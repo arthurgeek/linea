@@ -87,15 +87,15 @@ impl IoError {
         }
         .{ operation = operation, category = category, code = .Some(code), progress = progress }
     }
-}
 
-test fn io_errors_preserve_operation_category_and_progress() {
-    let error = IoError.from_os(.Read, 9, progress: 3)
-    testing.assert(match read error.operation { Read => true, _ => false }, "read failure lost its operation")?
-    testing.assert(match read error.category { InvalidDescriptor => true, _ => false }, "errno lost its stable category")?
-    testing.assert_eq(error.code, .Some(9), "errno was not retained")?
-    testing.assert_eq(error.progress, 3, "I/O progress was not retained")?
-    .Ok(())
+    test fn io_errors_preserve_operation_category_and_progress() {
+        let error = IoError.from_os(.Read, 9, progress: 3)
+        testing.assert(match read error.operation { Read => true, _ => false }, "read failure lost its operation")?
+        testing.assert(match read error.category { InvalidDescriptor => true, _ => false }, "errno lost its stable category")?
+        testing.assert_eq(error.code, .Some(9), "errno was not retained")?
+        testing.assert_eq(error.progress, 3, "I/O progress was not retained")?
+        .Ok(())
+    }
 }
 
 // A failed write becomes the I/O error behind it, or one describing the stall,

@@ -47,6 +47,9 @@ pub fn forPosition(
 ) !?lsp.types.Location {
     const ast = &checked.program.ast;
 
+    // An embed's path is defined by the file it names, opened at its start.
+    if (try embeddedAt(gpa, checked, file, position, encoding)) |opened| return opened;
+
     const named = references.namedAt(checked, file, position, encoding);
     const token = if (named == BindingId.none)
         references.sourceNameAt(checked, file, position, encoding)
@@ -60,6 +63,30 @@ pub fn forPosition(
     return .{
         .uri = opens,
         .range = positions.rangeOf(wrote_it.source, ast.tokenSpan(token), encoding),
+    };
+}
+
+/// The file an embed under the cursor read, or null where the cursor sits on
+/// no embed that read one.
+fn embeddedAt(
+    gpa: std.mem.Allocator,
+    checked: *const Analysis,
+    file: FileId,
+    position: lsp.types.Position,
+    encoding: lsp.offsets.Encoding,
+) !?lsp.types.Location {
+    const ast = &checked.program.ast;
+    const part = ast.partOfFile(file) orelse return null;
+    const found = checked.cursors.atPosition(ast, part, position, encoding) orelse return null;
+    const e = switch (found.node) {
+        .expr => |e| e,
+        else => return null,
+    };
+    const read = checked.program.embeds.of(e) orelse return null;
+    if (read == .none) return null;
+    return .{
+        .uri = try uri_mod.uriOf(gpa, checked.program.embeds.files[read.index()].path),
+        .range = .{ .start = .{ .line = 0, .character = 0 }, .end = .{ .line = 0, .character = 0 } },
     };
 }
 

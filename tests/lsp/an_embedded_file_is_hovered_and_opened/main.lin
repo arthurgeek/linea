@@ -1,0 +1,7 @@
+// Hover over `embed` says what the program carries, and the definition of
+// its path is the file itself.
+let page = embed("page.html")
+
+fn main() -> UInt8 {
+    UInt8(page.length())
+}

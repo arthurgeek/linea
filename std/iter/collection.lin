@@ -192,8 +192,7 @@ test fn a_failed_collection_can_be_released_whole() {
     // The arena's cursor fills all eight bytes, so the first item is refused.
     defer let arena = mem.Arena.open(mem.system(), size: 8)
     let released = match (UInt64(0)..3).collect_in(arena.handle()) {
-        Ok(collected) => {
-            let Collected { values, iterator: _ } = collected
+        Ok(Collected { values, iterator: _ }) => {
             values.release()
             false
         },
@@ -211,8 +210,7 @@ impl[I: Iterator + Release, A: Allocator, T: Release] release.Settle for Collect
     type Reason = mem.Oom
 
     fn settle(sink self: Self) -> mem.Oom where carries(self) {
-        let CollectFailure { collected, failure } = self
-        let Collected { values, iterator } = collected
+        let CollectFailure { collected: Collected { values, iterator }, failure } = self
         let reason = failure.settle()
         iterator.release()
         values.release()
@@ -225,8 +223,7 @@ test fn settling_a_failed_collection_keeps_the_allocation_reason() {
     defer let arena = mem.Arena.open(mem.system(), size: 8)
     let settled = (UInt64(0)..3).collect_in(arena.handle()).settled()
     let refused = match settled {
-        Ok(collected) => {
-            let Collected { values, iterator: _ } = collected
+        Ok(Collected { values, iterator: _ }) => {
             values.release()
             false
         },
@@ -283,12 +280,9 @@ test fn collect_first_push_refusal_returns_the_item_and_advanced_linear_captures
     var writer = testing.Recorder.of(64).unwrap()
     let explained = refused.fmt(&writer).is_ok() && writer.holds("could not grow the vector: Exhausted")
     writer.release()
-    let { collected, failure } = refused
-    let { values, iterator } = collected
-    let { reason, value } = failure
+    let { collected: { values, iterator }, failure: { reason, value } } = refused
     let (remaining, callback) = iterator.into_parts()
-    let { ledger } = callback.into_captures()
-    let { number: calls } = ledger
+    let { ledger: { number: calls } } = callback.into_captures()
     var remaining = remaining
     testing.assert(explained, "a collection failure lost its reason")?
     testing.assert_eq(reason, mem.Oom.Exhausted, "first insertion returned another allocation error")?
@@ -317,9 +311,7 @@ test fn collect_returns_linear_elements_and_captures_after_success_or_refusal() 
             Ok(completed) => completed,
             Err(failed) => {
                 refused = true
-                let { collected, failure } = failed
-                let { reason: _reason, value } = failure
-                let { number } = value
+                let { collected, failure: { reason: _reason, value: { number } } } = failed
                 total += number
                 collected
             },
@@ -332,8 +324,7 @@ test fn collect_returns_linear_elements_and_captures_after_success_or_refusal() 
         }
         pending.finish().unwrap()
         let (remaining, callback) = iterator.into_parts()
-        let { ledger } = callback.into_captures()
-        let { number: calls } = ledger
+        let { ledger: { number: calls } } = callback.into_captures()
         let completed_count = if refused {
             UInt64(5)
         } else {

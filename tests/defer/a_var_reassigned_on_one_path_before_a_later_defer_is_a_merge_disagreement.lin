@@ -1,0 +1,26 @@
+// [O-Merge]. The first `defer lock(key)` gives the key away on the path
+// through the first `if` body. The new key is stored only when `fresh` holds,
+// so the second `defer lock(key)` can still meet the old key, and the paths
+// disagree about `key` where they meet.
+struct Key {
+    n: UInt8,
+}
+
+fn lock(sink k: Key) {
+    let Key { n: _n } = k
+}
+
+fn main() -> UInt8 {
+    var turns: UInt8 = 0
+    var key: Key = .{ n = 1 }
+    let fresh = turns > 5
+    if turns == 0 {
+        defer lock(key)
+        turns = turns + 1
+    }
+    if fresh {
+        key = .{ n = 2 }
+    }
+    defer lock(key)
+    turns
+}

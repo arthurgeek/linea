@@ -1,0 +1,16 @@
+import std.io
+import pages
+import pages.cards
+
+let greeting = embed("greeting.txt")
+
+let page = embed("templates/page.txt")
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println(greeting)?
+    io.println(page)?
+    io.println(pages.card())?
+    io.println(pages.page())?
+    io.println(cards.page())?
+    .Ok(0)
+}

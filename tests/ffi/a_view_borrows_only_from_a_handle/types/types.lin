@@ -1,0 +1,3 @@
+// Sealed, but in a module the manifest does not trust with C.
+@(opaque, linear)
+type Outside = UInt64

@@ -1,0 +1,23 @@
+// `pick` answers to `Pick.pick`, whose result borrows `self` and is a `Str`.
+// The body returns a view of `other`: no clause can be added to the member
+// alone, and its result type is fixed too, so no owned copy is offered.
+trait Pick {
+    fn pick(self: Self, other: String) -> Str where borrows(self)
+}
+
+@derive(Release)
+struct Station {
+    code: String,
+}
+
+impl Pick for Station {
+    fn pick(_self: Self, other: String) -> Str where borrows(_self) {
+        other.view()
+    }
+}
+
+fn main() -> UInt8 {
+    defer let s = Station { code = String.new() }
+    defer let o = String.new()
+    UInt8(Pick.pick(s, o).length())
+}

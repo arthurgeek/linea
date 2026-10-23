@@ -69,217 +69,195 @@ impl Float64 {
     pub fn sqrt(self: Self) -> Float64 {
         linea_math_sqrt(self)
     }
-}
 
-test fn square_roots_preserve_zero_and_infinite_limits() {
-    let infinity = 1.0 / 0.0
-    testing.assert_eq(Float64.sqrt(9.0), 3.0, "square root of nine")?
-    testing.assert_eq(Float64.sqrt(0.0), 0.0, "square root of zero")?
-    testing.assert(1.0 / Float64.sqrt(-0.0) < 0.0, "square root preserves negative zero")?
-    testing.assert_eq(infinity.sqrt(), infinity, "square root of infinity")?
-    testing.assert(Float64.sqrt(-1.0).is_nan(), "negative square root is NaN")?
-    testing.assert((0.0 / 0.0).sqrt().is_nan(), "square root preserves NaN")?
-    testing.assert(Float64.sqrt(5e-324) > 0.0, "a subnormal square root stays positive")?
-    .Ok(())
-}
+    test fn square_roots_preserve_zero_and_infinite_limits() {
+        let infinity = 1.0 / 0.0
+        testing.assert_eq(Float64.sqrt(9.0), 3.0, "square root of nine")?
+        testing.assert_eq(Float64.sqrt(0.0), 0.0, "square root of zero")?
+        testing.assert(1.0 / Float64.sqrt(-0.0) < 0.0, "square root preserves negative zero")?
+        testing.assert_eq(infinity.sqrt(), infinity, "square root of infinity")?
+        testing.assert(Float64.sqrt(-1.0).is_nan(), "negative square root is NaN")?
+        testing.assert((0.0 / 0.0).sqrt().is_nan(), "square root preserves NaN")?
+        testing.assert(Float64.sqrt(5e-324) > 0.0, "a subnormal square root stays positive")?
+        .Ok(())
+    }
 
-impl Float64 {
     // Return the largest integral Float64 no greater than self.
     pub fn floor(self: Self) -> Float64 {
         linea_math_floor(self)
     }
-}
 
-test fn floor_rounds_down_and_keeps_zero_infinity_and_nan() {
-    let infinity = 1.0 / 0.0
-    testing.assert_eq(Float64.floor(-2.5), -3.0, "floor goes down")?
-    testing.assert_eq(Float64.floor(5e-324), 0.0, "floor a positive subnormal")?
-    testing.assert_eq(infinity.floor(), infinity, "floor preserves infinity")?
-    testing.assert(1.0 / Float64.floor(-0.0) < 0.0, "floor preserves negative zero")?
-    testing.assert((0.0 / 0.0).floor().is_nan(), "floor preserves NaN")?
-    .Ok(())
-}
+    test fn floor_rounds_down_and_keeps_zero_infinity_and_nan() {
+        let infinity = 1.0 / 0.0
+        testing.assert_eq(Float64.floor(-2.5), -3.0, "floor goes down")?
+        testing.assert_eq(Float64.floor(5e-324), 0.0, "floor a positive subnormal")?
+        testing.assert_eq(infinity.floor(), infinity, "floor preserves infinity")?
+        testing.assert(1.0 / Float64.floor(-0.0) < 0.0, "floor preserves negative zero")?
+        testing.assert((0.0 / 0.0).floor().is_nan(), "floor preserves NaN")?
+        .Ok(())
+    }
 
-impl Float64 {
     // Return the smallest integral Float64 no less than self. A negative value
     // above -1.0 rounds to -0.0.
     pub fn ceil(self: Self) -> Float64 {
         linea_math_ceil(self)
     }
-}
 
-test fn ceil_rounds_up_and_keeps_the_sign_of_a_negative_fraction() {
-    let infinity = 1.0 / 0.0
-    testing.assert_eq(Float64.ceil(-2.5), -2.0, "ceil goes up")?
-    testing.assert(1.0 / Float64.ceil(-5e-324) < 0.0, "ceil keeps subnormal sign")?
-    testing.assert_eq(infinity.ceil(), infinity, "ceil preserves infinity")?
-    testing.assert((0.0 / 0.0).ceil().is_nan(), "ceil preserves NaN")?
-    .Ok(())
-}
+    test fn ceil_rounds_up_and_keeps_the_sign_of_a_negative_fraction() {
+        let infinity = 1.0 / 0.0
+        testing.assert_eq(Float64.ceil(-2.5), -2.0, "ceil goes up")?
+        testing.assert(1.0 / Float64.ceil(-5e-324) < 0.0, "ceil keeps subnormal sign")?
+        testing.assert_eq(infinity.ceil(), infinity, "ceil preserves infinity")?
+        testing.assert((0.0 / 0.0).ceil().is_nan(), "ceil preserves NaN")?
+        .Ok(())
+    }
 
-impl Float64 {
     // Drop the fractional part, rounding toward zero and preserving the sign of
     // a zero result.
     pub fn trunc(self: Self) -> Float64 {
         linea_math_trunc(self)
     }
-}
 
-test fn trunc_rounds_toward_zero_and_keeps_the_sign() {
-    let infinity = 1.0 / 0.0
-    testing.assert_eq(Float64.trunc(-2.5), -2.0, "trunc goes toward zero")?
-    testing.assert(1.0 / Float64.trunc(-5e-324) < 0.0, "trunc keeps subnormal sign")?
-    testing.assert_eq(infinity.trunc(), infinity, "trunc preserves infinity")?
-    testing.assert((0.0 / 0.0).trunc().is_nan(), "trunc preserves NaN")?
-    .Ok(())
-}
+    test fn trunc_rounds_toward_zero_and_keeps_the_sign() {
+        let infinity = 1.0 / 0.0
+        testing.assert_eq(Float64.trunc(-2.5), -2.0, "trunc goes toward zero")?
+        testing.assert(1.0 / Float64.trunc(-5e-324) < 0.0, "trunc keeps subnormal sign")?
+        testing.assert_eq(infinity.trunc(), infinity, "trunc preserves infinity")?
+        testing.assert((0.0 / 0.0).trunc().is_nan(), "trunc preserves NaN")?
+        .Ok(())
+    }
 
-impl Float64 {
     // Return the nearest integral Float64, with halfway values rounded to even.
     pub fn round(self: Self) -> Float64 {
         linea_math_round(self)
     }
-}
 
-test fn round_takes_halfway_values_to_even() {
-    let infinity = 1.0 / 0.0
-    testing.assert_eq(Float64.round(2.5), 2.0, "positive tie to lower even")?
-    testing.assert_eq(Float64.round(3.5), 4.0, "positive tie to upper even")?
-    testing.assert_eq(Float64.round(-2.5), -2.0, "negative tie to upper even")?
-    testing.assert_eq(Float64.round(-3.5), -4.0, "negative tie to lower even")?
-    testing.assert(1.0 / Float64.round(-0.5) < 0.0, "round keeps negative zero")?
-    testing.assert_eq(infinity.round(), infinity, "round preserves infinity")?
-    testing.assert((0.0 / 0.0).round().is_nan(), "round preserves NaN")?
-    .Ok(())
-}
+    test fn round_takes_halfway_values_to_even() {
+        let infinity = 1.0 / 0.0
+        testing.assert_eq(Float64.round(2.5), 2.0, "positive tie to lower even")?
+        testing.assert_eq(Float64.round(3.5), 4.0, "positive tie to upper even")?
+        testing.assert_eq(Float64.round(-2.5), -2.0, "negative tie to upper even")?
+        testing.assert_eq(Float64.round(-3.5), -4.0, "negative tie to lower even")?
+        testing.assert(1.0 / Float64.round(-0.5) < 0.0, "round keeps negative zero")?
+        testing.assert_eq(infinity.round(), infinity, "round preserves infinity")?
+        testing.assert((0.0 / 0.0).round().is_nan(), "round preserves NaN")?
+        .Ok(())
+    }
 
-impl Float64 {
     // Raise self to `exponent`. A negative finite base needs an integral
     // exponent, or the result is NaN; a zero exponent or a base of one gives
     // 1.0 even with a NaN operand.
     pub fn pow(self: Self, exponent: Float64) -> Float64 {
         linea_math_pow(self, exponent)
     }
-}
 
-test fn powers_prioritize_identities_and_preserve_odd_signs() {
-    let infinity = 1.0 / 0.0
-    let nan = 0.0 / 0.0
-    testing.assert_eq(Float64.pow(2.0, exponent: 10.0), 1024.0, "an integral power")?
-    testing.assert_eq(nan.pow(0.0), 1.0, "zero exponent precedes NaN")?
-    testing.assert_eq(Float64.pow(1.0, nan), 1.0, "unit base precedes NaN")?
-    testing.assert_eq(Float64.pow(-1.0, infinity), 1.0, "negative unit at infinite exponent")?
-    testing.assert_eq(Float64.pow(-2.0, 3.0), -8.0, "negative base odd exponent")?
-    testing.assert(Float64.pow(-2.0, 0.5).is_nan(), "negative base fractional exponent")?
-    testing.assert(1.0 / Float64.pow(-0.0, 3.0) < 0.0, "negative zero odd power")?
-    testing.assert_eq(Float64.pow(-0.0, -3.0), -infinity, "negative zero odd reciprocal")?
-    testing.assert_eq((-infinity).pow(3.0), -infinity, "negative infinity odd power")?
-    testing.assert(1.0 / (-infinity).pow(-3.0) < 0.0, "negative infinity odd reciprocal")?
-    testing.assert_eq(Float64.pow(2.0, -infinity), 0.0, "large base with negative infinite exponent")?
-    testing.assert_eq(Float64.pow(0.5, infinity), 0.0, "small base with positive infinite exponent")?
-    testing.assert(nan.pow(2.0).is_nan(), "nonidentity NaN base")?
-    testing.assert_eq(Float64.pow(0.0, -1.0), infinity, "positive zero to a negative power")?
-    testing.assert(1.0 / Float64.pow(-0.0, 2.0) > 0.0, "negative zero even power is positive zero")?
-    testing.assert_eq(Float64.pow(10.0, 400.0), infinity, "a power far past the largest finite value")?
-    .Ok(())
-}
+    test fn powers_prioritize_identities_and_preserve_odd_signs() {
+        let infinity = 1.0 / 0.0
+        let nan = 0.0 / 0.0
+        testing.assert_eq(Float64.pow(2.0, exponent: 10.0), 1024.0, "an integral power")?
+        testing.assert_eq(nan.pow(0.0), 1.0, "zero exponent precedes NaN")?
+        testing.assert_eq(Float64.pow(1.0, nan), 1.0, "unit base precedes NaN")?
+        testing.assert_eq(Float64.pow(-1.0, infinity), 1.0, "negative unit at infinite exponent")?
+        testing.assert_eq(Float64.pow(-2.0, 3.0), -8.0, "negative base odd exponent")?
+        testing.assert(Float64.pow(-2.0, 0.5).is_nan(), "negative base fractional exponent")?
+        testing.assert(1.0 / Float64.pow(-0.0, 3.0) < 0.0, "negative zero odd power")?
+        testing.assert_eq(Float64.pow(-0.0, -3.0), -infinity, "negative zero odd reciprocal")?
+        testing.assert_eq((-infinity).pow(3.0), -infinity, "negative infinity odd power")?
+        testing.assert(1.0 / (-infinity).pow(-3.0) < 0.0, "negative infinity odd reciprocal")?
+        testing.assert_eq(Float64.pow(2.0, -infinity), 0.0, "large base with negative infinite exponent")?
+        testing.assert_eq(Float64.pow(0.5, infinity), 0.0, "small base with positive infinite exponent")?
+        testing.assert(nan.pow(2.0).is_nan(), "nonidentity NaN base")?
+        testing.assert_eq(Float64.pow(0.0, -1.0), infinity, "positive zero to a negative power")?
+        testing.assert(1.0 / Float64.pow(-0.0, 2.0) > 0.0, "negative zero even power is positive zero")?
+        testing.assert_eq(Float64.pow(10.0, 400.0), infinity, "a power far past the largest finite value")?
+        .Ok(())
+    }
 
-impl Float64 {
     // Return the sine of an angle in radians. Finite precision follows the
     // platform math library; an infinite angle produces NaN.
     pub fn sin(self: Self) -> Float64 {
         linea_math_sin(self)
     }
-}
 
-test fn sine_uses_radians_and_preserves_special_values() {
-    let pi = 3.141592653589793
-    testing.assert((Float64.sin(pi / 2.0) - 1.0).abs() < 1e-12, "sine at a quarter turn")?
-    testing.assert_eq(Float64.sin(0.0), 0.0, "sine at zero")?
-    testing.assert(1.0 / Float64.sin(-0.0) < 0.0, "sine preserves negative zero")?
-    testing.assert((1.0 / 0.0).sin().is_nan(), "an infinite angle has no sine")?
-    testing.assert((0.0 / 0.0).sin().is_nan(), "sine preserves NaN")?
-    .Ok(())
-}
+    test fn sine_uses_radians_and_preserves_special_values() {
+        let pi = 3.141592653589793
+        testing.assert((Float64.sin(pi / 2.0) - 1.0).abs() < 1e-12, "sine at a quarter turn")?
+        testing.assert_eq(Float64.sin(0.0), 0.0, "sine at zero")?
+        testing.assert(1.0 / Float64.sin(-0.0) < 0.0, "sine preserves negative zero")?
+        testing.assert((1.0 / 0.0).sin().is_nan(), "an infinite angle has no sine")?
+        testing.assert((0.0 / 0.0).sin().is_nan(), "sine preserves NaN")?
+        .Ok(())
+    }
 
-impl Float64 {
     // Return the cosine of an angle in radians. Finite precision follows the
     // platform math library; an infinite angle produces NaN.
     pub fn cos(self: Self) -> Float64 {
         linea_math_cos(self)
     }
-}
 
-test fn cosine_uses_radians_and_preserves_special_values() {
-    let pi = 3.141592653589793
-    testing.assert((pi.cos() + 1.0).abs() < 1e-12, "cosine at a half turn")?
-    testing.assert_eq(Float64.cos(-0.0), 1.0, "cosine at negative zero")?
-    testing.assert((1.0 / 0.0).cos().is_nan(), "an infinite angle has no cosine")?
-    testing.assert((0.0 / 0.0).cos().is_nan(), "cosine preserves NaN")?
-    .Ok(())
-}
+    test fn cosine_uses_radians_and_preserves_special_values() {
+        let pi = 3.141592653589793
+        testing.assert((pi.cos() + 1.0).abs() < 1e-12, "cosine at a half turn")?
+        testing.assert_eq(Float64.cos(-0.0), 1.0, "cosine at negative zero")?
+        testing.assert((1.0 / 0.0).cos().is_nan(), "an infinite angle has no cosine")?
+        testing.assert((0.0 / 0.0).cos().is_nan(), "cosine preserves NaN")?
+        .Ok(())
+    }
 
-impl Float64 {
     // Return the natural logarithm. Zero produces negative infinity; negative
     // inputs produce NaN.
     pub fn ln(self: Self) -> Float64 {
         linea_math_ln(self)
     }
-}
 
-test fn a_logarithm_has_defined_limits() {
-    let infinity = 1.0 / 0.0
-    testing.assert_eq(Float64.ln(1.0), 0.0, "logarithm at one")?
-    testing.assert_eq(Float64.ln(0.0), -infinity, "logarithm at zero limit")?
-    testing.assert_eq(Float64.ln(-0.0), -infinity, "logarithm at negative zero limit")?
-    testing.assert_eq(infinity.ln(), infinity, "logarithm at infinity")?
-    testing.assert(Float64.ln(-1.0).is_nan(), "negative logarithm is NaN")?
-    testing.assert((0.0 / 0.0).ln().is_nan(), "logarithm preserves NaN")?
-    .Ok(())
-}
+    test fn a_logarithm_has_defined_limits() {
+        let infinity = 1.0 / 0.0
+        testing.assert_eq(Float64.ln(1.0), 0.0, "logarithm at one")?
+        testing.assert_eq(Float64.ln(0.0), -infinity, "logarithm at zero limit")?
+        testing.assert_eq(Float64.ln(-0.0), -infinity, "logarithm at negative zero limit")?
+        testing.assert_eq(infinity.ln(), infinity, "logarithm at infinity")?
+        testing.assert(Float64.ln(-1.0).is_nan(), "negative logarithm is NaN")?
+        testing.assert((0.0 / 0.0).ln().is_nan(), "logarithm preserves NaN")?
+        .Ok(())
+    }
 
-impl Float64 {
     // Return e raised to self. Finite precision follows the platform math
     // library; a result past the largest finite value is infinity.
     pub fn exp(self: Self) -> Float64 {
         linea_math_exp(self)
     }
-}
 
-test fn an_exponential_has_defined_limits() {
-    let infinity = 1.0 / 0.0
-    testing.assert_eq(Float64.exp(0.0), 1.0, "exponential at zero")?
-    testing.assert_eq(Float64.exp(-0.0), 1.0, "exponential at negative zero")?
-    testing.assert_eq(infinity.exp(), infinity, "exponential at infinity")?
-    testing.assert_eq(Float64.exp(1000.0), infinity, "an exponential far past the largest finite value")?
-    testing.assert_eq((-infinity).exp(), 0.0, "exponential at negative infinity")?
-    testing.assert((Float64.ln(2.0).exp() - 2.0).abs() < 1e-12, "logarithm and exponential round trip")?
-    testing.assert((0.0 / 0.0).exp().is_nan(), "exponential preserves NaN")?
-    .Ok(())
-}
+    test fn an_exponential_has_defined_limits() {
+        let infinity = 1.0 / 0.0
+        testing.assert_eq(Float64.exp(0.0), 1.0, "exponential at zero")?
+        testing.assert_eq(Float64.exp(-0.0), 1.0, "exponential at negative zero")?
+        testing.assert_eq(infinity.exp(), infinity, "exponential at infinity")?
+        testing.assert_eq(Float64.exp(1000.0), infinity, "an exponential far past the largest finite value")?
+        testing.assert_eq((-infinity).exp(), 0.0, "exponential at negative infinity")?
+        testing.assert((Float64.ln(2.0).exp() - 2.0).abs() < 1e-12, "logarithm and exponential round trip")?
+        testing.assert((0.0 / 0.0).exp().is_nan(), "exponential preserves NaN")?
+        .Ok(())
+    }
 
-impl Float64 {
     // Return whether self is NaN. NaN is the only floating-point value unequal
     // to itself.
     pub fn is_nan(self: Self) -> Bool {
         self != self
     }
-}
 
-test fn a_nan_is_equal_to_nothing_including_itself() {
-    let nan = 0.0 / 0.0
+    test fn a_nan_is_equal_to_nothing_including_itself() {
+        let nan = 0.0 / 0.0
 
-    testing.assert(nan.is_nan(), "a NaN does not say it is one")?
+        testing.assert(nan.is_nan(), "a NaN does not say it is one")?
 
-    testing.assert(nan != nan, "a NaN equals itself")?
+        testing.assert(nan != nan, "a NaN equals itself")?
 
-    testing.assert(!Float64.is_nan(0.0), "zero says it is a NaN")?
-    testing.assert(!Float64.is_nan(-1.5), "a negative says it is a NaN")?
+        testing.assert(!Float64.is_nan(0.0), "zero says it is a NaN")?
+        testing.assert(!Float64.is_nan(-1.5), "a negative says it is a NaN")?
 
-    .Ok(())
-}
+        .Ok(())
+    }
 
-impl Float64 {
     // Negate negative values and return positive zero for either zero, so
     // the result never carries a sign; NaN stays NaN.
     pub fn abs(self: Self) -> Float64 {
@@ -291,19 +269,19 @@ impl Float64 {
             self
         }
     }
-}
 
-test fn an_absolute_value_drops_the_sign_and_keeps_everything_else() {
-    testing.assert_eq(Float64.abs(-2.5), 2.5, "absolute value of a negative float")?
-    testing.assert_eq(Float64.abs(2.5), 2.5, "absolute value of a positive float")?
+    test fn an_absolute_value_drops_the_sign_and_keeps_everything_else() {
+        testing.assert_eq(Float64.abs(-2.5), 2.5, "absolute value of a negative float")?
+        testing.assert_eq(Float64.abs(2.5), 2.5, "absolute value of a positive float")?
 
-    testing.assert_eq(Float64.abs(0.0), 0.0, "absolute value of zero")?
-    testing.assert(1.0 / Float64.abs(-0.0) > 0.0, "absolute value of negative zero keeps its sign")?
+        testing.assert_eq(Float64.abs(0.0), 0.0, "absolute value of zero")?
+        testing.assert(1.0 / Float64.abs(-0.0) > 0.0, "absolute value of negative zero keeps its sign")?
 
-    let nan = 0.0 / 0.0
-    testing.assert(nan.abs().is_nan(), "the magnitude of a NaN is not a NaN")?
+        let nan = 0.0 / 0.0
+        testing.assert(nan.abs().is_nan(), "the magnitude of a NaN is not a NaN")?
 
-    .Ok(())
+        .Ok(())
+    }
 }
 
 impl Float32 {

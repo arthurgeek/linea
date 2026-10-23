@@ -38,7 +38,7 @@ fn attachField(comptime field: std.builtin.Type.StructField, gpa: Allocator, sav
         "carried_places",          "borrowed_temporaries", "constant_values",    "contract_parameters",  "variant_uses",
         "interpolation_positions", "refused",              "folded_indices",     "field_name_spellings", "traversal_positions",
         "expansion_of_impl",       "try_conversions",      "declined_contracts", "adopted_contracts",    "binding_labels",
-        "aliased",                 "defaulted_contracts",
+        "aliased",                 "defaulted_contracts",  "fixed_functions",    "refused_members",
     })) {
         @field(result, name) = try mapMap(gpa, relocation, @field(saved, name));
     } else if (comptime in(name, &.{
@@ -82,7 +82,7 @@ fn attachField(comptime field: std.builtin.Type.StructField, gpa: Allocator, sav
         "capabilities",   "dependency_containment", "writer_containment",    "constant_texts",        "constant_pool",    "constant_materializations", "variants",     "fields",
         "interpolations", "interpolation_pieces",   "interpolation_formats", "interpolation_borrows", "interpolation_of", "callable_params",           "closure_args", "template_of",
         "module_paths",   "instance_args",          "instance_of",           "owned_names",           "owned_contracts",  "owned_callable_bounds",     "from_end",     "binding_types",
-        "generation",     "standin_args",           "standin_of",
+        "generation",     "standin_args",           "standin_of",            "broken_types",
     })) {
         // Type, binding, closure, string and compact semantic-run IDs stay fixed.
     } else @compileError("classify retained Typing field: " ++ name);

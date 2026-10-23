@@ -3,3 +3,5 @@ error[T-TryAnswer]: this `?` may return `Result[UInt8, RenderError]`, and the fu
   |
 7 |         mapped?
   |         ^^^^^^^ `?` returns from the function it is written in
+  |
+  = help: make the function return `Result[UInt8, RenderError]` and end it with `.Ok(…)`

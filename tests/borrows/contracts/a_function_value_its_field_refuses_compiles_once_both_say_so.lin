@@ -1,0 +1,17 @@
+// The edit the report on `second` names, applied: the field type and the
+// function both say the result may borrow from `b` as well as from `a`.
+struct Picker {
+    f: fn(read a: String, read b: String) -> Str where borrows(a, b),
+}
+
+fn second(_a: String, b: String) -> Str where borrows(_a, b) {
+    b.view()
+}
+
+fn main() -> UInt8 {
+    let p = Picker { f = second }
+    defer let a = String.new()
+    defer let b = String.new()
+    let f = copy(p.f)
+    UInt8(f(a, b).length())
+}

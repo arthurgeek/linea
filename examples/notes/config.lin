@@ -1,0 +1,152 @@
+import std.fmt
+import std.fs
+import std.io
+import std.json
+import std.mem
+import std.testing
+
+// Output format for note listings and details.
+@(copyable, derive(Debug, Equatable, Release))
+pub enum OutputFormat {
+    Table,
+    Json,
+}
+
+impl OutputFormat {
+    // Parse output format: "table" or "json" (case-insensitive).
+    pub fn parse(text: Str) -> Option[OutputFormat] {
+        if text.equals_ascii_folded("table") {
+            .Some(.Table)
+        } else if text.equals_ascii_folded("json") {
+            .Some(.Json)
+        } else {
+            .None
+        }
+    }
+
+    // Return format name string.
+    pub fn as_str(self: Self) -> Str {
+        match read self {
+            Table => "table",
+            Json => "json",
+        }
+    }
+
+    test fn output_format_parses_and_serializes() {
+        testing.assert_eq(OutputFormat.parse("table"), Option.Some(OutputFormat.Table), "table was not parsed")?
+        testing.assert_eq(OutputFormat.parse("TABLE"), Option.Some(OutputFormat.Table), "uppercase TABLE was not parsed")?
+        testing.assert_eq(OutputFormat.parse("json"), Option.Some(OutputFormat.Json), "json was not parsed")?
+        testing.assert(OutputFormat.parse("yaml").is_none(), "invalid format was accepted")?
+
+        testing.assert_eq(OutputFormat.Table.as_str(), "table", "table serialized incorrectly")?
+        testing.assert_eq(OutputFormat.Json.as_str(), "json", "json serialized incorrectly")?
+        .Ok(())
+    }
+}
+
+impl fmt.Display for OutputFormat {
+    fn fmt[W: io.Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str(self.as_str())
+    }
+}
+
+impl json.Encode for OutputFormat {
+    fn encode[W: io.Writer](self: Self, inout encoder: json.Encoder, inout writer: W) -> Result[(), json.EncodeError[W.Error]] where carries(.Err: writer) {
+        &encoder.string(&writer, self.as_str())
+    }
+}
+
+impl[A: Allocator] json.Decode[A] for OutputFormat {
+    fn decode(value: json.Value[A], allocator: A) -> Result[Self, json.DecodeError[A]] {
+        let text = value.as_str() else {
+            return .Err(json.DecodeError.failure_in(allocator, .WrongKind))
+        }
+        match OutputFormat.parse(text) {
+            Some(format) => .Ok(format),
+            None => .Err(json.DecodeError.failure_in(allocator, .OutOfRange)),
+        }
+    }
+
+    fn missing(allocator: A) -> Result[Self, json.DecodeError[A]] {
+        .Err(json.DecodeError.failure_in(allocator, .MissingField))
+    }
+}
+
+// Configuration error.
+@(copyable, derive(Debug, Release))
+pub enum ConfigError {
+    ReadFailed,
+    DecodeFailed,
+}
+
+impl fmt.Display for ConfigError {
+    fn fmt[W: io.Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            ReadFailed => &w.write_str("failed to read configuration file"),
+            DecodeFailed => &w.write_str("failed to parse configuration file"),
+        }
+    }
+}
+
+// User configuration settings.
+@derive(Release, json.Encode, json.Decode[A])
+pub struct Config[A: Allocator = mem.SystemAllocator] {
+    default_format: OutputFormat,
+    default_priority: Priority,
+    data_file: String[A],
+}
+
+impl Config[mem.SystemAllocator] {
+    // Return standard default configuration.
+    pub fn default() -> Self {
+        .{
+            default_format = .Table,
+            default_priority = .Normal,
+            data_file = "notes.json".to_owned().unwrap(),
+        }
+    }
+
+    // Load configuration. If path_opt is Some(path), requires the file to exist and be valid JSON.
+    // If path_opt is None, looks for "notes.cfg" in the current directory; if not found, returns default.
+    // If "notes.cfg" exists but cannot be parsed, reports an error.
+    pub fn load_or_default(sink path_opt: Option[fs.Path]) -> Result[Self, ConfigError] {
+        let is_explicit = path_opt.is_some()
+        let path = match path_opt {
+            Some(p) => p,
+            None => match fs.Path.from_str("notes.cfg") {
+                Ok(p) => p,
+                Err(_) => return .Err(.ReadFailed),
+            },
+        }
+
+        let text_res = fs.read_text(path, max_bytes: 65536)
+        match text_res {
+            Ok(content) => {
+                defer content.release()
+                let decoded: Result[Config, json.DecodeError] = json.decode(content.view())
+                match decoded {
+                    Ok(config) => .Ok(config),
+                    Err(error) => {
+                        error.release()
+                        .Err(.DecodeFailed)
+                    },
+                }
+            },
+            Err(err) => {
+                if !is_explicit && is_not_found(err) {
+                    .Ok(Config.default())
+                } else {
+                    .Err(.ReadFailed)
+                }
+            },
+        }
+    }
+
+    test fn default_config_holds_expected_defaults() {
+        defer let config = Config.default()
+        testing.assert_eq(config.default_format, OutputFormat.Table, "default format differs")?
+        testing.assert_eq(config.default_priority, Priority.Normal, "default priority differs")?
+        testing.assert_eq(config.data_file.view(), "notes.json", "default data file differs")?
+        .Ok(())
+    }
+}

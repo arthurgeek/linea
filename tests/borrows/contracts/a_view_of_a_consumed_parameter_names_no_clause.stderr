@@ -1,0 +1,18 @@
+error[O-Leak]: `s` (a linear `String[mem.SystemAllocator]`) is still owned when this path leaves
+ --> tests/borrows/contracts/a_view_of_a_consumed_parameter_names_no_clause.lin:5:15
+  |
+5 | fn first(sink s: String) -> Str where carries(s) {
+  |               ^ never settled on the path that reaches the end of this block
+7 | }
+  | - the block ends here
+  |
+  = help: settle it first with `s.release()`
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/borrows/contracts/a_view_of_a_consumed_parameter_names_no_clause.lin:6:5
+  |
+6 |     s.view()
+  |     ^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `s` is consumed by `first` and ends when it returns, so no clause lets anything observe it past the return
+  = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
+  = help: the types this names are reached with `import std.mem`

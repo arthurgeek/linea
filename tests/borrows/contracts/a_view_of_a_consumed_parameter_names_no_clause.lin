@@ -1,0 +1,11 @@
+// `first` consumes `s`, and `s` ends with the function, so no clause lets a
+// view of it escape: `borrows` cannot name a consumed parameter, and
+// `carries(s)` keeps only what `s` carries, not `s` itself. The report says
+// so rather than naming a clause the compiler would refuse.
+fn first(sink s: String) -> Str where carries(s) {
+    s.view()
+}
+
+fn main() -> UInt8 {
+    UInt8(first(String.new()).length())
+}

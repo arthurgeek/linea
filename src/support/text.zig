@@ -188,3 +188,76 @@ test "more than one scalar, or none, is not one" {
     try std.testing.expectEqual(@as(?u21, null), oneScalar("ab"));
     try std.testing.expectEqual(@as(?u21, null), oneScalar(""));
 }
+
+/// The offset of the first byte of `bytes` that begins no UTF-8 sequence, or
+/// null when every byte is part of one. A source file is checked with it
+/// ([S-Encoding]), and so is a file embedded as text ([M-EmbedText]).
+///
+/// A byte under 0x80 stands for itself, and program text is nearly all of
+/// them, so the common byte is skipped without being decoded -- a word at a
+/// time while none in it has the high bit set. What is left is what actually
+/// needs UTF-8 read out of it.
+///
+/// This is one pass over every byte of every file before a token is read, and
+/// decoding each of them made it a fifth of what lexing costs, which is the
+/// largest thing the front end does.
+pub fn firstInvalidUtf8(bytes: []const u8) ?usize {
+    const stride = @sizeOf(usize);
+    const high: usize = @bitCast([_]u8{0x80} ** stride);
+
+    var i: usize = 0;
+    while (i < bytes.len) {
+        while (i + stride <= bytes.len) {
+            const chunk: usize = @bitCast(bytes[i..][0..stride].*);
+            if (chunk & high != 0) break;
+            i += stride;
+        }
+        if (i >= bytes.len) break;
+
+        if (bytes[i] < 0x80) {
+            i += 1;
+            continue;
+        }
+        const n = std.unicode.utf8ByteSequenceLength(bytes[i]) catch return i;
+        if (i + n > bytes.len) return i;
+        _ = std.unicode.utf8Decode(bytes[i..][0..n]) catch return i;
+        i += n;
+    }
+    return null;
+}
+
+test "the first byte that begins no utf-8 sequence is found" {
+    try std.testing.expectEqual(@as(?usize, null), firstInvalidUtf8("plain text, and olá"));
+    try std.testing.expectEqual(@as(?usize, null), firstInvalidUtf8(""));
+    // 0xC3 opens a two-byte sequence, so on its own it is not UTF-8.
+    try std.testing.expectEqual(@as(?usize, 3), firstInvalidUtf8("abc\xC3"));
+    // An overlong form of `/` and an encoded surrogate are refused.
+    try std.testing.expectEqual(@as(?usize, 0), firstInvalidUtf8("\xC0\xAF"));
+    try std.testing.expectEqual(@as(?usize, 1), firstInvalidUtf8("a\xED\xA0\x80"));
+    // A continuation byte cannot begin a sequence; long ASCII runs are skipped.
+    try std.testing.expectEqual(@as(?usize, 17), firstInvalidUtf8("0123456789abcdefg\x80"));
+}
+
+/// The line and column, both counted from one, of byte `offset` in `bytes`. A
+/// column counts bytes, since the text may not be UTF-8 at all; a `\r\n` is
+/// one line break.
+pub fn lineColumnOf(bytes: []const u8, offset: usize) struct { line: usize, column: usize } {
+    var line: usize = 1;
+    var line_start: usize = 0;
+    for (bytes[0..@min(offset, bytes.len)], 0..) |c, i| {
+        if (c == '\n') {
+            line += 1;
+            line_start = i + 1;
+        }
+    }
+    return .{ .line = line, .column = offset - line_start + 1 };
+}
+
+test "a byte's line and column count from one" {
+    const at = lineColumnOf("ab\r\ncd\nef", 8);
+    try std.testing.expectEqual(@as(usize, 3), at.line);
+    try std.testing.expectEqual(@as(usize, 2), at.column);
+    const first = lineColumnOf("xyz", 0);
+    try std.testing.expectEqual(@as(usize, 1), first.line);
+    try std.testing.expectEqual(@as(usize, 1), first.column);
+}

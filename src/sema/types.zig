@@ -204,29 +204,6 @@ pub const TypeId = enum(u32) {
         };
     }
 
-    /// The width this type crosses a foreign boundary in, or null where it may
-    /// not cross at all.
-    ///
-    /// One question with one answer, asked by the checker to refuse a
-    /// signature and by the backend to print one. Two predicates here would
-    /// disagree somewhere, and the disagreement is a type the checker accepts
-    /// and the backend cannot emit -- which is a compiler crash on source a
-    /// programmer was told was fine.
-    ///
-    /// An integer's width and its signedness are the whole of its
-    /// representation, so both sides of a boundary already agree about it.
-    /// Nothing else does: where a structure's fields sit is the compiler's to
-    /// decide, a float carries a representation this language does not fix
-    /// across an ABI, and a linear value cannot cross code ownership never
-    /// read.
-    pub fn foreignWidth(self: TypeId) ?u8 {
-        const info = self.integerInfo() orelse return null;
-        return switch (info.bits) {
-            8, 16, 32, 64 => info.bits,
-            else => null,
-        };
-    }
-
     /// The values a type can represent.
     ///
     /// Wide enough for `UInt64`'s maximum and `Int64`'s minimum together, which is
@@ -1471,7 +1448,7 @@ pub fn inferredSource(builder: *Typing.Builder, params: []const CallableParam, r
 
 /// Whether `parameter` lends the place a borrowed `result` observes.
 fn lendsPlace(builder: *Typing.Builder, parameter: CallableParam, result: TypeId) bool {
-    return builder.get(result) == .borrow and builder.get(result).borrow.referent == parameter.ty and parameter.convention != .sink;
+    return builder.get(result) == .borrow and builder.get(result).borrow.referent == parameter.ty and suppliesEscapingPlace(parameter.convention);
 }
 
 /// Whether `parameter` is one of the sources `inferredSource` weighs for
@@ -1479,6 +1456,173 @@ fn lendsPlace(builder: *Typing.Builder, parameter: CallableParam, result: TypeId
 /// deciding eligibility again.
 pub fn isEligibleSource(builder: *Typing.Builder, parameter: CallableParam, result: TypeId) !bool {
     return lendsPlace(builder, parameter, result) or try builder.mayCarryDependencies(parameter.ty);
+}
+
+/// A source a clause names: the parameter's spelling, and whether the clause
+/// is `borrows`, for a result that observes the parameter's place, or
+/// `carries`, for one that keeps what the parameter already observes.
+pub const ClauseSource = struct { spelling: []const u8, borrows: bool };
+
+/// Whether a parameter passed by `convention` can supply the place an
+/// escaping observation observes. A consumed parameter ends with the
+/// function, so nothing may observe it past the return: `borrows` cannot name
+/// it, and only what it already carries may leave. The one rule for refusing
+/// such a clause and for every report that suggests one.
+pub fn suppliesEscapingPlace(convention: Convention) bool {
+    return convention != .sink;
+}
+
+/// Whether the clause naming `parameter` as a source of `result` is
+/// `borrows`: the parameter can supply an escaping place, and it lends the
+/// place the result observes or may hold storage of its own a view of it
+/// would point into and holds no view. A parameter that holds a view, such as
+/// a `Str` or a struct with one, may hand on what it observes: `carries` says
+/// that and holds a caller to no more, which is what the body's [O-Escapes]
+/// names for such a body too.
+pub fn borrowsFrom(builder: *Typing.Builder, gpa: std.mem.Allocator, parameter: CallableParam, result: TypeId) !bool {
+    if (!suppliesEscapingPlace(parameter.convention)) return false;
+    if (lendsPlace(builder, parameter, result)) return true;
+    const pool = builder.view();
+    return try pool.mayHoldStorage(gpa, parameter.ty) and !try pool.holdsView(gpa, parameter.ty);
+}
+
+/// The `where` clause naming `sources`, the `borrows` sources first:
+/// `where borrows(first, second)`, `where carries(left)`, or
+/// `where borrows(first), carries(second)`. Every report that names the
+/// clause a signature lacks spells it here, so a signature the checker could
+/// not infer and a body the ownership pass refused are given one answer.
+pub fn sourceClause(arena: std.mem.Allocator, sources: []const ClauseSource) std.mem.Allocator.Error![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    try out.appendSlice(arena, "where ");
+    var groups: usize = 0;
+    for ([_]bool{ true, false }) |borrows| {
+        var listed: usize = 0;
+        for (sources) |source| {
+            if (source.borrows != borrows) continue;
+            if (listed == 0) {
+                if (groups > 0) try out.appendSlice(arena, ", ");
+                try out.appendSlice(arena, if (borrows) "borrows(" else "carries(");
+                groups += 1;
+            } else try out.appendSlice(arena, ", ");
+            try out.appendSlice(arena, source.spelling);
+            listed += 1;
+        }
+        if (listed > 0) try out.append(arena, ')');
+    }
+    return out.items;
+}
+
+/// A retention a clause names: what the `inout` parameter `destination`
+/// keeps from `source`, and whether it keeps an observation of `source`'s
+/// place.
+pub const ClauseRetention = struct { destination: []const u8, source: []const u8, borrows: bool };
+
+/// The whole `where` clause a signature needs once it also says what
+/// `added` and `retained` name: every contract in `written` (the clause the
+/// declaration wrote, or the contract it inferred where `keep` is not null,
+/// keeping only the parameters `keep` lists), with the new sources and
+/// retentions beside them. The plain sources group as `sourceClause` writes
+/// them, `where borrows(a, b), carries(c)`, and any other contract follows as
+/// it is written. Every report that names a clause to write names this one,
+/// so writing it never drops a contract another report needs.
+pub fn wholeClause(
+    arena: std.mem.Allocator,
+    written: []const CallableContract,
+    names: []const []const u8,
+    keep: ?[]const u32,
+    added: []const ClauseSource,
+    retained: []const ClauseRetention,
+) std.mem.Allocator.Error![]const u8 {
+    var sources: std.ArrayList(ClauseSource) = .empty;
+    var rest: std.ArrayList(u8) = .empty;
+    var rests: usize = 0;
+    var kept_retentions: std.ArrayList(ClauseRetention) = .empty;
+    for (written) |contract| {
+        const at: ?u32 = switch (contract.source.root) {
+            .parameter => |index| if (index < names.len) index else null,
+            else => null,
+        };
+        const plain = at != null and contract.kind != .retains and contract.target.len == 0 and contract.source.fields.len == 0 and !contract.borrows_source;
+        if (plain) {
+            if (keep) |listed| if (std.mem.indexOfScalar(u32, listed, at.?) == null) continue;
+            try addClauseSource(arena, &sources, .{ .spelling = names[at.?], .borrows = contract.kind == .borrows });
+            continue;
+        }
+        // An inferred contract keeps only plain sources; anything else was
+        // written, and is kept whatever `keep` says.
+        if (keep != null) continue;
+        if (contract.kind == .retains) if (contract.destination) |dest| if (at != null and dest.fields.len == 0 and contract.source.fields.len == 0) {
+            switch (dest.root) {
+                .parameter => |d| if (d < names.len) {
+                    try kept_retentions.append(arena, .{ .destination = names[d], .source = names[at.?], .borrows = contract.borrows_source });
+                    continue;
+                },
+                else => {},
+            }
+        };
+        var one: std.ArrayList(u8) = .empty;
+        try appendContractText(arena, &one, &.{contract}, names, false);
+        try rest.print(arena, "{s}{s}", .{ if (rests == 0) "" else ", ", one.items[" where ".len..] });
+        rests += 1;
+    }
+    for (added) |source| try addClauseSource(arena, &sources, source);
+    for (retained) |retention| {
+        for (kept_retentions.items) |*existing| {
+            if (std.mem.eql(u8, existing.destination, retention.destination) and std.mem.eql(u8, existing.source, retention.source)) {
+                existing.borrows = existing.borrows or retention.borrows;
+                break;
+            }
+        } else try kept_retentions.append(arena, retention);
+    }
+    var out: std.ArrayList(u8) = .empty;
+    if (sources.items.len > 0) try out.appendSlice(arena, try sourceClause(arena, sources.items));
+    if (rests > 0) try out.print(arena, "{s}{s}", .{ if (out.items.len == 0) "where " else ", ", rest.items });
+    for (kept_retentions.items) |retention| try out.print(arena, "{s}retains({s}: {s}{s})", .{
+        if (out.items.len == 0) "where " else ", ",
+        retention.destination,
+        if (retention.borrows) "borrow " else "",
+        retention.source,
+    });
+    if (out.items.len == 0) try out.appendSlice(arena, "where carries()");
+    return out.items;
+}
+
+/// Adds `source` to a clause's plain sources, once: a source named both ways
+/// is named `borrows`, which keeps what `carries` keeps too.
+fn addClauseSource(arena: std.mem.Allocator, sources: *std.ArrayList(ClauseSource), source: ClauseSource) std.mem.Allocator.Error!void {
+    for (sources.items) |*existing| if (std.mem.eql(u8, existing.spelling, source.spelling)) {
+        existing.borrows = existing.borrows or source.borrows;
+        return;
+    };
+    try sources.append(arena, source);
+}
+
+test wholeClause {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const names: []const []const u8 = &.{ "seen", "a", "b" };
+    // The returned source and the retention each keep the other.
+    try testing.expectEqualStrings("where borrows(a, b), retains(seen: borrow b)", try wholeClause(a, &.{
+        .{ .kind = .retains, .source = .{ .root = .{ .parameter = 2 } }, .destination = .{ .root = .{ .parameter = 0 } }, .borrows_source = true },
+        .{ .kind = .borrows, .source = .{ .root = .{ .parameter = 1 } } },
+    }, names, null, &.{.{ .spelling = "b", .borrows = true }}, &.{}));
+    try testing.expectEqualStrings("where borrows(b), retains(seen: borrow b)", try wholeClause(a, &.{
+        .{ .kind = .borrows, .source = .{ .root = .{ .parameter = 2 } } },
+    }, names, null, &.{}, &.{.{ .destination = "seen", .source = "b", .borrows = true }}));
+    // An inferred contract keeps only the sources listed.
+    try testing.expectEqualStrings("where borrows(b)", try wholeClause(a, &.{
+        .{ .kind = .carries, .source = .{ .root = .{ .parameter = 1 } } },
+    }, names, &.{}, &.{.{ .spelling = "b", .borrows = true }}, &.{}));
+}
+
+test sourceClause {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try testing.expectEqualStrings("where borrows(first, second)", try sourceClause(a, &.{ .{ .spelling = "first", .borrows = true }, .{ .spelling = "second", .borrows = true } }));
+    try testing.expectEqualStrings("where carries(left)", try sourceClause(a, &.{.{ .spelling = "left", .borrows = false }}));
+    try testing.expectEqualStrings("where borrows(first), carries(second)", try sourceClause(a, &.{ .{ .spelling = "second", .borrows = false }, .{ .spelling = "first", .borrows = true } }));
 }
 
 test inferredSource {
@@ -1521,12 +1665,43 @@ fn sameContractPath(a: ContractPath, b: ContractPath) bool {
     return std.meta.eql(a.root, b.root) and sameSelectors(a.fields, b.fields);
 }
 
+/// Whether a value of `t` crosses a foreign boundary ([T-Extern],
+/// [T-Export]): an integer of 8, 16, 32 or 64 bits, a `Float64`, or an
+/// unrefined newtype over one. Every bit pattern of these is a value on both
+/// sides, so nothing C hands back can be a value Linea does not define. A
+/// refined newtype is refused because C could hand back a value outside its
+/// range; a newtype's ownership policy is the declaration's to state with its
+/// parameter convention. The checker refuses a signature by this answer and
+/// the backend holds what it renders to it, so `pool` is a pool being built or
+/// a finished one.
+pub fn crossesForeign(pool: anytype, t: TypeId) bool {
+    if (t.isFloat()) return true;
+    if (t.integerInfo()) |info| return switch (info.bits) {
+        8, 16, 32, 64 => true,
+        else => false,
+    };
+    return switch (pool.get(t)) {
+        .newtype => |newtype| !newtype.refined and crossesForeign(pool, newtype.base),
+        else => false,
+    };
+}
+
 fn dependencyFreeScalar(pool: anytype, ty: TypeId) bool {
     return switch (pool.get(ty)) {
         .integer, .open_integer, .open_float, .float, .boolean, .unit, .never => true,
-        .newtype => |named| dependencyFreeScalar(pool, named.base),
+        // A newtype over a scalar holds no part a dependency could live in,
+        // unless its declaration is one whose dependencies originate at the
+        // value, as `std.ffi`'s views of C addresses are.
+        .newtype => |named| !seedsDependencies(pool, ty) and dependencyFreeScalar(pool, named.base),
         else => false,
     };
+}
+
+/// Whether `ty`'s own declaration makes dependencies originate at its values,
+/// asked of a finished typing or of a pool being built.
+fn seedsDependencies(pool: anytype, ty: TypeId) bool {
+    if (@TypeOf(pool.*) == Typing) return pool.hasDirectDependencies(ty);
+    return pool.view().hasDirectDependencies(ty);
 }
 
 pub fn sameContracts(a: []const CallableContract, b: []const CallableContract) bool {
@@ -1753,8 +1928,14 @@ fn appendContractPath(gpa: std.mem.Allocator, out: anytype, path: ContractPath, 
 }
 
 fn appendContractText(gpa: std.mem.Allocator, out: anytype, contracts: []const CallableContract, names: ?[]const []const u8, mangled: bool) !void {
-    for (contracts, 0..) |contract, index| {
-        if (!mangled) try out.appendSlice(gpa, if (index == 0) " where " else ", ");
+    var written: usize = 0;
+    for (contracts) |contract| {
+        // What a callable requirement's result may carry from the callable
+        // itself is implied by the requirement and written by no program, so
+        // its text leaves it out; the symbol keeps it.
+        if (!mangled and contract.source.root == .callee) continue;
+        if (!mangled) try out.appendSlice(gpa, if (written == 0) " where " else ", ");
+        written += 1;
         try out.appendSlice(gpa, @tagName(contract.kind));
         try out.append(gpa, '(');
         if (contract.target.len != 0) {
@@ -2163,6 +2344,10 @@ pub const ConstructorBody = struct {
 };
 
 /// A function named as a value of one exact structural callable signature.
+/// The callable type a function value was received by, and whether that
+/// type is written in the library, where the program cannot change it.
+pub const FixedFunction = struct { signature: TypeId, in_library: bool };
+
 pub const FunctionValue = struct {
     at: ExprId,
     target: FunctionTarget,
@@ -5260,6 +5445,11 @@ pub const Typing = struct {
     /// does not fit its context is absent, though its recorded type is
     /// poison too.
     refused: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// Written types whose arguments lack a capability a bound of their
+    /// declaration asks for, each reported by [T-Bound]. Such a type promises
+    /// nothing about its capabilities, so a value of it is not reported for
+    /// owing a settlement.
+    broken_types: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
     /// The whole number each accepted bracket's index operand folds to, keyed
     /// by the operand, or by the count under a `^`. An operand that folds to
     /// nothing, or to a negative number, is absent.
@@ -5383,6 +5573,15 @@ pub const Typing = struct {
     /// Each implementation member written without a clause, with the trait
     /// signature whose contract it adopts.
     adopted_contracts: std.AutoHashMapUnmanaged(DeclId, DeclId) = .empty,
+    /// Each function a written callable type or a callable bound received as
+    /// a value, with that type, whether or not the function fit it: the
+    /// function answers to that type's signature, so its own cannot gain a
+    /// clause the type does not have.
+    fixed_functions: std.AutoHashMapUnmanaged(DeclId, FixedFunction) = .empty,
+    /// Each member of a trait implementation the checker refused for being
+    /// there at all: one the trait provides, or one it does not declare. The
+    /// member is to be dropped, so its body is not checked for ownership.
+    refused_members: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     /// Each function that wrote no clause and took its contract from its one
     /// carrier parameter, with that parameter's position.
     defaulted_contracts: std.AutoHashMapUnmanaged(DeclId, u32) = .empty,
@@ -5672,6 +5871,7 @@ pub const Typing = struct {
         self.borrowed_temporaries.deinit(gpa);
         self.interpolation_positions.deinit(gpa);
         self.refused.deinit(gpa);
+        self.broken_types.deinit(gpa);
         self.folded_indices.deinit(gpa);
         gpa.free(self.dependency_containment);
         gpa.free(self.writer_containment);
@@ -5739,6 +5939,8 @@ pub const Typing = struct {
         self.contract_parameters.deinit(gpa);
         self.declined_contracts.deinit(gpa);
         self.adopted_contracts.deinit(gpa);
+        self.fixed_functions.deinit(gpa);
+        self.refused_members.deinit(gpa);
         self.defaulted_contracts.deinit(gpa);
         self.aliased.deinit(gpa);
         self.defaults.deinit(gpa);
@@ -6566,8 +6768,86 @@ pub const Typing = struct {
         }
         const declaration = self.declOfType(t) orelse return false;
         if (self.raw_accesses.slice != .none and declaration == self.raw_accesses.slice) return true;
+        for (self.raw_accesses.foreign_views) |view| {
+            if (view != .none and declaration == view) return true;
+        }
         if (self.raw_accesses.buffer != .none and declaration == self.raw_accesses.buffer) return true;
         return self.raw_accesses.storage != .none and declaration == self.raw_accesses.storage and self.instanceOf(t) == null;
+    }
+
+    /// Whether a value of `t` may hold storage of its own, a buffer somewhere
+    /// in its fields, payloads or elements, which a view of it would point
+    /// into. A view and a scalar hold none; a type parameter may be anything
+    /// its bounds admit, so it may unless they make it copyable, which no
+    /// value holding storage is.
+    ///
+    /// **Bound:** each distinct type reached once.
+    pub fn mayHoldStorage(self: *const Typing, gpa: std.mem.Allocator, t: TypeId) std.mem.Allocator.Error!bool {
+        var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer seen.deinit(gpa);
+        return self.holdsStorageWalk(gpa, &seen, t);
+    }
+
+    fn holdsStorageWalk(self: *const Typing, gpa: std.mem.Allocator, seen: *std.AutoHashMapUnmanaged(TypeId, void), t: TypeId) std.mem.Allocator.Error!bool {
+        if ((try seen.getOrPut(gpa, t)).found_existing) return false;
+        switch (self.get(t)) {
+            .borrow => return false,
+            .parameter => |p| return p.requirement != .copyable,
+            .array => |a| return self.holdsStorageWalk(gpa, seen, a.element),
+            .struct_, .closure => {
+                if (self.declOfType(t)) |declaration| {
+                    if (self.raw_accesses.buffer != .none and declaration == self.raw_accesses.buffer) return true;
+                    if (self.raw_accesses.storage != .none and declaration == self.raw_accesses.storage) return true;
+                    if (self.raw_accesses.slice != .none and declaration == self.raw_accesses.slice) return false;
+                }
+                for (0..self.fieldCount(t)) |i| if (try self.holdsStorageWalk(gpa, seen, self.fieldType(t, @intCast(i)))) return true;
+                return false;
+            },
+            .enum_ => {
+                for (0..self.variantCount(t)) |v| for (0..self.variantFieldCount(t, @intCast(v))) |f| {
+                    if (try self.holdsStorageWalk(gpa, seen, self.variantFieldType(t, @intCast(v), @intCast(f)))) return true;
+                };
+                return false;
+            },
+            .newtype => |named| return self.holdsStorageWalk(gpa, seen, named.base),
+            else => return false,
+        }
+    }
+
+    /// Whether a value of `t` holds a view somewhere in its fields, payloads
+    /// or elements: an observation, or a slice of storage it does not own. A
+    /// type parameter is not known to.
+    ///
+    /// **Bound:** each distinct type reached once.
+    pub fn holdsView(self: *const Typing, gpa: std.mem.Allocator, t: TypeId) std.mem.Allocator.Error!bool {
+        var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer seen.deinit(gpa);
+        return self.holdsViewWalk(gpa, &seen, t);
+    }
+
+    fn holdsViewWalk(self: *const Typing, gpa: std.mem.Allocator, seen: *std.AutoHashMapUnmanaged(TypeId, void), t: TypeId) std.mem.Allocator.Error!bool {
+        if ((try seen.getOrPut(gpa, t)).found_existing) return false;
+        switch (self.get(t)) {
+            .borrow => return true,
+            .array => |a| return self.holdsViewWalk(gpa, seen, a.element),
+            .struct_, .closure => {
+                if (self.declOfType(t)) |declaration| {
+                    if (self.raw_accesses.slice != .none and declaration == self.raw_accesses.slice) return true;
+                    if (self.raw_accesses.buffer != .none and declaration == self.raw_accesses.buffer) return false;
+                    if (self.raw_accesses.storage != .none and declaration == self.raw_accesses.storage) return false;
+                }
+                for (0..self.fieldCount(t)) |i| if (try self.holdsViewWalk(gpa, seen, self.fieldType(t, @intCast(i)))) return true;
+                return false;
+            },
+            .enum_ => {
+                for (0..self.variantCount(t)) |v| for (0..self.variantFieldCount(t, @intCast(v))) |f| {
+                    if (try self.holdsViewWalk(gpa, seen, self.variantFieldType(t, @intCast(v), @intCast(f)))) return true;
+                };
+                return false;
+            },
+            .newtype => |named| return self.holdsViewWalk(gpa, seen, named.base),
+            else => return false,
+        }
     }
 
     pub fn mayCarryDependencies(self: *const Typing, t: TypeId) bool {
@@ -7067,14 +7347,20 @@ pub const Typing = struct {
     };
 
     /// Resolve the stored byte span once for text construction and runtime ABI.
-    /// Offsets are relative to the complete text descriptor, including its slice.
+    /// Offsets are relative to the complete descriptor: a `Str`'s, through its
+    /// `bytes` slice, or a byte slice's own, which is what `embed_bytes` and a
+    /// constant holding it lay out over the same pool of bytes.
     pub fn textFields(self: *const Typing, t: TypeId) ?TextFields {
-        const bytes = self.lookupField(t, "bytes") orelse return null;
-        const at = self.lookupField(bytes.ty, "at") orelse return null;
-        const len = self.lookupField(bytes.ty, "len") orelse return null;
+        const bytes = self.lookupField(t, "bytes") orelse return self.spanFields(t, 0);
+        return self.spanFields(bytes.ty, bytes.offset);
+    }
+
+    fn spanFields(self: *const Typing, slice: TypeId, base: u32) ?TextFields {
+        const at = self.lookupField(slice, "at") orelse return null;
+        const len = self.lookupField(slice, "len") orelse return null;
         return .{
-            .at = .{ .ty = at.ty, .offset = bytes.offset + at.offset },
-            .len = .{ .ty = len.ty, .offset = bytes.offset + len.offset },
+            .at = .{ .ty = at.ty, .offset = base + at.offset },
+            .len = .{ .ty = len.ty, .offset = base + len.offset },
         };
     }
 
@@ -7295,6 +7581,16 @@ pub const Typing = struct {
         /// Borrowed from the checker, which owns it: readable, so this pass
         /// cannot write into another's answer or free memory it was lent.
         decl_returns: Returns.Reading = .empty,
+        /// While the checker settles implementations' associated types, the
+        /// members it has not settled yet, borrowed from it. A settled
+        /// reference the checker reads (`reading_reference`) reads none of
+        /// them: `settledBy` records in `unsettled_read` the one it was asked
+        /// for, so the definition reading it waits for it. A member read while
+        /// a type's fields are laid out is not a definition's reference and
+        /// reads what has been settled so far.
+        unsettled_members: ?*const std.AutoHashMapUnmanaged(DeclId, void) = null,
+        unsettled_read: DeclId = .none,
+        reading_reference: bool = false,
         /// `Typing.declared_requirements`, borrowed for the same reason: minting
         /// a projection is a reading of what its declaration was bounded by.
         declared_requirements: []const CapabilityRequirement = &.{},
@@ -7323,6 +7619,7 @@ pub const Typing = struct {
         certified_storage: DeclId = .none,
         certified_buffer: DeclId = .none,
         certified_slice: DeclId = .none,
+        certified_foreign_views: [3]DeclId = .{ .none, .none, .none },
         /// `mem.ClosureEntry`: its instance at a callable type is the entry
         /// signature an erased closure is called through.
         certified_closure_entry: DeclId = .none,
@@ -9269,7 +9566,7 @@ pub const Typing = struct {
         pub fn view(self: *const Builder) Typing {
             return .{
                 .constant_pool = self.constant_pool.*,
-                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .closure_entry_type = self.certified_closure_entry },
+                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .closure_entry_type = self.certified_closure_entry, .foreign_views = self.certified_foreign_views },
                 .tuple_decls = self.tuple_decls,
                 .implementation_selections = self.implementation_selections,
                 .closure_release = self.closure_release,
@@ -9645,6 +9942,10 @@ pub const Typing = struct {
             // table says so and names both halves, where returning null here
             // said "this implementation supplies no return type" and dropped
             // the member out of overloading with nothing reported.
+            if (self.unsettled_members) |waiting| if (self.reading_reference and waiting.contains(member)) {
+                self.unsettled_read = member;
+                return null;
+            };
             const settled = self.decl_returns.get(member);
             if (settled == .poison) return null;
             if (impl.parameters == 0) return settled;
@@ -10761,6 +11062,7 @@ pub const Typing = struct {
             b.certified_storage = t.raw_accesses.storage;
             b.certified_buffer = t.raw_accesses.buffer;
             b.certified_slice = t.raw_accesses.slice;
+            b.certified_foreign_views = t.raw_accesses.foreign_views;
             b.certified_closure_entry = t.raw_accesses.closure_entry_type;
             b.tuple_decls = t.tuple_decls;
             b.implementations_settled = true;

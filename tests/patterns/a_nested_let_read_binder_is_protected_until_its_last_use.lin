@@ -1,0 +1,19 @@
+// A `let read` binder lends the part its nested pattern selects until its last
+// use. Writing a different field of the outer value is allowed; replacing the
+// part the binder reads, before that use, is not.
+struct Point {
+    x: UInt8,
+}
+
+struct Frame {
+    origin: Point,
+    scale: UInt8,
+}
+
+fn main() -> UInt8 {
+    var frame = Frame { origin = Point { x = 3 }, scale = 1 }
+    let read Frame { origin: Point { x }, scale: _ } = frame
+    frame.scale = 2
+    frame.origin = Point { x = 9 }
+    x
+}

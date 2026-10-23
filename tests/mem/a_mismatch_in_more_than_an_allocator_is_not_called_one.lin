@@ -1,0 +1,24 @@
+// The pair expected holds a system `String` and a `UInt8`, and this one holds
+// an arena `String` and a `UInt16`. More than the allocator differs, so the
+// report does not say that only the allocators do.
+import std.mem
+
+use mem.Lender
+
+@derive(Release)
+struct Pair[X, Y] {
+    x: X,
+    y: Y,
+}
+
+fn take(sink pair: Pair[String, UInt8]) -> UInt8 {
+    let Pair { x, y } = pair
+    x.release()
+    y
+}
+
+fn main() -> UInt8 {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let pair = Pair[String[mem.Handle], UInt16] { x = String.new_in(arena.handle()), y = 3 }
+    take(pair)
+}

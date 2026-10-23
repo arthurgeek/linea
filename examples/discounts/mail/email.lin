@@ -26,16 +26,16 @@ impl Email {
         let read Email(raw) = self
         copy(raw)
     }
-}
 
-// Code inside `mail` may call `Email(...)` directly: the opaque seal applies
-// only outside the module.
-test fn a_parse_is_the_only_way_to_an_address() {
-    testing.assert_eq(Email.of("someone@example.test"), .Some(Email("someone@example.test")), "keep the supplied address")?
-    let email = Email("someone@example.test")
-    testing.assert_eq(email.address(), "someone@example.test", "read back the validated address")?
-    testing.assert_eq(Email.of("someone.example.test"), .None, "reject an address without @")?
-    testing.assert_eq(Email.of(""), .None, "reject an empty address")?
-    // Even `"@"` passes this deliberately small check.
-    testing.assert_eq(Email.of("@"), .Some(Email("@")), "this example only requires an @")?
+    // Code inside `mail` may call `Email(...)` directly: the opaque seal applies
+    // only outside the module.
+    test fn a_parse_is_the_only_way_to_an_address() {
+        testing.assert_eq(Email.of("someone@example.test"), .Some(Email("someone@example.test")), "keep the supplied address")?
+        let email = Email("someone@example.test")
+        testing.assert_eq(email.address(), "someone@example.test", "read back the validated address")?
+        testing.assert_eq(Email.of("someone.example.test"), .None, "reject an address without @")?
+        testing.assert_eq(Email.of(""), .None, "reject an empty address")?
+        // Even `"@"` passes this deliberately small check.
+        testing.assert_eq(Email.of("@"), .Some(Email("@")), "this example only requires an @")?
+    }
 }

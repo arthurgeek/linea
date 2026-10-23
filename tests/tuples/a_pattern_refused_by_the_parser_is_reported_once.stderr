@@ -1,10 +1,50 @@
-error[S-Tuple]: a tuple pattern binds a name or `_` to each component
- --> tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin:4:21
+error[S-Tuple]: a tuple has two to eight components
+ --> tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin:4:17
   |
-4 |     let literal = |(1, 2)| 1
-  |                     ^ a pattern binds names and compares nothing; bind a name here and compare it in the body
+4 |     let wide = |(a, b, c, d, e, f, g, h, i)| a
+  |                 ^ give a struct names past eight parts
 error[S-Tuple]: a tuple has two to eight components
  --> tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin:5:18
   |
 5 |     let empty = |()| 1
   |                  ^ `()` has nothing to take apart
+error[N-Unused]: `b` is never used
+ --> tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin:4:21
+  |
+4 |     let wide = |(a, b, c, d, e, f, g, h, i)| a
+  |                     ^ bind it as `_` if the value is not wanted
+error[N-Unused]: `c` is never used
+ --> tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin:4:24
+  |
+4 |     let wide = |(a, b, c, d, e, f, g, h, i)| a
+  |                        ^ bind it as `_` if the value is not wanted
+error[N-Unused]: `d` is never used
+ --> tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin:4:27
+  |
+4 |     let wide = |(a, b, c, d, e, f, g, h, i)| a
+  |                           ^ bind it as `_` if the value is not wanted
+error[N-Unused]: `e` is never used
+ --> tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin:4:30
+  |
+4 |     let wide = |(a, b, c, d, e, f, g, h, i)| a
+  |                              ^ bind it as `_` if the value is not wanted
+error[N-Unused]: `f` is never used
+ --> tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin:4:33
+  |
+4 |     let wide = |(a, b, c, d, e, f, g, h, i)| a
+  |                                 ^ bind it as `_` if the value is not wanted
+error[N-Unused]: `g` is never used
+ --> tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin:4:36
+  |
+4 |     let wide = |(a, b, c, d, e, f, g, h, i)| a
+  |                                    ^ bind it as `_` if the value is not wanted
+error[N-Unused]: `h` is never used
+ --> tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin:4:39
+  |
+4 |     let wide = |(a, b, c, d, e, f, g, h, i)| a
+  |                                       ^ bind it as `_` if the value is not wanted
+error[N-Unused]: `i` is never used
+ --> tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin:4:42
+  |
+4 |     let wide = |(a, b, c, d, e, f, g, h, i)| a
+  |                                          ^ bind it as `_` if the value is not wanted

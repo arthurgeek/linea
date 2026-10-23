@@ -1,0 +1,5 @@
+error[M-Dependency]: the manifest of `tally` grants it `extern`, and this entry does not consent to it
+ --> tests/dependencies/a_library_that_builds_c_needs_its_consumers_consent/linea.json:3:9
+  |
+3 |         "tally": { "path": "tally" }
+  |         ^^^^^^^ write `"extern": true` in this entry to trust the signatures it declares

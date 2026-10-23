@@ -1,0 +1,8 @@
+error[T-Mismatch]: each closure has its own type, so `F`, settled by one, cannot stand for this one too
+  --> tests/generics/two_closures_cannot_settle_one_type_parameter.lin:10:21
+   |
+10 |     pair(|x| x + 1, |x| x + 2)
+   |                     ^^^^^^^^^ one type parameter, two closures
+   |
+   = help: declare a type parameter for each closure, with `F`'s bound
+   = help: closures called alike are kept together as `mem.Closure` values: open each with `mem.Closure.open(closure)`; closures that capture nothing also convert to a written `fn` type

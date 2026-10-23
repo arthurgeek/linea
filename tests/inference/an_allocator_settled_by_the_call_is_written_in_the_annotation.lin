@@ -1,0 +1,12 @@
+// `new_in` settles the vector's allocator from its argument, and nothing says
+// what it holds. The annotation the report shows writes the allocator the
+// call settled, and `T` to fill.
+import std.mem
+
+use mem.Lender
+
+fn main() -> UInt8 {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    defer var names = Vec.new_in(arena.handle())
+    UInt8(names.length())
+}

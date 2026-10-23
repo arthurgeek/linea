@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Pair[String[mem.SystemAllocator], UInt8]`, found `Pair[String[mem.Handle[mem.SystemAllocator]], UInt16]`
+  --> tests/mem/a_mismatch_in_more_than_an_allocator_is_not_called_one.lin:23:10
+   |
+14 | fn take(sink pair: Pair[String, UInt8]) -> UInt8 {
+   |              ---- expected because of this parameter
+23 |     take(pair)
+   |          ^^^^ expected `Pair[String[mem.SystemAllocator], UInt8]`, found `Pair[String[mem.Handle[mem.SystemAllocator]], UInt16]`

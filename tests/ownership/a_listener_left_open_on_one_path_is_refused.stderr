@@ -6,4 +6,4 @@ error[O-Leak]: `listener` (a linear `net.Listener`) is still owned when this pat
 14 |         Err(_) => return .Ok(1),
    |                   ^^^^^^ still owned here
    |
-   = help: settle it first with `listener.release()` or `listener.close()`
+   = help: settle it first with `listener.release()` or `listener.close()`, or declare it `defer let listener = …` so every path releases it

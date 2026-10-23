@@ -1,0 +1,10 @@
+error[O-Lent]: this writes a place the construct around it is lending
+ --> tests/patterns/a_walk_says_once_that_its_body_reads_what_it_lends.lin:8:9
+  |
+8 |         pairs[0] = (0, (0, 0))
+  |         ^^^^^^^^^^^^^^^^^^^^^^ write it after the construct ends, or take what it names instead of lending it
+error[O-Lent]: this reads a place the walk around it lends writably
+ --> tests/patterns/a_walk_says_once_that_its_body_reads_what_it_lends.lin:7:49
+  |
+7 |     for inout (first, (second, third)) in pairs {
+  |                                                 ^ read it through the binder, or lend it with `for read`

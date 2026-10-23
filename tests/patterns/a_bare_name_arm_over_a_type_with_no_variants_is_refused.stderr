@@ -1,0 +1,21 @@
+error[N-Variant]: `Digit` is not an enum, so `value` names no variant of it
+  --> tests/patterns/a_bare_name_arm_over_a_type_with_no_variants_is_refused.lin:13:9
+   |
+13 |         value => 1,
+   |         ^^^^^ a name at an arm's head names a variant
+   |
+   = help: write `Digit(…)` to read the value it wraps, or `_` to match any value
+error[N-Variant]: `Point` is not an enum, so `Origin` names no variant of it
+  --> tests/patterns/a_bare_name_arm_over_a_type_with_no_variants_is_refused.lin:19:9
+   |
+19 |         Origin => 0,
+   |         ^^^^^^ a name at an arm's head names a variant
+   |
+   = help: write `Point { … }` to take its fields apart, or `_` to match any value
+error[N-Variant]: `(UInt8, UInt8)` is not an enum, so `both` names no variant of it
+  --> tests/patterns/a_bare_name_arm_over_a_type_with_no_variants_is_refused.lin:25:9
+   |
+25 |         both => 2,
+   |         ^^^^ a name at an arm's head names a variant
+   |
+   = help: write `(…)` to take its components apart, or `_` to match any value

@@ -42,6 +42,7 @@ pub fn witnessOf(tag: Inst.Tag) []const u8 {
         .check,
         .call,
         .function_addr,
+        .foreign_function_addr,
         .call_indirect,
         .addr_of,
         .borrow,

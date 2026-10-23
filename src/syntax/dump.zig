@@ -638,7 +638,7 @@ fn dumpExpr(
     });
 
     switch (tag) {
-        .int_literal, .float_literal, .str_literal, .bool_literal, .name_ref, .param_argument, .reflection_root => {
+        .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .name_ref, .param_argument, .reflection_root => {
             // A multi-line literal is spelled by every line it spans, with the
             // layout between them, so its spelling is escaped to stay on the
             // dump's one line.

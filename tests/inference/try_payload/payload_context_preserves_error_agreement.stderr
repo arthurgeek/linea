@@ -2,4 +2,4 @@ error[T-TryAnswer]: this `?` may fail with `UInt16`, and no `From[UInt16] for UI
  --> tests/inference/try_payload/payload_context_preserves_error_agreement.lin:6:25
   |
 6 |     let value: UInt64 = success(7)?
-  |                         ^^^^^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`
+  |                         ^^^^^^^^^^^ `?` converts a different error through `From`: the library declares both `UInt8` and `From[UInt16]`; wrap it in a type this program declares that implements `From[UInt16]`, or convert it before `?` with `.map_err(…)`

@@ -4,8 +4,6 @@ import std.testing
 import std.time
 
 // A cookie is refused with `NotAToken` when its name is not an HTTP token,
-// with `InvalidValue` when its value holds a byte a cookie value cannot (a
-// control byte, a space, `"`, `,`, `;`, `\`, or anything outside ASCII),
 // with `InvalidPath` when its path does not start with `/` or holds a control
 // byte, a space, `;` or anything outside ASCII, with `InvalidDomain` when its
 // domain is empty or holds anything but letters, digits, `-` and `.`, with
@@ -16,12 +14,12 @@ import std.time
 // 1601, and with `Allocation` when the response's allocator cannot hold the
 // header. Browsers discard a cookie that breaks the `SameSite` or the prefix
 // rules, and ignore an `Expires` date before 1601. A cookie is refused rather
-// than sent, because a `;` or a newline in a value would otherwise end the
-// cookie early or add a header.
+// than sent, because a `;` or a newline in a name or a path would otherwise
+// end the cookie early or add a header. No value is refused: `set_cookie`
+// writes every value percent-encoded.
 @(copyable, derive(Equatable, Debug, From[mem.Oom]))
 pub enum CookieError {
     NotAToken,
-    InvalidValue,
     InvalidPath,
     InvalidDomain,
     InsecureSameSiteNone,
@@ -34,8 +32,7 @@ impl Display for CookieError {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
         &w.write_str(
             match read self {
-                NotAToken => "the cookie name is not an HTTP token",
-                InvalidValue => "the cookie value holds a byte a cookie cannot carry",
+                NotAToken => "the cookie name must be an HTTP token: ASCII letters, digits and !#$%&'*+-.^_`|~, with no space, `=`, `;` or other separator",
                 InvalidPath => "the cookie path must start with / and hold no space, control byte, semicolon or non-ASCII byte (percent-encode it)",
                 InvalidDomain => "the cookie domain must be letters, digits, hyphens and dots",
                 InsecureSameSiteNone => "a cookie that allows cross-site use must also be secure",
@@ -54,7 +51,7 @@ test fn a_cookie_error_displays_its_reason() {
     defer let prefix = fmt.render_owned(CookieError.PrefixRules).unwrap()
     defer let early = fmt.render_owned(CookieError.ExpiresBefore1601).unwrap()
     defer let memory = fmt.render_owned(CookieError.Allocation(.Exhausted)).unwrap()
-    testing.assert_eq(name.view(), "the cookie name is not an HTTP token", "the name reason changed")?
+    testing.assert_eq(name.view(), "the cookie name must be an HTTP token: ASCII letters, digits and !#$%&'*+-.^_`|~, with no space, `=`, `;` or other separator", "the name reason changed")?
     testing.assert_eq(path.view(), "the cookie path must start with / and hold no space, control byte, semicolon or non-ASCII byte (percent-encode it)", "the path reason changed")?
     testing.assert_eq(insecure.view(), "a cookie that allows cross-site use must also be secure", "the secure reason changed")?
     testing.assert_eq(prefix.view(), "a cookie named __Secure- must be secure, and one named __Host- must also have the path / and no domain", "the prefix reason changed")?
@@ -72,7 +69,7 @@ impl[P: Allocator] From[CookieError] for Error[P] {
 }
 
 test fn a_refused_cookie_answers_500() {
-    for refusal in [CookieError.NotAToken, .InvalidValue, .InvalidPath, .InvalidDomain, .InsecureSameSiteNone, .PrefixRules, .ExpiresBefore1601, .Allocation(.Exhausted)] {
+    for refusal in [CookieError.NotAToken, .InvalidPath, .InvalidDomain, .InsecureSameSiteNone, .PrefixRules, .ExpiresBefore1601, .Allocation(.Exhausted)] {
         let error: Error = refusal.into()
         testing.assert_eq(error.status(), Status.InternalServerError, "a refused cookie did not answer 500")?
     }
@@ -81,7 +78,9 @@ test fn a_refused_cookie_answers_500() {
 
 // A `Cookie` is one `name=value` pair of a request's `Cookie` header, borrowed
 // from the request. The value is the text the client sent, without the quotes
-// around it if it sent any, and is not decoded.
+// around it if it sent any, and is not decoded: a value `set_cookie` wrote is
+// percent-encoded, and `percent_decode_in(request.allocator(), cookie.value)`
+// reads it, as `Request.cookie` does.
 @(copyable, derive(Equatable, Debug))
 pub struct Cookie {
     name: Str,
@@ -176,6 +175,18 @@ fn walked[P: Allocator](request: Request[P]) -> String[mem.SystemAllocator] {
     text
 }
 
+// `cookie_reads` says whether the request's cookie `name` reads as
+// `expected`, where `None` expects no cookie.
+fn cookie_reads[P: Allocator](request: Request[P], name: Str, expected: Option[Str]) -> Bool {
+    match request.cookie(name).unwrap() {
+        Some(value) => match read expected {
+            Some(text) => value.view() == text,
+            None => false,
+        },
+        None => expected.is_none(),
+    }
+}
+
 impl[P: Allocator] Request[P] {
     // `cookies` walks the `name=value` pairs of the request's `Cookie` headers
     // in the order they arrived. Pairs are separated by `;`, and a pair that is
@@ -184,105 +195,145 @@ impl[P: Allocator] Request[P] {
     pub fn cookies(self: Self) -> Cookies where carries(self) {
         .{ stored = copy(self.head), fields = copy(self.header_fields), index = 0, rest = .{ start = 0, end = 0 } }
     }
-}
 
-test fn cookies_walk_the_pairs_of_a_cookie_header_in_order() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    &sent.add_header("Cookie", "session=abc123; theme=dark; empty=").unwrap()
-    defer let pairs = walked(sent.request())
-    testing.assert_eq(pairs.view(), "[session=abc123][theme=dark][empty=]", "the pairs changed")?
-    .Ok(())
-}
+    test fn cookies_walk_the_pairs_of_a_cookie_header_in_order() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &sent.add_header("Cookie", "session=abc123; theme=dark; empty=").unwrap()
+        defer let pairs = walked(sent.request())
+        testing.assert_eq(pairs.view(), "[session=abc123][theme=dark][empty=]", "the pairs changed")?
+        .Ok(())
+    }
 
-test fn a_malformed_pair_is_skipped_and_the_others_survive() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    &sent.add_header("Cookie", "novalue; =nameless; bad name=1; ok=1; a,b=2; last=2").unwrap()
-    defer let pairs = walked(sent.request())
-    testing.assert_eq(pairs.view(), "[ok=1][last=2]", "a malformed pair was yielded or hid its neighbours")?
-    .Ok(())
-}
+    test fn a_malformed_pair_is_skipped_and_the_others_survive() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &sent.add_header("Cookie", "novalue; =nameless; bad name=1; ok=1; a,b=2; last=2").unwrap()
+        defer let pairs = walked(sent.request())
+        testing.assert_eq(pairs.view(), "[ok=1][last=2]", "a malformed pair was yielded or hid its neighbours")?
+        .Ok(())
+    }
 
-test fn a_request_without_a_cookie_header_has_no_cookies() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    &sent.add_header("Accept", "*/*").unwrap()
-    defer let pairs = walked(sent.request())
-    testing.assert_eq(pairs.view(), "", "a request without cookies had some")?
-    .Ok(())
-}
+    test fn a_request_without_a_cookie_header_has_no_cookies() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &sent.add_header("Accept", "*/*").unwrap()
+        defer let pairs = walked(sent.request())
+        testing.assert_eq(pairs.view(), "", "a request without cookies had some")?
+        .Ok(())
+    }
 
-impl[P: Allocator] Request[P] {
     // `cookie` returns the value of the first cookie named `name`, compared
-    // exactly, since cookie names are case-sensitive, or `None` when the
-    // request sent none. A browser lists a cookie with a longer path first,
-    // and among cookies of the same path the one created first, so the first
-    // match need not be the one this site set: a site on a sibling subdomain
-    // can set a cookie of the same name for the parent domain. A name starting
-    // with `__Host-` cannot be set that way.
-    pub fn cookie(self: Self, name: Str) -> Option[Str] where carries(.Some: self) {
+    // exactly, since cookie names are case-sensitive, percent-decoded into the
+    // request's arena, so a value reads back as `set_cookie` was given it. It
+    // is `None` when the request sent no such cookie, and also when the first
+    // one's value is not percent-encoded UTF-8: `set_cookie` never writes such
+    // a value, so another program on the domain or the client wrote it, and a
+    // browser keeps sending it until it expires. Read as absent, it takes the
+    // path a first visit takes, and the handler's next `set_cookie` replaces
+    // it, where refusing the request would lock the visitor out. `cookies()`
+    // still yields it as sent. Each call decodes into the arena again, so a
+    // handler that reads a cookie more than once keeps the first result.
+    // Running out of memory in the arena is `Err`.
+    //
+    // A browser lists a cookie with a longer path first, and among cookies of
+    // the same path the one created first, so the first match need not be the
+    // one this site set: a site on a sibling subdomain can set a cookie of the
+    // same name for the parent domain. A name starting with `__Host-` cannot
+    // be set that way.
+    pub fn cookie(self: Self, name: Str) -> Result[Option[String[mem.Handle[P]]], mem.Oom] where carries(.Ok.Some: self) {
         for pair in self.cookies() {
             if pair.name == name {
-                return .Some(copy(pair.value))
+                return match percent_decode_in(self.allocator(), pair.value) {
+                    Ok(value) => .Ok(.Some(value)),
+                    Err(error) => match read error {
+                        Allocation(reason) => .Err(reason),
+                        _ => .Ok(.None),
+                    },
+                }
             }
         }
-        .None
+        .Ok(.None)
     }
-}
 
-test fn cookie_finds_a_cookie_by_name() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    &sent.add_header("Cookie", "session=abc123; theme=dark; empty=").unwrap()
-    testing.assert_eq(sent.request().cookie("theme"), Option.Some("dark"), "a cookie was not found")?
-    testing.assert_eq(sent.request().cookie("empty"), Option.Some(""), "an empty value was absent")?
-    testing.assert_eq(sent.request().cookie("missing"), .None, "an absent cookie was found")?
-    .Ok(())
-}
+    test fn cookie_finds_a_cookie_by_name() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &sent.add_header("Cookie", "session=abc123; theme=dark; empty=").unwrap()
+        testing.assert(cookie_reads(sent.request(), "theme", .Some("dark")), "a cookie was not found")?
+        testing.assert(cookie_reads(sent.request(), "empty", .Some("")), "an empty value was absent")?
+        testing.assert(cookie_reads(sent.request(), "missing", .None), "an absent cookie was found")?
+        .Ok(())
+    }
 
-test fn whitespace_around_pairs_is_tolerated_and_names_match_exactly() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    &sent.add_header("cookie", "  a=1 ;b = 2;\tC=3;;  ; d=4  ").unwrap()
-    defer let pairs = walked(sent.request())
-    testing.assert_eq(pairs.view(), "[a=1][b=2][C=3][d=4]", "whitespace or an empty pair disturbed the walk")?
-    testing.assert_eq(sent.request().cookie("c"), .None, "a cookie name matched another's case")?
-    testing.assert_eq(sent.request().cookie("C"), Option.Some("3"), "a cookie was not found by its own case")?
-    .Ok(())
-}
+    test fn cookie_decodes_the_percent_encoded_value() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &sent.add_header("Cookie", "name=Zo%C3%AB%20%3Cb%3E; plus=a+b; quoted=\"Ada%20L\"").unwrap()
+        testing.assert(cookie_reads(sent.request(), "name", .Some("Zoë <b>")), "an escape was not decoded")?
+        testing.assert(cookie_reads(sent.request(), "plus", .Some("a+b")), "a plus was read as a space")?
+        testing.assert(cookie_reads(sent.request(), "quoted", .Some("Ada L")), "a quoted value was not decoded")?
+        .Ok(())
+    }
 
-test fn a_value_may_hold_equals_signs_and_quotes_around_it_are_dropped() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    &sent.add_header("Cookie", "token=YWJj==; quoted=\"hello world\"; lone=\"; kept=\"x").unwrap()
-    testing.assert_eq(sent.request().cookie("token"), Option.Some("YWJj=="), "the equals signs of a value were lost")?
-    testing.assert_eq(sent.request().cookie("quoted"), Option.Some("hello world"), "the quotes were kept")?
-    testing.assert_eq(sent.request().cookie("lone"), Option.Some("\""), "a lone quote was dropped")?
-    testing.assert_eq(sent.request().cookie("kept"), Option.Some("\"x"), "an unpaired quote was dropped")?
-    .Ok(())
-}
+    // A value with a malformed escape, or one that is not UTF-8 once decoded, was
+    // not set by `set_cookie`, so it reads as no cookie and the walk still shows
+    // it as sent.
+    test fn a_cookie_that_does_not_decode_reads_as_none() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &sent.add_header("Cookie", "share=100%; latin=caf%E9; ok=1").unwrap()
+        testing.assert(cookie_reads(sent.request(), "share", .None), "a malformed escape was read")?
+        testing.assert(cookie_reads(sent.request(), "latin", .None), "a value that is not UTF-8 was read")?
+        testing.assert(cookie_reads(sent.request(), "ok", .Some("1")), "a good cookie beside bad ones was lost")?
+        defer let pairs = walked(sent.request())
+        testing.assert_eq(pairs.view(), "[share=100%][latin=caf%E9][ok=1]", "the walk did not show the values as sent")?
+        .Ok(())
+    }
 
-test fn non_ascii_values_are_returned_as_sent() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    &sent.add_header("Cookie", "name=José; note=日本語").unwrap()
-    testing.assert_eq(sent.request().cookie("name"), Option.Some("José"), "a non-ASCII value changed")?
-    testing.assert_eq(sent.request().cookie("note"), Option.Some("日本語"), "a non-ASCII value changed")?
-    .Ok(())
-}
+    test fn whitespace_around_pairs_is_tolerated_and_names_match_exactly() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &sent.add_header("cookie", "  a=1 ;b = 2;\tC=3;;  ; d=4  ").unwrap()
+        defer let pairs = walked(sent.request())
+        testing.assert_eq(pairs.view(), "[a=1][b=2][C=3][d=4]", "whitespace or an empty pair disturbed the walk")?
+        testing.assert(cookie_reads(sent.request(), "c", .None), "a cookie name matched another's case")?
+        testing.assert(cookie_reads(sent.request(), "C", .Some("3")), "a cookie was not found by its own case")?
+        .Ok(())
+    }
 
-test fn the_first_cookie_of_a_repeated_name_wins_across_headers() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    &sent.add_header("Cookie", "id=first; theme=dark").unwrap()
-    &sent.add_header("Accept", "*/*").unwrap()
-    &sent.add_header("Cookie", "id=second; lang=pt").unwrap()
-    defer let pairs = walked(sent.request())
-    testing.assert_eq(pairs.view(), "[id=first][theme=dark][id=second][lang=pt]", "a second Cookie header was not walked")?
-    testing.assert_eq(sent.request().cookie("id"), Option.Some("first"), "a later cookie shadowed the first")?
-    testing.assert_eq(sent.request().cookie("lang"), Option.Some("pt"), "a cookie of the second header was not found")?
-    .Ok(())
+    test fn a_value_may_hold_equals_signs_and_quotes_around_it_are_dropped() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &sent.add_header("Cookie", "token=YWJj==; quoted=\"hello world\"; lone=\"; kept=\"x").unwrap()
+        testing.assert(cookie_reads(sent.request(), "token", .Some("YWJj==")), "the equals signs of a value were lost")?
+        testing.assert(cookie_reads(sent.request(), "quoted", .Some("hello world")), "the quotes were kept")?
+        testing.assert(cookie_reads(sent.request(), "lone", .Some("\"")), "a lone quote was dropped")?
+        testing.assert(cookie_reads(sent.request(), "kept", .Some("\"x")), "an unpaired quote was dropped")?
+        .Ok(())
+    }
+
+    test fn non_ascii_values_without_escapes_read_as_sent() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &sent.add_header("Cookie", "name=José; note=日本語").unwrap()
+        testing.assert(cookie_reads(sent.request(), "name", .Some("José")), "a non-ASCII value changed")?
+        testing.assert(cookie_reads(sent.request(), "note", .Some("日本語")), "a non-ASCII value changed")?
+        .Ok(())
+    }
+
+    test fn the_first_cookie_of_a_repeated_name_wins_across_headers() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &sent.add_header("Cookie", "id=first; theme=dark").unwrap()
+        &sent.add_header("Accept", "*/*").unwrap()
+        &sent.add_header("Cookie", "id=second; lang=pt").unwrap()
+        defer let pairs = walked(sent.request())
+        testing.assert_eq(pairs.view(), "[id=first][theme=dark][id=second][lang=pt]", "a second Cookie header was not walked")?
+        testing.assert(cookie_reads(sent.request(), "id", .Some("first")), "a later cookie shadowed the first")?
+        testing.assert(cookie_reads(sent.request(), "lang", .Some("pt")), "a cookie of the second header was not found")?
+        .Ok(())
+    }
 }
 
 // `SameSite` is the `SameSite` attribute: `Strict` sends the cookie only with
@@ -306,17 +357,6 @@ impl Display for SameSite {
             },
         )
     }
-}
-
-// A cookie value is the visible ASCII bytes other than `"`, `,`, `;` and `\`.
-fn is_cookie_value(value: Str) -> Bool {
-    for at in 0..value.length() {
-        let byte = value.byte(at).unwrap()
-        if byte <= ascii_space || byte >= ascii_delete || byte == 34 || byte == 44 || byte == 59 || byte == 92 {
-            return false
-        }
-    }
-    true
 }
 
 // A path starts with `/` and is visible ASCII without `;`.
@@ -379,9 +419,6 @@ impl SetCookie {
         if !is_token(self.name) {
             return .Err(.NotAToken)
         }
-        if !is_cookie_value(self.value) {
-            return .Err(.InvalidValue)
-        }
         if self.path.length() > 0 && !is_cookie_path(self.path) {
             return .Err(.InvalidPath)
         }
@@ -409,7 +446,9 @@ impl SetCookie {
 
 impl Display for SetCookie {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
-        "{self.name}={self.value}".fmt(&w)?
+        // Percent-encoding writes only letters, digits, `-`, `.`, `_`, `~`
+        // and `%XX`, all of them bytes RFC 6265 lets a cookie value hold.
+        "{self.name}={percent_encoded(self.value)}".fmt(&w)?
         if self.path.length() > 0 {
             "; Path={self.path}".fmt(&w)?
         }
@@ -456,11 +495,11 @@ impl[P: Allocator] Response[P] {
     // malformed or that browsers would discard (see `CookieError`). The
     // attributes are left out unless given: `path` and `domain` when empty,
     // `max_age` (seconds) and `expires` when `None`, `secure` and `http_only`
-    // when false, and `same_site` when `None`. The value is sent as given, so a
-    // value that holds text a cookie cannot carry, such as a space or a
-    // non-ASCII character, is encoded by the caller, for instance as
-    // hexadecimal. The header is written once, into storage from the
-    // response's allocator.
+    // when false, and `same_site` when `None`. The value may be any text: it is
+    // written percent-encoded, as `percent_encoded` writes it, so a space, a
+    // `;` or `Zoë` cannot end the cookie early, and `Request.cookie` decodes it
+    // back. The header is written once, into storage from the response's
+    // allocator.
     pub fn set_cookie(
         inout self: Self,
         name: Str,
@@ -485,129 +524,142 @@ impl[P: Allocator] Response[P] {
         &self.headers.push(.{ name = header_name, value = line })?
         .Ok(())
     }
-}
 
-test fn a_cookie_is_set_with_the_attributes_given() {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var response = text(sent.request(), "ok").unwrap()
-    &response.set_cookie("theme", "dark").unwrap()
-    &response.set_cookie("session", "abc123", path: "/", domain: "example.com", max_age: .Some(3600), secure: true, http_only: true, same_site: .Some(.Lax)).unwrap()
-    let expires = time.Timestamp.from_unix(784111777, 0).unwrap()
-    &response.set_cookie("visit", "1", expires: .Some(expires), same_site: .Some(.Strict)).unwrap()
-    &response.set_cookie("embed", "x", secure: true, same_site: .Some(.Unrestricted)).unwrap()
-    defer let sent_cookies = set_cookies(response)
-    testing.assert_eq(sent_cookies.view(), "theme=dark|session=abc123; Path=/; Domain=example.com; Max-Age=3600; SameSite=Lax; Secure; HttpOnly|visit=1; Expires=Sun, 06 Nov 1994 08:49:37 GMT; SameSite=Strict|embed=x; SameSite=None; Secure|", "a Set-Cookie header changed")?
-    .Ok(())
-}
-
-test fn a_name_that_is_not_a_token_is_refused() {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var response = text(sent.request(), "ok").unwrap()
-    for name in ["", "two words", "a=b", "a;b", "a\r\nSet-Cookie: x=y", "café", "a,b", "a\"b"] {
-        testing.assert_eq(&response.set_cookie(name, "v"), .Err(CookieError.NotAToken), "a bad name was accepted")?
-    }
-    defer let sent_cookies = set_cookies(response)
-    testing.assert_eq(sent_cookies.view(), "", "a refused cookie left a header")?
-    .Ok(())
-}
-
-test fn a_value_a_cookie_cannot_carry_is_refused() {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var response = text(sent.request(), "ok").unwrap()
-    for value in ["a;b", "a b", "a,b", "a\"b", "a\\b", "a\r\nSet-Cookie: x=y", "a\tb", "José", "日本語"] {
-        testing.assert_eq(&response.set_cookie("n", value), .Err(CookieError.InvalidValue), "a bad value was accepted")?
-    }
-    for value in ["", "a=b", "YWJj==", "a%20b", "a/b:c@d", r"!#$%&'()*+-./:<=>?@[]^_`{|}~"] {
-        testing.assert_ok_eq(&response.set_cookie("n", value), (), "a good value was refused")?
-    }
-    .Ok(())
-}
-
-test fn a_path_or_domain_that_could_end_the_cookie_is_refused() {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var response = text(sent.request(), "ok").unwrap()
-    for path in ["x", "/a b", "/a;b", "/a\r\nb", "/é"] {
-        testing.assert_eq(&response.set_cookie("n", "v", path: path), .Err(CookieError.InvalidPath), "a bad path was accepted")?
-    }
-    for domain in ["a b", "a;b", "exa/mple.com", "é.com", "a\r\nb"] {
-        testing.assert_eq(&response.set_cookie("n", "v", domain: domain), .Err(CookieError.InvalidDomain), "a bad domain was accepted")?
-    }
-    testing.assert_ok_eq(&response.set_cookie("n", "v", path: "/a/b-c_d%20", domain: ".sub-1.example.com"), (), "a good path and domain were refused")?
-    .Ok(())
-}
-
-test fn cross_site_use_requires_secure() {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var response = text(sent.request(), "ok").unwrap()
-    testing.assert_eq(&response.set_cookie("n", "v", same_site: .Some(.Unrestricted)), .Err(CookieError.InsecureSameSiteNone), "an insecure SameSite=None cookie was accepted")?
-    testing.assert_ok_eq(&response.set_cookie("n", "v", same_site: .Some(.Lax)), (), "an insecure Lax cookie was refused")?
-    .Ok(())
-}
-
-test fn a_prefixed_cookie_keeps_the_rules_its_prefix_names() {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var response = text(sent.request(), "ok").unwrap()
-    testing.assert_eq(&response.set_cookie("__Secure-id", "v"), .Err(CookieError.PrefixRules), "an insecure __Secure- cookie was accepted")?
-    testing.assert_eq(&response.set_cookie("__secure-id", "v"), .Err(CookieError.PrefixRules), "a lowercase __secure- cookie escaped its rules")?
-    testing.assert_eq(&response.set_cookie("__Host-id", "v", path: "/"), .Err(CookieError.PrefixRules), "an insecure __Host- cookie was accepted")?
-    testing.assert_eq(&response.set_cookie("__Host-id", "v", secure: true), .Err(CookieError.PrefixRules), "a __Host- cookie without Path=/ was accepted")?
-    testing.assert_eq(&response.set_cookie("__Host-id", "v", path: "/app", secure: true), .Err(CookieError.PrefixRules), "a __Host- cookie on a narrower path was accepted")?
-    testing.assert_eq(&response.set_cookie("__Host-id", "v", path: "/", domain: "example.com", secure: true), .Err(CookieError.PrefixRules), "a __Host- cookie with a domain was accepted")?
-    defer let refused_cookies = set_cookies(response)
-    testing.assert_eq(refused_cookies.view(), "", "a refused prefixed cookie left a header")?
-    testing.assert_ok_eq(&response.set_cookie("__Secure-id", "v", domain: "example.com", secure: true), (), "a secure __Secure- cookie was refused")?
-    testing.assert_ok_eq(&response.set_cookie("__Host-id", "v", path: "/", secure: true), (), "a well-formed __Host- cookie was refused")?
-    testing.assert_ok_eq(&response.set_cookie("__Hostess", "v"), (), "a name that only starts like a prefix was refused")?
-    .Ok(())
-}
-
-// Browsers ignore an `Expires` date before 1601, which would keep the cookie
-// for the session instead of until that date.
-test fn an_expiry_before_1601_is_refused() {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var response = text(sent.request(), "ok").unwrap()
-    let last_second_of_1600 = time.Timestamp.from_unix(-11644473601, 0).unwrap()
-    let first_second_of_1601 = time.Timestamp.from_unix(-11644473600, 0).unwrap()
-    let first_moment = time.Timestamp.from_unix(-62167219200, 0).unwrap()
-    testing.assert_eq(&response.set_cookie("n", "v", expires: .Some(last_second_of_1600)), .Err(CookieError.ExpiresBefore1601), "an expiry in 1600 was accepted")?
-    testing.assert_eq(&response.set_cookie("n", "v", expires: .Some(first_moment)), .Err(CookieError.ExpiresBefore1601), "an expiry in year 0 was accepted")?
-    &response.set_cookie("n", "v", expires: .Some(first_second_of_1601)).unwrap()
-    defer let sent_cookies = set_cookies(response)
-    testing.assert_eq(sent_cookies.view(), "n=v; Expires=Mon, 01 Jan 1601 00:00:00 GMT|", "the earliest expiry changed")?
-    .Ok(())
-}
-
-// A 1 KiB arena holds the response, and a value from 1 to 1024 bytes runs out
-// of room at each of the allocations a cookie makes.
-test fn a_cookie_refused_for_memory_leaves_no_header() {
-    defer let long = Vec.filled(1024, UInt8(120)).unwrap()
-    let value = Str.from_bytes(long.as_slice()).unwrap()
-    var refusals: UInt64 = 0
-    for length in 1..1025 {
-        defer let arena = mem.Arena.open(mem.system(), size: 1024)
+    test fn a_cookie_is_set_with_the_attributes_given() {
+        defer let arena = mem.Arena.open(mem.system(), size: 8192)
         let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
         var response = text(sent.request(), "ok").unwrap()
-        match &response.set_cookie("n", value.slice(0, length).unwrap()) {
-            Ok(_) => {},
-            Err(refusal) => {
-                testing.assert_eq(refusal, CookieError.Allocation(.Exhausted), "running out of memory was reported as something else")?
-                testing.assert_eq(response.header("Set-Cookie"), .None, "a refused cookie left a header")?
-                refusals += 1
-            },
-        }
+        &response.set_cookie("theme", "dark").unwrap()
+        &response.set_cookie("session", "abc123", path: "/", domain: "example.com", max_age: .Some(3600), secure: true, http_only: true, same_site: .Some(.Lax)).unwrap()
+        let expires = time.Timestamp.from_unix(784111777, 0).unwrap()
+        &response.set_cookie("visit", "1", expires: .Some(expires), same_site: .Some(.Strict)).unwrap()
+        &response.set_cookie("embed", "x", secure: true, same_site: .Some(.Unrestricted)).unwrap()
+        defer let sent_cookies = set_cookies(response)
+        testing.assert_eq(sent_cookies.view(), "theme=dark|session=abc123; Path=/; Domain=example.com; Max-Age=3600; SameSite=Lax; Secure; HttpOnly|visit=1; Expires=Sun, 06 Nov 1994 08:49:37 GMT; SameSite=Strict|embed=x; SameSite=None; Secure|", "a Set-Cookie header changed")?
+        .Ok(())
     }
-    testing.assert(refusals > 0, "no cookie ran out of memory")?
-    .Ok(())
-}
 
-impl[P: Allocator] Response[P] {
+    test fn a_name_that_is_not_a_token_is_refused() {
+        defer let arena = mem.Arena.open(mem.system(), size: 8192)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        var response = text(sent.request(), "ok").unwrap()
+        for name in ["", "two words", "a=b", "a;b", "a\r\nSet-Cookie: x=y", "café", "a,b", "a\"b"] {
+            testing.assert_eq(&response.set_cookie(name, "v"), .Err(CookieError.NotAToken), "a bad name was accepted")?
+        }
+        defer let sent_cookies = set_cookies(response)
+        testing.assert_eq(sent_cookies.view(), "", "a refused cookie left a header")?
+        .Ok(())
+    }
+
+    test fn any_text_is_written_percent_encoded() {
+        defer let arena = mem.Arena.open(mem.system(), size: 8192)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        var response = text(sent.request(), "ok").unwrap()
+        &response.set_cookie("name", "Ada Lovelace").unwrap()
+        &response.set_cookie("who", "Zoë <b>").unwrap()
+        &response.set_cookie("note", "a;b,c\"d\\e\r\nSet-Cookie: x=y").unwrap()
+        &response.set_cookie("plain", "dark-mode_2.0~").unwrap()
+        defer let sent_cookies = set_cookies(response)
+        testing.assert_eq(sent_cookies.view(), "name=Ada%20Lovelace|who=Zo%C3%AB%20%3Cb%3E|note=a%3Bb%2Cc%22d%5Ce%0D%0ASet-Cookie%3A%20x%3Dy|plain=dark-mode_2.0~|", "a value was not percent-encoded")?
+        .Ok(())
+    }
+
+    test fn a_cookie_value_reads_back_as_it_was_set() {
+        for value in ["Ada Lovelace", "Zoë <b>", "a;b=c", "100% \"sure\"", "", "日本語", "a+b", "%41"] {
+            defer let arena = mem.Arena.open(mem.system(), size: 8192)
+            let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+            var response = text(sent.request(), "ok").unwrap()
+            &response.set_cookie("v", value, path: "/").unwrap()
+            let header = response.header("Set-Cookie").unwrap()
+            let (pair, _attributes) = header.split_once("; ").unwrap()
+            var returned = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+            &returned.add_header("Cookie", pair).unwrap()
+            testing.assert(cookie_reads(returned.request(), "v", .Some(value)), "a value did not read back as it was set")?
+        }
+        .Ok(())
+    }
+
+    test fn a_path_or_domain_that_could_end_the_cookie_is_refused() {
+        defer let arena = mem.Arena.open(mem.system(), size: 8192)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        var response = text(sent.request(), "ok").unwrap()
+        for path in ["x", "/a b", "/a;b", "/a\r\nb", "/é"] {
+            testing.assert_eq(&response.set_cookie("n", "v", path: path), .Err(CookieError.InvalidPath), "a bad path was accepted")?
+        }
+        for domain in ["a b", "a;b", "exa/mple.com", "é.com", "a\r\nb"] {
+            testing.assert_eq(&response.set_cookie("n", "v", domain: domain), .Err(CookieError.InvalidDomain), "a bad domain was accepted")?
+        }
+        testing.assert_ok_eq(&response.set_cookie("n", "v", path: "/a/b-c_d%20", domain: ".sub-1.example.com"), (), "a good path and domain were refused")?
+        .Ok(())
+    }
+
+    test fn cross_site_use_requires_secure() {
+        defer let arena = mem.Arena.open(mem.system(), size: 8192)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        var response = text(sent.request(), "ok").unwrap()
+        testing.assert_eq(&response.set_cookie("n", "v", same_site: .Some(.Unrestricted)), .Err(CookieError.InsecureSameSiteNone), "an insecure SameSite=None cookie was accepted")?
+        testing.assert_ok_eq(&response.set_cookie("n", "v", same_site: .Some(.Lax)), (), "an insecure Lax cookie was refused")?
+        .Ok(())
+    }
+
+    test fn a_prefixed_cookie_keeps_the_rules_its_prefix_names() {
+        defer let arena = mem.Arena.open(mem.system(), size: 8192)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        var response = text(sent.request(), "ok").unwrap()
+        testing.assert_eq(&response.set_cookie("__Secure-id", "v"), .Err(CookieError.PrefixRules), "an insecure __Secure- cookie was accepted")?
+        testing.assert_eq(&response.set_cookie("__secure-id", "v"), .Err(CookieError.PrefixRules), "a lowercase __secure- cookie escaped its rules")?
+        testing.assert_eq(&response.set_cookie("__Host-id", "v", path: "/"), .Err(CookieError.PrefixRules), "an insecure __Host- cookie was accepted")?
+        testing.assert_eq(&response.set_cookie("__Host-id", "v", secure: true), .Err(CookieError.PrefixRules), "a __Host- cookie without Path=/ was accepted")?
+        testing.assert_eq(&response.set_cookie("__Host-id", "v", path: "/app", secure: true), .Err(CookieError.PrefixRules), "a __Host- cookie on a narrower path was accepted")?
+        testing.assert_eq(&response.set_cookie("__Host-id", "v", path: "/", domain: "example.com", secure: true), .Err(CookieError.PrefixRules), "a __Host- cookie with a domain was accepted")?
+        defer let refused_cookies = set_cookies(response)
+        testing.assert_eq(refused_cookies.view(), "", "a refused prefixed cookie left a header")?
+        testing.assert_ok_eq(&response.set_cookie("__Secure-id", "v", domain: "example.com", secure: true), (), "a secure __Secure- cookie was refused")?
+        testing.assert_ok_eq(&response.set_cookie("__Host-id", "v", path: "/", secure: true), (), "a well-formed __Host- cookie was refused")?
+        testing.assert_ok_eq(&response.set_cookie("__Hostess", "v"), (), "a name that only starts like a prefix was refused")?
+        .Ok(())
+    }
+
+    // Browsers ignore an `Expires` date before 1601, which would keep the cookie
+    // for the session instead of until that date.
+    test fn an_expiry_before_1601_is_refused() {
+        defer let arena = mem.Arena.open(mem.system(), size: 8192)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        var response = text(sent.request(), "ok").unwrap()
+        let last_second_of_1600 = time.Timestamp.from_unix(-11644473601, 0).unwrap()
+        let first_second_of_1601 = time.Timestamp.from_unix(-11644473600, 0).unwrap()
+        let first_moment = time.Timestamp.from_unix(-62167219200, 0).unwrap()
+        testing.assert_eq(&response.set_cookie("n", "v", expires: .Some(last_second_of_1600)), .Err(CookieError.ExpiresBefore1601), "an expiry in 1600 was accepted")?
+        testing.assert_eq(&response.set_cookie("n", "v", expires: .Some(first_moment)), .Err(CookieError.ExpiresBefore1601), "an expiry in year 0 was accepted")?
+        &response.set_cookie("n", "v", expires: .Some(first_second_of_1601)).unwrap()
+        defer let sent_cookies = set_cookies(response)
+        testing.assert_eq(sent_cookies.view(), "n=v; Expires=Mon, 01 Jan 1601 00:00:00 GMT|", "the earliest expiry changed")?
+        .Ok(())
+    }
+
+    // A 1 KiB arena holds the response, and a value from 1 to 1024 bytes runs out
+    // of room at each of the allocations a cookie makes.
+    test fn a_cookie_refused_for_memory_leaves_no_header() {
+        defer let long = Vec.filled(1024, UInt8(120)).unwrap()
+        let value = Str.from_bytes(long.as_slice()).unwrap()
+        var refusals: UInt64 = 0
+        for length in 1..1025 {
+            defer let arena = mem.Arena.open(mem.system(), size: 1024)
+            let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+            var response = text(sent.request(), "ok").unwrap()
+            match &response.set_cookie("n", value.slice(0, length).unwrap()) {
+                Ok(_) => {},
+                Err(refusal) => {
+                    testing.assert_eq(refusal, CookieError.Allocation(.Exhausted), "running out of memory was reported as something else")?
+                    testing.assert_eq(response.header("Set-Cookie"), .None, "a refused cookie left a header")?
+                    refusals += 1
+                },
+            }
+        }
+        testing.assert(refusals > 0, "no cookie ran out of memory")?
+        .Ok(())
+    }
+
     // `clear_cookie` asks the browser to delete the cookie `name`: it sends the
     // cookie with an empty value that expired in 1970. A browser deletes only
     // the cookie whose `path` and `domain` match, so pass those `set_cookie`
@@ -617,26 +669,26 @@ impl[P: Allocator] Response[P] {
         let epoch = time.Timestamp.from_unix(0, 0).unwrap()
         &self.set_cookie(name, "", path: path, domain: domain, max_age: .Some(0), expires: .Some(epoch), secure: secure)
     }
-}
 
-test fn a_cookie_is_cleared_with_an_empty_expired_value() {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var response = text(sent.request(), "ok").unwrap()
-    &response.clear_cookie("session", path: "/").unwrap()
-    &response.clear_cookie("theme", path: "/app", domain: "example.com").unwrap()
-    defer let sent_cookies = set_cookies(response)
-    testing.assert_eq(sent_cookies.view(), "session=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT|theme=; Path=/app; Domain=example.com; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT|", "the clearing header changed")?
-    .Ok(())
-}
+    test fn a_cookie_is_cleared_with_an_empty_expired_value() {
+        defer let arena = mem.Arena.open(mem.system(), size: 8192)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        var response = text(sent.request(), "ok").unwrap()
+        &response.clear_cookie("session", path: "/").unwrap()
+        &response.clear_cookie("theme", path: "/app", domain: "example.com").unwrap()
+        defer let sent_cookies = set_cookies(response)
+        testing.assert_eq(sent_cookies.view(), "session=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT|theme=; Path=/app; Domain=example.com; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT|", "the clearing header changed")?
+        .Ok(())
+    }
 
-test fn a_prefixed_cookie_is_cleared_with_secure() {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var response = text(sent.request(), "ok").unwrap()
-    testing.assert_eq(&response.clear_cookie("__Host-session", path: "/"), .Err(CookieError.PrefixRules), "a clearing header a browser ignores was accepted")?
-    &response.clear_cookie("__Host-session", path: "/", secure: true).unwrap()
-    defer let sent_cookies = set_cookies(response)
-    testing.assert_eq(sent_cookies.view(), "__Host-session=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure|", "the secure clearing header changed")?
-    .Ok(())
+    test fn a_prefixed_cookie_is_cleared_with_secure() {
+        defer let arena = mem.Arena.open(mem.system(), size: 8192)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        var response = text(sent.request(), "ok").unwrap()
+        testing.assert_eq(&response.clear_cookie("__Host-session", path: "/"), .Err(CookieError.PrefixRules), "a clearing header a browser ignores was accepted")?
+        &response.clear_cookie("__Host-session", path: "/", secure: true).unwrap()
+        defer let sent_cookies = set_cookies(response)
+        testing.assert_eq(sent_cookies.view(), "__Host-session=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure|", "the secure clearing header changed")?
+        .Ok(())
+    }
 }

@@ -1,0 +1,21 @@
+// `Mixed` owns a `String` and holds a view. A result taken from it may keep
+// only what it observes, so `carries` is the clause that holds its callers to
+// no more than that.
+@derive(Release)
+struct Mixed {
+    owned: String,
+    v: Str,
+}
+
+fn pick(u: Mixed, w: Str, first: Bool) -> Str {
+    if first {
+        copy(u.v)
+    } else {
+        copy(w)
+    }
+}
+
+fn main() -> UInt8 {
+    defer let u = Mixed { owned = String.new(), v = "x" }
+    UInt8(pick(u, "w", true).length())
+}

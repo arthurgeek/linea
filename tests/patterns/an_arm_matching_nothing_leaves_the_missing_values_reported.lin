@@ -1,0 +1,28 @@
+// A range written backwards, or a literal outside a refinement, matches
+// nothing, so no value reaches its arm. The values no arm takes are a
+// second mistake, and are reported as well.
+type Digit = UInt8 where it in 0..=9
+
+enum Mode {
+    A,
+    B,
+    C,
+}
+
+fn _backwards(sink pair: (UInt8, Mode)) -> UInt8 {
+    match pair {
+        (0..=100, _) => 1,
+        (255..=101, A) => 2,
+    }
+}
+
+fn _outside(sink pair: (Digit, Mode)) -> UInt8 {
+    match pair {
+        (Digit(0..=9), A) => 1,
+        (Digit(12), B) => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,13 @@
+// A literal in a field's place compares the field, so a destructuring `let`
+// writing one misses every other value of it and is refused: the `let` has no
+// other arm to take them.
+struct Pair {
+    a: UInt8,
+    b: UInt8,
+}
+
+fn main() -> UInt8 {
+    let pair = Pair { a = 5, b = 2 }
+    let Pair { a: 1, b } = pair
+    b
+}

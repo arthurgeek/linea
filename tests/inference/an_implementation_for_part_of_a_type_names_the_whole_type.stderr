@@ -1,0 +1,7 @@
+error[T-Infer]: nothing here says what `B` is
+  --> tests/inference/an_implementation_for_part_of_a_type_names_the_whole_type.lin:16:16
+   |
+16 |     let pair = Pair.empty()
+   |                ^^^^^^^^^^^^ no argument determines it, and nothing expects a type of it
+   |
+   = help: say what `B` is where `pair` is declared: `let pair: Pair[UInt8, B] = Pair.empty()`, with a type in place of `B`

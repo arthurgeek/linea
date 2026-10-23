@@ -5,3 +5,5 @@ error[T-Mismatch]: expected `fn(read Str) -> Str where carries()`, found `fn(rea
    |         -- expected because of this parameter
 11 |     take(keep)
    |          ^^^^ expected `fn(read Str) -> Str where carries()`, found `fn(read Str) -> Str where carries(#1)`
+   |
+   = help: `#n` in a `fn` type's clause is its parameter at position n, counted from 1, because a parameter's name is not part of the type

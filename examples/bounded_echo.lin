@@ -9,6 +9,7 @@
 // them, because a client that stays silent, sends a byte at a time, or never
 // stops would otherwise hold every client queued behind it. The server logs
 // what happens to standard error.
+import std.cli
 import std.env
 import std.io
 import std.log
@@ -33,82 +34,68 @@ struct ServeOptions {
     connections: Option[UInt64],
 }
 
-struct SendOptions {
-    port: UInt16,
-    first_message: UInt64,
+fn build_cli() -> cli.Command {
+    var cmd = cli.Command.new("bounded_echo", "Bounded echo server and client")
+    var serve_cmd = cli.Command.new("serve", "run the bounded echo server")
+    &serve_cmd.option("port", "--port", "port to listen on", required: true)
+    &serve_cmd.option("connections", "--connections", "maximum connections to accept")
+    &cmd.subcommand(serve_cmd)
+
+    var send_cmd = cli.Command.new("send", "send lines to an echo server")
+    &send_cmd.option("port", "--port", "server port to connect to", required: true)
+    &send_cmd.positional("message", "messages to send", required: true, variadic: true)
+    &cmd.subcommand(send_cmd)
+    cmd
 }
 
 fn main() -> UInt8 {
-    let args = env.args()
-    if args.count() < 2 {
-        return usage()
+    defer var cmd = build_cli()
+    var cursor = cli.ArgCursor.new(env.args())
+    defer let matches = cmd.parse(&cursor) else |_| {
+        defer let u = cmd.usage()
+        io.eprintln(u.view())
+        return 64
     }
-    let mode = args.at(1) else {
-        return usage()
+    if matches.is_help() {
+        defer let u = cmd.usage()
+        io.eprintln(u.view())
+        return 64
     }
-    if mode == "serve" {
-        let options = parse_serve(args) else {
-            return usage()
+    let sub = matches.subcommand() else {
+        defer let u = cmd.usage()
+        io.eprintln(u.view())
+        return 64
+    }
+    if sub.name == "serve" {
+        let port: UInt16 = sub.matches.get("port") else |_| {
+            defer let u = cmd.usage()
+            io.eprintln(u.view())
+            return 64
         }
-        return run_serve(options)
-    }
-    if mode == "send" {
-        let options = parse_send(args) else {
-            return usage()
+        let connections: Option[UInt64] = sub.matches.get_optional("connections") else |_| {
+            defer let u = cmd.usage()
+            io.eprintln(u.view())
+            return 64
         }
-        return run_send(args, options)
+        return run_serve(.{ port, connections })
     }
-    usage()
-}
-
-// Print this when the arguments name no mode; the second line lines up with
-// the command in the first.
-let usage_text =
-    \\usage: bounded_echo serve --port PORT [--connections N]
-    \\       bounded_echo send --port PORT MESSAGE...
-
-fn usage() -> UInt8 {
-    io.eprintln(usage_text)
+    if sub.name == "send" {
+        let port: UInt16 = sub.matches.get("port") else |_| {
+            defer let u = cmd.usage()
+            io.eprintln(u.view())
+            return 64
+        }
+        defer let messages = sub.matches.positionals_all("message")
+        if messages.length() == 0 {
+            defer let u = cmd.usage()
+            io.eprintln(u.view())
+            return 64
+        }
+        return run_send(port, messages)
+    }
+    defer let u = cmd.usage()
+    io.eprintln(u.view())
     64
-}
-
-// Both modes start with a required `--port` argument at the same position.
-fn parse_port(args: env.Args) -> Option[UInt16] {
-    let flag = args.at(2)?
-    if flag != "--port" {
-        return .None
-    }
-    let port = args.at(3)?.parse[UInt16]() else |_| {
-        return .None
-    }
-    .Some(port)
-}
-
-fn parse_serve(args: env.Args) -> Option[ServeOptions] {
-    let port = parse_port(args)?
-    if args.count() == 4 {
-        return .Some(.{ port = port, connections = .None })
-    }
-    if args.count() != 6 {
-        return .None
-    }
-    let flag = args.at(4)?
-    if flag != "--connections" {
-        return .None
-    }
-    let connections = args.at(5)?.parse[UInt64]() else |_| {
-        return .None
-    }
-    .Some(.{ port = port, connections = .Some(connections) })
-}
-
-fn parse_send(args: env.Args) -> Option[SendOptions] {
-    // The port occupies indices 2 and 3; at least one message follows it.
-    if args.count() < 5 {
-        return .None
-    }
-    let port = parse_port(args)?
-    .Some(.{ port = port, first_message = 4 })
 }
 
 fn run_serve(options: ServeOptions) -> UInt8 {
@@ -174,23 +161,21 @@ fn echo_connection(sink connection: net.Connection, peer: net.Address, logger: l
     var failed = false
     loop {
         match &reader.read_line_borrowed(max_bytes: max_line_bytes) {
-            Ok(line) => match line {
-                None => break,
-                Some(received) => match io.line(received, &echoed) {
-                    Ok(_) => {
-                        lines += 1
-                        // Text past the limit is refused, and nothing is echoed.
-                        if echoed.length() > bounds.max_echo_bytes {
-                            logger.warn("a connection sent too much", log.field("peer", peer).and("limit", bounds.max_echo_bytes))
-                            failed = true
-                            break
-                        }
-                    },
-                    Err(_) => {
-                        logger.error("cannot hold an echoed line", log.field("peer", peer))
+            Ok(None) => break,
+            Ok(Some(received)) => match io.line(received, &echoed) {
+                Ok(_) => {
+                    lines += 1
+                    // Text past the limit is refused, and nothing is echoed.
+                    if echoed.length() > bounds.max_echo_bytes {
+                        logger.warn("a connection sent too much", log.field("peer", peer).and("limit", bounds.max_echo_bytes))
                         failed = true
                         break
-                    },
+                    }
+                },
+                Err(_) => {
+                    logger.error("cannot hold an echoed line", log.field("peer", peer))
+                    failed = true
+                    break
                 },
             },
             Err(error) => {
@@ -210,15 +195,15 @@ fn echo_connection(sink connection: net.Connection, peer: net.Address, logger: l
     let _closed = conn.close()
 }
 
-fn run_send(args: env.Args, options: SendOptions) -> UInt8 {
-    let target = net.loopback(options.port)
+fn run_send(port: UInt16, messages: Vec[Str]) -> UInt8 {
+    let target = net.loopback(port)
     var connection = net.connect(target) else |error| {
         io.eprintln("bounded_echo: cannot connect to {target}: {error}")
         return 1
     }
     // `&connection` lends the connection to `send_messages`, so it is still
     // here to close whether or not every message went out.
-    if !send_messages(args, options.first_message, &connection) {
+    if !send_messages(messages, &connection) {
         let _closed = connection.close()
         return 1
     }
@@ -247,14 +232,10 @@ fn run_send(args: env.Args, options: SendOptions) -> UInt8 {
     }
 }
 
-// Send each argument from `first` on as a line. Report the first message
-// that cannot be sent and answer whether every one was.
-fn send_messages(args: env.Args, first: UInt64, inout connection: net.Connection) -> Bool {
-    for index in first..args.count() {
-        let message = args.at(index) else {
-            io.eprintln("bounded_echo: a message must be valid UTF-8")
-            return false
-        }
+// Send each message as a line. Report the first message that cannot be sent
+// and answer whether every one was.
+fn send_messages(messages: Vec[Str], inout connection: net.Connection) -> Bool {
+    for read message in messages {
         let _ = io.line(message, &connection) else |error| {
             io.eprintln("bounded_echo: cannot send a message: {error}")
             return false
@@ -268,11 +249,9 @@ fn send_messages(args: env.Args, first: UInt64, inout connection: net.Connection
 fn print_echo(inout reader: io.BufferedReader[net.Connection]) -> Bool {
     loop {
         match &reader.read_line_borrowed(max_bytes: max_line_bytes) {
-            Ok(line) => match line {
-                None => return true,
-                Some(received) => {
-                    let _printed = io.println(received)
-                },
+            Ok(None) => return true,
+            Ok(Some(received)) => {
+                let _printed = io.println(received)
             },
             Err(error) => {
                 io.eprintln("bounded_echo: reading the echo failed: {error}")

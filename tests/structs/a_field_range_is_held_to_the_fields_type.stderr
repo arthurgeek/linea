@@ -1,0 +1,6 @@
+error[T-Literal]: `UInt8` cannot hold 300
+ --> tests/structs/a_field_range_is_held_to_the_fields_type.lin:5:21
+  |
+5 |         Range { lo: 300..=400, hi, inclusive: _ } => hi,
+  |                     ^^^ literal is out of range for its type
+  |                     --- expected because of this end

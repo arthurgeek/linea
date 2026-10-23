@@ -1,0 +1,18 @@
+// A closure that writes no result answers with what its body gives, here a
+// `UInt8`, so its `?` cannot hand `parse`'s failure on. The help offers the
+// result the closure would write to carry the failure, or `let … else`.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
+
+fn main() -> UInt8 {
+    let next = || {
+        let n = parse()?
+        n + 1
+    }
+    next()
+}

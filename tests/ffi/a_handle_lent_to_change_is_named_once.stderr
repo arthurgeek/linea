@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a handle another argument lends C to change
+  --> tests/ffi/a_handle_lent_to_change_is_named_once/named/named.lin:17:40
+   |
+17 |     let length = named_name_then_reset(handle, handle).length()
+   |                                        ^^^^^^ pass two different handles, or mark the changing parameter `read` if C only reads it
+   |                                                ------ lent to change here

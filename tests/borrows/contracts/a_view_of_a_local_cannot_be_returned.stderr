@@ -1,0 +1,8 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/borrows/contracts/a_view_of_a_local_cannot_be_returned.lin:11:5
+   |
+11 |     line.view()
+   |     ^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `line` belongs to `greeting` and ends when it returns, so nothing returned may observe it
+   = help: `line` owns the text already: put `line` itself where its view is, declaring `String` as the result

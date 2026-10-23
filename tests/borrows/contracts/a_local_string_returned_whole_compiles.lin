@@ -1,0 +1,18 @@
+// `titled` returns the `String` it built instead of a view of it. `defer var`
+// releases `line` on the paths where an `append` fails, and returning it moves
+// it to the caller, who releases it.
+import std.mem
+
+fn titled(name: Str) -> Result[String, mem.Oom] {
+    defer var line = String.new()
+    &line.append("Dr. ")?
+    &line.append(name)?
+    .Ok(line)
+}
+
+fn main() -> UInt8 {
+    defer let title = titled("Ada") else |_| {
+        return 1
+    }
+    UInt8(title.length())
+}

@@ -1,0 +1,16 @@
+// `remember` keeps a view of a string it releases before it returns. The
+// view outliving its owner is one mistake, reported where `seen` keeps it.
+import std.mem
+
+fn remember(inout seen: Vec[Str]) -> Result[(), mem.Oom] {
+    defer let local = String.new()
+    &seen.push(local.view()).settled()?
+    .Ok(())
+}
+
+fn main() -> UInt8 {
+    var seen: Vec[Str] = Vec.new()
+    let _r = remember(&seen)
+    seen.release()
+    0
+}

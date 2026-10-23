@@ -1,0 +1,177 @@
+import std.env
+import std.fs
+import std.io
+
+fn main() -> UInt8 {
+    let args = env.args()
+    let parsed = CliParser.parse(args)
+    let invocation = match parsed {
+        Ok(inv) => inv,
+        Err(err) => {
+            let _ = io.eprintln("error: {err}")
+            let _ = io.eprintln("usage: notes <command> [options]")
+            err.release()
+            return 2
+        },
+    }
+
+    let { action, format: format_flag, config_path } = invocation
+
+    if match read action { Help(_) => true, _ => false } {
+        defer action.release()
+        match read action {
+            Help(help_text) => {
+                io.print(help_text.view()).unwrap()
+            },
+            _ => {},
+        }
+        return 0
+    }
+
+    // Load configuration
+    defer let config = Config.load_or_default(config_path) else |err| {
+        action.release()
+        let _ = io.eprintln("error: {err}")
+        return 1
+    }
+
+    // Determine output format: command flag overrides config default
+    let format = match format_flag {
+        Some(f) => f,
+        None => config.default_format,
+    }
+
+    // Determine data storage path
+    let data_path = fs.Path.from_bytes(config.data_file.as_bytes()) else |_| {
+        action.release()
+        let _ = io.eprintln("error: invalid data file path in configuration")
+        return 1
+    }
+
+    // Open store
+    var store = NoteStore.open(data_path) else |err| {
+        action.release()
+        let _ = io.eprintln("error: failed to open notes store: {err}")
+        return 1
+    }
+    defer store.release()
+
+    match action {
+        Add(opts) => {
+            let { title, priority: prio_opt, tags } = opts
+            defer title.release()
+            let priority = match prio_opt {
+                Some(p) => p,
+                None => config.default_priority,
+            }
+            let prio_str = priority.as_str()
+            let id = &store.add(title.view(), priority, tags) else |_| {
+                let _ = io.eprintln("error: failed to allocate new note")
+                return 1
+            }
+            let saved = &store.save()
+            match saved {
+                Ok(_) => {},
+                Err(err) => {
+                    let _ = io.eprintln("error: failed to save notes: {err}")
+                    return 1
+                },
+            }
+            io.println("added note {id}: \"{title.view()}\" [{prio_str}]").unwrap()
+            0
+        },
+        List(opts) => {
+            let { status: list_status, tag: list_tag } = opts
+            defer match list_tag {
+                Some(t) => t.release(),
+                None => {},
+            }
+            let tag_filter = match read list_tag {
+                Some(t) => Option.Some(t.view()),
+                None => .None,
+            }
+            match format {
+                Table => {
+                    defer let rendered = TableFormatter.render_filtered_table(store.notes.as_slice(), list_status, tag_filter)
+                    io.print(rendered.view()).unwrap()
+                },
+                Json => {
+                    defer let rendered = TableFormatter.render_filtered_json(store.notes.as_slice(), list_status, tag_filter)
+                    io.println(rendered.view()).unwrap()
+                },
+            }
+            0
+        },
+        Done(id) => {
+            let note_opt = store.get(id)
+            if note_opt.is_none() {
+                let _ = io.eprintln("error: note {id} not found")
+                return 1
+            }
+            let note = note_opt.unwrap()
+            let title = note.title.to_owned().unwrap()
+            defer title.release()
+
+            let _ = &store.mark_done(id)
+            let saved = &store.save()
+            match saved {
+                Ok(_) => {},
+                Err(err) => {
+                    let _ = io.eprintln("error: failed to save notes: {err}")
+                    return 1
+                },
+            }
+            io.println("completed note {id}: \"{title.view()}\"").unwrap()
+            0
+        },
+        Remove(id) => {
+            let note_opt = store.get(id)
+            if note_opt.is_none() {
+                let _ = io.eprintln("error: note {id} not found")
+                return 1
+            }
+            let note = note_opt.unwrap()
+            let title = note.title.to_owned().unwrap()
+            defer title.release()
+
+            let removed = &store.remove(id)
+            defer match removed {
+                Some(n) => n.release(),
+                None => {},
+            }
+            let saved = &store.save()
+            match saved {
+                Ok(_) => {},
+                Err(err) => {
+                    let _ = io.eprintln("error: failed to save notes: {err}")
+                    return 1
+                },
+            }
+            io.println("removed note {id}: \"{title.view()}\"").unwrap()
+            0
+        },
+        Show(opts) => {
+            let note_opt = store.get(opts.id)
+            if note_opt.is_none() {
+                let _ = io.eprintln("error: note {opts.id} not found")
+                return 1
+            }
+            let note = note_opt.unwrap()
+            match format {
+                Table => {
+                    defer let rendered = TableFormatter.render_detail(note)
+                    io.print(rendered.view()).unwrap()
+                },
+                Json => {
+                    defer let rendered = TableFormatter.render_detail_json(note)
+                    io.println(rendered.view()).unwrap()
+                },
+            }
+            0
+        },
+        Help(text) => {
+            text.release()
+            0
+        },
+    }
+}

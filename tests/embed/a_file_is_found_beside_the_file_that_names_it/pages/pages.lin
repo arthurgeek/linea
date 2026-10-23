@@ -1,0 +1,7 @@
+pub fn card() -> Str {
+    embed("card.txt")
+}
+
+pub fn page() -> Str {
+    embed("../templates/page.txt")
+}

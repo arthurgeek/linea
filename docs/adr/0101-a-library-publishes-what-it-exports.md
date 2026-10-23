@@ -1,6 +1,6 @@
 # 101. A library publishes what it exports
 
-Status: Accepted — 2026-08-22
+Status: Accepted — 2026-08-22. Extended by [0228](0228-a-granted-module-calls-c.md).
 
 Extends [0096](0096-a-root-is-a-program-or-a-library.md), which made a manifest
 say whether a root is a program or a library, and left every naming decision

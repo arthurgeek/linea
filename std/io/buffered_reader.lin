@@ -177,6 +177,162 @@ impl Reader for FragmentReader {
     }
 }
 
+impl[R: Reader] BufferedReader[R, mem.SystemAllocator] {
+    // Read from `reader` through a read-ahead buffer of `capacity` bytes from
+    // the system allocator, as `open_in` does.
+    pub fn open(capacity: UInt64, sink reader: R) -> Result[Self, BufferOpenFailure[R]] where carries(.Ok.reader: reader), carries(.Err.resource: reader) {
+        BufferedReader.open_in(mem.system(), capacity, reader)
+    }
+
+    test fn a_reader_buffers_from_the_system_allocator() {
+        let source = FragmentReader { bytes = "tea\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
+            return testing.assert(false, "a system read-ahead buffer was refused")
+        }
+        let length = match &reader.read_raw_line_borrowed(max_bytes: 8) {
+            Ok(Some(value)) => value.length(),
+            Ok(None) => 0,
+            Err(_) => 0,
+        }
+        let _source = reader.abandon()
+        testing.assert_eq(length, UInt64(4), "a line read through a system buffer changed length")
+    }
+
+    // Read exactly count bytes into storage from the system allocator, under
+    // the limits of `read_exact_in`.
+    pub fn read_exact(inout self: Self, count: UInt64, max_bytes: UInt64) -> Result[Vec[UInt8, mem.SystemAllocator], ExactError[R.Error]] where carries(.Err.Input.reason: self.reader) {
+        &self.read_exact_in(mem.system(), count, max_bytes)
+    }
+
+    test fn read_exact_allocates_from_the_system_allocator() {
+        let source = FragmentReader { bytes = "abc".as_bytes(), position = 0, step = 3, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let length = match &reader.read_exact(count: 2, max_bytes: 4) {
+            Ok(bytes) => {
+                let length = bytes.length()
+                bytes.release()
+                length
+            },
+            Err(_) => 0,
+        }
+        let _source = reader.abandon()
+        testing.assert_eq(length, UInt64(2), "an exact read into the system allocator lost bytes")
+    }
+
+    test fn read_exact_collects_a_body_split_across_reads() {
+        let input = "hello world"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let body = match &reader.read_exact(count: 5, max_bytes: 10) {
+            Ok(bytes) => {
+                let intact = bytes.length() == 5 && bytes[0] == 104 && bytes[4] == 111
+                bytes.release()
+                intact
+            },
+            Err(_) => false,
+        }
+        let rest = match &reader.read_raw_line_borrowed(max_bytes: 6) {
+            Ok(Some(value)) => value.length() == 6 && value[0] == 32 && value[5] == 100,
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(body && rest, "an exact read lost bytes or disturbed the following read")?
+        .Ok(())
+    }
+
+    test fn read_exact_refuses_past_its_limit_before_reading() {
+        let input = "hello world"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let refused = match &reader.read_exact(count: 11, max_bytes: 10) {
+            Err(Limit) => true,
+            Err(_) => false,
+            Ok(bytes) => {
+                bytes.release()
+                false
+            },
+        }
+        let intact = match &reader.read_raw_line_borrowed(max_bytes: 11) {
+            Ok(Some(value)) => value.length() == 11 && value[0] == 104 && value[10] == 100,
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(refused && intact, "an oversized exact read consumed input before refusing")?
+        .Ok(())
+    }
+
+    test fn read_exact_reports_how_much_arrived_before_the_end() {
+        let input = "abc"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let ended = match &reader.read_exact(count: 5, max_bytes: 10) {
+            Err(Ended(n)) => n == 3,
+            Err(_) => false,
+            Ok(bytes) => {
+                bytes.release()
+                false
+            },
+        }
+        let _source = reader.abandon()
+        testing.assert(ended, "an exact read reported the wrong count at end of stream")?
+        .Ok(())
+    }
+
+    test fn read_exact_refuses_while_a_line_read_needs_recovery() {
+        let input = "abcd\nnext\n"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let limited = match &reader.read_line_borrowed(max_bytes: 3) {
+            Err(Limit) => true,
+            _ => false,
+        }
+        let blocked = match &reader.read_exact(count: 1, max_bytes: 4) {
+            Err(RecoveryRequired) => true,
+            Err(_) => false,
+            Ok(bytes) => {
+                bytes.release()
+                false
+            },
+        }
+        let _source = reader.abandon()
+        testing.assert(limited && blocked, "an exact read ignored a reader still needing line recovery")?
+        .Ok(())
+    }
+
+    // ExcessReadFixture (defined in read_all.lin, this module's other whole-input
+    // reader) misreports its own progress, overrunning the destination it was
+    // given. read_exact treats this as unusable rather than trusting the count.
+    test fn read_exact_reports_a_reader_that_overruns_its_destination() {
+        let source = ExcessReadFixture {}
+        var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let invalid = match &reader.read_exact(count: 2, max_bytes: 4) {
+            Err(InvalidProgress) => true,
+            Err(_) => false,
+            Ok(bytes) => {
+                bytes.release()
+                false
+            },
+        }
+        let _source = reader.abandon()
+        testing.assert(invalid, "an exact read accepted a reader that overran its destination")?
+        .Ok(())
+    }
+}
+
 impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Read from `reader` through a read-ahead buffer of `capacity` bytes from
     // `allocator`. A zero capacity or refused storage returns `reader`.
@@ -204,76 +360,52 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
             }),
         }
     }
-}
 
-impl[R: Reader] BufferedReader[R, mem.SystemAllocator] {
-    // Read from `reader` through a read-ahead buffer of `capacity` bytes from
-    // the system allocator, as `open_in` does.
-    pub fn open(capacity: UInt64, sink reader: R) -> Result[Self, BufferOpenFailure[R]] where carries(.Ok.reader: reader), carries(.Err.resource: reader) {
-        BufferedReader.open_in(mem.system(), capacity, reader)
+    test fn open_returns_the_reader_when_no_buffer_is_made() {
+        let input = "kept"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
+        let returned = match BufferedReader.open(capacity: 0, reader: source) {
+            Ok(reader) => {
+                let _source = reader.abandon()
+                return testing.assert(false, "a zero-capacity buffer was made")
+            },
+            Err(failure) => failure,
+        }
+        let BufferOpenFailure { resource, reason } = returned
+        let zero = resource.position == 0 && match reason { ZeroCapacity => true, Allocation(_) => false }
+        let arena = mem.Arena.open(mem.system(), size: 0)
+        let refused = match BufferedReader.open_in(arena.handle(), capacity: 4, reader: resource) {
+            Ok(reader) => {
+                let _source = reader.abandon()
+                false
+            },
+            Err(BufferOpenFailure { resource, reason }) => {
+                resource.position == 0 && match reason { Allocation(_) => true, ZeroCapacity => false }
+            },
+        }
+        arena.release()
+        testing.assert(zero, "a zero-capacity reader kept or read its source")?
+        testing.assert(refused, "a refused buffer kept or read its source")?
+        .Ok(())
     }
-}
 
-test fn a_reader_buffers_from_the_system_allocator() {
-    let source = FragmentReader { bytes = "tea\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
-        return testing.assert(false, "a system read-ahead buffer was refused")
+    test fn each_allocation_failure_covers_opening_a_reader() -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), mem.Oom] {
+                let source = FragmentReader { bytes = "kept".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
+                let reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
+                    return .Err(.Exhausted)
+                }
+                let _source = reader.abandon()
+                return .Ok(())
+            },
+            mem.Oom.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "opening a reader was reported as failing")?
+        .Ok(())
     }
-    let length = match &reader.read_raw_line_borrowed(max_bytes: 8) {
-        Ok(line) => match line { Some(value) => value.length(), None => 0 },
-        Err(_) => 0,
-    }
-    let _source = reader.abandon()
-    testing.assert_eq(length, UInt64(4), "a line read through a system buffer changed length")
-}
 
-test fn open_returns_the_reader_when_no_buffer_is_made() {
-    let input = "kept"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
-    let returned = match BufferedReader.open(capacity: 0, reader: source) {
-        Ok(reader) => {
-            let _source = reader.abandon()
-            return testing.assert(false, "a zero-capacity buffer was made")
-        },
-        Err(failure) => failure,
-    }
-    let BufferOpenFailure { resource, reason } = returned
-    let zero = resource.position == 0 && match reason { ZeroCapacity => true, Allocation(_) => false }
-    let arena = mem.Arena.open(mem.system(), size: 0)
-    let refused = match BufferedReader.open_in(arena.handle(), capacity: 4, reader: resource) {
-        Ok(reader) => {
-            let _source = reader.abandon()
-            false
-        },
-        Err(failure) => {
-            let BufferOpenFailure { resource, reason } = failure
-            resource.position == 0 && match reason { Allocation(_) => true, ZeroCapacity => false }
-        },
-    }
-    arena.release()
-    testing.assert(zero, "a zero-capacity reader kept or read its source")?
-    testing.assert(refused, "a refused buffer kept or read its source")?
-    .Ok(())
-}
-
-test fn each_allocation_failure_covers_opening_a_reader() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), mem.Oom] {
-            let source = FragmentReader { bytes = "kept".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
-            let reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
-                return .Err(.Exhausted)
-            }
-            let _source = reader.abandon()
-            return .Ok(())
-        },
-        mem.Oom.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "opening a reader was reported as failing")?
-    .Ok(())
-}
-
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Discard buffered input explicitly and return the underlying resource.
     pub fn abandon(sink self: Self) -> R where carries(self.reader) {
         let BufferedReader {
@@ -296,26 +428,25 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         record.release()
         reader
     }
-}
 
-test fn abandon_returns_the_reader_and_drops_its_read_ahead() {
-    let input = "ab\ncd\n"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
+    test fn abandon_returns_the_reader_and_drops_its_read_ahead() {
+        let input = "ab\ncd\n"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let first = match &reader.read_line_borrowed(max_bytes: 2) {
+            Ok(Some(value)) => value == "ab",
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let returned = reader.abandon()
+        testing.assert(first, "the first line was not read")?
+        // The read-ahead held the second line too, and abandoning drops it.
+        testing.assert_eq(returned.position, UInt64(6), "abandoning returned a reader at another position")?
+        .Ok(())
     }
-    let first = match &reader.read_line_borrowed(max_bytes: 2) {
-        Ok(line) => match line { Some(value) => value == "ab", None => false },
-        Err(_) => false,
-    }
-    let returned = reader.abandon()
-    testing.assert(first, "the first line was not read")?
-    // The read-ahead held the second line too, and abandoning drops it.
-    testing.assert_eq(returned.position, UInt64(6), "abandoning returned a reader at another position")?
-    .Ok(())
-}
 
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Inspect retained current-record bytes, including their terminator.
     pub fn pending(self: Self) -> mem.Slice[UInt8] where borrows(self) {
         match read self.record {
@@ -323,30 +454,28 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
             None => "".as_bytes(),
         }
     }
-}
 
-test fn an_oversized_line_retains_its_consumed_prefix() {
-    let input = "abcd\nnext\n"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
+    test fn an_oversized_line_retains_its_consumed_prefix() {
+        let input = "abcd\nnext\n"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let refused = match &reader.read_line_borrowed(max_bytes: 3) {
+            Err(Limit) => true,
+            _ => false,
+        }
+        let pending = reader.pending()
+        let preserved = pending.length() == 4 && pending[0] == 97 && pending[3] == 100
+        let blocked = match &reader.read_line_borrowed(max_bytes: 16) {
+            Err(RecoveryRequired) => true,
+            _ => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(refused && preserved && blocked, "line limit lost bytes or silently skipped recovery")?
+        .Ok(())
     }
-    let refused = match &reader.read_line_borrowed(max_bytes: 3) {
-        Err(error) => match error { Limit => true, _ => false },
-        Ok(_) => false,
-    }
-    let pending = reader.pending()
-    let preserved = pending.length() == 4 && pending[0] == 97 && pending[3] == 100
-    let blocked = match &reader.read_line_borrowed(max_bytes: 16) {
-        Err(error) => match error { RecoveryRequired => true, _ => false },
-        Ok(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(refused && preserved && blocked, "line limit lost bytes or silently skipped recovery")?
-    .Ok(())
-}
 
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Read one line of at most `max_bytes` payload bytes and borrow it as text
     // without its LF or CRLF; the view lasts until the next call. EOF returns
     // None.
@@ -361,101 +490,105 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
         &self.text_view()
     }
-}
 
-test fn text_lines_strip_only_their_terminators() {
-    let input = "á\r\n\nlast\r"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
+    test fn text_lines_strip_only_their_terminators() {
+        let input = "á\r\n\nlast\r"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let first = match &reader.read_line_borrowed(max_bytes: 2) {
+            Ok(Some(value)) => value == "á",
+            Ok(None) => false,
+            _ => false,
+        }
+        let empty = match &reader.read_line_borrowed(max_bytes: 0) {
+            Ok(Some(value)) => value == "",
+            Ok(None) => false,
+            _ => false,
+        }
+        let final_line = match &reader.read_line_borrowed(max_bytes: 5) {
+            Ok(Some(value)) => value == "last\r",
+            Ok(None) => false,
+            _ => false,
+        }
+        let ended = match &reader.read_line_borrowed(max_bytes: 0) {
+            Ok(line) => line.is_none(),
+            _ => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(first && empty && final_line && ended, "line framing changed payload or EOF")?
+        .Ok(())
     }
-    let first = match &reader.read_line_borrowed(max_bytes: 2) {
-        Ok(line) => match line { Some(value) => value == "á", None => false },
-        _ => false,
-    }
-    let empty = match &reader.read_line_borrowed(max_bytes: 0) {
-        Ok(line) => match line { Some(value) => value == "", None => false },
-        _ => false,
-    }
-    let final_line = match &reader.read_line_borrowed(max_bytes: 5) {
-        Ok(line) => match line { Some(value) => value == "last\r", None => false },
-        _ => false,
-    }
-    let ended = match &reader.read_line_borrowed(max_bytes: 0) {
-        Ok(line) => line.is_none(),
-        _ => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(first && empty && final_line && ended, "line framing changed payload or EOF")?
-    .Ok(())
-}
 
-test fn an_incomplete_utf8_prefix_is_retained_after_input_failure() {
-    let input = "ok\ná\n"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 4 }
-    var reader = BufferedReader.open(capacity: 2, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
+    test fn an_incomplete_utf8_prefix_is_retained_after_input_failure() {
+        let input = "ok\ná\n"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 4 }
+        var reader = BufferedReader.open(capacity: 2, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let first = match &reader.read_line_borrowed(max_bytes: 2) {
+            Ok(Some(value)) => value == "ok",
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let failed = match &reader.read_line_borrowed(max_bytes: 4) {
+            Err(Input(failure)) => failure.reason == 9 && failure.stream_offset == 4,
+            _ => false,
+        }
+        let bytes = reader.pending()
+        let retained = bytes.length() == 1 && bytes[0] == 195
+        let _source = reader.abandon()
+        testing.assert(first && failed && retained, "an incomplete scalar was rejected as encoding or lost on input failure")?
+        .Ok(())
     }
-    let first = match &reader.read_line_borrowed(max_bytes: 2) {
-        Ok(line) => match line { Some(value) => value == "ok", None => false },
-        Err(_) => false,
-    }
-    let failed = match &reader.read_line_borrowed(max_bytes: 4) {
-        Err(error) => match error { Input(failure) => failure.reason == 9 && failure.stream_offset == 4, _ => false },
-        Ok(_) => false,
-    }
-    let bytes = reader.pending()
-    let retained = bytes.length() == 1 && bytes[0] == 195
-    let _source = reader.abandon()
-    testing.assert(first && failed && retained, "an incomplete scalar was rejected as encoding or lost on input failure")?
-    .Ok(())
-}
 
-test fn a_smaller_line_limit_releases_excess_record_capacity() {
-    let input = "a long first line\nx\n"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 32, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 32, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
+    test fn a_smaller_line_limit_releases_excess_record_capacity() {
+        let input = "a long first line\nx\n"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 32, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 32, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let first = match &reader.read_line_borrowed(max_bytes: 64) {
+            Ok(Some(value)) => value == "a long first line",
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let next = match &reader.read_line_borrowed(max_bytes: 1) {
+            Ok(Some(value)) => value == "x",
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let bounded = match read reader.record {
+            Some(bytes) => bytes.length() <= 3,
+            None => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(first && next && bounded, "a smaller payload limit retained storage beyond its framing bound")?
+        .Ok(())
     }
-    let first = match &reader.read_line_borrowed(max_bytes: 64) {
-        Ok(line) => match line { Some(value) => value == "a long first line", None => false },
-        Err(_) => false,
-    }
-    let next = match &reader.read_line_borrowed(max_bytes: 1) {
-        Ok(line) => match line { Some(value) => value == "x", None => false },
-        Err(_) => false,
-    }
-    let bounded = match read reader.record {
-        Some(bytes) => bytes.length() <= 3,
-        None => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(first && next && bounded, "a smaller payload limit retained storage beyond its framing bound")?
-    .Ok(())
-}
 
-test fn each_allocation_failure_covers_every_growth_step_of_a_borrowed_line() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), LineError[UInt8]] {
-            let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
-            var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
-                return .Err(.Allocation(.Exhausted))
-            }
-            let outcome: Result[(), LineError[UInt8]] = match &reader.read_line_borrowed(max_bytes: 64) {
-                Ok(_) => .Ok(()),
-                Err(error) => .Err(error),
-            }
-            let _source = reader.abandon()
-            outcome
-        },
-        LineError.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "a growing borrowed line was reported as failing")?
-    .Ok(())
-}
+    test fn each_allocation_failure_covers_every_growth_step_of_a_borrowed_line() -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), LineError[UInt8]] {
+                let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
+                var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
+                    return .Err(.Allocation(.Exhausted))
+                }
+                let outcome: Result[(), LineError[UInt8]] = match &reader.read_line_borrowed(max_bytes: 64) {
+                    Ok(_) => .Ok(()),
+                    Err(error) => .Err(error),
+                }
+                let _source = reader.abandon()
+                outcome
+            },
+            LineError.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "a growing borrowed line was reported as failing")?
+        .Ok(())
+    }
 
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Read one line as `read_line_borrowed` does and return it as owned text.
     pub fn read_line(inout self: Self, max_bytes: UInt64) -> Result[Option[String[A]], LineError[R.Error]] where carries(.Ok: self.record, self.allocator), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
         if self.blocked {
@@ -468,121 +601,116 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
         &self.owned_text()
     }
-}
 
-test fn owned_lines_outlive_the_input_and_reader() {
-    let input = "owned á\n".to_owned().unwrap()
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
-        input.release()
-        return testing.assert(false, "reader allocation failed")
-    }
-    let line = &reader.read_line(max_bytes: 16) else |_| {
+    test fn owned_lines_outlive_the_input_and_reader() {
+        let input = "owned á\n".to_owned().unwrap()
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
+            input.release()
+            return testing.assert(false, "reader allocation failed")
+        }
+        let line = &reader.read_line(max_bytes: 16) else |_| {
+            let _source = reader.abandon()
+            input.release()
+            return testing.assert(false, "owned line failed")
+        }
         let _source = reader.abandon()
         input.release()
-        return testing.assert(false, "owned line failed")
+        match line {
+            None => testing.assert(false, "a terminated line became EOF"),
+            Some(line) => {
+                let intact = line.view() == "owned á"
+                line.release()
+                testing.assert(intact, "owned line depended on released input storage")
+            },
+        }
     }
-    let _source = reader.abandon()
-    input.release()
-    match line {
-        None => testing.assert(false, "a terminated line became EOF"),
-        Some(line) => {
-            let intact = line.view() == "owned á"
-            line.release()
-            testing.assert(intact, "owned line depended on released input storage")
-        },
-    }
-}
 
-test fn invalid_owned_text_restores_the_complete_raw_record() {
-    defer var bytes = mem.system().acquire(6).unwrap()
-    // FF is invalid UTF-8; the following line-ending bytes test record framing.
-    &bytes.store_byte(0, 255)
-    &bytes.store_byte(1, 13)
-    &bytes.store_byte(2, 10)
-    &bytes.store_byte(3, 111)
-    &bytes.store_byte(4, 107)
-    &bytes.store_byte(5, 10)
-    let source = FragmentReader { bytes = bytes.as_slice(), position = 0, step = 6, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 6, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
-    }
-    let invalid = match &reader.read_line(max_bytes: 4) {
-        Err(error) => match error {
-            Encoding(problem) => problem.offset == 0 && problem.stream_offset == 0,
-            _ => false,
-        },
-        Ok(line) => {
-            line.release()
-            false
-        },
-    }
-    let extracted = match &reader.take_pending() {
-        None => false,
-        Some(raw) => {
-            // Slices compare their lengths and then their elements.
-            let intact = raw.as_slice() == [UInt8(255), 13, 10].as_slice()
-            raw.release()
-            intact
-        },
-    }
-    let settled = match &reader.discard_pending(max_bytes: 0) {
-        Ok(progress) => progress.boundary && progress.discarded == 0,
-        Err(_) => false,
-    }
-    let next = match &reader.read_line_borrowed(max_bytes: 2) {
-        Ok(line) => match line { Some(value) => value == "ok", None => false },
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(invalid && extracted && settled && next, "owned text validation lost raw terminators or consumed the next record")?
-    .Ok(())
-}
-
-test fn owned_lines_are_allocated_from_an_arena() {
-    // The arena holds the read-ahead buffer and every record the line grows into.
-    defer let arena = mem.Arena.open(mem.system(), size: 1024)
-    let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
-    var reader = BufferedReader.open_in(arena.handle(), capacity: 4, reader: source) else |_| {
-        return testing.assert(false, "an arena reader was refused")
-    }
-    let kept = match &reader.read_line(max_bytes: 64) {
-        Ok(line) => match line {
+    test fn invalid_owned_text_restores_the_complete_raw_record() {
+        defer var bytes = mem.system().acquire(6).unwrap()
+        // FF is invalid UTF-8; the following line-ending bytes test record framing.
+        &bytes.store_byte(0, 255)
+        &bytes.store_byte(1, 13)
+        &bytes.store_byte(2, 10)
+        &bytes.store_byte(3, 111)
+        &bytes.store_byte(4, 107)
+        &bytes.store_byte(5, 10)
+        let source = FragmentReader { bytes = bytes.as_slice(), position = 0, step = 6, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 6, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let invalid = match &reader.read_line(max_bytes: 4) {
+            Err(Encoding(problem)) => problem.offset == 0 && problem.stream_offset == 0,
+            Err(_) => false,
+            Ok(line) => {
+                line.release()
+                false
+            },
+        }
+        let extracted = match &reader.take_pending() {
             None => false,
-            Some(line) => line.view() == "a line long enough to grow its record twice",
-        },
-        Err(_) => false,
+            Some(raw) => {
+                // Slices compare their lengths and then their elements.
+                let intact = raw.as_slice() == [UInt8(255), 13, 10].as_slice()
+                raw.release()
+                intact
+            },
+        }
+        let settled = match &reader.discard_pending(max_bytes: 0) {
+            Ok(progress) => progress.boundary && progress.discarded == 0,
+            Err(_) => false,
+        }
+        let next = match &reader.read_line_borrowed(max_bytes: 2) {
+            Ok(Some(value)) => value == "ok",
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(invalid && extracted && settled && next, "owned text validation lost raw terminators or consumed the next record")?
+        .Ok(())
     }
-    let _source = reader.abandon()
-    testing.assert(kept, "an owned line lost its text in an arena")?
-    .Ok(())
-}
 
-test fn each_allocation_failure_covers_every_growth_step_of_an_owned_line() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), LineError[UInt8]] {
-            let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
-            var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
-                return .Err(.Allocation(.Exhausted))
-            }
-            let outcome: Result[(), LineError[UInt8]] = match &reader.read_line(max_bytes: 64) {
-                Ok(line) => {
-                    line.release()
-                    .Ok(())
-                },
-                Err(error) => .Err(error),
-            }
-            let _source = reader.abandon()
-            outcome
-        },
-        LineError.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "a growing owned line was reported as failing")?
-    .Ok(())
-}
+    test fn owned_lines_are_allocated_from_an_arena() {
+        // The arena holds the read-ahead buffer and every record the line grows into.
+        defer let arena = mem.Arena.open(mem.system(), size: 1024)
+        let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
+        var reader = BufferedReader.open_in(arena.handle(), capacity: 4, reader: source) else |_| {
+            return testing.assert(false, "an arena reader was refused")
+        }
+        let kept = match &reader.read_line(max_bytes: 64) {
+            Ok(None) => false,
+            Ok(Some(line)) => line.view() == "a line long enough to grow its record twice",
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(kept, "an owned line lost its text in an arena")?
+        .Ok(())
+    }
 
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
+    test fn each_allocation_failure_covers_every_growth_step_of_an_owned_line() -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), LineError[UInt8]] {
+                let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
+                var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
+                    return .Err(.Allocation(.Exhausted))
+                }
+                let outcome: Result[(), LineError[UInt8]] = match &reader.read_line(max_bytes: 64) {
+                    Ok(line) => {
+                        line.release()
+                        .Ok(())
+                    },
+                    Err(error) => .Err(error),
+                }
+                let _source = reader.abandon()
+                outcome
+            },
+            LineError.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "a growing owned line was reported as failing")?
+        .Ok(())
+    }
+
     // Read one line of at most `max_bytes` bytes, terminator included, and
     // borrow its bytes without checking UTF-8.
     pub fn read_raw_line_borrowed(inout self: Self, max_bytes: UInt64) -> Result[Option[mem.Slice[UInt8]], LineError[R.Error]] where borrows(.Ok: self), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
@@ -596,54 +724,53 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
         .Ok(.Some(self.pending()))
     }
-}
 
-test fn a_borrowed_raw_line_keeps_its_terminator_and_bytes_that_are_not_utf8() {
-    defer var bytes = mem.system().acquire(3).unwrap()
-    // FF is invalid UTF-8, and a raw line keeps it as it arrived.
-    &bytes.store_byte(0, 255)
-    &bytes.store_byte(1, 13)
-    &bytes.store_byte(2, 10)
-    let source = FragmentReader { bytes = bytes.as_slice(), position = 0, step = 1, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 2, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
+    test fn a_borrowed_raw_line_keeps_its_terminator_and_bytes_that_are_not_utf8() {
+        defer var bytes = mem.system().acquire(3).unwrap()
+        // FF is invalid UTF-8, and a raw line keeps it as it arrived.
+        &bytes.store_byte(0, 255)
+        &bytes.store_byte(1, 13)
+        &bytes.store_byte(2, 10)
+        let source = FragmentReader { bytes = bytes.as_slice(), position = 0, step = 1, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 2, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let kept = match &reader.read_raw_line_borrowed(max_bytes: 3) {
+            Ok(Some(value)) => value == [UInt8(255), 13, 10].as_slice(),
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let ended = match &reader.read_raw_line_borrowed(max_bytes: 3) {
+            Ok(line) => line.is_none(),
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(kept, "a raw line changed its bytes or terminator")?
+        testing.assert(ended, "a raw read past the input did not end")?
+        .Ok(())
     }
-    let kept = match &reader.read_raw_line_borrowed(max_bytes: 3) {
-        Ok(line) => match line { Some(value) => value == [UInt8(255), 13, 10].as_slice(), None => false },
-        Err(_) => false,
-    }
-    let ended = match &reader.read_raw_line_borrowed(max_bytes: 3) {
-        Ok(line) => line.is_none(),
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(kept, "a raw line changed its bytes or terminator")?
-    testing.assert(ended, "a raw read past the input did not end")?
-    .Ok(())
-}
 
-test fn each_allocation_failure_covers_every_growth_step_of_a_borrowed_raw_line() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), LineError[UInt8]] {
-            let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
-            var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
-                return .Err(.Allocation(.Exhausted))
-            }
-            let outcome: Result[(), LineError[UInt8]] = match &reader.read_raw_line_borrowed(max_bytes: 64) {
-                Ok(_) => .Ok(()),
-                Err(error) => .Err(error),
-            }
-            let _source = reader.abandon()
-            outcome
-        },
-        LineError.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "a growing borrowed raw line was reported as failing")?
-    .Ok(())
-}
+    test fn each_allocation_failure_covers_every_growth_step_of_a_borrowed_raw_line() -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), LineError[UInt8]] {
+                let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
+                var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
+                    return .Err(.Allocation(.Exhausted))
+                }
+                let outcome: Result[(), LineError[UInt8]] = match &reader.read_raw_line_borrowed(max_bytes: 64) {
+                    Ok(_) => .Ok(()),
+                    Err(error) => .Err(error),
+                }
+                let _source = reader.abandon()
+                outcome
+            },
+            LineError.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "a growing borrowed raw line was reported as failing")?
+        .Ok(())
+    }
 
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Read one raw line as `read_raw_line_borrowed` does and return its bytes
     // as an owned vector.
     pub fn read_raw_line(inout self: Self, max_bytes: UInt64) -> Result[Option[Vec[UInt8, A]], LineError[R.Error]] where carries(.Ok: self.record, self.allocator), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
@@ -658,81 +785,73 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         let length = self.length
         .Ok(.Some(&self.take_bytes(length)))
     }
-}
 
-test fn a_raw_line_preserves_crlf_without_text_conversion() {
-    let input = "raw\r\nlast"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
-    }
-    let raw = match &reader.read_raw_line(max_bytes: 5) {
-        Ok(line) => match line {
-            None => false,
-            Some(bytes) => {
+    test fn a_raw_line_preserves_crlf_without_text_conversion() {
+        let input = "raw\r\nlast"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let raw = match &reader.read_raw_line(max_bytes: 5) {
+            Ok(None) => false,
+            Ok(Some(bytes)) => {
                 let intact = bytes.length() == 5 && bytes[3] == 13 && bytes[4] == 10
                 bytes.release()
                 intact
             },
-        },
-        Err(_) => false,
+            Err(_) => false,
+        }
+        let last = match &reader.read_raw_line_borrowed(max_bytes: 4) {
+            Ok(None) => false,
+            Ok(Some(bytes)) => bytes.length() == 4 && bytes[0] == 108 && bytes[3] == 116,
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(raw && last, "raw framing changed terminators or final bytes")?
+        .Ok(())
     }
-    let last = match &reader.read_raw_line_borrowed(max_bytes: 4) {
-        Ok(line) => match line {
-            None => false,
-            Some(bytes) => bytes.length() == 4 && bytes[0] == 108 && bytes[3] == 116,
-        },
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(raw && last, "raw framing changed terminators or final bytes")?
-    .Ok(())
-}
 
-test fn owned_raw_lines_are_allocated_from_an_arena() {
-    // The arena holds the read-ahead buffer and every record the line grows into.
-    defer let arena = mem.Arena.open(mem.system(), size: 1024)
-    let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
-    var reader = BufferedReader.open_in(arena.handle(), capacity: 4, reader: source) else |_| {
-        return testing.assert(false, "an arena reader was refused")
+    test fn owned_raw_lines_are_allocated_from_an_arena() {
+        // The arena holds the read-ahead buffer and every record the line grows into.
+        defer let arena = mem.Arena.open(mem.system(), size: 1024)
+        let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
+        var reader = BufferedReader.open_in(arena.handle(), capacity: 4, reader: source) else |_| {
+            return testing.assert(false, "an arena reader was refused")
+        }
+        let kept = match &reader.read_raw_line(max_bytes: 64) {
+            Ok(None) => false,
+            Ok(Some(line)) => line.as_slice() == "a line long enough to grow its record twice\n".as_bytes(),
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(kept, "an owned raw line lost its bytes in an arena")?
+        .Ok(())
     }
-    let kept = match &reader.read_raw_line(max_bytes: 64) {
-        Ok(line) => match line {
-            None => false,
-            Some(line) => line.as_slice() == "a line long enough to grow its record twice\n".as_bytes(),
-        },
-        Err(_) => false,
+
+    test fn each_allocation_failure_covers_every_growth_step_of_an_owned_raw_line() -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), LineError[UInt8]] {
+                let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
+                var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
+                    return .Err(.Allocation(.Exhausted))
+                }
+                let outcome: Result[(), LineError[UInt8]] = match &reader.read_raw_line(max_bytes: 64) {
+                    Ok(line) => {
+                        line.release()
+                        .Ok(())
+                    },
+                    Err(error) => .Err(error),
+                }
+                let _source = reader.abandon()
+                outcome
+            },
+            LineError.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "a growing owned raw line was reported as failing")?
+        .Ok(())
     }
-    let _source = reader.abandon()
-    testing.assert(kept, "an owned raw line lost its bytes in an arena")?
-    .Ok(())
-}
 
-test fn each_allocation_failure_covers_every_growth_step_of_an_owned_raw_line() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), LineError[UInt8]] {
-            let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
-            var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
-                return .Err(.Allocation(.Exhausted))
-            }
-            let outcome: Result[(), LineError[UInt8]] = match &reader.read_raw_line(max_bytes: 64) {
-                Ok(line) => {
-                    line.release()
-                    .Ok(())
-                },
-                Err(error) => .Err(error),
-            }
-            let _source = reader.abandon()
-            outcome
-        },
-        LineError.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "a growing owned raw line was reported as failing")?
-    .Ok(())
-}
-
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Read exactly count bytes, refusing before any read once count exceeds
     // max_bytes, and refusing while a prior blocked read still needs recovery;
     // neither refusal consumes anything or advances the stream position.
@@ -801,178 +920,47 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
         .Ok(bytes)
     }
-}
 
-impl[R: Reader] BufferedReader[R, mem.SystemAllocator] {
-    // Read exactly count bytes into storage from the system allocator, under
-    // the limits of `read_exact_in`.
-    pub fn read_exact(inout self: Self, count: UInt64, max_bytes: UInt64) -> Result[Vec[UInt8, mem.SystemAllocator], ExactError[R.Error]] where carries(.Err.Input.reason: self.reader) {
-        &self.read_exact_in(mem.system(), count, max_bytes)
-    }
-}
-
-test fn read_exact_allocates_from_the_system_allocator() {
-    let source = FragmentReader { bytes = "abc".as_bytes(), position = 0, step = 3, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
-    }
-    let length = match &reader.read_exact(count: 2, max_bytes: 4) {
-        Ok(bytes) => {
-            let length = bytes.length()
-            bytes.release()
-            length
-        },
-        Err(_) => 0,
-    }
-    let _source = reader.abandon()
-    testing.assert_eq(length, UInt64(2), "an exact read into the system allocator lost bytes")
-}
-
-test fn read_exact_collects_a_body_split_across_reads() {
-    let input = "hello world"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
-    }
-    let body = match &reader.read_exact(count: 5, max_bytes: 10) {
-        Ok(bytes) => {
-            let intact = bytes.length() == 5 && bytes[0] == 104 && bytes[4] == 111
-            bytes.release()
-            intact
-        },
-        Err(_) => false,
-    }
-    let rest = match &reader.read_raw_line_borrowed(max_bytes: 6) {
-        Ok(line) => match line { Some(value) => value.length() == 6 && value[0] == 32 && value[5] == 100, None => false },
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(body && rest, "an exact read lost bytes or disturbed the following read")?
-    .Ok(())
-}
-
-// The arena's eight-byte header leaves `scarce` no room for the body, while
-// `ample` holds the read-ahead buffer and the body.
-test fn read_exact_allocates_the_body_from_its_allocator() {
-    let input = "hello"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 5, fail_at = UInt64.max }
-    let ample = mem.Arena.open(mem.system(), size: 64)
-    let scarce = mem.Arena.open(mem.system(), size: 8)
-    var reader = BufferedReader.open_in(ample.handle(), capacity: 8, reader: source) else |_| {
+    // The arena's eight-byte header leaves `scarce` no room for the body, while
+    // `ample` holds the read-ahead buffer and the body.
+    test fn read_exact_allocates_the_body_from_its_allocator() {
+        let input = "hello"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 5, fail_at = UInt64.max }
+        let ample = mem.Arena.open(mem.system(), size: 64)
+        let scarce = mem.Arena.open(mem.system(), size: 8)
+        var reader = BufferedReader.open_in(ample.handle(), capacity: 8, reader: source) else |_| {
+            scarce.release()
+            ample.release()
+            return testing.assert(false, "reader allocation failed")
+        }
+        let refused = match &reader.read_exact_in(allocator: scarce.handle(), count: 5, max_bytes: 10) {
+            Err(Allocation(_reason)) => true,
+            Err(_) => false,
+            Ok(bytes) => {
+                bytes.release()
+                false
+            },
+        }
+        let body: Option[Str] = match &reader.read_exact_in(allocator: ample.handle(), count: 5, max_bytes: 10) {
+            Ok(bytes) => {
+                let text = Str.from_bytes(bytes.as_slice()).is_ok() && Str.from_bytes(bytes.as_slice()).unwrap() == "hello"
+                bytes.release()
+                if text {
+                    .Some("hello")
+                } else {
+                    .None
+                }
+            },
+            Err(_) => .None,
+        }
+        let _source = reader.abandon()
         scarce.release()
         ample.release()
-        return testing.assert(false, "reader allocation failed")
+        testing.assert(refused, "the body was not allocated from the allocator passed in")?
+        testing.assert_eq(body, .Some("hello"), "a refused allocation consumed the body")?
+        .Ok(())
     }
-    let refused = match &reader.read_exact_in(allocator: scarce.handle(), count: 5, max_bytes: 10) {
-        Err(error) => match error { Allocation(_reason) => true, _ => false },
-        Ok(bytes) => {
-            bytes.release()
-            false
-        },
-    }
-    let body: Option[Str] = match &reader.read_exact_in(allocator: ample.handle(), count: 5, max_bytes: 10) {
-        Ok(bytes) => {
-            let text = Str.from_bytes(bytes.as_slice()).is_ok() && Str.from_bytes(bytes.as_slice()).unwrap() == "hello"
-            bytes.release()
-            if text {
-                .Some("hello")
-            } else {
-                .None
-            }
-        },
-        Err(_) => .None,
-    }
-    let _source = reader.abandon()
-    scarce.release()
-    ample.release()
-    testing.assert(refused, "the body was not allocated from the allocator passed in")?
-    testing.assert_eq(body, .Some("hello"), "a refused allocation consumed the body")?
-    .Ok(())
-}
 
-test fn read_exact_refuses_past_its_limit_before_reading() {
-    let input = "hello world"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
-    }
-    let refused = match &reader.read_exact(count: 11, max_bytes: 10) {
-        Err(error) => match error { Limit => true, _ => false },
-        Ok(bytes) => {
-            bytes.release()
-            false
-        },
-    }
-    let intact = match &reader.read_raw_line_borrowed(max_bytes: 11) {
-        Ok(line) => match line { Some(value) => value.length() == 11 && value[0] == 104 && value[10] == 100, None => false },
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(refused && intact, "an oversized exact read consumed input before refusing")?
-    .Ok(())
-}
-
-test fn read_exact_reports_how_much_arrived_before_the_end() {
-    let input = "abc"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
-    }
-    let ended = match &reader.read_exact(count: 5, max_bytes: 10) {
-        Err(error) => match error { Ended(n) => n == 3, _ => false },
-        Ok(bytes) => {
-            bytes.release()
-            false
-        },
-    }
-    let _source = reader.abandon()
-    testing.assert(ended, "an exact read reported the wrong count at end of stream")?
-    .Ok(())
-}
-
-test fn read_exact_refuses_while_a_line_read_needs_recovery() {
-    let input = "abcd\nnext\n"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
-    }
-    let limited = match &reader.read_line_borrowed(max_bytes: 3) {
-        Err(error) => match error { Limit => true, _ => false },
-        Ok(_) => false,
-    }
-    let blocked = match &reader.read_exact(count: 1, max_bytes: 4) {
-        Err(error) => match error { RecoveryRequired => true, _ => false },
-        Ok(bytes) => {
-            bytes.release()
-            false
-        },
-    }
-    let _source = reader.abandon()
-    testing.assert(limited && blocked, "an exact read ignored a reader still needing line recovery")?
-    .Ok(())
-}
-
-// ExcessReadFixture (defined in read_all.lin, this module's other whole-input
-// reader) misreports its own progress, overrunning the destination it was
-// given. read_exact treats this as unusable rather than trusting the count.
-test fn read_exact_reports_a_reader_that_overruns_its_destination() {
-    let source = ExcessReadFixture {}
-    var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
-    }
-    let invalid = match &reader.read_exact(count: 2, max_bytes: 4) {
-        Err(error) => match error { InvalidProgress => true, _ => false },
-        Ok(bytes) => {
-            bytes.release()
-            false
-        },
-    }
-    let _source = reader.abandon()
-    testing.assert(invalid, "an exact read accepted a reader that overran its destination")?
-    .Ok(())
-}
-
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Taking pending bytes preserves whether their delimiter has been consumed.
     // No record means no allocation and no transfer; successful extraction makes
     // resuming unavailable until this record is discarded or the reader abandoned.
@@ -989,87 +977,83 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
             },
         }
     }
-}
 
-test fn taking_an_invalid_complete_line_does_not_discard_the_following_line() {
-    defer var bytes = mem.system().acquire(5).unwrap()
-    // FF is invalid UTF-8; the following line-ending bytes test record framing.
-    &bytes.store_byte(0, 255)
-    &bytes.store_byte(1, 10)
-    &bytes.store_byte(2, 111)
-    &bytes.store_byte(3, 107)
-    &bytes.store_byte(4, 10)
-    let source = FragmentReader { bytes = bytes.as_slice(), position = 0, step = 5, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 5, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
-    }
-    let invalid = match &reader.read_line_borrowed(max_bytes: 4) {
-        Err(error) => match error {
-            Encoding(problem) => problem.offset == 0 && problem.stream_offset == 0,
+    test fn taking_an_invalid_complete_line_does_not_discard_the_following_line() {
+        defer var bytes = mem.system().acquire(5).unwrap()
+        // FF is invalid UTF-8; the following line-ending bytes test record framing.
+        &bytes.store_byte(0, 255)
+        &bytes.store_byte(1, 10)
+        &bytes.store_byte(2, 111)
+        &bytes.store_byte(3, 107)
+        &bytes.store_byte(4, 10)
+        let source = FragmentReader { bytes = bytes.as_slice(), position = 0, step = 5, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 5, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let invalid = match &reader.read_line_borrowed(max_bytes: 4) {
+            Err(Encoding(problem)) => problem.offset == 0 && problem.stream_offset == 0,
             _ => false,
-        },
-        Ok(_) => false,
+        }
+        let extracted = match &reader.take_pending() {
+            None => false,
+            Some(raw) => {
+                let intact = raw.length() == 2 && raw[0] == 255 && raw[1] == 10
+                raw.release()
+                intact
+            },
+        }
+        let settled = match &reader.discard_pending(max_bytes: 0) {
+            Ok(progress) => progress.boundary && progress.discarded == 0,
+            Err(_) => false,
+        }
+        let next = match &reader.read_line_borrowed(max_bytes: 2) {
+            Ok(Some(value)) => value == "ok",
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(invalid && extracted && settled && next, "recovering a complete invalid line consumed the next record")?
+        .Ok(())
     }
-    let extracted = match &reader.take_pending() {
-        None => false,
-        Some(raw) => {
-            let intact = raw.length() == 2 && raw[0] == 255 && raw[1] == 10
-            raw.release()
-            intact
-        },
-    }
-    let settled = match &reader.discard_pending(max_bytes: 0) {
-        Ok(progress) => progress.boundary && progress.discarded == 0,
-        Err(_) => false,
-    }
-    let next = match &reader.read_line_borrowed(max_bytes: 2) {
-        Ok(line) => match line { Some(value) => value == "ok", None => false },
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(invalid && extracted && settled && next, "recovering a complete invalid line consumed the next record")?
-    .Ok(())
-}
 
-test fn allocation_failure_preserves_the_prefix_and_unconsumed_lookahead() {
-    defer var bytes = Vec.filled(count: 70, value: UInt8(97)).unwrap()
-    bytes[69] = 10
-    let source = FragmentReader { bytes = bytes.as_slice(), position = 0, step = 1, fail_at = UInt64.max }
-    // The slab fits read-ahead and the initial 64-byte record, but not growth.
-    let arena = mem.Arena.open(mem.system(), size: 96)
-    var reader = BufferedReader.open_in(arena.handle(), capacity: 1, reader: source) else |_| {
+    test fn allocation_failure_preserves_the_prefix_and_unconsumed_lookahead() {
+        defer var bytes = Vec.filled(count: 70, value: UInt8(97)).unwrap()
+        bytes[69] = 10
+        let source = FragmentReader { bytes = bytes.as_slice(), position = 0, step = 1, fail_at = UInt64.max }
+        // The slab fits read-ahead and the initial 64-byte record, but not growth.
+        let arena = mem.Arena.open(mem.system(), size: 96)
+        var reader = BufferedReader.open_in(arena.handle(), capacity: 1, reader: source) else |_| {
+            arena.release()
+            return testing.assert(false, "the initial reader buffer was refused")
+        }
+        let refused = match &reader.read_line_borrowed(max_bytes: 128) {
+            Err(Allocation(_)) => true,
+            _ => false,
+        }
+        let prefix = reader.pending()
+        let intact = prefix.length() == 64 && prefix[63] == 97
+        let extracted = match &reader.take_pending() {
+            None => false,
+            Some(bytes) => {
+                let retained = bytes.length() == 64
+                bytes.release()
+                retained
+            },
+        }
+        let recovered = match &reader.discard_pending(max_bytes: 6) {
+            Ok(progress) => progress.discarded == 6 && progress.boundary,
+            Err(_) => false,
+        }
+        let ended = match &reader.read_line_borrowed(max_bytes: 0) {
+            Ok(line) => line.is_none(),
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
         arena.release()
-        return testing.assert(false, "the initial reader buffer was refused")
+        testing.assert(refused && intact && extracted && recovered && ended, "allocation refusal lost bytes or consumed lookahead twice")?
+        .Ok(())
     }
-    let refused = match &reader.read_line_borrowed(max_bytes: 128) {
-        Err(error) => match error { Allocation(_) => true, _ => false },
-        Ok(_) => false,
-    }
-    let prefix = reader.pending()
-    let intact = prefix.length() == 64 && prefix[63] == 97
-    let extracted = match &reader.take_pending() {
-        None => false,
-        Some(bytes) => {
-            let retained = bytes.length() == 64
-            bytes.release()
-            retained
-        },
-    }
-    let recovered = match &reader.discard_pending(max_bytes: 6) {
-        Ok(progress) => progress.discarded == 6 && progress.boundary,
-        Err(_) => false,
-    }
-    let ended = match &reader.read_line_borrowed(max_bytes: 0) {
-        Ok(line) => line.is_none(),
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    arena.release()
-    testing.assert(refused && intact && extracted && recovered && ended, "allocation refusal lost bytes or consumed lookahead twice")?
-    .Ok(())
-}
 
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Discard the rest of a failed line, consuming at most `max_bytes` more
     // bytes.
     // The budget counts newly consumed bytes. A delimiter already consumed by
@@ -1103,48 +1087,47 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
         .Ok(.{ discarded = discarded, boundary = false })
     }
-}
 
-test fn partial_discard_preserves_extractable_bytes_but_prevents_resume() {
-    let input = "abcdef\nnext\n"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
+    test fn partial_discard_preserves_extractable_bytes_but_prevents_resume() {
+        let input = "abcdef\nnext\n"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let limited = match &reader.read_line_borrowed(max_bytes: 1) {
+            Err(Limit) => true,
+            _ => false,
+        }
+        let partial = match &reader.discard_pending(max_bytes: 1) {
+            Ok(progress) => progress.discarded == 1 && !progress.boundary,
+            Err(_) => false,
+        }
+        let cannot_resume = match &reader.resume_line_borrowed(max_bytes: 6) {
+            Err(ResumeUnavailable) => true,
+            _ => false,
+        }
+        let extracted = match &reader.take_pending() {
+            None => false,
+            Some(bytes) => {
+                let intact = bytes.length() == 2 && bytes[0] == 97 && bytes[1] == 98
+                bytes.release()
+                intact
+            },
+        }
+        let finished = match &reader.discard_pending(max_bytes: 4) {
+            Ok(progress) => progress.discarded == 4 && progress.boundary,
+            Err(_) => false,
+        }
+        let next = match &reader.read_line_borrowed(max_bytes: 4) {
+            Ok(Some(value)) => value == "next",
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(limited && partial && cannot_resume && extracted && finished && next, "partial discard lost its recovery state or retained prefix")?
+        .Ok(())
     }
-    let limited = match &reader.read_line_borrowed(max_bytes: 1) {
-        Err(error) => match error { Limit => true, _ => false },
-        Ok(_) => false,
-    }
-    let partial = match &reader.discard_pending(max_bytes: 1) {
-        Ok(progress) => progress.discarded == 1 && !progress.boundary,
-        Err(_) => false,
-    }
-    let cannot_resume = match &reader.resume_line_borrowed(max_bytes: 6) {
-        Err(error) => match error { ResumeUnavailable => true, _ => false },
-        Ok(_) => false,
-    }
-    let extracted = match &reader.take_pending() {
-        None => false,
-        Some(bytes) => {
-            let intact = bytes.length() == 2 && bytes[0] == 97 && bytes[1] == 98
-            bytes.release()
-            intact
-        },
-    }
-    let finished = match &reader.discard_pending(max_bytes: 4) {
-        Ok(progress) => progress.discarded == 4 && progress.boundary,
-        Err(_) => false,
-    }
-    let next = match &reader.read_line_borrowed(max_bytes: 4) {
-        Ok(line) => match line { Some(value) => value == "next", None => false },
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(limited && partial && cannot_resume && extracted && finished && next, "partial discard lost its recovery state or retained prefix")?
-    .Ok(())
-}
 
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Continue a text line whose read failed before the line ended, keeping the
     // prefix already collected, and borrow it as text. Resuming is unavailable
     // once part of the line was taken or discarded.
@@ -1158,149 +1141,151 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
         &self.text_view()
     }
-}
 
-test fn an_incomplete_line_resumes_with_its_retained_prefix() {
-    let input = "abcdef\nnext\n"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
+    test fn an_incomplete_line_resumes_with_its_retained_prefix() {
+        let input = "abcdef\nnext\n"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let limited = match &reader.read_line_borrowed(max_bytes: 2) {
+            Err(Limit) => true,
+            _ => false,
+        }
+        let resumed = match &reader.resume_line_borrowed(max_bytes: 6) {
+            Ok(Some(value)) => value == "abcdef",
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let next = match &reader.read_line_borrowed(max_bytes: 4) {
+            Ok(Some(value)) => value == "next",
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(limited && resumed && next, "resuming omitted its prefix or disturbed the next line")?
+        .Ok(())
     }
-    let limited = match &reader.read_line_borrowed(max_bytes: 2) {
-        Err(error) => match error { Limit => true, _ => false },
-        Ok(_) => false,
-    }
-    let resumed = match &reader.resume_line_borrowed(max_bytes: 6) {
-        Ok(line) => match line { Some(value) => value == "abcdef", None => false },
-        Err(_) => false,
-    }
-    let next = match &reader.read_line_borrowed(max_bytes: 4) {
-        Ok(line) => match line { Some(value) => value == "next", None => false },
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(limited && resumed && next, "resuming omitted its prefix or disturbed the next line")?
-    .Ok(())
-}
 
-test fn resuming_with_a_smaller_limit_bounds_the_retained_capacity() {
-    let input = "x\n"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 1 }
-    var reader = BufferedReader.open(capacity: 1, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
+    test fn resuming_with_a_smaller_limit_bounds_the_retained_capacity() {
+        let input = "x\n"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 1 }
+        var reader = BufferedReader.open(capacity: 1, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let failed = match &reader.read_line_borrowed(max_bytes: 64) {
+            Err(Input(_)) => true,
+            _ => false,
+        }
+        reader.reader.fail_at = UInt64.max
+        let resumed = match &reader.resume_line_borrowed(max_bytes: 1) {
+            Ok(Some(value)) => value == "x",
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let bounded = match read reader.record {
+            Some(bytes) => bytes.length() <= 3,
+            None => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(failed && resumed && bounded, "a resumed read retained storage beyond its smaller framing bound")?
+        .Ok(())
     }
-    let failed = match &reader.read_line_borrowed(max_bytes: 64) {
-        Err(error) => match error { Input(_) => true, _ => false },
-        Ok(_) => false,
-    }
-    reader.reader.fail_at = UInt64.max
-    let resumed = match &reader.resume_line_borrowed(max_bytes: 1) {
-        Ok(line) => match line { Some(value) => value == "x", None => false },
-        Err(_) => false,
-    }
-    let bounded = match read reader.record {
-        Some(bytes) => bytes.length() <= 3,
-        None => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(failed && resumed && bounded, "a resumed read retained storage beyond its smaller framing bound")?
-    .Ok(())
-}
 
-test fn refused_resume_shrinking_preserves_the_previous_prefix() {
-    let input = "x\n"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 1 }
-    // Header, read-ahead and the first record exhaust this slab exactly.
-    let arena = mem.Arena.open(mem.system(), size: 80)
-    var reader = BufferedReader.open_in(arena.handle(), capacity: 1, reader: source) else |_| {
+    test fn refused_resume_shrinking_preserves_the_previous_prefix() {
+        let input = "x\n"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 1 }
+        // Header, read-ahead and the first record exhaust this slab exactly.
+        let arena = mem.Arena.open(mem.system(), size: 80)
+        var reader = BufferedReader.open_in(arena.handle(), capacity: 1, reader: source) else |_| {
+            arena.release()
+            return testing.assert(false, "the initial reader buffer was refused")
+        }
+        let failed = match &reader.read_line_borrowed(max_bytes: 64) {
+            Err(Input(_)) => true,
+            _ => false,
+        }
+        reader.reader.fail_at = UInt64.max
+        let refused = match &reader.resume_line_borrowed(max_bytes: 1) {
+            Err(Allocation(_)) => true,
+            _ => false,
+        }
+        let pending = reader.pending()
+        let intact = pending.length() == 1 && pending[0] == 120 && reader.reader.position == 1
+        let extracted = match &reader.take_pending() {
+            None => false,
+            Some(bytes) => {
+                let intact = bytes.length() == 1 && bytes[0] == 120
+                bytes.release()
+                intact
+            },
+        }
+        let recovered = match &reader.discard_pending(max_bytes: 1) {
+            Ok(progress) => progress.discarded == 1 && progress.boundary,
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
         arena.release()
-        return testing.assert(false, "the initial reader buffer was refused")
+        testing.assert(failed && refused && intact && extracted && recovered, "refused shrinking lost the prefix or consumed more input")?
+        .Ok(())
     }
-    let failed = match &reader.read_line_borrowed(max_bytes: 64) {
-        Err(error) => match error { Input(_) => true, _ => false },
-        Ok(_) => false,
-    }
-    reader.reader.fail_at = UInt64.max
-    let refused = match &reader.resume_line_borrowed(max_bytes: 1) {
-        Err(error) => match error { Allocation(_) => true, _ => false },
-        Ok(_) => false,
-    }
-    let pending = reader.pending()
-    let intact = pending.length() == 1 && pending[0] == 120 && reader.reader.position == 1
-    let extracted = match &reader.take_pending() {
-        None => false,
-        Some(bytes) => {
-            let intact = bytes.length() == 1 && bytes[0] == 120
-            bytes.release()
-            intact
-        },
-    }
-    let recovered = match &reader.discard_pending(max_bytes: 1) {
-        Ok(progress) => progress.discarded == 1 && progress.boundary,
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    arena.release()
-    testing.assert(failed && refused && intact && extracted && recovered, "refused shrinking lost the prefix or consumed more input")?
-    .Ok(())
-}
 
-test fn a_resumed_borrowed_line_is_held_in_an_arena() {
-    // The arena holds the read-ahead buffer and every record the line grows into.
-    defer let arena = mem.Arena.open(mem.system(), size: 1024)
-    let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
-    var reader = BufferedReader.open_in(arena.handle(), capacity: 4, reader: source) else |_| {
-        return testing.assert(false, "an arena reader was refused")
+    test fn a_resumed_borrowed_line_is_held_in_an_arena() {
+        // The arena holds the read-ahead buffer and every record the line grows into.
+        defer let arena = mem.Arena.open(mem.system(), size: 1024)
+        let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
+        var reader = BufferedReader.open_in(arena.handle(), capacity: 4, reader: source) else |_| {
+            return testing.assert(false, "an arena reader was refused")
+        }
+        let failed = match &reader.read_line_borrowed(max_bytes: 64) {
+            Err(Input(_)) => true,
+            _ => false,
+        }
+        reader.reader.fail_at = UInt64.max
+        let kept = match &reader.resume_line_borrowed(max_bytes: 64) {
+            Ok(Some(line)) => line == "a line long enough to grow its record twice",
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(failed, "the first read did not fail at its input")?
+        testing.assert(kept, "a resumed borrowed line lost its text in an arena")?
+        .Ok(())
     }
-    let failed = match &reader.read_line_borrowed(max_bytes: 64) {
-        Err(error) => match error { Input(_) => true, _ => false },
-        Ok(_) => false,
-    }
-    reader.reader.fail_at = UInt64.max
-    let kept = match &reader.resume_line_borrowed(max_bytes: 64) {
-        Ok(line) => match line { Some(line) => line == "a line long enough to grow its record twice", None => false },
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(failed, "the first read did not fail at its input")?
-    testing.assert(kept, "a resumed borrowed line lost its text in an arena")?
-    .Ok(())
-}
 
-test fn each_allocation_failure_covers_every_growth_step_of_a_resumed_borrowed_line() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), LineError[UInt8]] {
-            // The source fails at byte 20, inside the first line.
-            let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
-            var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
-                return .Err(.Allocation(.Exhausted))
-            }
-            match &reader.read_line_borrowed(max_bytes: 64) {
-                Err(error) => match read error {
-                    Input(_) => {},
-                    _ => {
-                        let _source = reader.abandon()
-                        return .Err(error)
+    test fn each_allocation_failure_covers_every_growth_step_of_a_resumed_borrowed_line() -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), LineError[UInt8]] {
+                // The source fails at byte 20, inside the first line.
+                let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
+                var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
+                    return .Err(.Allocation(.Exhausted))
+                }
+                match &reader.read_line_borrowed(max_bytes: 64) {
+                    Err(error) => match read error {
+                        Input(_) => {},
+                        _ => {
+                            let _source = reader.abandon()
+                            return .Err(error)
+                        },
                     },
-                },
-                Ok(_) => {},
-            }
-            reader.reader.fail_at = UInt64.max
-            let outcome: Result[(), LineError[UInt8]] = match &reader.resume_line_borrowed(max_bytes: 64) {
-                Ok(_) => .Ok(()),
-                Err(error) => .Err(error),
-            }
-            let _source = reader.abandon()
-            outcome
-        },
-        LineError.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "a resumed borrowed line was reported as failing")?
-    .Ok(())
-}
+                    Ok(_) => {},
+                }
+                reader.reader.fail_at = UInt64.max
+                let outcome: Result[(), LineError[UInt8]] = match &reader.resume_line_borrowed(max_bytes: 64) {
+                    Ok(_) => .Ok(()),
+                    Err(error) => .Err(error),
+                }
+                let _source = reader.abandon()
+                outcome
+            },
+            LineError.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "a resumed borrowed line was reported as failing")?
+        .Ok(())
+    }
 
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Resume a failed text line as `resume_line_borrowed` does and return it as
     // owned text.
     pub fn resume_line(inout self: Self, max_bytes: UInt64) -> Result[Option[String[A]], LineError[R.Error]] where carries(.Ok: self.record, self.allocator), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
@@ -1313,103 +1298,99 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
         &self.owned_text()
     }
-}
 
-test fn an_input_failure_can_resume_an_owned_line() {
-    let input = "á\n"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 1 }
-    var reader = BufferedReader.open(capacity: 1, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
-    }
-    let failed = match &reader.read_line(max_bytes: 2) {
-        Err(error) => match error { Input(_) => true, _ => false },
-        Ok(line) => {
-            line.release()
-            false
-        },
-    }
-    reader.reader.fail_at = UInt64.max
-    let resumed = match &reader.resume_line(max_bytes: 2) {
-        Err(_) => false,
-        Ok(line) => match line {
-            None => false,
-            Some(line) => {
+    test fn an_input_failure_can_resume_an_owned_line() {
+        let input = "á\n"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 1 }
+        var reader = BufferedReader.open(capacity: 1, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let failed = match &reader.read_line(max_bytes: 2) {
+            Err(Input(_)) => true,
+            Err(_) => false,
+            Ok(line) => {
+                line.release()
+                false
+            },
+        }
+        reader.reader.fail_at = UInt64.max
+        let resumed = match &reader.resume_line(max_bytes: 2) {
+            Err(_) => false,
+            Ok(None) => false,
+            Ok(Some(line)) => {
                 let intact = line.view() == "á"
                 line.release()
                 intact
             },
-        },
+        }
+        let _source = reader.abandon()
+        testing.assert(failed && resumed, "resuming an input failure lost a split UTF-8 scalar")?
+        .Ok(())
     }
-    let _source = reader.abandon()
-    testing.assert(failed && resumed, "resuming an input failure lost a split UTF-8 scalar")?
-    .Ok(())
-}
 
-test fn a_resumed_owned_line_is_allocated_from_an_arena() {
-    // The arena holds the read-ahead buffer and every record the line grows into.
-    defer let arena = mem.Arena.open(mem.system(), size: 1024)
-    let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
-    var reader = BufferedReader.open_in(arena.handle(), capacity: 4, reader: source) else |_| {
-        return testing.assert(false, "an arena reader was refused")
+    test fn a_resumed_owned_line_is_allocated_from_an_arena() {
+        // The arena holds the read-ahead buffer and every record the line grows into.
+        defer let arena = mem.Arena.open(mem.system(), size: 1024)
+        let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
+        var reader = BufferedReader.open_in(arena.handle(), capacity: 4, reader: source) else |_| {
+            return testing.assert(false, "an arena reader was refused")
+        }
+        let failed = match &reader.read_line(max_bytes: 64) {
+            Err(Input(_)) => true,
+            Err(_) => false,
+            Ok(line) => {
+                line.release()
+                false
+            },
+        }
+        reader.reader.fail_at = UInt64.max
+        let kept = match &reader.resume_line(max_bytes: 64) {
+            Ok(None) => false,
+            Ok(Some(line)) => line.view() == "a line long enough to grow its record twice",
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(failed, "the first read did not fail at its input")?
+        testing.assert(kept, "a resumed owned line lost its text in an arena")?
+        .Ok(())
     }
-    let failed = match &reader.read_line(max_bytes: 64) {
-        Err(error) => match error { Input(_) => true, _ => false },
-        Ok(line) => {
-            line.release()
-            false
-        },
-    }
-    reader.reader.fail_at = UInt64.max
-    let kept = match &reader.resume_line(max_bytes: 64) {
-        Ok(line) => match line {
-            None => false,
-            Some(line) => line.view() == "a line long enough to grow its record twice",
-        },
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(failed, "the first read did not fail at its input")?
-    testing.assert(kept, "a resumed owned line lost its text in an arena")?
-    .Ok(())
-}
 
-test fn each_allocation_failure_covers_every_growth_step_of_a_resumed_owned_line() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), LineError[UInt8]] {
-            // The source fails at byte 20, inside the first line.
-            let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
-            var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
-                return .Err(.Allocation(.Exhausted))
-            }
-            match &reader.read_line(max_bytes: 64) {
-                Err(error) => match read error {
-                    Input(_) => {},
-                    _ => {
-                        let _source = reader.abandon()
-                        return .Err(error)
+    test fn each_allocation_failure_covers_every_growth_step_of_a_resumed_owned_line() -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), LineError[UInt8]] {
+                // The source fails at byte 20, inside the first line.
+                let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
+                var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
+                    return .Err(.Allocation(.Exhausted))
+                }
+                match &reader.read_line(max_bytes: 64) {
+                    Err(error) => match read error {
+                        Input(_) => {},
+                        _ => {
+                            let _source = reader.abandon()
+                            return .Err(error)
+                        },
                     },
-                },
-                Ok(line) => line.release(),
-            }
-            reader.reader.fail_at = UInt64.max
-            let outcome: Result[(), LineError[UInt8]] = match &reader.resume_line(max_bytes: 64) {
-                Ok(line) => {
-                    line.release()
-                    .Ok(())
-                },
-                Err(error) => .Err(error),
-            }
-            let _source = reader.abandon()
-            outcome
-        },
-        LineError.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "a resumed owned line was reported as failing")?
-    .Ok(())
-}
+                    Ok(line) => line.release(),
+                }
+                reader.reader.fail_at = UInt64.max
+                let outcome: Result[(), LineError[UInt8]] = match &reader.resume_line(max_bytes: 64) {
+                    Ok(line) => {
+                        line.release()
+                        .Ok(())
+                    },
+                    Err(error) => .Err(error),
+                }
+                let _source = reader.abandon()
+                outcome
+            },
+            LineError.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "a resumed owned line was reported as failing")?
+        .Ok(())
+    }
 
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Continue a raw line whose read failed before the line ended, keeping the
     // prefix already collected, and borrow its bytes.
     pub fn resume_raw_line_borrowed(inout self: Self, max_bytes: UInt64) -> Result[Option[mem.Slice[UInt8]], LineError[R.Error]] where borrows(.Ok: self), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
@@ -1422,101 +1403,102 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
         .Ok(.Some(self.pending()))
     }
-}
 
-test fn a_borrowed_raw_line_resumes_with_its_retained_prefix() {
-    let input = "ab\r\ncd\n"
-    let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 2 }
-    var reader = BufferedReader.open(capacity: 1, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
+    test fn a_borrowed_raw_line_resumes_with_its_retained_prefix() {
+        let input = "ab\r\ncd\n"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 2 }
+        var reader = BufferedReader.open(capacity: 1, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let failed = match &reader.read_raw_line_borrowed(max_bytes: 4) {
+            Err(Input(failure)) => failure.reason == 9 && failure.stream_offset == 2,
+            _ => false,
+        }
+        reader.reader.fail_at = UInt64.max
+        // A line read raw resumes only as a raw line.
+        let as_text = match &reader.resume_line_borrowed(max_bytes: 4) {
+            Err(ResumeUnavailable) => true,
+            _ => false,
+        }
+        let resumed = match &reader.resume_raw_line_borrowed(max_bytes: 4) {
+            Ok(Some(bytes)) => bytes == "ab\r\n".as_bytes(),
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let next = match &reader.read_raw_line_borrowed(max_bytes: 3) {
+            Ok(Some(bytes)) => bytes == "cd\n".as_bytes(),
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let again = match &reader.resume_raw_line_borrowed(max_bytes: 4) {
+            Err(ResumeUnavailable) => true,
+            _ => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(failed, "the input failure was not reported at its stream byte")?
+        testing.assert(as_text, "a raw line resumed as text")?
+        testing.assert(resumed, "resuming lost the prefix or the terminator")?
+        testing.assert(next, "resuming disturbed the next line")?
+        testing.assert(again, "a completed line resumed a second time")?
+        .Ok(())
     }
-    let failed = match &reader.read_raw_line_borrowed(max_bytes: 4) {
-        Err(error) => match error { Input(failure) => failure.reason == 9 && failure.stream_offset == 2, _ => false },
-        Ok(_) => false,
-    }
-    reader.reader.fail_at = UInt64.max
-    // A line read raw resumes only as a raw line.
-    let as_text = match &reader.resume_line_borrowed(max_bytes: 4) {
-        Err(error) => match error { ResumeUnavailable => true, _ => false },
-        Ok(_) => false,
-    }
-    let resumed = match &reader.resume_raw_line_borrowed(max_bytes: 4) {
-        Ok(line) => match line { Some(bytes) => bytes == "ab\r\n".as_bytes(), None => false },
-        Err(_) => false,
-    }
-    let next = match &reader.read_raw_line_borrowed(max_bytes: 3) {
-        Ok(line) => match line { Some(bytes) => bytes == "cd\n".as_bytes(), None => false },
-        Err(_) => false,
-    }
-    let again = match &reader.resume_raw_line_borrowed(max_bytes: 4) {
-        Err(error) => match error { ResumeUnavailable => true, _ => false },
-        Ok(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(failed, "the input failure was not reported at its stream byte")?
-    testing.assert(as_text, "a raw line resumed as text")?
-    testing.assert(resumed, "resuming lost the prefix or the terminator")?
-    testing.assert(next, "resuming disturbed the next line")?
-    testing.assert(again, "a completed line resumed a second time")?
-    .Ok(())
-}
 
-test fn a_resumed_borrowed_raw_line_is_held_in_an_arena() {
-    // The arena holds the read-ahead buffer and every record the line grows into.
-    defer let arena = mem.Arena.open(mem.system(), size: 1024)
-    let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
-    var reader = BufferedReader.open_in(arena.handle(), capacity: 4, reader: source) else |_| {
-        return testing.assert(false, "an arena reader was refused")
+    test fn a_resumed_borrowed_raw_line_is_held_in_an_arena() {
+        // The arena holds the read-ahead buffer and every record the line grows into.
+        defer let arena = mem.Arena.open(mem.system(), size: 1024)
+        let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
+        var reader = BufferedReader.open_in(arena.handle(), capacity: 4, reader: source) else |_| {
+            return testing.assert(false, "an arena reader was refused")
+        }
+        let failed = match &reader.read_raw_line_borrowed(max_bytes: 64) {
+            Err(Input(_)) => true,
+            _ => false,
+        }
+        reader.reader.fail_at = UInt64.max
+        let kept = match &reader.resume_raw_line_borrowed(max_bytes: 64) {
+            Ok(Some(line)) => line == "a line long enough to grow its record twice\n".as_bytes(),
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(failed, "the first read did not fail at its input")?
+        testing.assert(kept, "a resumed borrowed raw line lost its bytes in an arena")?
+        .Ok(())
     }
-    let failed = match &reader.read_raw_line_borrowed(max_bytes: 64) {
-        Err(error) => match error { Input(_) => true, _ => false },
-        Ok(_) => false,
-    }
-    reader.reader.fail_at = UInt64.max
-    let kept = match &reader.resume_raw_line_borrowed(max_bytes: 64) {
-        Ok(line) => match line { Some(line) => line == "a line long enough to grow its record twice\n".as_bytes(), None => false },
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(failed, "the first read did not fail at its input")?
-    testing.assert(kept, "a resumed borrowed raw line lost its bytes in an arena")?
-    .Ok(())
-}
 
-test fn each_allocation_failure_covers_every_growth_step_of_a_resumed_borrowed_raw_line() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), LineError[UInt8]] {
-            // The source fails at byte 20, inside the first line.
-            let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
-            var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
-                return .Err(.Allocation(.Exhausted))
-            }
-            match &reader.read_raw_line_borrowed(max_bytes: 64) {
-                Err(error) => match read error {
-                    Input(_) => {},
-                    _ => {
-                        let _source = reader.abandon()
-                        return .Err(error)
+    test fn each_allocation_failure_covers_every_growth_step_of_a_resumed_borrowed_raw_line() -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), LineError[UInt8]] {
+                // The source fails at byte 20, inside the first line.
+                let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
+                var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
+                    return .Err(.Allocation(.Exhausted))
+                }
+                match &reader.read_raw_line_borrowed(max_bytes: 64) {
+                    Err(error) => match read error {
+                        Input(_) => {},
+                        _ => {
+                            let _source = reader.abandon()
+                            return .Err(error)
+                        },
                     },
-                },
-                Ok(_) => {},
-            }
-            reader.reader.fail_at = UInt64.max
-            let outcome: Result[(), LineError[UInt8]] = match &reader.resume_raw_line_borrowed(max_bytes: 64) {
-                Ok(_) => .Ok(()),
-                Err(error) => .Err(error),
-            }
-            let _source = reader.abandon()
-            outcome
-        },
-        LineError.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "a resumed borrowed raw line was reported as failing")?
-    .Ok(())
-}
+                    Ok(_) => {},
+                }
+                reader.reader.fail_at = UInt64.max
+                let outcome: Result[(), LineError[UInt8]] = match &reader.resume_raw_line_borrowed(max_bytes: 64) {
+                    Ok(_) => .Ok(()),
+                    Err(error) => .Err(error),
+                }
+                let _source = reader.abandon()
+                outcome
+            },
+            LineError.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "a resumed borrowed raw line was reported as failing")?
+        .Ok(())
+    }
 
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Resume a failed raw line and return its bytes as an owned vector.
     pub fn resume_raw_line(inout self: Self, max_bytes: UInt64) -> Result[Option[Vec[UInt8, A]], LineError[R.Error]] where carries(.Ok: self.record, self.allocator), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
         if !self.can_resume(true) {
@@ -1529,105 +1511,101 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         let length = self.length
         .Ok(.Some(&self.take_bytes(length)))
     }
-}
 
-test fn raw_resume_preserves_invalid_utf8_and_the_terminator() {
-    defer var bytes = mem.system().acquire(2).unwrap()
-    // FF is invalid UTF-8; the following line-ending bytes test record framing.
-    &bytes.store_byte(0, 255)
-    &bytes.store_byte(1, 10)
-    let source = FragmentReader { bytes = bytes.as_slice(), position = 0, step = 1, fail_at = UInt64.max }
-    var reader = BufferedReader.open(capacity: 1, reader: source) else |_| {
-        return testing.assert(false, "reader allocation failed")
-    }
-    let limited = match &reader.read_raw_line(max_bytes: 0) {
-        Err(error) => match error { Limit => true, _ => false },
-        Ok(line) => {
-            line.release()
-            false
-        },
-    }
-    let resumed = match &reader.resume_raw_line(max_bytes: 2) {
-        Err(_) => false,
-        Ok(line) => match line {
-            None => false,
-            Some(line) => {
+    test fn raw_resume_preserves_invalid_utf8_and_the_terminator() {
+        defer var bytes = mem.system().acquire(2).unwrap()
+        // FF is invalid UTF-8; the following line-ending bytes test record framing.
+        &bytes.store_byte(0, 255)
+        &bytes.store_byte(1, 10)
+        let source = FragmentReader { bytes = bytes.as_slice(), position = 0, step = 1, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 1, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let limited = match &reader.read_raw_line(max_bytes: 0) {
+            Err(Limit) => true,
+            Err(_) => false,
+            Ok(line) => {
+                line.release()
+                false
+            },
+        }
+        let resumed = match &reader.resume_raw_line(max_bytes: 2) {
+            Err(_) => false,
+            Ok(None) => false,
+            Ok(Some(line)) => {
                 let intact = line.length() == 2 && line[0] == 255 && line[1] == 10
                 line.release()
                 intact
             },
-        },
+        }
+        let _source = reader.abandon()
+        testing.assert(limited && resumed, "raw recovery validated or changed input bytes")?
+        .Ok(())
     }
-    let _source = reader.abandon()
-    testing.assert(limited && resumed, "raw recovery validated or changed input bytes")?
-    .Ok(())
-}
 
-test fn a_resumed_owned_raw_line_is_allocated_from_an_arena() {
-    // The arena holds the read-ahead buffer and every record the line grows into.
-    defer let arena = mem.Arena.open(mem.system(), size: 1024)
-    let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
-    var reader = BufferedReader.open_in(arena.handle(), capacity: 4, reader: source) else |_| {
-        return testing.assert(false, "an arena reader was refused")
+    test fn a_resumed_owned_raw_line_is_allocated_from_an_arena() {
+        // The arena holds the read-ahead buffer and every record the line grows into.
+        defer let arena = mem.Arena.open(mem.system(), size: 1024)
+        let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
+        var reader = BufferedReader.open_in(arena.handle(), capacity: 4, reader: source) else |_| {
+            return testing.assert(false, "an arena reader was refused")
+        }
+        let failed = match &reader.read_raw_line(max_bytes: 64) {
+            Err(Input(_)) => true,
+            Err(_) => false,
+            Ok(line) => {
+                line.release()
+                false
+            },
+        }
+        reader.reader.fail_at = UInt64.max
+        let kept = match &reader.resume_raw_line(max_bytes: 64) {
+            Ok(None) => false,
+            Ok(Some(line)) => line.as_slice() == "a line long enough to grow its record twice\n".as_bytes(),
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(failed, "the first read did not fail at its input")?
+        testing.assert(kept, "a resumed owned raw line lost its bytes in an arena")?
+        .Ok(())
     }
-    let failed = match &reader.read_raw_line(max_bytes: 64) {
-        Err(error) => match error { Input(_) => true, _ => false },
-        Ok(line) => {
-            line.release()
-            false
-        },
-    }
-    reader.reader.fail_at = UInt64.max
-    let kept = match &reader.resume_raw_line(max_bytes: 64) {
-        Ok(line) => match line {
-            None => false,
-            Some(line) => line.as_slice() == "a line long enough to grow its record twice\n".as_bytes(),
-        },
-        Err(_) => false,
-    }
-    let _source = reader.abandon()
-    testing.assert(failed, "the first read did not fail at its input")?
-    testing.assert(kept, "a resumed owned raw line lost its bytes in an arena")?
-    .Ok(())
-}
 
-test fn each_allocation_failure_covers_every_growth_step_of_a_resumed_owned_raw_line() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), LineError[UInt8]] {
-            // The source fails at byte 20, inside the first line.
-            let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
-            var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
-                return .Err(.Allocation(.Exhausted))
-            }
-            match &reader.read_raw_line(max_bytes: 64) {
-                Err(error) => match read error {
-                    Input(_) => {},
-                    _ => {
-                        let _source = reader.abandon()
-                        return .Err(error)
+    test fn each_allocation_failure_covers_every_growth_step_of_a_resumed_owned_raw_line() -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), LineError[UInt8]] {
+                // The source fails at byte 20, inside the first line.
+                let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
+                var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
+                    return .Err(.Allocation(.Exhausted))
+                }
+                match &reader.read_raw_line(max_bytes: 64) {
+                    Err(error) => match read error {
+                        Input(_) => {},
+                        _ => {
+                            let _source = reader.abandon()
+                            return .Err(error)
+                        },
                     },
-                },
-                Ok(line) => line.release(),
-            }
-            reader.reader.fail_at = UInt64.max
-            let outcome: Result[(), LineError[UInt8]] = match &reader.resume_raw_line(max_bytes: 64) {
-                Ok(line) => {
-                    line.release()
-                    .Ok(())
-                },
-                Err(error) => .Err(error),
-            }
-            let _source = reader.abandon()
-            outcome
-        },
-        LineError.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "a resumed owned raw line was reported as failing")?
-    .Ok(())
-}
+                    Ok(line) => line.release(),
+                }
+                reader.reader.fail_at = UInt64.max
+                let outcome: Result[(), LineError[UInt8]] = match &reader.resume_raw_line(max_bytes: 64) {
+                    Ok(line) => {
+                        line.release()
+                        .Ok(())
+                    },
+                    Err(error) => .Err(error),
+                }
+                let _source = reader.abandon()
+                outcome
+            },
+            LineError.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "a resumed owned raw line was reported as failing")?
+        .Ok(())
+    }
 
-impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // A failed line can resume when it did not end, nothing was taken from it
     // or discarded, and it was read in the same mode, text or raw.
     fn can_resume(self: Self, raw: Bool) -> Bool {
@@ -1835,8 +1813,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         let bytes = &self.take_bytes(length)
         match String.from_bytes(bytes) {
             Ok(line) => return .Ok(.Some(line)),
-            Err(failure) => {
-                let Utf8Failure { bytes: bytes, error: error } = failure
+            Err(Utf8Failure { bytes: bytes, error: error }) => {
                 let replacement = mem.vector_into_buffer(bytes)
                 let empty = replace_pending_buffer(&self.record, replacement)
                 empty.release()

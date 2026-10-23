@@ -6,3 +6,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |
    = help: `session` is a carrier and this signature writes no clause, so its contract is `where carries(session)`
    = help: the value comes from `tag`; write `where carries(tag)` to say so
+   = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
+   = help: the types this names are reached with `import std.mem`

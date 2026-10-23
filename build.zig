@@ -118,9 +118,11 @@ fn libraryManifest(b: *std.Build) std.Build.LazyPath {
     var found: std.ArrayList([]const u8) = .empty;
     while (walker.next(io) catch @panic("cannot read the standard library")) |entry| {
         if (entry.kind != .file) continue;
-        // The manifest travels with the sources: it is what says this root is
-        // the library named `std`, for the embedded copy as for the directory.
-        if (!std.mem.endsWith(u8, entry.basename, ".lin") and !std.mem.eql(u8, entry.path, "linea.json")) continue;
+        // Every file but the library's documentation travels with the
+        // sources: the manifest says this root is the library named `std`, for
+        // the copy compiled in as for the directory, and any other file is one
+        // a library module may `embed`, which the copy must hold to read.
+        if (std.mem.endsWith(u8, entry.basename, ".md")) continue;
         found.append(b.allocator, b.dupe(entry.path)) catch @panic("OOM");
     }
     std.mem.sort([]const u8, found.items, {}, lessThanSlice);
@@ -874,7 +876,7 @@ const trees = [_]Tree{
     },
     .{
         .dir = "build",
-        .roots = &.{ "source_test.zig", "guide_gate.zig" },
+        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig" },
         .imported_by = "build.zig",
         .layered = false,
         .test_manifests = &.{"source_test.zig"},
@@ -1102,6 +1104,7 @@ const HeavySteps = struct {
     runtime_installs: [2]*std.Build.Step,
     generate_grammar: *std.Build.Step,
     guide_gate: *std.Build.Step.Compile,
+    example_tests: *std.Build.Step.Compile,
     checked_runtime_archive: std.Build.LazyPath,
     test_filters: []const []const u8,
     scratch: []const u8,
@@ -1246,6 +1249,24 @@ const HeavySteps = struct {
         if (toolchain.sanitizeVariable(self.sanitize.flag())) |variable| run.setEnvironmentVariable(variable.name, variable.value);
         run.addArg(b.pathJoin(&.{ self.scratch, "guide" }));
         run.addArg(b.pathFromRoot("tests"));
+        run.addArg(b.pathFromRoot("."));
+        if (self.walkers) |n| run.addArg(b.fmt("{d}", .{n}));
+        run.has_side_effects = true;
+        return run;
+    }
+
+    /// `linea test` on every root beneath `examples/`, including a library
+    /// nested under an application, which the application's own run does not
+    /// reach. The suite runs some of these as cases and compares a transcript,
+    /// which `-Dupdate` can rewrite to hold a failure; this step asserts the
+    /// exit status, which cannot be accepted.
+    fn exampleTests(self: *const HeavySteps, installed: *std.Build.Step) *std.Build.Step.Run {
+        const b = self.b;
+        const run = b.addRunArtifact(self.example_tests);
+        run.addArg(b.pathFromRoot("examples"));
+        run.addArg(b.getInstallPath(.bin, "linea"));
+        run.step.dependOn(installed);
+        if (toolchain.sanitizeVariable(self.sanitize.flag())) |variable| run.setEnvironmentVariable(variable.name, variable.value);
         if (self.walkers) |n| run.addArg(b.fmt("{d}", .{n}));
         run.has_side_effects = true;
         return run;
@@ -1332,7 +1353,7 @@ pub fn build(b: *std.Build) void {
     // jobs on one machine, so a run that takes every core makes the other jobs
     // wait for it. It is also the only way to measure what the parallelism is
     // actually buying, by asking for one.
-    const walkers = b.option(u32, "walkers", "How many workers walk the corpus (default: one per core)");
+    const walkers = b.option(u32, "walkers", "How many workers the corpus walk, the guide gate, the example tests and the soundness run use (default: one per core)");
 
     const scratch = b.option(
         []const u8,
@@ -1768,6 +1789,7 @@ pub fn build(b: *std.Build) void {
         .unit_module = undefined,
         .generate_grammar = undefined,
         .guide_gate = undefined,
+        .example_tests = undefined,
     };
     const exe = heavy.compiler();
     b.installArtifact(exe);
@@ -1961,6 +1983,18 @@ pub fn build(b: *std.Build) void {
     const run_guide = heavy.guide(b.getInstallStep());
     const guide_step = b.step("guide", "Compile the guide's programs and hold their pasted output to what the compiler prints");
     guide_step.dependOn(&run_guide.step);
+
+    heavy.example_tests = b.addExecutable(.{
+        .name = "example-tests",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("build/example_tests.zig"),
+            .target = b.graph.host,
+            .optimize = .Debug,
+        }),
+    });
+    heavy.example_tests.root_module.addAnonymousImport("process", .{ .root_source_file = b.path("src/conformance/process.zig") });
+    const example_tests_step = b.step("example-tests", "Run `linea test` on every root beneath examples/");
+    example_tests_step.dependOn(&heavy.exampleTests(b.getInstallStep()).step);
 
     // Fidelity, as a checked claim rather than an impression. Reserved-word
     // parity only reaches the surface: a grammar can mangle impl blocks or
@@ -2197,6 +2231,8 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/traits/a_grouped_tuple_head_is_reported_once.lin",
     "tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin",
     "tests/tuples/a_refused_tuple_arm_does_not_make_the_next_arm_unreachable.lin",
+    "tests/patterns/a_part_that_is_no_pattern_leaves_the_tuple_whole.lin",
+    "tests/patterns/an_unclosed_tuple_pattern_has_no_arity_judged.lin",
     "tests/structs/named_literals/a_named_literal_requires_its_closing_brace.lin",
     "tests/struct_update/the_base_comes_last.lin",
     "tests/struct_update/a_base_needs_an_expression.lin",
@@ -2216,12 +2252,10 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/traits/an_unnamed_callable_parameter_in_two_implementations_is_refused_by_the_parser.lin",
     "tests/defer_let/a_defer_let_binds_one_name.lin",
     "tests/defer_let/a_defer_let_read_binds_nothing_to_release.lin",
-    "tests/tuples/a_tuple_pattern_does_not_nest_in_a_payload.lin",
     "tests/tuples/var_does_not_take_a_tuple_apart.lin",
     "tests/tuples/a_declaration_parameter_is_a_name_not_a_pattern.lin",
     "tests/traits/a_grouped_type_is_not_an_implementation_head.lin",
     "tests/decl/borrowed_lets/a_borrowed_pattern_is_not_a_var_declaration.lin",
-    "tests/decl/borrowed_lets/nested_patterns_are_not_introduced_by_read.lin",
     "tests/decl/borrowed_lets/read_requires_an_irrefutable_pattern.lin",
     "tests/ownership/a_catch_all_is_the_bare_underscore/main.lin",
     "tests/traits/a_trait_projection_has_no_body.lin",
@@ -2279,12 +2313,10 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/modules/a_reexport_takes_no_modifier/mid/mid.lin",
     "tests/traits/a_trait_takes_no_modifier.lin",
     "tests/construction_derive/malformed_argument_keeps_parser_diagnostic.lin",
-    "tests/structs/a_field_pattern_binds_a_name_and_compares_nothing.lin",
-    "tests/structs/a_field_pattern_read_binds_a_name.lin",
-    "tests/structs/a_destructure_binds_a_name_for_each_field.lin",
-    "tests/structs/a_field_pattern_is_no_range.lin",
     "tests/decl/a_unit_result_is_not_written/main.lin",
     "tests/testing_signatures/a_written_unit_result_says_what_a_test_and_main_answer.lin",
+    "tests/embed/embed_is_reserved.lin",
+    "tests/embed/the_path_is_a_literal.lin",
 };
 
 /// Every corpus file the grammar is asked to derive.

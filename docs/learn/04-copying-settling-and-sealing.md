@@ -1430,8 +1430,11 @@ error[O-Leak]: `left` (a linear `Vec[UInt64, mem.SystemAllocator]`) is still own
 21 |         },
    |         - also still owned where the block ends
    |
-   = help: settle it first with `left.release()`
+   = help: settle it first with `left.release()`, or write `defer left.release()` where it is bound so every path releases it
 ```
+
+A pattern's binder such as `left` has no `let` to write `defer` in front of,
+so the help offers the release scheduled at the top of the arm instead.
 
 A network socket is the textbook linear value from the standard library.
 `net.Listener` and `net.Connection` are both linear, so a listener you forget

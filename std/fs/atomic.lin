@@ -1,6 +1,7 @@
 import std.mem
 import std.io
 import std.testing
+import std.text
 
 use io.Reader
 
@@ -122,7 +123,7 @@ test fn atomic_save_rejects_special_permission_bits_before_io() {
         Ok(_) => return testing.assert(false, "special permission bits were accepted"),
         Err(failure) => {
             testing.assert(!failure.published, "invalid permissions published a file")?
-            testing.assert(match read failure.primary { Some(reason) => match read reason { InvalidPermissions => true, _ => false }, None => false }, "permission error lost its context")?
+            testing.assert(match read failure.primary { Some(InvalidPermissions) => true, _ => false }, "permission error lost its context")?
         },
     }
     .Ok(())
@@ -182,8 +183,8 @@ test fn atomic_save_rejects_an_observed_nonregular_destination_before_writing() 
             testing.assert(!failure.published, "nonregular destination was published")?
             testing.assert_eq(failure.written, UInt64(0), "nonregular destination reached the write")?
             testing.assert(match read failure.primary {
-                Some(reason) => match read reason { Io(error) => match read error.operation { Metadata => true, _ => false }, _ => false },
-                None => false,
+                Some(Io(error)) => match read error.operation { Metadata => true, _ => false },
+                _ => false,
             }, "nonregular destination lost the metadata failure")?
         },
     }
@@ -230,7 +231,7 @@ test fn an_atomic_save_reports_scratch_allocation_failure() {
     defer remove_scratch(path)
     let refused = match save_atomic_in(arena.handle(), path, "tea".as_bytes(), policy: .CreateNew) {
         Ok(_) => false,
-        Err(failure) => match read failure.primary { Some(reason) => match read reason { Allocation(_) => true, _ => false }, None => false },
+        Err(failure) => match read failure.primary { Some(Allocation(_)) => true, _ => false },
     }
     testing.assert(refused, "an atomic save took its scratch from another allocator")?
     .Ok(())
@@ -252,8 +253,6 @@ let temporary_name_attempts: UInt64 = 64
 // `temporary_name_size` bytes.
 fn random_name[A: Allocator](inout buffer: mem.Buffer[A]) -> Result[(), io.IoError] where carries() {
     let prefix = ".linea-save-"
-    // Nibble values 0..15 index the lowercase hexadecimal alphabet.
-    let digits = "0123456789abcdef"
     for index in 0..prefix.length() {
         &buffer.store_byte(index, prefix.byte(index).unwrap())
     }
@@ -271,12 +270,18 @@ fn random_name[A: Allocator](inout buffer: mem.Buffer[A]) -> Result[(), io.IoErr
     for index in UInt64(0)..16 {
         let source = UInt64(15) - index
         let byte = buffer.load_byte(12 + source)
-        &buffer.store_byte(12 + source * 2, digits.byte(UInt64(byte / 16)).unwrap())
-        &buffer.store_byte(13 + source * 2, digits.byte(UInt64(byte % 16)).unwrap())
+        &buffer.store_byte(12 + source * 2, digit_byte(byte / 16))
+        &buffer.store_byte(13 + source * 2, digit_byte(byte % 16))
     }
     // Twelve prefix bytes plus 32 hex digits put the terminating NUL at 44.
     &buffer.store_byte(44, 0)
     .Ok(())
+}
+
+// `digit_byte` is the ASCII byte of the lowercase hexadecimal digit that
+// spells `nibble`, which is below 16.
+fn digit_byte(nibble: UInt8) -> UInt8 {
+    text.hex_digit(nibble).unwrap().byte(0).unwrap()
 }
 
 test fn temporary_names_have_a_fixed_ascii_extent_and_a_single_terminator() {

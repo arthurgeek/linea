@@ -1,0 +1,35 @@
+// A variant's payload may be another variant's pattern, so one `match` tells
+// apart every outcome of a load: a value, no value, and each kind of failure.
+enum ReadError {
+    Limit,
+    Closed,
+}
+
+enum LoadError {
+    Read(ReadError),
+    Parse(UInt8),
+}
+
+fn load(step: UInt8) -> Result[Option[UInt8], LoadError] {
+    match step {
+        0 => .Ok(.Some(1)),
+        1 => .Ok(.None),
+        2 => .Err(.Read(.Limit)),
+        3 => .Err(.Read(.Closed)),
+        _ => .Err(.Parse(step)),
+    }
+}
+
+fn score(step: UInt8) -> UInt8 {
+    match load(step) {
+        Ok(Some(value)) => value,
+        Ok(None) => 10,
+        Err(Read(Limit)) => 20,
+        Err(Read(Closed)) => 30,
+        Err(Parse(at)) => 40 + at,
+    }
+}
+
+fn main() -> UInt8 {
+    score(0) + score(1) + score(2) + score(3) + score(4) - 105
+}

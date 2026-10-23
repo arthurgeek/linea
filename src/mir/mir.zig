@@ -241,6 +241,10 @@ pub const Inst = struct {
         call,
         /// The code address of one concrete function.
         function_addr,
+        /// The code address of a C-callable entry to one concrete function,
+        /// passed to an `extern` that calls it back. The entry takes the
+        /// function's parameters in their C widths and calls the body.
+        foreign_function_addr,
         /// A call through one structural callable value.
         call_indirect,
 
@@ -277,7 +281,7 @@ pub const Inst = struct {
                 .float_math => .float_math,
                 .check => .check,
                 .call => .call,
-                .function_addr => .function,
+                .function_addr, .foreign_function_addr => .function,
                 .call_indirect => .indirect_call,
                 .call_noreturn => .call,
                 .call_indirect_noreturn => .indirect_call,
@@ -1332,6 +1336,7 @@ pub const Mir = struct {
             .check,
             .call,
             .function_addr,
+            .foreign_function_addr,
             .call_indirect,
             => |tag| std.debug.panic("compiler defect: {s} is not a terminator", .{@tagName(tag)}),
         };
@@ -1460,6 +1465,21 @@ pub const Mir = struct {
         ) !InstId {
             return self.addInst(b, .{
                 .tag = .function_addr,
+                .ty = ty,
+                .span = span,
+                .data = .{ .function = function },
+            });
+        }
+
+        pub fn addForeignFunctionAddr(
+            self: *Builder,
+            b: BlockId,
+            ty: TypeId,
+            span: Span,
+            function: FunctionId,
+        ) !InstId {
+            return self.addInst(b, .{
+                .tag = .foreign_function_addr,
                 .ty = ty,
                 .span = span,
                 .data = .{ .function = function },

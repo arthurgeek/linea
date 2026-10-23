@@ -77,41 +77,53 @@ impl Timestamp {
         }
         .Some(.{ seconds, nanoseconds })
     }
-}
 
-test fn a_timestamp_is_made_only_inside_the_years_rfc_3339_writes() {
-    testing.assert(Timestamp.from_unix(0, 999999999).is_some(), "the last nanosecond of a second was refused")?
-    testing.assert(Timestamp.from_unix(0, 1000000000).is_none(), "a whole second of nanoseconds was accepted")?
-    testing.assert(Timestamp.from_unix(-62167219200, 0).is_some(), "the start of year 0000 was refused")?
-    testing.assert(Timestamp.from_unix(-62167219201, 0).is_none(), "a moment before year 0000 was accepted")?
-    testing.assert(Timestamp.from_unix(253402300799, 0).is_some(), "the end of year 9999 was refused")?
-    testing.assert(Timestamp.from_unix(253402300800, 0).is_none(), "a moment after year 9999 was accepted")?
-    .Ok(())
-}
+    test fn a_timestamp_is_made_only_inside_the_years_rfc_3339_writes() {
+        testing.assert(Timestamp.from_unix(0, 999999999).is_some(), "the last nanosecond of a second was refused")?
+        testing.assert(Timestamp.from_unix(0, 1000000000).is_none(), "a whole second of nanoseconds was accepted")?
+        testing.assert(Timestamp.from_unix(-62167219200, 0).is_some(), "the start of year 0000 was refused")?
+        testing.assert(Timestamp.from_unix(-62167219201, 0).is_none(), "a moment before year 0000 was accepted")?
+        testing.assert(Timestamp.from_unix(253402300799, 0).is_some(), "the end of year 9999 was refused")?
+        testing.assert(Timestamp.from_unix(253402300800, 0).is_none(), "a moment after year 9999 was accepted")?
+        .Ok(())
+    }
 
-impl Timestamp {
     // `unix_seconds` returns the whole seconds since the Unix epoch, negative
     // before it.
     pub fn unix_seconds(self: Self) -> Int64 {
         self.seconds
     }
-}
 
-test fn unix_seconds_counts_from_the_epoch() {
-    testing.assert_eq(Timestamp.from_unix(-5, 250).unwrap().unix_seconds(), Int64(-5), "the seconds changed")?
-    .Ok(())
-}
+    test fn unix_seconds_counts_from_the_epoch() {
+        testing.assert_eq(Timestamp.from_unix(-5, 250).unwrap().unix_seconds(), Int64(-5), "the seconds changed")?
+        .Ok(())
+    }
 
-impl Timestamp {
     // `nanoseconds` returns the nanoseconds past the whole second.
     pub fn nanoseconds(self: Self) -> UInt32 {
         self.nanoseconds
     }
-}
 
-test fn nanoseconds_returns_the_part_of_a_second() {
-    testing.assert_eq(Timestamp.from_unix(-5, 250).unwrap().nanoseconds(), UInt32(250), "the nanoseconds changed")?
-    .Ok(())
+    test fn nanoseconds_returns_the_part_of_a_second() {
+        testing.assert_eq(Timestamp.from_unix(-5, 250).unwrap().nanoseconds(), UInt32(250), "the nanoseconds changed")?
+        .Ok(())
+    }
+
+    // `http_date` makes the `HttpDate` form of the timestamp.
+    pub fn http_date(self: Self) -> HttpDate {
+        .{ stamp = copy(self) }
+    }
+
+    test fn an_http_date_displays_in_the_form_header_fields_use() {
+        http_date_is(784111777, "Sun, 06 Nov 1994 08:49:37 GMT", "the RFC 9110 example changed")?
+        http_date_is(0, "Thu, 01 Jan 1970 00:00:00 GMT", "the epoch changed")?
+        http_date_is(951782400, "Tue, 29 Feb 2000 00:00:00 GMT", "a leap day changed")?
+        http_date_is(-1, "Wed, 31 Dec 1969 23:59:59 GMT", "the second before the epoch changed")?
+        http_date_is(-11644473600, "Mon, 01 Jan 1601 00:00:00 GMT", "the earliest date a cookie can expire changed")?
+        http_date_is(-62167219200, "Sat, 01 Jan 0000 00:00:00 GMT", "the first moment changed")?
+        http_date_is(253402300799, "Fri, 31 Dec 9999 23:59:59 GMT", "the last moment changed")?
+        .Ok(())
+    }
 }
 
 // A `Civil` date and time of day in UTC, as a calendar and a clock show it.
@@ -204,24 +216,6 @@ fn http_date_is(seconds: Int64, expected: Str, said: Str) -> Result[(), testing.
     checked
 }
 
-impl Timestamp {
-    // `http_date` makes the `HttpDate` form of the timestamp.
-    pub fn http_date(self: Self) -> HttpDate {
-        .{ stamp = copy(self) }
-    }
-}
-
-test fn an_http_date_displays_in_the_form_header_fields_use() {
-    http_date_is(784111777, "Sun, 06 Nov 1994 08:49:37 GMT", "the RFC 9110 example changed")?
-    http_date_is(0, "Thu, 01 Jan 1970 00:00:00 GMT", "the epoch changed")?
-    http_date_is(951782400, "Tue, 29 Feb 2000 00:00:00 GMT", "a leap day changed")?
-    http_date_is(-1, "Wed, 31 Dec 1969 23:59:59 GMT", "the second before the epoch changed")?
-    http_date_is(-11644473600, "Mon, 01 Jan 1601 00:00:00 GMT", "the earliest date a cookie can expire changed")?
-    http_date_is(-62167219200, "Sat, 01 Jan 0000 00:00:00 GMT", "the first moment changed")?
-    http_date_is(253402300799, "Fri, 31 Dec 9999 23:59:59 GMT", "the last moment changed")?
-    .Ok(())
-}
-
 // The count of days from 0000-01-01 to the Unix epoch is 719,528, and the
 // epoch fell on a Thursday, so `(day + 6) % 7` counts weekdays from Sunday.
 fn weekday_name(stamp: Timestamp) -> Str {
@@ -292,16 +286,14 @@ impl Instant {
         }
         .{ nanoseconds = UInt64(seconds) * nanoseconds_per_second + nanoseconds }
     }
-}
 
-test fn the_monotonic_clock_never_moves_back() {
-    let first = Instant.now()
-    let second = Instant.now()
-    testing.assert(second >= first, "the monotonic clock moved back")?
-    .Ok(())
-}
+    test fn the_monotonic_clock_never_moves_back() {
+        let first = Instant.now()
+        let second = Instant.now()
+        testing.assert(second >= first, "the monotonic clock moved back")?
+        .Ok(())
+    }
 
-impl Instant {
     // `since` returns how long after `earlier` this instant is, or a zero
     // duration when `earlier` is the later of the two.
     pub fn since(self: Self, earlier: Instant) -> Duration {
@@ -310,29 +302,27 @@ impl Instant {
         }
         .{ nanoseconds = self.nanoseconds - earlier.nanoseconds }
     }
-}
 
-test fn an_instant_measures_the_time_since_another() {
-    let earlier = Instant { nanoseconds = 1000 }
-    let later = Instant { nanoseconds = 3500 }
-    testing.assert_eq(later.since(earlier), Duration.from_nanoseconds(2500), "the time between two instants changed")?
-    testing.assert_eq(earlier.since(later), Duration.from_nanoseconds(0), "an earlier instant was a positive time after a later one")?
-    .Ok(())
-}
+    test fn an_instant_measures_the_time_since_another() {
+        let earlier = Instant { nanoseconds = 1000 }
+        let later = Instant { nanoseconds = 3500 }
+        testing.assert_eq(later.since(earlier), Duration.from_nanoseconds(2500), "the time between two instants changed")?
+        testing.assert_eq(earlier.since(later), Duration.from_nanoseconds(0), "an earlier instant was a positive time after a later one")?
+        .Ok(())
+    }
 
-impl Instant {
     // `elapsed` returns how long ago this instant was read.
     pub fn elapsed(self: Self) -> Duration {
         Instant.now().since(self)
     }
-}
 
-test fn an_instant_measures_the_time_since_it_was_read() {
-    let start = Instant.now()
-    let before = start.elapsed()
-    let after = start.elapsed()
-    testing.assert(after >= before, "the time since an instant shrank")?
-    .Ok(())
+    test fn an_instant_measures_the_time_since_it_was_read() {
+        let start = Instant.now()
+        let before = start.elapsed()
+        let after = start.elapsed()
+        testing.assert(after >= before, "the time since an instant shrank")?
+        .Ok(())
+    }
 }
 
 // `Duration` is a span of time in nanoseconds. Display writes it in the
@@ -348,51 +338,45 @@ impl Duration {
     pub fn from_nanoseconds(nanoseconds: UInt64) -> Duration {
         .{ nanoseconds }
     }
-}
 
-test fn from_nanoseconds_makes_a_duration_that_long() {
-    testing.assert_eq(Duration.from_nanoseconds(2000000), Duration.from_milliseconds(2), "two milliseconds changed")?
-    .Ok(())
-}
+    test fn from_nanoseconds_makes_a_duration_that_long() {
+        testing.assert_eq(Duration.from_nanoseconds(2000000), Duration.from_milliseconds(2), "two milliseconds changed")?
+        .Ok(())
+    }
 
-impl Duration {
     // `nanoseconds` returns the length of the duration in nanoseconds.
     pub fn nanoseconds(self: Self) -> UInt64 {
         self.nanoseconds
     }
-}
 
-test fn a_duration_returns_its_nanoseconds() {
-    testing.assert_eq(Duration.from_nanoseconds(1500).nanoseconds(), UInt64(1500), "the nanoseconds changed")?
-    .Ok(())
-}
+    test fn a_duration_returns_its_nanoseconds() {
+        testing.assert_eq(Duration.from_nanoseconds(1500).nanoseconds(), UInt64(1500), "the nanoseconds changed")?
+        .Ok(())
+    }
 
-impl Duration {
     // `from_milliseconds` makes a duration `milliseconds` long. A length past
     // 2^64 - 1 nanoseconds, about 584 years, overflows and traps.
     pub fn from_milliseconds(milliseconds: UInt64) -> Duration {
         .{ nanoseconds = milliseconds * nanoseconds_per_millisecond }
     }
-}
 
-test fn a_duration_is_made_from_milliseconds() {
-    testing.assert_eq(Duration.from_milliseconds(250), Duration.from_nanoseconds(250000000), "a quarter second changed")?
-    testing.assert_eq(Duration.from_milliseconds(0), Duration.from_nanoseconds(0), "no time changed")?
-    .Ok(())
-}
+    test fn a_duration_is_made_from_milliseconds() {
+        testing.assert_eq(Duration.from_milliseconds(250), Duration.from_nanoseconds(250000000), "a quarter second changed")?
+        testing.assert_eq(Duration.from_milliseconds(0), Duration.from_nanoseconds(0), "no time changed")?
+        .Ok(())
+    }
 
-impl Duration {
     // `from_seconds` makes a duration `seconds` long. A length past 2^64 - 1
     // nanoseconds, about 584 years, overflows and traps.
     pub fn from_seconds(seconds: UInt64) -> Duration {
         .{ nanoseconds = seconds * nanoseconds_per_second }
     }
-}
 
-test fn a_duration_is_made_from_seconds() {
-    testing.assert_eq(Duration.from_seconds(2), Duration.from_milliseconds(2000), "two seconds changed")?
-    testing.assert_eq(Duration.from_seconds(0), Duration.from_nanoseconds(0), "no time changed")?
-    .Ok(())
+    test fn a_duration_is_made_from_seconds() {
+        testing.assert_eq(Duration.from_seconds(2), Duration.from_milliseconds(2000), "two seconds changed")?
+        testing.assert_eq(Duration.from_seconds(0), Duration.from_nanoseconds(0), "no time changed")?
+        .Ok(())
+    }
 }
 
 // `sleep` blocks the calling thread until at least `duration` has passed on

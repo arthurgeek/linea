@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/dependencies/a_program_changing_a_librarys_handle_ends_the_view_a_closure_holds/main.lin:14:5
+   |
+14 |     n_reset(h)
+   |     ^^^^^^^^^^ keep this place available until the last use of its observation
+15 |     let first = later()
+   |                 ----- the observation is still used here

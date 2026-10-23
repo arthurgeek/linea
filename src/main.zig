@@ -27,6 +27,7 @@ comptime {
     _ = @import("syntax/ast.zig");
     _ = @import("syntax/program.zig");
     _ = @import("syntax/relocation.zig");
+    _ = @import("syntax/placement.zig");
     _ = @import("syntax/expanded_program.zig");
     _ = @import("syntax/dump.zig");
     _ = @import("syntax/expanded_dump.zig");
@@ -42,6 +43,7 @@ comptime {
     _ = @import("sema/intrinsics.zig");
     _ = @import("sema/observations.zig");
     _ = @import("sema/open_types.zig");
+    _ = @import("sema/usefulness.zig");
     _ = @import("sema/typecheck.zig");
     _ = @import("sema/retained_typing.zig");
     _ = @import("mir/mir.zig");
@@ -53,11 +55,13 @@ comptime {
     _ = @import("backend/mlir.zig");
     _ = @import("driver/toolchain.zig");
     _ = @import("support/generated_calls.zig");
+    _ = @import("support/module_route.zig");
     _ = @import("support/runtime_symbols.zig");
     _ = @import("support/symbol.zig");
     _ = @import("sema/instantiate.zig");
     _ = @import("driver/loader.zig");
     _ = @import("driver/dependencies.zig");
+    _ = @import("driver/embedded.zig");
     _ = @import("driver/runner.zig");
     _ = @import("ownership/cfg.zig");
     _ = @import("ownership/build.zig");

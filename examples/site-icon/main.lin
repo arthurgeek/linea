@@ -1,0 +1,96 @@
+// Serve a small web page and the icon a browser shows on its tab, as a CGI
+// program. A web server runs this program once for each request and sends
+// what it writes back to the browser.
+//
+// GET / answers the page, GET /favicon.ico answers the icon, and any other
+// path answers 404. Both files are part of the program: it reads nothing
+// beside it when it runs.
+import std.http
+import std.io
+import std.log
+import std.mem
+import std.testing
+
+use http.Handler
+use mem.Lender
+
+// `embed` keeps the text of `page.html`, beside this file, in the program. A
+// page is UTF-8 text, so it is a `Str`.
+let page = embed("page.html")
+
+// `embed_bytes` keeps the bytes of `favicon.ico` in the program. An icon is
+// not text, so it is a `mem.Slice[UInt8]`, a view of bytes that lives as long
+// as the program.
+//
+// `favicon.ico` is a 16 by 16 icon of an orange disc ringed in dark brown,
+// 1150 bytes.
+let favicon = embed_bytes("favicon.ico")
+
+// `home` answers the page as HTML. Its `<link rel="icon">` names the icon
+// relative to the page, so it reaches this program wherever the web server
+// mounts it.
+fn home(request: http.Request) -> Result[http.Response, http.Error] {
+    var answer = http.text(request, page)?
+    &answer.set_header("Content-Type", "text/html; charset=utf-8")?
+    .Ok(answer)
+}
+
+// `icon` answers the icon's bytes. `http.bytes` sends bytes built in the
+// request's arena, so the embedded bytes are copied there once; the copy is
+// freed with the arena after the answer is written.
+fn icon(request: http.Request) -> Result[http.Response, http.Error] {
+    var body: Vec[UInt8, mem.Handle] = Vec.new_in(request.allocator())
+    &body.append_slice(favicon)?
+    var answer = http.bytes(request, body)
+    &answer.set_header("Content-Type", "image/x-icon")?
+    .Ok(answer)
+}
+
+// A pattern matches its own path alone, so a path no route names answers 404.
+fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+    &router.route("GET /", home)?
+    &router.route("GET /favicon.ico", icon)
+}
+
+fn main() -> UInt8 {
+    let logger = log.to_stderr(minimum: .Info)
+    var router: http.Router[()] = http.Router.new()
+    let _ = routes(&router) else |error| {
+        logger.error("cannot register a route", log.field("error", error))
+        router.release()
+        return 2
+    }
+    // `serve_cgi` answers the one request this process was started for.
+    let _ = http.serve_cgi(http.logged(logger, router)) else |error| {
+        io.eprintln("site-icon: {error}")
+        io.eprintln("run it from a web server, or describe a request: REQUEST_METHOD=GET PATH_INFO=/favicon.ico site-icon")
+        return 64
+    }
+    0
+}
+
+// Each test builds a request in an arena, as `serve_cgi` does, and hands it
+// to the router.
+test fn the_icon_is_answered_byte_for_byte() {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "GET", "/favicon.ico", body: "").unwrap()
+    var nothing = ()
+    let answer = &router.serve_http(&nothing, sent.request()).unwrap()
+    testing.assert_eq(answer.header("Content-Type"), Option.Some("image/x-icon"), "the icon is not an icon")?
+    let body = answer.body().unwrap()
+    testing.assert_eq(body.length(), favicon.length(), "the icon lost bytes")?
+    // An icon file begins with two zero bytes and then 1, its type.
+    testing.assert(body[0] == 0 && body[1] == 0 && body[2] == 1, "the bytes are not an icon file")?
+}
+
+test fn the_page_names_the_icon() {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    var nothing = ()
+    let answer = &router.serve_http(&nothing, sent.request()).unwrap()
+    testing.assert(answer.text().unwrap().find(r#"<link rel="icon" href="favicon.ico""#).is_some(), "the page names no icon")?
+}

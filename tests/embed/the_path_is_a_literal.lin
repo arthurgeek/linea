@@ -1,0 +1,15 @@
+let name = "page.txt"
+
+fn main() -> UInt8 {
+    let named = embed(name).length()
+    let built = embed("{name}").length()
+    let lines = embed(
+        \\page.txt
+    ).length()
+    let two = embed("a.txt", "b.txt").length()
+    let none = embed().length()
+    let braced = embed(P { x = 1 }).length()
+    let comma = embed("a.txt",).length()
+    let bare = embed_bytes "page.txt"
+    UInt8(named + built + lines + two + none + braced + comma + bare.length())
+}

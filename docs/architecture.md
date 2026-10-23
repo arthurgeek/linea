@@ -346,7 +346,7 @@ lowers the expanded tree into a different semantic representation.
 | Source text | the loader | bytes per file | — |
 | `TokenList` | `lexer.tokenize` | structure-of-arrays | every token, losslessly: comments are tokens, whitespace is the gap between spans |
 | `Ast` | `parser.parse` | typed per category | declarations, statements, expressions, written trailing constraints — abstract, but keeping what tooling needs (parentheses are a node) |
-| `Program` | `driver/loader.zig` | source modules + canonical import routes + one source `Ast` | every source module the entry reached, its independently loaded root and root-relative source spelling, and the single source tree used by expansion and source-only tools |
+| `Program` | `driver/loader.zig` | source modules + canonical import routes + one source `Ast` + embedded files | every source module the entry reached, its independently loaded root and root-relative source spelling, the single source tree used by expansion and source-only tools, and the bytes of every file an `embed` or `embed_bytes` read with the expression that read each (`Program.embeds`) |
 | `ExpandedProgram` | `sema/resolve.zig` | source `Program` + expanded `Ast` + flat tables | the source IDs as an exact prefix, the expanded interner and owned generated sources, immutable active declarations and generated import targets per module, constant-time declaration ownership, generated-to-derive origins, resolver-paired template member plans, and immutable generated-implementation descriptors with component-requirement rows |
 | `Resolution` | `sema/resolve.zig` | side table over the expanded `Ast` | `targets`, `written`, `kinds`, `decls`, `type_names` with the trait rows indexed by module and by member name, `prelude`, qualified variant ordinals, references in constraint subjects and requirements, binding and lexical-scope tables, and both directions of `ExprId` ↔ `ClosureId` |
 | `Typing` | `sema/typecheck.zig` | side table over the expanded `Ast` | the type `pool`, expression and binding types including `Never`, checked literal and named constant values, interpolation value formats, normalised declaration constraints, capability and implementation-applicability answers, closure descriptors, function values, normalised call targets and arguments with their shared `call_index`, private storage declaration identities, context-dependent variant selections, implicit test-success sites, and match payload-disposal facts, implementations, instantiations, layouts, and generated member bodies suppressed during semantic recovery |
@@ -484,6 +484,19 @@ manifest is never a module of the root above it (`pathsOfModule` lists its
 manifest and stops there), and `pathsOfRoot` adds every dependency's files, so
 the command line, the language server and the conformance runner load the same
 graph.
+
+The loader also reads every file an `embed` or `embed_bytes` names, as each
+module is parsed (ADR 0227). A path is relative to the writing file's directory
+and bounded by its root: the directory of the root's manifest, the standard
+library's own directory for the library, or the file's directory where no
+manifest marks one. `driver/embedded.zig` resolves the spelling for every input
+and reads a path on disk one component at a time, so each is found by its
+exact spelling and no symbolic link is followed. In-memory input finds the
+file among the supplied files; an editor's input copies its buffers and reads
+embedded files from disk. Each file is read once per compilation, its bytes
+have the sources' lifetime, and [M-Embed] or [M-EmbedText] is reported against
+the literal naming it. No pass after the loader reads a file: the checker, the
+constant folder and lowering read `Program.embeds` through `Resolution.embeds`.
 
 Disk loading indexes source paths beneath the root, then reads source bytes
 only when their module is reached. Test discovery reaches every module in the
@@ -788,9 +801,21 @@ through injective key structure; associated projections cannot determine a
 binder by inversion. Selection, instantiation and retained queries consume the
 same declaration-ordered implementation arguments.
 
-Match exhaustiveness is tracked as one 64-bit word per match, one bit per
-variant, which is why an enum declares at most `max_variants` (64) variants
-([T-Variants]). A layout is rejected when its size exceeds `Layout.max_size`
+Coverage is one pass in `sema/usefulness.zig`: Maranget's usefulness, answered
+for every row at once as rustc does. `checkMatch` hands it the sound arms' rows
+and a wildcard row after them; the arms no value reaches are [T-Unreachable],
+and the values that reach the wildcard row are [T-Cover]'s witnesses. The
+irrefutable positions (`let`, `let read`, `let ... else`, a walk's binder and a
+lambda's parameter) hand it their one pattern and a wildcard ([T-Refutable]).
+The pass splits each column by the constructors its type has; a row naming a
+constructor joins that branch alone and a row with a wildcard joins every
+branch, so the cells copied into branches are the cost: the size of the
+patterns where no row puts a wildcard beside another row's constructor, plus
+one copy of each wildcard row per constructor its column splits into. Integer
+rows are bucketed by binary search over the sorted cut points. Exhaustiveness of nested patterns
+is NP-complete, so the copies for one construct are capped at
+`usefulness.max_cells` (2^20), past which it is [T-CoverLimit]. The matrix is
+built in an arena per construct and freed with it. A layout is rejected when its size exceeds `Layout.max_size`
 ([L-Size]), and an array length is stored in 32 bits ([T-ArraySize]).
 
 `Checker.checkPolyRec` examines constructor-growing normalized calls before
@@ -1032,11 +1057,23 @@ checker-owned and is discarded.
 
 Qualified variant selections retain their declaration-order ordinal in
 `Resolution.variant_ordinals`. Checking reads that answer for constructor
-payloads and generic argument inference. Context-dependent references and enum
-match arms are settled by the checker in `Typing.variant_uses`; arm records also
-retain whether the payload is left unnamed. Ownership reads that disposal fact,
-and MIR reads the selected ordinal for construction, tag tests and payload
-loads. Generic substitution preserves variant order, so no later consumer
+payloads and generic argument inference. Context-dependent references and
+variant patterns, at any depth of a pattern, are settled by the checker in
+`Typing.variant_uses`, keyed by the pattern node; a record also retains whether
+the payload is left unnamed. Ownership reads that disposal fact, and MIR reads
+the selected ordinal for construction, tag tests and payload loads.
+
+A nested pattern adds no node and no table of its own. The checker checks every
+pattern with one recursive routine, `checkPattern`, and records each part's
+answer where the outermost pattern's always was: its type by node, a variant
+pattern's ordinal in `variant_uses`, a struct field's identity in `field_names`,
+and a binder's type by binding. Ownership and lowering walk a pattern top-down
+and compose those answers into the path from the scrutinee to each part, so no
+pass selects a part a second way. The checker's own place relation for
+[O-Lent] and [N-Aliased] keeps, beside `binder_places`, a `pattern_places`
+entry for each nested pattern node, so a binder's place is a chain of one-step
+records ending at the value the construct took apart; ownership keeps the same
+chain as `Cfg.pattern_parts`, which `Projection.part` names. Generic substitution preserves variant order, so no later consumer
 searches a written variant's name again. Each sparse table follows the uses its
 pass settled: O(V) storage for V uses and expected O(1) lookup.
 
@@ -1308,7 +1345,10 @@ created and reports [O-Borrow] if the place it names was written, moved or
 released since. Liveness keeps that alias only until its last use, so the owner
 is free again afterwards. The checker still records `let read` binder places in
 its `binder_places` relation, which is what lets [N-Aliased] see a binder and
-its owner passed to one call.
+its owner passed to one call. A binder nested inside a pattern takes the part
+its whole path selects: its `.lent` or `.init` operation carries
+`Projection.part`, and `Cfg.pattern_parts` holds each nested node's step from
+the pattern around it.
 
 Dependency paths and immutable origin sets are interned within each function.
 Call-result contracts collect their contributed facts before interning the union,
@@ -1343,7 +1383,12 @@ collect their field facts before one canonical set union.
 Callable result bounds remain compact ambient facts. At a return or inout
 boundary, ownership checks whether declared target prefixes collectively cover
 every component that typing says may carry dependencies. A value's direct
-dependency seed cannot be discharged through its physical fields. This permits
+dependency seed cannot be discharged through its physical fields. The seeds
+are an observation, a type parameter, and the declarations the checker
+recognises by identity: `mem.Slice`, `mem.Buffer` and `mem.Storage`, and
+`std.ffi`'s `Bytes`, `CText` and `CTextList`, newtypes over a C address whose
+contracts tie them to what they view. A seeded newtype is not a
+dependency-free scalar, so a `carries` contract into one is kept. This permits
 an optional payload to be unpacked and restored while preserving distinct
 record-field obligations. Target suffixes are grouped by path step; immediate
 capable-component counts are cached by mentioned type within the function, so
@@ -1544,7 +1589,11 @@ scalar newtypes keep the original place or, for a match, materialize an unnamed
 temporary once. A `let read` initializer is always a checked place, so it never
 takes that temporary path. Match binder entries expire with the arm; `let read`
 entries stay for the rest of the function, keyed by their unique `BindingId`.
-Consuming patterns still load independent values. Ownership determines which
+Consuming patterns still load independent values. A `match` lowers as a chain
+of arms: `testPattern` tests each arm's pattern outer part first and branches
+to the next arm at the first part that fails, so a payload is read only behind
+its variant's tag test, then `bindPattern` binds every binder at any depth from
+the same chained field addresses. Ownership determines which
 observations may escape before lowering; MIR preserves that identity rather
 than copying a read binder into a new local slot.
 
@@ -1758,6 +1807,26 @@ proof paths before machine code. These facts permit no allocation elision,
 byte GEPs over their recorded base and offset, preserving pointer relationships
 and the existing overflow, bounds and alignment checks.
 
+A callback an `extern` takes lowers to `foreign_function_addr`, the address of
+a C-callable entry to one concrete function; the verifier refuses the value
+anywhere but as an argument of a direct call to an `extern`. The backend writes
+one private entry per function so passed, with the routine that writes an
+export's thunk: both take the declared types' C widths, widen them, call the
+body and narrow its answer. A crossing value is rendered from its storage
+representation, and a callback crosses as `!llvm.ptr`.
+
+An `extern` answering `ffi.Errno[R]` is lowered with a signature answering `R`,
+interned by discovery through `RawAccesses.errnoSignature` before the pool
+closes. Each call to it lowers to that call, then a call to the runtime's
+`linea_errno`, which discovery reaches with it, and then the `Errno` built from
+the two values. Lowering emits the two calls next to each other, so no
+instruction between them can change `errno`.
+
+An `extern` declaration and an export thunk mark every 8- or 16-bit integer
+parameter and result `llvm.signext` or `llvm.zeroext`, by the declared type's
+signedness. Both supported C ABIs leave the bits above a narrow value to its
+producer, and C compiled by Clang reads the whole register.
+
 A `Never`-returning function has no MLIR result and is marked noreturn. A
 noreturn call is followed by `llvm.unreachable`, and no conversion or storage
 operation is emitted for `Never`. Panic passes the recorded `Str` address and
@@ -1775,6 +1844,15 @@ file directly and produces textual LLVM IR (ADR 0116). The intermediate remains
 a real file, including when build artefacts are kept after a failure. Decode it
 with `mlir-opt` to inspect it. Linea implements no bytecode format, and the tool
 and verification boundaries are unchanged.
+
+A program's manifest may name C sources (`"native"`) and libraries
+(`"link"`). The loader records both on `Program` (`native`, `link`), with each
+source joined to the manifest's directory. `toolchain.build` compiles each
+source to an object beside the LLVM IR at the build's level, with the
+sanitizer flags when the runtime has them, and links the objects before the
+runtime archive and `-l<name>` after it. The conformance runner carries a
+case's C files with its source and writes them under the build's scratch
+directory, and the outcome cache keys on their bytes.
 
 A build links one of two runtime archives that differ only in the allocator.
 `liblinea_rt_checked.a` compiles `runtime/linea_rt.c` with
@@ -1842,7 +1920,7 @@ record that consumers must read.
 | --- | --- | --- |
 | Lexer → Parser | tokens, spans, reserved words | the `TokenList` itself |
 | Parser → Resolver | source tree shape, declaration kinds including template and standalone derive forms, ordered closed attribute groups and attached derive entries, normalized visibility and ownership policy, panic expressions, written trailing constraints | source `Ast` accessors — `declTokens`, `declName`, `declOwner`, `declAttributeGroups`, `attachedDeriveTraitRange`, `deriveRequestTraitRange`, `declTraitRef`, `boundsOf`, constraint subject and requirement accessors |
-| Loader → Resolver | which source modules exist, which independently loaded root owns each, what each imports, canonical routes between loaded modules, the source interner and source tree | `Program.modules` including typed `Module.root`, `Program.importRoute`, `Program.ast`, `Interner` |
+| Loader → Resolver | which source modules exist, which independently loaded root owns each, what each imports, canonical routes between loaded modules, the source interner and source tree, and the bytes each embed read | `Program.modules` including typed `Module.root`, `Program.importRoute`, `Program.ast`, `Interner`, `Program.embeds` (borrowed into `Resolution.embeds` for the checker, the constant folder and lowering) |
 | Resolver → Checker | immutable expanded syntax and active roots; generated declaration modules and import targets, declaration and rendered origins, template plans, generated-implementation descriptors and ordered component-requirement rows; which declaration each name reaches, each binding's kind, bound classification, references and open scopes for written constraints, the implementations the compiler provides, lambda source identity and parameter scopes | `ExpandedProgram` plus `Resolution` — `declsOf`, `moduleOf`, `importedBy`, declaration origins, generated span origins, `template_members`, `generatedImplementation`, `componentRequirements`, `targets`, `written`, `variant_ordinals`, `ambient_impls`, `closures`, scope tables; `boundNames` for the bounds |
 | Checker → Ownership | expanded roots; types including `Never`, universes, which expressions the checker refused, accepted source or generated bodies, generated bodies suppressed during semantic recovery, and each call's normalised target and arguments | `ExpandedProgram` plus `Typing` — binding/expression types, `refused`, `selected_places`, `folded_indices`, closure descriptors, `variant_uses`, `suppressed_generated_bodies` in shared module/root order, normalised calls and `call_index`; contract destinations remain keyed to the expanded AST transfer. Ownership decides consuming positions itself, from where each expression sits |
 | Checker → Instantiation | expanded roots; admitted generic call selections and their satisfied normalised constraints, callable conversions, normalised targets, implementations, `Self`, layouts, checked named constants | `ExpandedProgram` plus `Typing` — `constant_values`, declaration constraints, `function_values`, closure descriptors, normalised calls and `call_index`, `implementations`, `implementation_selections`, `laid_out`, `raw_accesses` |

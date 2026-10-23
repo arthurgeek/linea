@@ -1,0 +1,20 @@
+error[S-Name]: `embed_bytes` is a keyword, and a keyword cannot be a name
+ --> tests/embed/embed_is_reserved.lin:1:4
+  |
+1 | fn embed_bytes() -> UInt8 {
+  |    ^^^^^^^^^^^ choose another name
+error[S-Name]: `embed` is a keyword, and a keyword cannot be a name
+ --> tests/embed/embed_is_reserved.lin:6:9
+  |
+6 |     let embed = 2
+  |         ^^^^^ choose another name
+error[S-Paren]: expected `(`
+ --> tests/embed/embed_is_reserved.lin:7:11
+  |
+7 |     embed + embed_bytes()
+  |           ^ the file is named in parentheses
+error[S-Embed]: `embed_bytes` takes one string literal naming the file
+ --> tests/embed/embed_is_reserved.lin:7:25
+  |
+7 |     embed + embed_bytes()
+  |                         ^ name the file here, as a string literal

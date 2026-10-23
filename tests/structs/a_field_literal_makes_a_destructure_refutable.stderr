@@ -1,0 +1,7 @@
+error[T-Refutable]: this pattern does not match every `Pair`
+  --> tests/structs/a_field_literal_makes_a_destructure_refutable.lin:11:19
+   |
+11 |     let Pair { a: 1, b } = pair
+   |                   ^ `Pair { a: 0, b: _ }` is not matched
+   |
+   = help: take it apart with `match`, which has an arm for every case

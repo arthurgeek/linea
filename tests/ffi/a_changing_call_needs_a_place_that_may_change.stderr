@@ -1,0 +1,15 @@
+error[T-ExternHandle]: `greeter_rename` may change the object this handle holds, so the handle is lent from a place that may change
+  --> tests/ffi/a_changing_call_needs_a_place_that_may_change/greeter/greeter.lin:39:24
+   |
+39 |         greeter_rename(self.handle, copied.text())
+   |                        ^^^^^^^^^^^ pass a handle held in a `var` or an `inout` parameter, or mark `greeter` `read` if C only reads it
+error[T-ExternHandle]: `greeter_rename` may change the object this handle holds, so the handle is lent from a place that may change
+  --> tests/ffi/a_changing_call_needs_a_place_that_may_change/greeter/greeter.lin:51:20
+   |
+51 |     greeter_rename(greeter, name)
+   |                    ^^^^^^^ pass a handle held in a `var` or an `inout` parameter, or mark `greeter` `read` if C only reads it
+error[T-ExternHandle]: `greeter_rename` may change the object this handle holds, so the handle is lent from a place that may change
+  --> tests/ffi/a_changing_call_needs_a_place_that_may_change/greeter/greeter.lin:52:20
+   |
+52 |     greeter_rename(greeter, name)
+   |                    ^^^^^^^ pass a handle held in a `var` or an `inout` parameter, or mark `greeter` `read` if C only reads it

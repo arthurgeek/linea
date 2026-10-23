@@ -1,0 +1,12 @@
+// A `for inout` walk lends each binder's part of the element writably, and a
+// body that writes the walked array beside them is reported once, however
+// many binders the pattern holds.
+fn main() -> UInt8 {
+    var pairs: [(UInt64, (UInt64, UInt64)); 2] = [(1, (2, 3)), (4, (5, 6))]
+    var total: UInt64 = 0
+    for inout (first, (second, third)) in pairs {
+        pairs[0] = (0, (0, 0))
+        total = total + first + second + third
+    }
+    UInt8(total)
+}

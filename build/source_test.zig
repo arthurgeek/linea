@@ -815,6 +815,161 @@ test "the source of a tree is every zig file beneath it, in one order" {
     try testing.expectEqualStrings("const b = 2;\n", files[1].text);
 }
 
+test "example roots: every example and every nested manifest is a root" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const found = source.exampleRoots(gpa, &.{
+        .{ .path = "README.md", .directory = false },
+        .{ .path = "hello.lin", .directory = false },
+        .{ .path = "discounts", .directory = true },
+        .{ .path = "discounts/linea.json", .directory = false },
+        .{ .path = "discounts/main.lin", .directory = false },
+        .{ .path = "discounts/mail", .directory = true },
+        .{ .path = "discounts/mail/send.lin", .directory = false },
+        .{ .path = "guest-book", .directory = true },
+        .{ .path = "guest-book/linea.json", .directory = false },
+        .{ .path = "guest-book/sqlite", .directory = true },
+        .{ .path = "guest-book/sqlite/linea.json", .directory = false },
+        .{ .path = "guest-book/sqlite/deep", .directory = true },
+        .{ .path = "loose", .directory = true },
+        .{ .path = "loose/main.lin", .directory = false },
+    });
+    try testing.expectEqual(@as(usize, 5), found.len);
+    try testing.expectEqualStrings("discounts", found[0]);
+    try testing.expectEqualStrings("guest-book", found[1]);
+    try testing.expectEqualStrings("guest-book/sqlite", found[2]);
+    try testing.expectEqualStrings("hello.lin", found[3]);
+    try testing.expectEqualStrings("loose", found[4]);
+}
+
+test "example roots: a symlink under examples is refused by name" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "elsewhere");
+    try tmp.dir.createDirPath(io, "examples");
+    try tmp.dir.writeFile(io, .{ .sub_path = "elsewhere/main.lin", .data = "fn main() {}\n" });
+    try tmp.dir.symLink(io, "../elsewhere", "examples/linked", .{ .is_directory = true });
+
+    const layout = try source.exampleLayout(gpa, io, tmp.dir, "examples");
+    try testing.expectEqualStrings("linked", layout.symlink);
+}
+
+test "example roots: the walk lists nested directories and files and nothing else" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "examples/guest-book/sqlite");
+    try tmp.dir.writeFile(io, .{ .sub_path = "examples/hello.lin", .data = "fn main() {}\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "examples/guest-book/sqlite/linea.json", .data = "{}" });
+
+    const layout = try source.exampleLayout(gpa, io, tmp.dir, "examples");
+    const roots = source.exampleRoots(gpa, layout.entries);
+    try testing.expectEqual(@as(usize, 3), roots.len);
+    try testing.expectEqualStrings("guest-book", roots[0]);
+    try testing.expectEqualStrings("guest-book/sqlite", roots[1]);
+    try testing.expectEqualStrings("hello.lin", roots[2]);
+}
+
+test "example roots: a source no root reaches belongs to no example root" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // The same manifest text and directories as the loader's test "a manifest's
+    // source key narrows the files a root reaches", which must agree.
+    const entries = [_]source.ExampleEntry{
+        .{ .path = "hello.lin", .directory = false },
+        .{ .path = "app", .directory = true },
+        .{ .path = "app/linea.json", .directory = false, .text = "{\"source\": \"./src/\"}" },
+        .{ .path = "app/src/main.lin", .directory = false },
+        .{ .path = "app/src/deep/part.lin", .directory = false },
+        .{ .path = "app/stray.lin", .directory = false },
+        .{ .path = "app/lib", .directory = true },
+        .{ .path = "app/lib/linea.json", .directory = false, .text = "{}" },
+        .{ .path = "app/lib/main.lin", .directory = false },
+        .{ .path = "flat", .directory = true },
+        .{ .path = "flat/main.lin", .directory = false },
+        .{ .path = "flat/mail/send.lin", .directory = false },
+    };
+    const roots = source.exampleRoots(gpa, &entries);
+    const stray = source.unreachedSources(gpa, &entries, roots);
+    try testing.expectEqual(@as(usize, 0), stray.problems.len);
+    try testing.expectEqual(@as(usize, 1), stray.files.len);
+    try testing.expectEqualStrings("app/stray.lin", stray.files[0]);
+}
+
+test "example roots: a file named like a manifest is not the manifest" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const entries = [_]source.ExampleEntry{
+        .{ .path = "app", .directory = true },
+        .{ .path = "app/alinea.json", .directory = false },
+        .{ .path = "app/linea.json", .directory = false, .text = "{\"source\": \"src\"}" },
+        .{ .path = "app/src/main.lin", .directory = false },
+        .{ .path = "app/stray.lin", .directory = false },
+    };
+    const roots = source.exampleRoots(gpa, &entries);
+    const stray = source.unreachedSources(gpa, &entries, roots);
+    try testing.expectEqual(@as(usize, 0), stray.problems.len);
+    try testing.expectEqual(@as(usize, 1), stray.files.len);
+    try testing.expectEqualStrings("app/stray.lin", stray.files[0]);
+}
+
+test "example roots: a source that leaves its root, and a manifest that is not JSON, are named" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // The spellings of the loader's test "a manifest's source stays inside the
+    // directory holding it".
+    const entries = [_]source.ExampleEntry{
+        .{ .path = "up", .directory = true },
+        .{ .path = "up/linea.json", .directory = false, .text = "{\"source\": \"../d\"}" },
+        .{ .path = "up/main.lin", .directory = false },
+        .{ .path = "climbs", .directory = true },
+        .{ .path = "climbs/linea.json", .directory = false, .text = "{\"source\": \"src/../../x\"}" },
+        .{ .path = "absolute", .directory = true },
+        .{ .path = "absolute/linea.json", .directory = false, .text = "{\"source\": \"/tmp\"}" },
+        .{ .path = "inside", .directory = true },
+        .{ .path = "inside/linea.json", .directory = false, .text = "{\"source\": \"src/../lib\"}" },
+        .{ .path = "inside/lib/main.lin", .directory = false },
+        .{ .path = "broken", .directory = true },
+        .{ .path = "broken/linea.json", .directory = false, .text = "{\"source\": " },
+        .{ .path = "broken/main.lin", .directory = false },
+    };
+    const roots = source.exampleRoots(gpa, &entries);
+    const found = source.unreachedSources(gpa, &entries, roots);
+    try testing.expectEqual(@as(usize, 0), found.files.len);
+    try testing.expectEqual(@as(usize, 4), found.problems.len);
+    try testing.expectEqualStrings("absolute/linea.json names a source, \"/tmp\", outside its directory", found.problems[0]);
+    try testing.expectEqualStrings("broken/linea.json is not valid JSON", found.problems[1]);
+    try testing.expectEqualStrings("climbs/linea.json names a source, \"src/../../x\", outside its directory", found.problems[2]);
+    try testing.expectEqualStrings("up/linea.json names a source, \"../d\", outside its directory", found.problems[3]);
+}
+
+test "example roots: the tests a run reported are read from its closing line" {
+    try testing.expectEqual(@as(?usize, 3), source.testsReported("ok    a\n\n3 passed, 0 failed\n"));
+    try testing.expectEqual(@as(?usize, 0), source.testsReported("0 passed, 0 failed\n"));
+    try testing.expectEqual(@as(?usize, 5), source.testsReported("x\n4 passed, 1 failed"));
+    try testing.expectEqual(@as(?usize, null), source.testsReported("error[N-Undefined]: no such name\n"));
+    try testing.expectEqual(@as(?usize, null), source.testsReported(""));
+}
+
 test "the quoted strings of a text are read in order" {
     const gpa = testing.allocator;
     const rows =
@@ -1782,6 +1937,220 @@ test "the guide gate: a library's file with tests completes a project beside its
     try testing.expectEqualStrings("plants/plants.lin", reading.programs[0].target);
 }
 
+test "the guide gate: a labelled data block is a file beside the next program, not its output" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const reading = readFixture(gpa,
+        \\`usage.txt`:
+        \\
+        \\```text
+        \\usage: forecast CITY
+        \\```
+        \\
+        \\```linea
+        \\fn main() -> UInt8 {
+        \\    UInt8(embed("usage.txt").length())
+        \\}
+        \\```
+        \\
+        \\```linea
+        \\fn main() -> UInt8 {
+        \\    0
+        \\}
+        \\```
+        \\
+        \\```text
+        \\done
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), reading.problems.len);
+    try testing.expectEqual(@as(usize, 2), reading.programs.len);
+    try testing.expectEqual(@as(usize, 2), reading.programs[0].files.len);
+    try testing.expectEqualStrings("main.lin", reading.programs[0].files[0].path);
+    try testing.expectEqualStrings("usage.txt", reading.programs[0].files[1].path);
+    try testing.expectEqualStrings("usage: forecast CITY", reading.programs[0].files[1].text);
+    // A data block joins the program after it and no other.
+    try testing.expectEqual(@as(usize, 1), reading.programs[1].files.len);
+    try testing.expectEqualStrings("done", reading.programs[1].expected.?);
+}
+
+test "the guide gate: a data block with no program after it is reported" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const at_end = readFixture(gpa,
+        \\`orphan.txt`:
+        \\
+        \\```text
+        \\nobody embeds this
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), at_end.problems.len);
+    try testing.expectEqual(@as(usize, 3), at_end.problems[0].line);
+
+    const before_a_fragment = readFixture(gpa,
+        \\`orphan.txt`:
+        \\
+        \\```text
+        \\nobody embeds this
+        \\```
+        \\
+        \\```linea
+        \\let x = 1
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), before_a_fragment.problems.len);
+    try testing.expectEqual(@as(usize, 0), before_a_fragment.programs.len);
+}
+
+test "the guide gate: a line naming something other than a .lin file above a Linea block is prose, and the block is compiled" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const reading = readFixture(gpa,
+        \\The whole of it fits in one call to
+        \\`str.split_once`:
+        \\
+        \\```linea
+        \\fn main() -> UInt8 { 0 }
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), reading.problems.len);
+    try testing.expectEqual(@as(usize, 1), reading.programs.len);
+    try testing.expectEqual(@as(usize, 1), reading.programs[0].files.len);
+    try testing.expectEqualStrings("main.lin", reading.programs[0].files[0].path);
+}
+
+test "the guide gate: a labelled block directly after a program is its output, not data" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const reading = readFixture(gpa,
+        \\```linea
+        \\fn main() -> UInt8 { 0 }
+        \\```
+        \\
+        \\It prints what `io.print` was given, which ends
+        \\`report.txt`:
+        \\
+        \\```
+        \\done
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), reading.problems.len);
+    try testing.expectEqual(@as(usize, 1), reading.programs.len);
+    try testing.expectEqualStrings("done", reading.programs[0].expected.?);
+}
+
+test "the guide gate: an unchecked program takes the data above it" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const then_another = readFixture(gpa,
+        \\`page.txt`:
+        \\
+        \\```text
+        \\hello
+        \\```
+        \\
+        \\<!-- guide: unchecked the file is shown elsewhere -->
+        \\```linea
+        \\fn main() -> UInt8 { UInt8(embed("page.txt").length()) }
+        \\```
+        \\
+        \\```
+        \\error[M-Embed]: something
+        \\```
+        \\
+        \\```linea
+        \\fn main() -> UInt8 { 0 }
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), then_another.problems.len);
+    try testing.expectEqual(@as(usize, 1), then_another.programs.len);
+    try testing.expectEqual(@as(usize, 1), then_another.programs[0].files.len);
+
+    const at_end = readFixture(gpa,
+        \\`page.txt`:
+        \\
+        \\```text
+        \\hello
+        \\```
+        \\
+        \\<!-- guide: unchecked reason -->
+        \\```linea
+        \\fn main() -> UInt8 { UInt8(embed("page.txt").length()) }
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), at_end.problems.len);
+    try testing.expectEqual(@as(usize, 0), at_end.programs.len);
+}
+
+test "the guide gate: a labelled manifest and C source join the project" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const reading = readFixture(gpa,
+        \\`tally/linea.json`:
+        \\
+        \\```json
+        \\{ "extern": ["counter"], "native": ["counter/counter.c"] }
+        \\```
+        \\
+        \\`tally/counter/counter.c`:
+        \\
+        \\```c
+        \\int counter_double(int value) { return value * 2; }
+        \\```
+        \\
+        \\`tally/counter/counter.lin`:
+        \\
+        \\```linea
+        \\extern fn counter_double(value: Int32) -> Int32
+        \\
+        \\pub fn double(value: Int32) -> Int32 {
+        \\    counter_double(value)
+        \\}
+        \\```
+        \\
+        \\`tally/main.lin`:
+        \\
+        \\```linea
+        \\import counter
+        \\
+        \\fn main() -> UInt8 {
+        \\    UInt8(counter.double(2))
+        \\}
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), reading.problems.len);
+    try testing.expectEqual(@as(usize, 1), reading.programs.len);
+    try testing.expectEqual(@as(usize, 4), reading.programs[0].files.len);
+    try testing.expectEqualStrings("tally/linea.json", reading.programs[0].files[0].path);
+    // A labelled C source is a data file of the program after it, written
+    // beside the project's sources wherever it sits among them.
+    const carries_c = for (reading.programs[0].files) |file| {
+        if (std.mem.eql(u8, file.path, "tally/counter/counter.c")) break true;
+    } else false;
+    try testing.expect(carries_c);
+    try testing.expectEqualStrings("tally", reading.programs[0].target);
+}
+
 test "the guide gate: a fragment passes uncounted as a program, and a fragment with output is refused" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -1872,6 +2241,111 @@ test "the guide gate: a program without pasted output is only checked, and outpu
     );
     try testing.expectEqual(@as(usize, 1), loose.problems.len);
     try testing.expectEqual(@as(usize, 3), loose.problems[0].line);
+}
+
+test "the guide gate: an excerpt marker holds a fragment to consecutive lines of its file" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "examples/guest-book");
+    try tmp.dir.writeFile(
+        io,
+        .{
+            .sub_path = "examples/guest-book/main.lin",
+            .data =
+            \\import std.http
+            \\
+            \\fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+            \\    &router.route("GET /", home)?
+            \\    &router.route("POST /sign", sign)
+            \\}
+            \\
+            \\fn main() -> UInt8 {
+            \\    0
+            \\}
+            \\
+            ,
+        },
+    );
+
+    const readWithRoot = struct {
+        fn call(a: std.mem.Allocator, i: std.Io, dir: std.Io.Dir, text: []const u8) source.GuideReading {
+            var chapter = guide_chapter;
+            chapter.text = text;
+            chapter.root = .{ .io = i, .dir = dir };
+            return source.readGuideChapter(a, chapter);
+        }
+    }.call;
+
+    const matching = readWithRoot(gpa, io, tmp.dir,
+        \\<!-- guide: excerpt examples/guest-book/main.lin -->
+        \\```linea
+        \\fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+        \\    &router.route("GET /", home)?
+        \\    &router.route("POST /sign", sign)
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    0
+        \\}
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), matching.problems.len);
+    try testing.expectEqual(@as(usize, 0), matching.programs.len);
+    try testing.expectEqual(@as(usize, 1), matching.fragments);
+
+    const altered = readWithRoot(gpa, io, tmp.dir,
+        \\Prose.
+        \\
+        \\<!-- guide: excerpt examples/guest-book/main.lin -->
+        \\```linea
+        \\fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+        \\    &router.route("GET /", home)?
+        \\    &router.route("POST /changed", sign)
+        \\}
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), altered.problems.len);
+    try testing.expectEqual(@as(usize, 4), altered.problems[0].line);
+    try testing.expect(std.mem.indexOf(u8, altered.problems[0].message, "examples/guest-book/main.lin") != null);
+
+    const missing = readWithRoot(gpa, io, tmp.dir,
+        \\<!-- guide: excerpt examples/guest-book/missing.lin -->
+        \\```linea
+        \\let x = 1
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), missing.problems.len);
+    try testing.expectEqual(@as(usize, 2), missing.problems[0].line);
+    try testing.expect(std.mem.indexOf(u8, missing.problems[0].message, "examples/guest-book/missing.lin") != null);
+
+    const above_sh = readWithRoot(gpa, io, tmp.dir,
+        \\<!-- guide: excerpt examples/guest-book/main.lin -->
+        \\```sh
+        \\linea run examples/guest-book
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), above_sh.problems.len);
+    try testing.expectEqual(@as(usize, 2), above_sh.problems[0].line);
+
+    const above_output = readWithRoot(gpa, io, tmp.dir,
+        \\<!-- guide: excerpt examples/guest-book/main.lin -->
+        \\```
+        \\some output
+        \\```
+        \\
+    );
+    try testing.expect(above_output.problems.len >= 1);
+    try testing.expectEqual(@as(usize, 2), above_output.problems[0].line);
 }
 
 test "a sequential run orders exactly the heavy steps its suite selects" {

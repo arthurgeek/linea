@@ -122,6 +122,7 @@ module.exports = grammar({
     // An `extern` declares an operation without a source body, so
     // it is a header ended by a line break the way a trait's signature is.
     extern_declaration: $ => seq(
+      optional($.visibility),
       'extern',
       'fn',
       field('name', $.identifier),
@@ -688,6 +689,7 @@ module.exports = grammar({
       $.copy_expression,
       $.borrow_expression,
       $.panic_expression,
+      $.embed_expression,
       $.try_expression,
       $.marked_expression,
       $.lambda_expression,
@@ -836,6 +838,9 @@ module.exports = grammar({
 
     copy_expression: $ => prec(10, seq('copy', '(', $._expression, ')')),
     panic_expression: $ => prec(10, seq('panic', '(', field('message', $._expression), ')')),
+    // A file's text or bytes, read when the program is compiled. The path is
+    // one string literal, which the compiler holds to a quoted or raw one.
+    embed_expression: $ => prec(10, seq(choice('embed', 'embed_bytes'), '(', field('path', $.string_literal), ')')),
 
     // Postfix, at a field selection's precedence: `f()?.n` selects from what
     // `?` yielded, and `a?.b?` chains, which is what the parser's own suffix
@@ -981,22 +986,38 @@ module.exports = grammar({
 
     wildcard_pattern: _ => '_',
 
-    // `(a, b)` binds each component by position to a name or `_`, after
-    // `let`, in a walk's binder, in a match arm and as a lambda parameter.
-    // Nothing nests inside it.
+    // A pattern where a binder may stand: inside a variant's payload, a
+    // tuple's component, or after a struct field's `:`. A bare name binds or
+    // names a variant by its case, which the compiler reads and this grammar
+    // leaves to it.
+    _part_pattern: $ => choice(
+      $.identifier,
+      $.wildcard_pattern,
+      $.struct_pattern,
+      alias($._inferred_struct_pattern, $.struct_pattern),
+      $.variant_pattern,
+      $.range_pattern,
+      $.integer_literal,
+      $.string_literal,
+      $.tuple_pattern,
+    ),
+
+    // `(a, b)` takes each component apart by position, after `let`, in a
+    // walk's binder, in a match arm and as a lambda parameter, and each
+    // component is a pattern.
     // `(a,)` is accepted and left to the compiler to refuse.
     tuple_pattern: $ => seq(
       '(',
-      choice($.identifier, $.wildcard_pattern),
+      $._part_pattern,
       ',',
-      optional(commaSep1(choice($.identifier, $.wildcard_pattern))),
+      optional(commaSep1($._part_pattern)),
       ')',
     ),
 
     variant_pattern: $ => prec(1, seq(
       alias($.identifier, $.type_identifier),
       '(',
-      commaSep(choice($.identifier, $.wildcard_pattern)),
+      commaSep($._part_pattern),
       ')',
     )),
 
@@ -1015,7 +1036,7 @@ module.exports = grammar({
     // out would have written.
     field_pattern: $ => seq(
       field('name', $.identifier),
-      optional(seq(':', choice($.identifier, $.wildcard_pattern))),
+      optional(seq(':', $._part_pattern)),
     ),
 
     // `break` carries a value: a loop's value is what its breaks agree on.
@@ -1108,7 +1129,8 @@ module.exports = grammar({
     ),
     // The text after the colon, up to the closing brace, is one token: its
     // characters are the parts of a format spec, `[[fill]align][+][0][width]
-    // [.precision][?]`, rather than operators, as the compiler's lexer reads it.
+    // [.precision][x|X|?]`, rather than operators, as the compiler's lexer
+    // reads it.
     format_selector: $ => seq(':', $.format_spec),
     // Spaces before the closing brace are not part of the spec.
     format_spec: _ => /[^\s}"]([^}"\n]*[^\s}"])?/,

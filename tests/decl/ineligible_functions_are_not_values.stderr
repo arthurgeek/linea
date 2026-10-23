@@ -3,11 +3,11 @@ error[S-Test]: a test is not called by name
    |
 12 |     let _test: fn() -> Result[(), IoError] = checked
    |                                              ^^^^^^^ the compiler writes the only call to a test, so a program naming one would ship it
-error[M-Extern]: an `extern` is only declared in a root whose manifest grants `"extern": true`
+error[M-Extern]: an `extern` is declared only in a module its root's manifest grants, and linea.json does not list "."
  --> tests/decl/ineligible_functions_are_not_values.lin:9:11
   |
 9 | extern fn foreign(value: UInt8) -> UInt8
-  |           ^^^^^^^ call it through the standard library, which declares the ones that exist
+  |           ^^^^^^^ list this module under "extern" in linea.json to trust it with C, or call a module that is granted
 error[N-NotAValue]: `checked` is a test, and a test is not a value
   --> tests/decl/ineligible_functions_are_not_values.lin:12:46
    |

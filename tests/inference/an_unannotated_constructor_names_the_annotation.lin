@@ -1,0 +1,9 @@
+// `Vec.new()` builds an empty vector, and nothing in the call says what it
+// holds. The report shows the annotation that says so where `names` is
+// declared.
+fn main() -> UInt8 {
+    var names = Vec.new()
+    defer names.release()
+    let _pushed = &names.push("Ada").settled()
+    UInt8(names.length())
+}

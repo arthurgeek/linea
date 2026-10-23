@@ -1,0 +1,6 @@
+// This module is not listed under "extern", so it may not declare C.
+extern fn labs(value: Int64) -> Int64
+
+pub fn magnitude(value: Int64) -> Int64 {
+    labs(value)
+}

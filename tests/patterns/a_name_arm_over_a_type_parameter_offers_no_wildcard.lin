@@ -1,0 +1,12 @@
+// A type parameter may stand for any type, a linear one included, so a name at
+// an arm's head names no variant of it. Matching it with `_` would drop a value
+// that must be settled, so the report says to use the value as it is.
+fn first_byte[T](sink value: T) -> UInt8 {
+    match value {
+        Empty => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    first_byte(1)
+}

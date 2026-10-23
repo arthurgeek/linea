@@ -36,7 +36,7 @@ fn main() -> Result[UInt8, IoError] {
     match grouped { Some(t) => t.fmt(&out).unwrap(), None => () }
     match block { Some(t) => t.fmt(&out).unwrap(), None => () }
     match called { Some(t) => t.fmt(&out).unwrap(), None => () }
-    match nested { Some(inner) => match inner { Some(t) => t.fmt(&out).unwrap(), None => () }, None => () }
+    match nested { Some(Some(t)) => t.fmt(&out).unwrap(), Some(None) => (), None => () }
     match wrapped { Some(t) => t.fmt(&out).unwrap(), None => () }
     for item in listed {
         match item { Some(t) => t.fmt(&out).unwrap(), None => () }

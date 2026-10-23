@@ -1,0 +1,5 @@
+{
+    "dependencies": {
+        "statements": { "path": "statements", "extern": true }
+    }
+}

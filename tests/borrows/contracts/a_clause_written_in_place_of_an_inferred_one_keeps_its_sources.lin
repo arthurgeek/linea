@@ -1,0 +1,23 @@
+// `label` writes no clause, so it infers `carries(other)`, and its body also
+// returns a view of `self`. Writing a clause replaces the inferred one, so the
+// clause the report names keeps `other` beside `self`.
+@derive(Release)
+struct Station {
+    name: String,
+}
+
+impl Station {
+    fn label(inout self: Self, other: Str, first: Bool) -> Str {
+        if first {
+            self.name.view()
+        } else {
+            copy(other)
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    var s = Station { name = String.new() }
+    defer s.release()
+    UInt8(&s.label("x", true).length())
+}

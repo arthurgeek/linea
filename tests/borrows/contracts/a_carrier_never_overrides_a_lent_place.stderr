@@ -2,4 +2,4 @@ error[T-BorrowContract]: the result has more than one eligible observation sourc
  --> tests/borrows/contracts/a_carrier_never_overrides_a_lent_place.lin:8:4
   |
 8 | fn pick(session: Session, name: Str) -> borrow Str {
-  |    ^^^^ the result may borrow from `session` or `name`; add `where borrows(session)` or `where borrows(name)`, or list several sources in one clause
+  |    ^^^^ the result may come from `session` or `name`; add `where carries(session)` or `where borrows(name)`, or `where borrows(name), carries(session)` where it may come from either

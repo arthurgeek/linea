@@ -62,7 +62,7 @@ pub fn tokenizeInto(
     // by construction only if the file they came from was. Checked here rather
     // than per literal, because it is a fact about the file.
     const z_utf8 = tracy.beginZone(@src(), "lex.utf8");
-    const invalid = firstInvalidUtf8(source.text);
+    const invalid = literal_text.firstInvalidUtf8(source.text);
     z_utf8.end();
     if (invalid) |at| {
         try sink.addError(
@@ -137,39 +137,6 @@ pub fn isIdentifier(gpa: std.mem.Allocator, text: []const u8) std.mem.Allocator.
 ///
 /// The offset rather than a yes or no, so the diagnostic can point at the byte
 /// instead of at the file.
-/// A byte under 0x80 stands for itself, and program text is nearly all of
-/// them, so the common byte is skipped without being decoded -- a word at a
-/// time while none in it has the high bit set. What is left is what actually
-/// needs UTF-8 read out of it.
-///
-/// This is one pass over every byte of every file before a token is read, and
-/// decoding each of them made it a fifth of what lexing costs, which is the
-/// largest thing the front end does.
-fn firstInvalidUtf8(bytes: []const u8) ?usize {
-    const stride = @sizeOf(usize);
-    const high: usize = @bitCast([_]u8{0x80} ** stride);
-
-    var i: usize = 0;
-    while (i < bytes.len) {
-        while (i + stride <= bytes.len) {
-            const chunk: usize = @bitCast(bytes[i..][0..stride].*);
-            if (chunk & high != 0) break;
-            i += stride;
-        }
-        if (i >= bytes.len) break;
-
-        if (bytes[i] < 0x80) {
-            i += 1;
-            continue;
-        }
-        const n = std.unicode.utf8ByteSequenceLength(bytes[i]) catch return i;
-        if (i + n > bytes.len) return i;
-        _ = std.unicode.utf8Decode(bytes[i..][0..n]) catch return i;
-        i += n;
-    }
-    return null;
-}
-
 /// How many interpolations may be open at once. A literal inside an
 /// interpolation may interpolate in turn, and each level is one entry; past
 /// this the program is a mistake rather than a program, and the scanner says so

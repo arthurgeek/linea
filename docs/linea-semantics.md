@@ -186,6 +186,7 @@ expression   ::= literal | qualified | "(" expression ")" | tuple
                | "-" expression
                | "copy" "(" expression ")"
                | "panic" "(" expression ")"
+               | ("embed" | "embed_bytes") "(" string ")"
                | expression "." name
               | "!" expression
               | expression binop expression
@@ -257,9 +258,9 @@ statement, although it is a declaration.
 
 Words quoted in the grammar are reserved and cannot be names, with the
 exceptions below. This includes words used in only one grammatical position,
-such as `read`, `copy`, `sink`, `impl`, `opaque`, `linear`, `copyable` and
-`carrier`, so a reader can decide whether a name is legal without knowing the
-parser's state.
+such as `read`, `copy`, `sink`, `embed`, `embed_bytes`, `impl`, `opaque`,
+`linear`, `copyable` and `carrier`, so a reader can decide whether a name is
+legal without knowing the parser's state.
 
 `type`, `alias`, `proj`, `trav`, `it`, `via` and `default` are contextual
 words, not reserved words.
@@ -378,7 +379,10 @@ is.
 
 **[S-Test]** `test fn` declares a function called by the compiler and excluded
 from shipped artefacts. A test has **no visibility**: `pub` would export a name
-that imports cannot reach. The modifier applies only to a function.
+that imports cannot reach. The modifier applies only to a function. A test may
+sit at module scope or inside an inherent `impl`; inside an implementation for a
+trait it is refused. A test inside an `impl` is organized at module scope and does
+not become a callable member of the type.
 
 A test may instead be written `test trap fn`. It succeeds only when its child
 process reaches a language trap; returning successfully, returning a failure,
@@ -510,10 +514,33 @@ after its last line is text, so a match arm whose body is a multi-line literal
 writes the body as a block and puts the comma after the block's `}`. It is not
 a pattern: the `=>` after it would be part of its last line.
 
+An **embedded file** is the content of a file the program carries, read when
+the program is compiled rather than when it runs:
+
+```linea
+let page = embed("templates/page.html")
+let icon = embed_bytes("icon.png")
+```
+
+`embed(path)` is the file's text, a `Str`, and `embed_bytes(path)` is its bytes,
+a `mem.Slice[UInt8]`. Every byte is kept as the file holds it: a byte order
+mark, `\r\n` line ends, a final line break and NUL bytes are all part of the
+value. The path is relative to the directory of the file that writes it, and
+which files it may name is [M-Embed]'s. The program needs nothing beside it
+when it runs, and a change to the file is seen the next time the program is
+compiled.
+
+**[S-Embed]** The argument of `embed` or `embed_bytes` is one string literal,
+quoted or raw, that names the file. The file is read before any name is
+resolved, so the path is written where it is used: a name, even of a string
+constant, an interpolated or multi-line literal, a second argument and no
+argument are refused. Both words are reserved and written with their
+parentheses; neither is a callable value.
+
 **[S-Format]** An expression inside an interpolation may be followed by a
-colon and a format spec, `[[fill]align][+][0][width][.precision][?]`, each
-part optional and in that order: `"{day:02}"`, `"{count:>4}"`,
-`"{price:.2}"`, `"{name:<10}"`, `"{name:*^9?}"`. A colon begins a spec only
+colon and a format spec, `[[fill]align][+][0][width][.precision][x|X|?]`,
+each part optional and in that order: `"{day:02}"`, `"{count:>4}"`,
+`"{price:.2}"`, `"{name:<10}"`, `"{name:*^9?}"`, `"{color:06x}"`. A colon begins a spec only
 outside every parenthesis, bracket and brace of the value, so the colon in
 `"{f(n: 1)}"` names an argument. Spaces around the spec are not part of it.
 
@@ -535,17 +562,22 @@ outside every parenthesis, bracket and brace of the value, so the colon in
   occupies, counted in Unicode scalars: `"café"` occupies four. A value wider
   than its width is written whole.
 - `.precision` is the number of digits after a float's point.
+- `x` writes an integer's digits in base 16 with the letters `a` to `f`, and
+  `X` with `A` to `F`. A negative integer is written as `-` and the digits of
+  its magnitude, so `-255` with `:x` is `-ff` whatever its type, and zero
+  padding goes between the two: `-000ff` with `:06x`.
 
-A colon with no spec after it, a part out of order, an alignment or `0`
-without a width, a width or precision above 65535, and `0` beside an alignment
-are refused. A width and a precision are literal numbers; a width chosen at run
+A colon with no spec after it, a part out of order, more than one of `x`, `X`
+and `?`, an alignment or `0` without a width, a width or precision above
+65535, and `0` beside an alignment are refused. A width and a precision are literal numbers; a width chosen at run
 time is written through `std.fmt.Spec` instead.
 
 **[T-Format]** A spec's parts must suit the value's type. A sign and zero
-padding lay out integers and floats, and a precision lays out a float
-only; fill, alignment and width lay out any value. A generic value is a number
-when it has `Integer` evidence. `"{name:.2}"` on a `Str` and `"{count:.2}"` on
-an integer are refused.
+padding lay out integers and floats, a precision lays out a float only,
+and `x` and `X` write integers only; fill, alignment and width lay out any
+value. A generic value is a number, and an integer, when it has `Integer`
+evidence. `"{name:.2}"` on a `Str`, `"{count:.2}"` on an integer and
+`"{price:x}"` on a float are refused.
 
 **[T-Interpolation]** The compiler creates a type for each interpolated
 literal. Its value contains the surrounding text and the interpolated values.
@@ -639,12 +671,15 @@ its field names. Both forms consume the whole value and require every field
 exactly once. Shorthand, renamed binders, `_` discards, opaque visibility, and
 ownership obligations follow the same rules. An empty struct uses
 `let {} = value`. A tuple is taken apart by position with a tuple pattern
-`(a, b)` ([S-Tuple]). Nested patterns and partial moves are not permitted.
+`(a, b)` ([S-Tuple]). A part of any of these patterns may itself be a pattern
+([S-Match]), so `let Frame { origin: Point { x, y }, scale } = frame` takes the
+inner point apart too; the pattern must match every value of its type
+([T-Refutable]). There are no partial moves: the `let` takes the whole value.
 Taking a tuple apart does not dispose of any component: each binder receives
 its component and carries its ownership obligations.
 
 `let read Pattern = place` binds the same newtype, whole-struct and tuple
-patterns without taking the value apart. `read` marks the pattern, as it does
+patterns, nested as a consuming `let`'s may be, without taking the value apart. `read` marks the pattern, as it does
 in `match read`; it is not an operator on the initializer. Each binder is a
 read-only lend of the part its pattern selects, exactly as a `match read`
 binder is, and no value is copied or moved to make it. The initializer must be
@@ -770,10 +805,8 @@ terms earlier in a chain add no depth above a type they do not enclose.
 literal `(a, b)`, a type `(A, B)` and a pattern `(a, b)`. `(x)` groups `x` and
 is not a tuple; `(x,)` is refused; `()` is the unit value and type, the tuple
 of no components. A component of a literal is an expression, of a type a type,
-and of a pattern a name or `_`. Components are separated by commas, and a
-trailing comma is accepted after the second component or later. A pattern's
-binders are names: a tuple pattern does not nest inside a variant's payload or
-another pattern.
+and of a pattern a pattern ([S-Match]). Components are separated by commas, and a
+trailing comma is accepted after the second component or later.
 
 **[S-Brace]** A block is closed.
 
@@ -843,10 +876,28 @@ with the same value name the same default.
 
 **[S-Match]** A `match` contains a scrutinee and a brace-enclosed,
 comma-separated list of arms. Each arm is a pattern, `=>`, and an expression.
-A pattern is a variant name with an optional parenthesised binder list, a type
-name with a braced list of `field: name`, a tuple pattern `(a, b)` of names
-([S-Tuple]), a literal or range, or `_`. A binder must be a name; expressions
-as binders and nested patterns are not supported.
+A pattern is a variant name with an optional parenthesised list of patterns, a
+type name with a braced list of `field: pattern`, a tuple pattern `(a, b)`
+([S-Tuple]), a literal or range, or `_`. The patterns inside one -- in a
+variant's or newtype's parentheses, a tuple's components, or after a field's
+`:` -- are patterns of the same grammar, so `Some((name, port))`,
+`(Some(a), None)`, `Ok(Point { x, y })` and `Err(Read(Limit))` are patterns
+([ADR 0224](adr/0224-a-pattern-nests-wherever-a-binder-stands.md)). Inside a
+pattern a bare name is read by its case ([N-Case]): a lowercase name or `_`
+binds the part it stands at, and a capitalised one is a variant, matched with
+its payload unnamed. An inferred struct pattern `{ a, b }` may stand inside
+another pattern. A part is a pattern and never an expression: nothing compares
+a part against a value but a literal or a range.
+
+```
+match load(step) {
+    Ok(Some(value)) => value,
+    Ok(None) => 0,
+    Err(Read(Limit)) => 1,
+    Err(Read(Closed)) => 2,
+    Err(Parse(_)) => 3,
+}
+```
 
 A range-pattern bound must be an optionally negated integer literal, a string
 literal, or a name: either bare or a path to a declaration's constant
@@ -1231,7 +1282,10 @@ it stands for.
 **[N-Variant]** A variant is named through its enum: `Colour.Red`, or `.Red`
 when context supplies the type. A bare `Red` cannot name a variant. A leading
 `.` means that context supplies the type; this holds beyond enums, always
-refers to a named type, and creates no unnamed type.
+refers to a named type, and creates no unnamed type. A name at a `match` arm's
+head names a variant of the subject's enum, so over a subject whose type is not
+an enum, or not known to be one, it names nothing and is refused here; the
+report suggests `_`, or the pattern that takes the value apart.
 
 A postfix call can access **a type's inherent operations or operations of
 traits it satisfies**. For example, `s.length()` calls an operation in
@@ -1560,7 +1614,7 @@ already names a library in another directory anywhere in the compilation; when
 the library reaches itself through dependencies, the cycle named in the help;
 when the library's `source` leaves the directory holding its manifest, or
 shares modules with another root's source (they are one directory, or one holds
-the other without the inner root's manifest between them); or when the library's manifest grants `"extern": true` and the
+the other without the inner root's manifest between them); or when the library's manifest grants `extern` to any of its modules and the
 entry does not consent with `"extern": true`, or the entry consents and the
 manifest grants nothing. The program links every root's `extern`
 declarations, so the primary root's manifest also names every library in the
@@ -1657,6 +1711,32 @@ implementation reaches the prelude's declarations by identity: a module that
 declares its own `Result` or `Option` still derives `Debug`, `Display` and the
 other standard traits.
 
+**[M-Embed]** An embedded path names a regular file inside the root of the
+code that writes it. The path is relative to the directory of the writing
+file, and is one or more names separated by `/`. It may begin with a run of
+`..`, each naming the directory above, but may not climb above the root: the
+directory holding the program's or library's `linea.json`, or, for a file no
+program's source holds, the file's own directory. A program whose source sits
+in `src` therefore embeds `../templates/page.html` from `src/main.lin`, and the
+standard library embeds only files under its own directory. The path is
+refused when it is empty, begins with `/`, has an empty part (`a//b`, `a/`),
+holds a `.` part, a `..` after another name, a backslash, a NUL byte or a `:`,
+or climbs above the root. It names no file when no entry is spelled exactly as
+it is, byte for byte, including letter case on a filesystem that ignores case;
+when any directory on the way, or the file itself, is a symbolic link; when it
+names a directory or anything but a regular file; and when the file holds more
+than 16 MiB (16 777 216 bytes), which is refused before the file is read.
+
+Because no link below the root is followed, a path whose spelling stays inside
+the root stays inside it on disk. The root's own directory is not inspected, so
+a program reached through a link above it is unaffected. A file is read once
+per compilation however many expressions name it, and the code emitted for a
+program depends on the bytes it embeds and not on where the file sits.
+
+**[M-EmbedText]** A file embedded with `embed` is UTF-8 text, checked as a
+source file is ([S-Encoding]), because a `Str`'s bytes are valid UTF-8. A file
+of any bytes is embedded with `embed_bytes`.
+
 ### §3.8 Visibility
 
 A declaration is private, `internal`, `pub`, or `opaque`. Private is the
@@ -1696,8 +1776,24 @@ entry point.
 A manifest says what its root is: `"kind"` is `"program"` (the default) or
 `"library"`; `"name"` names a library, and the name `std` makes the root the
 standard library every program depends on, so only a library may take it;
-`"extern": true` grants [M-Extern]'s capability. The standard library's
-manifest is `{ "kind": "library", "name": "std", "extern": true }`. Whether a
+`"extern"` lists the modules granted [M-Extern]'s capability, each spelled as
+an import inside the root names it (`"store"`, `"io.core"`), with `"."` for the
+root module. A grant of another shape, or one naming a directory of the root
+that holds no source, stops the command before anything is checked. The
+standard library's manifest is
+`{ "kind": "library", "name": "std", "extern": ["fmt", "fs", "io.core", "mem", "net", "scalar", "time"] }`.
+`"native"` lists C sources, relative to the manifest, that a build compiles
+with the same `cc` at the same level and links into the program, and `"link"`
+lists libraries the build links, each a name `cc` takes after `-l`
+(`["sqlite3"]`). Either requires an `"extern"` grant, since only a granted
+module can call what they build. A library may name both, its sources relative
+to its own manifest: a program builds and links the C of every root it loads,
+its own first and then each dependency's in the order the dependency graph
+numbers them; a source named twice is built once, and libraries keep each
+manifest's order, named again wherever another manifest names them. A
+dependency granted `extern` is loaded, and its C built, only where its
+consumers consent ([M-Dependency]).
+Whether a
 root is the standard library is read from its manifest and never from its
 directory's name or location.
 
@@ -1835,16 +1931,39 @@ constructed from their parts, destructured, or inspected through those parts.
 struct Account { id: UInt8, balance: UInt8 }
 ```
 
-**[M-Extern]** An `extern` declaration appears only in a root whose manifest
-grants it, with `"extern": true`; the grant is any root's, program or library.
-A dependency's grant takes effect only where every manifest naming it, and the
-primary root's manifest, consent with `"extern": true` in an entry
-([M-Dependency]).
-The standard library's manifest grants it; a root whose manifest does not is
-refused. The compiler trusts an `extern` signature without inspecting its
-implementation, so the grant bounds that trust to roots that declare it
+**[M-Extern]** An `extern` declaration appears only in a module that its root's
+manifest lists under `"extern"`; any root, program or library, may grant its
+own modules. A dependency's grant takes effect only where every manifest
+naming it, and the primary root's manifest, consent with `"extern": true` in
+an entry ([M-Dependency]). A module the manifest does not list is refused. An
+`extern` is private to its module: `pub` or `internal` on one is refused,
+because another module calling C directly would be trusted with C too. The
+granted module publishes ordinary functions that call it. The compiler
+trusts an `extern` signature without inspecting its implementation, so the
+grant bounds that trust to the modules a reviewer was told to read
 ([ADR 0068](adr/0068-a-declaration-may-name-a-symbol-the-runtime-provides.md),
-[ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md)).
+[ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md),
+[ADR 0228](adr/0228-a-granted-module-calls-c.md)).
+
+**[M-Foreign]** Only a module its root's manifest grants `extern` may use
+`std.ffi`: import it, call any function or method `std.ffi` declares, or take
+one as a value, whatever `std.ffi` value it is handed. A trait's operation
+reached through one of `std.ffi`'s implementations, such as `release` on a
+`CString`, reads no C memory and is not refused. A module that is not granted may
+hold such a value and pass it on, which reads nothing. A granted module also
+publishes none of its types, as an earlier and plainer report: no function that
+is not private names one in its signature, no `pub use` or alias names one, and
+no struct or enum whose representation another module can reach holds one in a
+field or payload.
+`std.ffi` holds what crosses to C as an address: `Bytes` lends a view's bytes,
+`CText` is NUL-terminated text, `CTextList` is C's `char **`, and `CString`
+owns text with a NUL after it. A `Bytes`, `CText` or `CTextList` is a copyable
+newtype over the address whose dependencies originate at the value, as a
+`mem.Slice`'s do, so a contract ties it to what it views: `ffi.bytes(text)`
+carries `text`, and an `extern` answering a pointer into a handle declares
+`borrows(handle)`. Their operations trust what C supplied, such as a length,
+which is why they stay inside the module the grant names
+([ADR 0228](adr/0228-a-granted-module-calls-c.md)).
 
 **[M-Export]** An `export` declaration designates exactly one concrete foreign
 ABI entry point. Six declaration forms are excluded.
@@ -1915,7 +2034,8 @@ exempt because it exposes the declaration to other modules.
 A `use` that binds a trait is exempt: a method call can use a trait without
 naming it (`a.acquire(n)` requires `Allocator` in scope even if it appears only
 in the `use`), and these calls are resolved after name resolution. Unused
-aliases of types and functions remain diagnosed.
+aliases of types and functions remain diagnosed. An import or `use` that names
+nothing is refused by [M-Import], and is not also reported as unused.
 
 Prelude imports are exempt. The prelude imports every library module so its
 implementations are loaded and available for lookup, and a module that only
@@ -2085,7 +2205,10 @@ omitted parameter types and its result type is the expectation on the body. A
 non-capturing lambda whose completed signature satisfies that interface then
 converts to that one structural code-pointer type. A structural callable bound
 supplies the same parameter and result context without erasing the lambda's
-unique type. Callable-bound satisfaction also compares outer parameters by
+unique type, so two closures passed for one type parameter are two types, and
+the call is [T-Mismatch]: the report says each closure has its own type and
+names a type parameter for each, with the same bound. Callable-bound
+satisfaction also compares outer parameters by
 position, independently of their binder names. Label differences require no
 runtime adapter and introduce no parameter or result type variance.
 
@@ -2312,8 +2435,10 @@ included, name the trait's parameters, and read the types an implementation
 settles, `Self.Iter`, but nothing a particular implementation holds. A body
 provided by a trait with parameters, `Scale[K]`, runs at the arguments of the
 implementation it was reached through. An implementation does not supply a
-provided operation, and one that does is refused under this rule. `Sequence`
-provides `map` this way:
+provided operation, and one that does is refused under this rule. A member
+refused for being there at all is dropped by the fix, so its body is not checked
+for ownership: what it would return or keep is not a mistake of its own.
+`Sequence` provides `map` this way:
 
 ```linea
 pub trait Sequence {
@@ -2444,6 +2569,20 @@ An associated type definition cannot use a settled reference: `type Item =
 Self.Other` would define one associated type through another in the same
 implementation. An implementation defines each associated type exactly once;
 duplicate definitions are [N-Duplicate].
+
+A definition may read another implementation's settled type, `type Dual =
+Pong.Dual`, and means what that definition means, whichever implementation is
+written first. A definition that reads back to itself through such references,
+`Ping.Dual` reading `Pong.Dual` reading `Ping.Dual`, or `type Dual = Echo.Dual`
+inside `Echo`'s own implementation, defines no type and is [T-Impl], reported
+once per cycle at the definition on it written first, naming each definition
+and the type it is written as. The reference may sit inside an argument:
+`type D = Option[B.D]` with `type D = Option[A.D]` is the same cycle. A
+definition that only reads into such a cycle is that report's consequence. A
+cycle that passes through a type's field rather than through definitions,
+`type Iter = S[Box]` where `S[T]` has a field of type `T.Iter`, defines `Iter` as
+an ordinary type; it is the layout of `S[Box]` that contains itself, and
+[T-InfiniteLayout] reports it.
 
 An implementation supplies the trait's type arguments, as in
 `impl Holds[UInt8] for Coins` for `Holds[T]`. A wrong argument count is rejected
@@ -3485,6 +3624,12 @@ variant's checked payload types. Any remaining parameter is [T-Infer]:
 `Option.Some(3)` determines a type, but `Option.None` does not, and
 `Result.Ok(3)` leaves the error type unknown.
 
+An argument built by another constructor than the one its parameter's type
+writes around a parameter the call leaves open can never settle it, and is
+[T-Mismatch] rather than [T-Infer]: `Chan[Recv[UInt64, End]]` passed for
+`Chan[Send[T, N]]` is reported against `Chan[Send[UInt64, N]]`, with what the
+call settled filled in and the open parameter by its name.
+
 Inference does not use later statements, with two exceptions: an integer
 literal's open type ([T-Literal]) and a function value's open type parameters
 ([N-NotAValue]) are settled by their uses within the body. `let x = Option.None;`
@@ -3530,8 +3675,10 @@ under [T-Never].
 iterator implementing `Iterator`. Its binder, a name or a tuple pattern that
 takes the item apart, receives the iterator's `Item` once per element and is
 scoped to the body. A tuple pattern requires the item to be a tuple of the
-pattern's arity ([T-Arity], [T-Mismatch]); a lending walk's binders each name the
-whole element, so a write to one component while another is in use is [O-Lent].
+pattern's arity ([T-Arity], [T-Mismatch]), its components may be patterns of
+their own ([S-Match]), and it must match every item ([T-Refutable]). A lending
+walk's binders each name their own component of the element, so a write to one
+component while another is in use touches a different place.
 The expression after `in` is in consuming position, so the value cannot be
 referenced afterward.
 
@@ -3600,6 +3747,14 @@ capability at every projection, just as assignment through a bracket does.
 [T-Lend] defines the type requirements for a lending traversal. The binder has
 the place's element type, is rebound once per position, and is scoped to the
 body.
+
+A walked value may observe the storage its places sit in rather than own it: a
+`mem.Slice[T]` views elements another value owns, and a type whose projection
+indexes a slice it holds reaches them the same way. Each binder of such a walk
+then depends on what the walked value observes, as `view[i]` depends on
+`view`. Writing, growing or releasing that storage while a binder, or a borrow
+of one, is still used is [O-Borrow]. A slice's projection declares `read self`,
+so `for inout` over a slice is [N-Immutable].
 
 A range takes its endpoint type from an expected `Range[T]` or a known opposite
 endpoint. Otherwise numeric literals use their ordinary default. Known endpoints
@@ -3672,20 +3827,51 @@ the positional prefix violate this rule.
 default. The diagnostic names the unfilled parameter. An omitted defaulted
 argument is filled with the declaration's default value.
 
-**[T-Cover]** A `match` must cover every variant of its subject or end with `_`
-for the remaining variants. A tuple subject has one shape, so one tuple pattern
-or `_` covers it. A variant remains in the exhaustive set when its payload
-contains `Never`; `Option[Never]` must still account for `Some`.
+**[T-Cover]** A `match` must leave no value of its subject untaken: some arm
+matches every value, or it ends with `_` for the rest. Coverage looks inside
+every pattern, so a pair of options is covered by its four shapes and an arm
+`Some(0)` covers only the `Some` that carries zero. A struct, a tuple and a
+newtype have one shape, so a pattern taking one apart with a binder or `_` at
+every part covers it; an integer's arms cover the values their literals and
+ranges name. The diagnostic names the values no arm takes, each written as a
+pattern: `(None, Some)`, `Some(10..=255)`, `Wood`. It names at most nine of
+them, then says "and more", in declaration order compared column by column.
+Where arms leave several variants of one column to `_`, as `(_, One(0))` leaves
+`Off` and `Idle`, the values of the later columns are found for those variants
+together, so the nine may name `(Idle, Unset)` before every missing value that
+goes with `Off`. A variant whose payload the
+pattern would leave unnamed is written bare. A variant remains in the exhaustive
+set when its payload contains `Never`; `Option[Never]` must still account for
+`Some`. Text, a type parameter and any other type no pattern takes apart are
+covered only by a binder or `_`.
 
-**[T-Variants]** An enum declares at most 64 variants.
+Coverage is decided in one pass over the arms (Maranget's usefulness): it
+answers, for each arm, whether some value matches it and no arm before it, and
+which values match no arm, by splitting the arms' patterns position by position
+along the constructors each position's type has.
 
-**[T-Unreachable]** A match arm that no value can reach is ill-formed. This
-includes an already covered variant and `_` after coverage is complete, and any
-arm after a tuple pattern or `_` that covers a tuple subject.
+**[T-CoverLimit]** Checking a `match`'s coverage builds rows of its arms'
+patterns, one cell per pattern position, and a `match` whose check would build
+more than 2^20 cells is refused. Deciding whether nested patterns cover a type is
+NP-complete, so without a ceiling the cost of checking one `match` could grow
+exponentially with the width of its patterns. A `match` refused this way is
+split into nested `match`es, each covering one part. The pattern of a `let`,
+`let read`, `let ... else`, `for` or lambda parameter is checked the same way
+against a wildcard ([T-Refutable]); one pattern costs about its own size, so
+only a pattern of about a million parts reaches the limit, and it is taken apart
+in more than one step.
 
-**[T-Bind]** Variant payloads are accessible only by matching. An arm must bind
-all payload values or none; a partial prefix is rejected as a miscount. Binders
-are scoped to the arm.
+**[T-Unreachable]** A match arm that no value can reach is ill-formed: every
+value it matches is taken by the arms before it. This includes an already
+covered variant, `_` after coverage is complete, an arm after a pattern that
+takes the whole subject apart, `Some(Some(x))` after `Some(_)`, and a range
+written backwards, which matches nothing. An unreachable arm and a value no arm
+takes are separate mistakes, so a `match` with both reports both ([T-Cover]).
+
+**[T-Bind]** Variant payloads are accessible only by matching. A pattern must
+name all payload values or none; a partial prefix is rejected as a miscount.
+Binders are scoped to the arm, and a pattern declares each name once however
+deep it sits ([N-Duplicate]).
 
 **[S-Literal]** A leading `.` uses the expected type: `.Red` selects its variant,
 and `.{ x = 1 }` initializes its fields. A named structure literal writes a named
@@ -3854,7 +4040,11 @@ handed on with `?`, returned, or passed to something that takes it. A `Result`
 reports whether the computation succeeded, so this binder cannot discard it
 without acknowledging the alternatives. [T-Discard] governs expression
 statements, while [T-DiscardFailure] governs binders; a bare call in statement
-position is covered by [T-Discard], and an unread name by [N-Unused].
+position is covered by [T-Discard], and an unread name by [N-Unused]. Both
+reports offer `?` only where it would be accepted ([T-TryAnswer]): the function
+answers with a `Result` whose error the failure is or converts to, or, for a
+failure that settles to such a reason, `.settled()?`. Otherwise they offer
+`let … else |_| { … }`, which handles the failure where it happens.
 
 Explicit acknowledgement is sufficient. A `match` with only a `_` arm satisfies
 this rule by deliberately treating all alternatives alike; intentionally ignoring
@@ -4072,13 +4262,46 @@ substituted fields and payloads. A type argument occurring only behind `borrow`
 is observed, so its referent contributes no ownership obligation to the
 aggregate.
 
-**[T-Extern]** An `extern` accepts only integer parameters and returns an integer
-or Unit. Integer width and signedness define the representation shared across the
-boundary. Aggregates cannot cross because doing so would expose the layout kept
-private by [L-Layout]; linear values cannot cross because ownership cannot
-inspect paths through foreign code; callables cannot cross because their
-code-pointer representation and calling convention are not part of the foreign
-ABI contract.
+**[T-Extern]** An `extern`'s parameters and result cross the foreign boundary,
+and the result may also be Unit. What crosses is an integer of 8, 16, 32 or 64
+bits, a `Float64`, or an unrefined newtype whose base crosses, which crosses as
+its base:
+every bit pattern of these is a value on both sides, so nothing C hands back
+is a value Linea does not define. Integer width and signedness define the
+integer's representation, and an 8- or 16-bit integer is extended to a full
+register by whichever side produces it. A `Float64` is a C `double`. A newtype
+crosses whatever its ownership policy, because the parameter convention says
+what C does with the value: `read` and `inout` lend it for the call, and
+`sink` hands it to C, which consumes it. An `inout` parameter crosses as the
+address of its slot, which is C's `T *`: C reads the value there and may write
+another, as an out-parameter does. The compiler believes these statements as
+it believes the rest of the signature, so a linear newtype over `UInt64` is how
+a module holds a C object it must release, and a `UInt64` lent `inout` is how
+it receives one from a function that writes it through a pointer. An `extern`
+whose result can carry a dependency, such as a `std.ffi` view, writes a
+contract saying what the result points into, `borrows(handle)` or
+`carries()`: no body is read to infer one, and a handle parameter carries none
+by default, so a declaration that writes none is refused. A `borrows(p)` contract names
+a parameter `p` that is a handle ([T-ExternHandle]) whose type is not
+`copyable`, or a `std.ffi` view: an integer, an unsealed newtype or a type of
+an untrusted module could be copied or rebuilt to name the memory after `p`'s
+place changed, so it is refused. A refined newtype cannot cross,
+because C could hand back a value outside its range. `Bool` cannot cross,
+because no C ABI fixes which bytes are true. Aggregates cannot cross because
+doing so would expose the layout kept private by [L-Layout]. A callable crosses
+only as an `extern`'s callback, in the form [T-ExternCallback] checks; nothing
+else hands C a code pointer, because the convention a Linea function is called
+in is not part of the foreign ABI contract.
+
+An `extern` may instead answer `std.ffi`'s `Errno[R]`, where `R` crosses as a
+result does. C's function returns `R`, and the call evaluates to an `Errno`
+holding that value and the `errno` the call left set, read with no other
+evaluation between the call's return and the read. `Errno` is an opaque
+copyable type: its value is `value()`, and its code is reachable only through
+`failed_at(failure)`, which is `.Err(code)` when the value equals `failure` and
+`.Ok(value)` otherwise, or `failed_when(failed)`, which is `.Err(code)` when
+`failed` is true. `Errno` is not itself a type that crosses, so it is never a
+parameter and never an exported function's result.
 
 The private `std.mem` declarations `slot_stride`, `slot_take`, `slot_put`, and
 `slot_place` are typed storage primitives, not foreign calls. A recognized
@@ -4090,14 +4313,64 @@ The private `std.scalar` declarations `linea_math_sqrt`, `linea_math_floor`,
 `linea_math_ceil`, `linea_math_trunc`, `linea_math_round`, `linea_math_sin`,
 `linea_math_cos`, `linea_math_ln`, and `linea_math_exp` have the exact signature
 `(value: Float64) -> Float64`; `linea_math_pow` additionally takes
-`exponent: Float64`. These checked primitives are the sole Float64 exception.
-They are private, nongeneric externs with read parameters, no defaults and no
+`exponent: Float64`. These checked primitives are compiler-owned rather than
+foreign calls. They are private, nongeneric externs with read parameters, no defaults and no
 contracts or where predicates. A malformed trusted declaration is [T-Extern],
 even when its substituted signature would fit the ordinary integer boundary. A
 declaration of one of these symbols anywhere else, even in a root granted
 `extern`, is [T-Extern]: the symbols are compiler-owned. An ordinary body with
 the same name remains an ordinary function. The runtime symbols are reserved
 against exports.
+
+**[T-ExternCallback]** An `extern` may take a callback, a parameter of a plain
+`fn` type that C calls during the call through a C function pointer. Its
+parameters and result cross the boundary, apart from a leading `inout`
+parameter, which is a context: the `extern` takes exactly one `inout` parameter
+of the same type, which C receives as a `void *` and hands back on every call.
+The callback is declared without a convention, is a plain `fn` rather than an
+`inout fn` or `sink fn`, and promises to retain nothing. At a call, its
+argument names a function or is a lambda that captures nothing, because C calls
+an entry generated for one fixed function; a function value whose target is
+known only at run time is refused. The entry takes the callback's parameters in
+their C widths and calls the function, and nothing but an `extern` call is
+handed one. The compiler believes the declaration: C calls the callback only
+during the call, on the calling thread, with the context it was lent.
+
+```linea
+struct Tally { total: Int64 }
+
+extern fn squares_visit(count: Int32, visit: fn(inout tally: Tally, square: Int32) -> Int32, inout tally: Tally) -> Int32
+
+fn add_square(inout tally: Tally, square: Int32) -> Int32 {
+    tally.total += Int64(square)
+    0
+}
+```
+
+`squares_visit(5, add_square, &tally)` lends `tally` for the call, and every
+call C makes to `add_square` receives it.
+
+**[T-ExternHandle]** A handle is a newtype that is not `copyable` and is either
+sealed (`@opaque`) in a module its root's manifest grants `extern`, in any root,
+or a newtype over a handle. An `extern` parameter whose type is a handle names
+an object C holds, whichever root's `extern` takes it. A `copyable` newtype is
+never a handle. Written `read`, the parameter promises that C only reads the
+object. Only an `extern` may write `read` on a parameter, and only on a handle;
+on any other parameter it is redundant
+([S-Entry]). A handle parameter taken by a plain lend, without `read`, lets C
+change or free the object, so a call lends its argument's place exclusively,
+as an `inout` argument is lent, although C receives the handle by value. The
+argument must be a place that may change: a mutable binding, an `inout`
+parameter, a mutable capture, the binder of a `for inout` walk, or a field of
+one. Every observation of the place made before the call, such as a `CText`
+read from the object, ends at the call, and a later use of it is [O-Borrow];
+another argument of the same call naming the place is [N-Aliased]. A handle
+taken `inout` is lent as any `inout` argument is, and one taken `sink` is
+moved. The compiler believes a
+written `read`, and believes that each handle is the only one naming its
+object: an `extern` answering a handle answers a new or handed-over object,
+and the module trusted with C never builds a handle from an address another
+handle holds.
 
 **[T-ExternAgreement]** Every `extern` declaration of one symbol names the one
 function the runtime provides under that symbol, so each module may declare the
@@ -4120,9 +4393,10 @@ signature agrees with every other declaration of the symbol, so
 [T-ExternAgreement] does not also report a `linea_` symbol
 ([ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md)).
 
-**[T-Export]** An `export` accepts only integer parameters and returns an integer
-or Unit. It applies the same boundary restriction as [T-Extern], using the same
-predicate; the separate rule names the export site that violates it.
+**[T-Export]** An `export`'s parameters and result cross the foreign boundary
+as an `extern`'s do, and the result may also be Unit. It applies the same
+boundary restriction as [T-Extern], using the same predicate; the separate rule
+names the export site that violates it.
 
 **[T-Try]** The operand of `?` must be the prelude's `Option` or `Result`,
 recognized by declaration identity. A user type with variants named `Ok` and
@@ -4142,7 +4416,18 @@ the operand of `?`, and a `Result`'s error must be the function's error type or
 convert into it. Success payload types may differ: a function returning
 `Option[String]` may use `?` on `Option[UInt8]` because failure returns no
 payload. There is no conversion between `Option` and `Result`. Using `?` in a
-function returning `UInt8` violates this rule.
+function returning `UInt8` violates this rule; the report names the result type
+that would carry the failure, `Result[UInt8, E]` with the operand's error. Where
+the `?` is the whole of a statement, it also offers handling the failure there:
+`let count = … else |_| { … }` for the initialiser of `let count` (`var` for a
+`var`), and
+`let _ = … else |_| { … }` for an expression kept for its effect. `else` stands
+nowhere else, so a `?` inside a larger expression is offered only the signature.
+A destructuring `let` is offered `let … else` with its own pattern,
+`let (a, b) = … else |_| { … }`. A closure that writes no result, and is given
+none by a callable type it is passed as, answers with what its body gives, so a
+`?` in it is held to that type once the body is checked, and the report offers
+the closure's result, `|| -> Result[UInt8, E] { … }`.
 
 A failing `Result` returns its error. An error of the function's own error type
 passes through unchanged and needs no implementation. An error of a different
@@ -4202,8 +4487,11 @@ may take.
 
 The binding's annotation is the expected success type, and it constrains a
 generic initializer's result as a success-payload expectation does under `?`. The
-pattern is any binding pattern: a name, or a struct or newtype pattern that takes
-the success apart. `let read` observes a place, and an `else` construct is not one
+pattern is any binding pattern: a name, or a struct, tuple or newtype pattern that
+takes the success apart, nested as deep as it needs, such as
+`let Entry { name, span: (start, end) } = find(key) else { … }`. It must match
+every value of the success type ([T-Refutable]): the `else` runs when the
+initializer is `None` or `Err`, and never because a part of the pattern failed. `let read` observes a place, and an `else` construct is not one
 ([T-Lend]). A constant's initializer runs nothing, so a constant with an `else` is
 [T-Const].
 
@@ -4211,6 +4499,20 @@ The construct is a `match` with two arms written where the binding is, so its
 ownership is a consuming `match`'s: the initializer is taken, the error binding
 owns the error, and everything the function still holds where the block leaves is
 checked by [O-Leak] at that exit as it is at any `return`.
+
+**[T-Refutable]** A pattern in a `let`, `let read`, `let … else`, `for` or
+lambda parameter must match every value of its type: there is no arm to take the
+values it misses. `let Some(n) = found` misses `None` and is refused, with
+`match` or `let n = found else { … }` as the two ways to handle the other case.
+A pattern nested inside the head is held to the same rule, so
+`let (key, Some(value)) = pair else { … }` is refused too: the `else` of a
+binding runs when its `Option` or `Result` initializer fails, never when a part
+of the pattern does ([ADR 0224](adr/0224-a-pattern-nests-wherever-a-binder-stands.md)).
+The diagnostic names a value the pattern misses, at the part of the pattern
+that first leaves it out. A part that matches no value at all, a literal
+outside a refinement or a range written backwards, is reported here as well,
+as "this pattern matches no value"; in a `match` arm the same part is
+[T-Unreachable].
 
 **[T-Refine]** Every violation of a newtype's refinement contract is reported
 under this rule. An empty range is rejected at its declaration:
@@ -4224,7 +4526,16 @@ A refinement requires an integer base; non-integer refinement, such as
 `@opaque type Email = Str where ...`, is rejected here. `it` is the sole
 refinement value name, matched by identifier text as `Self` is. The `lo` and `hi`
 bounds must be integer literals. The lower bound is inclusive. `..` excludes the
-upper bound, while `..=` includes it.
+upper bound, while `..=` includes it. A range reaching past what the base can
+hold, such as `UInt8 where it in 0..=300`, is rejected at its declaration.
+
+A rejected refinement is reported once, at its declaration. Patterns of its type
+are judged by the values the range admits within what the base can hold, so
+`Level(0..=255)` covers the `UInt8` refinement above ([T-Cover]). Where no such
+value is left, because the range is empty or the base is not an integer, a `_`
+or a binder at that type, bare or inside the type's name as `Closed(_)`, still
+takes any value it holds, so the rest of the pattern is judged as usual. A pattern that names a value of the type is not
+judged, and neither are the other arms of its `match` nor its `let`.
 
 ### §4.1 Constant expressions
 
@@ -4235,6 +4546,7 @@ A **constant expression** is:
 - an integer literal;
 - a truth value, `true` or `false`;
 - a string literal without interpolation, raw or not;
+- an embedded file, `embed(path)` or `embed_bytes(path)`;
 - the unit value `()`;
 - a structure literal, fixed-array literal, tuple literal or enum variant
   construction whose stored components are constant expressions and whose
@@ -4286,13 +4598,19 @@ no arithmetic operations. A `Bool` constant is a literal or a reference to one,
 optionally parenthesised. Its value is `true` or `false`, distinct from every
 integer value, and a Bool cannot serve as a numeric bound or array length.
 
-A string constant is a string literal or an immutable reference to one,
-optionally parenthesised. Its value denotes static decoded bytes with the same
-UTF-8, escape and byte-length rules as a direct string literal. Embedded NUL and
-empty strings are admitted. String equality, concatenation, slicing, length calls
-and interpolation are not constant-expression forms, and text does not become an
-integer count, an arithmetic operand or a numeric conversion operand because it
-is constant. Function defaults admit these same string constant forms.
+A string constant is a string literal, an embedded file read with `embed`, or an
+immutable reference to one, optionally parenthesised. Its value denotes static
+decoded bytes with the same UTF-8, escape and byte-length rules as a direct
+string literal; an embedded file's value is the file's bytes. A byte constant is
+an embedded file read with `embed_bytes`, or an immutable reference to one: its
+value is the file's bytes, as a `mem.Slice[UInt8]` viewing static storage. An
+embed the loader refused is a constant whose value does not exist, so it is
+reported once, by [M-Embed] or [M-EmbedText], and not again by [T-Const].
+Embedded NUL and empty strings are admitted. String equality, concatenation,
+slicing, length calls and interpolation are not constant-expression forms, and
+text does not become an integer count, an arithmetic operand or a numeric
+conversion operand because it is constant. Function defaults admit these same
+string constant forms.
 
 Aggregate literals obey ordinary contextual typing, field completeness,
 uniqueness, extent, payload, range and opacity checks. The annotation on a named
@@ -4313,7 +4631,8 @@ annotation cannot take a contextual variant ([T-Infer]). An enum constant is not
 a number and cannot be an array length or an arithmetic or conversion operand.
 
 Copyable eligibility does not make an arbitrary observation static. A record
-containing literal-backed Str can be constant; the same record containing a
+containing literal-backed Str, or the byte slice of an embedded file, can be
+constant; the same record containing a
 runtime text view or `borrow` expression cannot. Resource owners, allocator calls
 and user-defined copy operations cannot appear inside constant values. A
 constant's value is laid out from checked data, without executing a constructor,
@@ -4603,6 +4922,19 @@ match k { Forged(n) => n }        // consumes `k`
 match read k { Forged(n) => n }   // does not; `n` is lent
 ```
 
+The construct decides how every binder holds its part, at any depth. Under a
+plain `match`, `let` or `let ... else` the value is taken whole, and each binder
+owns the part its path selects: in `Some((name, value))` each `String` moves to
+its own binder, which must settle it. Under `match read`, `let read` or a lending
+walk each binder lends exactly that part, so `Some((name, port))` over a lent
+option lends `name` from inside the pair inside `Some` with nothing copied; a
+scalar binder still reads a snapshot and other duplication still needs `copy`.
+There are no partial moves and no per-binder modes. `_` settles nothing at any
+depth: a linear part a consuming pattern binds to `_` is [O-Leak], and a variant
+whose linear payload a consuming pattern leaves unnamed is [O-Leak] as a `_` arm
+is. Each arm tests its pattern outer part first, so a payload is read only once
+its variant's tag is tested.
+
 The unit value `()` is not a pattern: the unit type has one value, so matching it
 tests nothing. `_` matches it; a bare name in an arm is a variant, not a binding.
 A variant's payload binder, as in `Dot(u)`, binds a unit payload.
@@ -4780,22 +5112,21 @@ at its last use and [O-Borrow] checks it instead. Multiple `read` lends and othe
 reads may coexist. A read through a pattern binder of the lend, such as
 `let read P { x } = p` inside `for inout p`, is a use of that lend. A lend that
 may write requires exclusive access: no separate read, write or lend may overlap
-it. The binders of one walk's tuple pattern lend the same place, so a read of any
-of them is a use of it. A write through one binder is reported, once and at that
-write, when another binder the body names lends the place; a binder the body
-never names lends nothing. [N-Aliased] holds two binders of one pattern apart,
-because they are different components, so a call passing both reports each write
-it makes under [O-Lent] and no alias. Access through the binder uses the existing
-lend, so `for inout x in xs { x = x * 2 }` is allowed.
+it. Each binder of a pattern lends the part its path selects, at any depth, so
+two binders of one pattern lend different places and a write through one leaves
+the other's part alone; a binder the body never names lends nothing. Access
+through the binder uses the existing lend, so `for inout x in xs { x = x * 2 }`
+is allowed.
 
 The overlap relation is the same as [N-Aliased]. That rule compares places passed
 to one call; [O-Lent] compares an operation's place with places lent by enclosing
 constructs. A `match read` binder names the part selected by its pattern,
-allowing writes to disjoint parts. A walk's binder names a position not known
-statically, so the check conservatively treats it as every position in the
-container, and any write to those positions overlaps it. Each binder of a tuple
-pattern in a walk takes that same place, so a write to one component through
-another binder overlaps it although the components are disjoint. All overlap checks occur at compile time, with no generated runtime check.
+allowing writes to disjoint parts: `pair._1 = 7` beside a binder of
+`(Some(first), _)` writes a part the binder does not name. A walk's element is a
+position not known statically, so the check conservatively treats it as every
+position in the container, and any write to those positions overlaps it; a
+binder of a walk's tuple pattern names its own component of that element. All
+overlap checks occur at compile time, with no generated runtime check.
 
 **[O-LinearTail]** A `for` over an array with Linear elements is rejected if
 control can leave before the last position. The walk moves each element as it
@@ -4869,7 +5200,10 @@ Callable source clauses describe dependencies at a boundary:
 Source paths name parameters and fixed fields and can dereference observations.
 A message that prints a `fn` type's contracts names a parameter as `#n`, its
 position counted from 1, because a parameter's name is not part of the type;
-a program names the parameter. `carries(reference)` preserves the descriptor's
+a program names the parameter, and a mismatch that prints such a clause says
+so. What a callable requirement's result may carry from the callable itself is
+implied by the requirement and written by no program, so a message leaves it
+out. `carries(reference)` preserves the descriptor's
 dependencies; `carries(*reference)` preserves those contained in its referent.
 Retention destinations cannot cross readonly observation storage. A clause can
 list several sources. `borrows` and `retains` require a source; only `carries()`
@@ -5052,7 +5386,10 @@ terminates the process.
 scope exit, a consuming `match` leaves its contents unnamed, a write overwrites
 it, or a structure literal writes over a field of its base that holds one.
 `let _ = k` is not exempt: `_` marks intentional non-use, not permission to
-discard a Linear value.
+discard a Linear value. The report names the operations that settle the value,
+and where it is left on an early exit and its type implements `Release`, the
+schedule that settles it on every path: `defer let` or `defer var` for a
+single-name binding, and `defer name.release()` where it is bound otherwise.
 
 A consuming arm can discard a payload with `_` or by naming the variant without
 binding its contents: `Has =>` and `_ =>` have the same effect. The match has
@@ -5135,14 +5472,21 @@ writing it is allowed and can satisfy [O-Reinit]. `k = k` also does not leak: th
 consuming right-hand side takes the value before the destination is written.
 
 **[O-Merge]** Paths into a join must agree about the state of a Linear binding,
-and of any binding a `defer` consumes. Other bindings merge pessimistically
+and of a binding that a `defer` able to run after the join, before the binding is
+assigned again as a whole, consumes. Other bindings merge pessimistically
 (`init ⊔ moved = moved`), with any later use reported as an error. For a Linear
 binding, choosing `moved` would hide a leak on one path, while choosing `init`
 would permit double consumption on the other; for a deferred binding the same two
 choices skip the schedule where it should run, or run it where the value is gone.
-The disagreement is reported at the join. A path that leaves the join's scope
-keeps an answer of its own, so a value given away on a path that returns is not a
-disagreement.
+The disagreement is reported at the join, once: a later join that only inherits
+it is not reported again. A path that leaves the join's scope keeps an answer of
+its own, so a value given away on a path that returns is not a disagreement.
+
+A `defer` whose schedule has already run consumed its value where it ran, as the
+same call written there would. A `defer lock(k)` in an `if` body or a `match` arm
+gives an affine `k` away on that path, and after the join `k` is moved, exactly
+as after a direct `lock(k)`. A binding ends with the block that declares it, so a
+join after a block compares nothing about a binding declared inside it.
 
 **[O-Reinit]** An `inout` parameter must be initialised on every path to an exit.
 Moving from it is allowed, but each path to a `return` or the body's end must
@@ -5196,8 +5540,14 @@ referent of an observation carried by any parameter convention. Result targets
 and retention destinations cannot cross observation storage. An ambiguous
 inferred source requires an explicit `borrows` or `carries` clause; the ambiguity
 is the only error reported, and the body is not checked against a contract nobody
-declared. Where several of the sources are carriers the report says so and names
-them. A clause whose source, destination or target is refused is likewise the only
+declared. The report names each candidate's clause and the one clause listing them
+all: `borrows` for a parameter it does not consume whose place the result may
+observe, or that may hold storage of its own a view would point into and holds
+no view; `carries` for one that holds a view, such as a `Str` or a struct with
+one, for a type parameter its bounds make copyable, and for one it consumes. A consumed parameter ends with
+the function, so no clause lets anything observe its place past the return, and
+[O-Escapes] says so instead of naming one. Where several of the sources are carriers the report says so and
+names them. A clause whose source, destination or target is refused is likewise the only
 error: the body is not checked against what remains of the clause. A trait
 implementation's member cannot promise more than its signature. Bodies must obey
 these signature contracts.
@@ -5213,14 +5563,18 @@ value the lend is a read observation. A `let read` binder observes the part its
 pattern selected in the same way, whatever that part's type, until the binder's
 last use. Copies and stored observations preserve the restriction. Disjoint
 record fields remain independent; an observation of a container element protects
-its container. Scope exits and deferred actions participate in the same check.
+its container, and the binders of a lending walk's pattern share the walked
+element's place, so a change through one ends an observation made through
+another. Scope exits and deferred actions participate in the same check.
 
 **[O-Escapes]** A returned or retained observation must depend only on the
 sources its callable contract permits. A place lent `inout` to a closure never
 leaves the function that lends it: no contract permits returning or retaining a
 value that holds the lend. An observation of a constant, or of a part of one,
-depends on nothing, because a constant's storage is static. A trait
-implementation's member without a clause is held to the contract it adopts from
+depends on nothing, because a constant's storage is static. So do a string
+literal and an embedded file, whose bytes are static storage too: a function
+declaring `carries()` may return `embed("page.html")` or its `as_bytes()`.
+A trait implementation's member without a clause is held to the contract it adopts from
 its trait signature. An observation of local storage cannot escape that storage's
 scope, and copying or embedding the observation does not remove this restriction.
 Replacing a statically known array slot removes that slot's previous carried
@@ -5233,6 +5587,50 @@ Exits include explicit returns, trailing expressions and writes through `inout`
 parameters. Deferred owner disposal still occurs before the recipient can use a
 returned observation, so returning a view into a local owner is rejected. An
 independent owned value may leave its scope through the ordinary move rules.
+
+A report is made once per exit for the observations leaving there, and once per
+lend; it is placed where the escaping value took its dependency, following a
+block to its tail and a local binding back to the value written into it. It
+names the edit each source calls for, spelled as [T-BorrowContract] spells it:
+the one clause listing every parameter the value comes from (`where
+borrows(first, second)`), the retention clause for a value an `inout` parameter
+keeps (`where retains(seen: field)`), or, for a local owner, that it ends when the
+function returns. Each further place the value took a dependency is pointed at
+as well. The clause named is the whole clause to write, and a function has one:
+every report of one function names the same clause, listing every source its
+escapes return and every retention its `inout` parameters keep, so writing the
+clause any report names answers them all. One the signature wrote keeps its
+sources, with a `borrows` written for a consumed parameter, which
+[T-BorrowContract] refuses, named `carries`; one written where the signature
+wrote none replaces the contract it inferred, so it also lists the sources that
+contract covered at any exit: `where borrows(self), carries(other)`.
+
+An observation of a local owner leaving the function is one mistake: the owner
+ending, or a `defer` releasing it, before the observation's use outside is that
+escape's consequence, and [O-Borrow] does not report it again. Where the local is
+an allocator the function opens and what leaves was built in it, the report names
+the form that takes the allocator as a parameter, `load_in` with `A: Allocator`
+and `allocator: A` first, so the caller's allocator decides how long the result
+lives, and the owned copy in the system allocator.
+
+A member of a trait implementation answers to its trait's signature, and a
+function received by a written callable type or a callable bound answers to that
+type. Where that fixed signature does not permit the clause, the report names
+the clause, says it cannot be added there, and offers what the program can
+change: returning or keeping what the fixed signature permits, or widening the
+trait or callable type where the program wrote it, and this signature with it.
+
+Where the type holding the observation declares `to_owned`, the report also
+offers the owned copy, which observes nothing and needs no clause, naming the
+type that holds it and the failure copying can report: `Result[String, mem.Oom]`
+for a result that was the view, `String` where a part of the result or an
+`inout` parameter held it. Where a local owner of that type supplied the view,
+it offers the owner itself instead, unless a `defer` releases the owner and runs
+at no other exit of the function, where moving it would leave the `defer`
+nothing to release. Under a
+fixed signature the result type is fixed too, so a returned view is offered no
+copy; a stored view still is, which is the fix for a route handler that keeps a
+request's text in its state.
 
 **[O-Temporary]** A value that is borrowed where it is written without being a
 place, such as `log.field("count", 3)`'s `3`, an argument `base + 2` to a

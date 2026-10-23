@@ -2,4 +2,4 @@ error[T-Bound]: `T` requires `Decode[SystemAllocator]`, and `Str` does not imple
  --> tests/json_typed/decode_borrowed_text.lin:5:75
   |
 5 |     let result: Result[Str, json.DecodeError[mem.SystemAllocator]] = json.decode(r#""tea""#)
-  |                                                                           ^^^^^^ the library declares both `Str` and `Decode[SystemAllocator]`; wrap it in a type this program declares that implements `Decode[SystemAllocator]`
+  |                                                                           ^^^^^^ the library declares both `Str` and `Decode[mem.SystemAllocator]`; wrap it in a type this program declares that implements `Decode[mem.SystemAllocator]`

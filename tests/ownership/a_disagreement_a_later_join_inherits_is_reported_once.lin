@@ -1,0 +1,28 @@
+// [O-Merge]. The lamp is given away on one path through the first `if`, so the
+// paths disagree there. After that join the lamp counts as given away, and the
+// second `if` stores a new lamp on one path only: the paths around it disagree
+// again, but only because of the first disagreement, so only the first is
+// reported.
+@linear
+struct Lamp {
+    id: UInt8,
+}
+
+fn give(sink lamp: Lamp) {
+    let Lamp { id: _ } = lamp
+}
+
+fn main() -> UInt8 {
+    var turns: UInt8 = 0
+    var lamp = Lamp { id = 1 }
+    let fresh = turns > 5
+    if turns == 0 {
+        give(lamp)
+        turns = turns + 1
+    }
+    if fresh {
+        lamp = Lamp { id = 2 }
+    }
+    give(lamp)
+    turns
+}

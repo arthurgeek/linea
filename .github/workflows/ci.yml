@@ -198,28 +198,20 @@ jobs:
       # runs one of these as a case and compares its transcript, so a run that
       # stopped passing can be accepted into the golden.
       #
-      # Every example that declares a test rather than a list of them, because a
-      # list is a second place to remember: an example gaining a test and not
-      # gaining a line here is one nothing runs, and nothing would say so.
+      # Every root beneath examples/, rather than a list of them, because a list
+      # is a second place to remember: an example gaining a test and not gaining
+      # a line here is one nothing runs, and nothing would say so. A root is each
+      # examples/*.lin, each examples/*/ and each deeper directory holding a
+      # linea.json, since `linea test` on an application runs the application's
+      # tests alone and a library nested under it needs a run of its own.
+      #
+      # `zig build example-tests` runs `linea test` on each root and counts the
+      # tests the runs report. It fails when any root fails, when a run ends
+      # without a count, when the runs report no test at all, when a `.lin` file
+      # lies outside every root's reach, and when examples/ holds a symlink.
       - name: The examples' own tests pass
         if: ${{ github.event_name == 'push' }}
-        run: |
-          # shellcheck disable=SC2016 # the script expands inside nix develop's bash
-          nix develop --command bash -c '
-            set -e
-            ran=0
-            for root in examples/*.lin examples/*/; do
-              root=${root%/}
-              grep -rqs "^test fn " "$root" || continue
-              echo ">>> $root"
-              ./zig-out/bin/linea test "$root"
-              ran=$((ran + 1))
-            done
-            # An empty sweep passes vacuously, and an example that stopped being
-            # walked reads exactly like one that has no tests.
-            [ "$ran" -gt 0 ] || { echo "no example declared a test"; exit 1; }
-            echo ">>> $ran example root(s) tested"
-          '
+        run: nix develop --command zig build example-tests -Dwalkers=1
 
       # A failed assertion or golden comparison still leaves completed program
       # outcomes. The runner checks their content and toolchain keys on reuse.
@@ -443,30 +435,19 @@ jobs:
       # runs one of these as a case and compares its transcript, so a run that
       # stopped passing can be accepted into the golden.
       #
-      # Every example that declares a test rather than a list of them, because a
-      # list is a second place to remember: an example gaining a test and not
-      # gaining a line here is one nothing runs, and nothing would say so.
+      # Every root beneath examples/, rather than a list of them, because a list
+      # is a second place to remember: an example gaining a test and not gaining
+      # a line here is one nothing runs, and nothing would say so. A root is each
+      # examples/*.lin, each examples/*/ and each deeper directory holding a
+      # linea.json, since `linea test` on an application runs the application's
+      # tests alone and a library nested under it needs a run of its own.
+      #
+      # `zig build example-tests` runs `linea test` on each root and counts the
+      # tests the runs report. It fails when any root fails, when a run ends
+      # without a count, when the runs report no test at all, when a `.lin` file
+      # lies outside every root's reach, and when examples/ holds a symlink.
       - name: The examples' own tests pass
-        run: |
-          # shellcheck disable=SC2016 # the script expands inside nix develop's bash
-          nix develop --command bash -c '
-            set -e
-            ran=0
-            roots=()
-            for root in examples/*.lin examples/*/; do
-              root=${root%/}
-              grep -rqs "^test fn " "$root" || continue
-              roots+=("$root")
-              ran=$((ran + 1))
-            done
-            # An empty sweep passes vacuously, and an example that stopped being
-            # walked reads exactly like one that has no tests.
-            [ "$ran" -gt 0 ] || { echo "no example declared a test"; exit 1; }
-            printf ">>> %s\n" "${roots[@]}"
-            # Two at a time, one per core; xargs fails if any root fails.
-            printf "%s\0" "${roots[@]}" | xargs -0 -n 1 -P 2 ./zig-out/bin/linea test
-            echo ">>> $ran example root(s) tested"
-          '
+        run: nix develop --command zig build example-tests -Dwalkers=2
 
       - name: Save program outcomes
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
@@ -529,6 +510,7 @@ jobs:
         run: nix develop --command zig build conformance-runner -Drelease 2>&1 | tee "$RUNNER_TEMP/sweep-build.log"
 
       - name: What each input dimension costs
+        continue-on-error: true
         shell: bash
         run: |
           read_optional() {

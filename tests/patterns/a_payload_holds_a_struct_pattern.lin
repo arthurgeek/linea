@@ -1,0 +1,20 @@
+// `Ok(Point { x, y })` takes apart the point that `Ok` carries in the arm's
+// pattern.
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn parse(present: Bool) -> Result[Point, Str] {
+    if !present {
+        return .Err("empty")
+    }
+    .Ok(Point { x = 1, y = 2 })
+}
+
+fn main() -> UInt8 {
+    match parse(true) {
+        Ok(Point { x, y }) => x + y - 3,
+        Err(_) => 1,
+    }
+}

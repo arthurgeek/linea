@@ -1,0 +1,38 @@
+// [O-Merge]. `defer lock(key)` runs at the `return` inside the loop. The key
+// is given away before the loop and stored again only on the first iteration,
+// so on a later iteration the `return` can find a key that is held or one that
+// is gone, depending on the path the loop took to get there. The paths around
+// `if turn == 1` must agree about `key`, and they do not.
+struct Key {
+    n: UInt8,
+}
+
+fn lock(sink k: Key) {
+    let Key { n: _n } = k
+}
+
+fn give(sink k: Key) {
+    let Key { n: _n } = k
+}
+
+fn go(stop: UInt8) -> UInt8 {
+    var key: Key = .{ n = 1 }
+    defer lock(key)
+    give(key)
+    var turn: UInt8 = 0
+    while turn < 3 {
+        turn = turn + 1
+        if turn == stop {
+            return turn
+        }
+        if turn == 1 {
+            key = .{ n = 7 }
+        }
+    }
+    key = .{ n = 9 }
+    turn
+}
+
+fn main() -> UInt8 {
+    go(2)
+}

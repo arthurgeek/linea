@@ -1,0 +1,8 @@
+import named
+
+fn main() -> UInt8 {
+    var held = named.Named.open()
+    let first = &held.first_byte_after_reset()
+    held.close()
+    first
+}

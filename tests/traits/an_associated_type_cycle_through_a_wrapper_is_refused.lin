@@ -1,0 +1,27 @@
+// `A.D` is written `Option[B.D]` and `B.D` is written `Option[A.D]`, so each
+// definition reads the other inside an `Option` and neither reaches a type.
+// The report names what each is written as and underlines the whole type.
+trait Paired {
+    type D
+}
+
+struct A {}
+
+struct B {}
+
+impl Paired for A {
+    type D = Option[B.D]
+}
+
+impl Paired for B {
+    type D = Option[A.D]
+}
+
+struct Tag[phantom Q] {
+    at: UInt64,
+}
+
+fn main() -> UInt8 {
+    let a: Tag[A] = .{ at = 1 }
+    UInt8(a.at)
+}

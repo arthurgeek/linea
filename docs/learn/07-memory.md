@@ -92,7 +92,7 @@ error[O-Leak]: `heading` (a linear `String[mem.SystemAllocator]`) is still owned
 22 | }
    | - also still owned where the block ends
    |
-   = help: settle it first with `heading.release()`
+   = help: settle it first with `heading.release()`, or declare it `defer let heading = …` so every path releases it
 ```
 
 A memory leak is a compile error. There is no garbage collector, and
@@ -361,7 +361,7 @@ error[T-Arity]: expected 0 argument(s), found 1
 5  |     defer let city = "Lisbon".to_owned(mem.system()) else |_| {
    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
   ::: std/text/str.lin
-36 |     pub fn to_owned(self: Self) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
+34 |     pub fn to_owned(self: Self) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
    |            -------- declared here
    |
    = help: `to_owned` uses the system allocator; use `to_owned_in(allocator, …)` to choose the allocator
@@ -677,7 +677,7 @@ fn main() -> Result[UInt8, io.IoError] {
   22 | }
      | - also still owned where the block ends
      |
-     = help: settle it first with `shipping.release()`
+     = help: settle it first with `shipping.release()`, or declare it `defer let shipping = …` so every path releases it
   ```
 
 - **From an arena**, a closure goes when the arena goes, and nothing releases

@@ -32,36 +32,32 @@ impl ParamValues {
         }
         .Ok(found)
     }
-}
 
-test fn a_param_value_is_found_by_its_exact_name_once() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/?year=2026&year=1999&Name=ada", body: "").unwrap()
-    let values = sent.request().query_params().unwrap()
-    testing.assert_eq(values.get("Name"), .Ok(.Some("ada")), "a value was not found")?
-    testing.assert_eq(values.get("name"), .Ok(.None), "a name matched another's case")?
-    testing.assert_eq(values.get("year"), .Err(.{ name = "year", value = "1999", problem = .Repeated }), "a repeated name was read")?
-    testing.assert_eq(values.count(), UInt64(3), "a value was lost")?
-    .Ok(())
-}
+    test fn a_param_value_is_found_by_its_exact_name_once() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/?year=2026&year=1999&Name=ada", body: "").unwrap()
+        let values = sent.request().query_params().unwrap()
+        testing.assert_eq(values.get("Name"), .Ok(.Some("ada")), "a value was not found")?
+        testing.assert_eq(values.get("name"), .Ok(.None), "a name matched another's case")?
+        testing.assert_eq(values.get("year"), .Err(.{ name = "year", value = "1999", problem = .Repeated }), "a repeated name was read")?
+        testing.assert_eq(values.count(), UInt64(3), "a value was lost")?
+        .Ok(())
+    }
 
-impl ParamValues {
     // `count` returns how many values there are, repeated names included.
     pub fn count(self: Self) -> UInt64 {
         self.fields.length()
     }
-}
 
-test fn count_includes_every_value_a_repeated_name_holds() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let repeated = new_request(arena.handle(), "GET", "/?tag=a&tag=b&page=2", body: "").unwrap()
-    let bare = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    testing.assert_eq(repeated.request().query_params().unwrap().count(), UInt64(3), "a repeated name was counted once")?
-    testing.assert_eq(bare.request().query_params().unwrap().count(), UInt64(0), "a request without a query had values")?
-    .Ok(())
-}
+    test fn count_includes_every_value_a_repeated_name_holds() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let repeated = new_request(arena.handle(), "GET", "/?tag=a&tag=b&page=2", body: "").unwrap()
+        let bare = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        testing.assert_eq(repeated.request().query_params().unwrap().count(), UInt64(3), "a repeated name was counted once")?
+        testing.assert_eq(bare.request().query_params().unwrap().count(), UInt64(0), "a request without a query had values")?
+        .Ok(())
+    }
 
-impl ParamValues {
     // `field` reads the value named `name` as a `T`. A value that is absent is
     // `T`'s missing value, such as `None` for an `Option`, or an error when
     // `T` has none. A value named twice is the error `get` gives, and a value
@@ -79,27 +75,25 @@ impl ParamValues {
             },
         }
     }
-}
 
-test fn a_field_reads_its_value_or_says_why_it_cannot() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/?year=2026&page=x", body: "").unwrap()
-    let values = sent.request().query_params().unwrap()
-    let year: Result[UInt32, ParamError] = values.field("year")
-    let absent: Result[Option[UInt32], ParamError] = values.field("limit")
-    let missing: Result[UInt32, ParamError] = values.field("limit")
-    let invalid: Result[UInt32, ParamError] = values.field("page")
-    testing.assert_eq(year, .Ok(2026), "the year was not read")?
-    testing.assert_eq(absent, .Ok(.None), "an absent optional value was not None")?
-    testing.assert_eq(missing, .Err(.{ name = "limit", value = "", problem = .Missing }), "an absent value was not missing")?
-    testing.assert_eq(invalid, .Err(.{ name = "page", value = "x", problem = .Invalid(.Syntax(0)) }), "an invalid value was read")?
-    let twice = new_request(arena.handle(), "GET", "/?page=1&page=2&id=7", body: "").unwrap()
-    let repeated: Result[UInt32, ParamError] = twice.request().query_params().unwrap().field("page")
-    testing.assert_eq(repeated, .Err(.{ name = "page", value = "2", problem = .Repeated }), "a repeated value was read")?
-    .Ok(())
-}
+    test fn a_field_reads_its_value_or_says_why_it_cannot() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/?year=2026&page=x", body: "").unwrap()
+        let values = sent.request().query_params().unwrap()
+        let year: Result[UInt32, ParamError] = values.field("year")
+        let absent: Result[Option[UInt32], ParamError] = values.field("limit")
+        let missing: Result[UInt32, ParamError] = values.field("limit")
+        let invalid: Result[UInt32, ParamError] = values.field("page")
+        testing.assert_eq(year, .Ok(2026), "the year was not read")?
+        testing.assert_eq(absent, .Ok(.None), "an absent optional value was not None")?
+        testing.assert_eq(missing, .Err(.{ name = "limit", value = "", problem = .Missing }), "an absent value was not missing")?
+        testing.assert_eq(invalid, .Err(.{ name = "page", value = "x", problem = .Invalid(.Syntax(0)) }), "an invalid value was read")?
+        let twice = new_request(arena.handle(), "GET", "/?page=1&page=2&id=7", body: "").unwrap()
+        let repeated: Result[UInt32, ParamError] = twice.request().query_params().unwrap().field("page")
+        testing.assert_eq(repeated, .Err(.{ name = "page", value = "2", problem = .Repeated }), "a repeated value was read")?
+        .Ok(())
+    }
 
-impl ParamValues {
     // `only` reads the one value there is as a `T`, whatever its name, as a
     // route with a single `{name}` holds. Any other count is a `Count` error,
     // which names no value.
@@ -110,17 +104,17 @@ impl ParamValues {
         let entry = copy(self.fields[0])
         read_value(stored_part(self.stored, entry.name), stored_part(self.stored, entry.value))
     }
-}
 
-test fn only_reads_the_single_value_whatever_its_name() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let several = new_request(arena.handle(), "GET", "/?page=1&page=2&id=7", body: "").unwrap()
-    let refused: Result[UInt32, ParamError] = several.request().query_params().unwrap().only()
-    let one = new_request(arena.handle(), "GET", "/?id=42", body: "").unwrap()
-    let only: Result[UInt32, ParamError] = one.request().query_params().unwrap().only()
-    testing.assert_eq(refused, .Err(.{ name = "", value = "", problem = .Count(3) }), "one of several values was read")?
-    testing.assert_eq(only, .Ok(42), "the only value was not read")?
-    .Ok(())
+    test fn only_reads_the_single_value_whatever_its_name() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let several = new_request(arena.handle(), "GET", "/?page=1&page=2&id=7", body: "").unwrap()
+        let refused: Result[UInt32, ParamError] = several.request().query_params().unwrap().only()
+        let one = new_request(arena.handle(), "GET", "/?id=42", body: "").unwrap()
+        let only: Result[UInt32, ParamError] = one.request().query_params().unwrap().only()
+        testing.assert_eq(refused, .Err(.{ name = "", value = "", problem = .Count(3) }), "one of several values was read")?
+        testing.assert_eq(only, .Ok(42), "the only value was not read")?
+        .Ok(())
+    }
 }
 
 // Read `text`, the value named `name`, as a `T`.

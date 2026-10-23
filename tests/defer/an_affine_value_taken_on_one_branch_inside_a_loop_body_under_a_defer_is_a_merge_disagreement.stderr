@@ -1,0 +1,5 @@
+error[O-Merge]: the paths here disagree about `k`
+  --> tests/defer/an_affine_value_taken_on_one_branch_inside_a_loop_body_under_a_defer_is_a_merge_disagreement.lin:23:9
+   |
+23 |         if turns == 1 {
+   |         ^^^^^^^^^^^^^^^ consume it on the other path too, or on neither

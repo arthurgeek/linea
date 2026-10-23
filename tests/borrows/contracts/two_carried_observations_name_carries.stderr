@@ -1,0 +1,5 @@
+error[T-BorrowContract]: the result has more than one eligible observation source
+ --> tests/borrows/contracts/two_carried_observations_name_carries.lin:3:4
+  |
+3 | fn longer(first: Str, second: Str) -> Str {
+  |    ^^^^^^ the result may come from `first` or `second`; add `where carries(first)` or `where carries(second)`, or `where carries(first, second)` where it may come from either

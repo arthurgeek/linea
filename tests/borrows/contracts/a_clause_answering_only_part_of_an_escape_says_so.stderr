@@ -1,0 +1,21 @@
+error[O-Leak]: `a` (a linear `String[mem.SystemAllocator]`) is still owned when this path leaves
+  --> tests/borrows/contracts/a_clause_answering_only_part_of_an_escape_says_so.lin:4:14
+   |
+4  | fn pick(sink a: String, b: String, c: Str, w: UInt8) -> Str where borrows(b) {
+   |              ^ never settled on the path that reaches the end of this block
+13 | }
+   | - the block ends here
+   |
+   = help: settle it first with `a.release()`
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/borrows/contracts/a_clause_answering_only_part_of_an_escape_says_so.lin:8:17
+   |
+8  |         let v = a.view()
+   |                 ^^^^^^^^ escape observations only from the signature's declared sources
+11 |         copy(c)
+   |         ------- this leaves the function as well
+   |
+   = help: part of the value comes from `c`, which `where borrows(b), carries(c)` would permit; the rest no clause can
+   = help: `a` is consumed by `pick` and ends when it returns, so no clause lets anything observe it past the return
+   = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
+   = help: the types this names are reached with `import std.mem`

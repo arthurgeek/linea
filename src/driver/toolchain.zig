@@ -215,6 +215,16 @@ pub const RunOutput = struct {
     }
 };
 
+/// A path under `scratch_root` that no other build names: `prefix`, a dash and
+/// sixty-four random bits in hex. A clock reading is not unique, since two
+/// builds that start in the same tick would write and then delete each other's
+/// intermediates, and a sharded CI job or a watch loop starts builds together.
+pub fn uniqueTarget(gpa: std.mem.Allocator, io: std.Io, scratch_root: []const u8, prefix: []const u8) std.mem.Allocator.Error![]const u8 {
+    var random: u64 = undefined;
+    io.random(@ptrCast(&random));
+    return std.fmt.allocPrint(gpa, "{s}/{s}-{s}", .{ scratch_root, prefix, std.fmt.hex(random) });
+}
+
 /// The files a build writes between the module and the executable, named in
 /// one place from the executable's own name. One routine, because whoever
 /// removes them must spell them the way the build did -- a cleanup keeping an
@@ -294,6 +304,10 @@ pub const Options = struct {
     /// A sanitizer the runtime was built with, which the link has to name too
     /// so its support library is pulled in. Null for an ordinary build.
     sanitize: ?[]const u8 = null,
+    /// C sources compiled at the same level and linked into the executable.
+    native: []const []const u8 = &.{},
+    /// C libraries linked into the executable, each passed as `-l<name>`.
+    link: []const []const u8 = &.{},
 };
 
 /// The conversion pipeline the emitter is written against, confirmed by
@@ -325,6 +339,31 @@ pub fn build(
 ) !?Failure {
     if (try lowerToLlvm(gpa, io, opts.mid)) |f| return f;
 
+    // Each C source becomes an object beside the IR, compiled by the same `cc`
+    // at the same level, and instrumented when the runtime is.
+    const objects = try gpa.alloc([]const u8, opts.native.len);
+    defer gpa.free(objects);
+    // Every object made so far is removed whichever way the build ends, so a
+    // source that fails to compile leaves none of the earlier ones behind.
+    var made: usize = 0;
+    defer for (objects[0..made]) |object| std.Io.Dir.cwd().deleteFile(io, object) catch {};
+    for (opts.native, 0..) |source, i| {
+        objects[i] = try std.fmt.allocPrint(gpa, "{s}.{d}.o", .{ opts.mid.assembly, i });
+        made = i + 1;
+        var compile: std.ArrayList([]const u8) = .empty;
+        defer compile.deinit(gpa);
+        try compile.appendSlice(gpa, &.{
+            Tool.cc.command(),
+            try std.fmt.allocPrint(gpa, "-O{s}", .{opts.opt}),
+            "-c",
+            "-o",
+            objects[i],
+            source,
+        });
+        try appendSanitizeLink(gpa, &compile, opts.sanitize);
+        if (try runTool(gpa, io, .cc, compile.items)) |f| return f;
+    }
+
     var argv: std.ArrayList([]const u8) = .empty;
     defer argv.deinit(gpa);
     // `-x ir` rather than trusting the extension, and `-Wno-override-module`
@@ -350,9 +389,19 @@ pub fn build(
     // nothing here starts.
     if (opts.artifact == .object) try argv.append(gpa, "-c");
 
+    // An object built with C of its own is the module's object and the C's
+    // joined into one by a relocatable link, so whoever links the library's
+    // object finds every symbol its `extern` declarations name.
+    const joins = opts.artifact == .object and objects.len > 0;
+    const module_object = if (joins) try std.fmt.allocPrint(gpa, "{s}.module.o", .{opts.mid.assembly}) else opts.out_path;
+    defer if (joins) {
+        std.Io.Dir.cwd().deleteFile(io, module_object) catch {};
+        gpa.free(module_object);
+    };
+
     try argv.appendSlice(gpa, &.{
         "-o",
-        opts.out_path,
+        module_object,
         "-x",
         "ir",
         opts.mid.assembly,
@@ -360,12 +409,24 @@ pub fn build(
 
     if (opts.artifact == .executable) {
         try argv.appendSlice(gpa, &.{ "-x", "none" });
-        try appendRuntimeLink(gpa, &argv, opts.runtime_path);
+        try argv.appendSlice(gpa, objects);
+        try argv.append(gpa, opts.runtime_path);
+        // After the runtime and the objects that reference them, which is the
+        // order a static archive among the libraries needs.
+        for (opts.link) |name| try argv.append(gpa, try std.fmt.allocPrint(gpa, "-l{s}", .{name}));
+        try appendSystemLink(gpa, &argv);
     }
 
     try appendSanitizeLink(gpa, &argv, opts.sanitize);
 
-    return runTool(gpa, io, .cc, argv.items);
+    if (try runTool(gpa, io, .cc, argv.items)) |f| return f;
+    if (!joins) return null;
+
+    var join: std.ArrayList([]const u8) = .empty;
+    defer join.deinit(gpa);
+    try join.appendSlice(gpa, &.{ Tool.cc.command(), "-r", "-o", opts.out_path, module_object });
+    try join.appendSlice(gpa, objects);
+    return runTool(gpa, io, .cc, join.items);
 }
 
 /// Links a C driver against a module already compiled to an object.
@@ -386,6 +447,8 @@ pub fn linkDriver(
     object_path: []const u8,
     runtime_path: []const u8,
     sanitize: ?[]const u8,
+    /// The libraries the object's manifests name under `link`.
+    link: []const []const u8,
 ) !?Failure {
     var argv: std.ArrayList([]const u8) = .empty;
     defer argv.deinit(gpa);
@@ -397,7 +460,9 @@ pub fn linkDriver(
         driver_path,
         object_path,
     });
-    try appendRuntimeLink(gpa, &argv, runtime_path);
+    try argv.append(gpa, runtime_path);
+    for (link) |name| try argv.append(gpa, try std.fmt.allocPrint(gpa, "-l{s}", .{name}));
+    try appendSystemLink(gpa, &argv);
 
     try appendSanitizeLink(gpa, &argv, sanitize);
 
@@ -434,14 +499,10 @@ test "a sanitized runtime is linked with its sanitizer and the undefined-behavio
     try testing.expectEqualStrings("-fsanitize=undefined", argv.items[1]);
 }
 
-/// Library dependencies follow the archive that references them. macOS math
-/// symbols are supplied by libSystem, which the host C compiler already links.
-fn appendRuntimeLink(
-    gpa: std.mem.Allocator,
-    argv: *std.ArrayList([]const u8),
-    runtime_path: []const u8,
-) !void {
-    try argv.append(gpa, runtime_path);
+/// The system libraries the runtime archive references, which follow it.
+/// macOS math symbols are supplied by libSystem, which the host C compiler
+/// already links.
+fn appendSystemLink(gpa: std.mem.Allocator, argv: *std.ArrayList([]const u8)) !void {
     if (builtin.os.tag == .linux) try argv.append(gpa, "-lm");
 }
 
@@ -694,6 +755,22 @@ test "overlapping runs keep their own directories under the scratch root" {
     try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().access(io, first.directory, .{}));
     for ([_][]const u8{ second.path, second_mid.ir, second_mid.lowered, second_mid.assembly }) |path| {
         try std.Io.Dir.cwd().access(io, path, .{});
+    }
+}
+
+test "a target name ends in sixteen hex digits, and a thousand of them are all distinct" {
+    const gpa = testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
+    defer seen.deinit(gpa);
+    for (0..1000) |_| {
+        const name = try uniqueTarget(arena.allocator(), testing.io, "/tmp", "linea-test");
+        try testing.expect(std.mem.startsWith(u8, name, "/tmp/linea-test-"));
+        const digits = name["/tmp/linea-test-".len..];
+        try testing.expectEqual(@as(usize, 16), digits.len);
+        for (digits) |c| try testing.expect(std.ascii.isHex(c));
+        try testing.expect(!(try seen.getOrPut(gpa, name)).found_existing);
     }
 }
 

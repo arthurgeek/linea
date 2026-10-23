@@ -1,0 +1,10 @@
+error[T-Discard]: this expression produces a `Result[(), mem.PushFailure[Str]]` that is discarded
+ --> tests/settle/a_discarded_push_names_what_handles_it.lin:8:5
+  |
+8 |     &names.push("Ada")
+  |     ^^^^^^^^^^^^^^^^^^ match it, or hand on its reason with `.settled()?`
+error[T-DiscardFailure]: this `Result[(), mem.PushFailure[Str]]` reports a failure, and `_` discards it
+  --> tests/settle/a_discarded_push_names_what_handles_it.lin:15:13
+   |
+15 |     let _ = &names.push("Bo")
+   |             ^^^^^^^^^^^^^^^^^ match it, or handle the failure with `let _ = … else |_| { … }`

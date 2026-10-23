@@ -1,0 +1,13 @@
+// The `?` is an argument of `double`, where no `else` can stand, so the report
+// names only the signature that would carry the failure.
+fn parse() -> Result[UInt8, Str] {
+    .Ok(1)
+}
+
+fn double(n: UInt8) -> UInt8 {
+    n * 2
+}
+
+fn main() -> UInt8 {
+    double(parse()?)
+}

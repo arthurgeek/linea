@@ -123,13 +123,13 @@ impl ParseError {
             _ => false,
         }
     }
-}
 
-test fn only_an_allocation_failure_is_running_out_of_memory() {
-    let full = ParseError { kind = .Allocation, offset = 3 }
-    let malformed = ParseError { kind = .Syntax, offset = 3 }
-    testing.assert(full.ran_out_of_memory(), "an allocation failure was the input's fault")?
-    testing.assert(!malformed.ran_out_of_memory(), "a syntax error ran out of memory")?
+    test fn only_an_allocation_failure_is_running_out_of_memory() {
+        let full = ParseError { kind = .Allocation, offset = 3 }
+        let malformed = ParseError { kind = .Syntax, offset = 3 }
+        testing.assert(full.ran_out_of_memory(), "an allocation failure was the input's fault")?
+        testing.assert(!malformed.ran_out_of_memory(), "a syntax error ran out of memory")?
+    }
 }
 
 test fn a_parse_error_displays_its_problem_and_the_byte_it_stopped_at() {

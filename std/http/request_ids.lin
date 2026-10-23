@@ -229,8 +229,8 @@ test fn a_numbered_request_keeps_the_rest_of_the_request() {
 test fn a_numbered_exchange_is_logged_with_its_number() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
-    let found = send(bound, "GET /health HTTP/1.1\r\n\r\n")
-    let missing = send(bound, "GET /nowhere HTTP/1.1\r\nX-Request-Id: forged\r\n\r\n")
+    let found = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\n")
+    let missing = send(bound, "GET /nowhere HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: forged\r\n\r\n")
     let file = log.capture()
     var served = with_request_ids(logged(file.logger(minimum: .Info), health_router()))
     let serving = serve(listener, &served, limits: serving(2))
@@ -282,7 +282,7 @@ test fn each_allocation_failure_covers_every_buffer_the_numbering_grows() -> Res
 test fn a_client_sent_number_is_never_logged() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
-    let forged = send(bound, "GET /health HTTP/1.1\r\nX-Request-Id: 1 status=200\r\n\r\n")
+    let forged = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: 1 status=200\r\n\r\n")
     let file = log.capture()
     var plain = logged(file.logger(minimum: .Info), health_router())
     let serving1 = serve(listener, &plain, limits: serving(1))
@@ -291,7 +291,7 @@ test fn a_client_sent_number_is_never_logged() {
     defer let plain_lines = file.finish()
     let listener2 = net.listen(net.loopback(0)).unwrap()
     let bound2 = listener2.local_address().unwrap()
-    let wrong = send(bound2, "GET /health HTTP/1.1\r\nx-request-id: 42\r\n\r\n")
+    let wrong = send(bound2, "GET /health HTTP/1.1\r\nHost: loopback\r\nx-request-id: 42\r\n\r\n")
     let file2 = log.capture()
     var misordered = logged(file2.logger(minimum: .Info), with_request_ids(health_router()))
     let serving2 = serve(listener2, &misordered, limits: serving(1))
@@ -350,10 +350,10 @@ test fn a_handlers_own_number_is_replaced() {
 // a number, not with the previous request's.
 test fn a_request_the_handler_never_saw_is_logged_without_a_number() {
     var listener = net.listen(net.loopback(0)).unwrap()
-    let first = send(listener.local_address().unwrap(), "GET /health HTTP/1.1\r\n\r\n")
+    let first = send(listener.local_address().unwrap(), "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\n")
     var client = net.connect(listener.local_address().unwrap()).unwrap()
     var request = String.new()
-    &request.append("POST /health HTTP/1.1\r\nContent-Length: 8192\r\n").unwrap()
+    &request.append("POST /health HTTP/1.1\r\nHost: loopback\r\nContent-Length: 8192\r\n").unwrap()
     for index in 0..4 {
         "X-{index}: ".fmt(&request).unwrap()
         for _ in 0..3700 {

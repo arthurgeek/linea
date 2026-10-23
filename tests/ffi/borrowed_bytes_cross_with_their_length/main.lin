@@ -1,0 +1,16 @@
+import std.io
+import std.mem
+import checksum
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer var bytes: mem.Vec[UInt8] = mem.Vec.new()
+    &bytes.push(1).unwrap()
+    &bytes.push(2).unwrap()
+    &bytes.push(3).unwrap()
+    let guest = checksum.of("guest")
+    let nothing = checksum.of("")
+    let empty_has_address = checksum.has_address("")
+    let counted = checksum.of_bytes(bytes.as_slice())
+    io.println("{guest} {nothing} {empty_has_address} {counted}")?
+    .Ok(0)
+}

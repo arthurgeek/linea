@@ -1,0 +1,14 @@
+// A literal in a field's place compares the field, so an arm that names one
+// takes only the values it names. A `match` whose arms leave other values
+// untaken is refused rather than run for a value no arm takes.
+struct Pair {
+    a: UInt8,
+    b: UInt8,
+}
+
+fn main() -> UInt8 {
+    let pair = Pair { a = 5, b = 2 }
+    match pair {
+        Pair { a: 1, b } => b,
+    }
+}

@@ -1,0 +1,20 @@
+error[M-Foreign]: `copy_bytes` is `std.ffi`'s, and only a module its root's manifest grants may use it
+  --> tests/ffi/only_a_granted_module_reads_c_text/main.lin:10:5
+   |
+10 |     text.copy_bytes(length: 4096).unwrap().release()
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ leave this to a module that is granted, which copies what C holds into an ordinary Linea value
+error[M-Foreign]: `length` is `std.ffi`'s, and only a module its root's manifest grants may use it
+  --> tests/ffi/only_a_granted_module_reads_c_text/main.lin:12:19
+   |
+12 |     let _length = found.inner.text.length()
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^ leave this to a module that is granted, which copies what C holds into an ordinary Linea value
+error[M-Foreign]: `to_owned` is `std.ffi`'s, and only a module its root's manifest grants may use it
+  --> tests/ffi/only_a_granted_module_reads_c_text/main.lin:14:9
+   |
+14 |         item.to_owned().unwrap().release()
+   |         ^^^^^^^^^^^^^^^ leave this to a module that is granted, which copies what C holds into an ordinary Linea value
+error[M-Foreign]: `is_null` is `std.ffi`'s, and only a module its root's manifest grants may use it
+  --> tests/ffi/only_a_granted_module_reads_c_text/main.lin:17:22
+   |
+17 |         |visited| if visited.is_null() {
+   |                      ^^^^^^^^^^^^^^^^^ leave this to a module that is granted, which copies what C holds into an ordinary Linea value

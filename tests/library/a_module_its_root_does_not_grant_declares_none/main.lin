@@ -1,0 +1,6 @@
+import ffi_side
+import arithmetic
+
+fn main() -> UInt8 {
+    UInt8(ffi_side.magnitude(-3)) + UInt8(arithmetic.magnitude(-4))
+}

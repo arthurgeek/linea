@@ -1,0 +1,36 @@
+import std.ffi
+import std.mem
+
+// A handle to a named object C holds.
+@(opaque)
+type Named = UInt64
+
+extern fn n_open() -> Named
+
+extern fn n_name(read h: Named) -> ffi.CText where borrows(h)
+
+pub fn open() -> Named {
+    n_open()
+}
+
+// The name C keeps inside the object, held so a closure can own it.
+struct Held { t: ffi.CText }
+
+impl Release for Held {
+    fn release(sink self: Self) {
+        let Held { t: _ } = self
+    }
+}
+
+// A closure that answers the first byte of the object's name when called.
+pub fn first_byte_later(h: Named) -> Result[mem.Closure[fn() -> UInt8, mem.SystemAllocator], mem.Oom] where borrows(.Ok: h) {
+    let held = Held { t = n_name(h) }
+    mem.Closure.open(
+        [sink held] || -> UInt8 {
+            let got = held.t.copy_bytes(length: 6).unwrap()
+            let first = got[0]
+            got.release()
+            first
+        },
+    )
+}

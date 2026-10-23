@@ -1,0 +1,83 @@
+import std.ffi
+import std.mem
+
+@(opaque, linear)
+type Handle = UInt64
+
+extern fn greeter_open() -> UInt64
+
+// Each answer points into the greeter, so it borrows the handle it was read
+// from.
+extern fn greeter_name(read greeter: Handle) -> ffi.CText where borrows(greeter)
+
+extern fn greeter_nothing(read greeter: Handle) -> ffi.CText where borrows(greeter)
+
+extern fn greeter_garbled(read greeter: Handle) -> ffi.CText where borrows(greeter)
+
+extern fn greeter_record(read greeter: Handle) -> ffi.CText where borrows(greeter)
+
+extern fn greeter_rename(greeter: Handle)
+
+extern fn greeter_close(sink greeter: Handle)
+
+@(opaque, linear)
+struct Greeter { handle: Handle }
+
+@(copyable, derive(Debug, Release))
+pub enum Problem { Missing, NotText, OutOfMemory }
+
+// A `CTextError` stays inside this module, so callers see a `Problem`.
+fn problem(sink failure: ffi.CTextError) -> Problem {
+    match failure {
+        Null => .Missing,
+        Encoding(_) => .NotText,
+        Allocation(_) => .OutOfMemory,
+    }
+}
+
+// Copy C's text into a `String` before anything can change it.
+fn owned(text: ffi.CText) -> Result[String, Problem] {
+    match text.to_owned() {
+        Ok(copied) => .Ok(copied),
+        Err(failure) => .Err(problem(failure)),
+    }
+}
+
+impl Greeter {
+    pub fn open() -> Option[Greeter] {
+        let address = greeter_open()
+        if address == 0 {
+            return .None
+        }
+        .Some(.{ handle = Handle(address) })
+    }
+
+    pub fn name(self: Self) -> Result[String, Problem] {
+        owned(greeter_name(self.handle))
+    }
+
+    pub fn nothing(self: Self) -> Result[String, Problem] {
+        owned(greeter_nothing(self.handle))
+    }
+
+    pub fn garbled(self: Self) -> Result[String, Problem] {
+        owned(greeter_garbled(self.handle))
+    }
+
+    // The record holds a NUL, so it is copied by its known length.
+    pub fn record(self: Self) -> Result[mem.Vec[UInt8], Problem] {
+        match greeter_record(self.handle).copy_bytes(length: 6) {
+            Ok(bytes) => .Ok(bytes),
+            Err(failure) => .Err(problem(failure)),
+        }
+    }
+
+    pub fn rename(inout self: Self) {
+        greeter_rename(self.handle)
+    }
+
+    pub fn close(sink self: Self) {
+        let Greeter { handle: handle } = self
+        greeter_close(handle)
+    }
+}

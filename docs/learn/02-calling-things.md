@@ -1273,8 +1273,12 @@ error[O-Leak]: `invited` (a linear closure) is still owned when this path leaves
 23 | }
    | - also still owned where the block ends
    |
-   = help: settle it first with `invited.release()`
+   = help: settle it first with `invited.release()`, or declare it `defer let invited = …` so every path releases it
 ```
+
+`defer let invited = [sink guests] |name: Str| { … }` binds the closure and
+schedules its release in one statement, the same as the `let` and the
+`defer invited.release()` above.
 
 And using `guests` after the closure took it is the familiar use-after-move,
 here with `io.println("{guests.length()} guests")?` in place of the second
@@ -1504,10 +1508,12 @@ closure begins, instead of a name followed by `._0` and `._1` in the body:
 import std.io
 
 fn main() -> Result[UInt8, io.IoError] {
-    let scores = [10, 20, 30, 40]
-    // `enumerate` pairs each score with its position. The first lambda's
-    // pattern `(i, _)` looks at the pair and ignores the score; the second
-    // takes the pair apart with `sink`, and `*x` reads the borrowed score.
+    let scores = [10, 20, 30, 40, 50]
+    // `enumerate` pairs each score with its position, counting from 0, and
+    // `filter` keeps the scores at even positions: 10 (position 0), 30 (2)
+    // and 50 (4). The first lambda's pattern `(i, _)` looks at the pair and
+    // ignores the score; the second takes the pair apart with `sink`, and
+    // `*x` reads the borrowed score, weighted by its position plus one.
     let weighted = scores
         .as_slice()
         .enumerate()
@@ -1520,7 +1526,7 @@ fn main() -> Result[UInt8, io.IoError] {
 ```
 
 ```
-The weighted total is 100.
+The weighted total is 350.
 ```
 
 The pattern follows the convention the parameter would have had. `|(i, _)|`

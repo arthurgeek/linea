@@ -1,1 +1,1 @@
-{ "kind": "library", "name": "descriptors", "extern": true }
+{ "kind": "library", "name": "descriptors", "extern": ["."] }

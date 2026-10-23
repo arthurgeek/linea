@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// Hover over `embed` says what the program carries, and the definition of\n// its path is the file itself.\nlet page = embed(\"page.html\")\n\nfn main() -> UInt8 {\n    UInt8(page.length())\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":2,"character":12}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":2,"character":20}}}
+{"jsonrpc":"2.0","id":4,"method":"shutdown"}

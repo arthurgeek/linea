@@ -1,0 +1,22 @@
+// The clause the report on `pick` names, applied: `m` may be released while
+// the result lives, because the result only carries what `m` observes.
+@derive(Release)
+struct Mixed {
+    owned: String,
+    v: Str,
+}
+
+fn pick(u: Mixed, w: Str, first: Bool) -> Str where carries(u, w) {
+    if first {
+        copy(u.v)
+    } else {
+        copy(w)
+    }
+}
+
+fn main() -> UInt8 {
+    var m = Mixed { owned = String.new(), v = "x" }
+    let s = pick(m, "w", true)
+    m.release()
+    UInt8(s.length())
+}

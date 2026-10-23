@@ -1,0 +1,18 @@
+// A push that is refused hands the value back in a `mem.PushFailure`, which `?`
+// cannot pass to a function answering `mem.Oom` until `.settled()` reduces it
+// to its reason. In `main`, which answers with a status, the failure is handled
+// where it happens.
+import std.mem
+
+fn remember(inout names: Vec[Str]) -> Result[(), mem.Oom] {
+    &names.push("Ada")
+    .Ok(())
+}
+
+fn main() -> UInt8 {
+    var names: Vec[Str] = Vec.new()
+    defer names.release()
+    let _ = &names.push("Bo")
+    let _remembered = remember(&names)
+    UInt8(names.length())
+}

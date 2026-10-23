@@ -1,0 +1,10 @@
+import named
+
+fn main() -> UInt8 {
+    var first = named.Named.open()
+    let second = named.Named.open()
+    let length = &first.reset_other(second)
+    first.close()
+    second.close()
+    UInt8(length)
+}

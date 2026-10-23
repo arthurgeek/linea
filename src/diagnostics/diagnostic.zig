@@ -38,6 +38,8 @@ pub const Code = enum {
     s_escape,
     /// A source file that is not UTF-8.
     s_encoding,
+    /// An `embed` or `embed_bytes` whose argument is not one string literal.
+    s_embed,
     s_char,
     s_string,
     /// A format selector inside an interpolation other than `:?`.
@@ -125,6 +127,10 @@ pub const Code = enum {
     /// answer to, a cycle, one name for two libraries, or `extern` granted on
     /// one side only.
     m_dependency,
+    /// An embedded path that names no regular file inside its root.
+    m_embed,
+    /// A file embedded with `embed` that is not UTF-8.
+    m_embed_text,
     /// An import nothing names. Its own rule rather than [N-Unused], because
     /// there is no `_` form to suggest: an import is removed.
     m_unused,
@@ -139,8 +145,11 @@ pub const Code = enum {
     /// A sealed type's representation reached from outside the module that
     /// declares it: built, taken apart, or read into.
     m_opaque,
-    /// An `extern` declaration outside the standard library.
+    /// An `extern` declaration in a module its root's manifest does not grant.
     m_extern,
+    /// `std.ffi` imported by a module its root does not grant, or one of its
+    /// types named in what a granted module publishes.
+    m_foreign,
     /// An `export` that designates no single foreign entry point: a generic,
     /// or one written in a program.
     m_export,
@@ -276,8 +285,14 @@ pub const Code = enum {
     /// inside a declaration that declares an allocator parameter of its own.
     t_defaulted_allocator,
     t_cover,
-    t_variants,
+    /// A `match`'s coverage check would build more matrix cells than its
+    /// budget allows. Nested patterns make exhaustiveness NP-complete, so the
+    /// budget is what bounds the cost of checking one `match`.
+    t_cover_limit,
     t_unreachable,
+    /// A pattern that must match every value of its type, in a `let`, a
+    /// `let read`, a `let … else`, a `for` or a lambda parameter, misses one.
+    t_refutable,
     /// A type holds itself inline, so computing its size requires its size.
     /// About layout rather than about recursion: a type that reaches itself
     /// through an indirection is well formed, and this rule outlives the one
@@ -324,6 +339,12 @@ pub const Code = enum {
     t_extern,
     /// Two `extern` declarations of one symbol whose signatures disagree.
     t_extern_agreement,
+    /// A callback an `extern` takes is not one C can call: its form, its
+    /// context, or an argument with no fixed function behind it.
+    t_extern_callback,
+    /// A C function that may change the object a sealed handle holds is
+    /// called from somewhere that does not hold the object whole.
+    t_extern_handle,
     /// An `extern` in the runtime's `linea_` namespace whose symbol the
     /// runtime does not declare, or whose signature is not the runtime's.
     t_extern_runtime,
@@ -362,6 +383,7 @@ pub const Code = enum {
             .s_extern => "S-Extern",
             .s_escape => "S-Escape",
             .s_encoding => "S-Encoding",
+            .s_embed => "S-Embed",
             .s_char => "S-Char",
             .s_string => "S-String",
             .s_format => "S-Format",
@@ -410,11 +432,14 @@ pub const Code = enum {
             .n_type_alias => "N-TypeAlias",
             .m_import => "M-Import",
             .m_dependency => "M-Dependency",
+            .m_embed => "M-Embed",
+            .m_embed_text => "M-EmbedText",
             .m_unused => "M-Unused",
             .m_vis => "M-Vis",
             .m_entry => "M-Entry",
             .m_opaque => "M-Opaque",
             .m_extern => "M-Extern",
+            .m_foreign => "M-Foreign",
             .m_export => "M-Export",
             .o_universe => "O-Universe",
             .o_capture => "O-Capture",
@@ -467,8 +492,9 @@ pub const Code = enum {
             .t_argument_default => "T-ArgumentDefault",
             .t_defaulted_allocator => "T-DefaultedAllocator",
             .t_cover => "T-Cover",
-            .t_variants => "T-Variants",
+            .t_cover_limit => "T-CoverLimit",
             .t_unreachable => "T-Unreachable",
+            .t_refutable => "T-Refutable",
             .t_infinite_layout => "T-InfiniteLayout",
             .l_size => "L-Size",
             .t_unknown_field => "T-UnknownField",
@@ -487,6 +513,8 @@ pub const Code = enum {
             .t_let_else => "T-LetElse",
             .t_extern => "T-Extern",
             .t_extern_agreement => "T-ExternAgreement",
+            .t_extern_callback => "T-ExternCallback",
+            .t_extern_handle => "T-ExternHandle",
             .t_extern_runtime => "T-ExternRuntime",
             .t_export => "T-Export",
             .t_phantom => "T-Phantom",
@@ -515,6 +543,25 @@ pub const Label = struct {
     style: LabelStyle = .primary,
 };
 
+/// One replacement a help's change makes: the bytes `span` covers in `file`
+/// become `text`. An empty span inserts.
+pub const Edit = struct {
+    file: FileId,
+    span: Span,
+    text: []const u8,
+};
+
+/// A help's change in a form a tool can apply without reading the help's
+/// text: every edit in `edits`, applied together, which never overlap.
+/// `note` is the index in the diagnostic's `notes` of the help it writes, or
+/// null where the help is the primary label's message, so what a reader is
+/// told and what a tool would write are one change, and a tool can title the
+/// change with the help.
+pub const Fix = struct {
+    note: ?u32,
+    edits: []const Edit,
+};
+
 /// A single reported problem. Held as a plain struct rather than column-wise:
 /// a handful exist per compilation and rendering touches every field of each,
 /// so there is no bulk traversal for dense columns to pay off against.
@@ -523,7 +570,16 @@ pub const Diagnostic = struct {
     code: ?Code = null,
     message: []const u8,
     labels: []const Label = &.{},
+    /// Advice for the next edit, each written `= help:`.
     notes: []const []const u8 = &.{},
+    /// Facts about the problem that no label can point at, such as where in a
+    /// file the compiler does not show the problem lies, each written
+    /// `= note:` before the advice.
+    remarks: []const []const u8 = &.{},
+    /// One fix per help concrete enough to write, in no particular order. A
+    /// help that leaves a choice to the reader, such as a type to fill in or
+    /// where to put a statement, has none.
+    fixes: []const Fix = &.{},
 
     pub fn primaryLabel(self: *const Diagnostic) ?Label {
         for (self.labels) |l| {

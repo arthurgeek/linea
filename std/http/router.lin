@@ -150,6 +150,48 @@ struct Router[S = (), P: Allocator = mem.SystemAllocator] {
     matched_fields: Vec[Field, P],
 }
 
+// A `Slot` is where a pattern's handler is registered: the node its path ends
+// at, and its method.
+struct Slot {
+    path: Str,
+    node: UInt64,
+    method: Option[Method],
+}
+
+impl[S] Router[S, mem.SystemAllocator] {
+    // `new` makes a router that keeps its routes in the system allocator. Its
+    // state type comes from the context, and is `()` when nothing names one.
+    pub fn new() -> Self {
+        Router.new_in(mem.system())
+    }
+
+    test fn a_router_written_without_an_allocator_is_the_system_router() {
+        let short: Router[()] = Router.new()
+        let long: Router[(), mem.SystemAllocator] = short
+        long.release()
+    }
+
+    test fn a_new_router_answers_404() {
+        defer var router = Router.new()
+        defer let received = served(&router, "GET", "/")
+        testing.assert_eq(received.view(), not_found, "a stateless router matched")?
+        .Ok(())
+    }
+
+    // Each request to `/visit` counts one visit in the state the router is lent.
+    test fn a_stateful_router_lends_the_state_to_each_route() {
+        defer var router: Router[Visits] = Router.new()
+        testing.assert_ok_eq(&router.route_raw("GET /visit", visit), (), "registering failed")?
+        var visits = Visits { count = 0 }
+        defer let first = served_with(&router, &visits, "GET", "/visit")
+        defer let second = served_with(&router, &visits, "GET", "/visit")
+        testing.assert_eq(first.view(), "200 visit 1", "the first visit was not counted")?
+        testing.assert_eq(second.view(), "200 visit 2", "the count was not kept in the state")?
+        testing.assert_eq(visits.count, UInt64(2), "the state lent to the router did not change")?
+        .Ok(())
+    }
+}
+
 impl[S, P: Allocator] Router[S, P] {
     // `new_in` makes a router that keeps its routes in `allocator`. Its routes
     // take a state of the type the context names, as
@@ -167,50 +209,14 @@ impl[S, P: Allocator] Router[S, P] {
             matched_fields = Vec.new_in(allocator),
         }
     }
-}
 
-test fn a_router_built_in_an_allocator_answers_404() {
-    defer var router = Router.new_in(mem.system())
-    defer let received = served(&router, "GET", "/")
-    testing.assert_eq(received.view(), not_found, "a new router matched")?
-    .Ok(())
-}
-
-impl[S] Router[S, mem.SystemAllocator] {
-    // `new` makes a router that keeps its routes in the system allocator. Its
-    // state type comes from the context, and is `()` when nothing names one.
-    pub fn new() -> Self {
-        Router.new_in(mem.system())
+    test fn a_router_built_in_an_allocator_answers_404() {
+        defer var router = Router.new_in(mem.system())
+        defer let received = served(&router, "GET", "/")
+        testing.assert_eq(received.view(), not_found, "a new router matched")?
+        .Ok(())
     }
-}
 
-test fn a_router_written_without_an_allocator_is_the_system_router() {
-    let short: Router[()] = Router.new()
-    let long: Router[(), mem.SystemAllocator] = short
-    long.release()
-}
-
-test fn a_new_router_answers_404() {
-    defer var router = Router.new()
-    defer let received = served(&router, "GET", "/")
-    testing.assert_eq(received.view(), not_found, "a stateless router matched")?
-    .Ok(())
-}
-
-// Each request to `/visit` counts one visit in the state the router is lent.
-test fn a_stateful_router_lends_the_state_to_each_route() {
-    defer var router: Router[Visits] = Router.new()
-    testing.assert_ok_eq(&router.route_raw("GET /visit", visit), (), "registering failed")?
-    var visits = Visits { count = 0 }
-    defer let first = served_with(&router, &visits, "GET", "/visit")
-    defer let second = served_with(&router, &visits, "GET", "/visit")
-    testing.assert_eq(first.view(), "200 visit 1", "the first visit was not counted")?
-    testing.assert_eq(second.view(), "200 visit 2", "the count was not kept in the state")?
-    testing.assert_eq(visits.count, UInt64(2), "the state lent to the router did not change")?
-    .Ok(())
-}
-
-impl[S, P: Allocator] Router[S, P] {
     // Register `handler` for `pattern`. `handler` is a named function whose
     // parameters are the inputs it reads, an `Endpoint`: an optional leading
     // `inout state`, up to six extractors, and the request last. The router
@@ -237,83 +243,81 @@ impl[S, P: Allocator] Router[S, P] {
         &self.nodes[slot.node].exact.register(slot.method, index)
         .Ok(())
     }
-}
 
-test fn a_route_is_registered_once_per_shape_and_method() {
-    defer var router = Router.new()
-    let first = &router.route_raw(r"/items/{id}", first_handler)
-    let other_method = &router.route_raw(r"POST /items/{id}", second_handler)
-    let deeper = &router.route_raw(r"/items/{id}/parts", second_handler)
-    let invalid = &router.route_raw("items", first_handler)
-    testing.assert_ok_eq(first, (), "registering failed")?
-    testing.assert_ok_eq(other_method, (), "a second method at one shape was refused")?
-    testing.assert_ok_eq(deeper, (), "a longer pattern was refused")?
-    testing.assert_eq(invalid, .Err(.InvalidPattern), "a pattern without a leading slash was accepted")?
-    .Ok(())
-}
+    test fn a_route_is_registered_once_per_shape_and_method() {
+        defer var router = Router.new()
+        let first = &router.route_raw(r"/items/{id}", first_handler)
+        let other_method = &router.route_raw(r"POST /items/{id}", second_handler)
+        let deeper = &router.route_raw(r"/items/{id}/parts", second_handler)
+        let invalid = &router.route_raw("items", first_handler)
+        testing.assert_ok_eq(first, (), "registering failed")?
+        testing.assert_ok_eq(other_method, (), "a second method at one shape was refused")?
+        testing.assert_ok_eq(deeper, (), "a longer pattern was refused")?
+        testing.assert_eq(invalid, .Err(.InvalidPattern), "a pattern without a leading slash was accepted")?
+        .Ok(())
+    }
 
-test fn identical_shapes_are_a_duplicate() {
-    defer var router = Router.new()
-    let first = &router.route_raw(r"/a/{x}", first_handler)
-    let renamed = &router.route_raw(r"/a/{y}", second_handler)
-    let method = &router.route_raw(r"GET /a/{x}", second_handler)
-    let again = &router.route_raw(r"GET /a/{z}", second_handler)
-    let slashed = &router.route_raw("/a/", second_handler)
-    let slashed_again = &router.route_raw("/a/", second_handler)
-    testing.assert_ok_eq(first, (), "registering failed")?
-    testing.assert_eq(renamed, .Err(.Duplicate), "a renamed parameter was a new shape")?
-    testing.assert_ok_eq(method, (), "a method pattern at a methodless shape was refused")?
-    testing.assert_eq(again, .Err(.Duplicate), "a repeated method pattern was accepted")?
-    testing.assert_ok_eq(slashed, (), "a pattern ending in / was refused")?
-    testing.assert_eq(slashed_again, .Err(.Duplicate), "a repeated pattern ending in / was accepted")?
-    defer let received = served(&router, "GET", "/a/1")
-    testing.assert_eq(received.view(), "200 second", "a refused pattern replaced a registered one")?
-    .Ok(())
-}
+    test fn identical_shapes_are_a_duplicate() {
+        defer var router = Router.new()
+        let first = &router.route_raw(r"/a/{x}", first_handler)
+        let renamed = &router.route_raw(r"/a/{y}", second_handler)
+        let method = &router.route_raw(r"GET /a/{x}", second_handler)
+        let again = &router.route_raw(r"GET /a/{z}", second_handler)
+        let slashed = &router.route_raw("/a/", second_handler)
+        let slashed_again = &router.route_raw("/a/", second_handler)
+        testing.assert_ok_eq(first, (), "registering failed")?
+        testing.assert_eq(renamed, .Err(.Duplicate), "a renamed parameter was a new shape")?
+        testing.assert_ok_eq(method, (), "a method pattern at a methodless shape was refused")?
+        testing.assert_eq(again, .Err(.Duplicate), "a repeated method pattern was accepted")?
+        testing.assert_ok_eq(slashed, (), "a pattern ending in / was refused")?
+        testing.assert_eq(slashed_again, .Err(.Duplicate), "a repeated pattern ending in / was accepted")?
+        defer let received = served(&router, "GET", "/a/1")
+        testing.assert_eq(received.view(), "200 second", "a refused pattern replaced a registered one")?
+        .Ok(())
+    }
 
-// A route closure reads what it captured, here the text it answers with.
-test fn a_route_closure_reads_what_it_captured() {
-    defer var router = Router.new()
-    let greeting = "hello"
-    let registered = &router.route_raw("GET /greet", [greeting] |inout _, request| text(request, greeting))
-    defer let received = served(&router, "GET", "/greet")
-    testing.assert_ok_eq(registered, (), "registering failed")?
-    testing.assert_eq(received.view(), "200 hello", "the captured text was not answered")?
-    .Ok(())
-}
+    // A route closure reads what it captured, here the text it answers with.
+    test fn a_route_closure_reads_what_it_captured() {
+        defer var router = Router.new()
+        let greeting = "hello"
+        let registered = &router.route_raw("GET /greet", [greeting] |inout _, request| text(request, greeting))
+        defer let received = served(&router, "GET", "/greet")
+        testing.assert_ok_eq(registered, (), "registering failed")?
+        testing.assert_eq(received.view(), "200 hello", "the captured text was not answered")?
+        .Ok(())
+    }
 
-test fn a_router_keeps_its_routes_in_an_arena() {
-    // The router's tables and the request's 65536-byte arena both come from
-    // this parent arena.
-    defer let parent = mem.Arena.open(mem.system(), size: 131072)
-    defer var router = Router.new_in(parent.handle())
-    testing.assert_ok_eq(&router.route_raw(r"GET /items/{id}", named_id), (), "registering in an arena failed")?
-    testing.assert_ok_eq(&router.route_raw("POST /items", first_handler), (), "a second route in an arena failed")?
-    defer let received = served(&router, "GET", "/items/42")
-    testing.assert_eq(received.view(), "200 id=42", "a router in an arena answered wrongly")?
-    .Ok(())
-}
+    test fn a_router_keeps_its_routes_in_an_arena() {
+        // The router's tables and the request's 65536-byte arena both come from
+        // this parent arena.
+        defer let parent = mem.Arena.open(mem.system(), size: 131072)
+        defer var router = Router.new_in(parent.handle())
+        testing.assert_ok_eq(&router.route_raw(r"GET /items/{id}", named_id), (), "registering in an arena failed")?
+        testing.assert_ok_eq(&router.route_raw("POST /items", first_handler), (), "a second route in an arena failed")?
+        defer let received = served(&router, "GET", "/items/42")
+        testing.assert_eq(received.view(), "200 id=42", "a router in an arena answered wrongly")?
+        .Ok(())
+    }
 
-test fn each_allocation_failure_covers_every_table_a_route_grows() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), RouteError] {
-            defer var router = Router.new_in(allocator)
-            &router.route_raw(r"GET /items/{id}", named_id)?
-            &router.route_raw("POST /items", first_handler)?
-            &router.route_raw("/static/", second_handler)?
-            // A closure that captures its text is kept in the router's allocator.
-            let greeting = "hello"
-            &router.route_raw("GET /greet", [greeting] |inout _, request| text(request, greeting))?
-            return .Ok(())
-        },
-        RouteError.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "registering routes was reported as failing")?
-    .Ok(())
-}
+    test fn each_allocation_failure_covers_every_table_a_route_grows() -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), RouteError] {
+                defer var router = Router.new_in(allocator)
+                &router.route_raw(r"GET /items/{id}", named_id)?
+                &router.route_raw("POST /items", first_handler)?
+                &router.route_raw("/static/", second_handler)?
+                // A closure that captures its text is kept in the router's allocator.
+                let greeting = "hello"
+                &router.route_raw("GET /greet", [greeting] |inout _, request| text(request, greeting))?
+                return .Ok(())
+            },
+            RouteError.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "registering routes was reported as failing")?
+        .Ok(())
+    }
 
-impl[S, P: Allocator] Router[S, P] {
     // `claim` finds the node `pattern` ends at, adding the nodes it lacks, and
     // refuses a pattern that is malformed or already registered.
     fn claim(inout self: Self, pattern: Str) -> Result[Slot, RouteError] where carries(.Ok: pattern), retains(self: self) {
@@ -336,17 +340,7 @@ impl[S, P: Allocator] Router[S, P] {
         }
         .Ok(.{ path = copy(parsed.path), node, method = copy(parsed.method) })
     }
-}
 
-// A `Slot` is where a pattern's handler is registered: the node its path ends
-// at, and its method.
-struct Slot {
-    path: Str,
-    node: UInt64,
-    method: Option[Method],
-}
-
-impl[S, P: Allocator] Router[S, P] {
     // `root` returns the root node, adding it on first use.
     fn root(inout self: Self) -> Result[UInt64, RouteError] where carries(), retains(self: self) {
         if self.nodes.length() != 0 {
@@ -421,9 +415,7 @@ impl[S, P: Allocator] Router[S, P] {
             },
         }
     }
-}
 
-impl[S, P: Allocator] Router[S, P] {
     // Find the pattern that answers `method` at `path`, and count the trie
     // nodes the search entered.
     fn walk(self: Self, method: Method, path: Str) -> Walk {
@@ -443,32 +435,30 @@ impl[S, P: Allocator] Router[S, P] {
         }
         .{ found, visited = search.visited }
     }
-}
 
-test fn a_match_visits_only_nodes_whose_prefix_matches() {
-    defer var router = Router.new()
-    for index in UInt64(0)..1000 {
-        let pattern = fmt.render_owned("GET /r{index}/{{id}}").unwrap()
-        let outcome = &router.route_raw(pattern.view(), first_handler)
-        pattern.release()
-        testing.assert_ok_eq(outcome, (), "registering a numbered route failed")?
+    test fn a_match_visits_only_nodes_whose_prefix_matches() {
+        defer var router = Router.new()
+        for index in UInt64(0)..1000 {
+            let pattern = fmt.render_owned("GET /r{index}/{{id}}").unwrap()
+            let outcome = &router.route_raw(pattern.view(), first_handler)
+            pattern.release()
+            testing.assert_ok_eq(outcome, (), "registering a numbered route failed")?
+        }
+        testing.assert_ok_eq(&router.route_raw("/items/new", first_handler), (), "registering failed")?
+        testing.assert_ok_eq(&router.route_raw(r"/items/{id}/edit", second_handler), (), "registering failed")?
+        // Of 1004 nodes, three match the prefix: the root, `r999` and `{id}`.
+        let last = router.walk(.Get, "/r999/42")
+        testing.assert_eq(last, Walk { found = .Route(999), visited = 3 }, "the last route was not found directly")?
+        // A path deeper than every pattern stops the search where the trie ends.
+        let past = router.walk(.Get, "/r5/7/x/y/z/w")
+        testing.assert_eq(past, Walk { found = .Unmatched, visited = 3 }, "a path past every pattern was searched past the trie")?
+        // `new` dead-ends at `edit`, and `{id}` is tried next: the root, `items`,
+        // `new`, `{id}` and `edit`.
+        let edit = router.walk(.Get, "/items/new/edit")
+        testing.assert_eq(edit, Walk { found = .Route(1001), visited = 5 }, "the search did not back out of a literal")?
+        .Ok(())
     }
-    testing.assert_ok_eq(&router.route_raw("/items/new", first_handler), (), "registering failed")?
-    testing.assert_ok_eq(&router.route_raw(r"/items/{id}/edit", second_handler), (), "registering failed")?
-    // Of 1004 nodes, three match the prefix: the root, `r999` and `{id}`.
-    let last = router.walk(.Get, "/r999/42")
-    testing.assert_eq(last, Walk { found = .Route(999), visited = 3 }, "the last route was not found directly")?
-    // A path deeper than every pattern stops the search where the trie ends.
-    let past = router.walk(.Get, "/r5/7/x/y/z/w")
-    testing.assert_eq(past, Walk { found = .Unmatched, visited = 3 }, "a path past every pattern was searched past the trie")?
-    // `new` dead-ends at `edit`, and `{id}` is tried next: the root, `items`,
-    // `new`, `{id}` and `edit`.
-    let edit = router.walk(.Get, "/items/new/edit")
-    testing.assert_eq(edit, Walk { found = .Route(1001), visited = 5 }, "the search did not back out of a literal")?
-    .Ok(())
-}
 
-impl[S, P: Allocator] Router[S, P] {
     // Search beneath node `at` for the segments of `path` from `start`, which
     // is past the end when none remain. The literal child is tried first, then
     // `{name}`, then `{name...}`, so the first
@@ -620,8 +610,8 @@ impl[S, P: Allocator] Handler[S, P] for Router[S, P] {
                 match record_path_values(&self.matched, &self.matched_fields, pattern, request.path()) {
                     Ok(_) => {},
                     Err(refusal) => return .Err(match refusal {
-                        Invalid => error(request, .BadRequest, "a path value is not percent-encoded UTF-8"),
-                        Allocation => Error.new(.InternalServerError),
+                        Allocation(_) => Error.new(.InternalServerError),
+                        _ => error(request, .BadRequest, "a path value is not percent-encoded UTF-8"),
                     }),
                 }
                 // Every recorded name and value is UTF-8, so the whole is.
@@ -812,24 +802,18 @@ test fn path_values_belong_to_the_request_answered() {
     .Ok(())
 }
 
-// Recording a path value fails when the value is not percent-encoded UTF-8
-// (`Invalid`) or when no memory holds it (`Allocation`).
-@copyable
-enum PathValueError {
-    Invalid,
-    Allocation,
-}
-
 // Record the value of each `{name}` and `{name...}` in `pattern`, the path of
-// the pattern that matched `path`, percent-decoded, in `matched` with its
-// ranges in `fields`. `pattern` is stored without its leading `/`, and `path`
+// the pattern that matched `path`, percent-decoded with `+` kept, in `matched`
+// with its ranges in `fields`. A value that is not percent-encoded UTF-8 is
+// refused with `Escape` or `Encoding`, and running out of memory with
+// `Allocation`. `pattern` is stored without its leading `/`, and `path`
 // has one; they have the same segments up to the pattern's end, because the
 // one matched the other. Storage for both is reserved once, since the names
 // and values take no more bytes than the pattern and the path.
-fn record_path_values[P: Allocator](inout matched: Vec[UInt8, P], inout fields: Vec[Field, P], pattern: Str, path: Str) -> Result[(), PathValueError] where carries() {
+fn record_path_values[P: Allocator](inout matched: Vec[UInt8, P], inout fields: Vec[Field, P], pattern: Str, path: Str) -> Result[(), PercentError] where carries() {
     let reserved = &matched.reserve(pattern.length() + path.length()).is_ok() && &fields.reserve(pattern.length()).is_ok()
     if !reserved {
-        return .Err(.Allocation)
+        return .Err(.Allocation(.Exhausted))
     }
     var pattern_start: UInt64 = 0
     var path_start: UInt64 = 1
@@ -847,7 +831,7 @@ fn record_path_values[P: Allocator](inout matched: Vec[UInt8, P], inout fields: 
                 let decoded = append_decoded(&matched, found.raw, plus_is_space: false)?
                 match &fields.push(.{ name, value = decoded }) {
                     Ok(_) => {},
-                    Err(_) => return .Err(.Allocation),
+                    Err(_) => return .Err(.Allocation(.Exhausted)),
                 }
             },
             None => {},
@@ -859,10 +843,10 @@ fn record_path_values[P: Allocator](inout matched: Vec[UInt8, P], inout fields: 
 }
 
 // Append `bytes` to `stored` and return the range they occupy.
-fn store_bytes[P: Allocator](inout stored: Vec[UInt8, P], bytes: mem.Slice[UInt8]) -> Result[Span, PathValueError] where carries() {
+fn store_bytes[P: Allocator](inout stored: Vec[UInt8, P], bytes: mem.Slice[UInt8]) -> Result[Span, PercentError] where carries() {
     let start = stored.length()
     if &stored.append_slice(bytes).is_err() {
-        return .Err(.Allocation)
+        return .Err(.Allocation(.Exhausted))
     }
     .Ok(.{ start, end = stored.length() })
 }
@@ -873,105 +857,6 @@ fn store_bytes[P: Allocator](inout stored: Vec[UInt8, P], bytes: mem.Slice[UInt8
 struct PathValue {
     name: Str,
     raw: Str,
-}
-
-// `append_decoded` appends `raw` to `stored` with each `%XX` escape decoded
-// into the byte it spells, and each `+` into a space when `plus_is_space` is
-// set, as a query encodes one, and returns the range the decoded bytes
-// occupy. An incomplete escape, one that is not hexadecimal, or decoded bytes
-// that are not UTF-8 are invalid, and leave `stored` as it was. Decoding
-// never lengthens the text, so reserving `raw`'s length first means nothing
-// is allocated here.
-fn append_decoded[A: Allocator](inout stored: Vec[UInt8, A], raw: Str, plus_is_space: Bool) -> Result[Span, PathValueError] where carries() {
-    let start = stored.length()
-    let bytes = raw.as_bytes()
-    var at: UInt64 = 0
-    var outcome: Result[(), PathValueError] = .Ok(())
-    while outcome.is_ok() && at < bytes.length() {
-        var byte = bytes[at]
-        at += 1
-        if byte == percent {
-            let escaped = if at + 2 <= bytes.length() {
-                escape_value(bytes[at], bytes[at + 1])
-            } else {
-                Option.None
-            }
-            match escaped {
-                Some(value) => byte = value,
-                None => outcome = .Err(.Invalid),
-            }
-            at += 2
-        } else if byte == plus && plus_is_space {
-            byte = ascii_space
-        }
-        if outcome.is_ok() && &stored.push(byte).is_err() {
-            outcome = .Err(.Allocation)
-        }
-    }
-    if outcome.is_ok() {
-        let appended = stored.as_slice().subspan(start: start, count: stored.length() - start).unwrap()
-        if Str.from_bytes(appended).is_err() {
-            outcome = .Err(.Invalid)
-        }
-    }
-    match outcome {
-        Ok(_) => .Ok(.{ start, end = stored.length() }),
-        Err(error) => {
-            &stored.truncate(start)
-            return .Err(error)
-        },
-    }
-}
-
-test fn decoding_appends_the_bytes_escapes_spell() {
-    defer var stored: Vec[UInt8] = Vec.new()
-    let spaced = append_decoded(&stored, "a%20b+c", plus_is_space: false).unwrap()
-    let formed = append_decoded(&stored, "Ada+L%C3%B3pez", plus_is_space: true).unwrap()
-    let kept = stored.length()
-    let cut = append_decoded(&stored, "ab%4", plus_is_space: true)
-    let lettered = append_decoded(&stored, "%zz", plus_is_space: true)
-    let invalid = append_decoded(&stored, "%FF", plus_is_space: true)
-    let text = Str.from_bytes(stored.as_slice()).unwrap()
-    testing.assert_eq(stored_part(text, spaced), "a b+c", "a path value decoded a plus")?
-    testing.assert_eq(stored_part(text, formed), "Ada López", "a query value was not decoded")?
-    testing.assert(cut.is_err() && lettered.is_err() && invalid.is_err(), "an invalid escape was decoded")?
-    testing.assert_eq(stored.length(), kept, "a refused value was kept")?
-    .Ok(())
-}
-
-// The byte `%` begins an escape.
-let percent: UInt8 = 37
-
-// In a query, the byte `+` stands for a space.
-let plus: UInt8 = 43
-
-// `escape_value` returns the byte two hexadecimal digits spell, in either case.
-fn escape_value(high: UInt8, low: UInt8) -> Option[UInt8] {
-    let first = hex_value(high)?
-    let second = hex_value(low)?
-    .Some(first * 16 + second)
-}
-
-// `hex_value` returns the value of one hexadecimal digit. The ASCII digits
-// `0` to `9` are 48 through 57, `A` to `F` are 65 through 70, and `a` to `f`
-// are 97 through 102.
-fn hex_value(byte: UInt8) -> Option[UInt8] {
-    if byte >= 48 && byte <= 57 {
-        .Some(byte - 48)
-    } else if byte >= 65 && byte <= 70 {
-        .Some(byte - 55)
-    } else if byte >= 97 && byte <= 102 {
-        .Some(byte - 87)
-    } else {
-        .None
-    }
-}
-
-test fn an_escape_is_two_hexadecimal_digits_in_either_case() {
-    testing.assert_eq(escape_value(50, 70), Option.Some(UInt8(47)), "%2F did not decode")?
-    testing.assert_eq(escape_value(99, 51), Option.Some(UInt8(195)), "%c3 did not decode")?
-    testing.assert_eq(escape_value(71, 48), .None, "a non-hexadecimal digit decoded")?
-    .Ok(())
 }
 
 // `served` describes a 404 this way.

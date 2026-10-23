@@ -3,3 +3,6 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |
 15 |     station.name.view()
    |     ^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `station`; write `where borrows(station)` to say so
+   = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`

@@ -1,0 +1,23 @@
+import std.ffi
+
+extern fn getenv(name: ffi.CText) -> ffi.CText where carries()
+
+// A `CText` is valid only while what it borrows lives, and only a granted
+// module may read it, so it never appears in what this module publishes.
+pub fn home(name: ffi.CText) -> ffi.CText {
+    getenv(name)
+}
+
+pub struct Entry {
+    label: ffi.CText,
+}
+
+pub enum Found {
+    Named(ffi.CText),
+    Missing,
+}
+
+// Re-exporting or aliasing the type would let another module name it too.
+pub use ffi.CText
+
+pub alias Text = ffi.CText

@@ -3,6 +3,7 @@ const testing = std.testing;
 
 const Sink = @import("../diagnostics/sink.zig").Sink;
 const Label = @import("../diagnostics/diagnostic.zig").Label;
+const Diagnostic = @import("../diagnostics/diagnostic.zig").Diagnostic;
 const Interner = @import("../support/interner.zig").Interner;
 const StringId = @import("../support/interner.zig").StringId;
 const Source = @import("../support/source.zig").Source;
@@ -1357,9 +1358,8 @@ pub const ExpandedProgram = struct {
     /// **Bound:** the sink's diagnostics, each compared by one hashed key.
     pub fn collapseGeneratedDiagnostics(self: *const ExpandedProgram, sink: *Sink) std.mem.Allocator.Error!void {
         var seen: std.StringHashMapUnmanaged(void) = .empty;
-        var kept: usize = 0;
-        const items = sink.mutableItems();
-        for (items) |item| {
+        var kept: std.ArrayList(Diagnostic) = .empty;
+        for (sink.items()) |item| {
             var diagnostic = item;
             var generated = false;
 
@@ -1390,8 +1390,7 @@ pub const ExpandedProgram = struct {
             }
             extra.items.len = provenance;
             if (!generated) {
-                items[kept] = diagnostic;
-                kept += 1;
+                try kept.append(sink.arena, diagnostic);
                 continue;
             }
 
@@ -1414,18 +1413,10 @@ pub const ExpandedProgram = struct {
             try key.print(sink.arena, "{d}|{d}|{s}", .{ @intFromEnum(diagnostic.severity), if (diagnostic.code) |code| @as(i64, @intFromEnum(code)) else -1, diagnostic.message });
             for (diagnostic.labels) |label| try key.print(sink.arena, "|{d}:{d}:{d}:{d}:{s}", .{ @intFromEnum(label.file), label.span.start, label.span.end, @intFromEnum(label.style), label.message });
             for (diagnostic.notes) |note| try key.print(sink.arena, "|{s}", .{note});
-            if ((try seen.getOrPut(sink.arena, key.items)).found_existing) {
-                switch (diagnostic.severity) {
-                    .err => sink.error_count -= 1,
-                    .warning => sink.warning_count -= 1,
-                    .note => {},
-                }
-                continue;
-            }
-            items[kept] = diagnostic;
-            kept += 1;
+            if ((try seen.getOrPut(sink.arena, key.items)).found_existing) continue;
+            try kept.append(sink.arena, diagnostic);
         }
-        sink.list.items.len = kept;
+        try sink.replaceAll(kept.items);
     }
 
     test "collapseGeneratedDiagnostics keeps the captioned template label of one expression" {

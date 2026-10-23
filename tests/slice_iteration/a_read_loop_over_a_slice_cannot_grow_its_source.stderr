@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/slice_iteration/a_read_loop_over_a_slice_cannot_grow_its_source.lin:10:9
+   |
+9  |         total += value
+   |                  ----- the observation is still used here
+10 |         &values.push(value).unwrap()
+   |         ^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation

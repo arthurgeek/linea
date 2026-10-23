@@ -1,0 +1,7 @@
+error[T-Infer]: nothing here says what `T` is
+ --> tests/inference/an_unannotated_constructor_names_the_annotation.lin:5:17
+  |
+5 |     var names = Vec.new()
+  |                 ^^^^^^^^^ no argument determines it, and nothing expects a type of it
+  |
+  = help: say what `T` is where `names` is declared: `var names: Vec[T] = Vec.new()`, with a type in place of `T`

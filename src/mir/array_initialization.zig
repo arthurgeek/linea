@@ -209,7 +209,7 @@ const Proof = struct {
                 if (self.by_binding.get(self.res.targetOf(at))) |i| self.candidates.items[i].rejected = true;
                 return true;
             },
-            .int_literal, .float_literal, .str_literal, .bool_literal => return true,
+            .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal => return true,
             .index => return self.indexed(at, context, false),
             .assign, .add_assign, .sub_assign, .mul_assign, .div_assign, .rem_assign => {
                 const pair = self.ast.binary(at);

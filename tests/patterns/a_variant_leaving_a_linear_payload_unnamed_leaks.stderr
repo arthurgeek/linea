@@ -1,0 +1,7 @@
+error[O-Leak]: this linear `Slot` is taken apart and what it holds is never settled
+  --> tests/patterns/a_variant_leaving_a_linear_payload_unnamed_leaks.lin:23:14
+   |
+23 |         Some(Taken) => 1,
+   |              ^^^^^ this pattern names none of what it holds
+   |
+   = help: name what it holds in the pattern, so something can settle it

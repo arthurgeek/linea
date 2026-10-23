@@ -1,0 +1,24 @@
+// A route's signature is the one the router calls, so it cannot add a clause
+// that lets the state keep a view of the request. The state keeps an owned
+// `String` instead, and `append` copies the path's text into it; the copy can
+// fail with `mem.Oom`, which `?` hands on as the route's error.
+import std.http
+import std.mem
+
+@derive(Release)
+struct App {
+    last: String,
+}
+
+fn remember[P: Allocator](inout app: App, request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] where carries(request) {
+    &app.last.append(request.path())?
+    http.text(request, "ok")
+}
+
+fn main() -> UInt8 {
+    var router: http.Router[App, mem.SystemAllocator] = http.Router.new()
+    let _registered = &router.route_raw("GET /", remember)
+    let server = http.with_state(App { last = String.new() }, router)
+    server.release()
+    0
+}

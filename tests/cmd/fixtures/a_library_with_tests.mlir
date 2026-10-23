@@ -100,7 +100,7 @@ module {
     %v39 = arith.constant 0 : i64 loc("tests/cmd/fixtures/a_library_with_tests/main.lin":7:9)
     cf.br ^b2 loc("tests/cmd/fixtures/a_library_with_tests/main.lin":6:5)
   }
-  func.func @sum() -> i8 {
+  func.func @sum() -> (i8 {llvm.zeroext}) {
     %answer = func.call @"lin.;sum"() : () -> i64
     %narrow = arith.trunci %answer : i64 to i8
     func.return %narrow : i8

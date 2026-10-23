@@ -3,3 +3,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   |
 7 |     match read bucket { Full(pair) => borrow pair.number }
   |                                       ^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `bucket` belongs to `invalid` and ends when it returns, so nothing returned may observe it

@@ -1,0 +1,21 @@
+// `main` answers `io.IoError`, and `?` would convert a `ConfigError` into it
+// through `From[ConfigError] for io.IoError`. The library declares both `From`
+// and `io.IoError`, so this program cannot write that implementation: the
+// report offers an error type of its own, or converting at the call.
+import std.io
+import std.text
+
+@derive(Debug, From[text.ParseError])
+enum ConfigError {
+    Number(text.ParseError),
+}
+
+fn parse_port(value: Str) -> Result[UInt16, ConfigError] {
+    .Ok(value.parse[UInt16]()?)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let port = parse_port("8080")?
+    io.println("{port}")?
+    .Ok(0)
+}

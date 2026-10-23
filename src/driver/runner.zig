@@ -363,7 +363,8 @@ const Transcript = struct {
         try self.w.flush();
     }
 
-    /// The count, once every result has been written.
+    /// The count, once every result has been written. `testsReported` in
+    /// `build/source.zig` reads this line, so a change to it changes that.
     fn finish(self: *Transcript) std.Io.Writer.Error!void {
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);

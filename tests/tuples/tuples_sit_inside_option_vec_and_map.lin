@@ -8,10 +8,7 @@ use mem.Lender
 fn main() -> UInt8 {
     let found: Option[(UInt8, Bool)] = .Some((4, true))
     let from_option = match found {
-        Some(pair) => {
-            let (n, _) = pair
-            n
-        },
+        Some((n, _)) => n,
         None => 0,
     }
 

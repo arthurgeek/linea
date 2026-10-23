@@ -3,6 +3,7 @@
 // client. Add a number, as in `tcp_echo serve PORT 3`, to stop after that many
 // clients. `tcp_echo send PORT MESSAGE...` connects, sends each message as a
 // line, and prints what comes back.
+import std.cli
 import std.env
 import std.io
 import std.mem
@@ -13,57 +14,78 @@ use mem.Lender
 use net.Accepted
 use net.Acceptor
 
+fn build_cli() -> cli.Command {
+    var cmd = cli.Command.new("tcp_echo", "Echo text over TCP")
+    var serve_cmd = cli.Command.new("serve", "listen for and echo connections")
+    &serve_cmd.positional("port", "port to listen on", required: true)
+    &serve_cmd.positional("clients", "number of clients to serve", required: false)
+    &cmd.subcommand(serve_cmd)
+
+    var send_cmd = cli.Command.new("send", "send messages to an echo server")
+    &send_cmd.positional("port", "server port to connect to", required: true)
+    &send_cmd.positional("message", "messages to send", required: true, variadic: true)
+    &cmd.subcommand(send_cmd)
+    cmd
+}
+
 fn main() -> UInt8 {
-    let args = env.args()
-    let mode = args.at(1) else {
-        return usage()
+    defer var cmd = build_cli()
+    var cursor = cli.ArgCursor.new(env.args())
+    defer let matches = cmd.parse(&cursor) else |_| {
+        defer let u = cmd.usage()
+        io.eprintln(u.view())
+        return 64
     }
-    let port = port_argument(args) else {
-        return usage()
+    if matches.is_help() {
+        defer let u = cmd.usage()
+        io.eprintln(u.view())
+        return 64
     }
-    if mode == "serve" {
-        let clients = clients_argument(args) else {
-            return usage()
+    let sub = matches.subcommand() else {
+        defer let u = cmd.usage()
+        io.eprintln(u.view())
+        return 64
+    }
+    if sub.name == "serve" {
+        let port: UInt16 = sub.matches.positional_as("port") else |_| {
+            defer let u = cmd.usage()
+            io.eprintln(u.view())
+            return 64
+        }
+        let clients_opt: Option[UInt64] = match sub.matches.positional("clients") {
+            Some(s) => match s.parse[UInt64]() {
+                Ok(v) => .Some(v),
+                Err(_) => {
+                    defer let u = cmd.usage()
+                    io.eprintln(u.view())
+                    return 64
+                },
+            },
+            None => .None,
+        }
+        let clients = match clients_opt {
+            Some(c) => c,
+            None => UInt64.max,
         }
         return serve(port, clients)
     }
-    if mode == "send" && args.count() > 3 {
-        return send(port, args)
+    if sub.name == "send" {
+        let port: UInt16 = sub.matches.positional_as("port") else |_| {
+            defer let u = cmd.usage()
+            io.eprintln(u.view())
+            return 64
+        }
+        defer let messages = sub.matches.positionals_all("message")
+        if messages.length() == 0 {
+            defer let u = cmd.usage()
+            io.eprintln(u.view())
+            return 64
+        }
+        return send(port, messages)
     }
-    usage()
-}
-
-// Print this when the arguments are not a mode and a port.
-let usage_text =
-    \\usage: tcp_echo serve PORT [CLIENTS]
-    \\       tcp_echo send PORT MESSAGE...
-
-fn usage() -> UInt8 {
-    io.eprintln(usage_text)
+    defer let u = cmd.usage()
+    io.eprintln(u.view())
     64
-}
-
-// Read the port from the third argument. `?` returns `.None` early when the
-// argument is missing, and `else |_|` does the same when it is not a number.
-fn port_argument(args: env.Args) -> Option[UInt16] {
-    let text = args.at(2)?
-    let port = text.parse[UInt16]() else |_| {
-        return .None
-    }
-    .Some(port)
-}
-
-// Read how many clients to serve from the fourth argument. Without one, the
-// server never stops.
-fn clients_argument(args: env.Args) -> Option[UInt64] {
-    if args.count() == 3 {
-        return .Some(UInt64.max)
-    }
-    let text = args.at(3)?
-    let clients = text.parse[UInt64]() else |_| {
-        return .None
-    }
-    .Some(clients)
 }
 
 fn serve(port: UInt16, clients: UInt64) -> UInt8 {
@@ -98,12 +120,12 @@ fn serve(port: UInt16, clients: UInt64) -> UInt8 {
 fn accept_clients(inout listener: net.Listener, clients: UInt64) -> Bool {
     var served: UInt64 = 0
     while served < clients {
-        let accepted = &listener.accept() else |error| {
+        // `Accepted` holds the connection and the address of the client, and
+        // the pattern takes both out of it as soon as `accept` succeeds.
+        let Accepted { connection, address } = &listener.accept() else |error| {
             io.eprintln("cannot accept a client: {error}")
             return false
         }
-        // `Accepted` holds the connection and the address of the client.
-        let Accepted { connection, address } = accepted
         var open = connection
         echo(&open, address)
         // The connection is closed here, once, whether or not the echo worked.
@@ -130,12 +152,12 @@ fn echo(inout connection: net.Connection, client: net.Address) {
     io.eprintln("echoed {received.length()} bytes to {client}")
 }
 
-fn send(port: UInt16, args: env.Args) -> UInt8 {
+fn send(port: UInt16, messages: Vec[Str]) -> UInt8 {
     var connection = net.connect(net.loopback(port)) else |error| {
         io.eprintln("cannot connect to port {port}: {error}")
         return 1
     }
-    let echoed = exchange(&connection, args)
+    let echoed = exchange(&connection, messages)
     // The connection is closed here, once, whether or not the exchange worked.
     let closed = connection.close()
     if closed.is_err() {
@@ -149,16 +171,11 @@ fn send(port: UInt16, args: env.Args) -> UInt8 {
     }
 }
 
-// Send the messages from the fourth argument on, one per line, and print what
-// the server sends back. Report the first step that fails and answer whether
-// every step worked.
-fn exchange(inout connection: net.Connection, args: env.Args) -> Bool {
+// Send the messages, one per line, and print what the server sends back. Report
+// the first step that fails and answer whether every step worked.
+fn exchange(inout connection: net.Connection, messages: Vec[Str]) -> Bool {
     defer var text = String.new()
-    for index in 3..args.count() {
-        let message = args.at(index) else {
-            io.eprintln("a message must be valid UTF-8")
-            return false
-        }
+    for read message in messages {
         let _line = io.line(message, &text) else |_| {
             io.eprintln("a message is too long to send")
             return false

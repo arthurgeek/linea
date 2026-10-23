@@ -1,0 +1,5 @@
+error[T-Unreachable]: no value reaches this arm
+ --> tests/patterns/a_literal_outside_a_refinement_matches_nothing.lin:7:14
+  |
+7 |         Port(0) => 0,
+  |              ^ no `Port` holds this value

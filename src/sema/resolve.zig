@@ -642,6 +642,9 @@ pub const Resolution = struct {
     /// names these by identity, so a module declaring its own `Tuple2`
     /// shadows the name and not the syntax. Read through `tupleDecl`.
     tuple_decls: TupleDecls = no_tuple_decls,
+    /// The files the program embeds, borrowed from the program, so folding a
+    /// constant reads what an `embed` read without reaching for the loader.
+    embeds: program_mod.Embeds = .{},
     /// The token that declares each binding: the `let`'s name, the parameter's
     /// name, the declaration's name, the binder in its pattern.
     ///
@@ -664,6 +667,9 @@ pub const Resolution = struct {
     /// at one token, so the token that declares the binder is also the one
     /// naming the field.
     field_shorthand: FinishedBindingBits,
+    /// Whether each binder may be written through, indexed by `BindingId`:
+    /// the binder of a `for inout` walk, which lends each place writably.
+    writable_binders: FinishedBindingBits,
     /// How far each binding's own module passes the name on, indexed by
     /// `BindingId`. This is the alias declaration's reach for a re-export,
     /// rather than the visibility of the declaration it holds.
@@ -1028,6 +1034,7 @@ pub const Resolution = struct {
         gpa.free(self.tokens);
         self.reexported.deinit(gpa);
         self.field_shorthand.deinit(gpa);
+        self.writable_binders.deinit(gpa);
         gpa.free(self.reach);
         self.referenced.deinit(gpa);
         self.ambient.deinit(gpa);
@@ -2067,7 +2074,12 @@ pub const Resolution = struct {
     }
 
     pub fn nameSites(self: *const Resolution) constfold.Names {
-        return .{ .ctx = self, .reaches = reachedFrom, .constant_call = constantCallFrom, .integer_property = integerPropertyFrom, .variant = variantFrom, .tuple_component = tupleComponentFrom };
+        return .{ .ctx = self, .reaches = reachedFrom, .constant_call = constantCallFrom, .integer_property = integerPropertyFrom, .variant = variantFrom, .tuple_component = tupleComponentFrom, .embedded = embeddedFrom };
+    }
+
+    fn embeddedFrom(ctx: *const anyopaque, id: ExprId) ?[]const u8 {
+        const self: *const Resolution = @ptrCast(@alignCast(ctx));
+        return self.embeds.bytesOf(id);
     }
 
     fn tupleComponentFrom(ctx: *const anyopaque, ast: *const Ast, arity: usize, position: usize) ?[]const u8 {
@@ -2124,16 +2136,14 @@ pub const Resolution = struct {
     /// Whether writing through this binding is accepted at all: a local's
     /// own `var` (never a `let`), a parameter's own `inout`, or a capture
     /// taken `sink` into a closure whose own invocation is `inout` -- the one
-    /// shape the resolver lets write back through a captured name. Every
-    /// other kind, including a binder, answers `false`: a binder's writable
-    /// cases depend on the construct that bound it (a `for inout` walk, and
-    /// no other), which is decided at bind time and kept nowhere a later
-    /// question can read it back, so this asks only what it can answer for
-    /// certain rather than assume the answer is yes.
+    /// shape the resolver lets write back through a captured name -- or the
+    /// binder of a `for inout` walk, which lends each place writably. Every
+    /// other kind answers `false`.
     ///
     /// Read from what each kind's own declaration already settled -- the
     /// statement's keyword, the parameter list's convention, the capture
-    /// list's convention and the lambda's own invocation -- so a
+    /// list's convention and the lambda's own invocation, and for a binder
+    /// the walk that bound it, recorded at bind time -- so a
     /// semantic-tokens modifier and a completion offer answer from the same
     /// rule instead of each keeping its own copy of "can this be written".
     pub fn bindingIsMutable(self: *const Resolution, ast: *const Ast, b: BindingId) bool {
@@ -2149,6 +2159,7 @@ pub const Resolution = struct {
                 const lambda = ast.lambda(self.closures.exprOf(loc.closure));
                 break :capture captureIsMutable(taken.convention, lambda.invocation);
             },
+            .binder => b.index() < self.writable_binders.len() and self.writable_binders.get(b),
             else => false,
         };
     }
@@ -4385,6 +4396,11 @@ fn resolveInternal(
         // and no reference can name it.
         if (b.at != TokenId.none and ast.tokenTag(b.at) != .identifier) continue;
 
+        // An import or `use` naming nothing was refused where it is written;
+        // nothing could use what it binds, so its disuse is that refusal's
+        // consequence.
+        if (b.unresolved) continue;
+
         const id = BindingId.at(@intCast(index));
         if (candidates.contains(id)) {
             try deferred_unused.append(gpa, id);
@@ -4427,6 +4443,8 @@ fn resolveInternal(
     errdefer reexported.deinit(gpa);
     var field_shorthand = try BindingBits.initEmpty(gpa, r.bindings.items.len);
     errdefer field_shorthand.deinit(gpa);
+    var writable_binders = try BindingBits.initEmpty(gpa, r.bindings.items.len);
+    errdefer writable_binders.deinit(gpa);
     const reaches = try gpa.alloc(Reach, r.bindings.items.len);
     errdefer gpa.free(reaches);
     var ambient_names = try BindingBits.initEmpty(gpa, r.bindings.items.len);
@@ -4453,6 +4471,7 @@ fn resolveInternal(
         tokens[i] = b.at;
         reexported.set(id, b.reexported);
         field_shorthand.set(id, b.names_a_field);
+        writable_binders.set(id, b.kind == .binder and b.mutable);
         reaches[i] = b.reach;
         ambient_names.set(id, b.ambient);
         referenced.set(id, b.used);
@@ -4663,6 +4682,8 @@ fn resolveInternal(
     errdefer finished_reexported.deinit(gpa);
     var finished_field_shorthand = field_shorthand.freeze();
     errdefer finished_field_shorthand.deinit(gpa);
+    var finished_writable_binders = writable_binders.freeze();
+    errdefer finished_writable_binders.deinit(gpa);
     var finished_ambient = ambient_names.freeze();
     errdefer finished_ambient.deinit(gpa);
     var finished_referenced = referenced.freeze();
@@ -4694,6 +4715,7 @@ fn resolveInternal(
         .builtins = builtins,
         .prelude = ambient_decls,
         .tuple_decls = r.tuple_decls,
+        .embeds = r.program.embeds,
         .type_names = type_names,
         .named = named,
         .traits_seen = trait_index.traits_seen,
@@ -4710,6 +4732,7 @@ fn resolveInternal(
         .tokens = tokens,
         .reexported = finished_reexported,
         .field_shorthand = finished_field_shorthand,
+        .writable_binders = finished_writable_binders,
         .reach = reaches,
         .ambient = finished_ambient,
         .referenced = finished_referenced,
@@ -5174,10 +5197,10 @@ pub fn reachedWithoutACall(ast: *const Ast, d: DeclId, in_root: bool) bool {
     if (!ast.declIsTest(d)) return false;
 
     // The same two conditions the entry point is held to. A test the parser
-    // refused -- inside an `impl`, or on something that is not a function --
+    // refused -- inside a trait impl, or on something that is not a function --
     // is not a body anything runs, so it is not exempt from being unused
     // either.
-    return ast.declTag(d) == .function and ast.declOwner(d) == TokenId.none;
+    return ast.declTag(d) == .function and ast.declTrait(d) == TokenId.none;
 }
 
 /// What a compilation is for.
@@ -6663,7 +6686,13 @@ const Resolver = struct {
             // A declaration inside a type is reached through the type's name,
             // so it is not a name in the module. Its binding is made all the
             // same: the unused rule applies to it like any other.
+            // A test inside an inherent impl is organized at module scope
+            // rather than becoming a callable member of the type.
             if (self.ast.declOwner(d) != TokenId.none) {
+                if (self.ast.declIsTest(d)) {
+                    try self.declareTop(d);
+                    continue;
+                }
                 try self.declareMember(d);
                 continue;
             }
@@ -7116,12 +7145,7 @@ const Resolver = struct {
             else => return,
         }
 
-        // The type's name is used by naming it here, exactly as an annotation
-        // uses one.
-        if (self.ast.exprTag(d.pattern) == .call)
-            try self.usePatternHead(self.ast.exprMain(self.ast.call(d.pattern).callee));
-
-        return self.bindPattern(d.pattern);
+        return self.bindPattern(d.pattern, false);
     }
 
     /// The binding of a member of `owner` with that name, in the namespace one
@@ -7298,7 +7322,9 @@ const Resolver = struct {
         for (self.program.modules) |*m| {
             for (m.decls.start..m.decls.end) |i| {
                 const d = DeclId.at(@intCast(i));
-                for (self.ast.declParams(d)) |param| try self.refuseRedundantRead(param);
+                // An `extern` says with `read` that C only reads a handle it
+                // is given, which a default would not say ([T-ExternHandle]).
+                if (!self.ast.declIsExtern(d)) for (self.ast.declParams(d)) |param| try self.refuseRedundantRead(param);
                 // A member carries only `pub`, and a signature carries
                 // nothing: the parser accepts no other word inside either
                 // pair of braces, so there is nothing here that it let past.
@@ -8732,7 +8758,12 @@ const Resolver = struct {
     /// What a fold reads about the names written in a constant expression, from
     /// what the walk has settled so far.
     fn nameSites(self: *const Resolver) constfold.Names {
-        return .{ .ctx = self, .reaches = reachedBy, .constant_call = constantCallBy, .integer_property = integerPropertyBy, .variant = variantBy, .tuple_component = tupleComponentBy };
+        return .{ .ctx = self, .reaches = reachedBy, .constant_call = constantCallBy, .integer_property = integerPropertyBy, .variant = variantBy, .tuple_component = tupleComponentBy, .embedded = embeddedBy };
+    }
+
+    fn embeddedBy(ctx: *const anyopaque, id: ExprId) ?[]const u8 {
+        const self: *const Resolver = @ptrCast(@alignCast(ctx));
+        return self.program.embeds.bytesOf(id);
     }
 
     fn tupleComponentBy(ctx: *const anyopaque, ast: *const Ast, arity: usize, position: usize) ?[]const u8 {
@@ -11461,7 +11492,7 @@ const Resolver = struct {
                 // top-level name, an import's included, of another in its
                 // module's run -- the two places [N-Duplicate] asks.
                 const module = self.program.moduleOf(d);
-                const namespace: Namespace = if (source.declOwner(d) == TokenId.none)
+                const namespace: Namespace = if (source.declOwner(d) == TokenId.none or source.declIsTest(d))
                     .{ .module_run = module }
                 else
                     .{ .members = .{ .module = module, .owner = source.tokenName(source.declOwner(d)) } };
@@ -12320,6 +12351,7 @@ const Resolver = struct {
         @memset(of_decl, DeclId.none);
         for (0..self.ast.declCount()) |i| {
             const d = DeclId.at(@intCast(i));
+            if (self.ast.declIsTest(d)) continue;
             const of = self.ast.declOwner(d);
             if (of == TokenId.none) continue;
             of_decl[i] = self.impl_of_head.get(of) orelse DeclId.none;
@@ -14051,57 +14083,63 @@ const Resolver = struct {
         return .{ .reached = b };
     }
 
-    /// Declares the names a match arm's pattern binds.
+    /// Declares the names a pattern binds, at every depth.
     ///
-    /// A bare pattern binds nothing; a call-shaped one binds its arguments,
-    /// which is the shape the parser gives `Circle(n)`. The binder's own
+    /// One spelling space covers the whole pattern, so a name bound twice is
+    /// reported however deep either one sits. `mutable` is whether the
+    /// construct lends its places writably, which reaches every binder.
+    fn bindPattern(self: *Resolver, pattern: ExprId, mutable: bool) std.mem.Allocator.Error!void {
+        self.pattern_names.restart();
+        try self.bindParts(pattern, mutable);
+    }
+
+    /// The names one pattern node binds. A bare name here is the pattern's
+    /// head, which a match arm reads as a variant and binds nothing by; a bare
+    /// name inside binds by its case (`Ast.partBinds`). The binder's own
     /// `name_ref` is pointed at the binding it declares rather than left
     /// unresolved, so a consumer reaching a pattern finds the binding through
     /// the map it already uses for every other name.
-    fn bindPattern(self: *Resolver, pattern: ExprId) std.mem.Allocator.Error!void {
-        self.pattern_names.restart();
-        // A struct pattern names the type it takes apart, then alternates
-        // field and binder. Only the binders are names this introduces; which
-        // fields a type has is the checker's question.
-        if (self.ast.exprTag(pattern) == .struct_pattern) {
-            const p = self.ast.call(pattern);
-            if (p.callee != ExprId.none) try self.usePatternHead(self.ast.exprMain(p.callee));
-
-            var i: usize = 1;
-            while (i < p.args.len) : (i += 2) {
-                // The shorthand puts the field and the binder at one token,
-                // which the parser records by building two nodes there. What
-                // was written is the tree's answer and nobody else's.
-                const shared = self.ast.exprMain(p.args[i - 1]) == self.ast.exprMain(p.args[i]);
-                try self.bindOne(p.args[i], shared, false);
-            }
-            return;
+    fn bindParts(self: *Resolver, pattern: ExprId, mutable: bool) std.mem.Allocator.Error!void {
+        switch (self.ast.exprTag(pattern)) {
+            // A struct pattern names the type it takes apart, then alternates
+            // field and part. Which fields a type has is the checker's
+            // question.
+            .struct_pattern => {
+                const p = self.ast.call(pattern);
+                if (p.callee != ExprId.none) try self.usePatternHead(self.ast.exprMain(p.callee));
+                var i: usize = 1;
+                while (i < p.args.len) : (i += 2) {
+                    // The shorthand puts the field and the binder at one token,
+                    // which the parser records by building two nodes there.
+                    const shared = self.ast.exprMain(p.args[i - 1]) == self.ast.exprMain(p.args[i]);
+                    try self.bindPart(p.args[i], shared, mutable);
+                }
+            },
+            // A tuple pattern names no type and takes each component by
+            // position.
+            .tuple_pattern => for (self.ast.call(pattern).args) |a| try self.bindPart(a, false, mutable),
+            // A range or a literal pattern's bounds are ordinary expressions --
+            // a name a bound reaches is a name in scope, not a part this
+            // pattern binds -- so they resolve the way any expression does.
+            .range, .int_literal, .negate, .str_literal => try self.expr(pattern),
+            // Most spellings here are a variant, which is not a type and marks
+            // nothing. A newtype's pattern spells the type itself,
+            // indistinguishable from a variant's at this point in the pipeline
+            // -- so the head is offered to the same lookup a struct pattern's
+            // is, which finds a declared type only where the spelling is one.
+            .call => {
+                try self.usePatternHead(self.ast.exprMain(self.ast.call(pattern).callee));
+                for (self.ast.call(pattern).args) |a| try self.bindPart(a, false, mutable);
+            },
+            else => {},
         }
+    }
 
-        // A tuple pattern names no type and binds each component by position.
-        if (self.ast.exprTag(pattern) == .tuple_pattern) {
-            for (self.ast.call(pattern).args) |a| try self.bindOne(a, false, false);
-            return;
-        }
-
-        // A range or a literal pattern's bounds are ordinary expressions -- a
-        // name a bound reaches is a name in scope, not a part this pattern
-        // binds -- so they resolve the way any expression does, through the
-        // same case a range or a literal in expression position already
-        // reaches.
-        if (self.ast.exprTag(pattern) == .range or self.ast.exprTag(pattern) == .int_literal) {
-            try self.expr(pattern);
-            return;
-        }
-
-        if (self.ast.exprTag(pattern) != .call) return;
-        // Most spellings here are a variant, which is not a type and marks
-        // nothing. A newtype's pattern spells the type itself, indistinguishable
-        // from a variant's at this point in the pipeline -- so the head is
-        // offered to the same lookup a struct pattern's is, which finds a
-        // declared type only where the spelling actually is one.
-        try self.usePatternHead(self.ast.exprMain(self.ast.call(pattern).callee));
-        for (self.ast.call(pattern).args) |a| try self.bindOne(a, false, false);
+    /// One part of a pattern: a binder, or a pattern nested there.
+    fn bindPart(self: *Resolver, part: ExprId, names_a_field: bool, mutable: bool) std.mem.Allocator.Error!void {
+        if (self.ast.partBinds(part)) return self.bindOne(part, names_a_field, mutable);
+        if (self.ast.exprTag(part) == .name_ref) return;
+        try self.bindParts(part, mutable);
     }
 
     /// One name a pattern binds to part of what it took apart.
@@ -14167,7 +14205,7 @@ const Resolver = struct {
             // mistake a second time.
             .err => {},
 
-            .int_literal, .float_literal, .str_literal, .bool_literal, .unit_literal => {},
+            .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal => {},
 
             .reflection_root => try self.reportReflection(
                 id,
@@ -14286,7 +14324,9 @@ const Resolver = struct {
                         });
                         // Settled at no token: nothing written names it.
                         self.settle(p.argument, argument, .none);
-                        for (self.ast.call(p.pattern).args) |binder| try self.bindOne(binder, false, p.convention == .inout);
+                        // One spelling space with the captures and the other
+                        // parameters, which the restart above opened.
+                        try self.bindParts(p.pattern, p.convention == .inout);
                         continue;
                     }
                     if (self.ast.tokenTag(p.name) != .identifier) continue;
@@ -14493,10 +14533,10 @@ const Resolver = struct {
 
                 // The binder of a writable lend is assignable: writing through
                 // it is what the walk was written for.
-                self.pattern_names.restart();
                 if (self.ast.exprTag(f.args[0]) == .tuple_pattern) {
-                    for (self.ast.call(f.args[0]).args) |component| try self.bindOne(component, false, writes);
+                    try self.bindPattern(f.args[0], writes);
                 } else {
+                    self.pattern_names.restart();
                     try self.bindOne(f.args[0], false, writes);
                 }
                 if (reflected) |reversed| {
@@ -14654,7 +14694,7 @@ const Resolver = struct {
                         );
                         try self.expr(body);
                     } else {
-                        try self.bindPattern(pattern);
+                        try self.bindPattern(pattern, false);
                         try self.expr(body);
                     }
                 }
@@ -14803,7 +14843,7 @@ const Resolver = struct {
         if (id == ExprId.none) return true;
         return switch (self.ast.exprTag(id)) {
             .err => true,
-            .int_literal, .float_literal, .str_literal, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .struct_pattern, .tuple_pattern => false,
+            .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .struct_pattern, .tuple_pattern => false,
             .lambda => blk: {
                 const lambda = self.ast.lambda(id);
                 for (lambda.captures) |capture| if (self.containsErr(capture.source)) break :blk true;
@@ -16128,7 +16168,7 @@ fn bindingSpelled(ast: *const Ast, res: *const Resolution, name: []const u8, nth
 }
 
 test "resolution flags and reach are typed by bindings and preserve public answers" {
-    inline for (.{ "reexported", "field_shorthand", "ambient", "referenced" }) |field| {
+    inline for (.{ "reexported", "field_shorthand", "writable_binders", "ambient", "referenced" }) |field| {
         const Field = @FieldType(Resolution, field);
         try testing.expect(Field == FinishedBindingBits);
         try testing.expect(!@hasDecl(Field, "set"));
@@ -16148,7 +16188,7 @@ test "resolution flags and reach are typed by bindings and preserve public answe
         \\}
     );
     try testing.expectEqual(@as(u32, 0), r.errors);
-    inline for (.{ "reexported", "field_shorthand", "ambient", "referenced" }) |field| {
+    inline for (.{ "reexported", "field_shorthand", "writable_binders", "ambient", "referenced" }) |field| {
         try testing.expectEqual(@as(usize, r.res.bindingCount()), @field(r.res, field).len());
     }
     try testing.expectEqual(@as(usize, r.res.bindingCount()), r.res.reach.len);
@@ -16220,7 +16260,7 @@ test "resolution flags and reach are typed by bindings and preserve public answe
     const module_result = try resolve(arena.allocator(), &program, &interner, &sink, .program);
     const module_res = module_result.resolution;
     try testing.expectEqual(@as(u32, 0), sink.error_count - before);
-    inline for (.{ "reexported", "field_shorthand", "ambient", "referenced" }) |field| {
+    inline for (.{ "reexported", "field_shorthand", "writable_binders", "ambient", "referenced" }) |field| {
         try testing.expectEqual(@as(usize, module_res.bindingCount()), @field(module_res, field).len());
     }
     try testing.expectEqual(@as(usize, module_res.bindingCount()), module_res.reach.len);

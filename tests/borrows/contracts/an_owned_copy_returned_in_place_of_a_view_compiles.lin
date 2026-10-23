@@ -1,0 +1,24 @@
+// `label` returns an owned copy of the station's name instead of a view of
+// it. `to_owned` copies the text and can fail with `mem.Oom`, so the result
+// is a `Result` holding a `String`, which observes nothing.
+import std.mem
+
+@derive(Release)
+struct Station {
+    name: String,
+}
+
+fn label(station: Station) -> Result[String, mem.Oom] {
+    station.name.view().to_owned()
+}
+
+fn main() -> UInt8 {
+    let name = "Harbour".to_owned() else |_| {
+        return 1
+    }
+    defer let station = Station { name = name }
+    defer let copied = label(station) else |_| {
+        return 1
+    }
+    UInt8(copied.length())
+}

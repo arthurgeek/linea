@@ -1,5 +1,7 @@
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
- --> tests/vec/observations/an_inout_callee_cannot_omit_retention.lin:2:5
+ --> tests/vec/observations/an_inout_callee_cannot_omit_retention.lin:2:14
   |
 2 |     target = copy(value)
-  |     ^^^^^^ escape observations only from the signature's declared sources
+  |              ^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `target` keeps a value that comes from `value`; write `where retains(target: value)` to say so

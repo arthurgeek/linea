@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ownership/a_newtype_over_a_view_keeps_its_owner/main.lin:12:5
+   |
+12 |     v.release()
+   |     ^ keep this place available until the last use of its observation
+13 |     s[0]
+   |     ---- the observation is still used here

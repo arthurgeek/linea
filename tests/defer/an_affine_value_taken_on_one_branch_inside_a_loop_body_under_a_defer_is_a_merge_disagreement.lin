@@ -1,0 +1,29 @@
+// [O-Merge]. Inside a `while` body, a `defer` of an affine key fires on the
+// path that kept the key and not on the path that gave it away. The two paths
+// meet before the body ends, so they disagree there about `k` even though the
+// key's scope ends just after.
+struct Key {
+    n: UInt8,
+}
+
+fn open(sink k: Key) -> UInt8 {
+    let Key { n } = k
+    n
+}
+
+fn lock(sink k: Key) {
+    let Key { n: _n } = k
+}
+
+fn main() -> UInt8 {
+    var turns: UInt8 = 0
+    while turns < 3 {
+        let k: Key = .{ n = turns }
+        defer lock(k)
+        if turns == 1 {
+            turns = turns + open(k)
+        }
+        turns = turns + 1
+    }
+    turns
+}

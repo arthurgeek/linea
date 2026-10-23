@@ -1,0 +1,42 @@
+// What the callback keeps between calls. C holds it only as a `void *` and
+// hands it back on every call.
+struct Tally {
+    total: Int64,
+    limit: Int64,
+}
+
+// C calls `visit` during the call, handing back the `tally` lent to it.
+extern fn squares_visit(count: Int32, visit: fn(inout tally: Tally, square: Int32) -> Int32, inout tally: Tally) -> Int32
+
+// Add a square to the running total, and ask C to stop once it passes the
+// limit.
+fn add_square(inout tally: Tally, square: Int32) -> Int32 {
+    tally.total += Int64(square)
+    if tally.total > tally.limit {
+        1
+    } else {
+        0
+    }
+}
+
+// Sum squares from one up until the sum passes `limit`, and say how many it
+// took.
+pub fn sum_past(limit: Int64) -> (Int64, Int32) {
+    var tally = Tally { total = 0, limit = limit }
+    let visited = squares_visit(100, add_square, &tally)
+    (tally.total, visited)
+}
+
+// A lambda that captures nothing is one fixed function, so C can call it too.
+pub fn count_squares(count: Int32) -> Int64 {
+    var tally = Tally { total = 0, limit = 1000000 }
+    let _visited = squares_visit(
+        count,
+        |inout counted: Tally, _square: Int32| -> Int32 {
+            counted.total += 1
+            0
+        },
+        &tally,
+    )
+    tally.total
+}

@@ -1,7 +1,7 @@
 error[O-Escapes]: a closure cannot store an observation in a place lent to it `inout`
- --> tests/inout_captures/a_closure_stores_no_observation_in_its_lent_place.lin:5:9
+ --> tests/inout_captures/a_closure_stores_no_observation_in_its_lent_place.lin:5:16
   |
 5 |         view = to
-  |         ^^^^ this stores an observation in the lent place
+  |                ^^ this stores an observation in the lent place
   |
   = help: the observation could outlive what it observes; store a value that observes nothing

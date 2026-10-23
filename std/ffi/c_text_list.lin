@@ -1,0 +1,41 @@
+import std.mem
+import std.testing
+
+// The address of an array of C strings, C's `char **`, which crosses as a
+// pointer. C passes one to a callback with its length beside it, as
+// `sqlite3_exec` passes a row's values. A `CTextList` carries what C said it
+// lives as long as, and is read one entry at a time.
+@(opaque, copyable)
+type CTextList = UInt64
+
+impl CTextList {
+    // Entry `index` of a list C said holds `count` entries. The entry is a
+    // null pointer where C stored one, as SQLite does for a NULL column. An
+    // index past `count` stops the program rather than reading past the list.
+    pub fn get(self: Self, index: UInt64, count: UInt64) -> CText where carries(self) {
+        if index >= count {
+            panic("a C string list was read past the count C gave for it")
+        }
+        let read CTextList(at) = self
+        CText(mem.foreign_word(at, index * 8))
+    }
+
+    test fn entries_are_read_where_the_list_holds_them() {
+        defer let first = CString.open("Ada").unwrap()
+        defer let second = CString.open("Grace").unwrap()
+        let system = mem.system()
+        var words = system.acquire(16) else |_| {
+            return testing.assert(false, "a list of two pointers was refused")
+        }
+        let CText(first_at) = first.text()
+        let CText(second_at) = second.text()
+        &words.store(0, first_at)
+        &words.store(8, second_at)
+        let list = CTextList(mem.foreign_address(words.as_slice()))
+        let named = list.get(1, count: 2).to_owned()
+        words.release()
+        defer let name = named.unwrap()
+        testing.assert_eq(name.view(), "Grace", "the second entry was read from elsewhere")?
+        .Ok(())
+    }
+}

@@ -41,128 +41,116 @@ impl[H: Allocator] AllocationLog[H] {
         &buffer.store(log_refuse_at, refuse_at)
         .Ok(.{ buffer, backing = copy(backing) })
     }
-}
 
-test fn open_records_into_the_backing_the_caller_chooses() {
-    // The log's 8240 bytes and both allocations fit in sixteen kilobytes.
-    defer let arena = Arena.open(system(), 16384)
-    defer let log = AllocationLog.open(arena.handle(), 2).unwrap()
-    let first = log.allocator().acquire(16)
-    let accepted = first.is_ok()
-    first.release()
-    let second = log.allocator().acquire(8)
-    let refused = second.is_err()
-    second.release()
-    testing.assert(accepted, "the first attempt over an arena was refused")?
-    testing.assert(refused, "the second attempt over an arena was not refused")?
-    testing.assert(log.all_disposed(), "an arena-backed release was not recorded")?
-}
+    test fn open_records_into_the_backing_the_caller_chooses() {
+        // The log's 8240 bytes and both allocations fit in sixteen kilobytes.
+        defer let arena = Arena.open(system(), 16384)
+        defer let log = AllocationLog.open(arena.handle(), 2).unwrap()
+        let first = log.allocator().acquire(16)
+        let accepted = first.is_ok()
+        first.release()
+        let second = log.allocator().acquire(8)
+        let refused = second.is_err()
+        second.release()
+        testing.assert(accepted, "the first attempt over an arena was refused")?
+        testing.assert(refused, "the second attempt over an arena was not refused")?
+        testing.assert(log.all_disposed(), "an arena-backed release was not recorded")?
+    }
 
-test fn open_refuses_the_acquisition_it_names() {
-    defer let log = AllocationLog.open(system(), 2).unwrap()
-    let first = log.allocator().acquire(16)
-    let accepted = first.is_ok()
-    first.release()
-    let second = log.allocator().acquire(8)
-    let refused = second.is_err()
-    second.release()
-    testing.assert(accepted, "the first attempt was refused")?
-    testing.assert(refused, "the second attempt was not refused")?
-}
+    test fn open_refuses_the_acquisition_it_names() {
+        defer let log = AllocationLog.open(system(), 2).unwrap()
+        let first = log.allocator().acquire(16)
+        let accepted = first.is_ok()
+        first.release()
+        let second = log.allocator().acquire(8)
+        let refused = second.is_err()
+        second.release()
+        testing.assert(accepted, "the first attempt was refused")?
+        testing.assert(refused, "the second attempt was not refused")?
+    }
 
-impl[H: Allocator] AllocationLog[H] {
     // Return a handle that allocates through the log's backing allocator and
     // records in this log. It borrows the log, so the log outlives every
     // handle and every buffer the handle acquired.
     pub fn allocator(self: Self) -> RefusingAllocator[H] where borrows(self) {
         .{ log = borrow self }
     }
-}
 
-test fn allocator_hands_out_buffers_the_log_records() {
-    defer let log = AllocationLog.open(system(), 0).unwrap()
-    let buffer = log.allocator().acquire(16).unwrap()
-    let length = buffer.length()
-    buffer.release()
-    testing.assert_eq(length, UInt64(16), "a logged buffer was not the size asked for")?
-    testing.assert_eq(log.acquired(), UInt64(1), "the acquisition was not recorded")?
-    testing.assert(log.all_disposed(), "the release was not recorded")?
-}
+    test fn allocator_hands_out_buffers_the_log_records() {
+        defer let log = AllocationLog.open(system(), 0).unwrap()
+        let buffer = log.allocator().acquire(16).unwrap()
+        let length = buffer.length()
+        buffer.release()
+        testing.assert_eq(length, UInt64(16), "a logged buffer was not the size asked for")?
+        testing.assert_eq(log.acquired(), UInt64(1), "the acquisition was not recorded")?
+        testing.assert(log.all_disposed(), "the release was not recorded")?
+    }
 
-impl[H: Allocator] AllocationLog[H] {
     // Return how many acquisitions were requested, including a refused one.
     pub fn attempts(self: Self) -> UInt64 {
         self.buffer.load(log_attempts)
     }
-}
 
-test fn attempts_count_refused_acquisitions_too() {
-    defer let log = AllocationLog.open(system(), 1).unwrap()
-    let refused = log.allocator().acquire(8)
-    refused.release()
-    let accepted = log.allocator().acquire(8)
-    accepted.release()
-    testing.assert_eq(log.attempts(), UInt64(2), "a refused attempt was not counted")?
-}
+    test fn attempts_count_refused_acquisitions_too() {
+        defer let log = AllocationLog.open(system(), 1).unwrap()
+        let refused = log.allocator().acquire(8)
+        refused.release()
+        let accepted = log.allocator().acquire(8)
+        accepted.release()
+        testing.assert_eq(log.attempts(), UInt64(2), "a refused attempt was not counted")?
+    }
 
-impl[H: Allocator] AllocationLog[H] {
     // Return how many acquisitions succeeded.
     pub fn acquired(self: Self) -> UInt64 {
         self.buffer.load(log_acquired)
     }
-}
 
-test fn acquired_counts_only_successful_acquisitions() {
-    defer let log = AllocationLog.open(system(), 2).unwrap()
-    let first = log.allocator().acquire(16).unwrap()
-    let second = log.allocator().acquire(8)
-    second.release()
-    first.release()
-    testing.assert_eq(log.acquired(), UInt64(1), "a refused attempt was recorded as acquired")?
-}
+    test fn acquired_counts_only_successful_acquisitions() {
+        defer let log = AllocationLog.open(system(), 2).unwrap()
+        let first = log.allocator().acquire(16).unwrap()
+        let second = log.allocator().acquire(8)
+        second.release()
+        first.release()
+        testing.assert_eq(log.acquired(), UInt64(1), "a refused attempt was recorded as acquired")?
+    }
 
-impl[H: Allocator] AllocationLog[H] {
     // Return the most bytes live at once.
     pub fn peak_bytes(self: Self) -> UInt64 {
         self.buffer.load(log_peak_bytes)
     }
-}
 
-test fn peak_bytes_remembers_the_most_bytes_live_at_once() {
-    defer let log = AllocationLog.open(system(), 0).unwrap()
-    let first = log.allocator().acquire(16).unwrap()
-    let second = log.allocator().acquire(8).unwrap()
-    second.release()
-    first.release()
-    let third = log.allocator().acquire(8).unwrap()
-    third.release()
-    testing.assert(log.peak_bytes() >= 24, "the peak lost the two live allocations")?
-}
+    test fn peak_bytes_remembers_the_most_bytes_live_at_once() {
+        defer let log = AllocationLog.open(system(), 0).unwrap()
+        let first = log.allocator().acquire(16).unwrap()
+        let second = log.allocator().acquire(8).unwrap()
+        second.release()
+        first.release()
+        let third = log.allocator().acquire(8).unwrap()
+        third.release()
+        testing.assert(log.peak_bytes() >= 24, "the peak lost the two live allocations")?
+    }
 
-impl[H: Allocator] AllocationLog[H] {
     // Refuse a later acquisition, counting from the log's first attempt. It
     // writes the shared log words, as its handles do, so handles may be live.
     pub fn refuse_attempt(self: Self, attempt: UInt64) {
         linea_raw_store(self.buffer.at, self.buffer.len, log_refuse_at, attempt)
     }
-}
 
-test fn refuse_attempt_refuses_a_later_acquisition_through_live_handles() {
-    defer let log = AllocationLog.open(system(), 0).unwrap()
-    let allocator = log.allocator()
-    allocator.acquire(8).unwrap().release()
-    log.refuse_attempt(3)
-    let second = allocator.acquire(8)
-    let accepted = second.is_ok()
-    second.release()
-    let third = allocator.acquire(8)
-    let refused = third.is_err()
-    third.release()
-    testing.assert(accepted, "an attempt before the refused one was refused")?
-    testing.assert(refused, "a later refusal was not applied")?
-}
+    test fn refuse_attempt_refuses_a_later_acquisition_through_live_handles() {
+        defer let log = AllocationLog.open(system(), 0).unwrap()
+        let allocator = log.allocator()
+        allocator.acquire(8).unwrap().release()
+        log.refuse_attempt(3)
+        let second = allocator.acquire(8)
+        let accepted = second.is_ok()
+        second.release()
+        let third = allocator.acquire(8)
+        let refused = third.is_err()
+        third.release()
+        testing.assert(accepted, "an attempt before the refused one was refused")?
+        testing.assert(refused, "a later refusal was not applied")?
+    }
 
-impl[H: Allocator] AllocationLog[H] {
     // Return whether every successful acquisition was disposed exactly once and
     // no bytes remain live.
     pub fn all_disposed(self: Self) -> Bool {
@@ -177,15 +165,15 @@ impl[H: Allocator] AllocationLog[H] {
         }
         true
     }
-}
 
-test fn all_disposed_is_false_while_an_allocation_is_live() {
-    defer let log = AllocationLog.open(system(), 0).unwrap()
-    let buffer = log.allocator().acquire(16).unwrap()
-    let settled_while_live = log.all_disposed()
-    buffer.release()
-    testing.assert(!settled_while_live, "a live allocation reads as settled")?
-    testing.assert(log.all_disposed(), "a disposed allocation stayed live")?
+    test fn all_disposed_is_false_while_an_allocation_is_live() {
+        defer let log = AllocationLog.open(system(), 0).unwrap()
+        let buffer = log.allocator().acquire(16).unwrap()
+        let settled_while_live = log.all_disposed()
+        buffer.release()
+        testing.assert(!settled_while_live, "a live allocation reads as settled")?
+        testing.assert(log.all_disposed(), "a disposed allocation stayed live")?
+    }
 }
 
 impl[H: Allocator] Release for AllocationLog[H] {
@@ -240,8 +228,7 @@ impl[H: Allocator] Allocator for RefusingAllocator[H] {
     }
 
     fn dispose(sink b: Buffer[Self]) {
-        let Buffer { at, len, allocated, allocator, obligation } = b
-        let RefusingAllocation { backing, index } = obligation
+        let Buffer { at, len, allocated, allocator, obligation: RefusingAllocation { backing, index } } = b
         let flag = log_flags + index * log_word_bytes
         if linea_raw_load(allocator.log.buffer.at, allocator.log.buffer.len, flag) != 1 {
             panic("an allocation was disposed more than once")

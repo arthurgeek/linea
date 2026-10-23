@@ -1,0 +1,30 @@
+import std.ffi
+
+@(opaque, linear)
+type Name = UInt64
+
+// A label around the handle, which names the same object. A newtype over a
+// handle is a handle too, so resetting through the label ends what was read
+// through the handle inside it.
+@linear
+type Label = Name
+
+extern fn named_open() -> Name
+
+extern fn named_name(read handle: Name) -> ffi.CText where borrows(handle)
+
+extern fn named_reset(handle: Label)
+
+extern fn named_close(sink handle: Name)
+
+pub fn first_length_after_reset() -> UInt64 {
+    var label = Label(named_open())
+    let name = match read label {
+        Label(inner) => named_name(inner),
+    }
+    named_reset(label)
+    let length = name.length()
+    let Label(handle) = label
+    named_close(handle)
+    length
+}

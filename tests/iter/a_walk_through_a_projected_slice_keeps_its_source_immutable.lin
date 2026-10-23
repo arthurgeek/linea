@@ -1,0 +1,32 @@
+// A type whose bracket reaches its elements through a slice names places in
+// the storage that slice observes, so a walk lending them keeps that storage
+// from changing while a binder still reads from it.
+import std.mem
+
+struct Window {
+    view: mem.Slice[UInt8],
+}
+
+impl Index[UInt64] for Window {
+    type Elem = UInt8
+
+    proj at(self: Self, i: UInt64) -> UInt8 where carries(self) {
+        self.view[i]
+    }
+}
+
+impl Window {
+    trav positions(self: Self) = 0..self.view.length()
+}
+
+fn main() -> UInt8 {
+    var values = Vec.filled(count: 2, value: UInt8(7)).unwrap()
+    defer values.release()
+    let window = Window { view = values.as_slice() }
+    var total: UInt8 = 0
+    for read value in window {
+        total += value
+        &values.push(value).unwrap()
+    }
+    total
+}

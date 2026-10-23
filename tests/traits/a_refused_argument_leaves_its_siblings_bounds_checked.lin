@@ -1,0 +1,12 @@
+// `Nope` names nothing, and `UInt8` misses `P`'s bound. The second is a
+// mistake of its own, so it is reported beside the first.
+trait Protocol {}
+
+struct Chan[phantom A, phantom P: Protocol] {
+    endpoint: UInt64,
+}
+
+fn main() -> UInt8 {
+    let c: Chan[Nope, UInt8] = .{ endpoint = 7 }
+    UInt8(c.endpoint)
+}

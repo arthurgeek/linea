@@ -3,3 +3,7 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |
 15 |         copy(request.name)
    |         ^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `request`; write `where carries(request)` to say so
+   = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
+   = help: the types this names are reached with `import std.mem`

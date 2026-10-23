@@ -1,0 +1,1 @@
+{ "extern": ["counter"], "native": ["counter/counter.c"] }

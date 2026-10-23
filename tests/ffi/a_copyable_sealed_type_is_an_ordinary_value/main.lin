@@ -1,0 +1,11 @@
+import std.io
+
+// `io.Descriptor` is sealed, but `copyable`, and any program makes one from an
+// integer with `io.descriptor`. A copy names the same descriptor, so it is not
+// a handle: it crosses as the `Int32` it holds, lent or read alike.
+extern fn abs(value: io.Descriptor) -> Int32
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{abs(io.descriptor(-3))}")?
+    .Ok(0)
+}

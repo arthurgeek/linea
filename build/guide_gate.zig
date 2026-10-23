@@ -1,13 +1,13 @@
 //! Compiles every complete program the guide pastes and holds the output
 //! pasted beside it to what the compiler prints.
 //!
-//! Usage: `guide-gate <guide directory> <linea> <scratch directory> <tests directory> [walkers]`.
+//! Usage: `guide-gate <guide directory> <linea> <scratch directory> <tests directory> <repository root> [walkers]`.
 //! Reading the guide is `source.zig`'s job and judging a result is too; this
 //! file only runs the compiler and reports.
 
 const std = @import("std");
 const source = @import("source.zig");
-const process = @import("process");
+const pool = @import("pool.zig");
 
 /// Longest a pasted program may take to compile and run. A program that needs
 /// more is a server or a loop, and is excluded by name.
@@ -25,20 +25,15 @@ const Walk = struct {
     scratch: []const u8,
     programs: []const source.GuideProgram,
     outcomes: []Outcome,
-    next: *std.atomic.Value(usize),
 
-    fn run(self: Walk, arena: *std.heap.ArenaAllocator) void {
-        while (true) {
-            const index = self.next.fetchAdd(1, .monotonic);
-            if (index >= self.programs.len) return;
-            self.outcomes[index] = self.one(arena.allocator(), index) catch |err| .{
-                .failure = std.fmt.allocPrint(
-                    arena.allocator(),
-                    "{s}:{d}: the gate could not run this program: {s}\n",
-                    .{ self.programs[index].chapter, self.programs[index].line, @errorName(err) },
-                ) catch "out of memory\n",
-            };
-        }
+    fn run(self: Walk, gpa: std.mem.Allocator, index: usize) void {
+        self.outcomes[index] = self.one(gpa, index) catch |err| .{
+            .failure = std.fmt.allocPrint(
+                gpa,
+                "{s}:{d}: the gate could not run this program: {s}\n",
+                .{ self.programs[index].chapter, self.programs[index].line, @errorName(err) },
+            ) catch "out of memory\n",
+        };
     }
 
     fn one(self: Walk, gpa: std.mem.Allocator, index: usize) !Outcome {
@@ -53,26 +48,23 @@ const Walk = struct {
             const text = try std.mem.concat(gpa, u8, &.{ file.text, "\n" });
             try cwd.writeFile(self.io, .{ .sub_path = path, .data = text });
         }
-        // The shell joins the two streams the way a terminal shows them, which
-        // is how the guide pastes a program that writes to both.
-        const result = process.run(gpa, self.io, .{
-            .argv = &.{ "/bin/sh", "-c", "exec \"$0\" \"$@\" 2>&1", self.linea, @tagName(program.command), program.target },
-            .cwd = .{ .path = directory },
-            .timeout = .{ .duration = .{ .raw = .fromSeconds(program_timeout_seconds), .clock = .awake } },
-        }) catch |err| switch (err) {
-            error.Timeout => return .{ .failure = try std.fmt.allocPrint(
+        const finished = try pool.runMerged(
+            gpa,
+            self.io,
+            &.{ self.linea, @tagName(program.command), program.target },
+            .{ .path = directory },
+            program_timeout_seconds,
+        );
+        if (finished.timed_out) {
+            const command = try std.fmt.allocPrint(gpa, "linea {s} {s}", .{ @tagName(program.command), program.target });
+            return .{ .failure = try std.fmt.allocPrint(
                 gpa,
-                "{s}:{d}: `linea {s} {s}` did not finish in {d} seconds; write `<!-- guide: unchecked REASON -->` above a program that cannot\n",
-                .{ program.chapter, program.line, @tagName(program.command), program.target, program_timeout_seconds },
-            ) },
-            else => |e| return e,
-        };
-        const succeeded = switch (result.term) {
-            .exited => |code| code == 0,
-            else => false,
-        };
+                "{s}:{d}: {s}write `<!-- guide: unchecked REASON -->` above a program that cannot finish\n",
+                .{ program.chapter, program.line, try pool.timeoutMessage(gpa, command, program_timeout_seconds, finished.output) },
+            ) };
+        }
         cwd.deleteTree(self.io, directory) catch {};
-        return .{ .failure = source.judgeGuideProgram(gpa, program, result.stdout, succeeded), .output = result.stdout };
+        return .{ .failure = source.judgeGuideProgram(gpa, program, finished.output, finished.succeeded), .output = finished.output };
     }
 };
 
@@ -80,12 +72,14 @@ pub fn main(init: std.process.Init) !u8 {
     const gpa = init.arena.allocator();
     const io = init.io;
     const args = try init.minimal.args.toSlice(gpa);
-    if (args.len < 5) {
-        std.debug.print("usage: guide-gate <guide directory> <linea> <scratch directory> <tests directory> [walkers]\n", .{});
+    if (args.len < 6) {
+        std.debug.print("usage: guide-gate <guide directory> <linea> <scratch directory> <tests directory> <repository root> [walkers]\n", .{});
         return 2;
     }
     const guide = args[1];
-    const wanted: ?usize = if (args.len > 5) try std.fmt.parseInt(usize, args[5], 10) else null;
+    var root = try std.Io.Dir.cwd().openDir(io, args[5], .{});
+    defer root.close(io);
+    const wanted: ?usize = if (args.len > 6) try std.fmt.parseInt(usize, args[6], 10) else null;
 
     const read = struct {
         fn file(i: std.Io, a: std.mem.Allocator, directory: []const u8, name: []const u8) ![]const u8 {
@@ -107,6 +101,7 @@ pub fn main(init: std.process.Init) !u8 {
     for (listed) |entry| {
         var chapter = entry;
         chapter.text = try read(io, gpa, guide, chapter.file);
+        chapter.root = .{ .io = io, .dir = root };
         const reading = source.readGuideChapter(gpa, chapter);
         for (reading.problems) |problem| {
             std.debug.print("{s}/{s}:{d}: {s}\n", .{ guide, problem.chapter, problem.line, problem.message });
@@ -120,21 +115,13 @@ pub fn main(init: std.process.Init) !u8 {
 
     const outcomes = try gpa.alloc(Outcome, programs.items.len);
     @memset(outcomes, .{});
-    const count = @min(programs.items.len, @max(1, wanted orelse std.Thread.getCpuCount() catch 1));
-    const arenas = try gpa.alloc(std.heap.ArenaAllocator, count);
-    for (arenas) |*arena| arena.* = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    var next: std.atomic.Value(usize) = .init(0);
-    const walk: Walk = .{
+    try pool.forEach(gpa, programs.items.len, wanted, Walk{
         .io = io,
         .linea = args[2],
         .scratch = args[3],
         .programs = programs.items,
         .outcomes = outcomes,
-        .next = &next,
-    };
-    const threads = try gpa.alloc(std.Thread, count);
-    for (threads, arenas) |*thread, *arena| thread.* = try std.Thread.spawn(.{}, Walk.run, .{ walk, arena });
-    for (threads) |thread| thread.join();
+    }, Walk.run);
 
     // The pasted errors of programs the gate does not run must read as
     // diagnostics the compiler prints: those of the programs it did run, and

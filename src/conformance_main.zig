@@ -12,6 +12,7 @@ const Source = source_mod.Source;
 const readFileAlloc = source_mod.readFileAlloc;
 const Sink = @import("diagnostics/sink.zig").Sink;
 const diagnostic = @import("diagnostics/diagnostic.zig");
+const Diagnostic = diagnostic.Diagnostic;
 const Interner = @import("support/interner.zig").Interner;
 const StringId = @import("support/interner.zig").StringId;
 const render = @import("diagnostics/render.zig");
@@ -172,19 +173,73 @@ const Case = struct {
     /// about a library -- whether something outside can call it -- and the
     /// answer is what the program prints.
     driver: ?InMemoryFile = null,
+    /// Every other regular file beneath a directory case: the files its
+    /// program may embed with `embed` or `embed_bytes`.
+    ///
+    /// Kept out of `files` for the reason the manifest is: they are not Linea
+    /// source, and a walk over a case's documents must not be handed a
+    /// template or an image. The loader reads them only through an embed.
+    data: []const InMemoryFile = &.{},
+    /// The C the case's manifest names under `native` and `link`, and every C
+    /// source and header beside the case's source, so an include resolves.
+    /// Kept out of `files` for the reason the driver is.
+    native: Native = .{},
+
+    /// The C outside the case's module that building it needs: the sources
+    /// and libraries the loader gathered from every manifest of the program,
+    /// its dependencies' included, built from the case's C files.
+    fn foreign(self: Case, program: *const Program) Foreign {
+        return .{
+            .driver = if (self.driver) |d| d.text else null,
+            .native = .{ .files = self.native.files, .compile = program.native, .link = program.link },
+        };
+    }
 };
 
-/// A case's source together with the manifest marking its root.
-///
-/// The loader reads the kind from the files it is given, so this is what it is
-/// given. The caller owns the result.
-fn withManifest(gpa: std.mem.Allocator, case: Case) ![]const InMemoryFile {
-    const marking = case.manifest orelse return case.files;
-    const all = try gpa.alloc(InMemoryFile, case.files.len + 1 + case.libraries.len);
-    @memcpy(all[0..case.files.len], case.files);
-    all[case.files.len] = marking;
-    @memcpy(all[case.files.len + 1 ..], case.libraries);
+/// The C a program is built with: the sources its manifest names under
+/// `native`, with every C file of the case beside them, and the libraries it
+/// names under `link`.
+const Native = struct {
+    /// Every `.c` and `.h` file of the case but its driver, by its path.
+    files: []const InMemoryFile = &.{},
+    /// The paths among `files` the build compiles.
+    compile: []const []const u8 = &.{},
+    link: []const []const u8 = &.{},
+};
+
+/// The C a case's build links beside its module: a driver that calls into a
+/// library, and the C a program's manifest builds and links.
+const Foreign = struct {
+    driver: ?[]const u8 = null,
+    native: Native = .{},
+};
+
+/// Every C file of the case, which the program's manifests name what to
+/// build from.
+fn nativeOf(c_files: []const InMemoryFile) Native {
+    return .{ .files = c_files };
+}
+
+/// What the loader reads beside a case's source: the manifest marking its
+/// root, where it has one, the manifests of the libraries it holds, and the
+/// files its program may embed. Every recompilation of a case, rewritten or
+/// not, is given these, so it is the same root holding the same files. The
+/// caller owns the result.
+fn besideOf(gpa: std.mem.Allocator, case: Case) ![]const InMemoryFile {
+    const marking = case.manifest orelse return case.data;
+    const all = try gpa.alloc(InMemoryFile, 1 + case.libraries.len + case.data.len);
+    all[0] = marking;
+    @memcpy(all[1..][0..case.libraries.len], case.libraries);
+    @memcpy(all[1 + case.libraries.len ..], case.data);
     return all;
+}
+
+/// A case's source followed by what the loader reads beside it. The caller
+/// owns the result.
+fn inputsOf(gpa: std.mem.Allocator, case: Case) ![]const InMemoryFile {
+    const beside = try besideOf(gpa, case);
+    if (beside.len == 0) return case.files;
+    return std.mem.concat(gpa, InMemoryFile, &.{ case.files, beside });
 }
 
 fn lessByPath(_: void, a: []const u8, b: []const u8) bool {
@@ -839,6 +894,28 @@ fn collectCases(gpa: std.mem.Allocator, io: std.Io, root: []const u8, all: []con
         drivers[owner] = try readCase(gpa, io, root, p);
     }
 
+    // Every other file beneath a directory case is one its program may embed.
+    // A golden is the case's record rather than its input, so one beneath the
+    // directory is left to the orphan check, which reports it.
+    const data_of = try gpa.alloc(std.ArrayList(InMemoryFile), roots.items.len);
+    @memset(data_of, .empty);
+    for (all) |p| {
+        if (!isCaseData(p)) continue;
+        const owner = ownerOf(roots.items, p) orelse continue;
+        try data_of[owner].append(gpa, try readCase(gpa, io, root, p));
+    }
+
+    // C sources and headers a program's manifest may build, read beside the
+    // source for the reason the driver is.
+    const c_files = try gpa.alloc(std.ArrayList(InMemoryFile), roots.items.len);
+    @memset(c_files, .empty);
+    for (all) |p| {
+        if (!std.mem.endsWith(u8, p, ".c") and !std.mem.endsWith(u8, p, ".h")) continue;
+        if (std.mem.eql(u8, std.fs.path.basename(p), driver_name)) continue;
+        const owner = ownerOf(roots.items, p) orelse continue;
+        try c_files[owner].append(gpa, try readCase(gpa, io, root, p));
+    }
+
     for (roots.items, 0..) |d, i| {
         const entry = try displayPath(gpa, root, d);
         try cases.append(gpa, .{
@@ -849,10 +926,53 @@ fn collectCases(gpa: std.mem.Allocator, io: std.Io, root: []const u8, all: []con
             .manifest = manifests[i],
             .libraries = try libraries[i].toOwnedSlice(gpa),
             .driver = drivers[i],
+            .data = try data_of[i].toOwnedSlice(gpa),
+            .native = nativeOf(try c_files[i].toOwnedSlice(gpa)),
         });
     }
 
     return cases.toOwnedSlice(gpa);
+}
+
+/// Whether a file beneath a directory case is a file the case's program may
+/// embed: anything but its source, its manifest, its driver and a golden.
+fn isCaseData(path: []const u8) bool {
+    const base = std.fs.path.basename(path);
+    if (std.mem.endsWith(u8, base, ".lin")) return false;
+    if (std.mem.eql(u8, base, loader.manifest_name) or std.mem.eql(u8, base, driver_name)) return false;
+    for (golden_extensions) |ext| if (std.mem.endsWith(u8, base, ext)) return false;
+    return true;
+}
+
+test "a directory case carries every other file beneath it as data its program may embed" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, "tree/site/nested");
+    try tmp.dir.createDirPath(io, "tree/site/templates");
+    for ([_][]const u8{ "tree/site/main.lin", "tree/site/linea.json", "tree/site/page.txt", "tree/site/nested/x.sql", "tree/site/templates/card.html", "tree/site/stale.out", "tree/alone.lin" }) |path| {
+        try tmp.dir.writeFile(io, .{ .sub_path = path, .data = "fn main() -> UInt8 { 0 }\n" });
+    }
+    const root = try tmp.dir.realPathFileAlloc(io, "tree", gpa);
+    const cases = try collectCases(gpa, io, root, try collectPaths(gpa, io, root));
+
+    try testing.expectEqual(@as(usize, 2), cases.len);
+    const alone, const site = if (std.mem.endsWith(u8, cases[0].entry, "alone.lin")) .{ cases[0], cases[1] } else .{ cases[1], cases[0] };
+    try testing.expectEqual(@as(usize, 0), alone.data.len);
+    try testing.expectEqual(@as(usize, 3), site.data.len);
+    var names: [3][]const u8 = undefined;
+    for (site.data, &names) |d, *n| n.* = std.fs.path.basename(d.path);
+    std.mem.sort([]const u8, &names, {}, lessByPath);
+    try testing.expectEqualStrings("card.html", names[0]);
+    try testing.expectEqualStrings("page.txt", names[1]);
+    try testing.expectEqualStrings("x.sql", names[2]);
+    // The manifest goes first, then the data, and the source keeps its place.
+    const inputs = try inputsOf(gpa, site);
+    try testing.expectEqual(site.files.len + 4, inputs.len);
+    try testing.expectEqualStrings("linea.json", std.fs.path.basename(inputs[site.files.len].path));
 }
 
 /// The stem every golden of the case anchored at `rel` is opened under.
@@ -1401,6 +1521,24 @@ const Property = enum {
     /// `checkWalkLoops` asserts it; a case is counted where it claimed one.
     walk_loops,
 
+    /// A help that names an edit concrete enough to write fixes what it was
+    /// written for.
+    ///
+    /// A help a reader follows verbatim and is told the same thing again is
+    /// worse than none, and nothing in the help's wording says whether it
+    /// works. So each edit a diagnostic carries, the machine-readable form of
+    /// one of its helps, is applied to the case and the case is checked again:
+    /// the error the help answered must be gone from where it was reported. A
+    /// different error elsewhere is the program's next mistake and is allowed.
+    /// Where the edit leaves the same rule at the same line with an edit of
+    /// its own, that one is followed in turn, a bounded number of times, so
+    /// two helps that each undo the other are reported rather than chased.
+    ///
+    /// There is no golden: the case is its own expectation, and `-Dupdate`
+    /// has nothing to accept. Counted per case of one file; a case is
+    /// checked where at least one of its diagnostics carried an edit.
+    help_edits,
+
     /// A range pattern's exhaustiveness is the type's own bounds.
     ///
     /// Held by the mutation that narrows a covering arm by one value, which is
@@ -1442,6 +1580,7 @@ const Property = enum {
             .float_round_trip => 6,
             .walk_named => 5,
             .walk_loops => 50,
+            .help_edits => 50,
         };
     }
 
@@ -1477,6 +1616,7 @@ const Property = enum {
             .walk_named,
             .walk_loops,
             .range_exhaustive,
+            .help_edits,
             => corpus.cases,
         };
     }
@@ -1544,6 +1684,7 @@ const Property = enum {
             .walk_named,
             .walk_loops,
             .range_exhaustive,
+            .help_edits,
             => "case",
             .command => "command",
             .deterministic, .held_once => "session",
@@ -1585,6 +1726,7 @@ const Property = enum {
             .walk_named => "a walk that cannot abandon what it holds is refused at the walk",
             .walk_loops => "every walk answers as the loop it stands for",
             .range_exhaustive => "a range pattern's exhaustiveness is the type's own bounds",
+            .help_edits => "a help's edit, applied, removes the error it was written for",
         };
     }
 };
@@ -2507,6 +2649,81 @@ fn callableEnumModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// One `match` with n arms, each naming a key and a variant inside a struct
+/// pattern, then `_`. A row naming a constructor joins that constructor's
+/// branch alone, so coverage copies each arm once and grows with n.
+fn matchArmsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("enum Choice { Yes(UInt8), No }\nstruct Row { key: UInt64, choice: Choice }\nfn pick(sink row: Row) -> UInt64 {\n    match row {\n");
+    for (0..n) |i| try w.print("        Row {{ key: {d}, choice: No }} => {d},\n", .{ i, i });
+    try w.writeAll("        _ => 0,\n    }\n}\nfn main() -> UInt8 {\n    UInt8(pick(Row { key = 1, choice = .No }))\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// One `match` over a pair of n-variant enums with an arm per variant naming
+/// it in both columns: the first column splits into n branches, and the
+/// second column is split again inside each of them.
+fn twoWideColumnsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("enum Wide {\n");
+    for (0..n) |i| try w.print("    V{d},\n", .{i});
+    try w.writeAll("}\nstruct Pair { a: Wide, b: Wide }\nfn same(sink pair: Pair) -> UInt8 {\n    match pair {\n");
+    for (0..n) |i| try w.print("        Pair {{ a: V{d}, b: V{d} }} => 1,\n", .{ i, i });
+    try w.writeAll("        _ => 0,\n    }\n}\nfn main() -> UInt8 {\n    same(Pair { a = .V0, b = .V1 })\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// One `match` of n arms, each binding a name: the arms' paths meet at the
+/// join after the `match`, each holding a binding the others never had.
+fn bindingArmsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("enum Found { Pair(UInt64, UInt8), Missing }\nfn pick(sink found: Found) -> UInt8 {\n    match found {\n");
+    for (0..n) |i| try w.print("        Pair({d}, value) => value,\n", .{i});
+    try w.writeAll("        _ => 0,\n    }\n}\nfn main() -> UInt8 {\n    pick(.Missing)\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// One enum of n variants, each carrying a number, and one `match` taking
+/// every variant's number in an arm of its own: the enum's width meets
+/// coverage, the arms' tag tests and every payload read the verifier places.
+fn wideEnumModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("enum Wide {\n");
+    for (0..n) |i| try w.print("    V{d}(UInt8),\n", .{i});
+    try w.writeAll("}\nfn number(sink w: Wide) -> UInt8 {\n    match w {\n");
+    for (0..n) |i| try w.print("        V{d}(value) => value,\n", .{i});
+    try w.writeAll("    }\n}\nfn main() -> UInt8 {\n    number(.V0(0))\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// A pattern n variants deep, over n enums each carrying the one before it,
+/// so resolving, checking, coverage and ownership each walk a pattern of
+/// depth n. Checked rather than emitted: every tag test reads at an offset
+/// into the outermost value, and the MIR verifier finds which part an access
+/// lands on by descending the type from there, which is the type's depth per
+/// access whatever wrote it.
+fn patternDepthModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("enum Level0 { Held(UInt8), Empty }\n");
+    for (1..n + 1) |i| try w.print("enum Level{d} {{ Held(Level{d}), Empty }}\n", .{ i, i - 1 });
+    try w.print("fn open(sink value: Level{d}) -> UInt8 {{\n    match value {{\n        ", .{n});
+    for (0..n + 1) |_| try w.writeAll("Held(");
+    try w.writeAll("inner");
+    for (0..n + 1) |_| try w.writeAll(")");
+    try w.writeAll(" => inner,\n        _ => 0,\n    }\n}\nfn main() -> UInt8 {\n    open(.Empty)\n}\n");
+    return out.toOwnedSlice();
+}
+
 /// n generic function values named without a type in one body, each settled
 /// by a call through it, so the body's open values and open types grow with n.
 fn openFunctionValuesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
@@ -3392,6 +3609,65 @@ fn heavyOwnershipDeltasModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     try w.writeAll("        turn = turn + 1\n    }\n");
     try w.writeAll("    turn\n}\n");
     return out.toOwnedSlice();
+}
+
+/// One body deferring `n` values at its top and then branching `n` times, so
+/// every join sits before every schedule and the function holds `n` deferred
+/// bindings over about `2n` blocks.
+fn deferredBindingsAcrossJoinsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    try w.writeAll(deferredKeyPrelude);
+    for (0..n) |i| try w.print("    let k{d}: Key = .{{ n = 1 }}\n    defer lock(k{d})\n", .{ i, i });
+    for (0..n) |_| try w.writeAll("    if turns == 0 {\n        turns = turns + 1\n    }\n");
+    try w.writeAll(deferredKeyEnd);
+    return out.toOwnedSlice();
+}
+
+/// Sixteen values deferred at the top of a body that then nests `n` loops, so
+/// the schedules at the body's end are awaited across `n` back edges.
+fn deferredBindingsUnderNestedLoopsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    try w.writeAll(deferredKeyPrelude);
+    for (0..16) |i| try w.print("    let k{d}: Key = .{{ n = 1 }}\n    defer lock(k{d})\n", .{ i, i });
+    for (0..n) |_| try w.writeAll("    while turns < 1 {\n");
+    for (0..n) |_| try w.writeAll("    turns = turns + 1\n    }\n");
+    try w.writeAll(deferredKeyEnd);
+    return out.toOwnedSlice();
+}
+
+const deferredKeyPrelude =
+    "struct Key { n: UInt8 }\n\n" ++
+    "fn lock(sink k: Key) {\n" ++
+    "    let Key { n: _n } = k\n" ++
+    "}\n\n" ++
+    "fn work() -> UInt8 {\n" ++
+    "    var turns: UInt8 = 0\n";
+
+const deferredKeyEnd = "    turns\n}\n\nfn main() -> UInt8 { work() }\n";
+
+test "deferred binding modules are accepted" {
+    inline for (.{ deferredBindingsAcrossJoinsModule, deferredBindingsUnderNestedLoopsModule }) |make| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        const text = try make(gpa, 16);
+        const source: Source = .{ .path = "deferred-bindings.lin", .text = text };
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+        var resolved = try resolveTree(gpa, &ast, &sink);
+        var typing = try typecheckTree(gpa, &resolved, &sink);
+        var plan = try checkOwnershipTree(gpa, &resolved, &typing, &sink);
+        defer plan.deinit(gpa);
+        try testing.expectEqual(@as(u32, 0), sink.error_count);
+    }
 }
 
 /// Distinct observations remain live across writes to unrelated owners.
@@ -4471,7 +4747,16 @@ fn costOf(gpa: std.mem.Allocator, io: std.Io, text: []const u8) !Cost {
 const TreeCostMode = union(enum) { emit, check, refused: diagnostic.Code };
 
 fn treeCost(gpa: std.mem.Allocator, io: std.Io, text: []const u8, mode: TreeCostMode) !Cost {
-    var counting: Counting = .{ .under = gpa };
+    return treeCostGrowing(gpa, io, text, mode, true);
+}
+
+/// `treeCost`, with backing growth refused where `growth` is false. An arena
+/// grows its last node in place by just what each allocation needs when the
+/// backing allows it, and every such growth is charged its full size, so with
+/// growth allowed the allocation metric reads where the backing happened to
+/// place the arena rather than what the compilation asked for.
+fn treeCostGrowing(gpa: std.mem.Allocator, io: std.Io, text: []const u8, mode: TreeCostMode, growth: bool) !Cost {
+    var counting: Counting = .{ .under = gpa, .allow_growth = growth };
     const a = counting.allocator();
 
     const timer = CostTimer.start(io);
@@ -4605,12 +4890,15 @@ fn throughTreeBatch(
                 var measured: Cost = .{ .took = 0, .nanos = 0 };
                 for (0..if (runs == 0) 1 else batch) |_| {
                     const operation = try treeCost(backing, io, text, mode);
-                    measured.took += operation.took;
                     measured.nanos += operation.nanos;
                     measured.cpu_nanos += operation.cpu_nanos;
                 }
                 if (measured.nanos < best.nanos) best = measured;
             }
+            // The allocation metric is fixed with backing growth refused, as
+            // `fastestOf` fixes it.
+            const accounting = try treeCostGrowing(backing, io, text, mode, false);
+            best.took = accounting.took * (if (runs == 0) 1 else batch);
             return best;
         }
     }.cost;
@@ -4944,6 +5232,9 @@ fn ratio(after: u64, before: u64) f64 {
 
 /// The faster of two readings of one size, with the CPU time of that same run.
 fn faster(a: Cost, b: Cost) Cost {
+    if (a.cpu_nanos > 0 and b.cpu_nanos > 0) {
+        return if (b.cpu_nanos < a.cpu_nanos) b else a;
+    }
     return if (b.nanos < a.nanos) b else a;
 }
 
@@ -4963,7 +5254,9 @@ fn balancedCurve(forward: Curve, reverse: Curve) !Curve {
 }
 
 fn curveSteepness(curve: Curve) f64 {
-    return @log2(ratio(curve[2].nanos, curve[1].nanos));
+    const after = if (curve[2].cpu_nanos > 0) curve[2].cpu_nanos else curve[2].nanos;
+    const before = if (curve[1].cpu_nanos > 0) curve[1].cpu_nanos else curve[1].nanos;
+    return @log2(ratio(after, before));
 }
 
 /// The fastest reading of each size across `samples`, which allocate alike.
@@ -5008,7 +5301,8 @@ const Measured = struct {
     /// Whether the smaller of the two readings it is judged on is long enough
     /// to divide.
     fn timed(self: Measured) bool {
-        return self.at[1].nanos >= sweep_enough;
+        const t1 = if (self.at[1].cpu_nanos > 0) self.at[1].cpu_nanos else self.at[1].nanos;
+        return t1 >= sweep_enough;
     }
 
     fn allocationWork(self: Measured) [2]f64 {
@@ -5016,7 +5310,10 @@ const Measured = struct {
     }
 
     fn time(self: Measured) [2]f64 {
-        return .{ ratio(self.at[1].nanos, self.at[0].nanos), ratio(self.at[2].nanos, self.at[1].nanos) };
+        const t0 = if (self.at[0].cpu_nanos > 0) self.at[0].cpu_nanos else self.at[0].nanos;
+        const t1 = if (self.at[1].cpu_nanos > 0) self.at[1].cpu_nanos else self.at[1].nanos;
+        const t2 = if (self.at[2].cpu_nanos > 0) self.at[2].cpu_nanos else self.at[2].nanos;
+        return .{ ratio(t1, t0), ratio(t2, t1) };
     }
 };
 
@@ -6013,6 +6310,11 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "editor diagnostic publication", .n = 1000, .cost = diagnosticPublicationCost },
     .{ .name = "editor qualified completion", .n = 500, .cost = qualifiedCompletionCost },
     .{ .name = "callable enum payloads", .n = 4000, .cost = throughTheTree(callableEnumModule) },
+    .{ .name = "match arms", .n = 4000, .cost = throughTheTree(matchArmsModule) },
+    .{ .name = "variants in one enum", .n = 1000, .cost = throughTheTree(wideEnumModule) },
+    .{ .name = "arms that each bind", .n = 2000, .cost = throughTheTree(bindingArmsModule) },
+    .{ .name = "two wide columns", .n = 1000, .cost = throughTheTree(twoWideColumnsModule) },
+    .{ .name = "pattern depth", .n = 400, .cost = throughTreeBatch(patternDepthModule, .check, 1) },
     .{ .name = "function values settled in one function", .n = 4000, .cost = throughTheTree(openFunctionValuesModule) },
     .{ .name = "function values settled across functions", .n = 4000, .cost = throughTheTree(functionValueBodiesModule) },
     .{ .name = "constructor payload fields", .n = 2000, .cost = throughTheTree(constructorPayloadFieldsModule) },
@@ -6030,6 +6332,8 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "conditional loop exits", .n = 8000, .cost = throughTheTree(conditionalLoopExitsModule) },
     .{ .name = "small ownership deltas", .n = 2000, .cost = throughTheTree(smallOwnershipDeltasModule) },
     .{ .name = "heavy ownership deltas", .n = 2000, .cost = throughTheTree(heavyOwnershipDeltasModule) },
+    .{ .name = "deferred bindings across joins", .n = 2000, .cost = throughTheTree(deferredBindingsAcrossJoinsModule) },
+    .{ .name = "deferred bindings under nested loops", .n = 200, .grows = false, .cost = throughTreeBatch(deferredBindingsUnderNestedLoopsModule, .check, 128) },
     .{ .name = "lending binders", .n = 1100, .cost = throughTheTree(lendingBindersModule) },
     .{ .name = "views taken and lent in one body", .n = 3000, .cost = throughTheTree(storage_mod.viewsProgram) },
     .{ .name = "views held in one struct and ended in turn", .n = 2000, .cost = throughTheTree(storage_mod.wideViewsProgram) },
@@ -6845,7 +7149,12 @@ fn settle(
 /// measured, and the smallest reading is the run that lost the least to
 /// whatever else the machine was doing.
 fn fastestOf(gpa: std.mem.Allocator, io: std.Io, text: []const u8, runs: usize) !Cost {
+    // One compilation with backing growth refused fixes the allocation metric,
+    // as a file-based cost's accounting run does; timing keeps ordinary
+    // allocator policy.
+    const accounting = try treeCostGrowing(gpa, io, text, .emit, false);
     var best = try costOf(gpa, io, text);
+    best.took = accounting.took;
     for (1..@max(runs, 1)) |_| {
         const again = try costOf(gpa, io, text);
         if (again.nanos < best.nanos) {
@@ -7561,7 +7870,7 @@ fn checkGeneratedProgram(
 
         const name = try std.fmt.allocPrint(scratch, "generated{d}", .{at_seed});
         const outcome_zone = tracy.beginZone(@src(), "generated.outcome");
-        const ran = outcomeOf(scratch, io, settings.cache, env.buildRunOptions(name, ir.written(), null)) catch |err| {
+        const ran = outcomeOf(scratch, io, settings.cache, env.buildRunOptions(name, ir.written(), .{})) catch |err| {
             outcome_zone.end();
             result.err = err;
             break :generated;
@@ -7953,7 +8262,7 @@ fn runAccepted(
     ir: []const u8,
     text: []const u8,
 ) !?Ran {
-    const ran = try outcomeOf(scratch, io, settings.cache, settings.env.buildRunOptions(name, ir, null));
+    const ran = try outcomeOf(scratch, io, settings.cache, settings.env.buildRunOptions(name, ir, .{}));
     if (ran.tool_failed and !ran.timed_out) {
         if (ran.tool_missing) {
             result.unbuilt += 1;
@@ -8212,7 +8521,7 @@ fn checkStorageProgram(
                 });
             } else {
                 result.generated += 1;
-                switch (try levelsAgree(scratch, io, settings.cache, &failures, settings.env.buildRunOptions(name, ir, null), ran, display_path, generated.text)) {
+                switch (try levelsAgree(scratch, io, settings.cache, &failures, settings.env.buildRunOptions(name, ir, .{}), ran, display_path, generated.text)) {
                     .agreed => result.levels_agreed += 1,
                     .disagreed => {},
                     .unbuilt => result.unbuilt += 1,
@@ -10781,17 +11090,11 @@ fn renameHolds(
         return true;
     }
 
-    // One more than the source, where the case carries a manifest: a renamed
-    // program is the same root as the one it was renamed from, and reloading it
-    // without what marks that root reads a library as a program.
-    const extra: usize = if (case.manifest == null) 0 else 1 + case.libraries.len;
-    const after = try gpa.alloc(InMemoryFile, case.files.len + extra);
+    // The source and what the loader reads beside it: a renamed program is the
+    // same root as the one it was renamed from, holding the same files, and
+    // reloading it without what marks that root reads a library as a program.
+    const after = try gpa.dupe(InMemoryFile, try inputsOf(gpa, case));
     defer gpa.free(after);
-    @memcpy(after[0..case.files.len], case.files);
-    if (case.manifest) |marking| {
-        after[case.files.len] = marking;
-        @memcpy(after[case.files.len + 1 ..], case.libraries);
-    }
 
     var rewritten: std.ArrayList([]u8) = .empty;
     defer {
@@ -16893,7 +17196,13 @@ const OutcomeCache = struct {
     ) ![]u8 {
         var h: std.hash.Wyhash = .init(self.salt);
         h.update(key.ir);
-        if (key.driver) |bytes| h.update(bytes);
+        if (key.foreign.driver) |bytes| h.update(bytes);
+        for (key.foreign.native.files) |file| {
+            h.update(file.path);
+            h.update(file.text);
+        }
+        for (key.foreign.native.compile) |path| h.update(path);
+        for (key.foreign.native.link) |name| h.update(name);
         h.update(key.opt);
         const filed = h.final();
         const name = try std.fmt.allocPrint(gpa, "{x}", .{filed});
@@ -17180,13 +17489,13 @@ test "nested outcomes retain the worker diagnostic writer" {
             .diagnostics = &diagnostics.writer,
         };
 
-        const opts = env.buildRunOptions("nested", "module ir", "driver source");
+        const opts = env.buildRunOptions("nested", "module ir", .{ .driver = "driver source" });
         try testing.expectEqualStrings("scratch", opts.scratch);
         try testing.expectEqualStrings("runtime.a", opts.runtime);
         try testing.expectEqualStrings("address", opts.sanitize.?);
         try testing.expectEqualStrings("nested", opts.name);
         try testing.expectEqualStrings("module ir", opts.ir);
-        try testing.expectEqualStrings("driver source", opts.driver.?);
+        try testing.expectEqualStrings("driver source", opts.foreign.driver.?);
         try testing.expect(opts.diagnostics == &diagnostics.writer);
     } else {
         try testing.expect(false);
@@ -17200,14 +17509,14 @@ const Env = struct {
     sanitize: ?[]const u8,
     diagnostics: ?*std.Io.Writer = null,
 
-    fn buildRunOptions(self: Env, name: []const u8, ir: []const u8, driver_source: ?[]const u8) BuildRunOptions {
+    fn buildRunOptions(self: Env, name: []const u8, ir: []const u8, foreign: Foreign) BuildRunOptions {
         return .{
             .scratch = self.scratch,
             .name = name,
             .ir = ir,
             .runtime = self.runtime,
             .sanitize = self.sanitize,
-            .driver = driver_source,
+            .foreign = foreign,
             .diagnostics = self.diagnostics,
         };
     }
@@ -17234,17 +17543,19 @@ const Checked = struct {
     /// The code this program generated, for a rewrite that claims to be the
     /// same program rather than merely to answer the same.
     ir: []const u8,
-    /// The manifest marking the root, where the case carries one.
+    /// The manifest marking the root, where the case carries one, and the
+    /// files its program may embed.
     ///
     /// A rewrite is compiled the way the case was, and what kind of root it is
-    /// is part of that: loaded without this, a library is read as a program and
-    /// refused for declaring no `main` -- a disagreement invented by the
-    /// property rather than found by it.
-    manifest: ?loader.InMemoryFile = null,
+    /// is part of that: loaded without the manifest, a library is read as a
+    /// program and refused for declaring no `main`, and without the data files
+    /// an embed names nothing -- disagreements invented by the property rather
+    /// than found by it.
+    beside: []const loader.InMemoryFile = &.{},
     /// The C driver the case is reached through, where it has one. A rewrite
     /// that cannot change what a program means cannot change what its caller
     /// prints, so the rewrite is run through the same driver.
-    driver: ?[]const u8 = null,
+    foreign: Foreign = .{},
 };
 
 /// Property: a rewrite that cannot change what a program means does not change
@@ -17320,7 +17631,177 @@ fn checkMutations(
     try retainFrom(gpa, failures, retained_upto);
 }
 
-/// One program the run has already built and run.
+/// How many fixes one case is followed through before what remains is
+/// reported as two helps that undo each other.
+const help_edit_rounds = 8;
+
+/// One error a help's fix answered: its rule and the line it was reported
+/// at, moved with every later fix.
+const HelpAnswered = struct { code: diagnostic.Code, line: usize };
+
+/// `text` with a fix applied, every edit at once, or why it cannot be: an
+/// edit outside `text`, two edits overlapping, or one into another file.
+const Applied = union(enum) { text: []const u8, refused: []const u8 };
+
+fn applyFix(scratch: std.mem.Allocator, text: []const u8, file: FileId, fix: diagnostic.Fix) !Applied {
+    const edits = try scratch.dupe(diagnostic.Edit, fix.edits);
+    std.mem.sortUnstable(diagnostic.Edit, edits, {}, struct {
+        fn later(_: void, a: diagnostic.Edit, b: diagnostic.Edit) bool {
+            return a.span.start > b.span.start;
+        }
+    }.later);
+    var current = text;
+    var floor: u32 = @intCast(text.len);
+    for (edits) |edit| {
+        if (edit.file != file) return .{ .refused = "an edit into another file" };
+        if (edit.span.start > edit.span.end or edit.span.end > text.len) return .{ .refused = "an edit outside the text" };
+        if (edit.span.end > floor) return .{ .refused = "two edits of one fix overlap" };
+        floor = edit.span.start;
+        current = try std.mem.concat(scratch, u8, &.{ current[0..edit.span.start], edit.text, current[edit.span.end..] });
+    }
+    return .{ .text = current };
+}
+
+/// Where `line` of `text` sits once `fix` is applied: moved by the lines
+/// each edit starting above it adds or removes.
+fn movedLine(text: []const u8, fix: diagnostic.Fix, line: usize) usize {
+    var moved = line;
+    for (fix.edits) |edit| {
+        if (lineAt(text, edit.span.start) >= line) continue;
+        const removed = std.mem.count(u8, text[edit.span.start..@min(edit.span.end, text.len)], "\n");
+        const added = std.mem.count(u8, edit.text, "\n");
+        moved = (moved + added) -| removed;
+    }
+    return moved;
+}
+
+/// What a fix writes, for a failure to show: each edit's text, joined.
+fn fixText(gpa: std.mem.Allocator, fix: diagnostic.Fix) ![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (fix.edits, 0..) |edit, i| try out.print(gpa, "{s}`{s}`", .{ if (i == 0) "" else " and ", std.mem.trim(u8, edit.text, " \n") });
+    return out.items;
+}
+
+/// Whether `diagnostics` hold an error under `code` at `line` of `text`.
+fn errorAtLine(diagnostics: []const Diagnostic, file: FileId, text: []const u8, code: diagnostic.Code, line: usize) ?Diagnostic {
+    for (diagnostics) |d| {
+        if (d.severity != .err or d.code != code) continue;
+        const label = d.primaryLabel() orelse continue;
+        if (label.file != file) continue;
+        if (lineAt(text, label.span.start) == line) return d;
+    }
+    return null;
+}
+
+/// Property `help_edits`: every fix a diagnostic of the case carries,
+/// applied alone to `text`, the case's one file, must leave no error under
+/// that diagnostic's rule at its line. Then the fixes are followed in turn,
+/// the first one each round, until no error carries one: an error a fix
+/// answered must not come back at its line, whichever later fix brings it
+/// back, and the fixes must run out within `help_edit_rounds`. A new error
+/// elsewhere is the program's next mistake. Whether any diagnostic carried
+/// a fix.
+///
+/// **Bound:** one compilation per fix the case's diagnostics carry, and one
+/// per round, at most `help_edit_rounds`.
+fn checkHelpEdits(
+    gpa: std.mem.Allocator,
+    failures: *std.ArrayList(Failure),
+    display_path: []const u8,
+    reported: []const Diagnostic,
+    file: FileId,
+    text: []const u8,
+    kind: ProgramKind,
+) !bool {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+    var carried = false;
+
+    // Each fix alone.
+    for (reported) |d| {
+        if (d.severity != .err) continue;
+        const code = d.code orelse continue;
+        const label = d.primaryLabel() orelse continue;
+        if (label.file != file) continue;
+        for (d.fixes) |fix| {
+            carried = true;
+            const help = if (fix.note) |at| d.notes[at] else label.message;
+            const failure: ?[]const u8 = switch (try applyFix(scratch, text, file, fix)) {
+                .refused => |why| why,
+                .text => |edited| failure: {
+                    const again = try mutate.diagnose(scratch, edited, kind);
+                    const line = movedLine(text, fix, lineAt(text, label.span.start));
+                    const left = errorAtLine(again.sink.list.items, again.file, edited, code, line) orelse break :failure null;
+                    break :failure try std.fmt.allocPrint(scratch, "{s} at line {d} is still reported: {s}", .{ code.ruleName(), line, left.message });
+                },
+            };
+            if (failure) |what| try failures.append(gpa, .{
+                .path = display_path,
+                .what = "a help's edit, applied, leaves the error it was written for",
+                .expected = try std.fmt.allocPrint(gpa, "no {s} at line {d} after writing {s}, as the help \"{s}\" says", .{ code.ruleName(), lineAt(text, label.span.start), try fixText(scratch, fix), help }),
+                .actual = try gpa.dupe(u8, what),
+            });
+        }
+    }
+    if (!carried) return false;
+
+    // The fixes in turn.
+    var answered: std.ArrayList(HelpAnswered) = .empty;
+    var applied: std.ArrayList([]const u8) = .empty;
+    var current = text;
+    var current_file = file;
+    var diagnostics_now: []const Diagnostic = reported;
+    var round: usize = 0;
+    const failure: ?[]const u8 = failure: while (true) : (round += 1) {
+        for (diagnostics_now) |d| {
+            if (d.severity != .err) continue;
+            const code = d.code orelse continue;
+            const label = d.primaryLabel() orelse continue;
+            if (label.file != current_file) continue;
+            const line = lineAt(current, label.span.start);
+            for (answered.items) |earlier| if (earlier.code == code and earlier.line == line)
+                break :failure try std.fmt.allocPrint(scratch, "{s} at line {d}, answered by an earlier fix, reported again: {s}", .{ code.ruleName(), line, d.message });
+        }
+        const next: Diagnostic = for (diagnostics_now) |d| {
+            if (d.severity != .err or d.code == null or d.fixes.len == 0) continue;
+            const label = d.primaryLabel() orelse continue;
+            if (label.file != current_file) continue;
+            break d;
+        } else break null;
+        if (round >= help_edit_rounds) break try std.fmt.allocPrint(scratch, "helps still offer edits after {d}", .{help_edit_rounds});
+        const fix = next.fixes[0];
+        const edited = switch (try applyFix(scratch, current, current_file, fix)) {
+            .refused => |why| break why,
+            .text => |t| t,
+        };
+        for (answered.items) |*earlier| earlier.line = movedLine(current, fix, earlier.line);
+        try answered.append(scratch, .{ .code = next.code.?, .line = movedLine(current, fix, lineAt(current, next.primaryLabel().?.span.start)) });
+        try applied.append(scratch, try fixText(scratch, fix));
+        const again = try mutate.diagnose(scratch, edited, kind);
+        current = edited;
+        current_file = again.file;
+        diagnostics_now = again.sink.list.items;
+    };
+    if (failure) |what| {
+        var edits: std.ArrayList(u8) = .empty;
+        for (applied.items, 0..) |t, i| try edits.print(gpa, "{s}{s}", .{ if (i == 0) "" else ", then ", t });
+        try failures.append(gpa, .{
+            .path = display_path,
+            .what = "a help's edit, applied, leaves the error it was written for",
+            .expected = try std.fmt.allocPrint(gpa, "each error a help's fix answers gone for good, after writing {s}", .{edits.items}),
+            .actual = try gpa.dupe(u8, what),
+        });
+    }
+    return true;
+}
+
+/// The line, counted from 1, that byte `offset` of `text` sits on.
+fn lineAt(text: []const u8, offset: u32) usize {
+    return std.mem.count(u8, text[0..@min(offset, text.len)], "\n") + 1;
+}
+
+/// One program the run has already built and run./// One program the run has already built and run.
 ///
 /// What a property needs to compare a second build against the first: where the
 /// intermediates go, how the case is named to a reader, and what the program
@@ -17341,7 +17822,7 @@ const Built = struct {
     /// entry point to link, and the link failure would be reported as the
     /// damage having changed what the program does -- a disagreement invented
     /// by the property rather than found by it.
-    driver: ?[]const u8 = null,
+    foreign: Foreign = .{},
 };
 
 test "lowered modules release literal bytes and functions on allocation failure" {
@@ -17570,7 +18051,7 @@ fn checkDamage(
             env.buildRunOptions(
                 try std.mem.concat(scratch, u8, &.{ program.name, ".", @tagName(d) }),
                 ir.written(),
-                program.driver,
+                program.foreign,
             ),
         );
 
@@ -17648,15 +18129,16 @@ fn checkMaterializedDerives(
     original_answer: []const u8,
     original_output: []const u8,
     original_errors: []const u8,
-    manifest: ?loader.InMemoryFile,
-    driver_source: ?[]const u8,
+    /// The manifest and data files the case carries, as `besideOf` gives them.
+    beside: []const loader.InMemoryFile,
+    foreign: Foreign,
 ) !void {
     var materialized = (try transform_mod.materializeDerives(gpa, program, expanded, resolution)) orelse return;
     defer materialized.deinit(gpa);
 
     var files: std.ArrayList(loader.InMemoryFile) = .empty;
     try files.appendSlice(gpa, materialized.files);
-    if (manifest) |file| try files.append(gpa, file);
+    try files.appendSlice(gpa, beside);
 
     var table: FileTable = .empty;
     var sink = Sink.init(gpa);
@@ -17695,7 +18177,7 @@ fn checkMaterializedDerives(
     const ran = try outcomeOf(gpa, io, cache, env.buildRunOptions(
         try std.mem.concat(gpa, u8, &.{ name, ".materialized-derives" }),
         ir.written(),
-        driver_source,
+        foreign,
     ));
     if (ran.tool_failed or ran.timed_out) {
         if (!ran.tool_missing) try failures.append(gpa, .{
@@ -17792,7 +18274,7 @@ fn checkRewrites(
         // `.lin` files rather than out of whatever the case is called.
         var one: std.ArrayList(loader.InMemoryFile) = .empty;
         try one.append(scratch, .{ .path = program.source.path, .text = variant.text });
-        if (program.manifest) |m| try one.append(scratch, m);
+        try one.appendSlice(scratch, program.beside);
         var loaded = try loadFromMemory(scratch, &table, &sink, &interner, program.source.path, one.items, .program, true, .borrow);
         try table.buildMaps(scratch);
         var settled = try checkProgram(scratch, per_rewrite.child_allocator, &loaded, &interner, &sink, .program);
@@ -17858,7 +18340,7 @@ fn checkRewrites(
             .answer = program.answer,
             .output = program.output,
             .errors = program.errors,
-            .driver = program.driver,
+            .foreign = program.foreign,
         }, @tagName(t), t.why(), ir.written())) continue;
         rewrites.put(t, (rewrites.get(t) orelse 0) + 1);
         reached = true;
@@ -17877,7 +18359,7 @@ const RanAs = struct {
     answer: []const u8,
     output: []const u8 = "",
     errors: []const u8 = "",
-    driver: ?[]const u8 = null,
+    foreign: Foreign = .{},
 };
 
 /// Builds and runs `ir`, a rewrite of `program`, and records every stream it
@@ -17902,7 +18384,7 @@ fn compareRewrittenRun(
         env.buildRunOptions(
             try std.mem.concat(scratch, u8, &.{ program.name, ".", suffix }),
             ir,
-            program.driver,
+            program.foreign,
         ),
     );
     if (ran.timed_out) {
@@ -18015,7 +18497,8 @@ const WalkSubject = struct {
     files: []const loader.InMemoryFile,
     /// The file each of `files` is in `semantics`, where it was loaded.
     file_ids: []const ?FileId,
-    manifest: ?loader.InMemoryFile = null,
+    /// The manifest and data files the case carries, as `besideOf` gives them.
+    beside: []const loader.InMemoryFile = &.{},
     /// What the original compilation settled; its `file` is set per rewrite.
     semantics: TransformSemantics,
     /// `rulesNamedBy` of the original compilation, through lowering.
@@ -18081,7 +18564,7 @@ fn compareWalkLoops(
 
     var inputs: std.ArrayList(loader.InMemoryFile) = .empty;
     for (subject.files, 0..) |other, j| try inputs.append(scratch, if (j == k) .{ .path = other.path, .text = rewritten } else other);
-    if (subject.manifest) |m| try inputs.append(scratch, m);
+    try inputs.appendSlice(scratch, subject.beside);
     const loaded = try generate.checkLoaded(scratch, subject.entry, inputs.items, checked_library);
     const table = &loaded.table;
     const sink = &loaded.sink;
@@ -18407,24 +18890,54 @@ const BuildRunOptions = struct {
     /// Its presence is what decides the shape of the build: with a driver the
     /// module is compiled to an object and the driver is what starts, which is
     /// the only arrangement that shows a library is callable from outside.
-    driver: ?[]const u8 = null,
+    foreign: Foreign = .{},
     /// The level `cc` compiles the module at, one of `toolchain.levels`.
     opt: []const u8 = toolchain.default_level,
     /// Where a concurrent caller retains harness diagnostics for ordered merge.
     diagnostics: ?*std.Io.Writer = null,
 
     fn key(self: BuildRunOptions) OutcomeKey {
-        return .{ .ir = self.ir, .driver = self.driver, .opt = self.opt };
+        return .{ .ir = self.ir, .foreign = self.foreign, .opt = self.opt };
     }
 };
 
 /// What one outcome is filed under beside the salt: the module, the driver
-/// linked against it, and the level it was compiled at.
+/// linked against it, and the level it was compiled at. Everything a program's
+/// behaviour depends on reaches its IR, the bytes of every file it embeds
+/// included, so a program whose embedded file changed is a different key and
+/// never reads the outcome recorded for the old bytes.
 const OutcomeKey = struct {
     ir: []const u8,
-    driver: ?[]const u8 = null,
+    foreign: Foreign = .{},
     opt: []const u8 = toolchain.default_level,
 };
+
+test "a program is filed under the bytes it embeds" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const checked = test_library.get();
+    var irs: [2][]const u8 = undefined;
+    // Two files of one length, so only the bytes differ.
+    for ([_][]const u8{ "first", "fresh" }, &irs) |motd, *ir| {
+        var table: FileTable = .empty;
+        var sink = Sink.init(a);
+        var interner: Interner = .empty;
+        const files = [_]InMemoryFile{
+            .{ .path = "app/main.lin", .text = "fn main() -> UInt8 {\n    UInt8(embed(\"motd.txt\").length())\n}\n" },
+            .{ .path = "app/motd.txt", .text = motd },
+        };
+        var loaded = try checked.loadFromMemory(a, &table, &sink, &interner, "app", &files, .program, .borrow);
+        var settled = try checked.checkProgram(a, a, &loaded, &interner, &sink, .program);
+        const module = (try lower(a, &settled.expanded, &settled.res, &settled.typing, &settled.disposals, &sink, .program)).?;
+        var written: std.Io.Writer.Allocating = .init(a);
+        try testing.expect(try emitMlir(a, &written.writer, &module, &table, &sink));
+        ir.* = written.written();
+        try testing.expect(std.mem.indexOf(u8, ir.*, motd) != null);
+    }
+    const cache: OutcomeCache = .{ .dir = "outcomes", .salt = 7 };
+    try testing.expect(!std.mem.eql(u8, try cache.pathFor(a, .{ .ir = irs[0] }), try cache.pathFor(a, .{ .ir = irs[1] })));
+}
 
 test "one module built at two levels is filed as two outcomes" {
     const cache: OutcomeCache = .{ .dir = "outcomes", .salt = 7 };
@@ -18497,6 +19010,24 @@ fn buildAndRun(gpa: std.mem.Allocator, io: std.Io, opts: BuildRunOptions) !Build
         try w.interface.flush();
     }
 
+    // The case's C files are written under a directory of this build's own,
+    // at their paths in the case, so a source's `#include "x.h"` finds the
+    // header beside it and the manifest's paths name them.
+    const native_dir = try std.fmt.allocPrint(gpa, "{s}.c-files", .{exe_path});
+    defer std.Io.Dir.cwd().deleteTree(io, native_dir) catch {};
+    for (opts.foreign.native.files) |file| {
+        const path = try std.fs.path.join(gpa, &.{ native_dir, file.path });
+        if (std.fs.path.dirname(path)) |parent| try std.Io.Dir.cwd().createDirPath(io, parent);
+        const written = try std.Io.Dir.cwd().createFile(io, path, .{});
+        defer written.close(io);
+        var buf: [4096]u8 = undefined;
+        var w = written.writer(io, &buf);
+        try w.interface.writeAll(file.text);
+        try w.interface.flush();
+    }
+    const native_sources = try gpa.alloc([]const u8, opts.foreign.native.compile.len);
+    for (opts.foreign.native.compile, 0..) |path, i| native_sources[i] = try std.fs.path.join(gpa, &.{ native_dir, path });
+
     // With a driver the module becomes an object rather than a program: it has
     // no entry point of its own, and what starts is the C program that calls
     // into it. The object, the driver and the runtime are then one link, which
@@ -18504,14 +19035,16 @@ fn buildAndRun(gpa: std.mem.Allocator, io: std.Io, opts: BuildRunOptions) !Build
     const object_path = built.object;
     if (try toolchain.build(gpa, io, .{
         .mid = mid,
-        .out_path = if (opts.driver == null) exe_path else object_path,
+        .out_path = if (opts.foreign.driver == null) exe_path else object_path,
         .runtime_path = opts.runtime,
         .sanitize = opts.sanitize,
-        .artifact = if (opts.driver == null) .executable else .object,
+        .artifact = if (opts.foreign.driver == null) .executable else .object,
         .opt = opts.opt,
+        .native = native_sources,
+        .link = opts.foreign.native.link,
     })) |f| return .{ .tool_failed = f };
 
-    if (opts.driver) |source| {
+    if (opts.foreign.driver) |source| {
         const driver_path = built.driver;
         {
             const file = try std.Io.Dir.cwd().createFile(io, driver_path, .{});
@@ -18522,7 +19055,7 @@ fn buildAndRun(gpa: std.mem.Allocator, io: std.Io, opts: BuildRunOptions) !Build
             try w.interface.flush();
         }
 
-        if (try toolchain.linkDriver(gpa, io, exe_path, driver_path, object_path, opts.runtime, opts.sanitize)) |f| {
+        if (try toolchain.linkDriver(gpa, io, exe_path, driver_path, object_path, opts.runtime, opts.sanitize, opts.foreign.native.link)) |f| {
             return .{ .tool_failed = f };
         }
     }
@@ -19380,7 +19913,7 @@ fn checkCase(
     const program = loaded: {
         const load_zone = tracy.beginZone(@src(), "frontend");
         defer load_zone.end();
-        const inputs = try withManifest(gpa, case);
+        const inputs = try inputsOf(gpa, case);
         break :loaded try env.library.loadFromMemory(gpa, &table, &sink, &interner, case.entry, inputs, .program, .borrow);
     };
     try table.buildMaps(gpa);
@@ -19476,8 +20009,10 @@ fn checkCase(
     // tree -- and a loader that numbered by discovery would pass every
     // other case here and fail this one.
     if (env.properties and case.files.len > 1) {
-        const flipped = try gpa.alloc(InMemoryFile, case.files.len);
+        const beside = try besideOf(gpa, case);
+        const flipped = try gpa.alloc(InMemoryFile, case.files.len + beside.len);
         for (case.files, 0..) |f, k| flipped[case.files.len - 1 - k] = f;
+        @memcpy(flipped[case.files.len..], beside);
 
         var other_table: FileTable = .empty;
         var other_sink = Sink.init(gpa);
@@ -19842,7 +20377,7 @@ fn checkCase(
         // is a program or library. This remains a second load and check, independent
         // of the compiler answers above; publication and rename only share that
         // independent answer with each other.
-        var lsp_checked = try lsp_analysis.of(gpa, gpa, env.library, try withManifest(gpa, case), case.entry);
+        var lsp_checked = try lsp_analysis.of(gpa, gpa, env.library, try inputsOf(gpa, case), case.entry);
         defer lsp_checked.deinit();
 
         tally(&w.properties, &w.passed_over, .published_diagnostics, carriable);
@@ -19982,7 +20517,7 @@ fn checkCase(
                             .ir = ir.written(),
                             .runtime = rt,
                             .sanitize = env.sanitize,
-                            .driver = if (case.driver) |d| d.text else null,
+                            .foreign = case.foreign(&program),
                         });
                         outcome_zone.end();
                         native_verified = !ran.tool_failed;
@@ -19993,7 +20528,7 @@ fn checkCase(
                                 .answer = ran.text,
                                 .output = ran.output,
                                 .errors = ran.errors,
-                                .driver = if (case.driver) |d| d.text else null,
+                                .foreign = case.foreign(&program),
                             };
                             answered_env = .{
                                 .scratch = env.scratch_dir,
@@ -20054,8 +20589,8 @@ fn checkCase(
                                 ran.text,
                                 ran.output,
                                 ran.errors,
-                                case.manifest,
-                                if (case.driver) |d| d.text else null,
+                                try besideOf(gpa, case),
+                                case.foreign(&program),
                             );
                         }
 
@@ -20069,7 +20604,7 @@ fn checkCase(
                                 .ir = ir.written(),
                                 .runtime = rt,
                                 .sanitize = env.sanitize,
-                                .driver = if (case.driver) |d| d.text else null,
+                                .foreign = case.foreign(&program),
                             }, ran, display_path, null)) {
                                 .agreed => w.levels_agreed += 1,
                                 .disagreed, .unbuilt => {},
@@ -20104,8 +20639,8 @@ fn checkCase(
                                 .output = ran.output,
                                 .errors = ran.errors,
                                 .ir = ir.written(),
-                                .manifest = case.manifest,
-                                .driver = if (case.driver) |d| d.text else null,
+                                .beside = try besideOf(gpa, case),
+                                .foreign = case.foreign(&program),
                             });
                             rewrites_zone.end();
                         }
@@ -20142,7 +20677,7 @@ fn checkCase(
                                 .name = case_name,
                                 .answer = ran.text,
                                 .errors = ran.errors,
-                                .driver = if (case.driver) |dr| dr.text else null,
+                                .foreign = case.foreign(&program),
                             });
                             damage_zone.end();
                         }
@@ -20217,7 +20752,7 @@ fn checkCase(
             .entry = case.entry,
             .files = case.files,
             .file_ids = file_ids,
-            .manifest = case.manifest,
+            .beside = try besideOf(gpa, case),
             .semantics = .{
                 .ast = &settled.expanded.ast,
                 .program = &program,
@@ -20231,6 +20766,15 @@ fn checkCase(
         walk_zone.end();
     }
     tally(&w.properties, &w.passed_over, .walk_loops, walks_written_out);
+
+    // Every case, counted where one of its diagnostics carried a fix. A case
+    // of several files is passed over: the fix is written into one file's
+    // text and recompiled alone.
+    var edits_applied = false;
+    if (env.corpus_properties and case.files.len == 1 and sink.hasErrors()) {
+        edits_applied = try checkHelpEdits(gpa, &w.failures, display_path, sink.items(), program.primaryFile(), case.files[0].text, program.kind);
+    }
+    tally(&w.properties, &w.passed_over, .help_edits, edits_applied);
 
     // And the one the mutation asserts, counted from what it did rather than
     // asked again: a case is checked here exactly where it claimed it, so a

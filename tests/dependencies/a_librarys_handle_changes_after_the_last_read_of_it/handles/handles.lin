@@ -1,0 +1,9 @@
+// A handle to an object C holds, sealed so only this library makes one.
+@(opaque, linear)
+type Name = UInt64
+
+extern fn named_open() -> Name
+
+pub fn open() -> Name {
+    named_open()
+}

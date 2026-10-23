@@ -10,3 +10,6 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |
 12 |         return .{ text = view }
    |                ^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `owned` belongs to `from` and ends when it returns, so nothing returned may observe it
+   = help: `owned` owns the text already: put `owned` itself where its view is, declaring `String` there

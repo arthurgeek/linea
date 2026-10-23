@@ -181,6 +181,8 @@ pub fn verify(
 
     const z_fns = tracy.beginZone(@src(), "verify.functions");
     defer z_fns.end();
+    var enum_parts: Members.EnumParts = .{ .gpa = gpa };
+    defer enum_parts.deinit();
     for (module.functions, 0..) |*f, i| {
         var v: Function = .{
             .gpa = gpa,
@@ -188,6 +190,7 @@ pub fn verify(
             .sink = sink,
             .mir = f,
             .id = FunctionId.at(@intCast(i)),
+            .enum_parts = &enum_parts,
         };
         if (!try v.verify()) ok = false;
     }
@@ -242,7 +245,7 @@ fn verifyStatics(module: *const Module, sink: *Sink) std.mem.Allocator.Error!boo
                 return staticDefect(sink, "static {d} part {d} covers {d} byte(s) at offset {d}, after byte {d} of {d}", .{ i, j, width, part.offset, end, size });
             }
             end = @as(u64, part.offset) + width;
-            if (!members.isMember(entry.ty, part.offset, width)) {
+            if (!try members.isMember(entry.ty, part.offset, width)) {
                 return staticDefect(sink, "static {d} part {d} at offset {d} is no part of `{s}`", .{ i, j, part.offset, module.types.nameOf(entry.ty) });
             }
             const fits = switch (module.representationOf(part.ty).storage) {
@@ -485,13 +488,39 @@ fn coversType(module: *const Module, t: TypeId) bool {
 /// static's parts, so one answer says what a part is.
 const Members = struct {
     module: *const Module,
+    /// Each enum's variant parts, sorted by where they begin, built the first
+    /// time an access into the enum is asked about. Null where the caller
+    /// asks too few questions to be worth an index, and then every variant is
+    /// searched.
+    enums: ?*EnumParts = null,
+
+    /// The distinct parts every variant of one enum places, by offset, with
+    /// the furthest end of any part up to each: an access is held by a part
+    /// beginning at or before it, and the furthest end says when no earlier
+    /// part can reach it.
+    const EnumParts = struct {
+        gpa: std.mem.Allocator,
+        by_type: std.AutoHashMapUnmanaged(TypeId, Index) = .empty,
+
+        const Part = struct { start: u32, ty: TypeId };
+        const Index = struct { parts: []const Part, reach: []const u32 };
+
+        fn deinit(self: *EnumParts) void {
+            var it = self.by_type.valueIterator();
+            while (it.next()) |index| {
+                self.gpa.free(index.parts);
+                self.gpa.free(index.reach);
+            }
+            self.by_type.deinit(self.gpa);
+        }
+    };
 
     /// Whether a run of bytes is a part of a type, or the whole of it.
     ///
     /// Reads the module's own pool for which parts exist and where, so the
     /// number compared against is the one the constant in the instruction was
     /// supposed to have been taken from.
-    fn isMember(self: Members, declared: TypeId, off: u32, width: u32) bool {
+    fn isMember(self: Members, declared: TypeId, off: u32, width: u32) std.mem.Allocator.Error!bool {
         // A newtype has the same parts and offsets as its base.
         const container = self.module.types.erased(declared);
         const whole = self.module.layoutOf(container);
@@ -522,7 +551,7 @@ const Members = struct {
                 while (at > 0) {
                     at -= 1;
                     const start = types.fieldOffset(container, at);
-                    if (self.partHolds(types.fieldType(container, at), start, off, width)) {
+                    if (try self.partHolds(types.fieldType(container, at), start, off, width)) {
                         break :blk true;
                     }
                     if (start != off) break;
@@ -554,19 +583,18 @@ const Members = struct {
                 if (stride == 0 or a.count == 0) break :blk false;
                 const which = off / stride;
                 if (which >= a.count) break :blk false;
-                if (self.partHolds(a.element, @intCast(which * stride), off, width)) break :blk true;
+                if (try self.partHolds(a.element, @intCast(which * stride), off, width)) break :blk true;
                 break :blk off % stride == 0 and width % stride == 0 and
                     off + width <= a.count * stride;
             },
             .enum_ => blk: {
                 // The tag occupies a full word at the front, and every variant
-                // is overlaid behind it. Each variant's payload is one
-                // non-decreasing placed run, so find the only field offset
-                // that could contain the access instead of scanning every
-                // payload for every indirect access. This costs one binary
-                // search per variant, at most the language's 64 variants,
-                // rather than fields-per-variant work per access.
+                // is overlaid behind it.
                 if (off == 0 and width == Layout.tag_width) break :blk true;
+                if (self.enums) |enums| break :blk try self.enumHolds(enums, container, off, width);
+                // Without an index each variant's payload is searched: one
+                // binary search per variant, for the few accesses a static's
+                // parts make.
                 for (0..types.variantCount(container)) |variant| {
                     const v: u32 = @intCast(variant);
                     const count = types.variantFieldCount(container, v);
@@ -580,7 +608,7 @@ const Members = struct {
                     while (field > 0) {
                         field -= 1;
                         const start = types.variantFieldOffset(container, v, field);
-                        if (self.partHolds(
+                        if (try self.partHolds(
                             types.variantFieldType(container, v, field),
                             start,
                             off,
@@ -661,13 +689,80 @@ const Members = struct {
 
     /// Whether one part accounts for an access: it is that part exactly, or it
     /// lies inside a part that has parts of its own.
+    /// Whether some variant's part holds an access into the enum, read from
+    /// the enum's index. **Bound:** building the index sorts every variant's
+    /// parts once per verification; an access then costs a binary search and
+    /// one check per distinct part reaching it -- not the enum's variant
+    /// count, which an access was otherwise asked against every time.
+    fn enumHolds(self: Members, enums: *EnumParts, container: TypeId, off: u32, width: u32) std.mem.Allocator.Error!bool {
+        const index = enums.by_type.get(container) orelse try self.indexEnum(enums, container);
+        // The last part beginning at or before the access.
+        var lo: usize = 0;
+        var hi: usize = index.parts.len;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            if (index.parts[mid].start <= off) lo = mid + 1 else hi = mid;
+        }
+        var at = lo;
+        while (at > 0) {
+            at -= 1;
+            // No part up to here reaches the access.
+            if (index.reach[at] <= off and !(index.parts[at].start == off)) break;
+            const part = index.parts[at];
+            if (try self.partHolds(part.ty, part.start, off, width)) return true;
+        }
+        return false;
+    }
+
+    fn indexEnum(self: Members, enums: *EnumParts, container: TypeId) std.mem.Allocator.Error!EnumParts.Index {
+        const types = &self.module.types;
+        var parts: std.ArrayList(EnumParts.Part) = .empty;
+        errdefer parts.deinit(enums.gpa);
+        for (0..types.variantCount(container)) |variant| {
+            const v: u32 = @intCast(variant);
+            for (0..types.variantFieldCount(container, v)) |field| {
+                try parts.append(enums.gpa, .{
+                    .start = types.variantFieldOffset(container, v, @intCast(field)),
+                    .ty = types.variantFieldType(container, v, @intCast(field)),
+                });
+            }
+        }
+        std.mem.sort(EnumParts.Part, parts.items, {}, struct {
+            fn less(_: void, a: EnumParts.Part, b: EnumParts.Part) bool {
+                if (a.start != b.start) return a.start < b.start;
+                return @intFromEnum(a.ty) < @intFromEnum(b.ty);
+            }
+        }.less);
+        // One entry per place and type: a hundred variants carrying the same
+        // part at the same offset are one candidate.
+        var kept: usize = 0;
+        for (parts.items) |part| {
+            if (kept > 0 and parts.items[kept - 1].start == part.start and parts.items[kept - 1].ty == part.ty) continue;
+            parts.items[kept] = part;
+            kept += 1;
+        }
+        parts.shrinkRetainingCapacity(kept);
+        const owned = try parts.toOwnedSlice(enums.gpa);
+        errdefer enums.gpa.free(owned);
+        const reach = try enums.gpa.alloc(u32, owned.len);
+        errdefer enums.gpa.free(reach);
+        var furthest: u32 = 0;
+        for (owned, reach) |part, *r| {
+            furthest = @max(furthest, part.start + self.module.layoutOf(part.ty).size);
+            r.* = furthest;
+        }
+        const index: EnumParts.Index = .{ .parts = owned, .reach = reach };
+        try enums.by_type.put(enums.gpa, container, index);
+        return index;
+    }
+
     fn partHolds(
         self: Members,
         part: TypeId,
         at: u32,
         off: u32,
         width: u32,
-    ) bool {
+    ) std.mem.Allocator.Error!bool {
         if (!coversType(self.module, part)) return false;
         const l = self.module.layoutOf(part);
         if (off == at and width == l.size) return true;
@@ -686,6 +781,9 @@ const Function = struct {
     id: FunctionId,
     ok: bool = true,
     locations: []const Location = &.{},
+    /// The variant parts of each enum an access reached, indexed once for
+    /// the whole module.
+    enum_parts: *Members.EnumParts,
 
     const Location = struct {
         block: u32 = std.math.maxInt(u32),
@@ -701,6 +799,7 @@ const Function = struct {
         // pass that reports defects.
         if (!try self.cover()) return false;
         if (!try self.references()) return false;
+        if (!try self.foreignEntriesReachOnlyC()) return false;
         if (!try self.verifySignature()) return false;
 
         const locations = try self.gpa.alloc(Location, self.mir.insts.len);
@@ -1244,6 +1343,7 @@ const Function = struct {
             .float_math,
             .check,
             .function_addr,
+            .foreign_function_addr,
             .call_indirect,
             .call_noreturn,
             .call_indirect_noreturn,
@@ -1253,6 +1353,81 @@ const Function = struct {
             .trap,
             => {},
         }
+        return true;
+    }
+
+    /// A C-callable entry follows C's convention, so only C may call it: every
+    /// use of a `foreign_function_addr` is an argument of a direct call to an
+    /// `extern`. One pass over the function's instructions, reading each
+    /// operand once.
+    fn foreignEntriesReachOnlyC(self: *Function) std.mem.Allocator.Error!bool {
+        const mir = self.mir;
+        for (0..mir.insts.len) |i| {
+            const user = InstId.at(@intCast(i));
+            var single: [6]InstId = @splat(.none);
+            const used: []const InstId = switch (mir.tagOf(user).payload()) {
+                .call => {
+                    const c = mir.callOf(user);
+                    if (self.module.isExternal(c.func)) continue;
+                    for (c.args) |a| if (try self.refuseForeignEntry(user, a)) return false;
+                    continue;
+                },
+                .indirect_call => {
+                    const c = mir.indirectCallOf(user);
+                    if (try self.refuseForeignEntry(user, c.callee)) return false;
+                    for (c.args) |a| if (try self.refuseForeignEntry(user, a)) return false;
+                    continue;
+                },
+                .unary => blk: {
+                    single[0] = mir.unaryOf(user);
+                    break :blk single[0..1];
+                },
+                .binary => blk: {
+                    const pair = mir.binaryOf(user);
+                    single[0] = pair.lhs;
+                    single[1] = pair.rhs;
+                    break :blk single[0..2];
+                },
+                .store => blk: {
+                    single[0] = mir.storeOf(user).value;
+                    break :blk single[0..1];
+                },
+                .float_math => blk: {
+                    const math = mir.floatMathOf(user);
+                    single[0] = math.lhs;
+                    single[1] = math.rhs;
+                    break :blk single[0..2];
+                },
+                .raw_access => blk: {
+                    const raw = mir.rawAccessOf(user);
+                    single = .{ raw.address, raw.length, raw.value, raw.overflow_check, raw.bounds_check, raw.alignment_check };
+                    break :blk single[0..6];
+                },
+                .check => blk: {
+                    single[0] = mir.checkOf(user).value;
+                    break :blk single[0..1];
+                },
+                .branch => blk: {
+                    single[0] = mir.branchOf(user).cond;
+                    break :blk single[0..1];
+                },
+                .trap => blk: {
+                    single[0] = mir.trapOf(user).message;
+                    break :blk single[0..1];
+                },
+                .constant, .bytes, .static, .local, .function, .target => continue,
+            };
+            for (used) |operand| if (try self.refuseForeignEntry(user, operand)) return false;
+        }
+        return true;
+    }
+
+    /// Reports `operand` where it is a C-callable entry used by `user`, which
+    /// is not a direct call to an `extern`.
+    fn refuseForeignEntry(self: *Function, user: InstId, operand: InstId) std.mem.Allocator.Error!bool {
+        if (operand == .none or operand.index() >= self.mir.insts.len) return false;
+        if (self.mir.tagOf(operand) != .foreign_function_addr) return false;
+        try self.report(self.mir.spanOf(user), "%{d} uses C-callable entry %{d} as something other than an argument of an extern call", .{ user.index(), operand.index() });
         return true;
     }
 
@@ -1572,7 +1747,7 @@ const Function = struct {
     }
 
     fn members(self: *const Function) Members {
-        return .{ .module = self.module };
+        return .{ .module = self.module, .enums = self.enum_parts };
     }
 
     fn described(self: *Function, t: TypeId, what: []const u8) std.mem.Allocator.Error!bool {
@@ -1731,6 +1906,7 @@ const Function = struct {
                 .float_math,
                 .check,
                 .function_addr,
+                .foreign_function_addr,
                 => .value,
             };
             const got = mir.resultRoleOf(id);
@@ -2034,7 +2210,7 @@ const Function = struct {
         // at its own alignment -- so an offset that is a member offset is an
         // aligned one, and a second test of it would be this pass asking the
         // table a question it just answered.
-        if (!self.members().isMember(object.ty, off, width)) {
+        if (!try self.members().isMember(object.ty, off, width)) {
             try self.report(span, "%{d} {s} {d} byte(s) at offset {d}, which is no part of `{s}`", .{
                 id.index(), how, width, off, self.module.types.nameOf(object.ty),
             });
@@ -3204,6 +3380,28 @@ test "a code pointer can be stored loaded and called" {
     const checked = try h.run();
     try testing.expect(checked.ok);
     try testing.expectEqual(@as(usize, 0), checked.said.len);
+}
+
+test "a C-callable entry is passed to an extern and never called from Linea" {
+    const gpa = testing.allocator;
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.signature = Harness.nullary_callable;
+    b.return_type = .u8;
+    const entry = try b.addBlock();
+    const pointer = try b.addForeignFunctionAddr(entry, Harness.nullary_callable, Span.empty, FunctionId.at(1));
+    const result = try b.addIndirectCall(entry, .value, .u8, Span.empty, pointer, &.{});
+    _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = result } });
+    const functions = try gpa.dupe(Mir, &.{
+        try b.finish(entry, .from(0)),
+        try pointerTarget(gpa, Harness.nullary_callable, null),
+    });
+    var h = try Harness.init(gpa, functions);
+    defer h.deinit();
+
+    const checked = try h.run();
+    try testing.expect(!checked.ok);
+    try expectSaid(checked.said, "as something other than an argument of an extern call");
 }
 
 test "a code pointer cannot be forged by a constant" {

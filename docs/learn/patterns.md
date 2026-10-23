@@ -155,3 +155,33 @@ var basket: Vec[Str] = Vec.new()
 
 [Memory](07-memory.md#an-allocator-is-an-argument) says why the caller always
 chooses.
+
+## Declaring command-line options and commands
+
+`std.cli` turns process arguments into a typed matches view from a command
+schema, generating aligned `--help` text and usage errors:
+
+```linea
+var cmd = cli.Command.new("notes", "Manage personal notes")
+&cmd.flag("loud", "--loud", "shout the summary", short: .Some("-l"))
+&cmd.option("format", "--format", "table or json", default: .Some("table"))
+&cmd.positional("title", "note title", required: true)
+
+let matches = &cmd.parse(env.args())?
+defer matches.release()
+
+if matches.is_help() {
+    io.print(matches.help_text().view())?
+    return .Ok(0)
+}
+let title = matches.required_positional("title")?
+let is_loud = matches.flag("loud")
+```
+
+Flags, options with defaults, optional and variadic positionals, and
+subcommands keep their definitions in one place. The [notes example](../../examples/notes/)
+builds a multi-command CLI with table rendering, JSON export, and config
+defaults; [`bounded_echo`](../../examples/bounded_echo.lin) and
+[`tcp_echo`](../../examples/tcp_echo.lin) demonstrate servers and clients with
+subcommands, options, and variadic trailing arguments.
+

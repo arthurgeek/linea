@@ -1,0 +1,29 @@
+// `greeting` has one way out, and its `defer` releases `line` there, so
+// putting `line` in place of its view would leave the `defer` nothing to do.
+// The `return` inside the closure in `count` is that closure's, not
+// `greeting`'s, and does not change that.
+fn count(flag: Bool) -> UInt8 {
+    let f = [flag] || -> UInt8 {
+        if flag {
+            return 1
+        }
+        0
+    }
+    f()
+}
+
+fn greeting(flag: Bool) -> Str {
+    let line = String.new()
+    defer line.release()
+    let _n = [flag] || -> UInt8 {
+        if flag {
+            return 1
+        }
+        0
+    }()
+    line.view()
+}
+
+fn main() -> UInt8 {
+    UInt8(greeting(true).length()) + count(true)
+}

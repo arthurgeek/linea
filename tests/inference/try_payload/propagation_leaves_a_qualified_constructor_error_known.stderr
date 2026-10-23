@@ -2,4 +2,4 @@ error[T-TryAnswer]: this `?` may fail with `Other`, and no `From[Other] for Fail
   --> tests/inference/try_payload/propagation_leaves_a_qualified_constructor_error_known.lin:10:17
    |
 10 |     let value = attempt(Other.Code)?
-   |                 ^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`
+   |                 ^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement `From[Other]` for `Failure`, or convert it before `?` with `.map_err(…)`

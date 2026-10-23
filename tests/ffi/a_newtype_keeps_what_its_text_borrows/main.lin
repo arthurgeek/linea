@@ -1,0 +1,25 @@
+import std.ffi
+import std.io
+
+// A newtype holds the `CText` it wraps, so it borrows the `CString` the text
+// came from, and releasing the `CString` while it lives is refused.
+@copyable
+type Wrapped = ffi.CText
+
+fn read_back(w: Wrapped) -> String {
+    let Wrapped(t) = copy(w)
+    t.to_owned().unwrap()
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let held = ffi.CString.open("Ada").unwrap()
+    let w = Wrapped(held.text())
+    held.release()
+    let other = ffi.CString.open("Zed").unwrap()
+    let got = read_back(w)
+    other.release()
+    let shown = io.println("read back: {got.view()}")
+    got.release()
+    shown?
+    .Ok(0)
+}

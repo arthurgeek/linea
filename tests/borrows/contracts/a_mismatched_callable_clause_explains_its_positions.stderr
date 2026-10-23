@@ -1,0 +1,17 @@
+error[T-Mismatch]: expected `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#1)`, found `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#2)`
+  --> tests/borrows/contracts/a_mismatched_callable_clause_explains_its_positions.lin:17:26
+   |
+17 |     let p = Picker { f = second }
+   |                      - expected because of this field
+   |                          ^^^^^^ expected `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#1)`, found `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#2)`
+   |
+   = help: `#n` in a `fn` type's clause is its parameter at position n, counted from 1, because a parameter's name is not part of the type
+error[T-Mismatch]: expected `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#1)`, found `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#2)`
+  --> tests/borrows/contracts/a_mismatched_callable_clause_explains_its_positions.lin:21:35
+   |
+12 | fn pick[F: fn(read a: String, read b: String) -> Str where borrows(a)](f: F, a: String, b: String) -> UInt64 {
+   |                                                                        - expected because of this parameter
+21 |     UInt8(f(a, b).length() + pick(second, a, b))
+   |                                   ^^^^^^ expected `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#1)`, found `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#2)`
+   |
+   = help: `#n` in a `fn` type's clause is its parameter at position n, counted from 1, because a parameter's name is not part of the type

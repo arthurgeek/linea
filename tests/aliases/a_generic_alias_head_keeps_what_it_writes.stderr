@@ -18,7 +18,7 @@ error[T-Mismatch]: expected `Str`, found `Int64`
    |                  - expected because of this parameter
 33 |     let _keyed = Keyed.make(1, 2)
    |                             ^ expected `Str`, found `Int64`
-error[T-Mismatch]: `T` was already settled as `UInt8` here, and this is a `Str`
+error[T-Mismatch]: `T` was already settled as `UInt8`, and this is a `Str`
   --> tests/aliases/a_generic_alias_head_keeps_what_it_writes.lin:38:5
    |
 38 |     Twice.make(1, "x")

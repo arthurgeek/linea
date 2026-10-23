@@ -1,0 +1,8 @@
+error[T-Mismatch]: expected `String[A]`, found `String[mem.SystemAllocator]`
+  --> tests/mem/a_system_string_in_a_generic_allocator_names_the_allocators.lin:12:9
+   |
+12 |     .Ok(line)
+   |     --- expected because of what this variant carries
+   |         ^^^^ expected `String[A]`, found `String[mem.SystemAllocator]`
+   |
+   = help: only their allocators differ: the `String` expected is in `A`, and this one is in `mem.SystemAllocator`, the default; build it with the `_in` form of the call that made it, passing the allocator `A` stands for

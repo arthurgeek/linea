@@ -1,0 +1,5 @@
+error[T-Unreachable]: no value reaches this arm
+ --> tests/patterns/an_arm_inside_earlier_arms_is_unreachable.lin:6:9
+  |
+6 |         Some(Some(inner)) => inner,
+  |         ^^^^^^^^^^^^^^^^^ the arms before it take every value it would

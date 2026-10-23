@@ -19,9 +19,9 @@ whether it sits beside the first or in another module.
   beside 1
   $ grep -A4 'N-Duplicate' beside.out
   error[N-Duplicate]: `floor` is already declared in this type
-     --> beside/scalar/float.lin:350:12
+     --> beside/scalar/float.lin:328:12
       |
-  350 |     pub fn floor(self: Self) -> Float64 {
+  328 |     pub fn floor(self: Self) -> Float64 {
       |            ^^^^^ a name is declared once
   $ cp -R "$LINEA_ROOT"/std across
   $ printf '\nimpl Float64 {\n    // Return the value unchanged.\n    pub fn floor(self: Self) -> Float64 {\n        self\n    }\n}\n' >> across/text/parse_float.lin

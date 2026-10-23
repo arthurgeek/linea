@@ -1,0 +1,31 @@
+// `pick` returns a view of `b` at one exit and of `c` at another, and its
+// clause names only `a`; `keep` keeps a view in each of two vectors and
+// names nothing. Each report names the one clause its function needs, so
+// writing it once answers every report.
+fn pick(a: String, b: String, c: String, flag: UInt8) -> Str where borrows(a) {
+    if flag == 0 {
+        return a.view()
+    }
+    if flag == 1 {
+        return b.view()
+    }
+    c.view()
+}
+
+fn keep(inout first: Vec[Str], inout second: Vec[Str], left: Str, right: Str) -> UInt64 {
+    &first.push(copy(left)).unwrap()
+    &second.push(copy(right)).unwrap()
+    first.length() + second.length()
+}
+
+fn main() -> UInt8 {
+    defer let a = String.new()
+    defer let b = String.new()
+    defer let c = String.new()
+    var first: Vec[Str] = Vec.new()
+    var second: Vec[Str] = Vec.new()
+    let kept = keep(&first, &second, "tea", "milk")
+    first.release()
+    second.release()
+    UInt8(pick(a, b, c, 1).length()) + UInt8(kept)
+}

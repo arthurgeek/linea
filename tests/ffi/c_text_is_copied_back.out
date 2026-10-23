@@ -1,0 +1,5 @@
+before: Ada
+after: Grace
+nothing: Missing
+garbled: NotText
+record: 6 bytes, the third is 0

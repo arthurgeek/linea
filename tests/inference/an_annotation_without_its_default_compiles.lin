@@ -1,0 +1,11 @@
+// The annotation the report on `Vec.new()` shows, with `Str` for `T`; it
+// leaves the allocator to its default and needs no import.
+// `Vec.new()` builds an empty vector, and nothing in the call says what it
+// holds. The report shows the annotation that says so where `names` is
+// declared.
+fn main() -> UInt8 {
+    var names: Vec[Str] = Vec.new()
+    defer names.release()
+    let _pushed = &names.push("Ada").settled()
+    UInt8(names.length())
+}

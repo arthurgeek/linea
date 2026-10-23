@@ -1,0 +1,64 @@
+import std.testing
+
+// What a C function returned, beside the `errno` C left set as it returned.
+// An `extern` declared to answer `Errno[R]` returns `R` from C, and the
+// compiler reads `errno` immediately after the call, before any other code can
+// change it. C sets `errno` only when a call fails, so the code is reachable
+// only through `failed_at` or `failed_when`, once the caller has said what
+// failure looks like.
+//
+// `R` is copyable because an `Errno` is: a value that must not be duplicated,
+// such as a linear handle, is made from `R` once the call has succeeded.
+@(opaque, copyable)
+struct Errno[R: Copyable] {
+    value: R,
+    code: Int32,
+}
+
+impl[R: Copyable] Errno[R] {
+    // What C returned. A call that succeeded leaves `errno` holding whatever
+    // an earlier call set, so the value alone is what success answers.
+    pub fn value(self: Self) -> R {
+        copy(self.value)
+    }
+
+    test fn the_value_is_what_c_returned() {
+        let answer: Errno[Int32] = .{ value = 7, code = 2 }
+        testing.assert_eq(answer.value(), 7, "the value was not what C returned")?
+        .Ok(())
+    }
+
+    // `.Err` with `errno` when `failed` says the call failed, and `.Ok` with
+    // what C returned otherwise. Use it for a function whose failure is not one
+    // value, such as one answering any negative number.
+    pub fn failed_when(self: Self, failed: Bool) -> Result[R, Int32] {
+        if failed {
+            return .Err(self.code)
+        }
+        .Ok(copy(self.value))
+    }
+
+    test fn errno_is_answered_only_when_the_call_failed() {
+        let answer: Errno[Int64] = .{ value = -4, code = 9 }
+        testing.assert_eq(answer.failed_when(answer.value() < 0), .Err(9), "a failed call lost its errno")?
+        testing.assert_eq(answer.failed_when(false), .Ok(-4), "a successful call answered errno")?
+        .Ok(())
+    }
+}
+
+impl[R: Copyable + Equatable] Errno[R] {
+    // `.Err` with `errno` when C returned `failure`, the value a function
+    // answers when it fails, such as -1 from most POSIX calls or 0 for a null
+    // pointer, and `.Ok` with what C returned otherwise.
+    pub fn failed_at(self: Self, failure: R) -> Result[R, Int32] where carries(self) {
+        self.failed_when(self.value.equals(failure))
+    }
+
+    test fn the_failure_value_selects_errno() {
+        let failed: Errno[Int32] = .{ value = -1, code = 2 }
+        testing.assert_eq(failed.failed_at(-1), .Err(2), "-1 did not select errno")?
+        let succeeded: Errno[Int32] = .{ value = 3, code = 2 }
+        testing.assert_eq(succeeded.failed_at(-1), .Ok(3), "a descriptor was taken for a failure")?
+        .Ok(())
+    }
+}

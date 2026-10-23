@@ -1,0 +1,16 @@
+// Inside a pattern a capitalised name is a variant, never a binder: `Red` in
+// `Some(Red)` matches that variant, and `Crimson`, which `Colour` does not
+// declare, is refused as a variant rather than bound as a name.
+enum Colour {
+    Red,
+    Green,
+}
+
+fn main() -> UInt8 {
+    let paint: Option[Colour] = .Some(.Red)
+    match paint {
+        Some(Red) => 1,
+        Some(Crimson) => 2,
+        _ => 0,
+    }
+}

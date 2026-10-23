@@ -1,0 +1,43 @@
+// A `defer let` note inside an `if` body is given to `keep` on the path that
+// continues the loop, and released on the path that reaches the body's end.
+// Both paths meet at the loop head having settled the note.
+import std.io
+
+use io.print
+
+struct Note {
+    id: UInt8,
+}
+
+impl Release for Note {
+    fn release(sink self: Self) {
+        let Note { id } = self
+        match print("r{id} ") {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+    }
+}
+
+fn keep(sink note: Note) {
+    let Note { id } = note
+    match print("k{id} ") {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+}
+
+fn main() -> UInt8 {
+    var total: UInt8 = 0
+    for id in [7, 8, 9] {
+        if id >= 8 {
+            defer let note = Note { id = id }
+            if id == 8 {
+                keep(note)
+                continue
+            }
+        }
+        total = total + 1
+    }
+    total
+}

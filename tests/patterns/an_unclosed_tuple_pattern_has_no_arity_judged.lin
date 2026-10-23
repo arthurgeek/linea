@@ -1,0 +1,10 @@
+// A tuple pattern whose `)` is never written is reported once, at its `(`.
+// What it holds may be cut short, so its arity is not judged.
+fn first(sink triple: (UInt8, UInt8, UInt8)) -> UInt8 {
+    let (low, _middle = triple
+    low
+}
+
+fn main() -> UInt8 {
+    first((1, 2, 3)) - 1
+}

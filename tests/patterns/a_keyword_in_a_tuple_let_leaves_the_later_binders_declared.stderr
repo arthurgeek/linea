@@ -1,0 +1,5 @@
+error[S-Match]: `return` is a keyword, and a keyword cannot be a name
+ --> tests/patterns/a_keyword_in_a_tuple_let_leaves_the_later_binders_declared.lin:4:10
+  |
+4 |     let (return, count) = pair
+  |          ^^^^^^ choose another name

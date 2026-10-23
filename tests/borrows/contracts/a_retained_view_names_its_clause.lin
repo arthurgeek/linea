@@ -1,0 +1,17 @@
+// `remember` keeps `field` in `seen`, which outlives the call, and its
+// signature does not say so. The report names the retention clause.
+import std.io
+import std.mem
+
+fn remember(inout seen: Vec[Str], sink field: Str) -> Result[(), mem.Oom] {
+    &seen.push(field).settled()
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer var seen: Vec[Str] = Vec.new()
+    if remember(&seen, "a").is_err() {
+        return .Ok(1)
+    }
+    io.println("{seen.length()}")?
+    .Ok(0)
+}

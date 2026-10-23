@@ -1,0 +1,12 @@
+// The edit the report on `second` names, applied: the callable type it is
+// assigned to and its own signature both say the result may borrow `b`.
+fn second(_a: String, b: String) -> Str where borrows(_a, b) {
+    b.view()
+}
+
+fn main() -> UInt8 {
+    let f: fn(read a: String, read b: String) -> Str where borrows(a, b) = second
+    defer let a = String.new()
+    defer let b = String.new()
+    UInt8(f(a, b).length())
+}

@@ -1,0 +1,10 @@
+error[S-Entry]: `read` on an `extern` parameter marks a handle, a newtype sealed in a module trusted with C that is not `copyable`, whose object C only reads
+  --> tests/ffi/a_copyable_type_is_not_a_handle/named/named.lin:12:22
+   |
+12 | extern fn named_name(read handle: Name) -> ffi.CText where borrows(handle)
+   |                      ^^^^ omit `read`; parameters are read by default
+error[T-Extern]: `named_name` answers memory `handle` lends, so `handle` must be a handle or a `std.ffi` view, and `Name` is neither
+  --> tests/ffi/a_copyable_type_is_not_a_handle/named/named.lin:12:27
+   |
+12 | extern fn named_name(read handle: Name) -> ffi.CText where borrows(handle)
+   |                           ^^^^^^ take a handle: a type sealed with `@opaque` in a module trusted with C and not `copyable`; or write `where carries()` when C keeps the memory for the program's life

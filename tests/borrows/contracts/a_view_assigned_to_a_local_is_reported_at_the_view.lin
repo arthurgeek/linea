@@ -1,0 +1,15 @@
+// `v` is assigned a view of `b`, which the signature does not permit, and
+// the report underlines that view rather than the `v` it is written into.
+fn pick(a: String, b: String, flag: Bool) -> Str where borrows(a) {
+    var v = a.view()
+    if flag {
+        v = b.view()
+    }
+    v
+}
+
+fn main() -> UInt8 {
+    defer let a = String.new()
+    defer let b = String.new()
+    UInt8(pick(a, b, true).length())
+}

@@ -301,8 +301,7 @@ pub fn std.io.core;write_all[std.io.core.Descriptor](inout writer: std.io.core.D
                 }
                 written += count
             },
-            Err(failure) => {
-                let WriteFailure { kind: kind, reason: reason, written: count } = failure
+            Err(WriteFailure { kind: kind, reason: reason, written: count }) => {
                 if count > remaining {
                     return .Err(.{ kind = .InvalidProgress, reason = reason, written = written })
                 }

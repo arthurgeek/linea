@@ -1,0 +1,22 @@
+// `load_title` builds its result in an arena it opens and releases itself,
+// so the text would outlive the memory holding it. That is one mistake,
+// reported once where the text leaves, with the allocator taken as a
+// parameter or the system allocator as the ways to keep the text alive.
+import std.io
+import std.mem
+
+use mem.Lender
+
+fn load_title() -> Result[String[mem.Handle], mem.Oom] {
+    let arena = mem.Arena.open(mem.system(), size: 1024)
+    defer arena.release()
+    "Daily report".to_owned_in(arena.handle())
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let title = load_title() else |_| {
+        return .Ok(1)
+    }
+    io.println(title.view())?
+    .Ok(0)
+}

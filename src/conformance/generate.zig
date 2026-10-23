@@ -151,6 +151,8 @@ pub const interpolation_specs = [_]struct { text: []const u8, format: node.Inter
     .{ .text = ":>4", .format = .{ .alignment = .right, .width = 4 } },
     .{ .text = ":02", .format = .{ .zero = true, .width = 2 } },
     .{ .text = ":*^+6?", .format = .{ .fill = '*', .alignment = .center, .plus = true, .width = 6, .debug = true } },
+    .{ .text = ":02x", .format = .{ .zero = true, .width = 2, .hex = .lower } },
+    .{ .text = ":>3X", .format = .{ .alignment = .right, .width = 3, .hex = .upper } },
 };
 
 pub const InterpolationShape = struct {
@@ -3749,7 +3751,7 @@ fn conditionalDepth(ast: *const Ast, id: ExprId) u32 {
             const b = ast.binary(id);
             break :blk @max(conditionalDepth(ast, b.lhs), conditionalDepth(ast, b.rhs));
         },
-        .int_literal, .float_literal, .str_literal, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .continue_, .err => 0,
+        .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .continue_, .err => 0,
         // A generated range's ends are literals, so nothing nests inside one
         // for this to find.
         .range => 0,

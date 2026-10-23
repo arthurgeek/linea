@@ -1,0 +1,34 @@
+// An associated type defined through another implementation's settled type
+// must reach a type in the end. `Ping.Dual` and `Pong.Dual` name each other and
+// never reach one, so the definitions are refused, once for the cycle. `Echo.Dual`
+// names itself, which is the shortest such cycle.
+trait Protocol {
+    type Dual
+}
+
+struct Ping {}
+
+struct Pong {}
+
+struct Echo {}
+
+impl Protocol for Ping {
+    type Dual = Pong.Dual
+}
+
+impl Protocol for Pong {
+    type Dual = Ping.Dual
+}
+
+impl Protocol for Echo {
+    type Dual = Echo.Dual
+}
+
+struct Tag[phantom P] {
+    at: UInt64,
+}
+
+fn main() -> UInt8 {
+    let ping: Tag[Ping] = .{ at = 1 }
+    UInt8(ping.at)
+}

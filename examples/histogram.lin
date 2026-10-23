@@ -47,39 +47,49 @@ impl Histogram {
         let Histogram { counts } = self
         counts.release()
     }
-}
 
-test fn a_histogram_counts_what_is_recorded_into_it() {
-    var h = Histogram.open(4).unwrap()
-    // Leave bucket 0 empty; record once in bucket 1 and twice in bucket 3.
-    &h.record(1)
-    &h.record(3)
-    &h.record(3)
+    test fn a_histogram_counts_what_is_recorded_into_it() {
+        var h = Histogram.open(4).unwrap()
+        // Leave bucket 0 empty; record once in bucket 1 and twice in bucket 3.
+        &h.record(1)
+        &h.record(3)
+        &h.record(3)
 
-    let none = h.count(0)
-    let once = h.count(1)
-    let twice = h.count(3)
-    h.close()
+        let none = h.count(0)
+        let once = h.count(1)
+        let twice = h.count(3)
+        h.close()
 
-    testing.assert_eq(none, 0, "a bucket nothing recorded holds something")?
-    testing.assert_eq(once, 1, "a bucket recorded once does not hold one")?
-    testing.assert_eq(twice, 2, "a bucket recorded twice does not hold two")?
-}
+        testing.assert_eq(none, 0, "a bucket nothing recorded holds something")?
+        testing.assert_eq(once, 1, "a bucket recorded once does not hold one")?
+        testing.assert_eq(twice, 2, "a bucket recorded twice does not hold two")?
+    }
 
-test fn two_histograms_keep_independent_counts() {
-    var first = Histogram.open(2).unwrap()
-    var second = Histogram.open(2).unwrap()
-    &first.record(0)
-    &second.record(0)
-    &second.record(0)
+    test fn two_histograms_keep_independent_counts() {
+        var first = Histogram.open(2).unwrap()
+        var second = Histogram.open(2).unwrap()
+        &first.record(0)
+        &second.record(0)
+        &second.record(0)
 
-    let one = first.count(0)
-    let two = second.count(0)
-    first.close()
-    second.close()
+        let one = first.count(0)
+        let two = second.count(0)
+        first.close()
+        second.close()
 
-    testing.assert_eq(one, 1, "a first histogram did not count its own")?
-    testing.assert_eq(two, 2, "a second histogram did not count its own")?
+        testing.assert_eq(one, 1, "a first histogram did not count its own")?
+        testing.assert_eq(two, 2, "a second histogram did not count its own")?
+    }
+
+    test fn an_unrepresentable_bucket_count_is_refused() {
+        match Histogram.open(UInt64.max) {
+            Err(_) => {},
+            Ok(histogram) => {
+                histogram.close()
+                testing.assert(false, "an unrepresentable bucket count was accepted")?
+            },
+        }
+    }
 }
 
 // The four buckets start at 0, 100, 200 and 300 ms. Index 3 also holds
@@ -124,14 +134,4 @@ fn main() -> Result[UInt8, IoError] {
 
     println("request latency: under 100 ms: {fast}, 100-199 ms: {moderate}, 200-299 ms: {slow}, 300 ms or more: {delayed}")?
     .Ok(0)
-}
-
-test fn an_unrepresentable_bucket_count_is_refused() {
-    match Histogram.open(UInt64.max) {
-        Err(_) => {},
-        Ok(histogram) => {
-            histogram.close()
-            testing.assert(false, "an unrepresentable bucket count was accepted")?
-        },
-    }
 }

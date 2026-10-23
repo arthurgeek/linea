@@ -1,0 +1,20 @@
+// `_` settles nothing, at any depth. A linear ticket inside the pair inside
+// `Some` that the pattern discards is still owned when the arm ends.
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+impl Release for Ticket {
+    fn release(sink self: Self) {
+        let Ticket { number: _number } = self
+    }
+}
+
+fn main() -> UInt8 {
+    let held: Option[(Ticket, UInt8)] = .Some((.{ number = 1 }, 2))
+    match held {
+        Some((_, kept)) => kept,
+        None => 0,
+    }
+}

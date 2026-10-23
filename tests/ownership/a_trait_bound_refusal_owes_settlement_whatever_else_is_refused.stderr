@@ -1,0 +1,24 @@
+error[T-Bound]: `T` requires `Copyable`, and `Session` does not have that capability
+  --> tests/ownership/a_trait_bound_refusal_owes_settlement_whatever_else_is_refused.lin:14:18
+   |
+14 |     let _copied: NeedsCopy[Session] = .{ value = Session { id = 2 } }
+   |                  ^^^^^^^^^ mark `Session` `@copyable`, or drop the bound
+error[T-Bound]: `R` requires `Equatable`, and `Session` does not implement it
+  --> tests/ownership/a_trait_bound_refusal_owes_settlement_whatever_else_is_refused.lin:19:17
+   |
+19 |     let opened: NeedsEq[Session] = .{ value = Session { id = 1 } }
+   |                 ^^^^^^^ implement it for that type, or drop the bound
+error[T-Bound]: `R` requires `Equatable`, and `Session` does not implement it
+  --> tests/ownership/a_trait_bound_refusal_owes_settlement_whatever_else_is_refused.lin:20:16
+   |
+20 |     let _held: NeedsEq[Session] = opened
+   |                ^^^^^^^ implement it for that type, or drop the bound
+error[O-Leak]: `_held` (a linear `NeedsEq[Session]`) is still owned when this path leaves
+  --> tests/ownership/a_trait_bound_refusal_owes_settlement_whatever_else_is_refused.lin:20:9
+   |
+20 |     let _held: NeedsEq[Session] = opened
+   |         ^^^^^ never settled on the path that reaches the end of this block
+22 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

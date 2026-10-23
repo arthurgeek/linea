@@ -1,0 +1,7 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/ffi/a_sealed_name_keeps_its_label_borrowed/label/label.lin:21:9
+   |
+21 |         Name(self.text.text())
+   |         ^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `self`; write `where borrows(self)` to say so

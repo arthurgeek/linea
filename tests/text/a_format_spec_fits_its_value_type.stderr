@@ -1,30 +1,45 @@
 error[T-Format]: `T` is not a number, so its format spec cannot ask for zero padding
   --> tests/text/a_format_spec_fits_its_value_type.lin:12:15
    |
-12 |     println("{value:06}")
+12 |     println("{value:06}")?
    |               ^^^^^ these lay out integers and floats; pad other values with an alignment and a width, as in `>4`
-error[T-Format]: `Str` is not a float, so its format spec cannot ask for a precision
-  --> tests/text/a_format_spec_fits_its_value_type.lin:19:15
+error[T-Format]: `T` is not an integer, so its format spec cannot ask for hexadecimal digits
+  --> tests/text/a_format_spec_fits_its_value_type.lin:13:15
    |
-19 |     println("{name:.2}")?
-   |               ^^^^ a precision counts the digits after a float's point
-error[T-Format]: `Int64` is not a float, so its format spec cannot ask for a precision
+13 |     println("{value:x}")
+   |               ^^^^^ `x` and `X` write an integer in base 16; to write the bytes of text or a slice in base 16, interpolate `text.hex_encoded(bytes)`
+error[T-Format]: `Str` is not a float, so its format spec cannot ask for a precision
   --> tests/text/a_format_spec_fits_its_value_type.lin:20:15
    |
-20 |     println("{count:.2}")?
-   |               ^^^^^ a precision counts the digits after a float's point
-error[T-Format]: `Str` is not a number, so its format spec cannot ask for zero padding
+20 |     println("{name:.2}")?
+   |               ^^^^ a precision counts the digits after a float's point
+error[T-Format]: `Int64` is not a float, so its format spec cannot ask for a precision
   --> tests/text/a_format_spec_fits_its_value_type.lin:21:15
    |
-21 |     println("{name:05}")?
-   |               ^^^^ these lay out integers and floats; pad other values with an alignment and a width, as in `>4`
-error[T-Format]: `Bool` is not a number, so its format spec cannot ask for a `+` sign
+21 |     println("{count:.2}")?
+   |               ^^^^^ a precision counts the digits after a float's point
+error[T-Format]: `Str` is not a number, so its format spec cannot ask for zero padding
   --> tests/text/a_format_spec_fits_its_value_type.lin:22:15
    |
-22 |     println("{ready:+}")?
-   |               ^^^^^ these lay out integers and floats; pad other values with an alignment and a width, as in `>4`
-error[T-Format]: `Str` is not a number, so its format spec cannot ask for a `+` sign
+22 |     println("{name:05}")?
+   |               ^^^^ these lay out integers and floats; pad other values with an alignment and a width, as in `>4`
+error[T-Format]: `Bool` is not a number, so its format spec cannot ask for a `+` sign
   --> tests/text/a_format_spec_fits_its_value_type.lin:23:15
    |
-23 |     println("{name:>+6?}")?
+23 |     println("{ready:+}")?
+   |               ^^^^^ these lay out integers and floats; pad other values with an alignment and a width, as in `>4`
+error[T-Format]: `Str` is not a number, so its format spec cannot ask for a `+` sign
+  --> tests/text/a_format_spec_fits_its_value_type.lin:24:15
+   |
+24 |     println("{name:>+6?}")?
    |               ^^^^ these lay out integers and floats; pad other values with an alignment and a width, as in `>4`
+error[T-Format]: `Float64` is not an integer, so its format spec cannot ask for hexadecimal digits
+  --> tests/text/a_format_spec_fits_its_value_type.lin:26:15
+   |
+26 |     println("{price:x}")?
+   |               ^^^^^ `x` and `X` write an integer in base 16; to write the bytes of text or a slice in base 16, interpolate `text.hex_encoded(bytes)`
+error[T-Format]: `Str` is not an integer, so its format spec cannot ask for hexadecimal digits
+  --> tests/text/a_format_spec_fits_its_value_type.lin:27:15
+   |
+27 |     println("{name:X}")?
+   |               ^^^^ `x` and `X` write an integer in base 16; to write the bytes of text or a slice in base 16, interpolate `text.hex_encoded(bytes)`

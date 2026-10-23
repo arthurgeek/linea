@@ -42,6 +42,7 @@ zig fmt --check build.zig build src runtime  # what CI checks first
 zig build sweep -Drelease      # every cost dimension
 zig build sweep -Drelease -Dsweep-filter=<substring>  # one cost dimension
 zig build guide                # compile the guide's programs, compare pasted output
+zig build example-tests        # linea test on every root under examples/, nested libraries included
 ```
 
 `zig build test` does not check formatting, so run `zig fmt --check` as well
@@ -88,16 +89,20 @@ until it is green.
   shows. A `linea` block with `fn main`, a `test fn` or a `` `path.lin`: ``
   label is a program; the bare or `text` block after it (past an optional `sh`
   block holding `linea run|check|test PATH`) is its output, and is all of what
-  the compiler prints. A block showing only the first diagnostics carries
-  `<!-- guide: first N diagnostics -->` on the line above it and must be exactly
-  those N with at least one more after them. Output that follows no program, or
-  a program that cannot run, carries `<!-- guide: unchecked REASON -->` above
-  its block; its diagnostic headers, `= help:`/`= note:` lines and underline
+  the compiler prints. A fenced block labelled `` `path/linea.json`: ``,
+  `` `path.c`: `` or `` `path.h`: `` is a file of the labelled project around
+  it, so a program that builds and calls C runs. A block showing only the
+  first diagnostics carries `<!-- guide: first N diagnostics -->` on the line
+  above it and must be exactly those N with at least one more after them.
+  Output that follows no program, or a program that cannot run, carries
+  `<!-- guide: unchecked REASON -->` above its block; its diagnostic headers, `= help:`/`= note:` lines and underline
   labels must still read like ones the compiler prints (wording found in the
   gate's own runs or in the `.stderr` goldens under `tests/`), so a new message
-  shown only there needs a corpus case that prints it. A fenced block that is
-  neither compiled nor marked fails the gate. A location inside `std/` is
-  compared by file alone.
+  shown only there needs a corpus case that prints it. A `linea` block carrying
+  `<!-- guide: excerpt PATH -->` above it is counted as a fragment and held to
+  be consecutive lines of `PATH` relative to the repository root. A fenced block
+  that is neither compiled nor marked fails the gate. A location inside `std/`
+  is compared by file alone.
 - A case is a `.lin` file or a directory holding `main.lin`; a module is a
   directory, and its goldens sit beside the directory under its own name.
   Examples keep only what a reader wants: their goldens sit in `tests/examples/`
@@ -116,6 +121,31 @@ until it is green.
   consecutive from zero, so a failure names a reproducing number). A generated
   program the compiler rejects is a failure: the generator and the compiler
   disagree about the language.
+- Every rejected case of one file is also held to its helps: a diagnostic
+  carries a `Fix` for each help concrete enough to write, the edits that help
+  names applied together, and the conformance runner applies each fix alone and
+  checks the case again: the error must be gone from the line it was reported
+  at. Then it follows the fixes in turn, one each round, until no error carries
+  one: an error a fix answered must not come back at its line, a new error
+  elsewhere is the program's next mistake and is allowed, and fixes still
+  offered after eight are reported as helps that undo each other. There is no
+  golden, `-Dupdate` cannot silence it, and the run fails under a floor of cases
+  that carried a fix. Fixes carried: the `where` clause [O-Escapes] and
+  [T-BorrowContract] name, on a function or a lambda; the owned copy of a
+  returned view and the owner put in place of its view, with the imports they
+  need; the result type [T-TryAnswer] names, with every `return` and the tail
+  wrapped; `.settled()` before `?` and a discarded failure handed on; the
+  [O-Leak] `defer`; a member [T-Impl] says to drop; the other allocator form of
+  a call; and a type parameter for each of two closures. Helps that carry none,
+  because the edit is a choice the reader makes: the [T-Infer] annotation and
+  defaulted parameters (which type), `let … else` (what the `else` block
+  does), releasing before a path leaves and [O-Merge] (where, and on which
+  path), the owned copy kept in a field or an `inout` parameter (the field's
+  type and the failure path both change, or `append` instead), the allocator
+  taken as a parameter (the signature and every caller), implementing a
+  conversion (a body to write) and the import beside it, and every help
+  outside this list's rules. A help offering an edit a tool could write
+  should carry it.
 
 ### CI lanes
 

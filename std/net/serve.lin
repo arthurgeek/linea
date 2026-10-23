@@ -81,8 +81,7 @@ enum Seen {
 // Settle `attempt` and describe it.
 fn seen(sink attempt: Attempt) -> Seen {
     match attempt {
-        Connected(accepted) => {
-            let Accepted { connection, address: _ } = accepted
+        Connected(Accepted { connection, address: _ }) => {
             connection.close().unwrap()
             .Connected
         },
@@ -193,8 +192,7 @@ pub fn serve[L: Acceptor + io.Close, H: inout fn(sink connection: Connection, pe
     var stopped: Option[NetError] = .None
     while stopped.is_none() && !reached(connections, served) {
         match accept_attempt(&accepting, &pause_ms) {
-            Connected(accepted) => {
-                let Accepted { connection, address } = accepted
+            Connected(Accepted { connection, address }) => {
                 &handler(connection, address)
                 served += 1
             },
@@ -235,7 +233,8 @@ test fn the_handler_reads_from_each_connection_and_names_its_peer() {
             panic("the reader was refused its buffer")
         }
         received = match &reader.read_line_borrowed(max_bytes: 16) {
-            Ok(line) => match line { Some(text) => text == "ping", None => false },
+            Ok(Some(text)) => text == "ping",
+            Ok(None) => false,
             Err(_) => false,
         }
         let _closed = reader.abandon().close()

@@ -1,0 +1,11 @@
+// Each binder of a walk's tuple pattern lends its own component of the
+// element, so writing `b` while `a` is still in use touches a different place.
+fn main() -> UInt8 {
+    var pairs: [(UInt8, UInt8); 2] = [(1, 2), (3, 4)]
+    var total: UInt8 = 0
+    for inout (a, b) in pairs {
+        b = 1
+        total += a
+    }
+    total + pairs[0]._1 + pairs[1]._1 - 6
+}

@@ -22,6 +22,19 @@ impl Plan {
             points
         }
     }
+
+    test fn the_plan_caps_what_its_rule_awards() {
+        let regular = Plan { earn = per_dollar, cap = 30 }
+        testing.assert_eq(regular.earn(1250), 12, "a $12.50 purchase earns 12 points")?
+        testing.assert_eq(regular.earn(4800), 30, "the cap limits a large purchase")?
+        testing.assert_eq((regular.earn)(4800), 48, "the rule alone ignores the cap")?
+    }
+
+    test fn a_large_purchase_earns_double() {
+        let member = Plan { earn = double_over_twenty, cap = 80 }
+        testing.assert_eq(member.earn(1999), 19, "below $20 earns one point per dollar")?
+        testing.assert_eq(member.earn(2000), 40, "$20 earns two points per dollar")?
+    }
 }
 
 // `per_dollar` matches the `fn(cents: UInt64) -> UInt64` field type, so a Plan
@@ -53,19 +66,6 @@ fn plan_for(member: Bool) -> Plan {
         30
     }
     Plan { earn = rule, cap }
-}
-
-test fn the_plan_caps_what_its_rule_awards() {
-    let regular = Plan { earn = per_dollar, cap = 30 }
-    testing.assert_eq(regular.earn(1250), 12, "a $12.50 purchase earns 12 points")?
-    testing.assert_eq(regular.earn(4800), 30, "the cap limits a large purchase")?
-    testing.assert_eq((regular.earn)(4800), 48, "the rule alone ignores the cap")?
-}
-
-test fn a_large_purchase_earns_double() {
-    let member = Plan { earn = double_over_twenty, cap = 80 }
-    testing.assert_eq(member.earn(1999), 19, "below $20 earns one point per dollar")?
-    testing.assert_eq(member.earn(2000), 40, "$20 earns two points per dollar")?
 }
 
 fn main() -> Result[UInt8, io.IoError] {

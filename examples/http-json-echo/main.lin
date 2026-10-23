@@ -7,6 +7,7 @@
 // 404 or 405 by the router. Every response carries an `X-Request-Id` header.
 // The handlers log what they did, and every request is logged once more when
 // its answer has been sent, all to standard error.
+import std.cli
 import std.env
 import std.http
 import std.io
@@ -248,28 +249,22 @@ fn main() -> UInt8 {
 
 // Read `--port PORT` and an optional `--requests N`, in either order.
 fn parse_options(args: env.Args) -> Option[Options] {
-    var port: Option[UInt16] = .None
-    var requests: Option[UInt64] = .None
-    var index: UInt64 = 1
-    while index < args.count() {
-        let flag = args.at(index)?
-        let value = args.at(index + 1)?
-        if flag == "--port" {
-            let number = value.parse[UInt16]() else |_| {
-                return .None
-            }
-            port = .Some(number)
-        } else if flag == "--requests" {
-            let number = value.parse[UInt64]() else |_| {
-                return .None
-            }
-            requests = .Some(number)
-        } else {
-            return .None
-        }
-        index += 2
+    defer var cmd = cli.Command.new("http-json-echo", "HTTP JSON echo server")
+    &cmd.option("port", "--port", "port to listen on", required: true)
+    &cmd.option("requests", "--requests", "number of requests to serve")
+
+    var cursor = cli.ArgCursor.new(args)
+    defer let matches = cmd.parse(&cursor) else |_| {
+        return .None
     }
-    .Some(.{ port = port?, requests })
+
+    let port: UInt16 = matches.get("port") else |_| {
+        return .None
+    }
+    let requests: Option[UInt64] = matches.get_optional("requests") else |_| {
+        return .None
+    }
+    .Some(.{ port, requests })
 }
 
 // Each test builds a request in an arena, as the server does, and hands it to

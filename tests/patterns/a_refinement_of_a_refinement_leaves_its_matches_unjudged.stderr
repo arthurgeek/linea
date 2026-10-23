@@ -1,0 +1,5 @@
+error[T-Refine]: `Small` refines `Digit`, which is not an integer type
+ --> tests/patterns/a_refinement_of_a_refinement_leaves_its_matches_unjudged.lin:6:6
+  |
+6 | type Small = Digit where it in 1..=3
+  |      ^^^^^ only an integer type may be refined

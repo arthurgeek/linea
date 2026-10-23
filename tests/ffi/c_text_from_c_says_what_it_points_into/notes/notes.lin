@@ -1,0 +1,27 @@
+import std.ffi
+
+@(opaque, linear)
+type Handle = UInt64
+
+// The answer points somewhere C owns, and only the declaration can say
+// where, so it must: `borrows(note)` when it points into the note, or
+// `carries()` when C keeps it for as long as the program runs.
+extern fn note_text(read note: Handle) -> ffi.CText
+
+extern fn note_close(sink note: Handle)
+
+@(opaque, linear)
+struct Note { handle: Handle }
+
+impl Note {
+    pub fn open(address: UInt64) -> Note {
+        .{ handle = Handle(address) }
+    }
+
+    pub fn length(sink self: Self) -> UInt64 {
+        let Note { handle: handle } = self
+        let text = note_text(handle)
+        note_close(handle)
+        text.length()
+    }
+}

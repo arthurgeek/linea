@@ -94,6 +94,8 @@ pub const Tag = enum(u8) {
     keyword_carries,
     keyword_retains,
     keyword_panic,
+    keyword_embed,
+    keyword_embed_bytes,
     keyword_template,
     keyword_derive,
     keyword_reflect,

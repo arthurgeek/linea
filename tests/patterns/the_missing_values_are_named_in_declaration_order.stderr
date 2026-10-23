@@ -1,0 +1,5 @@
+error[T-Cover]: this `match` does not cover `Missing`, `Low(1..=255)`, `High`, `Spike(10..=255)`, `Off`
+  --> tests/patterns/the_missing_values_are_named_in_declaration_order.lin:12:5
+   |
+12 |     match reading {
+   |     ^^^^^^^^^^^^^^^ add the missing arms, or a `_`

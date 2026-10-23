@@ -1,0 +1,8 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/mem/a_string_built_in_a_local_arena_is_reported_once.lin:13:5
+   |
+13 |     "Daily report".to_owned_in(arena.handle())
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `arena` is an allocator `load_title` opens and ends, so nothing built in it may leave: take the allocator as a parameter instead, as `load_title_in` with `A: Allocator` and `allocator: A` first, and build in `allocator`, so the caller's allocator decides how long the result lives
+   = help: or keep it in the system allocator: declare `String` in place of the type built in `arena`, and build it with `….to_owned()`, which can fail with `mem.Oom`

@@ -179,8 +179,15 @@ fn render(
         try writeMarker(w, window, l, gutter, opts);
     }
 
-    if (d.notes.len > 0) {
+    if (d.notes.len > 0 or d.remarks.len > 0) {
         try writeGutterBar(w, gutter);
+        for (d.remarks) |remark| {
+            try w.splatByteAll(' ', gutter);
+            try paint(w, opts, severityColor(.note));
+            try w.print(" = note: {s}", .{remark});
+            try paint(w, opts, reset);
+            try w.writeByte('\n');
+        }
         for (d.notes) |note| {
             try w.splatByteAll(' ', gutter);
             try paint(w, opts, severityColor(.note));

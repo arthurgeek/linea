@@ -1,0 +1,8 @@
+// A range in a field's place compares the field against it, so its bounds
+// must be values of the field's type: `lo` is a `UInt8`, and 300 is not one.
+fn main() -> UInt8 {
+    match 5..UInt8(9) {
+        Range { lo: 300..=400, hi, inclusive: _ } => hi,
+        _ => 0,
+    }
+}

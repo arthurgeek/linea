@@ -1,0 +1,21 @@
+import std.io
+
+use io.IoError
+
+trait Marker {}
+
+struct Box {
+    x: UInt8,
+}
+
+// A trait implementation declares only what the trait requires, and the
+// compiler calls a test.
+impl Marker for Box {
+    test fn a_thing_holds() -> Result[(), IoError] {
+        return .Ok({})
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

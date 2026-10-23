@@ -1,0 +1,5 @@
+error[M-Embed]: "../x.txt" climbs above the directory of the file that writes it
+ --> tests/embed/a_file_alone_cannot_climb.lin:2:17
+  |
+2 |     UInt8(embed("../x.txt").length())
+  |                 ^^^^^^^^^^ a file that no program holds embeds only what sits beside it or below it

@@ -1,0 +1,35 @@
+// Each branch returns a closure holding its own `inout` lend, `count` on one
+// and `other` on the other. They are two mistakes, so each is reported.
+import std.mem
+
+fn ticker(flag: Bool) -> Result[mem.Closure[inout fn() -> UInt8, mem.SystemAllocator], mem.Oom] {
+    var count: UInt8 = 0
+    var other: UInt8 = 5
+    if flag {
+        mem.Closure.open(
+            inout [inout count] || {
+                count += 1
+                count
+            },
+        )
+    } else {
+        mem.Closure.open(
+            inout [inout other] || {
+                other += 1
+                other
+            },
+        )
+    }
+}
+
+fn main() -> UInt8 {
+    match ticker(true) {
+        Ok(tick) => {
+            var kept = tick
+            let seen = &kept()
+            kept.release()
+            seen
+        },
+        Err(_) => 0,
+    }
+}

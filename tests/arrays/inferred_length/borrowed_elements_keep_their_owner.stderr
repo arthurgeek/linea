@@ -1,5 +1,7 @@
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
- --> tests/arrays/inferred_length/borrowed_elements_keep_their_owner.lin:4:5
+ --> tests/arrays/inferred_length/borrowed_elements_keep_their_owner.lin:3:36
   |
-4 |     views
-  |     ^^^^^ escape observations only from the signature's declared sources
+3 |     let views: [borrow UInt8; _] = [borrow number]
+  |                                    ^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `number` belongs to `bad` and ends when it returns, so nothing returned may observe it

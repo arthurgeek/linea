@@ -1,7 +1,7 @@
 //! This file reads the format spec after an interpolation's colon, as in
 //! `{price:>8.2}`.
 //!
-//! The spec is written `[[fill]align][+][0][width][.precision][?]`. The lexer
+//! The spec is written `[[fill]align][+][0][width][.precision][x|X|?]`. The lexer
 //! decides where its text ends; this file decides what the text means, once,
 //! for the parser that records it and every later reader of the record. What
 //! the spec does to a value is `std.fmt`'s: interpolation hands the recorded
@@ -13,6 +13,10 @@ const testing = std.testing;
 /// An alignment places a value inside its width. `none` leaves the choice to
 /// the value's type: numbers sit on the right and everything else on the left.
 pub const Alignment = enum(u2) { none, left, right, center };
+
+/// Hexadecimal digits write an integer in base 16, with lowercase letters
+/// (`x`) or capitals (`X`). `none` writes decimal digits.
+pub const Hex = enum(u2) { none, lower, upper };
 
 /// A width or precision is at most this. A literal width needs a bound for
 /// the record to have a fixed size, and no column of text is wider.
@@ -34,7 +38,9 @@ pub const Format = packed struct(u64) {
     fill: u21 = ' ',
     width: u16 = 0,
     precision: u16 = 0,
-    _unused: u5 = 0,
+    /// `x` and `X` write an integer's digits in base 16.
+    hex: Hex = .none,
+    _unused: u3 = 0,
 
     pub const display: Format = .{};
     pub const debug_only: Format = .{ .debug = true };
@@ -42,7 +48,7 @@ pub const Format = packed struct(u64) {
     /// Answer true when this format asks for more than the trait it renders
     /// through, so rendering it needs the library's layout routines.
     pub fn laysOut(self: Format) bool {
-        return self.alignment != .none or self.plus or self.zero or self.width != 0 or self.has_precision;
+        return self.alignment != .none or self.plus or self.zero or self.width != 0 or self.has_precision or self.hex != .none;
     }
 
     test "a format lays out a value only when it asks for more than a trait" {
@@ -52,6 +58,7 @@ pub const Format = packed struct(u64) {
         try testing.expect((Format{ .plus = true }).laysOut());
         try testing.expect((Format{ .has_precision = true }).laysOut());
         try testing.expect((Format{ .alignment = .left, .width = 1 }).laysOut());
+        try testing.expect((Format{ .hex = .lower }).laysOut());
     }
 
     pub fn eql(self: Format, other: Format) bool {
@@ -72,6 +79,7 @@ pub const Format = packed struct(u64) {
         try testing.expectEqual(@as(u64, 0) | (@as(u64, ' ') << 6), Format.display.bits());
         try testing.expect(Format.display.bits() != Format.debug_only.bits());
         try testing.expect((Format{ .width = 1 }).bits() != (Format{ .precision = 1, .has_precision = true }).bits());
+        try testing.expect((Format{ .hex = .lower }).bits() != (Format{ .hex = .upper }).bits());
     }
 
     /// Write the spec in its canonical spelling, without the colon: `*>+6.2?`.
@@ -90,11 +98,16 @@ pub const Format = packed struct(u64) {
         if (self.zero) try w.writeByte('0');
         if (self.width != 0) try w.print("{d}", .{self.width});
         if (self.has_precision) try w.print(".{d}", .{self.precision});
+        switch (self.hex) {
+            .none => {},
+            .lower => try w.writeByte('x'),
+            .upper => try w.writeByte('X'),
+        }
         if (self.debug) try w.writeByte('?');
     }
 
     test "a format's canonical spelling reads back as the same format" {
-        const texts = [_][]const u8{ "?", "02", ">4", ".2", "*^9?", "+08.3", "·>5", " <3", "+", ".0" };
+        const texts = [_][]const u8{ "?", "02", ">4", ".2", "*^9?", "+08.3", "·>5", " <3", "+", ".0", "x", "08X", "x>4x" };
         for (texts) |text| {
             const parsed = parse(text).format;
             var buffer: [32]u8 = undefined;
@@ -196,13 +209,26 @@ pub fn parse(text: []const u8) Parsed {
         format.precision = count;
         format.has_precision = true;
     }
-    if (at < text.len and text[at] == '?') {
-        format.debug = true;
+    // The last part chooses how the value's text is spelled: `x` or `X` for
+    // an integer's base-16 digits, or `?` for Debug. A value has one
+    // spelling, so a second of them is refused by name rather than as a part
+    // out of order.
+    if (at < text.len) switch (text[at]) {
+        'x' => format.hex = .lower,
+        'X' => format.hex = .upper,
+        '?' => format.debug = true,
+        else => {},
+    };
+    if (format.hex != .none or format.debug) {
         at += 1;
+        if (at < text.len and (text[at] == 'x' or text[at] == 'X' or text[at] == '?')) return refuse(
+            "a format spec takes one of `x`, `X` and `?`",
+            "`x` and `X` write an integer's digits in base 16 and `?` renders through Debug; keep one",
+        );
     }
 
     if (at != text.len) return refuse(
-        "a format spec is written `[[fill]align][+][0][width][.precision][?]`",
+        "a format spec is written `[[fill]align][+][0][width][.precision][x|X|?]`",
         "this part is out of that order or is not one of them",
     );
     if (format.zero and format.alignment != .none) return refuse(
@@ -253,12 +279,16 @@ test "a format spec reads each part in order" {
     try expectFormat(".0", .{ .has_precision = true });
     try expectFormat("+", .{ .plus = true });
     try expectFormat("65535", .{ .width = 65535 });
+    try expectFormat("x", .{ .hex = .lower });
+    try expectFormat("08X", .{ .zero = true, .width = 8, .hex = .upper });
+    try expectFormat("*>+6x", .{ .fill = '*', .alignment = .right, .plus = true, .width = 6, .hex = .lower });
+    try expectFormat("x>3", .{ .fill = 'x', .alignment = .right, .width = 3 });
 }
 
 test "a format spec refuses parts out of order or without what they need" {
-    try expectRefused("name", "a format spec is written `[[fill]align][+][0][width][.precision][?]`");
-    try expectRefused("?4", "a format spec is written `[[fill]align][+][0][width][.precision][?]`");
-    try expectRefused("0+4", "a format spec is written `[[fill]align][+][0][width][.precision][?]`");
+    try expectRefused("name", "a format spec is written `[[fill]align][+][0][width][.precision][x|X|?]`");
+    try expectRefused("?4", "a format spec is written `[[fill]align][+][0][width][.precision][x|X|?]`");
+    try expectRefused("0+4", "a format spec is written `[[fill]align][+][0][width][.precision][x|X|?]`");
     try expectRefused("<05", "zero padding and an alignment cannot both lay out one value");
     try expectRefused("0", "zero padding needs a width");
     try expectRefused(">", "an alignment needs a width");
@@ -268,6 +298,10 @@ test "a format spec refuses parts out of order or without what they need" {
     try expectRefused("{>4", "a fill cannot be `{` or `\\`");
     try expectRefused("\\>4", "a fill cannot be `{` or `\\`");
     try expectRefused("\xff", "a format spec is text");
+    try expectRefused("x4", "a format spec is written `[[fill]align][+][0][width][.precision][x|X|?]`");
+    try expectRefused("x?", "a format spec takes one of `x`, `X` and `?`");
+    try expectRefused("xX", "a format spec takes one of `x`, `X` and `?`");
+    try expectRefused("?x", "a format spec takes one of `x`, `X` and `?`");
 }
 
 test "fuzz: a parsed format spells text that parses back to it" {

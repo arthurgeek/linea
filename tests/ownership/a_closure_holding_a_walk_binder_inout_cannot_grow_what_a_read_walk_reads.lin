@@ -1,0 +1,25 @@
+// Walking `list` with `for read` reads it while `grow` holds it lent
+// `inout`, so calling `grow` inside the walk, which grows the list being
+// walked, is refused.
+fn main() -> UInt8 {
+    var held: [Vec[UInt8]; 1] = [Vec.new()]
+    var total: UInt64 = 0
+    for inout list in held {
+        for _ in 0..4 {
+            let _p = &list.push(3)
+        }
+        var grow = inout [inout list] || {
+            for _ in 0..100 {
+                let _q = &list.push(7)
+            }
+        }
+        for read x in list {
+            &grow()
+            total += UInt64(x)
+        }
+    }
+    for list in held {
+        list.release()
+    }
+    UInt8(total)
+}

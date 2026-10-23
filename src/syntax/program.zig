@@ -6,6 +6,7 @@ const Ast = @import("ast.zig").Ast;
 const node = @import("node.zig");
 const DeclId = node.DeclId;
 const DeclRange = node.DeclRange;
+const ExprId = node.ExprId;
 
 /// Which module, within one compilation. Modules are numbered in the order the
 /// loader reaches them. The program records its primary module separately.
@@ -227,6 +228,87 @@ pub const DeclarationSelection = union(enum) {
     };
 };
 
+/// Which file an `embed` or `embed_bytes` read, within one compilation.
+pub const EmbedId = enum(u32) {
+    /// The embed was refused, and the loader said why.
+    none = std.math.maxInt(u32),
+    _,
+
+    pub fn from(i: usize) EmbedId {
+        return @enumFromInt(i);
+    }
+
+    pub fn index(self: EmbedId) usize {
+        return @intFromEnum(self);
+    }
+};
+
+/// One file an embed read, as the loader read it once for the compilation.
+pub const Embedded = struct {
+    /// The path relative to the root of the code that embeds it. Hover and
+    /// definition name it; the emitted code never does, so moving the tree
+    /// emits the same program.
+    path: []const u8,
+    /// Every byte of the file, with the lifetime of the program's sources.
+    bytes: []const u8,
+};
+
+/// What one `embed` or `embed_bytes` expression read.
+pub const EmbedSite = struct {
+    expr: ExprId,
+    embed: EmbedId,
+};
+
+/// Every file the program embeds, and which expression read which.
+///
+/// Recorded by the loader, the only pass that reads a file, and read by the
+/// checker, the constant folder, lowering and the language server through
+/// `of` and `bytesOf`. Sites ascend by expression, because the loader records
+/// a module's embeds as it parses the module and modules take ascending runs
+/// of the tree, so a question is a search over the sites rather than a walk.
+pub const Embeds = struct {
+    files: []const Embedded = &.{},
+    sites: []const EmbedSite = &.{},
+    /// Every path the program's embeds named, read or refused, as the loader
+    /// spelled it: what an editor watches, since a file that appears or
+    /// changes there changes the program. The library's are not among them.
+    watched: []const []const u8 = &.{},
+
+    /// The file `expr` read, `.none` where its embed was refused, or null
+    /// where `expr` is no embed the loader saw.
+    pub fn of(self: Embeds, expr: ExprId) ?EmbedId {
+        var lo: usize = 0;
+        var hi: usize = self.sites.len;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            if (self.sites[mid].expr.index() < expr.index()) lo = mid + 1 else hi = mid;
+        }
+        if (lo < self.sites.len and self.sites[lo].expr == expr) return self.sites[lo].embed;
+        return null;
+    }
+
+    /// The bytes `expr` embeds, or null where it embeds nothing.
+    pub fn bytesOf(self: Embeds, expr: ExprId) ?[]const u8 {
+        const id = self.of(expr) orelse return null;
+        if (id == .none) return null;
+        return self.files[id.index()].bytes;
+    }
+
+    test "an embed is found by its expression, and a refused one reads nothing" {
+        const files = [_]Embedded{.{ .path = "page.txt", .bytes = "page" }};
+        const sites = [_]EmbedSite{
+            .{ .expr = .at(3), .embed = .from(0) },
+            .{ .expr = .at(9), .embed = .none },
+            .{ .expr = .at(12), .embed = .from(0) },
+        };
+        const embeds: Embeds = .{ .files = &files, .sites = &sites };
+        try testing.expectEqualStrings("page", embeds.bytesOf(.at(12)).?);
+        try testing.expectEqual(EmbedId.none, embeds.of(.at(9)).?);
+        try testing.expect(embeds.bytesOf(.at(9)) == null);
+        try testing.expect(embeds.of(.at(4)) == null);
+    }
+};
+
 pub const Program = struct {
     /// Source declarations selected for program dumps, excluding the library.
     pub fn ownDeclarations(self: *const Program) DeclarationSelection {
@@ -258,6 +340,15 @@ pub const Program = struct {
     /// root's own module. Such a module need declare no `main` to be
     /// checked; running it needs one.
     named_module: bool = false,
+    /// The files the program's `embed` and `embed_bytes` expressions read.
+    embeds: Embeds = .{},
+    /// The C sources the manifest names under `native`, each joined to the
+    /// manifest's directory, which a build compiles and links beside the
+    /// program. Owned.
+    native: []const []const u8 = &.{},
+    /// The C libraries the manifest names under `link`, which a build links
+    /// as `-l<name>`. Owned.
+    link: []const []const u8 = &.{},
     ast: Ast,
 
     pub fn root(self: *const Program) *const Module {
@@ -410,7 +501,17 @@ pub const Program = struct {
             gpa.free(r.dependencies);
         }
         gpa.free(self.roots);
+        for (self.native) |path| gpa.free(path);
+        gpa.free(self.native);
+        for (self.link) |name| gpa.free(name);
+        gpa.free(self.link);
         gpa.free(self.modules);
+        // The paths and bytes have the sources' lifetime, as the file table's
+        // entries do; the two lists are the program's.
+        gpa.free(self.embeds.files);
+        gpa.free(self.embeds.sites);
+        for (self.embeds.watched) |path| gpa.free(path);
+        gpa.free(self.embeds.watched);
         self.ast.deinit(gpa);
         self.* = undefined;
     }
@@ -420,6 +521,7 @@ pub const Program = struct {
 // filtered to one of them, which would otherwise never look inside it.
 comptime {
     _ = Program;
+    _ = Embeds;
 }
 
 test "a declaration belongs to the module whose range holds it" {

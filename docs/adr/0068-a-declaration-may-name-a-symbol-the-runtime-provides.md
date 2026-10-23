@@ -1,6 +1,6 @@
 # 68. A declaration may name a symbol the runtime provides
 
-Status: Accepted — 2026-08-04. Extended by [0150](0150-float-math-crosses-a-checked-scalar-boundary.md) and [0156](0156-every-declaration-of-an-extern-symbol-is-one-function.md). The `std/` clause of [M-Extern] is superseded by [0171](0171-the-standard-library-is-an-ordinary-library.md), which grants the capability through a root's manifest.
+Status: Accepted — 2026-08-04. Extended by [0150](0150-float-math-crosses-a-checked-scalar-boundary.md) and [0156](0156-every-declaration-of-an-extern-symbol-is-one-function.md). The `std/` clause of [M-Extern] is superseded by [0171](0171-the-standard-library-is-an-ordinary-library.md), which grants the capability through a root's manifest. The integer-only clause of [T-Extern], the clause refusing linear values and callables, and "Not an FFI" are superseded by [0228](0228-a-granted-module-calls-c.md).
 
 ## Context
 

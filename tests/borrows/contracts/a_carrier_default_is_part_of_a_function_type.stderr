@@ -5,6 +5,8 @@ error[T-Mismatch]: expected `fn(read Session, read Str) -> Str where carries(#1)
    |        ---- expected because of this parameter
 45 |     let c = run(through_tag, session)
    |                 ^^^^^^^^^^^ expected `fn(read Session, read Str) -> Str where carries(#1)`, found `fn(read Session, read Str) -> Str where carries(#2)`
+   |
+   = help: `#n` in a `fn` type's clause is its parameter at position n, counted from 1, because a parameter's name is not part of the type
 error[T-Mismatch]: expected `fn(read Session, read Str) -> Str where carries(#1)`, found `fn(read Session, read Str) -> Str where carries(#2)`
   --> tests/borrows/contracts/a_carrier_default_is_part_of_a_function_type.lin:46:23
    |
@@ -12,3 +14,5 @@ error[T-Mismatch]: expected `fn(read Session, read Str) -> Str where carries(#1)
    |              ---- expected because of this parameter
 46 |     let d = run_plain(through_tag, session)
    |                       ^^^^^^^^^^^ expected `fn(read Session, read Str) -> Str where carries(#1)`, found `fn(read Session, read Str) -> Str where carries(#2)`
+   |
+   = help: `#n` in a `fn` type's clause is its parameter at position n, counted from 1, because a parameter's name is not part of the type

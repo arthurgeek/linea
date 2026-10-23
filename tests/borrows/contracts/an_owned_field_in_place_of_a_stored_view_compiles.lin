@@ -1,0 +1,20 @@
+// `Contact` holds an owned `String` instead of a view, so a contact built from
+// a copy of the text may leave the function that made it. The copy can fail
+// with `mem.Oom`, which `?` hands on.
+import std.mem
+
+@derive(Release)
+struct Contact {
+    name: String,
+}
+
+fn contact_for(first: Str) -> Result[Contact, mem.Oom] {
+    .Ok(Contact { name = first.to_owned()? })
+}
+
+fn main() -> UInt8 {
+    defer let contact = contact_for("Ada") else |_| {
+        return 1
+    }
+    UInt8(contact.name.length())
+}

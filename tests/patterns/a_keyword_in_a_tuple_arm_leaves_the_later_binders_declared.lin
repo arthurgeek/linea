@@ -1,0 +1,12 @@
+// A keyword cannot stand in a tuple pattern. The arm is refused for it alone:
+// the binder after it is still declared, so the arm's body reads it.
+fn first_or_zero(sink pair: (Bool, UInt8)) -> UInt8 {
+    match pair {
+        (true, count) => count,
+        _ => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    first_or_zero((true, 1)) - 1
+}

@@ -1,0 +1,17 @@
+// `line` is a `String` that `titled` builds and owns, so a view of it cannot
+// leave. The report offers returning `line` itself, which owns the text.
+import std.mem
+
+fn titled(name: Str) -> Result[Str, mem.Oom] {
+    defer var line = String.new()
+    &line.append("Dr. ")?
+    &line.append(name)?
+    .Ok(line.view())
+}
+
+fn main() -> UInt8 {
+    match titled("Ada") {
+        Ok(title) => UInt8(title.length()),
+        Err(_) => 1,
+    }
+}

@@ -1,0 +1,8 @@
+error[T-Bound]: `Self.Iter` requires `Discardable`, and `Cursor` does not have that capability
+  --> tests/iter/count/requires_a_discardable_iterator.lin:24:18
+   |
+24 |     UInt8(cursor.count())
+   |                  ^^^^^ `count` may dispose of a `Cursor`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
+  ::: std/iter/iter.lin
+L  |         Self.Iter: Discardable,
+   |         --------- required by this `where` clause

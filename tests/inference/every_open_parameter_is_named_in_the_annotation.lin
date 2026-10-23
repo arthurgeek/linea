@@ -1,0 +1,20 @@
+// `Pair.empty()` settles neither of `Pair`'s parameters, so the annotation
+// the report shows names both.
+struct Pair[A, B] {
+    a: Option[A],
+    b: Option[B],
+}
+
+impl[A, B] Pair[A, B] {
+    fn empty() -> Self {
+        Pair[A, B] { a = .None, b = .None }
+    }
+}
+
+fn main() -> UInt8 {
+    let p = Pair.empty()
+    match p.a {
+        Some(_) => 1,
+        None => 0,
+    }
+}

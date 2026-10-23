@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Guest book</title>
+<style>
+  body { max-width: 36rem; margin: 2rem auto; padding: 0 1rem; font: 1rem/1.5 system-ui, sans-serif; }
+  label, textarea { display: block; width: 100%; margin-top: 0.5rem; }
+  ol { padding-left: 1.25rem; }
+  li { margin-top: 1rem; }
+  time { color: #555; font-size: 0.875rem; }
+</style>
+<h1>Guest book</h1>
+<form method="post" action="{{action}}">
+  <label>Name <input name="name" value="{{name}}" maxlength="60" required></label>
+  <label>Message <textarea name="message" maxlength="500" required></textarea></label>
+  <button>Sign</button>
+</form>
+<ol reversed>
+{{entries}}</ol>

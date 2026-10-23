@@ -1,0 +1,15 @@
+// `local` is released by its `defer` on every path, so putting it in place
+// of its view would be released all the same: the report does not offer it.
+struct Contact {
+    name: Str,
+}
+
+fn make(_a: Str) -> Contact {
+    let local = String.new()
+    defer local.release()
+    Contact { name = local.view() }
+}
+
+fn main() -> UInt8 {
+    UInt8(make("x").name.length())
+}

@@ -6,7 +6,8 @@ the command-line-file clause of [0075](0075-a-program-root-is-a-directory-holdin
 the reserved-path-root clause of [0085](0085-the-library-is-imported.md) and
 the reserved-root sentence of [0111](0111-import-paths-are-root-relative.md).
 Extends [0096](0096-a-root-is-a-program-or-a-library.md) with two manifest
-keys.
+keys. The boolean `"extern": true` grant is superseded by
+[0228](0228-a-granted-module-calls-c.md), which grants named modules.
 
 ## Context
 

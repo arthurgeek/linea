@@ -1,0 +1,5 @@
+error[T-TryAnswer]: this `?` may fail with `io.IoError`, and no `From[io.IoError] for fs.FsFailure` implementation converts it to the function's error type
+ --> tests/try/a_reexported_error_is_written_where_it_is_exported.lin:8:5
+  |
+8 |     file.close()?
+  |     ^^^^^^^^^^^^^ `?` converts a different error through `From`: the library declares both `fs.FsFailure` and `From[io.IoError]`; wrap it in a type this program declares that implements `From[io.IoError]`, or convert it before `?` with `.map_err(…)`

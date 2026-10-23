@@ -28,6 +28,12 @@ const hex_digits = "0123456789abcdef";
 /// that stops holding the day the prefix grows.
 pub const defined_prefix = "lin.";
 
+/// What a C-callable entry to a function passed to C as a callback is called:
+/// the function's own name after this prefix. As long as `defined_prefix`, so
+/// `max_len` bounds both, and spelled with a byte no C identifier holds and no
+/// other Linea symbol starts with.
+pub const callback_prefix = "lcb.";
+
 /// A bound on generated names, owned by nothing downstream: the emitted
 /// formats read longer names without complaint. Kept because a name is
 /// built by concatenation, and a concatenation with no ceiling turns a

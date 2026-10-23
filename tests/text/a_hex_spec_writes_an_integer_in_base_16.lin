@@ -1,0 +1,29 @@
+// `x` at the end of a format spec writes an integer's digits in base 16 with
+// lowercase letters, and `X` with capitals. Fill, alignment, width, a `+`
+// sign and zero padding lay the digits out as they lay out decimal ones. A
+// negative integer is written as a minus sign and its magnitude, so `-255`
+// is `-ff` whatever the integer's type. A parameter bounded by `Integer` is a
+// number, so its spec may ask for hexadecimal digits.
+import std.io
+
+use io.IoError
+use io.println
+
+fn byte_code[T: Copyable + Integer](value: T) -> Result[(), IoError] {
+    println("0x{value:02X}")
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let color: UInt32 = 16737945
+    let byte: UInt8 = 10
+    let loss = -255
+    let zero: UInt8 = 0
+    let most: UInt64 = 18446744073709551615
+    let least: Int64 = -9223372036854775808
+    println("#{color:06x} #{color:06X} [{byte:x}] [{byte:02x}] [{zero:x}]")?
+    println("[{byte:>4x}] [{byte:<4X}] [{byte:*^5x}] [{byte:+x}] [{loss:x}] [{loss:06X}]")?
+    println("[{most:x}] [{least:x}] [{color:3x}]")?
+    byte_code(UInt8(171))?
+    byte_code(7)?
+    return .Ok(0)
+}

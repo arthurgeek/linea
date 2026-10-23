@@ -1,0 +1,8 @@
+let page = embed("templates/page.html")
+//         ^ function.builtin
+//               ^ string
+
+fn icon() -> UInt64 {
+    embed_bytes(r"icon.png").length()
+//  ^ function.builtin
+}

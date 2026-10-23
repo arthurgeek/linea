@@ -1,0 +1,8 @@
+// A lambda parameter may nest tuple patterns: `zip` pairs two `enumerate`d
+// walks, and the closure names each position and item where it begins.
+fn main() -> UInt8 {
+    let left: [UInt8; 3] = [1, 2, 3]
+    let right: [UInt8; 3] = [10, 20, 30]
+    let total = left.as_slice().enumerate().zip(right.as_slice().enumerate()).map(|sink ((i, x), (_, y))| i + UInt64(*x) * UInt64(*y)).fold(0, |sink a, sink b| a + b)
+    UInt8(total - 143)
+}

@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `Nope`
+  --> tests/traits/a_refused_argument_leaves_its_siblings_bounds_checked.lin:10:17
+   |
+10 |     let c: Chan[Nope, UInt8] = .{ endpoint = 7 }
+   |                 ^^^^ no type with this name is declared here
+error[T-Bound]: `P` requires `Protocol`, and `UInt8` does not implement it
+  --> tests/traits/a_refused_argument_leaves_its_siblings_bounds_checked.lin:10:12
+   |
+10 |     let c: Chan[Nope, UInt8] = .{ endpoint = 7 }
+   |            ^^^^ implement it for that type, or drop the bound

@@ -8,7 +8,7 @@ error[N-Unused]: `b` is never used
   |
 4 | fn pick[T: Copyable](a: T, b: T) -> T where carries(a) {
   |                            ^ name it with a leading `_` if the value is not wanted
-error[T-Mismatch]: `T` was already settled as `UInt8` here, and this is a `Bool`
+error[T-Mismatch]: `T` was already settled as `UInt8`, and this is a `Bool`
   --> tests/generics/one_parameter_two_types.lin:17:30
    |
 17 |     let bad: UInt8 = pick(n, true)

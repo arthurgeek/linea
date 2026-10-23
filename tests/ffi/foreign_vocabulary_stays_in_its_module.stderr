@@ -1,0 +1,30 @@
+error[M-Foreign]: `CText` comes from `std.ffi` and is read only where C is trusted, so this module may not publish it
+ --> tests/ffi/foreign_vocabulary_stays_in_its_module/labels/labels.lin:7:13
+  |
+7 | pub fn home(name: ffi.CText) -> ffi.CText {
+  |             ^^^^ keep it private, or copy what it holds into an ordinary Linea value here
+error[M-Foreign]: `CText` comes from `std.ffi` and is read only where C is trusted, so this module may not publish it
+ --> tests/ffi/foreign_vocabulary_stays_in_its_module/labels/labels.lin:7:8
+  |
+7 | pub fn home(name: ffi.CText) -> ffi.CText {
+  |        ^^^^ keep it private, or copy what it holds into an ordinary Linea value here
+error[M-Foreign]: `CText` comes from `std.ffi` and is read only where C is trusted, so this module may not publish it
+  --> tests/ffi/foreign_vocabulary_stays_in_its_module/labels/labels.lin:12:5
+   |
+12 |     label: ffi.CText,
+   |     ^^^^^ keep it private, or copy what it holds into an ordinary Linea value here
+error[M-Foreign]: `CText` comes from `std.ffi` and is read only where C is trusted, so this module may not publish it
+  --> tests/ffi/foreign_vocabulary_stays_in_its_module/labels/labels.lin:16:5
+   |
+16 |     Named(ffi.CText),
+   |     ^^^^^ keep it private, or copy what it holds into an ordinary Linea value here
+error[M-Foreign]: `CText` comes from `std.ffi` and is read only where C is trusted, so this module may not publish it
+  --> tests/ffi/foreign_vocabulary_stays_in_its_module/labels/labels.lin:21:13
+   |
+21 | pub use ffi.CText
+   |             ^^^^^ keep it private, or copy what it holds into an ordinary Linea value here
+error[M-Foreign]: `CText` comes from `std.ffi` and is read only where C is trusted, so this module may not publish it
+  --> tests/ffi/foreign_vocabulary_stays_in_its_module/labels/labels.lin:23:11
+   |
+23 | pub alias Text = ffi.CText
+   |           ^^^^ keep it private, or copy what it holds into an ordinary Linea value here

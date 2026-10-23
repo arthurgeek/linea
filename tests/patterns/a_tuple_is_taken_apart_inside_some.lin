@@ -1,0 +1,24 @@
+// `Some((name, port))` takes apart the pair that `Some` carries, so the arm
+// binds both of its components in one pattern.
+fn setting(present: Bool) -> Option[(Str, UInt64)] {
+    if !present {
+        return .None
+    }
+    .Some(("port", 80))
+}
+
+fn main() -> UInt8 {
+    let port = match setting(true) {
+        Some((name, port)) => if name == "port" {
+            port
+        } else {
+            1
+        },
+        None => 2,
+    }
+    let missing = match setting(false) {
+        Some((_, port)) => port,
+        None => 0,
+    }
+    UInt8(port - 80 + missing)
+}

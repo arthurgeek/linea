@@ -1,0 +1,48 @@
+// A `struct counter *` is an address, which this module keeps in a sealed
+// newtype over `UInt64`. `@opaque` means only this module can make one from an
+// address, and `@linear` means every handle must reach `counter_close`.
+@(opaque, linear)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+// A handle crosses as the address it holds. A plain parameter lends it to C
+// for the call, and `sink` gives it to C for good. (`inout` would pass the
+// address of the handle itself, which is C's `struct counter **`.)
+extern fn counter_add(counter: Handle, amount: Int8)
+
+// C only reads the counter here, which `read` says.
+extern fn counter_total(read counter: Handle) -> Int64
+
+extern fn counter_close(sink counter: Handle)
+
+// A running total kept by the C library. It must be closed.
+@(opaque, linear)
+struct Counter { handle: Handle }
+
+pub enum OpenError { OutOfMemory }
+
+impl Counter {
+    // `counter_open` answers zero when it cannot allocate, so the handle is
+    // built only from an address that is not.
+    pub fn open() -> Result[Counter, OpenError] {
+        let address = counter_open()
+        if address == 0 {
+            return .Err(.OutOfMemory)
+        }
+        .Ok(.{ handle = Handle(address) })
+    }
+
+    pub fn add(inout self: Self, amount: Int8) {
+        counter_add(self.handle, amount)
+    }
+
+    pub fn total(self: Self) -> Int64 {
+        counter_total(self.handle)
+    }
+
+    pub fn close(sink self: Self) {
+        let Counter { handle: handle } = self
+        counter_close(handle)
+    }
+}

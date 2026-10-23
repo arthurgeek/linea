@@ -1,0 +1,17 @@
+// `Pair` promises a copyable value, and `Session` is not one. Once [T-Bound]
+// refuses `Pair[Session]`, the type promises nothing, so a value of it is not
+// also reported as leaked.
+@copyable
+struct Pair[R: Copyable] { value: R }
+
+@linear
+struct Session { id: UInt64 }
+
+fn make() -> Pair[Session] {
+    .{ value = Session { id = 1 } }
+}
+
+fn main() -> UInt8 {
+    let _pair = make()
+    0
+}

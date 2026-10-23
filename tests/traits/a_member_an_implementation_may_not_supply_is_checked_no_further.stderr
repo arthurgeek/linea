@@ -1,0 +1,5 @@
+error[T-Impl]: `Named` provides `label`, and an implementation does not supply it
+  --> tests/traits/a_member_an_implementation_may_not_supply_is_checked_no_further.lin:23:8
+   |
+23 |     fn label(_self: Self, other: String) -> Str where borrows(_self) {
+   |        ^^^^^ drop it: every type implementing the trait runs the trait's own body

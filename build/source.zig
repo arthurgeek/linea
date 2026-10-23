@@ -804,6 +804,7 @@ pub const GuideChapter = struct {
     name: []const u8,
     file: []const u8,
     text: []const u8 = "",
+    root: ?struct { io: std.Io, dir: std.Io.Dir } = null,
 };
 
 /// Every chapter `docs/learn/README.md` links to, in the order it lists them.
@@ -903,14 +904,37 @@ const GuideFence = struct {
     line: usize,
     info: []const u8,
     body: []const u8,
-    /// The path in a `` `path.lin`: `` line directly above the fence.
+    /// The path in a `` `path.lin`: `` or `` `page.txt`: `` line directly
+    /// above the fence.
     label: ?[]const u8,
     unchecked: bool,
     /// The N of a `<!-- guide: first N diagnostics -->` line directly above.
     first: ?usize,
+    /// The path of a `<!-- guide: excerpt PATH -->` line directly above.
+    excerpt: ?[]const u8 = null,
 
+    /// A block that could be a program's output. One directly after a
+    /// program is its output whatever line stands above it.
     fn isOutput(self: GuideFence) bool {
         return self.info.len == 0 or std.mem.eql(u8, self.info, "text");
+    }
+
+    /// A block that is not Linea, labelled with a file that is not Linea
+    /// source, and that no program before it claimed as output: a file
+    /// written beside the next program, which it may `embed`.
+    fn isData(self: GuideFence) bool {
+        const path = self.label orelse return false;
+        // A labelled manifest is a file of the project it sits in.
+        if (std.mem.eql(u8, self.info, "json") and isManifestPath(path)) return false;
+        return !std.mem.eql(u8, self.info, "linea") and !std.mem.endsWith(u8, path, ".lin");
+    }
+
+    /// The `.lin` file a Linea block's label names, or null. A line above a
+    /// Linea block naming anything else, such as `` `str.split_once`: `` at
+    /// the end of a sentence, is prose.
+    fn sourceLabel(self: GuideFence) ?[]const u8 {
+        const path = self.label orelse return null;
+        return if (std.mem.endsWith(u8, path, ".lin")) path else null;
     }
 
     fn hasEntryPoint(self: GuideFence) bool {
@@ -926,21 +950,27 @@ const GuideFence = struct {
 
 const marker_open = "<!-- guide:";
 const marker_close = "-->";
-const marker_help = "the guide markers are `<!-- guide: unchecked REASON -->` and `<!-- guide: first N diagnostics -->`, and each is complete";
+const marker_help = "the guide markers are `<!-- guide: unchecked REASON -->`, `<!-- guide: first N diagnostics -->` and `<!-- guide: excerpt PATH -->`, and each is complete";
 
 const Marker = union(enum) {
     unchecked,
     first: usize,
+    excerpt: []const u8,
 };
 
-/// The marker a `<!-- guide: ... -->` line holds, or null when it is neither
-/// kind.
+/// The marker a `<!-- guide: ... -->` line holds, or null when it is none of
+/// the three kinds.
 fn guideMarker(bare: []const u8) ?Marker {
     if (!std.mem.endsWith(u8, bare, marker_close)) return null;
     const inner = std.mem.trim(u8, bare[marker_open.len .. bare.len - marker_close.len], " \t");
     var words = std.mem.tokenizeAny(u8, inner, " \t");
     const kind = words.next() orelse return null;
     if (std.mem.eql(u8, kind, "unchecked")) return if (words.next() != null) .unchecked else null;
+    if (std.mem.eql(u8, kind, "excerpt")) {
+        const path = words.next() orelse return null;
+        if (words.next() != null or path.len == 0 or path[0] == '/') return null;
+        return .{ .excerpt = path };
+    }
     if (!std.mem.eql(u8, kind, "first")) return null;
     const count = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
     const noun = words.next() orelse return null;
@@ -949,13 +979,15 @@ fn guideMarker(bare: []const u8) ?Marker {
     return .{ .first = count };
 }
 
-/// The path a `` `path.lin`: `` or `` `path/linea.json`: `` line labels, or
-/// null for any other line.
+/// The path a `` `path.lin`: `` or `` `path/linea.json`: `` line labels, or a
+/// data file's such as `` `usage.txt`: ``, or null for any other line. A data
+/// file's name carries an extension, so a line naming a word, `` `defer`: ``,
+/// labels nothing.
 fn guideLabel(line: []const u8) ?[]const u8 {
     const bare = std.mem.trim(u8, line, " \t");
-    if (bare.len < 8 or bare[0] != '`' or !std.mem.endsWith(u8, bare, "`:")) return null;
+    if (bare.len < 4 or bare[0] != '`' or !std.mem.endsWith(u8, bare, "`:")) return null;
     const path = bare[1 .. bare.len - 2];
-    if (!std.mem.endsWith(u8, path, ".lin") and !isManifestPath(path)) return null;
+    if (std.mem.indexOfScalar(u8, std.fs.path.basename(path), '.') == null) return null;
     for (path) |c| {
         if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '/' and c != '.' and c != '-') return null;
     }
@@ -1001,7 +1033,11 @@ fn guideFences(
                 .unchecked = if (pending) |p| p.marker == .unchecked else false,
                 .first = if (pending) |p| switch (p.marker) {
                     .first => |count| count,
-                    .unchecked => null,
+                    .unchecked, .excerpt => null,
+                } else null,
+                .excerpt = if (pending) |p| switch (p.marker) {
+                    .excerpt => |path| path,
+                    .unchecked, .first => null,
                 } else null,
             }) catch @panic("out of memory");
             label = null;
@@ -1102,6 +1138,10 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
     const fences = guideFences(gpa, chapter, &problems);
     var programs: std.ArrayList(GuideProgram) = .empty;
     var project: std.ArrayList(GuideFile) = .empty;
+    // Files written beside the next program, which it may embed, and the line
+    // of the first of them.
+    var data: std.ArrayList(GuideFile) = .empty;
+    var data_line: usize = 0;
     var fragments: usize = 0;
     var excluded: usize = 0;
     var unrun_output: std.ArrayList(GuideBlock) = .empty;
@@ -1110,6 +1150,12 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
         const fence = fences[i];
         i += 1;
         const is_linea = std.mem.eql(u8, fence.info, "linea");
+        // A data block belongs to the program directly after it, past other
+        // data blocks and the files of a labelled project; anything else
+        // strands it, and a fragment does below.
+        const is_manifest = std.mem.eql(u8, fence.info, "json") and if (fence.label) |path| isManifestPath(path) else false;
+        const continues_data = fence.isData() or is_linea or is_manifest;
+        if (!continues_data) strandData(gpa, chapter, &problems, &data, data_line);
         if (fence.first != null and !fence.isOutput()) {
             problems.append(gpa, .{
                 .chapter = chapter.file,
@@ -1117,8 +1163,31 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
                 .message = "`<!-- guide: first N diagnostics -->` belongs directly above the output block it describes",
             }) catch @panic("out of memory");
         }
+        if (fence.excerpt) |path| {
+            if (!is_linea) {
+                problems.append(gpa, .{
+                    .chapter = chapter.file,
+                    .line = fence.line,
+                    .message = "`<!-- guide: excerpt PATH -->` belongs directly above a `linea` block",
+                }) catch @panic("out of memory");
+                if (fence.isOutput()) continue;
+            } else {
+                fragments += 1;
+                strandData(gpa, chapter, &problems, &data, data_line);
+                if (checkExcerpt(gpa, chapter, path, fence.body)) |message| {
+                    problems.append(gpa, .{
+                        .chapter = chapter.file,
+                        .line = fence.line,
+                        .message = message,
+                    }) catch @panic("out of memory");
+                }
+                continue;
+            }
+        }
         if (fence.unchecked) {
             excluded += 1;
+            // An excluded program takes the data above it with it.
+            if (is_linea) data.clearRetainingCapacity();
             if (fence.isOutput()) {
                 unrun_output.append(gpa, .{ .chapter = chapter.file, .line = fence.line, .body = fence.body }) catch @panic("out of memory");
             }
@@ -1126,6 +1195,11 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
                 unrun_output.append(gpa, .{ .chapter = chapter.file, .line = fences[i].line, .body = fences[i].body }) catch @panic("out of memory");
                 i += 1;
             }
+            continue;
+        }
+        if (fence.isData()) {
+            if (data.items.len == 0) data_line = fence.line;
+            data.append(gpa, .{ .path = fence.label.?, .text = fence.body }) catch @panic("out of memory");
             continue;
         }
         if (fence.isOutput()) {
@@ -1146,19 +1220,21 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             continue;
         }
         if (!is_linea) continue;
-        if (fence.label == null) project.clearRetainingCapacity();
+        const label = fence.sourceLabel();
+        if (label == null) project.clearRetainingCapacity();
         const has_entry = fence.hasEntryPoint();
-        if (fence.label) |path| project.append(gpa, .{ .path = path, .text = fence.body }) catch @panic("out of memory");
-        const is_main_file = if (fence.label) |path| std.mem.eql(u8, std.fs.path.basename(path), "main.lin") else false;
+        if (label) |path| project.append(gpa, .{ .path = path, .text = fence.body }) catch @panic("out of memory");
+        const is_main_file = if (label) |path| std.mem.eql(u8, std.fs.path.basename(path), "main.lin") else false;
         var sources: usize = 0;
         for (project.items) |file| sources += @intFromBool(std.mem.endsWith(u8, file.path, ".lin"));
-        const alone = fence.label != null and sources == 1 and has_entry;
-        if (fence.label != null and !is_main_file and !alone) {
+        const alone = label != null and sources == 1 and has_entry;
+        if (label != null and !is_main_file and !alone) {
             fragments += @intFromBool(!has_entry);
             continue;
         }
-        if (fence.label == null and !has_entry) {
+        if (label == null and !has_entry) {
             fragments += 1;
+            strandData(gpa, chapter, &problems, &data, data_line);
             continue;
         }
 
@@ -1196,12 +1272,14 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             if (isTestSummary(last)) command = .@"test";
         }
 
-        if (fence.label != null) {
+        if (label != null) {
             var root: []const u8 = ".";
             if (is_main_file) {
-                const dir = std.fs.path.dirname(fence.label.?) orelse "";
+                const dir = std.fs.path.dirname(label.?) orelse "";
                 if (dir.len > 0) root = dir;
-            } else root = fence.label.?;
+            } else root = label.?;
+            project.appendSlice(gpa, data.items) catch @panic("out of memory");
+            data.clearRetainingCapacity();
             programs.append(gpa, .{
                 .chapter = chapter.file,
                 .line = fence.line,
@@ -1216,8 +1294,10 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             continue;
         }
         const name = if (command_block) |shown| shown.path else if (expected) |text| guideNamedFile(text) orelse "main.lin" else "main.lin";
-        const files = gpa.alloc(GuideFile, 1) catch @panic("out of memory");
+        const files = gpa.alloc(GuideFile, 1 + data.items.len) catch @panic("out of memory");
         files[0] = .{ .path = name, .text = fence.body };
+        @memcpy(files[1..], data.items);
+        data.clearRetainingCapacity();
         programs.append(gpa, .{
             .chapter = chapter.file,
             .line = fence.line,
@@ -1229,6 +1309,7 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             .expected_first = expected_first,
         }) catch @panic("out of memory");
     }
+    strandData(gpa, chapter, &problems, &data, data_line);
     return .{
         .programs = programs.toOwnedSlice(gpa) catch @panic("out of memory"),
         .problems = problems.toOwnedSlice(gpa) catch @panic("out of memory"),
@@ -1236,6 +1317,59 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
         .excluded = excluded,
         .unrun_output = unrun_output.toOwnedSlice(gpa) catch @panic("out of memory"),
     };
+}
+
+/// Why `fragment` is not a verbatim run of consecutive lines of `path` under
+/// `chapter.root`, or null when it is.
+fn checkExcerpt(gpa: std.mem.Allocator, chapter: GuideChapter, path: []const u8, fragment: []const u8) ?[]const u8 {
+    const root = chapter.root orelse return std.fmt.allocPrint(gpa, "the excerpt file `{s}` could not be read", .{path}) catch @panic("out of memory");
+    const file_text = root.dir.readFileAlloc(root.io, path, gpa, .limited(1 << 22)) catch {
+        return std.fmt.allocPrint(gpa, "the excerpt file `{s}` could not be read", .{path}) catch @panic("out of memory");
+    };
+    if (isExcerptOf(gpa, fragment, file_text)) return null;
+    return std.fmt.allocPrint(gpa, "the excerpt does not match consecutive lines of `{s}`", .{path}) catch @panic("out of memory");
+}
+
+fn isExcerptOf(gpa: std.mem.Allocator, fragment: []const u8, file_text: []const u8) bool {
+    var wanted: std.ArrayList([]const u8) = .empty;
+    var frag_iter = std.mem.splitScalar(u8, fragment, '\n');
+    while (frag_iter.next()) |raw| {
+        wanted.append(gpa, std.mem.trimEnd(u8, raw, "\r")) catch @panic("out of memory");
+    }
+    if (wanted.items.len == 0) return false;
+
+    var lines: std.ArrayList([]const u8) = .empty;
+    var file_iter = std.mem.splitScalar(u8, file_text, '\n');
+    while (file_iter.next()) |raw| {
+        lines.append(gpa, std.mem.trimEnd(u8, raw, "\r")) catch @panic("out of memory");
+    }
+    if (wanted.items.len > lines.items.len) return false;
+    const limit = lines.items.len - wanted.items.len + 1;
+    outer: for (0..limit) |start| {
+        for (wanted.items, 0..) |line, offset| {
+            if (!std.mem.eql(u8, lines.items[start + offset], line)) continue :outer;
+        }
+        return true;
+    }
+    return false;
+}
+
+/// Reports data blocks no program took, and forgets them: a file written beside
+/// nothing that runs is a block the gate never checked.
+fn strandData(
+    gpa: std.mem.Allocator,
+    chapter: GuideChapter,
+    problems: *std.ArrayList(GuideProblem),
+    data: *std.ArrayList(GuideFile),
+    line: usize,
+) void {
+    if (data.items.len == 0) return;
+    problems.append(gpa, .{
+        .chapter = chapter.file,
+        .line = line,
+        .message = "a labelled data block is written beside the program directly after it, and none follows; put the program after it, or write `<!-- guide: unchecked REASON -->` above the block",
+    }) catch @panic("out of memory");
+    data.clearRetainingCapacity();
 }
 
 /// Why what the compiler printed is not what the guide pasted, or null when it
@@ -1794,4 +1928,192 @@ fn sortedKeys(gpa: std.mem.Allocator, keys: []const []const u8) []const []const 
         }
     }.less);
     return copy;
+}
+
+/// One file or directory beneath `examples/`, by path relative to it.
+pub const ExampleEntry = struct {
+    path: []const u8,
+    directory: bool,
+    /// A manifest's text; empty for everything else.
+    text: []const u8 = "",
+};
+
+pub const ExampleLayout = union(enum) {
+    entries: []const ExampleEntry,
+    /// A symlink, by path. `linea` does not follow one inside a root, so
+    /// whether a linked directory is a root is a question the walk cannot
+    /// settle, and the gate refuses to guess.
+    symlink: []const u8,
+};
+
+/// Every file and directory beneath `sub_path`, ordered by path.
+///
+/// `iterate` is what makes the walk legal: a directory opened without it can
+/// still be iterated on some hosts and not on others.
+pub fn exampleLayout(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    root: std.Io.Dir,
+    sub_path: []const u8,
+) !ExampleLayout {
+    var dir = try root.openDir(io, sub_path, .{ .iterate = true });
+    defer dir.close(io);
+
+    var walker = try dir.walk(gpa);
+    defer walker.deinit();
+
+    var found: std.ArrayList(ExampleEntry) = .empty;
+    while (try walker.next(io)) |entry| {
+        const path = try gpa.dupe(u8, entry.path);
+        switch (entry.kind) {
+            .sym_link => return .{ .symlink = path },
+            .directory => try found.append(gpa, .{ .path = path, .directory = true }),
+            .file => {
+                const text: []const u8 = if (std.mem.eql(u8, entry.basename, manifest_name))
+                    try dir.readFileAlloc(io, entry.path, gpa, .limited(1 << 20))
+                else
+                    "";
+                try found.append(gpa, .{ .path = path, .directory = false, .text = text });
+            },
+            else => {},
+        }
+    }
+    std.mem.sort(ExampleEntry, found.items, {}, struct {
+        fn less(_: void, a: ExampleEntry, b: ExampleEntry) bool {
+            return std.mem.lessThan(u8, a.path, b.path);
+        }
+    }.less);
+    return .{ .entries = found.items };
+}
+
+const manifest_name = "linea.json";
+
+/// Which paths to hand to `linea test`, relative to `examples/`: each `.lin`
+/// file directly in it, each directory directly in it (an example is a root
+/// with or without a manifest), and each deeper directory holding a
+/// `linea.json`, which is a library or application of its own.
+///
+/// `linea test` runs only the tests of the root it names (ADR 0229), so a
+/// nested library needs its own run. Which files a root reaches, and which of
+/// them declare tests, is the loader's answer and is read from the run.
+pub fn exampleRoots(gpa: std.mem.Allocator, entries: []const ExampleEntry) []const []const u8 {
+    var roots: std.StringArrayHashMapUnmanaged(void) = .empty;
+    for (entries) |entry| {
+        const nested = std.mem.indexOfScalar(u8, entry.path, '/') != null;
+        if (entry.directory) {
+            if (!nested) roots.put(gpa, entry.path, {}) catch @panic("out of memory");
+            continue;
+        }
+        if (!nested) {
+            if (std.mem.endsWith(u8, entry.path, ".lin")) roots.put(gpa, entry.path, {}) catch @panic("out of memory");
+            continue;
+        }
+        const directory = std.fs.path.dirnamePosix(entry.path).?;
+        if (std.mem.eql(u8, std.fs.path.basenamePosix(entry.path), manifest_name)) {
+            roots.put(gpa, directory, {}) catch @panic("out of memory");
+        }
+    }
+    return sortedKeys(gpa, roots.keys());
+}
+
+/// How many tests a `linea test` run reported, from its closing
+/// `N passed, M failed` line; null when the output ends otherwise.
+pub fn testsReported(output: []const u8) ?usize {
+    const trimmed = std.mem.trimEnd(u8, output, "\n");
+    const line = trimmed[(std.mem.lastIndexOfScalar(u8, trimmed, '\n') orelse 0)..];
+    var words = std.mem.tokenizeAny(u8, line, " ,\n");
+    const passed = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
+    if (!std.mem.eql(u8, words.next() orelse return null, "passed")) return null;
+    const failed = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
+    if (!std.mem.eql(u8, words.next() orelse return null, "failed")) return null;
+    return passed + failed;
+}
+
+/// What `unreachedSources` found wrong beneath `examples/`.
+pub const Unreached = struct {
+    /// `.lin` files no root's run would load.
+    files: []const []const u8,
+    /// Manifests whose `source` cannot be applied, each as a sentence naming it.
+    problems: []const []const u8,
+};
+
+/// Whether a manifest's `source` names a directory inside the one holding the
+/// manifest: not absolute, and not climbing past it once `.` and `..` are
+/// resolved. The rule is `sourceStaysInside` in `src/driver/loader.zig`, which
+/// build/ cannot import; its test "a manifest's source stays inside the
+/// directory holding it" and the case "a source that leaves its root, and a
+/// manifest that is not JSON, are named" in `build/source_test.zig` use the
+/// same spellings.
+fn staysInside(gpa: std.mem.Allocator, named: []const u8) bool {
+    if (named.len > 0 and named[0] == '/') return false;
+    const resolved = std.fs.path.resolvePosix(gpa, &.{named}) catch @panic("out of memory");
+    return !(std.mem.eql(u8, resolved, "..") or std.mem.startsWith(u8, resolved, "../"));
+}
+
+/// The directory, relative to `examples/`, whose files `root` reaches: the
+/// root itself, or its manifest's `source` directory. A manifest that cannot
+/// be read, or whose `source` leaves the root, is a problem and has no reach.
+///
+/// This is the rule `sourceRootOf` in `src/driver/loader.zig` applies to a
+/// manifest, spelled by joining and removing `.` segments. The compiler cannot
+/// be imported here, so the loader's test "a manifest's source key narrows the
+/// files a root reaches" and the case "a source no root reaches belongs to no
+/// example root" in `build/source_test.zig` use the same manifest text and fail
+/// when the two disagree.
+fn reachOf(gpa: std.mem.Allocator, root: []const u8, entries: []const ExampleEntry, problems: *std.ArrayList([]const u8)) ?[]const u8 {
+    const manifest = for (entries) |entry| {
+        if (entry.directory or !std.mem.eql(u8, std.fs.path.basenamePosix(entry.path), manifest_name)) continue;
+        const directory = std.fs.path.dirnamePosix(entry.path) orelse continue;
+        if (std.mem.eql(u8, directory, root)) break entry;
+    } else null;
+    var named: []const u8 = ".";
+    if (manifest) |found| {
+        const Written = struct { source: ?[]const u8 = null };
+        const parsed = std.json.parseFromSliceLeaky(Written, gpa, found.text, .{ .ignore_unknown_fields = true }) catch {
+            problems.append(gpa, std.fmt.allocPrint(gpa, "{s} is not valid JSON", .{found.path}) catch @panic("out of memory")) catch @panic("out of memory");
+            return null;
+        };
+        if (parsed.source) |source| if (source.len > 0) {
+            if (!staysInside(gpa, source)) {
+                problems.append(gpa, std.fmt.allocPrint(gpa, "{s} names a source, \"{s}\", outside its directory", .{ found.path, source }) catch @panic("out of memory")) catch @panic("out of memory");
+                return null;
+            }
+            named = source;
+        };
+    }
+    const resolved = std.fs.path.resolvePosix(gpa, &.{ "/", root, named }) catch @panic("out of memory");
+    return resolved[1..];
+}
+
+/// The `.lin` files beneath `examples/` that no root reaches, so that no run of
+/// `linea test` would load them, and the manifests whose `source` cannot be
+/// applied. A file belongs to the deepest root enclosing it, and is reached
+/// when it lies inside that root's source directory.
+pub fn unreachedSources(gpa: std.mem.Allocator, entries: []const ExampleEntry, roots: []const []const u8) Unreached {
+    var problems: std.ArrayList([]const u8) = .empty;
+    const reaches = gpa.alloc(?[]const u8, roots.len) catch @panic("out of memory");
+    for (roots, reaches) |root, *reach| {
+        reach.* = if (std.mem.endsWith(u8, root, ".lin")) root else reachOf(gpa, root, entries, &problems);
+    }
+    var unreached: std.ArrayList([]const u8) = .empty;
+    for (entries) |entry| {
+        if (entry.directory or !std.mem.endsWith(u8, entry.path, ".lin")) continue;
+        var owner: ?usize = null;
+        for (roots, 0..) |root, at| {
+            const encloses = std.mem.eql(u8, entry.path, root) or
+                (entry.path.len > root.len and entry.path[root.len] == '/' and std.mem.startsWith(u8, entry.path, root));
+            if (encloses and (owner == null or root.len > roots[owner.?].len)) owner = at;
+        }
+        const at = owner orelse {
+            unreached.append(gpa, entry.path) catch @panic("out of memory");
+            continue;
+        };
+        if (std.mem.eql(u8, entry.path, roots[at])) continue;
+        // A root whose manifest is refused reports that, not its files.
+        const reach = reaches[at] orelse continue;
+        const inside = reach.len == 0 or
+            (entry.path.len > reach.len and entry.path[reach.len] == '/' and std.mem.startsWith(u8, entry.path, reach));
+        if (!inside) unreached.append(gpa, entry.path) catch @panic("out of memory");
+    }
+    return .{ .files = unreached.items, .problems = problems.items };
 }
