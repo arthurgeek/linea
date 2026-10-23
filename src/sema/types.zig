@@ -1675,7 +1675,7 @@ fn sameContractPath(a: ContractPath, b: ContractPath) bool {
 /// the backend holds what it renders to it, so `pool` is a pool being built or
 /// a finished one.
 pub fn crossesForeign(pool: anytype, t: TypeId) bool {
-    if (t.isFloat()) return true;
+    if (t == .f64) return true;
     if (t.integerInfo()) |info| return switch (info.bits) {
         8, 16, 32, 64 => true,
         else => false,

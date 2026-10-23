@@ -405,7 +405,7 @@ fn foreignTypeOf(module: *const Module, ty: TypeId) []const u8 {
             64 => "i64",
             else => std.debug.panic("compiler defect: a {d}-bit integer crosses the foreign boundary", .{integer.bits}),
         },
-        .float => |bits| floatType(bits),
+        .float => |bits| if (bits == 64) "f64" else std.debug.panic("compiler defect: a {d}-bit float crosses the foreign boundary", .{bits}),
         // A callback crosses as the address of its C-callable entry.
         .code_pointer => "!llvm.ptr",
         else => std.debug.panic("compiler defect: this type does not cross the foreign boundary", .{}),

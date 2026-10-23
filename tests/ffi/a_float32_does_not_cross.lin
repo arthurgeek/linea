@@ -1,0 +1,8 @@
+// A `Float32` does not cross the foreign boundary: only an integer, a `Float64` or
+// a newtype over one has a C representation the language fixes.
+extern fn scale(f: Float32) -> Float32
+
+fn main() -> UInt8 {
+    let _s = scale(1.0)
+    0
+}
