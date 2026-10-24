@@ -1170,6 +1170,7 @@ place while any statement prepared on it is open, much as a Rust
 `guests/main.lin` that closes the database before finishing its statement is
 refused:
 
+<!-- guide: edit guests/main.lin end -->
 ```linea
 pub fn close_too_soon(sink database: Database) {
     let names = database.prepare("SELECT name FROM guests") else |_| {
@@ -1181,14 +1182,13 @@ pub fn close_too_soon(sink database: Database) {
 }
 ```
 
-<!-- guide: unchecked a fragment added to the end of guests/main.lin above, shown for the error it gets -->
 ```
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> guests/main.lin:61:5
+  --> guests/main.lin:60:5
    |
-61 |     database.close()
+60 |     database.close()
    |     ^^^^^^^^ keep this place available until the last use of its observation
-62 |     names.finish()
+61 |     names.finish()
    |     ----- the observation is still used here
 ```
 
