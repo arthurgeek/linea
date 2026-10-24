@@ -15,175 +15,97 @@ const TokenId = @import("../lexer/token.zig").TokenId;
 const typecheck = @import("../sema/typecheck.zig");
 const Resolution = @import("../sema/resolve.zig").Resolution;
 const Code = @import("../diagnostics/diagnostic.zig").Code;
+const Edit = @import("../diagnostics/diagnostic.zig").Edit;
+const Fix = @import("../diagnostics/diagnostic.zig").Fix;
+const publish = @import("publish.zig");
+const uri_mod = @import("uri.zig");
 const placement = @import("../syntax/placement.zig");
 const Placement = placement.Placement;
 const placementIn = placement.placementIn;
 const placementForUse = placement.placementForUse;
 
-/// Every quick fix offered for the diagnostics a request carried.
+/// Every quick fix offered for the diagnostics a request carried: one
+/// action per `Fix` the compiler attached to each of them, titled with the
+/// help it writes.
 ///
-/// One action per module of the file's own program that an `import` written
-/// here would name, for each `[N-Undefined]` the request carried.
+/// **The compiler answers what edit fixes a diagnostic**, and this only
+/// spells its answer for a client. A request's diagnostic is matched to the
+/// compiler's by what was published for it -- range, rule and message -- so
+/// an action is offered only for a problem the client is showing.
 ///
 /// Allocated from the allocator handed in, which for a request is the
 /// message's arena, and released with it.
+///
+/// **Bound:** the file's diagnostics, once per diagnostic the request
+/// carried.
 pub fn forFile(
     gpa: std.mem.Allocator,
     checked: *const Analysis,
     file: FileId,
-    query: workspace.Query,
-    program: []const u8,
     uri: []const u8,
     diagnostics: []const lsp.types.Diagnostic,
     encoding: lsp.offsets.Encoding,
 ) ![]const lsp.types.CodeAction.Result {
-    const ast = &checked.program.ast;
-    const part = ast.partOfFile(file) orelse return &.{};
-    const text = part.source;
-    const place = placementIn(ast, part, text);
+    const publication = try publish.Publication.init(gpa, checked);
+    const published = try publication.forFile(gpa, file, encoding);
+    const reported = publication.reportedIn(file);
 
     var offered: std.ArrayList(lsp.types.CodeAction.Result) = .empty;
     errdefer offered.deinit(gpa);
-
-    // Grouped by the name that was undefined, so a name reported twice in one
-    // request is offered one action naming both reports rather than the same
-    // action twice.
-    var seen: std.ArrayList([]const u8) = .empty;
-    defer seen.deinit(gpa);
-
-    const taken = try takenFromAnImportIn(gpa, &checked.program, file);
-    defer gpa.free(taken);
-
-    for (diagnostics, 0..) |d, i| {
-        const name = importableNameIn(checked, file, text, d, encoding) orelse continue;
-        if (indexOfName(seen.items, name) != null) continue;
-        try seen.append(gpa, name);
-
-        if (indexOfName(taken, name) != null) continue;
-
-        var reports: std.ArrayList(lsp.types.Diagnostic) = .empty;
-        errdefer reports.deinit(gpa);
-        for (diagnostics[i..]) |other| {
-            const also = importableNameIn(checked, file, text, other, encoding) orelse continue;
-            if (std.mem.eql(u8, also, name)) try reports.append(gpa, other);
-        }
-        const held = try reports.toOwnedSlice(gpa);
-
-        // Which modules carry that name is the index's answer, and it already
-        // answers for this program alone -- a filter written again here would
-        // be a second decision about what an import can reach.
-        for (query.modulesNamed(program, name)) |m| {
-            const writes = try writingImport(gpa, program, m.dir, text, place, encoding) orelse continue;
-            try offered.append(gpa, .{ .code_action = .{
-                .title = try std.fmt.allocPrint(gpa, "import {s}", .{writes.path}),
+    for (diagnostics) |d| {
+        for (published, reported) |p, r| {
+            if (!samePublished(p, d)) continue;
+            for (r.fixes) |f| try offered.append(gpa, .{ .code_action = .{
+                .title = if (f.note) |at| r.notes[at] else r.primaryLabel().?.message,
                 .kind = .quickfix,
-                .diagnostics = held,
-                .edit = try editIn(gpa, uri, writes.edit),
+                .diagnostics = try gpa.dupe(lsp.types.Diagnostic, &.{d}),
+                .edit = try editOf(gpa, checked, file, uri, f, encoding),
             } });
+            break;
         }
     }
-
-    try appendUses(gpa, checked, file, text, uri, diagnostics, encoding, &offered);
     return offered.toOwnedSlice(gpa);
 }
 
-/// One action per `[T-UnknownOperation]` the request carried whose name a
-/// trait out of scope declares, offering the `use` that brings the trait in.
-///
-/// The same code carries a name no operation answers to at all. Whether a
-/// trait out of scope declares it is the checker's question, asked below.
-///
-/// **The message is not parsed.** A fix built by reading the words back out of
-/// a diagnostic is a second copy of the rule that wrote them, and the two come
-/// apart the first time the sentence is reworded. What is read is the range --
-/// which expression the report was about -- and the trait is found by asking
-/// the routine the checker asked, over the same receiver type.
-fn appendUses(
+/// Whether a request's diagnostic is the one published as `p`.
+fn samePublished(p: lsp.types.Diagnostic, d: lsp.types.Diagnostic) bool {
+    if (!std.meta.eql(p.range, d.range)) return false;
+    if (!std.mem.eql(u8, p.message, d.message)) return false;
+    const pc = p.code orelse return d.code == null;
+    const dc = d.code orelse return false;
+    return switch (pc) {
+        .string => |a| dc == .string and std.mem.eql(u8, a, dc.string),
+        .number => |a| dc == .number and a == dc.number,
+    };
+}
+
+/// A fix's edits as one change to the documents they edit: `file` under the
+/// request's own `uri`, any other under its path's.
+fn editOf(
     gpa: std.mem.Allocator,
     checked: *const Analysis,
     file: FileId,
-    text: []const u8,
     uri: []const u8,
-    diagnostics: []const lsp.types.Diagnostic,
+    f: Fix,
     encoding: lsp.offsets.Encoding,
-    offered: *std.ArrayList(lsp.types.CodeAction.Result),
-) !void {
-    const ast = &checked.program.ast;
-    const part = ast.partOfFile(file) orelse return;
-    const place = placementForUse(ast, part, text);
-
-    var seen: std.ArrayList(DeclId) = .empty;
-    defer seen.deinit(gpa);
-
-    for (diagnostics) |d| {
-        const code = d.code orelse continue;
-        switch (code) {
-            .string => |rule| if (!std.mem.eql(u8, rule, Code.t_unknown_operation.ruleName())) continue,
-            .number => continue,
-        }
-
-        const at: u32 = @intCast(lsp.offsets.positionToIndex(text, d.range.start, encoding));
-        const trait = try traitFor(gpa, checked, file, at) orelse continue;
-        if (indexOfDecl(seen.items, trait) != null) continue;
-        try seen.append(gpa, trait);
-
-        const writes = try writingUse(gpa, &checked.program, &checked.semantics.res, file, trait, text, place, encoding);
-        try offered.append(gpa, .{ .code_action = .{
-            .title = if (writes.import_path != null)
-                try std.fmt.allocPrint(gpa, "import {s} and use {s}", .{ writes.import_path.?, writes.path })
-            else
-                try std.fmt.allocPrint(gpa, "use {s}", .{writes.path}),
-            .kind = .quickfix,
-            .diagnostics = try gpa.dupe(lsp.types.Diagnostic, &.{d}),
-            .edit = try editsIn(gpa, uri, writes),
-        } });
+) !lsp.types.WorkspaceEdit {
+    var changes: Changes = .empty;
+    errdefer changes.deinit(gpa);
+    var lists: std.ArrayList(std.ArrayList(lsp.types.TextEdit)) = .empty;
+    var keys: std.ArrayList(FileId) = .empty;
+    for (f.edits) |e| {
+        const at = std.mem.indexOfScalar(FileId, keys.items, e.file) orelse at: {
+            try keys.append(gpa, e.file);
+            try lists.append(gpa, .empty);
+            break :at keys.items.len - 1;
+        };
+        try lists.items[at].append(gpa, textEdit(checked.table.get(e.file).text, e, encoding));
     }
-}
-
-/// The trait that would declare what is selected at a byte, if this module
-/// could see it.
-fn traitFor(
-    gpa: std.mem.Allocator,
-    checked: *const Analysis,
-    file: FileId,
-    at: u32,
-) !?DeclId {
-    const ast = &checked.program.ast;
-    const under = checked.cursors.under(ast, file, at) orelse return null;
-
-    // The report covers the whole selection, so its first byte is the
-    // receiver's -- and what sits at a byte is the name, with the selection
-    // written around it. The selection is what carries the name being reached
-    // for, which is the same pair `qualifies` reads for an import.
-    const named = switch (under.node) {
-        .expr => |e| e,
-        else => return null,
-    };
-    const selected = switch (under.around orelse return null) {
-        .expr => |e| e,
-        else => return null,
-    };
-    if (ast.exprTag(selected) != .field) return null;
-
-    const base = ast.unaryOperand(selected);
-    if (base != named) return null;
-    const held = checked.semantics.typing.exprType(base);
-    if (held == .poison) return null;
-
-    const wanted = ast.tokenName(ast.exprMain(selected));
-    const found = try typecheck.reachIn(
-        ast,
-        &checked.program,
-        &checked.semantics.res,
-        &checked.semantics.typing,
-        checked.semantics.res.moduleOfFile(file),
-        checked.cursors.declarationAt(ast, file, at),
-    ).elsewhere(gpa, held, wanted);
-    return if (found == DeclId.none) null else found;
-}
-
-fn indexOfDecl(held: []const DeclId, wanted: DeclId) ?usize {
-    return std.mem.indexOfScalar(DeclId, held, wanted);
+    for (keys.items, lists.items) |k, list| {
+        const named = if (k == file) uri else try uri_mod.uriOf(gpa, checked.table.get(k).path);
+        try changes.put(gpa, named, list.items);
+    }
+    return .{ .changes = .{ .map = changes } };
 }
 
 /// Every name an `import` written in this file would collide with.
@@ -246,62 +168,6 @@ pub fn takenFromAnImportIn(
         }
     }
     return written.toOwnedSlice(gpa);
-}
-
-/// The name a diagnostic says nothing has bound and an import would bind, or
-/// null where it names something else.
-///
-/// Read out of the source the diagnostic points at rather than out of its
-/// message: the range is where the name is written, and a message parsed for
-/// the name between its backticks would be a second place deciding what the
-/// diagnostic is about.
-///
-/// Where it is written decides as much as what it says. An import binds a
-/// module, and [M-Vis] makes qualified access the only way a module's name is
-/// reached -- so a name written anywhere else is one no import binds, and an
-/// import written for it would leave the name as undefined as it was and add
-/// an import nothing names.
-///
-/// Costs one pass over the file's bytes to reach the offset and the lookup
-/// that says what sits there, which is a binary search over the file's tokens.
-fn importableNameIn(
-    checked: *const Analysis,
-    file: FileId,
-    text: []const u8,
-    d: lsp.types.Diagnostic,
-    encoding: lsp.offsets.Encoding,
-) ?[]const u8 {
-    const code = d.code orelse return null;
-    switch (code) {
-        .string => |rule| if (!std.mem.eql(u8, rule, Code.n_undefined.ruleName())) return null,
-        .number => return null,
-    }
-    const start = lsp.offsets.positionToIndex(text, d.range.start, encoding);
-    const end = lsp.offsets.positionToIndex(text, d.range.end, encoding);
-    if (end <= start or end > text.len) return null;
-    if (!qualifies(checked, file, @intCast(start))) return null;
-    return text[start..end];
-}
-
-/// Whether what is written at a byte is the left side of a qualified access.
-///
-/// The node covering it and the node written around it are one lookup, which
-/// is what the index of what sits where a cursor is exists for: `a` in
-/// `a.open()` is a name inside a selection, and the selection is what says the
-/// name is being reached through.
-fn qualifies(checked: *const Analysis, file: FileId, at: u32) bool {
-    const ast = &checked.program.ast;
-    const under = checked.cursors.under(ast, file, at) orelse return false;
-    const named = switch (under.node) {
-        .expr => |e| e,
-        else => return false,
-    };
-    const around = switch (under.around orelse return false) {
-        .expr => |e| e,
-        else => return false,
-    };
-    if (ast.exprTag(around) != .field) return false;
-    return ast.unaryOperand(around) == named;
 }
 
 /// Whether a name is among a list of them.
@@ -369,12 +235,8 @@ pub fn writingImport(
     };
 }
 
-/// The `use` that brings one trait into scope, and the edits writing it.
-///
-/// Which module the `use` names is the resolution's answer, the one the
-/// checker's help gives: the import that passes the trait on, as that import
-/// binds it, or else the module that reaches it on the shortest path, whose
-/// import is written too.
+/// The `use` that brings one trait into scope, and the edits writing it, as
+/// `typecheck.useWriting` writes them for the checker's fix.
 pub fn writingUse(
     gpa: std.mem.Allocator,
     program: *const program_mod.Program,
@@ -382,164 +244,32 @@ pub fn writingUse(
     file: FileId,
     declares: DeclId,
     text: []const u8,
-    place: Placement,
     encoding: lsp.offsets.Encoding,
 ) !Import {
-    const ast = &program.ast;
-    const route = res.useRoute(program, ast, file, declares);
-    const name = ast.tokenText(ast.declName(declares));
-    const at = lsp.offsets.indexToPosition(text, place.at, encoding);
-    const path = try std.fmt.allocPrint(gpa, "{s}.{s}", .{ route.module, name });
-    errdefer gpa.free(path);
-    const binds = path[route.module.len + 1 ..];
-
-    const alone: Import = .{
-        .path = path,
-        .binds = binds,
-        .edit = .{
-            .range = .{ .start = at, .end = at },
-            .newText = try std.fmt.allocPrint(gpa, "{s}use {s}{s}", .{ place.lead, path, place.trail }),
-        },
-    };
-    const needed = route.import orelse return alone;
-    const part = ast.partOfFile(file) orelse return alone;
-    gpa.free(alone.edit.newText);
-    const above = placementIn(ast, part, text);
-    const from = lsp.offsets.indexToPosition(text, above.at, encoding);
-
-    // A file with no `use` yet opens its group right below the imports, where
-    // the new import goes too, so the two are written as one edit: the
-    // import, a blank line, the `use`, and whatever spacing the import's own
-    // placement leaves after it.
-    if (above.at == place.at) {
-        const after = above.trail[1..];
-        return .{
-            .path = path,
-            .binds = binds,
-            .edit = .{
-                .range = .{ .start = from, .end = from },
-                .newText = try std.fmt.allocPrint(gpa, "{s}import {s}\n\nuse {s}\n{s}", .{ above.lead, needed, path, after }),
-            },
-            .import_path = needed,
-        };
-    }
-    const written = try std.fmt.allocPrint(gpa, "{s}use {s}{s}", .{ place.lead, path, place.trail });
-    errdefer gpa.free(written);
+    const writing = try typecheck.useWriting(gpa, program, &program.ast, res, file, declares);
+    errdefer gpa.free(writing.path);
+    const edits = writing.edits();
+    errdefer for (edits) |e| gpa.free(e.text);
+    const last = if (std.mem.lastIndexOfScalar(u8, writing.path, '.')) |dot| dot + 1 else 0;
+    const written = edits[edits.len - 1];
     return .{
-        .path = path,
-        .binds = binds,
-        .edit = .{ .range = .{ .start = at, .end = at }, .newText = written },
-        .imports = .{
-            .range = .{ .start = from, .end = from },
-            .newText = try std.fmt.allocPrint(gpa, "{s}import {s}{s}", .{ above.lead, needed, above.trail }),
-        },
-        .import_path = needed,
+        .path = writing.path,
+        .binds = writing.path[last..],
+        .edit = textEdit(text, written, encoding),
+        .imports = if (edits.len == 2) textEdit(text, edits[0], encoding) else null,
+        .import_path = writing.import_path,
     };
 }
 
-/// A `use` and the import it needs, if any, as edits to one document.
-fn editsIn(gpa: std.mem.Allocator, uri: []const u8, writes: Import) !lsp.types.WorkspaceEdit {
-    const count: usize = if (writes.imports != null) 2 else 1;
-    const edits = try gpa.alloc(lsp.types.TextEdit, count);
-    if (writes.imports) |first| edits[0] = first;
-    edits[count - 1] = writes.edit;
-
-    var changes: Changes = .empty;
-    errdefer changes.deinit(gpa);
-    try changes.put(gpa, uri, edits);
-    return .{ .changes = .{ .map = changes } };
-}
-
-/// One edit, as an edit to one document.
-fn editIn(
-    gpa: std.mem.Allocator,
-    uri: []const u8,
-    edit: lsp.types.TextEdit,
-) !lsp.types.WorkspaceEdit {
-    const edits = try gpa.alloc(lsp.types.TextEdit, 1);
-    edits[0] = edit;
-
-    var changes: Changes = .empty;
-    errdefer changes.deinit(gpa);
-    try changes.put(gpa, uri, edits);
-    return .{ .changes = .{ .map = changes } };
+/// A compiler edit of `text` as the edit a client applies.
+fn textEdit(text: []const u8, edit: Edit, encoding: lsp.offsets.Encoding) lsp.types.TextEdit {
+    return .{
+        .range = .{
+            .start = lsp.offsets.indexToPosition(text, edit.span.start, encoding),
+            .end = lsp.offsets.indexToPosition(text, edit.span.end, encoding),
+        },
+        .newText = edit.text,
+    };
 }
 
 const Changes = std.StringArrayHashMapUnmanaged([]const lsp.types.TextEdit);
-
-test "a trait quick fix uses the callers associated capability bounds" {
-    const gpa = std.testing.allocator;
-    const text =
-        \\import models
-        \\use models.Source
-        \\use models.Marker
-        \\fn _bounded[S: Source](value: Marker[S.Item]) -> UInt8 where S.Item: Copyable {
-        \\    value.inspect()
-        \\}
-        \\fn main() -> UInt8 { 0 }
-    ;
-    const models =
-        \\pub trait Source { type Item }
-        \\pub struct Marker[phantom T] {}
-        \\pub trait Inspect { fn inspect(self: Self) -> UInt8 }
-        \\impl[T: Copyable] Inspect for Marker[T] {
-        \\    fn inspect(_self: Self) -> UInt8 { 1 }
-        \\}
-    ;
-    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{
-        .{ .path = "main.lin", .text = text },
-        .{ .path = "models/models.lin", .text = models },
-    }, "main.lin");
-    defer checked.deinit();
-    try std.testing.expectEqual(@as(u32, 1), checked.sink.error_count);
-    try std.testing.expectEqual(Code.t_unknown_operation, checked.sink.items()[0].code.?);
-    const at: u32 = @intCast(std.mem.indexOf(u8, text, "value.inspect()").?);
-    const trait = try traitFor(gpa, &checked, checked.fileNamed("main.lin").?, at);
-    try std.testing.expect(trait != null);
-    try std.testing.expectEqualStrings("Inspect", checked.program.ast.tokenText(checked.program.ast.declName(trait.?)));
-}
-
-test "a trait quick fix propagates allocation failure while finding its trait" {
-    const testing = std.testing;
-    const gpa = testing.allocator;
-    const text =
-        \\import std.hash
-        \\fn main() -> UInt8 {
-        \\    let seat = UInt64(12)
-        \\    UInt8(seat.hash() % 2)
-        \\}
-    ;
-    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
-    defer checked.deinit();
-
-    var messages = std.heap.ArenaAllocator.init(gpa);
-    defer messages.deinit();
-    const a = messages.allocator();
-    const publication = try @import("publish.zig").Publication.init(a, &checked);
-    const diagnostics = try publication.forFile(a, checked.fileNamed("main.lin").?, .@"utf-16");
-    var offered: std.ArrayList(lsp.types.CodeAction.Result) = .empty;
-    try appendUses(a, &checked, checked.fileNamed("main.lin").?, text, "file:///main.lin", diagnostics, .@"utf-16", &offered);
-    try testing.expectEqual(@as(usize, 1), offered.items.len);
-    try testing.expectEqualStrings("use hash.Hash", offered.items[0].code_action.title);
-
-    const trait = (try traitFor(gpa, &checked, checked.fileNamed("main.lin").?, @intCast(std.mem.indexOf(u8, text, "seat.hash").?))).?;
-    const writes = try writingUse(gpa, &checked.program, &checked.semantics.res, checked.fileNamed("main.lin").?, trait, text, .{ .at = 0, .lead = "", .trail = "\n" }, .@"utf-16");
-    defer gpa.free(writes.path);
-    defer gpa.free(writes.edit.newText);
-    try testing.expectEqualStrings("Hash", writes.binds);
-    try testing.expectEqualStrings("use hash.Hash\n", writes.edit.newText);
-
-    var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = 0 });
-    var failed: std.ArrayList(lsp.types.CodeAction.Result) = .empty;
-    defer failed.deinit(failing.allocator());
-    try testing.expectError(error.OutOfMemory, appendUses(
-        failing.allocator(),
-        &checked,
-        checked.fileNamed("main.lin").?,
-        text,
-        "file:///main.lin",
-        diagnostics,
-        .@"utf-16",
-        &failed,
-    ));
-}

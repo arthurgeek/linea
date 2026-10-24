@@ -15,6 +15,8 @@ const interner_mod = @import("../support/interner.zig");
 const Interner = interner_mod.Interner;
 const StringId = interner_mod.StringId;
 const Label = @import("../diagnostics/diagnostic.zig").Label;
+const diagnostic_mod = @import("../diagnostics/diagnostic.zig");
+const placement = @import("../syntax/placement.zig");
 const Code = @import("../diagnostics/diagnostic.zig").Code;
 const tokenize = @import("../lexer/lexer.zig").tokenize;
 const parse = @import("../parser/parser.zig").parse;
@@ -13747,6 +13749,76 @@ const Resolver = struct {
     /// names a type or a value is what decides which of the two this is, and
     /// the checker asks that question -- except where the answer is an enum,
     /// because a variant that names no variant is a mistake about names.
+    /// Gives the [N-Undefined] just reported for `head`, the name left of a
+    /// dot, one help and one fix per module of the root an `import` would
+    /// bind to that name: one another import loaded, or a directory of the
+    /// root's that none did. Which of two is meant is the reader's to say,
+    /// so each is offered. None where the module already writes the name,
+    /// since an import of it would be a second declaration of it.
+    ///
+    /// **Bound:** the program's modules and the root's unloaded directories,
+    /// once each; only where a head was undefined.
+    fn offerImports(self: *Resolver, head: ExprId, before: usize) std.mem.Allocator.Error!void {
+        const items = self.sink.items();
+        if (items.len != before + 1) return;
+        const reported = items[before];
+        if (reported.code != .n_undefined) return;
+        const label = reported.primaryLabel() orelse return;
+        const span = self.ast.exprSpan(head);
+        if (label.span.start != span.start or label.span.end != span.end) return;
+        const name = self.ast.tokenText(self.ast.exprMain(head));
+        if (self.current == .none or self.moduleWrites(self.current, name)) return;
+
+        const arena = self.sink.arena;
+        var routes: std.ArrayList([]const u8) = .empty;
+        for (self.program.modules, 0..) |m, index| {
+            if (m.library or !std.mem.eql(u8, m.name, name)) continue;
+            const route = self.program.importRoute(self.current, ModuleId.from(@intCast(index))) orelse continue;
+            try routes.append(arena, route.syntax);
+        }
+        for (self.program.unloaded_routes) |route| {
+            const leaf = if (std.mem.lastIndexOfScalar(u8, route, '.')) |dot| route[dot + 1 ..] else route;
+            if (std.mem.eql(u8, leaf, name)) try routes.append(arena, route);
+        }
+        if (routes.items.len == 0) return;
+
+        const notes = try arena.alloc([]const u8, reported.notes.len + routes.items.len);
+        @memcpy(notes[0..reported.notes.len], reported.notes);
+        const fixes = try arena.alloc(diagnostic_mod.Fix, reported.fixes.len + routes.items.len);
+        @memcpy(fixes[0..reported.fixes.len], reported.fixes);
+        const part = self.ast.partOf(self.ast.exprMain(head));
+        const goes = placement.placementIn(self.ast, part, part.source);
+        for (routes.items, 0..) |route, i| {
+            const at = reported.notes.len + i;
+            notes[at] = try std.fmt.allocPrint(arena, "write `import {s}`: a module is reached through the import that names it", .{route});
+            fixes[reported.fixes.len + i] = .{ .kind = .import_module, .note = @intCast(at), .edits = try arena.dupe(diagnostic_mod.Edit, &.{.{
+                .file = label.file,
+                .span = .{ .start = goes.at, .end = goes.at },
+                .text = try std.fmt.allocPrint(arena, "{s}import {s}{s}", .{ goes.lead, route, goes.trail }),
+            }}) };
+        }
+        var revised = reported;
+        revised.notes = notes;
+        revised.fixes = fixes;
+        try self.sink.revise(before, revised);
+    }
+
+    /// Whether module `m` declares `name` at its top level or one of its
+    /// imports binds it, so an import of that name would collide.
+    ///
+    /// **Bound:** the module's declarations, once.
+    fn moduleWrites(self: *const Resolver, m: ModuleId, name: []const u8) bool {
+        const decls = self.program.get(m).decls;
+        for (decls.start..decls.end) |i| {
+            const d = DeclId.at(@intCast(i));
+            if (self.ast.declOwner(d) != .none) continue;
+            const at = self.ast.declName(d);
+            if (at == .none) continue;
+            if (std.mem.eql(u8, self.ast.tokenText(at), name)) return true;
+        }
+        return false;
+    }
+
     fn selection(self: *Resolver, id: ExprId) std.mem.Allocator.Error!void {
         const base = self.ast.unaryOperand(id);
 
@@ -13758,7 +13830,9 @@ const Resolver = struct {
             }
         }
 
+        const before = self.sink.items().len;
         try self.expr(base);
+        if (self.ast.exprTag(base) == .name_ref) try self.offerImports(base, before);
         if (!self.selectsAName(id)) return;
 
         // A postfix call reaches a type's own operation, and which type the

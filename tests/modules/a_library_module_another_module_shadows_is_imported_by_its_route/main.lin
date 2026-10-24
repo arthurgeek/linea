@@ -1,0 +1,15 @@
+import util
+
+fn pick(a: String, b: String, first: Bool) -> Str where borrows(a) {
+    if first {
+        a.view()
+    } else {
+        b.view()
+    }
+}
+
+fn main() -> UInt8 {
+    defer let a = String.new()
+    defer let b = String.new()
+    util.four(UInt8(pick(a, b, false).length()))
+}

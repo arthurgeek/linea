@@ -83,6 +83,14 @@ pub const Publication = struct {
         return .{ .checked = checked, .starts = starts, .grouped = grouped };
     }
 
+    /// The compiler's diagnostics `forFile` converts for `file`, in the same
+    /// order, so the two can be read side by side.
+    pub fn reportedIn(self: Publication, file: FileId) []const *const Diagnostic {
+        const i = file.index();
+        if (self.starts.len == 0 or i >= self.starts.len - 1) return &.{};
+        return self.grouped[self.starts[i]..self.starts[i + 1]];
+    }
+
     /// Converts this file's diagnostics to LSP format in sink order, matching
     /// the order rendered by `check`. Rule names, messages, severities and
     /// spans come from the reporting pass; only their representation changes.
