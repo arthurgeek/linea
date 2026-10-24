@@ -32,6 +32,7 @@ The library tests itself.
   ok    cli.parse_ends_subcommand_matching_at_a_double_dash
   ok    cli.parse_handles_optional_and_variadic_positionals
   ok    cli.parse_handles_subcommand_variadic_positionals
+  ok    cli.parse_lets_a_declared_short_h_name_its_own_switch
   ok    cli.parse_names_a_missing_required_option_by_its_flag
   ok    cli.parse_parses_cursor_into_matches
   ok    cli.parse_reads_help_only_where_a_help_subcommand_is_registered
@@ -53,7 +54,9 @@ The library tests itself.
   ok    cli.subcommand_name_returns_subcommand_identifier
   ok    cli.subcommand_registers_nested_commands
   ok    cli.subcommand_returns_matched_subcommand_record
+  ok    cli.usage_aligns_columns_by_characters
   ok    cli.usage_formats_aligned_help_documentation
+  ok    cli.usage_lists_positionals_before_the_subcommand
   ok    cmp.unit_values_are_equivalent
   ok    collections.a_deleted_collision_bucket_is_reused_without_allocation
   ok    collections.a_drain_settles_linear_values_without_a_release_implementation
@@ -1415,4 +1418,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1412 passed, 0 failed
+  1415 passed, 0 failed
