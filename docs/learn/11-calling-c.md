@@ -944,12 +944,14 @@ type StatementHandle = UInt64
 
 extern fn sqlite3_open_v2(filename: ffi.CText, inout database: UInt64, flags: Int32, vfs: UInt64) -> Int32
 
-// `close_v2` always releases the connection, even while a statement is open.
+// With no statement open on it, `close_v2` closes the connection at once.
 extern fn sqlite3_close_v2(sink database: DatabaseHandle) -> Int32
 
 extern fn sqlite3_errmsg(read database: DatabaseHandle) -> ffi.CText where borrows(database)
 
-extern fn sqlite3_prepare_v2(database: DatabaseHandle, sql: ffi.Bytes, length: Int32, inout statement: UInt64, tail: UInt64) -> Int32
+// Preparing changes nothing on the connection but its last error, which
+// `message` copies when it is asked, so it takes the connection `read`.
+extern fn sqlite3_prepare_v2(read database: DatabaseHandle, sql: ffi.Bytes, length: Int32, inout statement: UInt64, tail: UInt64) -> Int32
 
 extern fn sqlite_shim_bind_text(statement: StatementHandle, index: Int32, text: ffi.Bytes, length: Int32) -> Int32
 
@@ -986,8 +988,13 @@ fn copied(text: ffi.CText) -> String {
 @(opaque, linear)
 struct Database { handle: DatabaseHandle }
 
+// A statement observes the connection it was prepared on, so the connection
+// cannot be closed while the statement is open.
 @(opaque, linear)
-struct Statement { handle: StatementHandle }
+struct Statement {
+    handle: StatementHandle,
+    database: borrow Database,
+}
 
 impl Database {
     pub fn open(path: Str) -> Result[Database, Error] {
@@ -1015,9 +1022,9 @@ impl Database {
         copied(sqlite3_errmsg(self.handle))
     }
 
-    // Preparing changes the connection's error state, which `message` reads,
-    // so it takes the connection `inout`.
-    pub fn prepare(inout self: Self, sql: Str) -> Result[Statement, Error] {
+    // Preparing only reads the connection, so several statements can be open
+    // on it at once. Each one borrows the connection until it is finished.
+    pub fn prepare(self: Self, sql: Str) -> Result[Statement, Error] where borrows(.Ok: self) {
         var address: UInt64 = 0
         let code = sqlite3_prepare_v2(self.handle, ffi.bytes(sql), Int32(sql.length()), &address, 0)
         if code != ok {
@@ -1026,7 +1033,7 @@ impl Database {
             }
             return .Err(.{ code = code })
         }
-        .Ok(.{ handle = StatementHandle(address) })
+        .Ok(.{ handle = StatementHandle(address), database = borrow self })
     }
 
     pub fn close(sink self: Self) {
@@ -1068,7 +1075,7 @@ impl Statement {
     }
 
     pub fn finish(sink self: Self) {
-        let Statement { handle: handle } = self
+        let Statement { handle: handle, database: _ } = self
         let _finalized = sqlite3_finalize(handle)
     }
 }
@@ -1089,14 +1096,14 @@ import sqlite
 use sqlite.Database
 use sqlite.Error
 
-fn run(inout database: Database, sql: Str) -> Result[(), Error] {
-    defer var statement = &database.prepare(sql)?
+fn run(database: Database, sql: Str) -> Result[(), Error] {
+    defer var statement = database.prepare(sql)?
     let _row = &statement.step()?
     .Ok(())
 }
 
-fn add(inout database: Database, name: Str) -> Result[(), Error] {
-    defer var insert = &database.prepare("INSERT INTO guests VALUES (?1)")?
+fn add(database: Database, name: Str) -> Result[(), Error] {
+    defer var insert = database.prepare("INSERT INTO guests VALUES (?1)")?
     &insert.bind_text(1, name)?
     let _row = &insert.step()?
     .Ok(())
@@ -1106,16 +1113,16 @@ fn main() -> Result[UInt8, io.IoError] {
     defer var database = Database.open(":memory:") else |_| {
         return .Ok(1)
     }
-    let _created = run(&database, "CREATE TABLE guests (name TEXT)") else |_| {
+    let _created = run(database, "CREATE TABLE guests (name TEXT)") else |_| {
         return .Ok(2)
     }
-    let _first = add(&database, "Grace") else |_| {
+    let _first = add(database, "Grace") else |_| {
         return .Ok(3)
     }
-    let _second = add(&database, "Ada") else |_| {
+    let _second = add(database, "Ada") else |_| {
         return .Ok(4)
     }
-    defer var names = &database.prepare("SELECT name FROM guests ORDER BY name") else |_| {
+    defer var names = database.prepare("SELECT name FROM guests ORDER BY name") else |_| {
         return .Ok(5)
     }
     while true {
@@ -1128,7 +1135,7 @@ fn main() -> Result[UInt8, io.IoError] {
         defer let name = names.text(0)
         io.println("{name}")?
     }
-    match &database.prepare("SELEC name FROM guests") {
+    match database.prepare("SELEC name FROM guests") {
         Ok(statement) => statement.finish(),
         Err(failure) => {
             defer let said = database.message()
@@ -1148,6 +1155,38 @@ SQLite refused code 1: near "SELEC": syntax error
 Nothing in `main` can misuse SQLite: it never sees a pointer, every
 connection and statement it opens is linear or released by `defer`, and every
 error is a value it must handle.
+
+A `Statement` holds `database: borrow Database`, so the connection stays in
+place while any statement prepared on it is open, much as a Rust
+`Statement<'conn>` borrows its `Connection`. A function added to the end of
+`guests/main.lin` that closes the database before finishing its statement is
+refused:
+
+```linea
+pub fn close_too_soon(sink database: Database) {
+    let names = database.prepare("SELECT name FROM guests") else |_| {
+        database.close()
+        return
+    }
+    database.close()
+    names.finish()
+}
+```
+
+<!-- guide: unchecked a fragment added to the end of guests/main.lin above, shown for the error it gets -->
+```
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> guests/main.lin:61:5
+   |
+61 |     database.close()
+   |     ^^^^^^^^ keep this place available until the last use of its observation
+62 |     names.finish()
+   |     ----- the observation is still used here
+```
+
+Finishing `names` before `database.close()` is accepted. Because no statement
+can outlive its connection, `close` never meets an open statement, and
+`sqlite3_close_v2` closes the connection at once.
 
 ## A library that wraps C
 
