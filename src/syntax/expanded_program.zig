@@ -4,6 +4,7 @@ const testing = std.testing;
 const Sink = @import("../diagnostics/sink.zig").Sink;
 const Label = @import("../diagnostics/diagnostic.zig").Label;
 const Diagnostic = @import("../diagnostics/diagnostic.zig").Diagnostic;
+const Fix = @import("../diagnostics/diagnostic.zig").Fix;
 const Interner = @import("../support/interner.zig").Interner;
 const StringId = @import("../support/interner.zig").StringId;
 const Source = @import("../support/source.zig").Source;
@@ -1356,6 +1357,23 @@ pub const ExpandedProgram = struct {
     /// the same thing about the same source are reported once.
     ///
     /// **Bound:** the sink's diagnostics, each compared by one hashed key.
+    /// `fixes` without each one with an edit into a generated file. The
+    /// array is rebuilt only when one is dropped.
+    fn sourceFixes(self: *const ExpandedProgram, arena: std.mem.Allocator, fixes: []const Fix) std.mem.Allocator.Error![]const Fix {
+        const writesGenerated = struct {
+            fn check(program: *const ExpandedProgram, fix: Fix) bool {
+                for (fix.edits) |edit| if (program.originOfGeneratedFile(edit.file) != null) return true;
+                return false;
+            }
+        }.check;
+        var any = false;
+        for (fixes) |fix| any = any or writesGenerated(self, fix);
+        if (!any) return fixes;
+        var kept: std.ArrayList(Fix) = .empty;
+        for (fixes) |fix| if (!writesGenerated(self, fix)) try kept.append(arena, fix);
+        return kept.items;
+    }
+
     pub fn collapseGeneratedDiagnostics(self: *const ExpandedProgram, sink: *Sink) std.mem.Allocator.Error!void {
         var seen: std.StringHashMapUnmanaged(void) = .empty;
         var kept: std.ArrayList(Diagnostic) = .empty;
@@ -1389,6 +1407,10 @@ pub const ExpandedProgram = struct {
                 provenance += 1;
             }
             extra.items.len = provenance;
+            // A fix editing generated code edits text the reader never
+            // wrote and a derive writes again on the next build, so it is
+            // dropped rather than moved to the derive.
+            diagnostic.fixes = try self.sourceFixes(sink.arena, diagnostic.fixes);
             if (!generated) {
                 try kept.append(sink.arena, diagnostic);
                 continue;
