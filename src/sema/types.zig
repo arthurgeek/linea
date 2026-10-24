@@ -3295,6 +3295,12 @@ pub const ImplIndex = struct {
             const entry = self.provisional.get(key_) orelse return null;
             const root = self.rootScope(entry.scope);
             if (self.scopes.items[root].dead) return null;
+            // A refusal by a measure compares against the size an enclosing
+            // frame of the same implementation recorded. Every such frame
+            // encloses the frame the refusal was decided under, so while that
+            // frame's own scope is open the measure stands; once it has
+            // closed, a later branch may have no such frame above it.
+            if (entry.measured and root != entry.scope) return null;
             try self.assumed.append(self.gpa, self.frames.items[self.scopes.items[root].frame].key);
             if (entry.measured) self.recursive_refusals += 1;
             return entry.answer;
