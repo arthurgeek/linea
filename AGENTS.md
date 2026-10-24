@@ -99,12 +99,13 @@ until it is green.
   `linea check` and never runs it; the output after it is compared when it
   shows diagnostics, and is otherwise what a run prints, held to the wording
   rule below. Every other `linea` block is a fragment, checked one of three
-  ways. `<!-- guide: edit [PATH] N | N-M | after N TEXT -->` above it
-  replaces line N or lines N-M of the nearest program above, or inserts after
-  line N, counting lines as that program is pasted; with PATH it edits that
-  file of the nearest program above that has one, which a project needs.
-  TEXT is the start of line N, trimmed, so a number that names another line
-  fails; only `after 0`, the top of the file, takes none. Consecutive
+  ways. `<!-- guide: edit [PATH] N TEXT | N-M TEXT … TEXT | after N TEXT -->`
+  above it replaces line N or lines N-M of the nearest program above, or
+  inserts after line N, counting lines as that program is pasted; with PATH it
+  edits that file of the nearest program above that has one, which a project
+  needs. Each TEXT is the start of the line it names, trimmed: line N, and for
+  a range also line M after ` … `, so a number that names another line fails;
+  only `after 0`, the top of the file, takes none. Consecutive
   edit blocks apply together, and the output after the last is what the
   edited program prints; an edit of a `check` program is only checked too.
   An edit that writes back the lines it replaces, or whose nearest program

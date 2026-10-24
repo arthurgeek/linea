@@ -1472,7 +1472,7 @@ While the closure is still going to be called, `total` is lent to it, and
 `main` may not use `total` by its own name. Print the running total between
 two weighings:
 
-<!-- guide: edit 10-11 &weigh(1200) -->
+<!-- guide: edit 10-11 &weigh(1200) … &weigh(50) -->
 ```linea
     &weigh(1200)
     io.println("{total} grams so far")?

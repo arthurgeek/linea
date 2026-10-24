@@ -1075,7 +1075,7 @@ const GuideFence = struct {
 
 const marker_open = "<!-- guide:";
 const marker_close = "-->";
-const marker_help = "the guide markers are `<!-- guide: unchecked REASON -->`, `<!-- guide: check REASON -->`, `<!-- guide: first N diagnostics -->`, `<!-- guide: excerpt PATH -->` and `<!-- guide: edit [PATH] N | N-M | after N TEXT -->`, and each is complete";
+const marker_help = "the guide markers are `<!-- guide: unchecked REASON -->`, `<!-- guide: check REASON -->`, `<!-- guide: first N diagnostics -->`, `<!-- guide: excerpt PATH -->` and `<!-- guide: edit [PATH] N TEXT | N-M TEXT … TEXT | after N TEXT -->`, and each is complete";
 
 const Marker = union(enum) {
     unchecked,
@@ -1098,6 +1098,8 @@ const Edit = struct {
     /// one it goes after, which holds the number to the line the prose
     /// means. Only an insertion at the top of a file names no line.
     anchor: ?[]const u8,
+    /// The start of the last line a range replaces, after ` … `.
+    last_anchor: ?[]const u8,
 };
 
 /// The marker a `<!-- guide: ... -->` line holds, or null when it is none of
@@ -1125,7 +1127,7 @@ fn guideMarker(bare: []const u8) ?Marker {
 
 /// The words after `edit`: an optional relative path, then `N`, `N-M` or
 /// `after N`, with lines counted from 1, then the text the named line starts
-/// with.
+/// with; a range also names its last line, after ` … `.
 fn editMarker(words: *std.mem.TokenIterator(u8, .any)) ?Edit {
     var word = words.next() orelse return null;
     var path: ?[]const u8 = null;
@@ -1135,20 +1137,30 @@ fn editMarker(words: *std.mem.TokenIterator(u8, .any)) ?Edit {
         word = words.next() orelse return null;
     }
     var lines: Edit = undefined;
+    var ranged = false;
     if (std.mem.eql(u8, word, "after")) {
         const after = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
-        lines = .{ .path = path, .start = after, .count = 0, .anchor = null };
+        lines = .{ .path = path, .start = after, .count = 0, .anchor = null, .last_anchor = null };
     } else {
         const dash = std.mem.indexOfScalar(u8, word, '-');
         const from = std.fmt.parseInt(usize, word[0 .. dash orelse word.len], 10) catch return null;
         const to = if (dash) |at| std.fmt.parseInt(usize, word[at + 1 ..], 10) catch return null else from;
         if (from == 0 or to < from) return null;
-        lines = .{ .path = path, .start = from - 1, .count = to - from + 1, .anchor = null };
+        lines = .{ .path = path, .start = from - 1, .count = to - from + 1, .anchor = null, .last_anchor = null };
+        ranged = dash != null;
     }
-    const anchor = std.mem.trim(u8, words.rest(), " \t");
-    if (anchor.len > 0) {
-        lines.anchor = anchor;
-    } else if (lines.count > 0 or lines.start > 0) return null;
+    const text = std.mem.trim(u8, words.rest(), " \t");
+    if (text.len == 0) return if (lines.count == 0 and lines.start == 0) lines else null;
+    const separator = " … ";
+    if (std.mem.indexOf(u8, text, separator)) |at| {
+        if (!ranged) return null;
+        lines.anchor = std.mem.trim(u8, text[0..at], " \t");
+        lines.last_anchor = std.mem.trim(u8, text[at + separator.len ..], " \t");
+        if (lines.anchor.?.len == 0 or lines.last_anchor.?.len == 0) return null;
+    } else {
+        if (ranged) return null;
+        lines.anchor = text;
+    }
     return lines;
 }
 
@@ -1366,8 +1378,9 @@ fn claimOutput(
 /// - `<!-- guide: edit [PATH] LINES -->` above it applies it to the nearest
 ///   program above, or with PATH to the nearest program above with the file
 ///   PATH, replacing line N, lines N-M, or inserting after line N, counted in
-///   that file as pasted, with the text line N starts with after the numbers
-///   to hold them to the line meant. Consecutive edit blocks apply together, and the
+///   that file as pasted, with the text line N starts with after the numbers,
+///   and for a range that of line M after ` … `, to hold them to the lines
+///   meant. Consecutive edit blocks apply together, and the
 ///   output after the last is what the edited program prints.
 /// - `<!-- guide: excerpt PATH -->` holds it to consecutive lines of a file
 ///   the build compiles, or of a program a linked guide page compiles.
@@ -1775,28 +1788,31 @@ fn applyEdits(
             failed = true;
             continue;
         }
-        if (edit.anchor) |anchor| {
-            // The named line: the first one replaced, or the one an insertion
-            // goes after.
-            const named = if (edit.count > 0) edit.start else edit.start - 1;
-            var split = std.mem.splitScalar(u8, base.files[file].text, '\n');
-            var at: usize = 0;
-            const text = while (split.next()) |line| : (at += 1) {
-                if (at == named) break std.mem.trim(u8, line, " \t\r");
-            } else "";
-            if (!std.mem.startsWith(u8, text, anchor)) {
-                problems.append(gpa, .{
-                    .chapter = chapter.file,
-                    .line = fence.line,
-                    .message = std.fmt.allocPrint(
-                        gpa,
-                        "line {d} of `{s}` is `{s}`, which does not start with the edit's anchor `{s}`; the anchor names the first line the edit replaces, or the line it goes after, so correct the number or the anchor",
-                        .{ named + 1, base.files[file].path, text, anchor },
-                    ) catch @panic("out of memory"),
-                }) catch @panic("out of memory");
-                failed = true;
-                continue;
-            }
+        // The named line, the first one replaced or the one an insertion goes
+        // after, and the last line of a range.
+        const named = if (edit.count > 0) edit.start else edit.start -| 1;
+        const anchors = [_]struct { line: usize, text: ?[]const u8 }{
+            .{ .line = named, .text = edit.anchor },
+            .{ .line = edit.start + edit.count -| 1, .text = edit.last_anchor },
+        };
+        const anchored = for (anchors) |anchor| {
+            const want = anchor.text orelse continue;
+            const have = std.mem.trim(u8, lineAt(base.files[file].text, anchor.line), " \t\r");
+            if (std.mem.startsWith(u8, have, want)) continue;
+            problems.append(gpa, .{
+                .chapter = chapter.file,
+                .line = fence.line,
+                .message = std.fmt.allocPrint(
+                    gpa,
+                    "line {d} of `{s}` is `{s}`, which does not start with the edit's anchor `{s}`; the anchors name the first line the edit replaces, or the line it goes after, and the last line of a range, so correct the number or the anchor",
+                    .{ anchor.line + 1, base.files[file].path, have, want },
+                ) catch @panic("out of memory"),
+            }) catch @panic("out of memory");
+            break false;
+        } else true;
+        if (!anchored) {
+            failed = true;
+            continue;
         }
         for (placed.items) |earlier| {
             if (earlier.file != file) continue;
@@ -1875,6 +1891,16 @@ fn applyEdits(
     }
     if (failed) return null;
     return .{ .files = files, .blocks = blocks.toOwnedSlice(gpa) catch @panic("out of memory") };
+}
+
+/// The 0-based line `index` of `text`, or the empty string past its end.
+fn lineAt(text: []const u8, index: usize) []const u8 {
+    var split = std.mem.splitScalar(u8, text, '\n');
+    var at: usize = 0;
+    while (split.next()) |line| : (at += 1) {
+        if (at == index) return line;
+    }
+    return "";
 }
 
 /// Why `fragment` is not a run of consecutive lines of `path` under

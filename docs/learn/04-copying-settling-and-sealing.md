@@ -709,7 +709,7 @@ fn refund(sink ticket: Ticket) -> Result[(), io.IoError] {
 }
 ```
 
-<!-- guide: edit 16-18 if doors_open { -->
+<!-- guide: edit 16-18 if doors_open { … } -->
 ```linea
     if doors_open {
         redeem(ticket)?
@@ -853,7 +853,7 @@ cents. Her second is not, so its 1500 cents return to her.
 Forget the `rollback` branch and the money would leave Alice's account without
 reaching anyone. That program does not compile:
 
-<!-- guide: edit 37-41 Some(transfer) => if approved { -->
+<!-- guide: edit 37-41 Some(transfer) => if approved { … }, -->
 ```linea
         Some(transfer) => if approved {
             commit(transfer, &to)
@@ -1115,7 +1115,7 @@ If every path takes the value, the `defer` can never run, and that is a
 mistake worth hearing about. Replace `tidy` with this version, which archives
 every note:
 
-<!-- guide: edit 16-24 fn tidy(sink note: Note) -> Result[(), -->
+<!-- guide: edit 16-24 fn tidy(sink note: Note) -> Result[(), … } -->
 ```linea
 fn tidy(sink note: Note) -> Result[(), io.IoError] {
     defer note.release()
@@ -1253,7 +1253,7 @@ the arms to agree. There are two ways to make them agree. The `?` form above
 leaves the function before the commit when the check fails. Or the committing
 arm can leave the function itself:
 
-<!-- guide: edit 20-28 fn send(cents: UInt64, limit: UInt64) -->
+<!-- guide: edit 20-28 fn send(cents: UInt64, limit: UInt64) … } -->
 ```linea
 fn send(cents: UInt64, limit: UInt64) -> UInt64 {
     let transfer = Transfer { cents }

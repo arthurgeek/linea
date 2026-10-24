@@ -141,7 +141,7 @@ afterwards. The shorter-looking `server.close().is_ok() && client.close().is_ok(
 is refused, and the reason is worth seeing. Put this line in place of the three
 `close` lets:
 
-<!-- guide: edit 60-62 let server_closed = server.close() -->
+<!-- guide: edit 60-62 let server_closed = server.close() … let listener_closed = listener.close() -->
 ```linea
     let closed = server.close().is_ok() && client.close().is_ok() && listener.close().is_ok()
 ```
@@ -401,7 +401,7 @@ changes it on every call, and `into_captures()` hands the counter back when
 `serve` is done ([Calling things](02-calling-things.md#a-closure-that-changes-what-it-owns)
 shows the same closure on its own). Only the handler in `main` changes:
 
-<!-- guide: edit greeting.lin 55-56 var handler = welcome -->
+<!-- guide: edit greeting.lin 55-56 var handler = welcome … let ended = net.serve(listener, -->
 ```linea
     var handler = inout [sink greeted = UInt64(0)] |sink connection: net.Connection, peer: net.Address| {
         greeted += 1

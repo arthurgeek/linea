@@ -2312,7 +2312,7 @@ test "the guide gate: an edit marker applies the fragment to the program above a
         \\
         \\A second edit of the same program, which must check:
         \\
-        \\<!-- guide: edit 2-3 let a = 1 -->
+        \\<!-- guide: edit 2-3 let a = 1 … let b = 2 -->
         \\```linea
         \\    let a = 3
         \\    let b = 4
@@ -2510,6 +2510,26 @@ test "the guide gate: an edit's anchor holds its line number to the line it mean
     try testing.expectEqual(@as(usize, 0), right_line.problems.len);
     try testing.expectEqual(@as(usize, 2), right_line.programs.len);
 
+    // A range names its last line too, so an end that still compiles is
+    // caught.
+    const wrong_end = readFixture(gpa, program ++
+        \\<!-- guide: edit 4-6 // greet … io.println("hi") -->
+        \\```linea
+        \\    io.println("hello")?
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), wrong_end.problems.len);
+    try testing.expect(std.mem.indexOf(u8, wrong_end.problems[0].message, ".Ok(0)") != null);
+    const right_end = readFixture(gpa, program ++
+        \\<!-- guide: edit 4-5 // greet … io.println("hi") -->
+        \\```linea
+        \\    io.println("hello")?
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), right_end.problems.len);
+
     // An insertion names the line it goes after.
     const insertion = readFixture(gpa, program ++
         \\<!-- guide: edit after 5 .Ok(0) -->
@@ -2544,7 +2564,7 @@ test "the guide gate: an edit marker must name lines of a program above it" {
         \\}
         \\```
         \\
-        \\<!-- guide: edit 2-9 0 -->
+        \\<!-- guide: edit 2-9 0 … } -->
         \\```linea
         \\    1
         \\```
@@ -2561,7 +2581,7 @@ test "the guide gate: an edit marker must name lines of a program above it" {
         \\}
         \\```
         \\
-        \\<!-- guide: edit 1-2 fn main -->
+        \\<!-- guide: edit 1-2 fn main … 0 -->
         \\```linea
         \\fn main() -> UInt8 {
         \\```
@@ -2582,6 +2602,8 @@ test "the guide gate: an edit marker must name lines of a program above it" {
         "<!-- guide: edit 0 -->",
         "<!-- guide: edit after -->",
         "<!-- guide: edit after two -->",
+        "<!-- guide: edit 2-3 0 -->",
+        "<!-- guide: edit 2 0 … 0 -->",
         "<!-- guide: edit 2 -->",
         "<!-- guide: edit after 2 -->",
         "<!-- guide: edit /abs.lin 2 -->",
