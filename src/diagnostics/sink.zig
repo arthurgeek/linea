@@ -71,7 +71,7 @@ pub const Sink = struct {
         within.labels = try cutLabels(self.arena, d.labels);
         within.notes = try cutNotes(self.arena, d.notes);
         within.remarks = try cutNotes(self.arena, d.remarks);
-        within.fixes = try boundFixes(self.arena, d.fixes);
+        within.fixes = try boundFixes(self.arena, d.fixes, d.notes.len);
         return within;
     }
 
@@ -175,7 +175,13 @@ fn cut(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
 /// An edit is source a tool writes, and half a clause does not parse, so a
 /// fix is kept whole or dropped rather than cut; its help is a note, and is
 /// cut as any note is. The array is rebuilt only when a fix is dropped.
-fn boundFixes(arena: std.mem.Allocator, fixes: []const Fix) ![]const Fix {
+///
+/// Every diagnostic `add` and `revise` store passes here, so this is where a
+/// fix is held to what `Fix` promises: its `note` is one of the `notes`
+/// count helps, and its edits never overlap. A fix breaking either is the
+/// compiler's mistake, not the program's.
+fn boundFixes(arena: std.mem.Allocator, fixes: []const Fix, notes: usize) ![]const Fix {
+    for (fixes) |fix| assertHolds(fix, notes);
     const within = struct {
         fn check(fix: Fix) bool {
             for (fix.edits) |e| if (e.text.len > max_text_bytes) return false;
@@ -188,6 +194,21 @@ fn boundFixes(arena: std.mem.Allocator, fixes: []const Fix) ![]const Fix {
     var kept: std.ArrayList(Fix) = .empty;
     for (fixes) |fix| if (within(fix)) try kept.append(arena, fix);
     return kept.items;
+}
+
+/// That `fix` writes one of `notes` helps, or its primary label's, and that
+/// no two of its edits touch the same bytes of one file. Two insertions at
+/// one byte overlap too: which is written first is a choice the fix did not
+/// make.
+///
+/// **Bound:** the square of the fix's edits, a handful.
+fn assertHolds(fix: Fix, notes: usize) void {
+    if (fix.note) |at| std.debug.assert(at < notes);
+    for (fix.edits, 0..) |a, i| for (fix.edits[i + 1 ..]) |b| {
+        if (a.file != b.file) continue;
+        const overlap = a.span.start == b.span.start or (a.span.start < b.span.end and b.span.start < a.span.end);
+        std.debug.assert(!overlap);
+    };
 }
 
 /// The labels, with every message within the bound.
@@ -353,7 +374,7 @@ test "every text a diagnostic carries is one the sink cuts" {
     // one would leave a diagnostic naming a place that cannot be found.
     const expected_diagnostic = [_][]const u8{ "severity", "code", "message", "labels", "notes", "remarks", "fixes" };
     const expected_label = [_][]const u8{ "file", "span", "message", "style" };
-    const expected_fix = [_][]const u8{ "note", "edits" };
+    const expected_fix = [_][]const u8{ "kind", "note", "edits" };
     const expected_edit = [_][]const u8{ "file", "span", "text" };
 
     const d_fields = @typeInfo(Diagnostic).@"struct".fields;
@@ -383,14 +404,14 @@ test "a fix with an edit over the bound is dropped whole, and its help kept" {
     @memset(long, 'a');
     const short = "a" ** max_text_bytes;
     const kept: []const Edit = &.{.{ .file = .from(0), .span = span, .text = short }};
-    const over: []const Edit = &.{ .{ .file = .from(0), .span = span, .text = short }, .{ .file = .from(0), .span = span, .text = long } };
+    const over: []const Edit = &.{ .{ .file = .from(0), .span = span, .text = short }, .{ .file = .from(0), .span = .{ .start = 1, .end = 1 }, .text = long } };
 
     var sink = Sink.init(a);
     try sink.add(.{
         .severity = .err,
         .message = "boom",
         .notes = &.{ "write the clause", "write the other clause" },
-        .fixes = &.{ .{ .note = 0, .edits = kept }, .{ .note = 1, .edits = over } },
+        .fixes = &.{ .{ .kind = .where_clause, .note = 0, .edits = kept }, .{ .kind = .where_clause, .note = 1, .edits = over } },
     });
 
     const d = sink.items()[0];
