@@ -1,0 +1,1015 @@
+// Generic structures may hold one another in their fields, in a ring as long
+// as a program writes. Each structure here holds the next two through a
+// container that stores none of them, so a `Ring0[UInt8]` is one byte wide,
+// and a generic function reads a field of one at its own parameter.
+struct Many[phantom T] {}
+
+struct Ring0[X] { x: X, next: Many[Ring1[X]], skip: Many[Ring2[X]] }
+
+struct Ring1[X] { x: X, next: Many[Ring2[X]], skip: Many[Ring3[X]] }
+
+struct Ring2[X] { x: X, next: Many[Ring3[X]], skip: Many[Ring4[X]] }
+
+struct Ring3[X] { x: X, next: Many[Ring4[X]], skip: Many[Ring5[X]] }
+
+struct Ring4[X] { x: X, next: Many[Ring5[X]], skip: Many[Ring6[X]] }
+
+struct Ring5[X] { x: X, next: Many[Ring6[X]], skip: Many[Ring7[X]] }
+
+struct Ring6[X] { x: X, next: Many[Ring7[X]], skip: Many[Ring8[X]] }
+
+struct Ring7[X] { x: X, next: Many[Ring8[X]], skip: Many[Ring9[X]] }
+
+struct Ring8[X] { x: X, next: Many[Ring9[X]], skip: Many[Ring10[X]] }
+
+struct Ring9[X] { x: X, next: Many[Ring10[X]], skip: Many[Ring11[X]] }
+
+struct Ring10[X] { x: X, next: Many[Ring11[X]], skip: Many[Ring12[X]] }
+
+struct Ring11[X] { x: X, next: Many[Ring12[X]], skip: Many[Ring13[X]] }
+
+struct Ring12[X] { x: X, next: Many[Ring13[X]], skip: Many[Ring14[X]] }
+
+struct Ring13[X] { x: X, next: Many[Ring14[X]], skip: Many[Ring15[X]] }
+
+struct Ring14[X] { x: X, next: Many[Ring15[X]], skip: Many[Ring16[X]] }
+
+struct Ring15[X] { x: X, next: Many[Ring16[X]], skip: Many[Ring17[X]] }
+
+struct Ring16[X] { x: X, next: Many[Ring17[X]], skip: Many[Ring18[X]] }
+
+struct Ring17[X] { x: X, next: Many[Ring18[X]], skip: Many[Ring19[X]] }
+
+struct Ring18[X] { x: X, next: Many[Ring19[X]], skip: Many[Ring20[X]] }
+
+struct Ring19[X] { x: X, next: Many[Ring20[X]], skip: Many[Ring21[X]] }
+
+struct Ring20[X] { x: X, next: Many[Ring21[X]], skip: Many[Ring22[X]] }
+
+struct Ring21[X] { x: X, next: Many[Ring22[X]], skip: Many[Ring23[X]] }
+
+struct Ring22[X] { x: X, next: Many[Ring23[X]], skip: Many[Ring24[X]] }
+
+struct Ring23[X] { x: X, next: Many[Ring24[X]], skip: Many[Ring25[X]] }
+
+struct Ring24[X] { x: X, next: Many[Ring25[X]], skip: Many[Ring26[X]] }
+
+struct Ring25[X] { x: X, next: Many[Ring26[X]], skip: Many[Ring27[X]] }
+
+struct Ring26[X] { x: X, next: Many[Ring27[X]], skip: Many[Ring28[X]] }
+
+struct Ring27[X] { x: X, next: Many[Ring28[X]], skip: Many[Ring29[X]] }
+
+struct Ring28[X] { x: X, next: Many[Ring29[X]], skip: Many[Ring30[X]] }
+
+struct Ring29[X] { x: X, next: Many[Ring30[X]], skip: Many[Ring31[X]] }
+
+struct Ring30[X] { x: X, next: Many[Ring31[X]], skip: Many[Ring32[X]] }
+
+struct Ring31[X] { x: X, next: Many[Ring32[X]], skip: Many[Ring33[X]] }
+
+struct Ring32[X] { x: X, next: Many[Ring33[X]], skip: Many[Ring34[X]] }
+
+struct Ring33[X] { x: X, next: Many[Ring34[X]], skip: Many[Ring35[X]] }
+
+struct Ring34[X] { x: X, next: Many[Ring35[X]], skip: Many[Ring36[X]] }
+
+struct Ring35[X] { x: X, next: Many[Ring36[X]], skip: Many[Ring37[X]] }
+
+struct Ring36[X] { x: X, next: Many[Ring37[X]], skip: Many[Ring38[X]] }
+
+struct Ring37[X] { x: X, next: Many[Ring38[X]], skip: Many[Ring39[X]] }
+
+struct Ring38[X] { x: X, next: Many[Ring39[X]], skip: Many[Ring40[X]] }
+
+struct Ring39[X] { x: X, next: Many[Ring40[X]], skip: Many[Ring41[X]] }
+
+struct Ring40[X] { x: X, next: Many[Ring41[X]], skip: Many[Ring42[X]] }
+
+struct Ring41[X] { x: X, next: Many[Ring42[X]], skip: Many[Ring43[X]] }
+
+struct Ring42[X] { x: X, next: Many[Ring43[X]], skip: Many[Ring44[X]] }
+
+struct Ring43[X] { x: X, next: Many[Ring44[X]], skip: Many[Ring45[X]] }
+
+struct Ring44[X] { x: X, next: Many[Ring45[X]], skip: Many[Ring46[X]] }
+
+struct Ring45[X] { x: X, next: Many[Ring46[X]], skip: Many[Ring47[X]] }
+
+struct Ring46[X] { x: X, next: Many[Ring47[X]], skip: Many[Ring48[X]] }
+
+struct Ring47[X] { x: X, next: Many[Ring48[X]], skip: Many[Ring49[X]] }
+
+struct Ring48[X] { x: X, next: Many[Ring49[X]], skip: Many[Ring50[X]] }
+
+struct Ring49[X] { x: X, next: Many[Ring50[X]], skip: Many[Ring51[X]] }
+
+struct Ring50[X] { x: X, next: Many[Ring51[X]], skip: Many[Ring52[X]] }
+
+struct Ring51[X] { x: X, next: Many[Ring52[X]], skip: Many[Ring53[X]] }
+
+struct Ring52[X] { x: X, next: Many[Ring53[X]], skip: Many[Ring54[X]] }
+
+struct Ring53[X] { x: X, next: Many[Ring54[X]], skip: Many[Ring55[X]] }
+
+struct Ring54[X] { x: X, next: Many[Ring55[X]], skip: Many[Ring56[X]] }
+
+struct Ring55[X] { x: X, next: Many[Ring56[X]], skip: Many[Ring57[X]] }
+
+struct Ring56[X] { x: X, next: Many[Ring57[X]], skip: Many[Ring58[X]] }
+
+struct Ring57[X] { x: X, next: Many[Ring58[X]], skip: Many[Ring59[X]] }
+
+struct Ring58[X] { x: X, next: Many[Ring59[X]], skip: Many[Ring60[X]] }
+
+struct Ring59[X] { x: X, next: Many[Ring60[X]], skip: Many[Ring61[X]] }
+
+struct Ring60[X] { x: X, next: Many[Ring61[X]], skip: Many[Ring62[X]] }
+
+struct Ring61[X] { x: X, next: Many[Ring62[X]], skip: Many[Ring63[X]] }
+
+struct Ring62[X] { x: X, next: Many[Ring63[X]], skip: Many[Ring64[X]] }
+
+struct Ring63[X] { x: X, next: Many[Ring64[X]], skip: Many[Ring65[X]] }
+
+struct Ring64[X] { x: X, next: Many[Ring65[X]], skip: Many[Ring66[X]] }
+
+struct Ring65[X] { x: X, next: Many[Ring66[X]], skip: Many[Ring67[X]] }
+
+struct Ring66[X] { x: X, next: Many[Ring67[X]], skip: Many[Ring68[X]] }
+
+struct Ring67[X] { x: X, next: Many[Ring68[X]], skip: Many[Ring69[X]] }
+
+struct Ring68[X] { x: X, next: Many[Ring69[X]], skip: Many[Ring70[X]] }
+
+struct Ring69[X] { x: X, next: Many[Ring70[X]], skip: Many[Ring71[X]] }
+
+struct Ring70[X] { x: X, next: Many[Ring71[X]], skip: Many[Ring72[X]] }
+
+struct Ring71[X] { x: X, next: Many[Ring72[X]], skip: Many[Ring73[X]] }
+
+struct Ring72[X] { x: X, next: Many[Ring73[X]], skip: Many[Ring74[X]] }
+
+struct Ring73[X] { x: X, next: Many[Ring74[X]], skip: Many[Ring75[X]] }
+
+struct Ring74[X] { x: X, next: Many[Ring75[X]], skip: Many[Ring76[X]] }
+
+struct Ring75[X] { x: X, next: Many[Ring76[X]], skip: Many[Ring77[X]] }
+
+struct Ring76[X] { x: X, next: Many[Ring77[X]], skip: Many[Ring78[X]] }
+
+struct Ring77[X] { x: X, next: Many[Ring78[X]], skip: Many[Ring79[X]] }
+
+struct Ring78[X] { x: X, next: Many[Ring79[X]], skip: Many[Ring80[X]] }
+
+struct Ring79[X] { x: X, next: Many[Ring80[X]], skip: Many[Ring81[X]] }
+
+struct Ring80[X] { x: X, next: Many[Ring81[X]], skip: Many[Ring82[X]] }
+
+struct Ring81[X] { x: X, next: Many[Ring82[X]], skip: Many[Ring83[X]] }
+
+struct Ring82[X] { x: X, next: Many[Ring83[X]], skip: Many[Ring84[X]] }
+
+struct Ring83[X] { x: X, next: Many[Ring84[X]], skip: Many[Ring85[X]] }
+
+struct Ring84[X] { x: X, next: Many[Ring85[X]], skip: Many[Ring86[X]] }
+
+struct Ring85[X] { x: X, next: Many[Ring86[X]], skip: Many[Ring87[X]] }
+
+struct Ring86[X] { x: X, next: Many[Ring87[X]], skip: Many[Ring88[X]] }
+
+struct Ring87[X] { x: X, next: Many[Ring88[X]], skip: Many[Ring89[X]] }
+
+struct Ring88[X] { x: X, next: Many[Ring89[X]], skip: Many[Ring90[X]] }
+
+struct Ring89[X] { x: X, next: Many[Ring90[X]], skip: Many[Ring91[X]] }
+
+struct Ring90[X] { x: X, next: Many[Ring91[X]], skip: Many[Ring92[X]] }
+
+struct Ring91[X] { x: X, next: Many[Ring92[X]], skip: Many[Ring93[X]] }
+
+struct Ring92[X] { x: X, next: Many[Ring93[X]], skip: Many[Ring94[X]] }
+
+struct Ring93[X] { x: X, next: Many[Ring94[X]], skip: Many[Ring95[X]] }
+
+struct Ring94[X] { x: X, next: Many[Ring95[X]], skip: Many[Ring96[X]] }
+
+struct Ring95[X] { x: X, next: Many[Ring96[X]], skip: Many[Ring97[X]] }
+
+struct Ring96[X] { x: X, next: Many[Ring97[X]], skip: Many[Ring98[X]] }
+
+struct Ring97[X] { x: X, next: Many[Ring98[X]], skip: Many[Ring99[X]] }
+
+struct Ring98[X] { x: X, next: Many[Ring99[X]], skip: Many[Ring100[X]] }
+
+struct Ring99[X] { x: X, next: Many[Ring100[X]], skip: Many[Ring101[X]] }
+
+struct Ring100[X] { x: X, next: Many[Ring101[X]], skip: Many[Ring102[X]] }
+
+struct Ring101[X] { x: X, next: Many[Ring102[X]], skip: Many[Ring103[X]] }
+
+struct Ring102[X] { x: X, next: Many[Ring103[X]], skip: Many[Ring104[X]] }
+
+struct Ring103[X] { x: X, next: Many[Ring104[X]], skip: Many[Ring105[X]] }
+
+struct Ring104[X] { x: X, next: Many[Ring105[X]], skip: Many[Ring106[X]] }
+
+struct Ring105[X] { x: X, next: Many[Ring106[X]], skip: Many[Ring107[X]] }
+
+struct Ring106[X] { x: X, next: Many[Ring107[X]], skip: Many[Ring108[X]] }
+
+struct Ring107[X] { x: X, next: Many[Ring108[X]], skip: Many[Ring109[X]] }
+
+struct Ring108[X] { x: X, next: Many[Ring109[X]], skip: Many[Ring110[X]] }
+
+struct Ring109[X] { x: X, next: Many[Ring110[X]], skip: Many[Ring111[X]] }
+
+struct Ring110[X] { x: X, next: Many[Ring111[X]], skip: Many[Ring112[X]] }
+
+struct Ring111[X] { x: X, next: Many[Ring112[X]], skip: Many[Ring113[X]] }
+
+struct Ring112[X] { x: X, next: Many[Ring113[X]], skip: Many[Ring114[X]] }
+
+struct Ring113[X] { x: X, next: Many[Ring114[X]], skip: Many[Ring115[X]] }
+
+struct Ring114[X] { x: X, next: Many[Ring115[X]], skip: Many[Ring116[X]] }
+
+struct Ring115[X] { x: X, next: Many[Ring116[X]], skip: Many[Ring117[X]] }
+
+struct Ring116[X] { x: X, next: Many[Ring117[X]], skip: Many[Ring118[X]] }
+
+struct Ring117[X] { x: X, next: Many[Ring118[X]], skip: Many[Ring119[X]] }
+
+struct Ring118[X] { x: X, next: Many[Ring119[X]], skip: Many[Ring120[X]] }
+
+struct Ring119[X] { x: X, next: Many[Ring120[X]], skip: Many[Ring121[X]] }
+
+struct Ring120[X] { x: X, next: Many[Ring121[X]], skip: Many[Ring122[X]] }
+
+struct Ring121[X] { x: X, next: Many[Ring122[X]], skip: Many[Ring123[X]] }
+
+struct Ring122[X] { x: X, next: Many[Ring123[X]], skip: Many[Ring124[X]] }
+
+struct Ring123[X] { x: X, next: Many[Ring124[X]], skip: Many[Ring125[X]] }
+
+struct Ring124[X] { x: X, next: Many[Ring125[X]], skip: Many[Ring126[X]] }
+
+struct Ring125[X] { x: X, next: Many[Ring126[X]], skip: Many[Ring127[X]] }
+
+struct Ring126[X] { x: X, next: Many[Ring127[X]], skip: Many[Ring128[X]] }
+
+struct Ring127[X] { x: X, next: Many[Ring128[X]], skip: Many[Ring129[X]] }
+
+struct Ring128[X] { x: X, next: Many[Ring129[X]], skip: Many[Ring130[X]] }
+
+struct Ring129[X] { x: X, next: Many[Ring130[X]], skip: Many[Ring131[X]] }
+
+struct Ring130[X] { x: X, next: Many[Ring131[X]], skip: Many[Ring132[X]] }
+
+struct Ring131[X] { x: X, next: Many[Ring132[X]], skip: Many[Ring133[X]] }
+
+struct Ring132[X] { x: X, next: Many[Ring133[X]], skip: Many[Ring134[X]] }
+
+struct Ring133[X] { x: X, next: Many[Ring134[X]], skip: Many[Ring135[X]] }
+
+struct Ring134[X] { x: X, next: Many[Ring135[X]], skip: Many[Ring136[X]] }
+
+struct Ring135[X] { x: X, next: Many[Ring136[X]], skip: Many[Ring137[X]] }
+
+struct Ring136[X] { x: X, next: Many[Ring137[X]], skip: Many[Ring138[X]] }
+
+struct Ring137[X] { x: X, next: Many[Ring138[X]], skip: Many[Ring139[X]] }
+
+struct Ring138[X] { x: X, next: Many[Ring139[X]], skip: Many[Ring140[X]] }
+
+struct Ring139[X] { x: X, next: Many[Ring140[X]], skip: Many[Ring141[X]] }
+
+struct Ring140[X] { x: X, next: Many[Ring141[X]], skip: Many[Ring142[X]] }
+
+struct Ring141[X] { x: X, next: Many[Ring142[X]], skip: Many[Ring143[X]] }
+
+struct Ring142[X] { x: X, next: Many[Ring143[X]], skip: Many[Ring144[X]] }
+
+struct Ring143[X] { x: X, next: Many[Ring144[X]], skip: Many[Ring145[X]] }
+
+struct Ring144[X] { x: X, next: Many[Ring145[X]], skip: Many[Ring146[X]] }
+
+struct Ring145[X] { x: X, next: Many[Ring146[X]], skip: Many[Ring147[X]] }
+
+struct Ring146[X] { x: X, next: Many[Ring147[X]], skip: Many[Ring148[X]] }
+
+struct Ring147[X] { x: X, next: Many[Ring148[X]], skip: Many[Ring149[X]] }
+
+struct Ring148[X] { x: X, next: Many[Ring149[X]], skip: Many[Ring150[X]] }
+
+struct Ring149[X] { x: X, next: Many[Ring150[X]], skip: Many[Ring151[X]] }
+
+struct Ring150[X] { x: X, next: Many[Ring151[X]], skip: Many[Ring152[X]] }
+
+struct Ring151[X] { x: X, next: Many[Ring152[X]], skip: Many[Ring153[X]] }
+
+struct Ring152[X] { x: X, next: Many[Ring153[X]], skip: Many[Ring154[X]] }
+
+struct Ring153[X] { x: X, next: Many[Ring154[X]], skip: Many[Ring155[X]] }
+
+struct Ring154[X] { x: X, next: Many[Ring155[X]], skip: Many[Ring156[X]] }
+
+struct Ring155[X] { x: X, next: Many[Ring156[X]], skip: Many[Ring157[X]] }
+
+struct Ring156[X] { x: X, next: Many[Ring157[X]], skip: Many[Ring158[X]] }
+
+struct Ring157[X] { x: X, next: Many[Ring158[X]], skip: Many[Ring159[X]] }
+
+struct Ring158[X] { x: X, next: Many[Ring159[X]], skip: Many[Ring160[X]] }
+
+struct Ring159[X] { x: X, next: Many[Ring160[X]], skip: Many[Ring161[X]] }
+
+struct Ring160[X] { x: X, next: Many[Ring161[X]], skip: Many[Ring162[X]] }
+
+struct Ring161[X] { x: X, next: Many[Ring162[X]], skip: Many[Ring163[X]] }
+
+struct Ring162[X] { x: X, next: Many[Ring163[X]], skip: Many[Ring164[X]] }
+
+struct Ring163[X] { x: X, next: Many[Ring164[X]], skip: Many[Ring165[X]] }
+
+struct Ring164[X] { x: X, next: Many[Ring165[X]], skip: Many[Ring166[X]] }
+
+struct Ring165[X] { x: X, next: Many[Ring166[X]], skip: Many[Ring167[X]] }
+
+struct Ring166[X] { x: X, next: Many[Ring167[X]], skip: Many[Ring168[X]] }
+
+struct Ring167[X] { x: X, next: Many[Ring168[X]], skip: Many[Ring169[X]] }
+
+struct Ring168[X] { x: X, next: Many[Ring169[X]], skip: Many[Ring170[X]] }
+
+struct Ring169[X] { x: X, next: Many[Ring170[X]], skip: Many[Ring171[X]] }
+
+struct Ring170[X] { x: X, next: Many[Ring171[X]], skip: Many[Ring172[X]] }
+
+struct Ring171[X] { x: X, next: Many[Ring172[X]], skip: Many[Ring173[X]] }
+
+struct Ring172[X] { x: X, next: Many[Ring173[X]], skip: Many[Ring174[X]] }
+
+struct Ring173[X] { x: X, next: Many[Ring174[X]], skip: Many[Ring175[X]] }
+
+struct Ring174[X] { x: X, next: Many[Ring175[X]], skip: Many[Ring176[X]] }
+
+struct Ring175[X] { x: X, next: Many[Ring176[X]], skip: Many[Ring177[X]] }
+
+struct Ring176[X] { x: X, next: Many[Ring177[X]], skip: Many[Ring178[X]] }
+
+struct Ring177[X] { x: X, next: Many[Ring178[X]], skip: Many[Ring179[X]] }
+
+struct Ring178[X] { x: X, next: Many[Ring179[X]], skip: Many[Ring180[X]] }
+
+struct Ring179[X] { x: X, next: Many[Ring180[X]], skip: Many[Ring181[X]] }
+
+struct Ring180[X] { x: X, next: Many[Ring181[X]], skip: Many[Ring182[X]] }
+
+struct Ring181[X] { x: X, next: Many[Ring182[X]], skip: Many[Ring183[X]] }
+
+struct Ring182[X] { x: X, next: Many[Ring183[X]], skip: Many[Ring184[X]] }
+
+struct Ring183[X] { x: X, next: Many[Ring184[X]], skip: Many[Ring185[X]] }
+
+struct Ring184[X] { x: X, next: Many[Ring185[X]], skip: Many[Ring186[X]] }
+
+struct Ring185[X] { x: X, next: Many[Ring186[X]], skip: Many[Ring187[X]] }
+
+struct Ring186[X] { x: X, next: Many[Ring187[X]], skip: Many[Ring188[X]] }
+
+struct Ring187[X] { x: X, next: Many[Ring188[X]], skip: Many[Ring189[X]] }
+
+struct Ring188[X] { x: X, next: Many[Ring189[X]], skip: Many[Ring190[X]] }
+
+struct Ring189[X] { x: X, next: Many[Ring190[X]], skip: Many[Ring191[X]] }
+
+struct Ring190[X] { x: X, next: Many[Ring191[X]], skip: Many[Ring192[X]] }
+
+struct Ring191[X] { x: X, next: Many[Ring192[X]], skip: Many[Ring193[X]] }
+
+struct Ring192[X] { x: X, next: Many[Ring193[X]], skip: Many[Ring194[X]] }
+
+struct Ring193[X] { x: X, next: Many[Ring194[X]], skip: Many[Ring195[X]] }
+
+struct Ring194[X] { x: X, next: Many[Ring195[X]], skip: Many[Ring196[X]] }
+
+struct Ring195[X] { x: X, next: Many[Ring196[X]], skip: Many[Ring197[X]] }
+
+struct Ring196[X] { x: X, next: Many[Ring197[X]], skip: Many[Ring198[X]] }
+
+struct Ring197[X] { x: X, next: Many[Ring198[X]], skip: Many[Ring199[X]] }
+
+struct Ring198[X] { x: X, next: Many[Ring199[X]], skip: Many[Ring200[X]] }
+
+struct Ring199[X] { x: X, next: Many[Ring200[X]], skip: Many[Ring201[X]] }
+
+struct Ring200[X] { x: X, next: Many[Ring201[X]], skip: Many[Ring202[X]] }
+
+struct Ring201[X] { x: X, next: Many[Ring202[X]], skip: Many[Ring203[X]] }
+
+struct Ring202[X] { x: X, next: Many[Ring203[X]], skip: Many[Ring204[X]] }
+
+struct Ring203[X] { x: X, next: Many[Ring204[X]], skip: Many[Ring205[X]] }
+
+struct Ring204[X] { x: X, next: Many[Ring205[X]], skip: Many[Ring206[X]] }
+
+struct Ring205[X] { x: X, next: Many[Ring206[X]], skip: Many[Ring207[X]] }
+
+struct Ring206[X] { x: X, next: Many[Ring207[X]], skip: Many[Ring208[X]] }
+
+struct Ring207[X] { x: X, next: Many[Ring208[X]], skip: Many[Ring209[X]] }
+
+struct Ring208[X] { x: X, next: Many[Ring209[X]], skip: Many[Ring210[X]] }
+
+struct Ring209[X] { x: X, next: Many[Ring210[X]], skip: Many[Ring211[X]] }
+
+struct Ring210[X] { x: X, next: Many[Ring211[X]], skip: Many[Ring212[X]] }
+
+struct Ring211[X] { x: X, next: Many[Ring212[X]], skip: Many[Ring213[X]] }
+
+struct Ring212[X] { x: X, next: Many[Ring213[X]], skip: Many[Ring214[X]] }
+
+struct Ring213[X] { x: X, next: Many[Ring214[X]], skip: Many[Ring215[X]] }
+
+struct Ring214[X] { x: X, next: Many[Ring215[X]], skip: Many[Ring216[X]] }
+
+struct Ring215[X] { x: X, next: Many[Ring216[X]], skip: Many[Ring217[X]] }
+
+struct Ring216[X] { x: X, next: Many[Ring217[X]], skip: Many[Ring218[X]] }
+
+struct Ring217[X] { x: X, next: Many[Ring218[X]], skip: Many[Ring219[X]] }
+
+struct Ring218[X] { x: X, next: Many[Ring219[X]], skip: Many[Ring220[X]] }
+
+struct Ring219[X] { x: X, next: Many[Ring220[X]], skip: Many[Ring221[X]] }
+
+struct Ring220[X] { x: X, next: Many[Ring221[X]], skip: Many[Ring222[X]] }
+
+struct Ring221[X] { x: X, next: Many[Ring222[X]], skip: Many[Ring223[X]] }
+
+struct Ring222[X] { x: X, next: Many[Ring223[X]], skip: Many[Ring224[X]] }
+
+struct Ring223[X] { x: X, next: Many[Ring224[X]], skip: Many[Ring225[X]] }
+
+struct Ring224[X] { x: X, next: Many[Ring225[X]], skip: Many[Ring226[X]] }
+
+struct Ring225[X] { x: X, next: Many[Ring226[X]], skip: Many[Ring227[X]] }
+
+struct Ring226[X] { x: X, next: Many[Ring227[X]], skip: Many[Ring228[X]] }
+
+struct Ring227[X] { x: X, next: Many[Ring228[X]], skip: Many[Ring229[X]] }
+
+struct Ring228[X] { x: X, next: Many[Ring229[X]], skip: Many[Ring230[X]] }
+
+struct Ring229[X] { x: X, next: Many[Ring230[X]], skip: Many[Ring231[X]] }
+
+struct Ring230[X] { x: X, next: Many[Ring231[X]], skip: Many[Ring232[X]] }
+
+struct Ring231[X] { x: X, next: Many[Ring232[X]], skip: Many[Ring233[X]] }
+
+struct Ring232[X] { x: X, next: Many[Ring233[X]], skip: Many[Ring234[X]] }
+
+struct Ring233[X] { x: X, next: Many[Ring234[X]], skip: Many[Ring235[X]] }
+
+struct Ring234[X] { x: X, next: Many[Ring235[X]], skip: Many[Ring236[X]] }
+
+struct Ring235[X] { x: X, next: Many[Ring236[X]], skip: Many[Ring237[X]] }
+
+struct Ring236[X] { x: X, next: Many[Ring237[X]], skip: Many[Ring238[X]] }
+
+struct Ring237[X] { x: X, next: Many[Ring238[X]], skip: Many[Ring239[X]] }
+
+struct Ring238[X] { x: X, next: Many[Ring239[X]], skip: Many[Ring240[X]] }
+
+struct Ring239[X] { x: X, next: Many[Ring240[X]], skip: Many[Ring241[X]] }
+
+struct Ring240[X] { x: X, next: Many[Ring241[X]], skip: Many[Ring242[X]] }
+
+struct Ring241[X] { x: X, next: Many[Ring242[X]], skip: Many[Ring243[X]] }
+
+struct Ring242[X] { x: X, next: Many[Ring243[X]], skip: Many[Ring244[X]] }
+
+struct Ring243[X] { x: X, next: Many[Ring244[X]], skip: Many[Ring245[X]] }
+
+struct Ring244[X] { x: X, next: Many[Ring245[X]], skip: Many[Ring246[X]] }
+
+struct Ring245[X] { x: X, next: Many[Ring246[X]], skip: Many[Ring247[X]] }
+
+struct Ring246[X] { x: X, next: Many[Ring247[X]], skip: Many[Ring248[X]] }
+
+struct Ring247[X] { x: X, next: Many[Ring248[X]], skip: Many[Ring249[X]] }
+
+struct Ring248[X] { x: X, next: Many[Ring249[X]], skip: Many[Ring250[X]] }
+
+struct Ring249[X] { x: X, next: Many[Ring250[X]], skip: Many[Ring251[X]] }
+
+struct Ring250[X] { x: X, next: Many[Ring251[X]], skip: Many[Ring252[X]] }
+
+struct Ring251[X] { x: X, next: Many[Ring252[X]], skip: Many[Ring253[X]] }
+
+struct Ring252[X] { x: X, next: Many[Ring253[X]], skip: Many[Ring254[X]] }
+
+struct Ring253[X] { x: X, next: Many[Ring254[X]], skip: Many[Ring255[X]] }
+
+struct Ring254[X] { x: X, next: Many[Ring255[X]], skip: Many[Ring256[X]] }
+
+struct Ring255[X] { x: X, next: Many[Ring256[X]], skip: Many[Ring257[X]] }
+
+struct Ring256[X] { x: X, next: Many[Ring257[X]], skip: Many[Ring258[X]] }
+
+struct Ring257[X] { x: X, next: Many[Ring258[X]], skip: Many[Ring259[X]] }
+
+struct Ring258[X] { x: X, next: Many[Ring259[X]], skip: Many[Ring260[X]] }
+
+struct Ring259[X] { x: X, next: Many[Ring260[X]], skip: Many[Ring261[X]] }
+
+struct Ring260[X] { x: X, next: Many[Ring261[X]], skip: Many[Ring262[X]] }
+
+struct Ring261[X] { x: X, next: Many[Ring262[X]], skip: Many[Ring263[X]] }
+
+struct Ring262[X] { x: X, next: Many[Ring263[X]], skip: Many[Ring264[X]] }
+
+struct Ring263[X] { x: X, next: Many[Ring264[X]], skip: Many[Ring265[X]] }
+
+struct Ring264[X] { x: X, next: Many[Ring265[X]], skip: Many[Ring266[X]] }
+
+struct Ring265[X] { x: X, next: Many[Ring266[X]], skip: Many[Ring267[X]] }
+
+struct Ring266[X] { x: X, next: Many[Ring267[X]], skip: Many[Ring268[X]] }
+
+struct Ring267[X] { x: X, next: Many[Ring268[X]], skip: Many[Ring269[X]] }
+
+struct Ring268[X] { x: X, next: Many[Ring269[X]], skip: Many[Ring270[X]] }
+
+struct Ring269[X] { x: X, next: Many[Ring270[X]], skip: Many[Ring271[X]] }
+
+struct Ring270[X] { x: X, next: Many[Ring271[X]], skip: Many[Ring272[X]] }
+
+struct Ring271[X] { x: X, next: Many[Ring272[X]], skip: Many[Ring273[X]] }
+
+struct Ring272[X] { x: X, next: Many[Ring273[X]], skip: Many[Ring274[X]] }
+
+struct Ring273[X] { x: X, next: Many[Ring274[X]], skip: Many[Ring275[X]] }
+
+struct Ring274[X] { x: X, next: Many[Ring275[X]], skip: Many[Ring276[X]] }
+
+struct Ring275[X] { x: X, next: Many[Ring276[X]], skip: Many[Ring277[X]] }
+
+struct Ring276[X] { x: X, next: Many[Ring277[X]], skip: Many[Ring278[X]] }
+
+struct Ring277[X] { x: X, next: Many[Ring278[X]], skip: Many[Ring279[X]] }
+
+struct Ring278[X] { x: X, next: Many[Ring279[X]], skip: Many[Ring280[X]] }
+
+struct Ring279[X] { x: X, next: Many[Ring280[X]], skip: Many[Ring281[X]] }
+
+struct Ring280[X] { x: X, next: Many[Ring281[X]], skip: Many[Ring282[X]] }
+
+struct Ring281[X] { x: X, next: Many[Ring282[X]], skip: Many[Ring283[X]] }
+
+struct Ring282[X] { x: X, next: Many[Ring283[X]], skip: Many[Ring284[X]] }
+
+struct Ring283[X] { x: X, next: Many[Ring284[X]], skip: Many[Ring285[X]] }
+
+struct Ring284[X] { x: X, next: Many[Ring285[X]], skip: Many[Ring286[X]] }
+
+struct Ring285[X] { x: X, next: Many[Ring286[X]], skip: Many[Ring287[X]] }
+
+struct Ring286[X] { x: X, next: Many[Ring287[X]], skip: Many[Ring288[X]] }
+
+struct Ring287[X] { x: X, next: Many[Ring288[X]], skip: Many[Ring289[X]] }
+
+struct Ring288[X] { x: X, next: Many[Ring289[X]], skip: Many[Ring290[X]] }
+
+struct Ring289[X] { x: X, next: Many[Ring290[X]], skip: Many[Ring291[X]] }
+
+struct Ring290[X] { x: X, next: Many[Ring291[X]], skip: Many[Ring292[X]] }
+
+struct Ring291[X] { x: X, next: Many[Ring292[X]], skip: Many[Ring293[X]] }
+
+struct Ring292[X] { x: X, next: Many[Ring293[X]], skip: Many[Ring294[X]] }
+
+struct Ring293[X] { x: X, next: Many[Ring294[X]], skip: Many[Ring295[X]] }
+
+struct Ring294[X] { x: X, next: Many[Ring295[X]], skip: Many[Ring296[X]] }
+
+struct Ring295[X] { x: X, next: Many[Ring296[X]], skip: Many[Ring297[X]] }
+
+struct Ring296[X] { x: X, next: Many[Ring297[X]], skip: Many[Ring298[X]] }
+
+struct Ring297[X] { x: X, next: Many[Ring298[X]], skip: Many[Ring299[X]] }
+
+struct Ring298[X] { x: X, next: Many[Ring299[X]], skip: Many[Ring300[X]] }
+
+struct Ring299[X] { x: X, next: Many[Ring300[X]], skip: Many[Ring301[X]] }
+
+struct Ring300[X] { x: X, next: Many[Ring301[X]], skip: Many[Ring302[X]] }
+
+struct Ring301[X] { x: X, next: Many[Ring302[X]], skip: Many[Ring303[X]] }
+
+struct Ring302[X] { x: X, next: Many[Ring303[X]], skip: Many[Ring304[X]] }
+
+struct Ring303[X] { x: X, next: Many[Ring304[X]], skip: Many[Ring305[X]] }
+
+struct Ring304[X] { x: X, next: Many[Ring305[X]], skip: Many[Ring306[X]] }
+
+struct Ring305[X] { x: X, next: Many[Ring306[X]], skip: Many[Ring307[X]] }
+
+struct Ring306[X] { x: X, next: Many[Ring307[X]], skip: Many[Ring308[X]] }
+
+struct Ring307[X] { x: X, next: Many[Ring308[X]], skip: Many[Ring309[X]] }
+
+struct Ring308[X] { x: X, next: Many[Ring309[X]], skip: Many[Ring310[X]] }
+
+struct Ring309[X] { x: X, next: Many[Ring310[X]], skip: Many[Ring311[X]] }
+
+struct Ring310[X] { x: X, next: Many[Ring311[X]], skip: Many[Ring312[X]] }
+
+struct Ring311[X] { x: X, next: Many[Ring312[X]], skip: Many[Ring313[X]] }
+
+struct Ring312[X] { x: X, next: Many[Ring313[X]], skip: Many[Ring314[X]] }
+
+struct Ring313[X] { x: X, next: Many[Ring314[X]], skip: Many[Ring315[X]] }
+
+struct Ring314[X] { x: X, next: Many[Ring315[X]], skip: Many[Ring316[X]] }
+
+struct Ring315[X] { x: X, next: Many[Ring316[X]], skip: Many[Ring317[X]] }
+
+struct Ring316[X] { x: X, next: Many[Ring317[X]], skip: Many[Ring318[X]] }
+
+struct Ring317[X] { x: X, next: Many[Ring318[X]], skip: Many[Ring319[X]] }
+
+struct Ring318[X] { x: X, next: Many[Ring319[X]], skip: Many[Ring320[X]] }
+
+struct Ring319[X] { x: X, next: Many[Ring320[X]], skip: Many[Ring321[X]] }
+
+struct Ring320[X] { x: X, next: Many[Ring321[X]], skip: Many[Ring322[X]] }
+
+struct Ring321[X] { x: X, next: Many[Ring322[X]], skip: Many[Ring323[X]] }
+
+struct Ring322[X] { x: X, next: Many[Ring323[X]], skip: Many[Ring324[X]] }
+
+struct Ring323[X] { x: X, next: Many[Ring324[X]], skip: Many[Ring325[X]] }
+
+struct Ring324[X] { x: X, next: Many[Ring325[X]], skip: Many[Ring326[X]] }
+
+struct Ring325[X] { x: X, next: Many[Ring326[X]], skip: Many[Ring327[X]] }
+
+struct Ring326[X] { x: X, next: Many[Ring327[X]], skip: Many[Ring328[X]] }
+
+struct Ring327[X] { x: X, next: Many[Ring328[X]], skip: Many[Ring329[X]] }
+
+struct Ring328[X] { x: X, next: Many[Ring329[X]], skip: Many[Ring330[X]] }
+
+struct Ring329[X] { x: X, next: Many[Ring330[X]], skip: Many[Ring331[X]] }
+
+struct Ring330[X] { x: X, next: Many[Ring331[X]], skip: Many[Ring332[X]] }
+
+struct Ring331[X] { x: X, next: Many[Ring332[X]], skip: Many[Ring333[X]] }
+
+struct Ring332[X] { x: X, next: Many[Ring333[X]], skip: Many[Ring334[X]] }
+
+struct Ring333[X] { x: X, next: Many[Ring334[X]], skip: Many[Ring335[X]] }
+
+struct Ring334[X] { x: X, next: Many[Ring335[X]], skip: Many[Ring336[X]] }
+
+struct Ring335[X] { x: X, next: Many[Ring336[X]], skip: Many[Ring337[X]] }
+
+struct Ring336[X] { x: X, next: Many[Ring337[X]], skip: Many[Ring338[X]] }
+
+struct Ring337[X] { x: X, next: Many[Ring338[X]], skip: Many[Ring339[X]] }
+
+struct Ring338[X] { x: X, next: Many[Ring339[X]], skip: Many[Ring340[X]] }
+
+struct Ring339[X] { x: X, next: Many[Ring340[X]], skip: Many[Ring341[X]] }
+
+struct Ring340[X] { x: X, next: Many[Ring341[X]], skip: Many[Ring342[X]] }
+
+struct Ring341[X] { x: X, next: Many[Ring342[X]], skip: Many[Ring343[X]] }
+
+struct Ring342[X] { x: X, next: Many[Ring343[X]], skip: Many[Ring344[X]] }
+
+struct Ring343[X] { x: X, next: Many[Ring344[X]], skip: Many[Ring345[X]] }
+
+struct Ring344[X] { x: X, next: Many[Ring345[X]], skip: Many[Ring346[X]] }
+
+struct Ring345[X] { x: X, next: Many[Ring346[X]], skip: Many[Ring347[X]] }
+
+struct Ring346[X] { x: X, next: Many[Ring347[X]], skip: Many[Ring348[X]] }
+
+struct Ring347[X] { x: X, next: Many[Ring348[X]], skip: Many[Ring349[X]] }
+
+struct Ring348[X] { x: X, next: Many[Ring349[X]], skip: Many[Ring350[X]] }
+
+struct Ring349[X] { x: X, next: Many[Ring350[X]], skip: Many[Ring351[X]] }
+
+struct Ring350[X] { x: X, next: Many[Ring351[X]], skip: Many[Ring352[X]] }
+
+struct Ring351[X] { x: X, next: Many[Ring352[X]], skip: Many[Ring353[X]] }
+
+struct Ring352[X] { x: X, next: Many[Ring353[X]], skip: Many[Ring354[X]] }
+
+struct Ring353[X] { x: X, next: Many[Ring354[X]], skip: Many[Ring355[X]] }
+
+struct Ring354[X] { x: X, next: Many[Ring355[X]], skip: Many[Ring356[X]] }
+
+struct Ring355[X] { x: X, next: Many[Ring356[X]], skip: Many[Ring357[X]] }
+
+struct Ring356[X] { x: X, next: Many[Ring357[X]], skip: Many[Ring358[X]] }
+
+struct Ring357[X] { x: X, next: Many[Ring358[X]], skip: Many[Ring359[X]] }
+
+struct Ring358[X] { x: X, next: Many[Ring359[X]], skip: Many[Ring360[X]] }
+
+struct Ring359[X] { x: X, next: Many[Ring360[X]], skip: Many[Ring361[X]] }
+
+struct Ring360[X] { x: X, next: Many[Ring361[X]], skip: Many[Ring362[X]] }
+
+struct Ring361[X] { x: X, next: Many[Ring362[X]], skip: Many[Ring363[X]] }
+
+struct Ring362[X] { x: X, next: Many[Ring363[X]], skip: Many[Ring364[X]] }
+
+struct Ring363[X] { x: X, next: Many[Ring364[X]], skip: Many[Ring365[X]] }
+
+struct Ring364[X] { x: X, next: Many[Ring365[X]], skip: Many[Ring366[X]] }
+
+struct Ring365[X] { x: X, next: Many[Ring366[X]], skip: Many[Ring367[X]] }
+
+struct Ring366[X] { x: X, next: Many[Ring367[X]], skip: Many[Ring368[X]] }
+
+struct Ring367[X] { x: X, next: Many[Ring368[X]], skip: Many[Ring369[X]] }
+
+struct Ring368[X] { x: X, next: Many[Ring369[X]], skip: Many[Ring370[X]] }
+
+struct Ring369[X] { x: X, next: Many[Ring370[X]], skip: Many[Ring371[X]] }
+
+struct Ring370[X] { x: X, next: Many[Ring371[X]], skip: Many[Ring372[X]] }
+
+struct Ring371[X] { x: X, next: Many[Ring372[X]], skip: Many[Ring373[X]] }
+
+struct Ring372[X] { x: X, next: Many[Ring373[X]], skip: Many[Ring374[X]] }
+
+struct Ring373[X] { x: X, next: Many[Ring374[X]], skip: Many[Ring375[X]] }
+
+struct Ring374[X] { x: X, next: Many[Ring375[X]], skip: Many[Ring376[X]] }
+
+struct Ring375[X] { x: X, next: Many[Ring376[X]], skip: Many[Ring377[X]] }
+
+struct Ring376[X] { x: X, next: Many[Ring377[X]], skip: Many[Ring378[X]] }
+
+struct Ring377[X] { x: X, next: Many[Ring378[X]], skip: Many[Ring379[X]] }
+
+struct Ring378[X] { x: X, next: Many[Ring379[X]], skip: Many[Ring380[X]] }
+
+struct Ring379[X] { x: X, next: Many[Ring380[X]], skip: Many[Ring381[X]] }
+
+struct Ring380[X] { x: X, next: Many[Ring381[X]], skip: Many[Ring382[X]] }
+
+struct Ring381[X] { x: X, next: Many[Ring382[X]], skip: Many[Ring383[X]] }
+
+struct Ring382[X] { x: X, next: Many[Ring383[X]], skip: Many[Ring384[X]] }
+
+struct Ring383[X] { x: X, next: Many[Ring384[X]], skip: Many[Ring385[X]] }
+
+struct Ring384[X] { x: X, next: Many[Ring385[X]], skip: Many[Ring386[X]] }
+
+struct Ring385[X] { x: X, next: Many[Ring386[X]], skip: Many[Ring387[X]] }
+
+struct Ring386[X] { x: X, next: Many[Ring387[X]], skip: Many[Ring388[X]] }
+
+struct Ring387[X] { x: X, next: Many[Ring388[X]], skip: Many[Ring389[X]] }
+
+struct Ring388[X] { x: X, next: Many[Ring389[X]], skip: Many[Ring390[X]] }
+
+struct Ring389[X] { x: X, next: Many[Ring390[X]], skip: Many[Ring391[X]] }
+
+struct Ring390[X] { x: X, next: Many[Ring391[X]], skip: Many[Ring392[X]] }
+
+struct Ring391[X] { x: X, next: Many[Ring392[X]], skip: Many[Ring393[X]] }
+
+struct Ring392[X] { x: X, next: Many[Ring393[X]], skip: Many[Ring394[X]] }
+
+struct Ring393[X] { x: X, next: Many[Ring394[X]], skip: Many[Ring395[X]] }
+
+struct Ring394[X] { x: X, next: Many[Ring395[X]], skip: Many[Ring396[X]] }
+
+struct Ring395[X] { x: X, next: Many[Ring396[X]], skip: Many[Ring397[X]] }
+
+struct Ring396[X] { x: X, next: Many[Ring397[X]], skip: Many[Ring398[X]] }
+
+struct Ring397[X] { x: X, next: Many[Ring398[X]], skip: Many[Ring399[X]] }
+
+struct Ring398[X] { x: X, next: Many[Ring399[X]], skip: Many[Ring400[X]] }
+
+struct Ring399[X] { x: X, next: Many[Ring400[X]], skip: Many[Ring401[X]] }
+
+struct Ring400[X] { x: X, next: Many[Ring401[X]], skip: Many[Ring402[X]] }
+
+struct Ring401[X] { x: X, next: Many[Ring402[X]], skip: Many[Ring403[X]] }
+
+struct Ring402[X] { x: X, next: Many[Ring403[X]], skip: Many[Ring404[X]] }
+
+struct Ring403[X] { x: X, next: Many[Ring404[X]], skip: Many[Ring405[X]] }
+
+struct Ring404[X] { x: X, next: Many[Ring405[X]], skip: Many[Ring406[X]] }
+
+struct Ring405[X] { x: X, next: Many[Ring406[X]], skip: Many[Ring407[X]] }
+
+struct Ring406[X] { x: X, next: Many[Ring407[X]], skip: Many[Ring408[X]] }
+
+struct Ring407[X] { x: X, next: Many[Ring408[X]], skip: Many[Ring409[X]] }
+
+struct Ring408[X] { x: X, next: Many[Ring409[X]], skip: Many[Ring410[X]] }
+
+struct Ring409[X] { x: X, next: Many[Ring410[X]], skip: Many[Ring411[X]] }
+
+struct Ring410[X] { x: X, next: Many[Ring411[X]], skip: Many[Ring412[X]] }
+
+struct Ring411[X] { x: X, next: Many[Ring412[X]], skip: Many[Ring413[X]] }
+
+struct Ring412[X] { x: X, next: Many[Ring413[X]], skip: Many[Ring414[X]] }
+
+struct Ring413[X] { x: X, next: Many[Ring414[X]], skip: Many[Ring415[X]] }
+
+struct Ring414[X] { x: X, next: Many[Ring415[X]], skip: Many[Ring416[X]] }
+
+struct Ring415[X] { x: X, next: Many[Ring416[X]], skip: Many[Ring417[X]] }
+
+struct Ring416[X] { x: X, next: Many[Ring417[X]], skip: Many[Ring418[X]] }
+
+struct Ring417[X] { x: X, next: Many[Ring418[X]], skip: Many[Ring419[X]] }
+
+struct Ring418[X] { x: X, next: Many[Ring419[X]], skip: Many[Ring420[X]] }
+
+struct Ring419[X] { x: X, next: Many[Ring420[X]], skip: Many[Ring421[X]] }
+
+struct Ring420[X] { x: X, next: Many[Ring421[X]], skip: Many[Ring422[X]] }
+
+struct Ring421[X] { x: X, next: Many[Ring422[X]], skip: Many[Ring423[X]] }
+
+struct Ring422[X] { x: X, next: Many[Ring423[X]], skip: Many[Ring424[X]] }
+
+struct Ring423[X] { x: X, next: Many[Ring424[X]], skip: Many[Ring425[X]] }
+
+struct Ring424[X] { x: X, next: Many[Ring425[X]], skip: Many[Ring426[X]] }
+
+struct Ring425[X] { x: X, next: Many[Ring426[X]], skip: Many[Ring427[X]] }
+
+struct Ring426[X] { x: X, next: Many[Ring427[X]], skip: Many[Ring428[X]] }
+
+struct Ring427[X] { x: X, next: Many[Ring428[X]], skip: Many[Ring429[X]] }
+
+struct Ring428[X] { x: X, next: Many[Ring429[X]], skip: Many[Ring430[X]] }
+
+struct Ring429[X] { x: X, next: Many[Ring430[X]], skip: Many[Ring431[X]] }
+
+struct Ring430[X] { x: X, next: Many[Ring431[X]], skip: Many[Ring432[X]] }
+
+struct Ring431[X] { x: X, next: Many[Ring432[X]], skip: Many[Ring433[X]] }
+
+struct Ring432[X] { x: X, next: Many[Ring433[X]], skip: Many[Ring434[X]] }
+
+struct Ring433[X] { x: X, next: Many[Ring434[X]], skip: Many[Ring435[X]] }
+
+struct Ring434[X] { x: X, next: Many[Ring435[X]], skip: Many[Ring436[X]] }
+
+struct Ring435[X] { x: X, next: Many[Ring436[X]], skip: Many[Ring437[X]] }
+
+struct Ring436[X] { x: X, next: Many[Ring437[X]], skip: Many[Ring438[X]] }
+
+struct Ring437[X] { x: X, next: Many[Ring438[X]], skip: Many[Ring439[X]] }
+
+struct Ring438[X] { x: X, next: Many[Ring439[X]], skip: Many[Ring440[X]] }
+
+struct Ring439[X] { x: X, next: Many[Ring440[X]], skip: Many[Ring441[X]] }
+
+struct Ring440[X] { x: X, next: Many[Ring441[X]], skip: Many[Ring442[X]] }
+
+struct Ring441[X] { x: X, next: Many[Ring442[X]], skip: Many[Ring443[X]] }
+
+struct Ring442[X] { x: X, next: Many[Ring443[X]], skip: Many[Ring444[X]] }
+
+struct Ring443[X] { x: X, next: Many[Ring444[X]], skip: Many[Ring445[X]] }
+
+struct Ring444[X] { x: X, next: Many[Ring445[X]], skip: Many[Ring446[X]] }
+
+struct Ring445[X] { x: X, next: Many[Ring446[X]], skip: Many[Ring447[X]] }
+
+struct Ring446[X] { x: X, next: Many[Ring447[X]], skip: Many[Ring448[X]] }
+
+struct Ring447[X] { x: X, next: Many[Ring448[X]], skip: Many[Ring449[X]] }
+
+struct Ring448[X] { x: X, next: Many[Ring449[X]], skip: Many[Ring450[X]] }
+
+struct Ring449[X] { x: X, next: Many[Ring450[X]], skip: Many[Ring451[X]] }
+
+struct Ring450[X] { x: X, next: Many[Ring451[X]], skip: Many[Ring452[X]] }
+
+struct Ring451[X] { x: X, next: Many[Ring452[X]], skip: Many[Ring453[X]] }
+
+struct Ring452[X] { x: X, next: Many[Ring453[X]], skip: Many[Ring454[X]] }
+
+struct Ring453[X] { x: X, next: Many[Ring454[X]], skip: Many[Ring455[X]] }
+
+struct Ring454[X] { x: X, next: Many[Ring455[X]], skip: Many[Ring456[X]] }
+
+struct Ring455[X] { x: X, next: Many[Ring456[X]], skip: Many[Ring457[X]] }
+
+struct Ring456[X] { x: X, next: Many[Ring457[X]], skip: Many[Ring458[X]] }
+
+struct Ring457[X] { x: X, next: Many[Ring458[X]], skip: Many[Ring459[X]] }
+
+struct Ring458[X] { x: X, next: Many[Ring459[X]], skip: Many[Ring460[X]] }
+
+struct Ring459[X] { x: X, next: Many[Ring460[X]], skip: Many[Ring461[X]] }
+
+struct Ring460[X] { x: X, next: Many[Ring461[X]], skip: Many[Ring462[X]] }
+
+struct Ring461[X] { x: X, next: Many[Ring462[X]], skip: Many[Ring463[X]] }
+
+struct Ring462[X] { x: X, next: Many[Ring463[X]], skip: Many[Ring464[X]] }
+
+struct Ring463[X] { x: X, next: Many[Ring464[X]], skip: Many[Ring465[X]] }
+
+struct Ring464[X] { x: X, next: Many[Ring465[X]], skip: Many[Ring466[X]] }
+
+struct Ring465[X] { x: X, next: Many[Ring466[X]], skip: Many[Ring467[X]] }
+
+struct Ring466[X] { x: X, next: Many[Ring467[X]], skip: Many[Ring468[X]] }
+
+struct Ring467[X] { x: X, next: Many[Ring468[X]], skip: Many[Ring469[X]] }
+
+struct Ring468[X] { x: X, next: Many[Ring469[X]], skip: Many[Ring470[X]] }
+
+struct Ring469[X] { x: X, next: Many[Ring470[X]], skip: Many[Ring471[X]] }
+
+struct Ring470[X] { x: X, next: Many[Ring471[X]], skip: Many[Ring472[X]] }
+
+struct Ring471[X] { x: X, next: Many[Ring472[X]], skip: Many[Ring473[X]] }
+
+struct Ring472[X] { x: X, next: Many[Ring473[X]], skip: Many[Ring474[X]] }
+
+struct Ring473[X] { x: X, next: Many[Ring474[X]], skip: Many[Ring475[X]] }
+
+struct Ring474[X] { x: X, next: Many[Ring475[X]], skip: Many[Ring476[X]] }
+
+struct Ring475[X] { x: X, next: Many[Ring476[X]], skip: Many[Ring477[X]] }
+
+struct Ring476[X] { x: X, next: Many[Ring477[X]], skip: Many[Ring478[X]] }
+
+struct Ring477[X] { x: X, next: Many[Ring478[X]], skip: Many[Ring479[X]] }
+
+struct Ring478[X] { x: X, next: Many[Ring479[X]], skip: Many[Ring480[X]] }
+
+struct Ring479[X] { x: X, next: Many[Ring480[X]], skip: Many[Ring481[X]] }
+
+struct Ring480[X] { x: X, next: Many[Ring481[X]], skip: Many[Ring482[X]] }
+
+struct Ring481[X] { x: X, next: Many[Ring482[X]], skip: Many[Ring483[X]] }
+
+struct Ring482[X] { x: X, next: Many[Ring483[X]], skip: Many[Ring484[X]] }
+
+struct Ring483[X] { x: X, next: Many[Ring484[X]], skip: Many[Ring485[X]] }
+
+struct Ring484[X] { x: X, next: Many[Ring485[X]], skip: Many[Ring486[X]] }
+
+struct Ring485[X] { x: X, next: Many[Ring486[X]], skip: Many[Ring487[X]] }
+
+struct Ring486[X] { x: X, next: Many[Ring487[X]], skip: Many[Ring488[X]] }
+
+struct Ring487[X] { x: X, next: Many[Ring488[X]], skip: Many[Ring489[X]] }
+
+struct Ring488[X] { x: X, next: Many[Ring489[X]], skip: Many[Ring490[X]] }
+
+struct Ring489[X] { x: X, next: Many[Ring490[X]], skip: Many[Ring491[X]] }
+
+struct Ring490[X] { x: X, next: Many[Ring491[X]], skip: Many[Ring492[X]] }
+
+struct Ring491[X] { x: X, next: Many[Ring492[X]], skip: Many[Ring493[X]] }
+
+struct Ring492[X] { x: X, next: Many[Ring493[X]], skip: Many[Ring494[X]] }
+
+struct Ring493[X] { x: X, next: Many[Ring494[X]], skip: Many[Ring495[X]] }
+
+struct Ring494[X] { x: X, next: Many[Ring495[X]], skip: Many[Ring496[X]] }
+
+struct Ring495[X] { x: X, next: Many[Ring496[X]], skip: Many[Ring497[X]] }
+
+struct Ring496[X] { x: X, next: Many[Ring497[X]], skip: Many[Ring498[X]] }
+
+struct Ring497[X] { x: X, next: Many[Ring498[X]], skip: Many[Ring499[X]] }
+
+struct Ring498[X] { x: X, next: Many[Ring499[X]], skip: Many[Ring0[X]] }
+
+struct Ring499[X] { x: X, next: Many[Ring0[X]], skip: Many[Ring1[X]] }
+
+fn held[T: Copyable](ring: Ring1[T]) -> T {
+    copy(ring.x)
+}
+
+fn main() -> UInt8 {
+    let ring: Ring0[UInt8] = .{ x = 40, next = .{}, skip = .{} }
+    let next: Ring1[UInt8] = .{ x = 2, next = .{}, skip = .{} }
+    ring.x + held(next)
+}

@@ -2,7 +2,9 @@
 
 Status: Accepted — 2026-07-28. Extended by
 [0142](0142-construction-derives-expand-to-ordinary-source.md) with the
-finite-height proof for generic call cycles.
+finite-height proof for generic call cycles. The ordinary-fields clause
+superseded by [0248](0248-an-instantiation-holding-a-parameter-is-written-when-read.md):
+an instantiation holding a type parameter has its fields written when read.
 
 Builds on [0028](0028-a-type-is-a-pool-handle-and-layout-is-a-table.md), which
 made a type an interned handle, and on

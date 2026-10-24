@@ -918,11 +918,26 @@ const CapabilityFacts = struct {
     heads: std.ArrayList(u32) = .empty,
     edges: std.ArrayList(Edge) = .empty,
     queue: std.ArrayList(TypeId) = .empty,
+    /// How far the walk over the pool has reached.
     scanned: usize = 0,
+    /// Which types have their parts recorded as edges. An instantiation
+    /// whose parts are unwritten is passed over until they are.
+    recorded: std.ArrayList(bool) = .empty,
+    /// Types passed over unwritten whose parts have since been written.
+    late: std.ArrayList(TypeId) = .empty,
+    /// Unwritten instantiations a recorded type holds, which the builder
+    /// writes before the facts are read.
+    unwritten: std.ArrayList(TypeId) = .empty,
     dirty: bool = false,
 
     fn invalidate(self: *CapabilityFacts, owner: TypeId) void {
-        if (owner.index() < self.scanned) self.dirty = true;
+        if (owner.index() < self.recorded.items.len and self.recorded.items[owner.index()]) self.dirty = true;
+    }
+
+    /// `t`'s parts were written for the first time. Nothing recorded them,
+    /// so nothing is invalidated: the walk records them when it next runs.
+    fn noteFilled(self: *CapabilityFacts, gpa: std.mem.Allocator, t: TypeId) !void {
+        if (t.index() < self.scanned) try self.late.append(gpa, t);
     }
 
     fn deinit(self: *CapabilityFacts, gpa: std.mem.Allocator) void {
@@ -934,6 +949,9 @@ const CapabilityFacts = struct {
         self.heads.deinit(gpa);
         self.edges.deinit(gpa);
         self.queue.deinit(gpa);
+        self.recorded.deinit(gpa);
+        self.late.deinit(gpa);
+        self.unwritten.deinit(gpa);
         self.* = .{};
     }
 
@@ -948,7 +966,8 @@ const CapabilityFacts = struct {
         try self.strengthen(gpa, ty, capability);
     }
 
-    fn edge(self: *CapabilityFacts, gpa: std.mem.Allocator, owner: TypeId, child: TypeId) !void {
+    fn edge(self: *CapabilityFacts, gpa: std.mem.Allocator, builder: *const Typing.Builder, owner: TypeId, child: TypeId) !void {
+        if (builder.isShell(child)) try self.unwritten.append(gpa, child);
         const at: u32 = @intCast(self.edges.items.len);
         try self.edges.append(gpa, .{ .owner = owner, .child = child, .next = self.heads.items[child.index()] });
         self.heads.items[child.index()] = at;
@@ -972,8 +991,12 @@ const CapabilityFacts = struct {
 
     /// Each type strengthens at most twice and becomes known noncopyable
     /// once: O(types + parts) between representation replacements.
+    ///
+    /// An instantiation whose parts are unwritten has no edges to record and
+    /// is passed over; it is recorded once they are written, and a recorded
+    /// type holding one leaves it in `unwritten` for the builder to write.
     fn update(self: *CapabilityFacts, builder: *Typing.Builder) !void {
-        if (!self.dirty and self.scanned == builder.pool.items.len and self.queue.items.len == 0) return;
+        if (!self.dirty and self.scanned == builder.pool.items.len and self.queue.items.len == 0 and self.late.items.len == 0) return;
         const gpa = builder.gpa;
         if (self.dirty) {
             builder.scoped_capability_facts.deinit(gpa);
@@ -986,6 +1009,9 @@ const CapabilityFacts = struct {
             self.heads.clearRetainingCapacity();
             self.edges.clearRetainingCapacity();
             self.queue.clearRetainingCapacity();
+            self.recorded.clearRetainingCapacity();
+            self.late.clearRetainingCapacity();
+            self.unwritten.clearRetainingCapacity();
             self.scanned = 0;
             self.dirty = false;
         }
@@ -996,47 +1022,13 @@ const CapabilityFacts = struct {
         try self.part_counts.appendNTimes(gpa, 0, count - self.part_counts.items.len);
         try self.known_noncopyable.appendNTimes(gpa, false, count - self.known_noncopyable.items.len);
         try self.heads.appendNTimes(gpa, none, count - self.heads.items.len);
-        const view = builder.view();
+        try self.recorded.appendNTimes(gpa, false, count - self.recorded.items.len);
         while (self.scanned < count) : (self.scanned += 1) {
             const ty: TypeId = @enumFromInt(@as(u32, @intCast(self.scanned)));
-            self.first_parts.items[ty.index()] = @intCast(self.edges.items.len);
-            switch (builder.get(ty)) {
-                .parameter => |parameter| try self.seed(gpa, ty, assumedCapability(parameter.requirement)),
-                .struct_ => |record| {
-                    try self.seed(gpa, ty, policyCapability(record.ownership_policy));
-                    if (record.ownership_policy != .copyable) try self.markNoncopyable(gpa, ty);
-                    for (builder.fields.items(.ty)[record.first_field..][0..record.field_count]) |field|
-                        try self.edge(gpa, ty, field);
-                },
-                .enum_ => |sum| {
-                    try self.seed(gpa, ty, policyCapability(sum.ownership_policy));
-                    if (sum.ownership_policy != .copyable) try self.markNoncopyable(gpa, ty);
-                    for (sum.first_variant..sum.first_variant + sum.variant_count) |variant| {
-                        const first = builder.variants.items(.first_field)[variant];
-                        const len = builder.variants.items(.field_count)[variant];
-                        for (builder.fields.items(.ty)[first..][0..len]) |field| try self.edge(gpa, ty, field);
-                    }
-                },
-                .newtype => |nominal| {
-                    try self.seed(gpa, ty, policyCapability(nominal.ownership_policy));
-                    if (nominal.ownership_policy != .copyable) try self.markNoncopyable(gpa, ty);
-                    try self.edge(gpa, ty, nominal.base);
-                },
-                .array => |array| if (array.count != 0) {
-                    try self.edge(gpa, ty, array.element);
-                },
-                .closure => |closure| try self.edge(gpa, ty, closure.environment),
-                .borrow, .callable, .integer, .open_integer, .open_float, .open_type, .boolean, .float, .unit, .never, .poison => {},
-            }
-            if (builder.certified_storage != .none and view.declOfType(ty) == builder.certified_storage) {
-                if (view.instanceOf(ty)) |instance| {
-                    const arguments = view.argsOf(instance);
-                    if (arguments.len != 0) try self.edge(gpa, ty, arguments[0]);
-                } else if (builder.parameters.get(Typing.Builder.parameterKey(builder.certified_storage.index(), 0))) |element| {
-                    try self.edge(gpa, ty, @enumFromInt(element));
-                }
-            }
-            self.part_counts.items[ty.index()] = @intCast(self.edges.items.len - self.first_parts.items[ty.index()]);
+            if (!builder.isShell(ty)) try self.recordParts(builder, ty);
+        }
+        while (self.late.pop()) |ty| {
+            if (!self.recorded.items[ty.index()] and !builder.isShell(ty)) try self.recordParts(builder, ty);
         }
         var next: usize = 0;
         while (next < self.queue.items.len) : (next += 1) {
@@ -1050,6 +1042,51 @@ const CapabilityFacts = struct {
             }
         }
         self.queue.clearRetainingCapacity();
+    }
+
+    /// Seeds `ty` from its policy and records each part it owns as an edge.
+    fn recordParts(self: *CapabilityFacts, builder: *Typing.Builder, ty: TypeId) !void {
+        const gpa = builder.gpa;
+        const view = builder.view();
+        self.recorded.items[ty.index()] = true;
+        self.first_parts.items[ty.index()] = @intCast(self.edges.items.len);
+        switch (builder.get(ty)) {
+            .parameter => |parameter| try self.seed(gpa, ty, assumedCapability(parameter.requirement)),
+            .struct_ => |record_type| {
+                try self.seed(gpa, ty, policyCapability(record_type.ownership_policy));
+                if (record_type.ownership_policy != .copyable) try self.markNoncopyable(gpa, ty);
+                for (builder.fields.items(.ty)[record_type.first_field..][0..record_type.field_count]) |field|
+                    try self.edge(gpa, builder, ty, field);
+            },
+            .enum_ => |sum| {
+                try self.seed(gpa, ty, policyCapability(sum.ownership_policy));
+                if (sum.ownership_policy != .copyable) try self.markNoncopyable(gpa, ty);
+                for (sum.first_variant..sum.first_variant + sum.variant_count) |variant| {
+                    const first = builder.variants.items(.first_field)[variant];
+                    const len = builder.variants.items(.field_count)[variant];
+                    for (builder.fields.items(.ty)[first..][0..len]) |field| try self.edge(gpa, builder, ty, field);
+                }
+            },
+            .newtype => |nominal| {
+                try self.seed(gpa, ty, policyCapability(nominal.ownership_policy));
+                if (nominal.ownership_policy != .copyable) try self.markNoncopyable(gpa, ty);
+                try self.edge(gpa, builder, ty, nominal.base);
+            },
+            .array => |array| if (array.count != 0) {
+                try self.edge(gpa, builder, ty, array.element);
+            },
+            .closure => |closure| try self.edge(gpa, builder, ty, closure.environment),
+            .borrow, .callable, .integer, .open_integer, .open_float, .open_type, .boolean, .float, .unit, .never, .poison => {},
+        }
+        if (builder.certified_storage != .none and view.declOfType(ty) == builder.certified_storage) {
+            if (view.instanceOf(ty)) |instance| {
+                const arguments = view.argsOf(instance);
+                if (arguments.len != 0) try self.edge(gpa, builder, ty, arguments[0]);
+            } else if (builder.parameters.get(Typing.Builder.parameterKey(builder.certified_storage.index(), 0))) |element| {
+                try self.edge(gpa, builder, ty, @enumFromInt(element));
+            }
+        }
+        self.part_counts.items[ty.index()] = @intCast(self.edges.items.len - self.first_parts.items[ty.index()]);
     }
 };
 
@@ -1171,15 +1208,37 @@ const BorrowContainment = struct {
     heads: std.ArrayList(u32) = .empty,
     edges: std.ArrayList(Edge) = .empty,
     queue: std.ArrayList(TypeId) = .empty,
+    /// How far the walk over the pool has reached.
     scanned: usize = 0,
+    /// What each type has recorded as edges: nothing, its arguments alone
+    /// (an unwritten instantiation, in `writers` mode), or every part.
+    recorded: std.ArrayList(Recorded) = .empty,
+    /// Types whose parts were written after the walk passed them.
+    late: std.ArrayList(TypeId) = .empty,
+    /// Unwritten instantiations whose answer needs their parts, which the
+    /// builder writes before the facts are read.
+    unwritten: std.ArrayList(TypeId) = .empty,
+    /// Unwritten instantiations recorded by their arguments alone.
+    by_arguments: std.ArrayList(TypeId) = .empty,
     dirty: bool = false,
     coverage: DependencyCoverage = .{},
 
+    const Recorded = enum(u8) { nothing, arguments, parts };
+
     fn invalidate(self: *BorrowContainment, owner: TypeId) void {
-        if (owner.index() < self.scanned) {
+        if (owner.index() < self.recorded.items.len and self.recorded.items[owner.index()] != .nothing) {
             if (!self.dirty) self.coverage.capable_children.clearRetainingCapacity();
             self.dirty = true;
         }
+    }
+
+    /// `t`'s parts were written for the first time. What was recorded of it
+    /// is still true, so nothing is invalidated: the walk records the parts
+    /// when it next runs, unless its arguments already settled the answer.
+    fn noteFilled(self: *BorrowContainment, gpa: std.mem.Allocator, t: TypeId) !void {
+        if (t.index() >= self.scanned) return;
+        if (self.recorded.items[t.index()] == .arguments and self.values.items[t.index()]) return;
+        try self.late.append(gpa, t);
     }
 
     fn deinit(self: *BorrowContainment, gpa: std.mem.Allocator) void {
@@ -1187,6 +1246,10 @@ const BorrowContainment = struct {
         self.heads.deinit(gpa);
         self.edges.deinit(gpa);
         self.queue.deinit(gpa);
+        self.recorded.deinit(gpa);
+        self.late.deinit(gpa);
+        self.unwritten.deinit(gpa);
+        self.by_arguments.deinit(gpa);
         self.coverage.deinit(gpa);
         self.* = .{};
     }
@@ -1227,6 +1290,20 @@ const BorrowContainment = struct {
     /// over these edges and a witness path is found over them, so the two
     /// cannot disagree about what a type contains.
     fn eachChild(builder: *Typing.Builder, ty: TypeId, mode: Mode, visit: anytype) std.mem.Allocator.Error!void {
+        try eachPart(builder, ty, mode, visit);
+        const view = builder.view();
+        if (mode == .writers) {
+            if (view.instanceOf(ty)) |instance| for (view.argsOf(instance)) |argument| try visit.child(.argument, argument);
+        } else if (builder.certified_storage != .none and view.declOfType(ty) == builder.certified_storage) {
+            if (view.instanceOf(ty)) |instance| {
+                const arguments = view.argsOf(instance);
+                if (arguments.len != 0) try visit.child(.stored, arguments[0]);
+            }
+        }
+    }
+
+    /// The children `eachChild` hands over other than a type's arguments.
+    fn eachPart(builder: *Typing.Builder, ty: TypeId, mode: Mode, visit: anytype) std.mem.Allocator.Error!void {
         const view = builder.view();
         const typed_storage = builder.certified_storage != .none and
             view.declOfType(ty) == builder.certified_storage and view.instanceOf(ty) != null;
@@ -1258,52 +1335,53 @@ const BorrowContainment = struct {
             },
             else => {},
         }
-        if (mode == .writers) {
-            if (view.instanceOf(ty)) |instance| for (view.argsOf(instance)) |argument| try visit.child(.argument, argument);
-        } else if (builder.certified_storage != .none and view.declOfType(ty) == builder.certified_storage) {
-            if (view.instanceOf(ty)) |instance| {
-                const arguments = view.argsOf(instance);
-                if (arguments.len != 0) try visit.child(.stored, arguments[0]);
-            }
-        }
     }
 
-    /// Records each part a type holds as an edge back to that type.
+    /// Records each part a type holds as an edge back to that type, and
+    /// keeps each unwritten part for the builder to write.
     const Edges = struct {
         containment: *BorrowContainment,
-        gpa: std.mem.Allocator,
+        builder: *const Typing.Builder,
         owner: TypeId,
+        mode: Mode,
 
+        /// In `writers` mode an unwritten part records its own arguments,
+        /// which usually settle it without its parts being written.
         fn child(edges: Edges, _: Step, part: TypeId) std.mem.Allocator.Error!void {
-            try edges.containment.edge(edges.gpa, edges.owner, part);
+            const gpa = edges.builder.gpa;
+            if (edges.mode == .raw_carriers and edges.builder.isShell(part)) try edges.containment.unwritten.append(gpa, part);
+            try edges.containment.edge(gpa, edges.owner, part);
         }
     };
 
+    /// An unwritten instantiation has no parts to record. In `writers` mode
+    /// its arguments are recorded, since every argument is a part there, and
+    /// an argument holding a type parameter settles the answer; one they do
+    /// not settle is left in `unwritten`, as is any unwritten part a recorded
+    /// type holds, for the builder to write and the next walk to record.
     fn update(self: *BorrowContainment, builder: *Typing.Builder, mode: Mode) !void {
+        if (!self.dirty and self.scanned == builder.pool.items.len and self.late.items.len == 0) return;
         const gpa = builder.gpa;
         if (self.dirty) {
             self.values.clearRetainingCapacity();
             self.heads.clearRetainingCapacity();
             self.edges.clearRetainingCapacity();
             self.queue.clearRetainingCapacity();
+            self.recorded.clearRetainingCapacity();
+            self.late.clearRetainingCapacity();
+            self.unwritten.clearRetainingCapacity();
+            self.by_arguments.clearRetainingCapacity();
             self.scanned = 0;
             self.dirty = false;
         }
         const count = builder.pool.items.len;
         try self.values.appendNTimes(gpa, false, count - self.values.items.len);
         try self.heads.appendNTimes(gpa, none, count - self.heads.items.len);
-        const view = builder.view();
+        try self.recorded.appendNTimes(gpa, .nothing, count - self.recorded.items.len);
         while (self.scanned < count) : (self.scanned += 1) {
-            const ty: TypeId = @enumFromInt(@as(u32, @intCast(self.scanned)));
-            try eachChild(builder, ty, mode, Edges{ .containment = self, .gpa = gpa, .owner = ty });
-            switch (mode) {
-                .writers => switch (builder.get(ty)) {
-                    .closure, .callable, .parameter, .open_type => try self.mark(gpa, ty),
-                    else => {},
-                },
-                else => if (view.directDependencySeed(ty)) try self.mark(gpa, ty),
-            }
+            try self.recordParts(builder, @enumFromInt(@as(u32, @intCast(self.scanned))), mode);
         }
+        while (self.late.pop()) |ty| try self.recordParts(builder, ty, mode);
         var next: usize = 0;
         while (next < self.queue.items.len) : (next += 1) {
             var at = self.heads.items[@intFromEnum(self.queue.items[next])];
@@ -1314,6 +1392,43 @@ const BorrowContainment = struct {
             }
         }
         self.queue.clearRetainingCapacity();
+        for (self.by_arguments.items) |ty| {
+            if (!self.values.items[@intFromEnum(ty)]) try self.unwritten.append(gpa, ty);
+        }
+        self.by_arguments.clearRetainingCapacity();
+    }
+
+    /// Records what `ty` holds as edges, as far as its parts are written.
+    fn recordParts(self: *BorrowContainment, builder: *Typing.Builder, ty: TypeId, mode: Mode) !void {
+        const gpa = builder.gpa;
+        const at = @intFromEnum(ty);
+        if (builder.isShell(ty)) {
+            if (mode != .writers or self.recorded.items[at] != .nothing) return;
+            self.recorded.items[at] = .arguments;
+            const edges: Edges = .{ .containment = self, .builder = builder, .owner = ty, .mode = mode };
+            const instance = builder.instanceOf(ty).?;
+            for (builder.argsOf(instance)) |argument| try edges.child(.argument, argument);
+            try self.by_arguments.append(gpa, ty);
+            return;
+        }
+        // Arguments already recorded stay edges; recording them again would
+        // only add duplicates, so a type that had them reads its parts alone.
+        if (self.recorded.items[at] == .parts) return;
+        const had_arguments = self.recorded.items[at] == .arguments;
+        self.recorded.items[at] = .parts;
+        const view = builder.view();
+        if (had_arguments) {
+            try eachPart(builder, ty, mode, Edges{ .containment = self, .builder = builder, .owner = ty, .mode = mode });
+        } else {
+            try eachChild(builder, ty, mode, Edges{ .containment = self, .builder = builder, .owner = ty, .mode = mode });
+        }
+        switch (mode) {
+            .writers => switch (builder.get(ty)) {
+                .closure, .callable, .parameter, .open_type => try self.mark(gpa, ty),
+                else => {},
+            },
+            else => if (view.directDependencySeed(ty)) try self.mark(gpa, ty),
+        }
     }
 };
 
@@ -3571,7 +3686,7 @@ pub const ImplIndex = struct {
         };
         const descriptor = pool.closureOf(closure.closure);
         for (descriptor.owned_fields) |field| {
-            const ty = pool.fieldType(closure.environment, field.index());
+            const ty = writtenPart(pool, closure.environment, field.index());
             if (!try self.anyOnce(impls, pool, decided, trait, ty, false)) return false;
         }
         return true;
@@ -5106,6 +5221,24 @@ pub const Instance = struct {
     first_arg: u32,
     arg_count: u32,
     ty: TypeId,
+    /// The declared type whose parts this one copies.
+    template: TypeId,
+    /// Whether the instantiation's parts are written. One whose arguments
+    /// hold a type parameter is minted with its field types and payloads
+    /// unwritten, and `Builder.ensureFilled` writes them the first time
+    /// anything reads them: copying parts on minting copies the parts' own
+    /// instantiations in turn, and generic structures holding one another
+    /// through their fields made that copy grow with the square of their
+    /// number.
+    parts: Parts = .written,
+
+    pub const Parts = enum {
+        unwritten,
+        /// Being written: a type the write reaches through itself reads the
+        /// parts written so far, and no table records it until it is done.
+        writing,
+        written,
+    };
 };
 
 /// One copy of one declaration: which declaration, and what this copy makes of
@@ -6680,6 +6813,24 @@ pub const Typing = struct {
         return lookupInstance(self.instance_of, self.instances, t);
     }
 
+    /// Whether `t` is an instantiation whose parts are not written yet.
+    ///
+    /// The checker writes them on first need and writes every one a later
+    /// pass can reach before it hands the pool on, so a finished pool holds
+    /// such a type only as an argument nothing reads the parts of.
+    pub fn isShell(self: *const Typing, t: TypeId) bool {
+        const instance = lookupInstance(self.instance_of, self.instances, t) orelse return false;
+        return instance.parts != .written;
+    }
+
+    /// Stops a read of a part the pool has not written.
+    fn readsParts(self: *const Typing, t: TypeId) void {
+        if (!std.debug.runtime_safety) return;
+        const instance = lookupInstance(self.instance_of, self.instances, t) orelse return;
+        if (instance.parts == .unwritten)
+            @panic("compiler defect: a part of an instantiation was read before it was written");
+    }
+
     fn lookupInstance(instance_of: []const u32, instances: []const Instance, t: TypeId) ?Instance {
         const at_id = @intFromEnum(t);
         if (at_id >= instance_of.len) return null;
@@ -6996,6 +7147,7 @@ pub const Typing = struct {
     }
 
     pub fn mayCarryDependencies(self: *const Typing, t: TypeId) bool {
+        self.readsParts(t);
         const index = @intFromEnum(t);
         std.debug.assert(index < self.dependency_containment.len);
         return self.dependency_containment[index];
@@ -7061,6 +7213,7 @@ pub const Typing = struct {
     }
 
     pub fn capabilityOf(self: *const Typing, t: TypeId) Capability {
+        self.readsParts(t);
         return self.capabilities[t.index()];
     }
 
@@ -7079,9 +7232,15 @@ pub const Typing = struct {
     pub fn isScalarSnapshot(self: *const Typing, t: TypeId) bool {
         return switch (self.get(t)) {
             .integer, .open_integer, .open_float, .boolean, .float => true,
-            .enum_ => |e| e.ownership_policy == .copyable and e.payload_field_count == 0,
+            .enum_ => |e| e.ownership_policy == .copyable and self.payloadFree(t, e),
             else => false,
         };
+    }
+
+    /// Whether no variant of `t` carries a value.
+    fn payloadFree(self: *const Typing, t: TypeId, e: anytype) bool {
+        self.readsParts(t);
+        return e.payload_field_count == 0;
     }
 
     pub fn mayCopy(self: *const Typing, t: TypeId) bool {
@@ -7405,11 +7564,13 @@ pub const Typing = struct {
 
     /// How many values a variant carries.
     pub fn variantFieldCount(self: *const Typing, t: TypeId, i: u32) u32 {
+        self.readsParts(t);
         const e = self.get(t).enum_;
         return self.variants.items(.field_count)[e.first_variant + i];
     }
 
     pub fn variantFieldType(self: *const Typing, t: TypeId, i: u32, f: u32) TypeId {
+        self.readsParts(t);
         const e = self.get(t).enum_;
         const first_field = self.variants.items(.first_field)[e.first_variant + i];
         return self.fields.items(.ty)[first_field + f];
@@ -7418,6 +7579,7 @@ pub const Typing = struct {
     /// Where one of a variant's values begins: past the tag, then placed like
     /// any other run.
     pub fn variantFieldOffset(self: *const Typing, t: TypeId, i: u32, f: u32) u32 {
+        self.readsParts(t);
         const e = self.get(t).enum_;
         const variant_at = e.first_variant + i;
         const first = self.variants.items(.first_field)[variant_at];
@@ -7432,6 +7594,7 @@ pub const Typing = struct {
     }
 
     pub fn layoutOf(self: *const Typing, t: TypeId) Layout {
+        self.readsParts(t);
         return self.arrangement().layoutOf(t);
     }
 
@@ -7451,6 +7614,7 @@ pub const Typing = struct {
 
     pub fn fieldType(self: *const Typing, t: TypeId, i: u32) TypeId {
         if (self.get(t) == .closure) return self.fieldType(self.get(t).closure.environment, i);
+        self.readsParts(t);
         const x = self.get(t).struct_;
         return self.fields.items(.ty)[x.first_field + i];
     }
@@ -7477,6 +7641,7 @@ pub const Typing = struct {
             .struct_ => |x| x,
             else => return null,
         };
+        self.readsParts(t);
         const at = self.fieldNamed(shape.first_field, shape.field_count, name) orelse return null;
         return .{
             .index = at,
@@ -7572,6 +7737,7 @@ pub const Typing = struct {
     /// Where a field begins, which is the one thing lowering needs and the
     /// backend never sees -- an offset reaches it baked into an instruction.
     pub fn fieldOffset(self: *const Typing, t: TypeId, i: u32) u32 {
+        self.readsParts(t);
         return switch (self.get(t)) {
             .struct_ => |x| self.placedOffset(x.first_field, x.field_count, i) orelse
                 self.arrangement().offsetIn(x.first_field, x.field_count, i, 0),
@@ -7879,6 +8045,9 @@ pub const Typing = struct {
 
         /// Whether the complete-template refill has run.
         refilled: bool = false,
+        /// How many instantiations have had their parts written for the
+        /// first time, so a caller can tell whether settling wrote any.
+        parts_written: usize = 0,
 
         /// Records that a declared type came from a declaration.
         ///
@@ -8651,19 +8820,95 @@ pub const Typing = struct {
             // becoming a hang; where an implementation's settlement closed it,
             // this is what leaves a type to report the cycle against instead
             // of a walk with no end.
+            //
+            // An instantiation whose arguments hold a type parameter is left
+            // unwritten until something reads its parts. Writing one copies
+            // the template's parts, which mints their instantiations at the
+            // same arguments: `Ring1[X]` holding `Many[Ring2[X]]` mints
+            // `Ring2[X]`, whose parts mint `Ring3[X]`, round every structure
+            // that names another, once for each declaration's own parameter.
+            // A ground instantiation is written at once, since lowering lays
+            // out every one it reaches.
+            const is_ground = try self.allGround(args);
             try self.instances.append(self.gpa, .{
                 .decl = decl,
                 .first_arg = first_arg,
                 .arg_count = @intCast(args.len),
                 .ty = made,
+                .template = template,
+                .parts = .unwritten,
             });
             const at: u32 = @intCast(self.instances.items.len - 1);
             try self.noteAt(&self.instance_of, made, at, Typing.not_an_instance);
             try self.noteMinted(at, decl.index(), args);
 
-            try self.fillInstance(template, made, decl.index(), args);
+            if (is_ground) try self.fillInstance(at);
 
             return made;
+        }
+
+        /// Whether `t` is an instantiation whose parts are not written yet.
+        pub fn isShell(self: *const Builder, t: TypeId) bool {
+            const instance = self.instanceOf(t) orelse return false;
+            return instance.parts != .written;
+        }
+
+        /// Writes `t`'s parts if it is an instantiation that has not had them
+        /// written, so what follows may read them.
+        ///
+        /// Every reader of a part a pool may not have written comes through
+        /// here: the builder's part accessors call it, and the finished pool's
+        /// refuse a type it was not called for.
+        pub fn ensureFilled(self: *Builder, t: TypeId) std.mem.Allocator.Error!void {
+            const at_id = @intFromEnum(t);
+            if (at_id >= self.instance_of.items.len) return;
+            const at = self.instance_of.items[at_id];
+            if (at == Typing.not_an_instance or self.instances.items[at].parts != .unwritten) return;
+            try self.fillInstance(at);
+        }
+
+        /// Brings the capability facts up to the pool, writing each unwritten
+        /// instantiation a recorded type owns so that its parts are recorded
+        /// too. Written here rather than inside the walk: writing parts mints
+        /// types and may select implementations, which ask these facts.
+        fn settleCapabilities(self: *Builder) std.mem.Allocator.Error!void {
+            while (true) {
+                try self.capability_facts.update(self);
+                if (self.capability_facts.unwritten.items.len == 0) return;
+                const held = try self.capability_facts.unwritten.toOwnedSlice(self.gpa);
+                defer self.gpa.free(held);
+                for (held) |t| try self.ensureFilled(t);
+            }
+        }
+
+        /// `settleCapabilities`, for one of the containment tables.
+        fn settleContainment(self: *Builder, facts: *BorrowContainment, mode: BorrowContainment.Mode) std.mem.Allocator.Error!void {
+            while (true) {
+                try facts.update(self, mode);
+                if (facts.unwritten.items.len == 0) return;
+                const held = try facts.unwritten.toOwnedSlice(self.gpa);
+                defer self.gpa.free(held);
+                for (held) |t| try self.ensureFilled(t);
+            }
+        }
+
+        /// Writes the parts of every instantiation the checker minted and
+        /// none read, and of every part those reach.
+        ///
+        /// Called by the checker before it hands the pool on: a later pass
+        /// reads a finished pool and cannot write to it, and an expression or
+        /// a binding the checker recorded may have a type whose parts nothing
+        /// in the checker asked for. Only the instantiations minted before
+        /// the call are written, with what their parts reach; one those
+        /// writes mint as an argument is one no recorded type holds.
+        ///
+        /// **Bound:** one write per instantiation the checker minted, plus
+        /// the parts those reach -- the work minting them already paid for.
+        pub fn fillMinted(self: *Builder) std.mem.Allocator.Error!void {
+            const minted = self.instances.items.len;
+            for (0..minted) |at| {
+                if (self.instances.items[at].parts == .unwritten) try self.fillInstance(@intCast(at));
+            }
         }
 
         /// Fills every instantiation again, from templates that are complete.
@@ -8678,7 +8923,9 @@ pub const Typing = struct {
         ///
         /// One pass is enough. An instance's parts come from its template
         /// rather than from another instance, and a nested argument is
-        /// refilled by this same walk.
+        /// refilled by this same walk. An instantiation whose parts were never
+        /// written is passed over: it copies its template when it is first
+        /// read, and the template is complete by then.
         pub fn refillInstances(self: *Builder) std.mem.Allocator.Error!void {
             const zone = tracy.beginZone(@src(), "types.refill");
             defer zone.end();
@@ -8687,31 +8934,128 @@ pub const Typing = struct {
 
             var i: usize = 0;
             while (i < self.instances.items.len) : (i += 1) {
-                const inst = self.instances.items[i];
-                const template = self.typeOfDecl(inst.decl) orelse continue;
-                const args = try self.gpa.dupe(TypeId, self.argsOf(inst));
-                defer self.gpa.free(args);
-                try self.fillInstance(template, inst.ty, inst.decl.index(), args);
+                if (self.instances.items[i].parts != .written) continue;
+                try self.fillInstance(@intCast(i));
             }
 
             self.capability_facts.dirty = true;
-            try self.capability_facts.update(self);
+            try self.settleCapabilities();
         }
 
-        /// Fills an instantiation's parts by substituting the template's.
-        fn fillInstance(
+        /// Writes an instantiation's parts by substituting its template's,
+        /// and then writes the parts of every unwritten instantiation those
+        /// parts hold, so a type whose parts are written holds only types
+        /// whose parts are written. A layout, a cycle or a copy walks a type
+        /// through its parts and never through its arguments, so that walk
+        /// never meets an unwritten one.
+        ///
+        /// The one routine that writes what an instantiation holds: minting a
+        /// ground instantiation, a first read of an unwritten one, and the
+        /// refill once templates are complete all come here.
+        ///
+        /// **Bound:** one substitution per part of each instantiation written,
+        /// and an instantiation already written is not written again.
+        fn fillInstance(self: *Builder, first: u32) std.mem.Allocator.Error!void {
+            var pending: std.ArrayList(u32) = .empty;
+            defer pending.deinit(self.gpa);
+            try pending.append(self.gpa, first);
+            while (pending.pop()) |at| {
+                const inst = self.instances.items[at];
+                if (at != first and inst.parts != .unwritten) continue;
+                const was_filled = inst.parts == .written;
+                if (!was_filled) self.instances.items[at].parts = .writing;
+                const args = try self.gpa.dupe(TypeId, self.argsOf(inst));
+                defer self.gpa.free(args);
+                try self.writeParts(inst.template, inst.ty, inst.decl.index(), args, was_filled);
+                if (!was_filled) {
+                    self.instances.items[at].parts = .written;
+                    self.parts_written += 1;
+                    try self.capability_facts.noteFilled(self.gpa, inst.ty);
+                    try self.dependency_facts.noteFilled(self.gpa, inst.ty);
+                    try self.writer_facts.noteFilled(self.gpa, inst.ty);
+                }
+                try self.queueShellParts(&pending, inst.ty);
+            }
+        }
+
+        /// Queues each unwritten instantiation among `t`'s parts.
+        fn queueShellParts(self: *Builder, pending: *std.ArrayList(u32), t: TypeId) std.mem.Allocator.Error!void {
+            switch (self.pool.items[@intFromEnum(t)]) {
+                .struct_ => |x| for (x.first_field..x.first_field + x.field_count) |k| {
+                    try self.queueShell(pending, self.fields.items(.ty)[k]);
+                },
+                .enum_ => |e| for (e.first_variant..e.first_variant + e.variant_count) |v| {
+                    const first_field = self.variants.items(.first_field)[v];
+                    const field_count = self.variants.items(.field_count)[v];
+                    for (first_field..first_field + field_count) |k| try self.queueShell(pending, self.fields.items(.ty)[k]);
+                },
+                .array, .newtype, .closure, .borrow => try self.queueShell(pending, t),
+                else => {},
+            }
+        }
+
+        /// Writes every unwritten instantiation that a written type holds
+        /// among its parts, so a walk over every type's parts -- a cycle, a
+        /// width -- meets none. A declared type is written from source and
+        /// may hold an instantiation nothing has read yet.
+        ///
+        /// **Bound:** one visit per type in the pool, and one write per
+        /// instantiation it holds that was unwritten.
+        pub fn writeHeldParts(self: *Builder) std.mem.Allocator.Error!void {
+            var pending: std.ArrayList(u32) = .empty;
+            defer pending.deinit(self.gpa);
+            var i: usize = 0;
+            while (i < self.pool.items.len) : (i += 1) {
+                const t: TypeId = @enumFromInt(@as(u32, @intCast(i)));
+                if (self.isShell(t)) continue;
+                try self.queueShellParts(&pending, t);
+                while (pending.pop()) |at| {
+                    if (self.instances.items[at].parts == .unwritten) try self.fillInstance(at);
+                }
+            }
+        }
+
+        /// Queues `part` where it is an unwritten instantiation, or where it
+        /// reaches one as an element, a base, an environment or a referent:
+        /// the steps a place or a pattern takes into a value.
+        fn queueShell(self: *Builder, pending: *std.ArrayList(u32), part: TypeId) std.mem.Allocator.Error!void {
+            var held = part;
+            while (true) switch (self.pool.items[@intFromEnum(held)]) {
+                .array => |a| held = a.element,
+                .newtype => |n| held = n.base,
+                .closure => |c| held = c.environment,
+                .borrow => |b| held = b.referent,
+                else => break,
+            };
+            const at_id = @intFromEnum(held);
+            if (at_id >= self.instance_of.items.len) return;
+            const at = self.instance_of.items[at_id];
+            if (at == Typing.not_an_instance or self.instances.items[at].parts != .unwritten) return;
+            try pending.append(self.gpa, at);
+        }
+
+        /// Writes the parts `made` copies from `template` at `args`. A first
+        /// write changes nothing anything has read, so only a rewrite drops
+        /// what was worked out from the old parts.
+        fn writeParts(
             self: *Builder,
             template: TypeId,
             made: TypeId,
             decl: u32,
             args: []const TypeId,
+            rewrite: bool,
         ) std.mem.Allocator.Error!void {
             switch (self.pool.items[@intFromEnum(template)]) {
                 .struct_ => |x| {
                     for (0..x.field_count) |k| {
                         const from = self.fields.items(.ty)[x.first_field + k];
                         const to = try self.substitute(from, decl, args);
-                        self.setFieldType(made, @intCast(k), to);
+                        if (rewrite) {
+                            self.setFieldType(made, @intCast(k), to);
+                        } else {
+                            const first_field = self.pool.items[@intFromEnum(made)].struct_.first_field;
+                            self.fields.items(.ty)[first_field + k] = to;
+                        }
                     }
                 },
                 .enum_ => |e| {
@@ -8734,7 +9078,15 @@ pub const Typing = struct {
                             };
                         }
                         const first = try self.addFields(run);
-                        self.setVariantFields(made, @intCast(k), first, field_count);
+                        if (rewrite) {
+                            self.setVariantFields(made, @intCast(k), first, field_count);
+                        } else {
+                            const sum = &self.pool.items[@intFromEnum(made)].enum_;
+                            const made_at = sum.first_variant + k;
+                            self.variants.items(.first_field)[made_at] = first;
+                            self.variants.items(.field_count)[made_at] = field_count;
+                            sum.payload_field_count += field_count;
+                        }
                     }
                 },
                 else => {},
@@ -8843,11 +9195,15 @@ pub const Typing = struct {
             @memset(self.placed_at.items[from..], 0);
         }
 
-        pub fn variantFieldCount(self: *const Builder, t: TypeId, i: u32) u32 {
+        /// How many values a variant carries, writing the parts of an
+        /// instantiation that has not had them written.
+        pub fn variantFieldCount(self: *Builder, t: TypeId, i: u32) std.mem.Allocator.Error!u32 {
+            try self.ensureFilled(t);
             return self.view().variantFieldCount(t, i);
         }
 
-        pub fn variantFieldType(self: *const Builder, t: TypeId, i: u32, f: u32) TypeId {
+        pub fn variantFieldType(self: *Builder, t: TypeId, i: u32, f: u32) std.mem.Allocator.Error!TypeId {
+            try self.ensureFilled(t);
             return self.view().variantFieldType(t, i, f);
         }
 
@@ -8868,7 +9224,8 @@ pub const Typing = struct {
         /// The first cycle among inline parts, or null. Asked once, after every
         /// type is entered and before any layout is, because asking for the
         /// layout of a type on a cycle does not return.
-        pub fn firstCycle(self: *const Builder, gpa: std.mem.Allocator) !?Cycle {
+        pub fn firstCycle(self: *Builder, gpa: std.mem.Allocator) !?Cycle {
+            try self.writeHeldParts();
             return firstCycleIn(
                 gpa,
                 self.pool.items,
@@ -8887,6 +9244,9 @@ pub const Typing = struct {
         pub fn nextOversized(self: *const Builder, from: u32) ?TypeId {
             for (from..self.pool.items.len) |i| {
                 const t: TypeId = @enumFromInt(@as(u32, @intCast(i)));
+                // An unwritten instantiation's width is its template's,
+                // which is asked about where it was declared.
+                if (self.isShell(t)) continue;
                 if (self.crossesSizeLimit(t)) return t;
             }
             return null;
@@ -8902,11 +9262,11 @@ pub const Typing = struct {
             if (!self.layoutOf(t).too_wide) return false;
 
             for (0..self.fieldCount(t)) |i| {
-                if (self.layoutOf(self.fieldType(t, @intCast(i))).too_wide) return false;
+                if (self.layoutOf(self.view().fieldType(t, @intCast(i))).too_wide) return false;
             }
             for (0..self.variantCount(t)) |v| {
-                for (0..self.variantFieldCount(t, @intCast(v))) |f| {
-                    const p = self.variantFieldType(t, @intCast(v), @intCast(f));
+                for (0..self.view().variantFieldCount(t, @intCast(v))) |f| {
+                    const p = self.view().variantFieldType(t, @intCast(v), @intCast(f));
                     if (self.layoutOf(p).too_wide) return false;
                 }
             }
@@ -8920,10 +9280,11 @@ pub const Typing = struct {
         /// Which part a name selects, mid-build. The finished typing answers
         /// the same question the same way; two loops over one table are two
         /// chances to disagree about which part a name means.
-        pub fn lookupField(self: *const Builder, t: TypeId, name: []const u8) ?struct {
+        pub fn lookupField(self: *Builder, t: TypeId, name: []const u8) std.mem.Allocator.Error!?struct {
             index: u32,
             ty: TypeId,
         } {
+            try self.ensureFilled(t);
             // The same index the finished pool searches. Not `Typing`'s own
             // `lookupField`, which also settles the offset: a part's layout is
             // still being written while the checker asks, and this asks only
@@ -8934,14 +9295,17 @@ pub const Typing = struct {
                 else => return null,
             };
             const at = pool.fieldNamed(first, self.fieldCount(t), name) orelse return null;
-            return .{ .index = at, .ty = self.fieldType(t, at) };
+            return .{ .index = at, .ty = pool.fieldType(t, at) };
         }
 
         pub fn fieldName(self: *const Builder, t: TypeId, i: u32) []const u8 {
             return self.view().fieldName(t, i);
         }
 
-        pub fn fieldType(self: *const Builder, t: TypeId, i: u32) TypeId {
+        /// A part's type, writing the parts of an instantiation that has not
+        /// had them written.
+        pub fn fieldType(self: *Builder, t: TypeId, i: u32) std.mem.Allocator.Error!TypeId {
+            try self.ensureFilled(t);
             return self.view().fieldType(t, i);
         }
 
@@ -9118,7 +9482,8 @@ pub const Typing = struct {
         }
 
         pub fn mayCarryDependencies(self: *Builder, t: TypeId) !bool {
-            try self.dependency_facts.update(self, .raw_carriers);
+            try self.ensureFilled(t);
+            try self.settleContainment(&self.dependency_facts, .raw_carriers);
             return self.dependency_facts.values.items[@intFromEnum(t)];
         }
 
@@ -9489,7 +9854,7 @@ pub const Typing = struct {
                 // An interpolation's type is the types of the values it holds.
                 .struct_ => if (self.isInterpolation(ty)) {
                     var field: u32 = 0;
-                    while (field < self.fieldCount(ty)) : (field += 1) try visitor.part(self.fieldType(ty, field));
+                    while (field < self.fieldCount(ty)) : (field += 1) try visitor.part(self.view().fieldType(ty, field));
                 } else for (self.appliedTo(ty)) |argument| try visitor.part(argument),
                 .enum_, .newtype => for (self.appliedTo(ty)) |argument| try visitor.part(argument),
             }
@@ -10465,32 +10830,36 @@ pub const Typing = struct {
         }
 
         pub fn knownNoncopyable(self: *Builder, t: TypeId) !bool {
-            try self.capability_facts.update(self);
+            try self.ensureFilled(t);
+            try self.settleCapabilities();
             return self.capability_facts.known_noncopyable.items[t.index()];
         }
 
         pub fn capabilityView(self: *Builder) !Typing {
-            try self.capability_facts.update(self);
+            try self.settleCapabilities();
             return self.view();
         }
 
         pub fn dependencyView(self: *Builder) !Typing {
-            try self.dependency_facts.update(self, .raw_carriers);
+            try self.settleContainment(&self.dependency_facts, .raw_carriers);
             return self.view();
         }
 
         pub fn coversDependencyPaths(self: *Builder, comptime Path: type, ty: TypeId, paths: []const Path, context: anytype) !bool {
+            try self.ensureFilled(ty);
             const pool = try self.dependencyView();
             return self.dependency_facts.coverage.covers(Path, self.gpa, &pool, ty, paths, context);
         }
 
         pub fn capabilityOf(self: *Builder, t: TypeId) !Capability {
-            try self.capability_facts.update(self);
+            try self.ensureFilled(t);
+            try self.settleCapabilities();
             return self.capability_facts.values.items[t.index()];
         }
 
         pub fn prepareCapabilityWithin(self: *Builder, owner: DeclId, t: TypeId) !void {
-            try self.capability_facts.update(self);
+            try self.ensureFilled(t);
+            try self.settleCapabilities();
             const scope = self.contextual_constraints.activeCapabilityScope(owner);
             if (scope != .none) try self.scoped_capability_facts.prepare(self, scope, t);
         }
@@ -10502,7 +10871,8 @@ pub const Typing = struct {
         }
 
         pub fn prepareLookupWithin(self: *Builder, owner: DeclId, t: TypeId) !void {
-            try self.capability_facts.update(self);
+            try self.ensureFilled(t);
+            try self.settleCapabilities();
             const capability_scope = self.contextual_constraints.activeCapabilityScope(owner);
             if (capability_scope != .none) try self.scoped_capability_facts.prepare(self, capability_scope, t);
             if (t == .poison) return;
@@ -10896,7 +11266,8 @@ pub const Typing = struct {
             self.prepared_implementations.clear();
         }
 
-        pub fn isScalarSnapshot(self: *const Builder, t: TypeId) bool {
+        pub fn isScalarSnapshot(self: *Builder, t: TypeId) std.mem.Allocator.Error!bool {
+            try self.ensureFilled(t);
             return self.view().isScalarSnapshot(t);
         }
 
@@ -10985,9 +11356,14 @@ pub const Typing = struct {
         }
 
         pub fn finish(self: *Builder, binding_types: BindingTypes) !Typing {
-            try self.capability_facts.update(self);
-            try self.dependency_facts.update(self, .raw_carriers);
-            try self.writer_facts.update(self, .writers);
+            // Settling one table may write parts another has yet to record.
+            while (true) {
+                const written = self.parts_written;
+                try self.settleCapabilities();
+                try self.settleContainment(&self.dependency_facts, .raw_carriers);
+                try self.settleContainment(&self.writer_facts, .writers);
+                if (written == self.parts_written) break;
+            }
             const mapped = self.interpolation_of.items.len;
             try self.interpolation_of.resize(self.gpa, self.pool.items.len);
             @memset(self.interpolation_of.items[mapped..], not_an_interpolation);
@@ -11418,6 +11794,14 @@ pub const Groundness = struct {
         return ground(typing, ty, .{ .memo = self, .gpa = gpa });
     }
 };
+
+/// A part of `t`, read through a builder or a finished pool alike, where `t`
+/// is no instantiation or one whose parts are written, so nothing is written
+/// to answer.
+fn writtenPart(pool: anytype, t: TypeId, i: u32) TypeId {
+    if (comptime @hasDecl(@TypeOf(pool.*), "view")) return pool.view().fieldType(t, i);
+    return pool.fieldType(t, i);
+}
 
 const GroundMemo = struct { memo: *Groundness, gpa: std.mem.Allocator };
 
@@ -13100,7 +13484,7 @@ test "unchanged enum payloads preserve layout generation" {
     try testing.expectEqual(generation, builder.generation);
     builder.setVariantFieldType(value, 0, 0, .u16);
     try testing.expect(builder.generation != generation);
-    try testing.expectEqual(TypeId.u16, builder.variantFieldType(value, 0, 0));
+    try testing.expectEqual(TypeId.u16, (try builder.variantFieldType(value, 0, 0)));
 }
 
 test "callable invocation modes participate in identity and bound satisfaction" {

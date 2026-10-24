@@ -1467,6 +1467,7 @@ fn typecheckInternal(
     // reaches exists by now, and every one of them has settled.
     try c.reportBrokenBounds();
     try c.checkPolyRec();
+    try c.builder.fillMinted();
     try reportOversizedTypes(sink, program, &c.builder, 0);
 
     // The binding types pass to the caller rather than being freed: lowering
@@ -4702,10 +4703,11 @@ fn operandHint(builder: *const Typing.Builder, t: TypeId) ?[]const u8 {
 pub fn reportOversizedTypes(
     sink: *Sink,
     program: *const ExpandedProgram,
-    builder: *const Typing.Builder,
+    builder: *Typing.Builder,
     from: u32,
 ) !void {
     const ast = &program.ast;
+    try builder.writeHeldParts();
     var next = from;
     while (builder.nextOversized(next)) |t| {
         next = @intFromEnum(t) + 1;
@@ -7875,7 +7877,7 @@ const Checker = struct {
                     // Refused, and still read, so the body is checked against
                     // the contract as written rather than against none.
                     if (self.sealedHere(ty)) self.reportSealedAtToken(token, ty);
-                    const found = self.builder.lookupField(ty, self.ast.tokenText(token)) orelse {
+                    const found = (try self.builder.lookupField(ty, self.ast.tokenText(token))) orelse {
                         self.reportAtToken(.t_borrow_contract, token, "a contract path must name an existing field", "this field is not part of the contract source", null);
                         fields.deinit(self.gpa);
                         return null;
@@ -7921,15 +7923,15 @@ const Checker = struct {
                     self.reportAtToken(.t_borrow_contract, name, "a result target must name an existing variant", "this variant is not part of the result", null);
                     return null;
                 };
-                if (self.builder.variantFieldCount(ty, variant) != 1) {
+                if ((try self.builder.variantFieldCount(ty, variant)) != 1) {
                     self.reportAtToken(.t_borrow_contract, name, "a variant target requires exactly one payload", "use a whole-result contract for this shape", null);
                     return null;
                 }
                 try self.contract_variants.put(self.gpa, name, .{ .receiver = ty, .ordinal = @enumFromInt(variant) });
                 try selectors.append(self.gpa, .{ .payload = .{ .variant = @enumFromInt(variant), .index = 0 } });
-                ty = self.builder.variantFieldType(ty, variant, 0);
+                ty = (try self.builder.variantFieldType(ty, variant, 0));
             } else {
-                const field = self.builder.lookupField(ty, text) orelse {
+                const field = (try self.builder.lookupField(ty, text)) orelse {
                     self.reportAtToken(.t_borrow_contract, name, "a result target must name an existing contained field", "this field is not part of the result", null);
                     return null;
                 };
@@ -10450,8 +10452,11 @@ const Checker = struct {
             }
             const inst = self.builder.instanceOf(site.ty) orelse continue;
             if (self.refusedBefore(site.at)) continue;
-            if (try self.argumentBoundsUnmet(inst.decl, self.builder.argsOf(inst), null, site.at, &.{}, .report) and
-                try self.lacksBoundCapability(inst.decl, self.builder.argsOf(inst)))
+            // Copied: checking a bound may mint a type and move the list
+            // `argsOf` slices.
+            const args = try self.sink.arena.dupe(TypeId, self.builder.argsOf(inst));
+            if (try self.argumentBoundsUnmet(inst.decl, args, null, site.at, &.{}, .report) and
+                try self.lacksBoundCapability(inst.decl, args))
                 try self.broken_types.put(self.gpa, site.ty, {});
         }
         try self.reportBrokenTraitBounds();
@@ -10529,9 +10534,11 @@ const Checker = struct {
             else => return null,
         }
         const inst = self.builder.instanceOf(want.ty) orelse return null;
-        const args = self.builder.argsOf(inst);
+        // Copied first: checking a bound may mint a type and move the list
+        // `argsOf` slices.
+        const args = try self.sink.arena.dupe(TypeId, self.builder.argsOf(inst));
         if (try self.argumentsMeetBounds(inst.decl, args)) return null;
-        return try self.sink.arena.dupe(TypeId, args);
+        return args;
     }
 
     /// Whether `args` meet every bound `d` declares on its parameters, asked
@@ -11381,7 +11388,7 @@ const Checker = struct {
         };
         if (closure.environment == .unit) return null;
         for (self.res.closureCaptures(closure.closure), 0..) |capture, index| {
-            const ty = self.builder.fieldType(closure.environment, @intCast(index));
+            const ty = (try self.builder.fieldType(closure.environment, @intCast(index)));
             // The observation an `inout` capture stores is copyable, and the
             // exclusive lend it stands for is not.
             if (capture.convention == .inout and requirement == .copyable) return .{
@@ -12308,7 +12315,7 @@ const Checker = struct {
                 .struct_ => {
                     const declared = self.ast.declFields(d);
                     for (0..count) |i| {
-                        const part = self.builder.fieldType(t, @intCast(i));
+                        const part = (try self.builder.fieldType(t, @intCast(i)));
                         if (!try self.builder.knownNoncopyable(part)) continue;
                         failed = .{ .ty = part, .at = if (i < declared.len) declared[i].name else self.ast.declName(d) };
                         break;
@@ -12423,12 +12430,12 @@ const Checker = struct {
         }
 
         for (0..self.builder.fieldCount(last)) |i| {
-            if (self.builder.fieldType(last, @intCast(i)) != back) continue;
+            if (self.builder.view().fieldType(last, @intCast(i)) != back) continue;
             self.builder.setFieldType(last, @intCast(i), .poison);
         }
         for (0..self.builder.variantCount(last)) |i| {
-            for (0..self.builder.variantFieldCount(last, @intCast(i))) |f| {
-                if (self.builder.variantFieldType(last, @intCast(i), @intCast(f)) != back) continue;
+            for (0..self.builder.view().variantFieldCount(last, @intCast(i))) |f| {
+                if (self.builder.view().variantFieldType(last, @intCast(i), @intCast(f)) != back) continue;
                 self.builder.setVariantFieldType(last, @intCast(i), @intCast(f), .poison);
             }
         }
@@ -13239,7 +13246,7 @@ const Checker = struct {
         for (self.builder.closureOf(closure.closure).owned_fields) |field| {
             // A literal captured before its uses settled it names an open
             // integer, which reads as what it settled on.
-            const ty = try self.builder.resolveOpen(self.builder.fieldType(closure.environment, field.index()), &self.open_types);
+            const ty = try self.builder.resolveOpen(try self.builder.fieldType(closure.environment, field.index()), &self.open_types);
             if (try self.answersTrait(ty, trait)) continue;
             return .{ .name = self.ast.tokenText(self.res.captureNameToken(captures[field.index()].binding)), .ty = ty };
         }
@@ -13576,8 +13583,10 @@ const Checker = struct {
         // A capability demanded of a parameter's associated type is written in
         // the implementation's public head, so it names no hidden field.
         if (unmet.capability != null and self.builder.standinOf(unmet.subject) != null) return unmet;
-        const arguments = self.builder.appliedTo(sealed);
-        const parameters = self.builder.appliedTo(unmet.head);
+        // Copied: asking a requirement may mint a type and move the list
+        // `appliedTo` slices.
+        const arguments = try self.sink.arena.dupe(TypeId, self.builder.appliedTo(sealed));
+        const parameters = try self.sink.arena.dupe(TypeId, self.builder.appliedTo(unmet.head));
         var inner = unmet;
         var steps: usize = 0;
         while (steps < unmet_requirement_depth) : (steps += 1) {
@@ -14251,7 +14260,7 @@ const Checker = struct {
             _ = self.report(.n_variant, pattern, "the enum has no such variant", .{}, "not a variant of what is matched");
             return self.refuseParts(pattern);
         };
-        const carries = self.builder.variantFieldCount(of, k);
+        const carries = (try self.builder.variantFieldCount(of, k));
 
         // Every part or none. A prefix would take the first parts and leave
         // the rest unnamed, which reads as a choice and is a miscount.
@@ -14277,7 +14286,7 @@ const Checker = struct {
         var each = self.ast.patternParts(pattern);
         while (each.next()) |part| {
             const j: u32 = @intCast(part.index);
-            const ty = self.builder.variantFieldType(of, k, j);
+            const ty = (try self.builder.variantFieldType(of, k, j));
             const step: Step = .{ .carried = .{ .variant = k, .index = j } };
             sound = sound.join(try self.checkPart(part.node, ty, at, .{ .payload = .{ .variant = k, .index = j } }, step));
         }
@@ -14425,7 +14434,7 @@ const Checker = struct {
             const name = self.ast.tokenText(self.ast.exprMain(part.label));
             _ = self.record(part.label, .unit);
 
-            const field = if (self.builder.lookupField(of, name)) |found| found.index else {
+            const field = if (try self.builder.lookupField(of, name)) |found| found.index else {
                 _ = self.report(
                     .t_unknown_field,
                     part.label,
@@ -14448,7 +14457,7 @@ const Checker = struct {
 
             const field_name = self.ast.tokenName(self.ast.exprMain(part.label));
             const selection: types_mod.PartSelection = .{ .field = .{ .index = @intCast(field), .name = field_name } };
-            sound = sound.join(try self.checkPart(part.node, self.builder.fieldType(of, field), at, selection, .{ .field = field_name }));
+            sound = sound.join(try self.checkPart(part.node, try self.builder.fieldType(of, field), at, selection, .{ .field = field_name }));
         }
 
         // Whole-struct: every field is named exactly once. There are no
@@ -14530,7 +14539,7 @@ const Checker = struct {
             }
             const name = self.ast.declFieldName(instance.?.decl, i);
             const selection: types_mod.PartSelection = .{ .field = .{ .index = i, .name = name } };
-            sound = sound.join(try self.checkPart(part.node, self.builder.fieldType(settled, i), at, selection, .{ .field = name }));
+            sound = sound.join(try self.checkPart(part.node, try self.builder.fieldType(settled, i), at, selection, .{ .field = name }));
         }
         return sound;
     }
@@ -14718,17 +14727,17 @@ const Checker = struct {
         const message = try std.fmt.allocPrint(self.sink.arena, "this pattern does not match every `{s}`", .{try self.typeName(of)});
         // A variant of `Option` or `Result` at the head names what a success
         // carries, which `let ... else` binds while handling the other case.
-        const unwraps = self.variant_uses.contains(pattern) and self.carrierOf(of) != null;
+        const unwraps = self.variant_uses.contains(pattern) and (try self.carrierOf(of)) != null;
         const unwrap_help: []const []const u8 = &.{"bind what it carries with `let ... else`, or take it apart with `match`"};
         const match_help: []const []const u8 = &.{"take it apart with `match`, which has an arm for every case"};
-        _ = self.reportWithOriginNotes(.t_refutable, self.missedPart(pattern, missed, of), message, label, null, if (unwraps) unwrap_help else match_help);
+        _ = self.reportWithOriginNotes(.t_refutable, try self.missedPart(pattern, missed, of), message, label, null, if (unwraps) unwrap_help else match_help);
     }
 
     /// The part of a pattern a missed value first fails to match, read along
     /// the value: a variant naming another variant, or a literal leaving the
     /// value out. The whole pattern where no part says so. Bounded by the
     /// pattern's size.
-    fn missedPart(self: *Checker, pattern: ExprId, missed: PatternCoverage.Witness, of: TypeId) ExprId {
+    fn missedPart(self: *Checker, pattern: ExprId, missed: PatternCoverage.Witness, of: TypeId) std.mem.Allocator.Error!ExprId {
         if (self.takesAnything(pattern)) return pattern;
         const types: PatternTypes = .{ .checker = self };
         var ctor: usefulness.Ctor = .product;
@@ -14757,7 +14766,7 @@ const Checker = struct {
         while (each.next()) |part| {
             const at = (self.part_selections.get(part.node) orelse continue).position();
             if (at >= parts.len) continue;
-            if (self.partMisses(part.node, parts[at])) return self.missedPart(part.node, parts[at], types.part(of, ctor, at));
+            if (self.partMisses(part.node, parts[at])) return (try self.missedPart(part.node, parts[at], (try types.part(of, ctor, at))));
         }
         return pattern;
     }
@@ -14847,20 +14856,20 @@ const Checker = struct {
             };
         }
 
-        pub fn arity(self: PatternTypes, ty: TypeId, c: usefulness.Ctor) u32 {
+        pub fn arity(self: PatternTypes, ty: TypeId, c: usefulness.Ctor) std.mem.Allocator.Error!u32 {
             const t = self.settled(ty);
             return switch (c) {
-                .variant => |k| self.checker.builder.variantFieldCount(t, k),
+                .variant => |k| try self.checker.builder.variantFieldCount(t, k),
                 .product => if (self.checker.builder.get(t) == .newtype) 1 else self.checker.builder.fieldCount(t),
                 .integers => 0,
             };
         }
 
-        pub fn part(self: PatternTypes, ty: TypeId, c: usefulness.Ctor, i: u32) TypeId {
+        pub fn part(self: PatternTypes, ty: TypeId, c: usefulness.Ctor, i: u32) std.mem.Allocator.Error!TypeId {
             const t = self.settled(ty);
             return switch (c) {
-                .variant => |k| self.checker.builder.variantFieldType(t, k, i),
-                .product => if (self.checker.builder.get(t) == .newtype) self.checker.builder.baseOf(t) else self.checker.builder.fieldType(t, i),
+                .variant => |k| try self.checker.builder.variantFieldType(t, k, i),
+                .product => if (self.checker.builder.get(t) == .newtype) self.checker.builder.baseOf(t) else (try self.checker.builder.fieldType(t, i)),
                 .integers => .poison,
             };
         }
@@ -14877,7 +14886,7 @@ const Checker = struct {
             .name, .call => if (self.variant_uses.get(pattern)) |use| {
                 const k: u32 = @intFromEnum(use.ordinal);
                 // A variant leaving its payload unnamed names no part.
-                const count: u32 = if (self.ast.patternForm(pattern) == .call) types.arity(of, .{ .variant = k }) else 0;
+                const count: u32 = if (self.ast.patternForm(pattern) == .call) try types.arity(of, .{ .variant = k }) else 0;
                 out.* = .{ .variant = .{ .index = k, .args = try self.coverageParts(arena, pattern, of, .{ .variant = k }, count) } };
             } else if (self.builder.get(types.settled(of)) == .newtype and types.kind(of) == .integer) {
                 // A refined newtype's column is its base's integers, so the
@@ -14892,7 +14901,7 @@ const Checker = struct {
                 // A newtype's pattern: its one constructor, around its base.
                 out.* = .{ .product = try self.coverageParts(arena, pattern, of, .product, 1) };
             },
-            .tuple, .struct_ => out.* = .{ .product = try self.coverageParts(arena, pattern, of, .product, types.arity(of, .product)) },
+            .tuple, .struct_ => out.* = .{ .product = try self.coverageParts(arena, pattern, of, .product, try types.arity(of, .product)) },
             .literal, .range => out.* = .{ .integers = self.foldedInterval(pattern) orelse return &usefulness.wild },
             // Neither is a sound pattern, so neither reaches here; taking
             // nothing in particular is the answer that claims nothing.
@@ -14912,7 +14921,7 @@ const Checker = struct {
         while (each.next()) |part| {
             const at = (self.part_selections.get(part.node) orelse continue).position();
             if (at >= count) continue;
-            args[at] = try self.coveragePattern(arena, part.node, types.part(of, c, at));
+            args[at] = try self.coveragePattern(arena, part.node, try types.part(of, c, at));
         }
         return args;
     }
@@ -15214,7 +15223,7 @@ const Checker = struct {
                 // Advising it for a `Result` would send the reader to
                 // [T-DiscardFailure], so the hint names what that rule accepts
                 // instead: one diagnostic must not recommend the next.
-                const reports_failure = if (self.carrierOf(t)) |c| c.kind == .result else false;
+                const reports_failure = if (try self.carrierOf(t)) |c| c.kind == .result else false;
                 // A function named on its own line was almost always meant to
                 // be called.
                 const named = self.res.targetOf(self.ast.withoutGroups(e));
@@ -15246,9 +15255,9 @@ const Checker = struct {
     /// reason which does, `.settled()?`. Otherwise the failure is handled
     /// where it happens, by the `let … else` that binds what succeeded.
     fn handlingOfFailure(self: *Checker, t: TypeId) std.mem.Allocator.Error!Handling {
-        const carrier = self.carrierOf(t) orelse return .{ .text = "match it" };
+        const carrier = (try self.carrierOf(t)) orelse return .{ .text = "match it" };
         const failure = self.errorTypeOf(carrier);
-        if (self.current_return) |want| if (self.carrierOf(want.ty)) |answers| if (answers.kind == .result) {
+        if (self.current_return) |want| if (try self.carrierOf(want.ty)) |answers| if (answers.kind == .result) {
             const answered = self.errorTypeOf(answers);
             if (failure == answered or failure == .poison or answered == .poison or try self.errorConversion(failure, answered) != null)
                 return .{ .text = "match it, hand it on with `?`, or return it", .hands_on = "?" };
@@ -15272,7 +15281,7 @@ const Checker = struct {
         const text = handling.hands_on orelse return;
         if (self.sink.items().len <= reported) return;
         if (statement) {
-            const carrier = self.carrierOf(t) orelse return;
+            const carrier = (try self.carrierOf(t)) orelse return;
             if (self.payloadTypeOf(carrier) != .unit) return;
         }
         const end = self.ast.exprSpan(value).end;
@@ -15322,7 +15331,7 @@ const Checker = struct {
         // down: the program named the alternatives and chose to treat them
         // alike, which a reader sees. `let _` says the value was never there.
         if (d.pattern == ExprId.none and std.mem.eql(u8, self.ast.tokenText(d.name), "_")) {
-            if (self.carrierOf(t)) |c| {
+            if (try self.carrierOf(t)) |c| {
                 if (c.kind == .result) {
                     const handling = try self.handlingOfFailure(t);
                     const reported = self.sink.items().len;
@@ -15563,7 +15572,7 @@ const Checker = struct {
                 const ordinals = try self.gpa.alloc(types_mod.FieldOrdinal, fields.len);
                 plan.fields = ordinals;
                 for (fields, ordinals) |field, *ordinal| {
-                    const selected = self.builder.lookupField(ty, field.name) orelse {
+                    const selected = (try self.builder.lookupField(ty, field.name)) orelse {
                         self.gpa.free(plan.fields);
                         return .refused;
                     };
@@ -15578,7 +15587,7 @@ const Checker = struct {
             .variant => |variant| {
                 if (shape != .enum_) return .refused;
                 const ordinal = (try self.variantNamed(ty, variant.name)) orelse return .refused;
-                const declared = self.builder.variantFieldCount(ty, ordinal);
+                const declared = (try self.builder.variantFieldCount(ty, ordinal));
                 if (declared != variant.payloads.len) return .refused;
                 // A variant the enum declares without fields stores nothing, so
                 // it duplicates freely even where a sibling's payload leaves the
@@ -15586,7 +15595,7 @@ const Checker = struct {
                 if (declared != 0 and try self.builder.capabilityOf(ty) != .copyable) return .{ .uncopyable = ty };
                 plan.variant = @enumFromInt(ordinal);
                 for (variant.payloads, 0..) |child, i| {
-                    const planned = try self.planConstant(child, self.builder.variantFieldType(ty, ordinal, @intCast(i)));
+                    const planned = try self.planConstant(child, try self.builder.variantFieldType(ty, ordinal, @intCast(i)));
                     if (planned != .planned) return planned;
                 }
             },
@@ -15968,9 +15977,9 @@ const Checker = struct {
                     // The qualifier names the type rather than a value, and
                     // every expression ends with exactly one type.
                     if (q != ExprId.none) _ = self.record(q, t);
-                    if (self.buildsSealedVariant(t, self.variantOrdinal(id)))
+                    if (try self.buildsSealedVariant(t, self.variantOrdinal(id)))
                         break :blk self.reportSealed(id, t, "only its own module can build one");
-                    if (self.variantOrdinal(id)) |ordinal| if (self.missingPayload(id, t, ordinal, expected)) |refused| break :blk refused;
+                    if (self.variantOrdinal(id)) |ordinal| if (try self.missingPayload(id, t, ordinal, expected)) |refused| break :blk refused;
                     break :blk try self.foldVariantReference(id, try self.expect(id, t, expected));
                 }
                 if (Expected.typeOf(expected)) |want| {
@@ -15990,10 +15999,10 @@ const Checker = struct {
                             "not a variant of the type expected here",
                         );
                     };
-                    if (self.buildsSealedVariant(want, ordinal))
+                    if (try self.buildsSealedVariant(want, ordinal))
                         break :blk self.reportSealed(id, want, "only its own module can build one");
                     try self.variant_uses.put(self.gpa, id, .{ .ordinal = @enumFromInt(ordinal) });
-                    if (self.missingPayload(id, want, @intCast(ordinal), expected)) |refused| break :blk refused;
+                    if (try self.missingPayload(id, want, @intCast(ordinal), expected)) |refused| break :blk refused;
                     break :blk try self.foldVariantReference(id, self.record(id, want));
                 }
                 break :blk self.report(
@@ -17049,7 +17058,7 @@ const Checker = struct {
     fn owedBy(self: *Checker, iter: TypeId) std.mem.Allocator.Error![]const u8 {
         const arena = self.sink.arena;
         if (self.builder.instanceOf(iter)) |inst| {
-            const args = self.builder.argsOf(inst);
+            const args = try arena.dupe(TypeId, self.builder.argsOf(inst));
             const item = try self.itemYieldedBy(iter);
             for (args) |arg| {
                 if (!try self.builder.mustConsumeWithin(self.generic, arg)) continue;
@@ -17242,7 +17251,7 @@ const Checker = struct {
             try self.traversalDelegationError(at, "declare field forwarding in the type's defining module");
             return;
         }
-        const field = self.builder.lookupField(row.ty, self.ast.tokenText(target)) orelse {
+        const field = (try self.builder.lookupField(row.ty, self.ast.tokenText(target))) orelse {
             try self.traversalDelegationError(at, "the forwarded name is not a stored field of this type");
             return;
         };
@@ -18155,7 +18164,7 @@ const Checker = struct {
         const previous_failure = self.failure_expected;
         defer self.failure_expected = previous_failure;
         self.failure_expected = null;
-        if (self.returnAnswer()) |answer| if (self.carrierOf(answer.ty)) |carrier| {
+        if (self.returnAnswer()) |answer| if (try self.carrierOf(answer.ty)) |carrier| {
             if (carrier.kind == .result) self.failure_expected = .{
                 .target = self.ast.withoutGroups(operand),
                 .depth = 0,
@@ -18175,7 +18184,7 @@ const Checker = struct {
         if (t == .poison) return self.record(id, .poison);
         if (t == .never) return self.expect(id, .never, expected);
 
-        const carrier = self.carrierOf(t) orelse return self.report(
+        const carrier = (try self.carrierOf(t)) orelse return self.report(
             .t_try,
             id,
             "`?` needs an `Option` or a `Result`, and this is `{s}`",
@@ -18227,7 +18236,7 @@ const Checker = struct {
         // An answer that is already an error's consequence is not judged,
         // and the `?` still gives its payload.
         if (answer == .poison) return true;
-        const answers = self.carrierOf(answer);
+        const answers = (try self.carrierOf(answer));
         if (answers == null) {
             _ = try self.reportTryWithoutCarrier(id, t, carrier, answer, answerer, where);
             return false;
@@ -18499,7 +18508,7 @@ const Checker = struct {
             break :blk try self.check(u.operand, null);
         };
 
-        const carrier = if (t == .poison or t == .never) null else self.carrierOf(t);
+        const carrier = if (t == .poison or t == .never) null else (try self.carrierOf(t));
         if (carrier == null) {
             self.bindFailure(u, .poison, null);
             _ = try self.check(u.body, null);
@@ -18580,7 +18589,8 @@ const Checker = struct {
     /// usable are one answer. A library whose `Result` does not spell its
     /// alternatives `Ok` and `Err` is one `?` cannot use, and every `?` over
     /// it reports [T-Try] rather than yielding a type nothing reported.
-    fn carrierOf(self: *const Checker, t: TypeId) ?Carrier {
+    fn carrierOf(self: *Checker, t: TypeId) std.mem.Allocator.Error!?Carrier {
+        try self.builder.ensureFilled(t);
         const d = self.builder.view().declOfType(t) orelse return null;
         const kind: Carrier.Kind = blk: {
             if (self.option_decl) |o| {
@@ -18607,12 +18617,12 @@ const Checker = struct {
     /// nothing had reported, which is the one thing poison is not allowed to
     /// mean.
     fn payloadTypeOf(self: *const Checker, c: Carrier) TypeId {
-        return self.builder.variantFieldType(c.ty, c.success, 0);
+        return self.builder.view().variantFieldType(c.ty, c.success, 0);
     }
 
     /// What a failing `Result` carries.
     fn errorTypeOf(self: *const Checker, c: Carrier) TypeId {
-        return self.builder.variantFieldType(c.ty, c.failure, 0);
+        return self.builder.view().variantFieldType(c.ty, c.failure, 0);
     }
 
     /// Reports a `?` whose failure the function's error type does not
@@ -19306,8 +19316,8 @@ const Checker = struct {
             const valid = self.ast.declTag(d) == .struct_ and
                 self.ast.declVisibility(d) == .opaque_ and self.ast.declOwnershipPolicy(d) == .copyable and
                 self.ast.declTypeParams(d).len == 1 and self.builder.fieldCount(ty) == 2 and
-                std.mem.eql(u8, self.builder.fieldName(ty, 0), "at") and self.builder.fieldType(ty, 0) == .u64 and
-                std.mem.eql(u8, self.builder.fieldName(ty, 1), "len") and self.builder.fieldType(ty, 1) == .u64;
+                std.mem.eql(u8, self.builder.fieldName(ty, 0), "at") and (try self.builder.fieldType(ty, 0)) == .u64 and
+                std.mem.eql(u8, self.builder.fieldName(ty, 1), "len") and (try self.builder.fieldType(ty, 1)) == .u64;
             if (!valid) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Slice certificate requires an opaque copyable address-and-length descriptor", "declare at and len as UInt64 fields and exactly one element parameter", null);
         }
         if (raw.storage != .none) {
@@ -19317,14 +19327,14 @@ const Checker = struct {
                 self.ast.declVisibility(d) == .private and self.ast.declOwnershipPolicy(d) != .copyable and
                 self.ast.declTypeParams(d).len == 2 and self.builder.fieldCount(ty) == 4;
             if (valid) {
-                const optional = self.builder.fieldType(ty, 0);
+                const optional = (try self.builder.fieldType(ty, 0));
                 const optional_args = self.builder.appliedTo(optional);
                 const allocator = self.param_types[d.index()][1];
                 valid = std.mem.eql(u8, self.builder.fieldName(ty, 0), "buffer") and self.option_decl != null and
                     self.builder.view().declOfType(optional) == self.option_decl and optional_args.len == 1 and
-                    std.mem.eql(u8, self.builder.fieldName(ty, 1), "allocator") and self.builder.fieldType(ty, 1) == allocator and
-                    std.mem.eql(u8, self.builder.fieldName(ty, 2), "at") and self.builder.fieldType(ty, 2) == .u64 and
-                    std.mem.eql(u8, self.builder.fieldName(ty, 3), "len") and self.builder.fieldType(ty, 3) == .u64;
+                    std.mem.eql(u8, self.builder.fieldName(ty, 1), "allocator") and (try self.builder.fieldType(ty, 1)) == allocator and
+                    std.mem.eql(u8, self.builder.fieldName(ty, 2), "at") and (try self.builder.fieldType(ty, 2)) == .u64 and
+                    std.mem.eql(u8, self.builder.fieldName(ty, 3), "len") and (try self.builder.fieldType(ty, 3)) == .u64;
                 if (valid) {
                     const buffer = optional_args[0];
                     const args = self.builder.appliedTo(buffer);
@@ -19356,8 +19366,8 @@ const Checker = struct {
         for (std.enums.values(ErrnoField)) |field| {
             if (!std.mem.eql(u8, self.builder.fieldName(ty, @intFromEnum(field)), @tagName(field))) return false;
         }
-        return self.builder.fieldType(ty, @intFromEnum(ErrnoField.value)) == self.param_types[d.index()][0] and
-            self.builder.fieldType(ty, @intFromEnum(ErrnoField.code)) == .i32;
+        return self.builder.view().fieldType(ty, @intFromEnum(ErrnoField.value)) == self.param_types[d.index()][0] and
+            self.builder.view().fieldType(ty, @intFromEnum(ErrnoField.code)) == .i32;
     }
 
     /// Lowering reads a `Closure`'s entry, address and length by position and
@@ -19380,19 +19390,19 @@ const Checker = struct {
         for (std.enums.values(ClosureField)) |field| {
             if (!std.mem.eql(u8, self.builder.fieldName(ty, @intFromEnum(field)), @tagName(field))) return false;
         }
-        const entry = self.builder.fieldType(ty, @intFromEnum(ClosureField.entry));
+        const entry = self.builder.view().fieldType(ty, @intFromEnum(ClosureField.entry));
         const entry_args = self.builder.appliedTo(entry);
         if (self.builder.view().declOfType(entry) != entry_decl or entry_args.len != 1 or entry_args[0] != signature) return false;
-        const release = switch (self.builder.get(self.builder.fieldType(ty, @intFromEnum(ClosureField.settle)))) {
+        const release = switch (self.builder.get(self.builder.view().fieldType(ty, @intFromEnum(ClosureField.settle)))) {
             .callable => |release| release,
             else => return false,
         };
         const release_params = self.builder.callableParams(release);
         if (release.result != .unit or release.invocation != .read or release_params.len != 2 or
             release_params[0].ty != .u64 or release_params[1].ty != .u64) return false;
-        if (self.builder.fieldType(ty, @intFromEnum(ClosureField.at)) != .u64 or
-            self.builder.fieldType(ty, @intFromEnum(ClosureField.len)) != .u64) return false;
-        const optional = self.builder.fieldType(ty, @intFromEnum(ClosureField.storage));
+        if (self.builder.view().fieldType(ty, @intFromEnum(ClosureField.at)) != .u64 or
+            self.builder.view().fieldType(ty, @intFromEnum(ClosureField.len)) != .u64) return false;
+        const optional = self.builder.view().fieldType(ty, @intFromEnum(ClosureField.storage));
         const optional_args = self.builder.appliedTo(optional);
         if (self.option_decl == null or self.builder.view().declOfType(optional) != self.option_decl or optional_args.len != 1) return false;
         const buffer_args = self.builder.appliedTo(optional_args[0]);
@@ -20043,10 +20053,10 @@ const Checker = struct {
     /// Whether a variant reference builds a value of a type sealed here. A
     /// payload-free variant is built by the reference itself; a variant with
     /// a payload is built by its call, which answers for the seal there.
-    fn buildsSealedVariant(self: *const Checker, ty: TypeId, ordinal: ?u32) bool {
+    fn buildsSealedVariant(self: *Checker, ty: TypeId, ordinal: ?u32) std.mem.Allocator.Error!bool {
         const k = ordinal orelse return false;
         if (!self.sealedHere(ty)) return false;
-        return self.builder.variantFieldCount(ty, k) == 0;
+        return (try self.builder.variantFieldCount(ty, k)) == 0;
     }
 
     /// How this module writes the name of `ty`'s declaration, as every other
@@ -20094,9 +20104,9 @@ const Checker = struct {
     /// a constructor callback reach their variant through other paths. With
     /// nothing expected, the name is neither a construction nor a constructor
     /// value, so what is missing is the context rather than the payload.
-    fn missingPayload(self: *Checker, id: ExprId, ty: TypeId, ordinal: u32, expected: ?Expected) ?TypeId {
+    fn missingPayload(self: *Checker, id: ExprId, ty: TypeId, ordinal: u32, expected: ?Expected) std.mem.Allocator.Error!?TypeId {
         if (id == self.construction_callee) return null;
-        const carries = self.builder.variantFieldCount(ty, ordinal);
+        const carries = (try self.builder.variantFieldCount(ty, ordinal));
         if (carries == 0) return null;
         if (expected == null) return self.report(
             .t_infer,
@@ -20452,7 +20462,7 @@ const Checker = struct {
                     // written as, which says what the type lacks.
                     const receiver = self.builder.exprType(self.ast.withoutGroups(self.ast.unaryOperand(head)));
                     const name = self.ast.tokenText(self.ast.exprMain(head));
-                    if (self.builder.lookupField(self.builder.view().observedReceiver(receiver).receiver, name) == null) {
+                    if ((try self.builder.lookupField(self.builder.view().observedReceiver(receiver).receiver, name)) == null) {
                         for (deferred.type_reports) |deferred_report| try self.sink.add(deferred_report);
                         const outer = self.callee;
                         const outer_arguments = self.callee_arguments;
@@ -20898,7 +20908,7 @@ const Checker = struct {
         for (deferred_tries.items) |pending| {
             // Read again: what the operand left open, the body may since have settled.
             const tried = self.builder.exprType(self.ast.unaryOperand(pending.id));
-            const carrier = self.carrierOf(tried) orelse continue;
+            const carrier = (try self.carrierOf(tried)) orelse continue;
             if (answered == .poison) continue;
             if (answered == .never) {
                 _ = self.report(
@@ -23581,7 +23591,7 @@ const Checker = struct {
         if (t == .poison) return self.record(id, .poison);
         if (t == .never) return self.expect(id, .never, expected);
 
-        if (self.builder.isScalarSnapshot(t)) {
+        if (try self.builder.isScalarSnapshot(t)) {
             return self.report(
                 .o_scalar_copy,
                 id,
@@ -23744,9 +23754,9 @@ const Checker = struct {
             // expression ends with exactly one type.
             self.noteQualifier(id);
             _ = self.record(base, t);
-            if (self.buildsSealedVariant(t, self.variantOrdinal(id)))
+            if (try self.buildsSealedVariant(t, self.variantOrdinal(id)))
                 return self.reportSealed(id, t, "only its own module can build one");
-            if (self.variantOrdinal(id)) |ordinal| if (self.missingPayload(id, t, ordinal, expected)) |refused| return refused;
+            if (self.variantOrdinal(id)) |ordinal| if (try self.missingPayload(id, t, ordinal, expected)) |refused| return refused;
             return self.foldVariantReference(id, try self.expect(id, t, expected));
         }
 
@@ -23827,7 +23837,7 @@ const Checker = struct {
         const name = self.ast.tokenText(self.ast.exprMain(id));
 
         const wanted = self.ast.tokenName(self.ast.exprMain(id));
-        const field = self.builder.lookupField(of, name);
+        const field = (try self.builder.lookupField(of, name));
         var declaring: std.ArrayList(node.DeclId) = .empty;
         defer declaring.deinit(self.gpa);
         // A selection reaches a field, and the callee of a postfix call reaches
@@ -24690,9 +24700,9 @@ const Checker = struct {
 
     const ConstructorShape = struct { ordinal: u32, payloads: u32 };
 
-    fn constructorShape(self: *const Checker, id: ExprId, ty: TypeId) ConstructorShape {
+    fn constructorShape(self: *Checker, id: ExprId, ty: TypeId) std.mem.Allocator.Error!ConstructorShape {
         const ordinal = self.variantOrdinal(id) orelse unreachable;
-        return .{ .ordinal = ordinal, .payloads = self.builder.variantFieldCount(ty, ordinal) };
+        return .{ .ordinal = ordinal, .payloads = (try self.builder.variantFieldCount(ty, ordinal)) };
     }
 
     fn constructorSelection(self: *Checker, id: ExprId, result: TypeId, report_missing: bool) ?ConstructorSelection {
@@ -24793,7 +24803,7 @@ const Checker = struct {
 
         const declaration = selection.declaration;
         const template = self.type_of_decl.get(declaration);
-        if (self.builder.variantFieldCount(selection.result, selection.ordinal) != 1) {
+        if ((try self.builder.variantFieldCount(selection.result, selection.ordinal)) != 1) {
             _ = self.report(.t_call, id, "a callable enum constructor must carry exactly one payload", .{}, "use a closure for this variant");
             return .{ .declaration = declaration, .result = .poison, .ordinal = selection.ordinal, .qualified = selection.qualified };
         }
@@ -24805,7 +24815,7 @@ const Checker = struct {
             defer self.gpa.free(selected);
             @memset(selected, .poison);
             var clash: ?Clash = null;
-            const payload = self.builder.variantFieldType(template, selection.ordinal, 0);
+            const payload = (try self.builder.variantFieldType(template, selection.ordinal, 0));
             var agrees = try self.settleSignatureTypes(payload, parameters[0].ty, declaration, selected, &clash);
             if (agrees) if (self.builder.instanceOf(wanted.result)) |instance| {
                 if (instance.decl == declaration) {
@@ -24856,7 +24866,7 @@ const Checker = struct {
             };
         }
         selection.result = result;
-        const payload = self.builder.variantFieldType(result, selection.ordinal, 0);
+        const payload = (try self.builder.variantFieldType(result, selection.ordinal, 0));
         if (payload != parameters[0].ty) {
             _ = self.reportMismatch(id, payload, .{ .ty = parameters[0].ty, .at = self.locOf(id), .reason = .payload }, "");
             selection.result = .poison;
@@ -26426,7 +26436,7 @@ const Checker = struct {
             try self.delegationError(impl, "declare field delegation in the type's defining module");
             return null;
         }
-        const field = self.builder.lookupField(implementation.ty, self.ast.tokenText(field_token)) orelse {
+        const field = (try self.builder.lookupField(implementation.ty, self.ast.tokenText(field_token))) orelse {
             try self.delegationError(impl, "the delegated name is not a stored field of this type");
             return null;
         };
@@ -26699,7 +26709,7 @@ const Checker = struct {
             const name = self.ast.tokenText(self.ast.exprMain(c.args[i]));
             _ = self.record(c.args[i], .unit);
 
-            const at = if (self.builder.lookupField(want, name)) |found| found.index else {
+            const at = if (try self.builder.lookupField(want, name)) |found| found.index else {
                 _ = self.report(.t_unknown_field, c.args[i], "`{s}` has no field `{s}`", .{ (try self.typeName(want)), name }, "not a field of this type");
                 _ = try self.check(c.args[i + 1], null);
                 poisoned = true;
@@ -26717,7 +26727,7 @@ const Checker = struct {
             // The field's type flows into its value, so a literal takes it the
             // way an argument takes its parameter's type.
             const v = try self.check(c.args[i + 1], .{
-                .ty = self.builder.fieldType(want, at),
+                .ty = (try self.builder.fieldType(want, at)),
                 .at = .{ .file = self.ast.fileOfExpr(c.args[i]), .span = self.ast.exprSpan(c.args[i]) },
                 .reason = .field,
                 .inference = if (expected) |context| context.inference else null,
@@ -26858,7 +26868,7 @@ const Checker = struct {
             return self.reportSealed(id, t, "only its own module can build one");
         }
 
-        const shape = self.constructorShape(callee, t);
+        const shape = (try self.constructorShape(callee, t));
         const k = shape.ordinal;
         const carries: usize = shape.payloads;
         if (c.args.len != carries) {
@@ -26879,7 +26889,7 @@ const Checker = struct {
         var argument_diverges = false;
         for (c.args, walked, 0..) |a, w, j| {
             const want: Expected = .{
-                .ty = self.builder.variantFieldType(t, k, @intCast(j)),
+                .ty = (try self.builder.variantFieldType(t, k, @intCast(j))),
                 .at = .{ .file = self.ast.fileOfExpr(c.callee), .span = self.ast.exprSpan(c.callee) },
                 .reason = .payload,
                 .inference = if (expected) |e| e.inference else null,
@@ -26927,7 +26937,7 @@ const Checker = struct {
         if (d == node.DeclId.none) return;
 
         const answers = self.decl_returns.get(d);
-        const carrier = self.carrierOf(answers) orelse return;
+        const carrier = (try self.carrierOf(answers)) orelse return;
         if (carrier.kind != .result) return;
 
         const at = self.ast.declReturnRef(d).name;
@@ -27027,7 +27037,7 @@ const Checker = struct {
             // anything a reader wrote.
             if (answers == .poison) continue;
 
-            const carrier = self.carrierOf(answers) orelse {
+            const carrier = (try self.carrierOf(answers)) orelse {
                 try self.sink.addError(
                     .s_test,
                     self.ast.fileOfDecl(d),
@@ -28099,7 +28109,7 @@ const Checker = struct {
                 self.generic = site.within;
                 try self.checkArgumentBounds(
                     instance.decl,
-                    self.builder.argsOf(instance),
+                    try self.sink.arena.dupe(TypeId, self.builder.argsOf(instance)),
                     null,
                     site.at,
                 );
@@ -28142,7 +28152,10 @@ const Checker = struct {
             const implementation_index_in_rows = self.row_of_impl[descriptor.generated_impl.index()];
             if (implementation_index_in_rows == impl_of_none) continue;
             const implementation = self.implementations[implementation_index_in_rows];
-            const target_arguments = self.builder.appliedTo(implementation.ty);
+            // Copied, because reading a component's type may mint a type and
+            // move the list `appliedTo` slices.
+            const target_arguments = try self.gpa.dupe(TypeId, self.builder.appliedTo(implementation.ty));
+            defer self.gpa.free(target_arguments);
             const RequirementKey = struct { requirement: node.TemplateRequirementId, bound: expanded_mod.RequirementBoundOrdinal };
             var argument_sets: std.AutoHashMapUnmanaged(RequirementKey, []const TypeId) = .empty;
             defer {
@@ -28239,7 +28252,7 @@ const Checker = struct {
             if (row_index == impl_of_none) continue;
             const implementation = self.implementations[row_index];
             if (implementation.trait != release.trait.index()) continue;
-            const target_arguments = self.builder.appliedTo(implementation.ty);
+            const target_arguments = try self.sink.arena.dupe(TypeId, self.builder.appliedTo(implementation.ty));
             self.current = self.program.moduleOf(descriptor.generated_impl);
             for (self.program.componentRequirements(implementation_id)) |row| {
                 const requirement = self.ast.template_requirements[row.requirement.index()];
@@ -31384,7 +31397,7 @@ const Checker = struct {
                     },
                     .struct_ => if (pool.isInterpolation(key.ty)) {
                         var at: u32 = 1;
-                        while (at < pool.fieldCount(key.ty)) : (at += 2) try self.childHeight(terms, pool.fieldType(key.ty, at), key.substitute, outer);
+                        while (at < pool.fieldCount(key.ty)) : (at += 2) try self.childHeight(terms, pool.view().fieldType(key.ty, at), key.substitute, outer);
                         if (pool.fieldCount(key.ty) < 2) try self.contribute(terms, closed_source, outer, 0);
                         return;
                     },
@@ -31434,7 +31447,7 @@ const Checker = struct {
                     },
                     .struct_ => if (pool.isInterpolation(ty)) {
                         var at: u32 = 1;
-                        while (at < pool.fieldCount(ty)) : (at += 2) if (try self.unknown(pool.fieldType(ty, at), substitute)) return true;
+                        while (at < pool.fieldCount(ty)) : (at += 2) if (try self.unknown(pool.view().fieldType(ty, at), substitute)) return true;
                     },
                     else => {},
                 }
@@ -31645,7 +31658,7 @@ const Checker = struct {
                 },
                 .struct_ => if (pool.isInterpolation(ty)) {
                     var at: u32 = 1;
-                    while (at < pool.fieldCount(ty)) : (at += 2) if (try self.visit(pool.fieldType(ty, at))) return true;
+                    while (at < pool.fieldCount(ty)) : (at += 2) if (try self.visit(pool.view().fieldType(ty, at))) return true;
                 },
                 .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .newtype => {},
             }
@@ -31782,8 +31795,8 @@ const Checker = struct {
         const got = self.builder.instanceOf(actual) orelse return true;
         if (want.decl != got.decl) return true;
 
-        const wanted = self.builder.argsOf(want);
-        const given = self.builder.argsOf(got);
+        const wanted = try self.sink.arena.dupe(TypeId, self.builder.argsOf(want));
+        const given = try self.sink.arena.dupe(TypeId, self.builder.argsOf(got));
         if (wanted.len != given.len) return true;
 
         for (wanted, given) |w, g| {
@@ -32136,7 +32149,7 @@ const Checker = struct {
                             const callable_parameters = self.builder.callableParams(signature);
                             if (selection.result != .poison and
                                 callable_parameters.len == 1 and
-                                self.builder.variantFieldCount(selection.result, selection.ordinal) == 1)
+                                (try self.builder.variantFieldCount(selection.result, selection.ordinal)) == 1)
                             {
                                 const generics = self.ast.declTypeParams(selection.declaration);
                                 const inferred = try self.gpa.alloc(TypeId, generics.len);
@@ -32144,7 +32157,7 @@ const Checker = struct {
                                 @memset(inferred, .poison);
                                 var clash: ?Clash = null;
                                 const template = self.type_of_decl.get(selection.declaration);
-                                const payload = self.builder.variantFieldType(template, selection.ordinal, 0);
+                                const payload = (try self.builder.variantFieldType(template, selection.ordinal, 0));
                                 _ = try self.settleSignatureTypes(payload, callable_parameters[0].ty, selection.declaration, inferred, &clash);
                                 if (self.builder.instanceOf(selection.result)) |instance| {
                                     for (inferred, self.builder.argsOf(instance)) |found, argument| {
@@ -32862,7 +32875,7 @@ const Checker = struct {
         var answers = try self.throughCall(try returnType(self, sig), sig, over, .{ .own = own, .head = head });
 
         const target = if (want.success) |success| blk: {
-            answers = self.successType(answers, success.depth) orelse return;
+            answers = (try self.successType(answers, success.depth)) orelse return;
             break :blk success.expected;
         } else want.expected orelse return;
         if (target.ty == .poison or answers == .poison) return;
@@ -32991,7 +33004,7 @@ const Checker = struct {
 
             const answers = switch (index) {
                 0 => result,
-                1 => self.successType(result, success.?.depth) orelse continue,
+                1 => (try self.successType(result, success.?.depth)) orelse continue,
                 else => unreachable,
             };
             for (settling) |s| {
@@ -33002,7 +33015,7 @@ const Checker = struct {
         if (failure) |want| {
             var at = result;
             for (0..want.depth + 1) |_| {
-                const carrier = self.carrierOf(at) orelse break;
+                const carrier = (try self.carrierOf(at)) orelse break;
                 if (carrier.kind == .result) for (settling) |s| {
                     // Propagation constrains only what the call left open: a
                     // callback result, or the type of an integer literal. It
@@ -33027,10 +33040,10 @@ const Checker = struct {
         }
     }
 
-    fn successType(self: *const Checker, ty: TypeId, depth: u32) ?TypeId {
+    fn successType(self: *Checker, ty: TypeId, depth: u32) std.mem.Allocator.Error!?TypeId {
         var result = ty;
         for (0..depth) |_| {
-            const carrier = self.carrierOf(result) orelse return null;
+            const carrier = (try self.carrierOf(result)) orelse return null;
             result = self.payloadTypeOf(carrier);
         }
         return result;
@@ -33282,7 +33295,7 @@ const Checker = struct {
 
         const template = self.type_of_decl.get(d);
         const k = self.variantOrdinal(callee) orelse return .nothing;
-        if (self.builder.variantFieldCount(template, k) != c.args.len) return .nothing;
+        if ((try self.builder.variantFieldCount(template, k)) != c.args.len) return .nothing;
 
         const found = try self.gpa.alloc(TypeId, params.len);
         defer self.gpa.free(found);
@@ -33294,7 +33307,7 @@ const Checker = struct {
         const q = self.ast.unaryOperand(callee);
         if (q != ExprId.none) if (self.genericAliasHead(self.res.targetOf(q))) |alias| {
             if (self.aliasPathType(self.res.targetOf(q))) |aliased| if (self.builder.instanceOf(aliased)) |instance| {
-                const written = self.builder.argsOf(instance);
+                const written = try self.sink.arena.dupe(TypeId, self.builder.argsOf(instance));
                 if (written.len == params.len) {
                     heading = .{ .alias = alias, .written = written, .found = try self.openAliasArguments(alias) };
                     self.seedAliasHeading(heading.?, found);
@@ -33308,7 +33321,7 @@ const Checker = struct {
         defer self.gpa.free(tried);
         @memset(tried, false);
         for (c.args, 0..) |a, j| {
-            const carried = self.builder.variantFieldType(template, k, @intCast(j));
+            const carried = (try self.builder.variantFieldType(template, k, @intCast(j)));
             const p = switch (self.builder.get(carried)) {
                 .parameter => |x| x,
                 // A payload that is not a bare parameter settles nothing:
