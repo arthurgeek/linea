@@ -1,0 +1,24 @@
+// Derived `Debug` and `Equatable` take every variant apart, the one whose
+// payload is an enum with no variants included.
+@copyable
+enum Uninhabited {}
+
+derive (Debug, Equatable) for Uninhabited
+
+@copyable
+enum Wrap {
+    Never(Uninhabited),
+    Plain(UInt8),
+}
+
+derive (Debug, Equatable) for Wrap
+
+fn main() -> UInt8 {
+    let a: Wrap = .Plain(1)
+    let b: Wrap = .Plain(1)
+    if a == b {
+        0
+    } else {
+        1
+    }
+}

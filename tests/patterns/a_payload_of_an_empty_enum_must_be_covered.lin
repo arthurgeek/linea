@@ -1,0 +1,13 @@
+// `Some` of an enum with no variants is still a variant a `match` names: an
+// arm for `None` alone leaves it uncovered.
+enum Nothing {}
+
+fn only_none(sink x: Option[Nothing]) -> UInt8 {
+    match x {
+        None => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    only_none(.None)
+}

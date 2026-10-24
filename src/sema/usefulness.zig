@@ -210,6 +210,14 @@ pub fn Coverage(comptime Context: type) type {
         /// before them and, where `query` is a type, which of its values no
         /// row matches.
         pub fn check(self: *Self, rows: []const Row, query: ?Ty) Error!Outcome {
+            // No value of an enum with no variants is ever made, so no rows
+            // over one leave nothing untaken: the empty `match` it is taken
+            // apart with. A part of that type inside another pattern is a
+            // column like an opaque type's, which `split_column` answers.
+            if (rows.len == 0) if (query) |ty| switch (self.context.kind(ty)) {
+                .variants => |n| if (n == 0) return .{ .reached = &.{}, .missing = &.{} },
+                else => {},
+            };
             const count = rows.len + @intFromBool(query != null);
             const refs = try self.arena.alloc(Ref, count);
             for (rows, 0..) |r, i| refs[i] = .{ .cells = r, .id = @intCast(i) };
@@ -289,7 +297,14 @@ pub fn Coverage(comptime Context: type) type {
             var out: std.ArrayList(Branch) = .empty;
             switch (self.context.kind(ty)) {
                 .product => try out.append(self.arena, try self.branch(rows, ty, .product)),
-                .variants => |count| {
+                // An enum with no variants has no constructor a row can name,
+                // so its column is split as an opaque type's is: a wildcard
+                // there is reached, and a value no row takes is any value.
+                // `Some` of one is a value coverage accounts for, as `Some`
+                // of `Never` is.
+                .variants => |count| if (count == 0) {
+                    try out.append(self.arena, try self.rest(rows, ty, try self.anyValue(ty)));
+                } else {
                     // The variants the rows name, sorted, and nothing sized by
                     // the enum: a column split again under every branch of the
                     // one before it pays for what its rows name each time,
@@ -602,16 +617,18 @@ pub fn Coverage(comptime Context: type) type {
 
 /// A small type world for the tests: `Bit` is a two-variant enum, `Opt` an
 /// option of a `Byte` (an integer from 0 to 3), `Pair` a pair of options,
-/// `Nest` an option of an option, `Text` matched only by a wildcard, and
-/// `Refused` a type whose declaration was refused.
+/// `Nest` an option of an option, `Text` matched only by a wildcard,
+/// `Refused` a type whose declaration was refused, `Empty` an enum with no
+/// variants and `Hollow` an option of one.
 const TestTypes = struct {
-    pub const Ty = enum { bit, byte, opt, pair, nest, text, refused };
+    pub const Ty = enum { bit, byte, opt, pair, nest, text, refused, empty, hollow };
 
     pub fn kind(_: TestTypes, ty: Ty) Kind {
         return switch (ty) {
             .bit => .{ .variants = 2 },
             .byte => .{ .integer = .{ .lo = 0, .hi = 3 } },
-            .opt, .nest => .{ .variants = 2 },
+            .opt, .nest, .hollow => .{ .variants = 2 },
+            .empty => .{ .variants = 0 },
             .pair => .{ .product = 2 },
             .text => .opaque_,
             .refused => .refused,
@@ -620,7 +637,7 @@ const TestTypes = struct {
 
     pub fn arity(_: TestTypes, ty: Ty, c: Ctor) u32 {
         return switch (ty) {
-            .opt, .nest => switch (c) {
+            .opt, .nest, .hollow => switch (c) {
                 .variant => |k| if (k == 0) 1 else 0,
                 else => 0,
             },
@@ -634,6 +651,7 @@ const TestTypes = struct {
             .opt => .byte,
             .nest => .opt,
             .pair => .opt,
+            .hollow => .empty,
             else => .text,
         };
     }
@@ -750,6 +768,23 @@ test "a type no pattern names is covered by a wildcard alone" {
     try testing.expect(try firstMissing(&c, &.{}, .text) != null);
     const rows = [_]TestCoverage.Row{try rowOf(arena, &wild, .text)};
     try testing.expect(try firstMissing(&c, &rows, .text) == null);
+}
+
+test "an enum with no variants is covered by no rows, and is a part like an opaque type" {
+    var state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer state.deinit();
+    const arena = state.allocator();
+    var c: TestCoverage = .{ .context = .{}, .arena = arena };
+
+    try testing.expect(try firstMissing(&c, &.{}, .empty) == null);
+    try testing.expect(try usefulAfter(&c, &.{}, try rowOf(arena, &wild, .empty)));
+
+    // `Some` of it is still a value: `None` alone leaves it, and `Some(_)`
+    // after `None` reaches it.
+    const only_none = [_]TestCoverage.Row{try rowOf(arena, &none, .hollow)};
+    const missing = (try firstMissing(&c, &only_none, .hollow)).?;
+    try testing.expectEqual(@as(u32, 0), missing.shape.variant.index);
+    try testing.expect(try usefulAfter(&c, &only_none, try rowOf(arena, try some(arena, &wild), .hollow)));
 }
 
 test "a match whose check outgrows its budget is refused" {
