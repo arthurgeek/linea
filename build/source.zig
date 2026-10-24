@@ -1301,10 +1301,10 @@ fn claimOutput(
 /// checked one way:
 ///
 /// - `<!-- guide: edit [PATH] LINES -->` above it applies it to the last
-///   program above, replacing line N, lines N-M, or inserting after line N,
-///   counted in that program as pasted. Consecutive edit blocks apply
-///   together, and the output after the last is what the edited program
-///   prints.
+///   program above, or with PATH to the file PATH of the last program above
+///   that has one, replacing line N, lines N-M, or inserting after line N,
+///   counted in that file as pasted. Consecutive edit blocks apply together,
+///   and the output after the last is what the edited program prints.
 /// - `<!-- guide: excerpt PATH -->` holds it to consecutive lines of a file
 ///   the build compiles, or of a program a guide page compiles.
 /// - `<!-- guide: unchecked REASON -->` excludes it, for a sketch or a
@@ -1326,8 +1326,10 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
     var excluded: usize = 0;
     var unrun_output: std.ArrayList(GuideBlock) = .empty;
     // The index in `programs` of the last program built from program blocks,
-    // which an edit changes.
+    // which an edit changes, and of the last with a file at each path, which
+    // an edit naming that path changes.
     var above: ?usize = null;
+    var by_file: std.StringHashMapUnmanaged(usize) = .empty;
     var i: usize = 0;
     while (i < fences.len) {
         const fence = fences[i];
@@ -1408,11 +1410,18 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             while (i < fences.len and std.mem.eql(u8, fences[i].info, "linea") and fences[i].edit() != null) i += 1;
             const run = fences[run_start..i];
             const claim = claimOutput(gpa, chapter, fences, &i, &problems);
-            const base = if (above) |at| programs.items[at] else {
+            const named = for (run) |edit_fence| {
+                if (edit_fence.edit().?.path) |path| break path;
+            } else null;
+            const base_at = if (named) |path| by_file.get(path) else above;
+            const base = if (base_at) |at| programs.items[at] else {
                 problems.append(gpa, .{
                     .chapter = chapter.file,
                     .line = fence.line,
-                    .message = "an edit changes the program above it, and no program comes before it in this page",
+                    .message = if (named) |path|
+                        std.fmt.allocPrint(gpa, "an edit naming `{s}` changes the last program above with that file, and none comes before it in this page", .{path}) catch @panic("out of memory")
+                    else
+                        "an edit changes the program above it, and no program comes before it in this page",
                 }) catch @panic("out of memory");
                 continue;
             };
@@ -1487,6 +1496,7 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
                 .expected_first = claim.expected_first,
             }) catch @panic("out of memory");
             above = programs.items.len - 1;
+            for (programs.items[above.?].files) |file| by_file.put(gpa, file.path, above.?) catch @panic("out of memory");
             project.clearRetainingCapacity();
             continue;
         }
@@ -1506,6 +1516,7 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             .expected_first = claim.expected_first,
         }) catch @panic("out of memory");
         above = programs.items.len - 1;
+        by_file.put(gpa, name, above.?) catch @panic("out of memory");
     }
     strandData(gpa, chapter, &problems, &data, data_line);
     return .{
@@ -1738,6 +1749,7 @@ pub fn judgeGuideProgram(gpa: std.mem.Allocator, program: GuideProgram, actual: 
     const shown = maskStandardLocations(gpa, std.mem.trimEnd(u8, actual, " \t\r\n"));
     const pasted = maskStandardLocations(gpa, std.mem.trimEnd(u8, program.expected orelse {
         if (succeeded) return null;
+        if (program.source == .fragment and onlyUnusedDeclarations(actual, program.files[0].text)) return null;
         const what: []const u8 = switch (program.source) {
             .program => "the program is complete and pasted without output, and `linea check` refused it",
             .fragment => "this fragment is pasted without output, and `linea check` refused it alone, as the root file of a library",
@@ -1785,6 +1797,43 @@ pub fn judgeGuideProgram(gpa: std.mem.Allocator, program: GuideProgram, actual: 
             shown,
         },
     ) catch @panic("out of memory");
+}
+
+/// Whether every diagnostic in `output` is `[N-Unused]` reported at a line of
+/// `body` that opens a declaration at the top of the file. A fragment shows
+/// declarations without the code that calls them, so its own declarations
+/// going unused says nothing about the fragment; an unused local, or any
+/// other error, does.
+fn onlyUnusedDeclarations(output: []const u8, body: []const u8) bool {
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    var diagnostics: usize = 0;
+    var awaiting_location = false;
+    while (lines.next()) |raw| {
+        const line = std.mem.trimEnd(u8, raw, " \t\r");
+        if (line.len > 0 and line[0] != ' ') {
+            const opening = diagnosticOpening(line) orelse continue;
+            if (!std.mem.eql(u8, opening.kind, "error") or !std.mem.eql(u8, opening.code, "N-Unused")) return false;
+            if (awaiting_location) return false;
+            diagnostics += 1;
+            awaiting_location = true;
+            continue;
+        }
+        if (!awaiting_location) continue;
+        const arrow = std.mem.indexOf(u8, line, "--> ") orelse continue;
+        awaiting_location = false;
+        // `path:LINE:COLUMN`, read from the right so a path may hold colons.
+        const location = line[arrow + 4 ..];
+        const column_colon = std.mem.lastIndexOfScalar(u8, location, ':') orelse return false;
+        const line_colon = std.mem.lastIndexOfScalar(u8, location[0..column_colon], ':') orelse return false;
+        const number = std.fmt.parseInt(usize, location[line_colon + 1 .. column_colon], 10) catch return false;
+        var body_lines = std.mem.splitScalar(u8, body, '\n');
+        var at: usize = 1;
+        const reported = while (body_lines.next()) |body_line| : (at += 1) {
+            if (at == number) break body_line;
+        } else return false;
+        if (reported.len == 0 or reported[0] == ' ' or reported[0] == '\t') return false;
+    }
+    return diagnostics > 0 and !awaiting_location;
 }
 
 /// `text` with the line and column of every location inside the standard
