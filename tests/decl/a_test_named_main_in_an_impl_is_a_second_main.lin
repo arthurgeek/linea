@@ -1,0 +1,25 @@
+// A test inside an `impl` is named at module scope, so in the root module a
+// test named `main` is a second declaration of the entry point's name.
+import std.testing
+
+struct Clock {
+    ticks: UInt32,
+}
+
+impl Clock {
+    pub fn new() -> Clock {
+        Clock { ticks = 0 }
+    }
+
+    test fn main() {
+        testing.assert_eq(Clock.new().ticks, 0, "a new clock has not ticked")?
+    }
+}
+
+fn main() -> UInt8 {
+    if Clock.new().ticks == 0 {
+        0
+    } else {
+        1
+    }
+}

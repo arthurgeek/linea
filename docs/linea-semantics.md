@@ -391,7 +391,8 @@ exactly as if it were written at module scope. No path through the type reaches
 it. Its name shares the module's one namespace with every other test and
 top-level name, so two implementations in one module do not each declare a test
 of one name ([N-Duplicate]), and the implementation adds nothing to its
-qualified name. A test is not instantiated, so neither `Self` nor the
+qualified name. In the root module a test named `main`, inside an `impl` or
+not, is a second declaration of the entry point's name ([S-Entry]). A test is not instantiated, so neither `Self` nor the
 implementation's type parameters name a type in it; writing either is refused,
 and the test names the concrete types it tests instead, as `Boxed[UInt8]`.
 
