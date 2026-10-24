@@ -533,6 +533,17 @@ pub fn is_valid_authority(authority: Str) -> Bool {
     Origin.is_valid_authority(authority)
 }
 
+test fn an_authority_is_a_host_and_an_optional_port() {
+    testing.assert(is_valid_authority("example.test"), "a host was refused")?
+    testing.assert(is_valid_authority(" example.test:8080 "), "a host and port with spaces around them were refused")?
+    testing.assert(is_valid_authority("[::1]:443"), "an IPv6 literal and port were refused")?
+    testing.assert(!is_valid_authority(""), "an empty authority was accepted")?
+    testing.assert(!is_valid_authority("example.test:http"), "a port that is not a number was accepted")?
+    testing.assert(!is_valid_authority("user@example.test"), "userinfo was accepted")?
+    testing.assert(!is_valid_authority("example.test/path"), "a path was accepted")?
+    .Ok(())
+}
+
 // Policy configuring same-origin / CSRF verification.
 @(copyable, derive(Equatable, Debug, Release))
 pub struct SameOriginPolicy {
