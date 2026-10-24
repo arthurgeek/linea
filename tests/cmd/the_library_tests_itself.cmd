@@ -2,8 +2,8 @@ The library tests itself.
 
   $ linea test "$LINEA_ROOT"/std > out
   $ cat out
+  ok    cli.cli_errors_display_what_went_wrong
   ok    cli.custom_usage_overrides_usage_output
-  ok    cli.duplicate_opt_creates_expected_variant
   ok    cli.expect_end_verifies_all_tokens_consumed
   ok    cli.find_flag_searches_hierarchically
   ok    cli.find_option_searches_hierarchically
@@ -16,11 +16,8 @@ The library tests itself.
   ok    cli.get_positional_parses_typed_positionals
   ok    cli.has_next_reports_available_tokens
   ok    cli.help_command_reports_active_help_target
-  ok    cli.invalid_value_creates_expected_variant
   ok    cli.is_help_reports_help_request
   ok    cli.is_supplied_distinguishes_user_options_from_defaults
-  ok    cli.missing_arg_creates_expected_variant
-  ok    cli.missing_value_creates_expected_variant
   ok    cli.new_creates_cursor_from_args
   ok    cli.new_creates_system_command
   ok    cli.new_in_creates_custom_allocator_command
@@ -30,12 +27,21 @@ The library tests itself.
   ok    cli.optional_parsed_converts_present_option_or_none
   ok    cli.options_all_collects_repeatable_options
   ok    cli.parse_args_parses_process_arguments
-  ok    cli.parse_cursor_aliases_parse
+  ok    cli.parse_descends_into_nested_subcommands
+  ok    cli.parse_does_not_take_a_declared_switch_as_a_value
+  ok    cli.parse_ends_subcommand_matching_at_a_double_dash
   ok    cli.parse_handles_optional_and_variadic_positionals
   ok    cli.parse_handles_subcommand_variadic_positionals
+  ok    cli.parse_names_a_missing_required_option_by_its_flag
   ok    cli.parse_parses_cursor_into_matches
+  ok    cli.parse_reads_help_only_where_a_help_subcommand_is_registered
+  ok    cli.parse_records_global_switches_where_they_are_declared
+  ok    cli.parse_refuses_a_value_attached_to_a_flag
+  ok    cli.parse_reports_every_refused_allocation
+  ok    cli.parse_splits_short_clusters_and_attached_short_values
+  ok    cli.parse_takes_a_lone_dash_as_a_positional
+  ok    cli.parse_takes_an_attached_long_option_value
   ok    cli.peek_inspects_token_without_advancing
-  ok    cli.positional_as_parses_typed_positional
   ok    cli.positional_registers_positional_arguments
   ok    cli.positional_retrieves_positional_arguments
   ok    cli.positionals_all_collects_variadic_positionals
@@ -47,9 +53,6 @@ The library tests itself.
   ok    cli.subcommand_name_returns_subcommand_identifier
   ok    cli.subcommand_registers_nested_commands
   ok    cli.subcommand_returns_matched_subcommand_record
-  ok    cli.unexpected_arg_creates_expected_variant
-  ok    cli.unknown_cmd_creates_expected_variant
-  ok    cli.unknown_opt_creates_expected_variant
   ok    cli.usage_formats_aligned_help_documentation
   ok    cmp.unit_values_are_equivalent
   ok    collections.a_deleted_collision_bucket_is_reused_without_allocation
@@ -206,8 +209,6 @@ The library tests itself.
   ok    fmt.decimal_digits_count_every_place
   ok    fmt.each_allocation_failure_covers_every_growth_step_of_an_owned_rendering
   ok    fmt.fixed_digits_round_half_away_from_zero
-  ok    fmt.float32_debug_writes_the_shortest_binary32_decimal
-  ok    fmt.float32_display_renders_the_shortest_round_trip_decimal
   ok    fmt.float_debug_composes_with_nested_derivation
   ok    fmt.float_debug_distinguishes_adjacent_values
   ok    fmt.float_debug_names_infinities_and_canonical_nan
@@ -253,7 +254,6 @@ The library tests itself.
   ok    fmt.write_display_appends_to_what_the_writer_holds
   ok    fmt.write_display_ignores_number_parts_on_other_values
   ok    fmt.write_display_pads_text_by_its_alignment
-  ok    fmt.write_float32_rounds_the_binary32_digits
   ok    fmt.write_float_appends_to_what_the_writer_holds
   ok    fmt.write_float_pads_signs_and_names_non_finite_values
   ok    fmt.write_float_rounds_to_its_precision
@@ -510,7 +510,6 @@ The library tests itself.
   ok    http.an_arena_parent_serves_every_exchange_from_one_request_arena
   ok    http.an_arena_too_small_for_the_limits_is_refused
   ok    http.an_arena_too_small_for_the_limits_is_refused_with_a_parent
-  ok    http.an_authority_is_a_host_and_an_optional_port
   ok    http.an_error_displays_its_status_and_message
   ok    http.an_error_is_answered_with_its_headers
   ok    http.an_error_is_answered_with_its_message
@@ -1239,8 +1238,6 @@ The library tests itself.
   ok    result.unwrap_or_returns_ok_or_the_eager_fallback
   ok    result.unwrap_returns_ok
   ok    result.unwrap_traps_on_err
-  ok    scalar.a_float32_absolute_value_drops_the_sign_and_keeps_everything_else
-  ok    scalar.a_float32_nan_is_equal_to_nothing_including_itself
   ok    scalar.a_logarithm_has_defined_limits
   ok    scalar.a_nan_is_equal_to_nothing_including_itself
   ok    scalar.an_absolute_value_drops_the_sign_and_keeps_everything_else
@@ -1302,8 +1299,6 @@ The library tests itself.
   ok    text.ends_with_compares_the_trailing_bytes
   ok    text.equal_owned_and_observed_text_share_a_content_hash
   ok    text.find_respects_boundaries_and_empty_needles
-  ok    text.float32_parses_through_the_parse_trait
-  ok    text.float32_parsing_rounds_once_to_binary32
   ok    text.float64_parses_through_the_parse_trait
   ok    text.float_parsing_bounds_token_work_before_conversion
   ok    text.float_parsing_preserves_exact_values_and_signed_zero
@@ -1413,4 +1408,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1410 passed, 0 failed
+  1405 passed, 0 failed

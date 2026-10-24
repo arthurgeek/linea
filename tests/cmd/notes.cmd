@@ -96,24 +96,36 @@ An unknown command reports a usage error.
 A subcommand displays its own usage and options when requested.
 
   $ ./notes add --help
-  usage: notes add [options] <title>
+  usage: notes add <title> [options]
   
   add a new note
   
   options:
-    --tags <value>    comma-separated list of tags
+    --tags <value>        comma-separated list of tags
     --priority <value>    note priority (low, normal, high)
+  
+  global options:
+    --json                shortcut for --format json
+    --table               shortcut for --format table
+    --format <value>      output format: table or json
+    --config <value>      path to configuration file (default: notes.cfg)
 
 The help command followed by a subcommand also displays that subcommand's usage.
 
   $ ./notes help add
-  usage: notes add [options] <title>
+  usage: notes add <title> [options]
   
   add a new note
   
   options:
-    --tags <value>    comma-separated list of tags
+    --tags <value>        comma-separated list of tags
     --priority <value>    note priority (low, normal, high)
+  
+  global options:
+    --json                shortcut for --format json
+    --table               shortcut for --format table
+    --format <value>      output format: table or json
+    --config <value>      path to configuration file (default: notes.cfg)
 
 Omitting a required positional argument reports an error.
 
@@ -178,3 +190,52 @@ Providing an invalid status filter reports an error.
   [2]
 
 
+An argument that is not UTF-8 is reported by its position.
+
+  $ ./notes add 'a'"$(printf '\303')"'z'
+  error: argument 2 is not valid UTF-8
+  usage: notes <command> [options]
+  [2]
+
+A value can be attached to its option with `=`.
+
+  $ ./notes list --format=json
+  [{"id":1,"title":"Write design doc","status":"done","priority":"high","tags":["work","spec"]},{"id":3,"title":"Review Linea PR","status":"open","priority":"normal","tags":["work"]}]
+
+An option followed by a declared flag has no value.
+
+  $ ./notes list --format --json
+  error: option '--format' requires a value
+  usage: notes <command> [options]
+  [2]
+
+Help for a command that does not exist is an error.
+
+  $ ./notes help nosuch
+  error: unknown command 'nosuch'
+  usage: notes <command> [options]
+  [2]
+
+After `--`, a word is an argument and never a command.
+
+  $ ./notes -- list
+  error: unexpected argument 'list'
+  usage: notes <command> [options]
+  [2]
+
+The help of a subcommand lists the global options too.
+
+  $ ./notes help list
+  usage: notes list [options]
+  
+  list matching notes
+  
+  options:
+    --status <value>    filter by status (open, done, all)
+    --tag <value>       filter by tag
+  
+  global options:
+    --json              shortcut for --format json
+    --table             shortcut for --format table
+    --format <value>    output format: table or json
+    --config <value>    path to configuration file (default: notes.cfg)

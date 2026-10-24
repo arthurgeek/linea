@@ -121,8 +121,12 @@ struct Options {
 // Read `--port PORT` and an optional `--requests N`, in either order.
 fn parse_options(args: env.Args) -> Option[Options] {
     defer var cmd = cli.Command.new("countdown-server", "Countdown server")
-    &cmd.option("port", "--port", "port to listen on", required: true)
-    &cmd.option("requests", "--requests", "number of requests to serve")
+    let _ = &cmd.option("port", "--port", "port to listen on", required: true) else |_| {
+        return .None
+    }
+    let _ = &cmd.option("requests", "--requests", "number of requests to serve") else |_| {
+        return .None
+    }
 
     var cursor = cli.ArgCursor.new(args)
     defer let matches = cmd.parse(&cursor) else |_| {

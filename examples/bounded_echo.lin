@@ -13,6 +13,7 @@ import std.cli
 import std.env
 import std.io
 import std.log
+import std.mem
 import std.net
 import std.testing
 import std.time
@@ -34,68 +35,75 @@ struct ServeOptions {
     connections: Option[UInt64],
 }
 
-fn build_cli() -> cli.Command {
-    var cmd = cli.Command.new("bounded_echo", "Bounded echo server and client")
-    var serve_cmd = cli.Command.new("serve", "run the bounded echo server")
-    &serve_cmd.option("port", "--port", "port to listen on", required: true)
-    &serve_cmd.option("connections", "--connections", "maximum connections to accept")
-    &cmd.subcommand(serve_cmd)
+// Build the command schema. Each `?` hands back a refused allocation, and
+// `defer var` releases a command that was not yet registered when that
+// happens.
+fn build_cli() -> Result[cli.Command, mem.Oom] {
+    defer var cmd = cli.Command.new("bounded_echo", "Bounded echo server and client")
+    defer var serve_cmd = cli.Command.new("serve", "run the bounded echo server")
+    &serve_cmd.option("port", "--port", "port to listen on", required: true)?
+    &serve_cmd.option("connections", "--connections", "maximum connections to accept")?
+    &cmd.subcommand(serve_cmd)?
 
-    var send_cmd = cli.Command.new("send", "send lines to an echo server")
-    &send_cmd.option("port", "--port", "server port to connect to", required: true)
-    &send_cmd.positional("message", "messages to send", required: true, variadic: true)
-    &cmd.subcommand(send_cmd)
-    cmd
+    defer var send_cmd = cli.Command.new("send", "send lines to an echo server")
+    &send_cmd.option("port", "--port", "server port to connect to", required: true)?
+    &send_cmd.positional("message", "messages to send", required: true, variadic: true)?
+    &cmd.subcommand(send_cmd)?
+    .Ok(cmd)
+}
+
+// Print the usage to standard error and return 64, the conventional exit
+// status for a usage mistake.
+fn usage_error(cmd: cli.Command) -> UInt8 {
+    match cmd.usage() {
+        Ok(text) => {
+            io.eprintln(text.view())
+            text.release()
+        },
+        Err(_) => io.eprintln("out of memory"),
+    }
+    64
 }
 
 fn main() -> UInt8 {
-    defer var cmd = build_cli()
+    defer var cmd = build_cli() else |_| {
+        io.eprintln("out of memory")
+        return 1
+    }
     var cursor = cli.ArgCursor.new(env.args())
-    defer let matches = cmd.parse(&cursor) else |_| {
-        defer let u = cmd.usage()
-        io.eprintln(u.view())
-        return 64
+    defer let matches = cmd.parse(&cursor) else |error| {
+        io.eprintln("error: {error}")
+        return usage_error(cmd)
     }
     if matches.is_help() {
-        defer let u = cmd.usage()
-        io.eprintln(u.view())
-        return 64
+        return usage_error(cmd)
     }
     let sub = matches.subcommand() else {
-        defer let u = cmd.usage()
-        io.eprintln(u.view())
-        return 64
+        return usage_error(cmd)
     }
     if sub.name == "serve" {
-        let port: UInt16 = sub.matches.get("port") else |_| {
-            defer let u = cmd.usage()
-            io.eprintln(u.view())
-            return 64
+        let port: UInt16 = sub.matches.get("port") else |error| {
+            io.eprintln("error: {error}")
+            return usage_error(cmd)
         }
-        let connections: Option[UInt64] = sub.matches.get_optional("connections") else |_| {
-            defer let u = cmd.usage()
-            io.eprintln(u.view())
-            return 64
+        let connections: Option[UInt64] = sub.matches.get_optional("connections") else |error| {
+            io.eprintln("error: {error}")
+            return usage_error(cmd)
         }
         return run_serve(.{ port, connections })
     }
     if sub.name == "send" {
-        let port: UInt16 = sub.matches.get("port") else |_| {
-            defer let u = cmd.usage()
-            io.eprintln(u.view())
-            return 64
+        let port: UInt16 = sub.matches.get("port") else |error| {
+            io.eprintln("error: {error}")
+            return usage_error(cmd)
         }
-        defer let messages = sub.matches.positionals_all("message")
-        if messages.length() == 0 {
-            defer let u = cmd.usage()
-            io.eprintln(u.view())
-            return 64
+        defer let messages = sub.matches.positionals_all("message") else |_| {
+            io.eprintln("out of memory")
+            return 1
         }
         return run_send(port, messages)
     }
-    defer let u = cmd.usage()
-    io.eprintln(u.view())
-    64
+    usage_error(cmd)
 }
 
 fn run_serve(options: ServeOptions) -> UInt8 {

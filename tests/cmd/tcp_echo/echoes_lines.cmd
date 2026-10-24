@@ -1,9 +1,11 @@
 The echo example, built once and run as a server and as a client.
 
-A command that is not a mode and a port prints the usage and exits with 64.
+A command that is not a mode and a port names what is missing, prints the
+usage and exits with 64.
 
   $ linea build "$LINEA_ROOT"/examples/tcp_echo.lin -o echo
   $ ./echo serve
+  error: missing required argument 'port'
   usage: tcp_echo <command>
   
   Echo text over TCP
