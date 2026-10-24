@@ -2234,6 +2234,7 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/tuples/a_refused_tuple_arm_does_not_make_the_next_arm_unreachable.lin",
     "tests/patterns/a_part_that_is_no_pattern_leaves_the_tuple_whole.lin",
     "tests/patterns/an_unclosed_tuple_pattern_has_no_arity_judged.lin",
+    "tests/patterns/a_part_that_compares_is_reported_by_its_form.lin",
     "tests/structs/named_literals/a_named_literal_requires_its_closing_brace.lin",
     "tests/struct_update/the_base_comes_last.lin",
     "tests/struct_update/a_base_needs_an_expression.lin",
