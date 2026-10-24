@@ -378,7 +378,7 @@ fn add_header_field[A: Allocator](inout stored: String[A], inout header_fields: 
     }
     if name.equals_ascii_folded("Host") {
         tally.host_count += 1
-        if tally.host_count > 1 || !is_valid_authority(value) {
+        if tally.host_count > 1 || !Origin.is_valid_authority(value) {
             return .Err(.Status(.BadRequest))
         }
     }
