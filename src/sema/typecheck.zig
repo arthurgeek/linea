@@ -5769,6 +5769,9 @@ const Checker = struct {
     /// Who a `?` reached here answers to: a closure while a closure's body
     /// is checked, the function elsewhere. What its reports name.
     try_answerer: TryAnswerer = .function,
+    /// Where the type a `typed_closure` answerer's result comes from is
+    /// written, which its report points at. Null for every other answerer.
+    try_answer_typed_at: ?Loc = null,
     /// Whether the function being checked wrote a result type that was
     /// refused, so a `?` in it has nothing known to answer to.
     answer_unknown: bool = false,
@@ -18221,8 +18224,10 @@ const Checker = struct {
             statement.name,
             binder,
         }) else signature;
-        const labels = try self.sink.arena.alloc(Label, 1);
+        const typed_at = if (answerer == .typed_closure) self.try_answer_typed_at else null;
+        const labels = try self.sink.arena.alloc(Label, if (typed_at != null) 2 else 1);
         labels[0] = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id), .message = try std.fmt.allocPrint(self.sink.arena, "`?` returns from the {s} it is written in", .{answerer.noun()}), .style = .primary };
+        if (typed_at) |at| labels[1] = .{ .file = at.file, .span = at.span, .message = "the closure's type is given here", .style = .secondary };
         // Only a result written on the body it answers for is the fix's to edit.
         if (answerer == .function or answerer == .closure) if (self.answer_fixes) |pending| try pending.append(self.gpa, .{
             .diagnostic = self.sink.items().len,
@@ -20630,18 +20635,21 @@ const Checker = struct {
             const previous_tries = self.deferred_tries;
             const previous_failure = self.failure_expected;
             const previous_answerer = self.try_answerer;
+            const previous_typed_at = self.try_answer_typed_at;
             self.current_return = result_expected;
             self.inferred_return = if (result_expected == null) &inferred_return else null;
             self.inferred_body = if (result_expected == null) lambda.body else .none;
             self.deferred_tries = if (result_expected == null or result_expected.?.inference != null) &deferred_tries else null;
             self.failure_expected = null;
             self.try_answerer = answerer;
+            self.try_answer_typed_at = if (answerer == .typed_closure) expected.?.at else null;
             defer self.current_return = previous_return;
             defer self.inferred_return = previous_inferred;
             defer self.inferred_body = previous_body;
             defer self.deferred_tries = previous_tries;
             defer self.failure_expected = previous_failure;
             defer self.try_answerer = previous_answerer;
+            defer self.try_answer_typed_at = previous_typed_at;
             // A closure's body is a function of its own: a `break` or
             // `continue` in it has no loop to leave, and its `return` and `?`
             // leave the closure rather than the loops around it.

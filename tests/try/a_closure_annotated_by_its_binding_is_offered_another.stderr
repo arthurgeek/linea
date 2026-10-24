@@ -1,6 +1,8 @@
 error[T-TryAnswer]: this `?` may return `Result[UInt8, Bad]`, and the closure answers with `UInt8`
   --> tests/try/a_closure_annotated_by_its_binding_is_offered_another.lin:15:17
    |
+14 |     let next: fn() -> UInt8 = || {
+   |               ------------- the closure's type is given here
 15 |         let n = parse()?
    |                 ^^^^^^^^ `?` returns from the closure it is written in
    |

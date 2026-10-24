@@ -1,0 +1,24 @@
+// A `Hook`'s `run` field holds an `fn() -> UInt8`, so the closure stored in
+// it answers with `UInt8`, and its `?` cannot hand `parse`'s failure on. The
+// report points at the type that gives the closure its result.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
+
+struct Hook {
+    run: fn() -> UInt8,
+}
+
+fn main() -> UInt8 {
+    let hook = Hook {
+        run = || {
+            let n = parse()?
+            n
+        },
+    }
+    (hook.run)()
+}
