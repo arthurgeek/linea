@@ -3994,8 +3994,9 @@ pub fn useWriting(
     const part = ast.partOfFile(file).?;
     const text = part.source;
     const place = placement.placementForUse(ast, part, text);
-    const alone: HelpEdit = .{ .file = file, .span = .{ .start = place.at, .end = place.at }, .text = try std.fmt.allocPrint(arena, "{s}use {s}{s}", .{ place.lead, path, place.trail }) };
-    const needed = route.import orelse return .{ .path = path, .import_path = null, .held = .{ alone, undefined }, .count = 1 };
+    // Written only where it is returned: the caller may own every text it is
+    // handed, so a text made and then set aside would leak.
+    const needed = route.import orelse return .{ .path = path, .import_path = null, .held = .{ try useAlone(arena, file, place, path), undefined }, .count = 1 };
     const above = placement.placementIn(ast, part, text);
     // A file with no `use` yet opens its group right below the imports, where
     // the new import goes too, so the two are written as one edit: the
@@ -4006,7 +4007,13 @@ pub fn useWriting(
         return .{ .path = path, .import_path = needed, .held = .{ together, undefined }, .count = 1 };
     }
     const import: HelpEdit = .{ .file = file, .span = .{ .start = above.at, .end = above.at }, .text = try std.fmt.allocPrint(arena, "{s}import {s}{s}", .{ above.lead, needed, above.trail }) };
-    return .{ .path = path, .import_path = needed, .held = .{ import, alone }, .count = 2 };
+    errdefer arena.free(import.text);
+    return .{ .path = path, .import_path = needed, .held = .{ import, try useAlone(arena, file, place, path) }, .count = 2 };
+}
+
+/// The edit writing `use path` where `place` puts it.
+fn useAlone(arena: std.mem.Allocator, file: FileId, place: placement.Placement, path: []const u8) std.mem.Allocator.Error!HelpEdit {
+    return .{ .file = file, .span = .{ .start = place.at, .end = place.at }, .text = try std.fmt.allocPrint(arena, "{s}use {s}{s}", .{ place.lead, path, place.trail }) };
 }
 
 /// A type written into a help, for a reader in module `from` to copy into
