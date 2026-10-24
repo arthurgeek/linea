@@ -1,5 +1,6 @@
 // A template is instantiated for every type that satisfies it, and the compiler
-// writes the one call to a test, so a test does not sit in a template.
+// writes the one call to a test, so a test does not sit in a template. Refused
+// there, it is refused once.
 import std.testing
 
 trait Named {
@@ -12,7 +13,7 @@ template impl Named where reflect.target: struct {
     }
 
     test fn a_template_names_zero() {
-        testing.assert(true, "a template holds no test")?
+        testing.assert(Self.name() == 0, "a template holds no test")?
     }
 }
 

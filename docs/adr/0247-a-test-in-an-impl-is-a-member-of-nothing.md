@@ -48,8 +48,8 @@ is written in.
 
 ## Consequences
 
-A test in a generic implementation writes concrete types, `Boxed[UInt8]`
-rather than `Self`, which makes the instance it tests visible where it is
+A test in a generic implementation writes concrete types rather than `Self`,
+`Boxed[UInt8]` in an annotation and `Boxed` before a call, which makes the instance it tests visible where it is
 tested. A test cannot be written once for every instance of a generic type;
 that would need a test to be instantiated, which nothing in the runner does.
 

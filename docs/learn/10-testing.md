@@ -175,9 +175,10 @@ error[S-Test]: `Self` names no type in a test
    |                     ^^^^ a test inside an `impl` is resolved at module scope; write `Meter`
 ```
 
-Writing `Meter.new()` fixes it. In a generic `impl[T] Boxed[T]`, a test writes
-a concrete instance such as `Boxed[UInt8]`, which also says which instance it
-checks. Because trait implementations supply only what a trait declares, tests
+Writing `Meter.new()` fixes it. In a generic `impl[T] Boxed[T]`, a test names
+the instance it checks: `let boxed: Boxed[UInt8] = Boxed.new(3)` writes the
+whole type in the annotation and only `Boxed` before the call, whose argument
+settles `T`. Because trait implementations supply only what a trait declares, tests
 sit in inherent implementations, not in trait implementations
 (`impl Trait for Type`) or templates.
 

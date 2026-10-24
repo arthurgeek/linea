@@ -1,5 +1,5 @@
 error[S-Test]: a test does not sit in a template
-  --> tests/decl/a_test_does_not_sit_in_a_template.lin:14:5
+  --> tests/decl/a_test_does_not_sit_in_a_template.lin:15:5
    |
-14 |     test fn a_template_names_zero() {
+15 |     test fn a_template_names_zero() {
    |     ^^^^ a template is instantiated for types that satisfy it, and the compiler calls a test

@@ -12764,6 +12764,10 @@ const Resolver = struct {
         return self.impl_of_head.get(of) orelse DeclId.none;
     }
 
+    /// Where a name `refuseImplNameInTest` reports was written: a written
+    /// type, or an expression such as the head of a call.
+    const NamePosition = enum { annotation, expression };
+
     /// [S-Test] at `Self`, or at one of the implementation's own type
     /// parameters, written in a test that implementation's braces hold, and
     /// whether it was reported.
@@ -12774,17 +12778,28 @@ const Resolver = struct {
     /// it does mean something. Where the implementation is for one concrete
     /// type, the help writes that type in place of `Self`; under type
     /// parameters, which arguments the test means is the reader's choice.
-    fn refuseImplNameInTest(self: *Resolver, tok: TokenId) std.mem.Allocator.Error!bool {
+    ///
+    /// What the help writes depends on `position`. A written type is the whole
+    /// head, `Boxed[UInt8]`; before a call it is the type's name, `Boxed`,
+    /// because a call settles the arguments and a bracketed head is no value.
+    ///
+    /// A test in a trait implementation or a template was refused where it
+    /// was parsed, so neither name is reported a second time inside it.
+    fn refuseImplNameInTest(self: *Resolver, tok: TokenId, position: NamePosition) std.mem.Allocator.Error!bool {
         if (tok == TokenId.none or self.ast.tokenTag(tok) != .identifier) return false;
         const impl = self.implHoldingTest();
         if (impl == DeclId.none) return false;
+        const refused = self.ast.declTag(impl) != .impl_ or self.ast.declTrait(impl) != TokenId.none;
         const generic = self.ast.declTypeParams(impl).len != 0;
         const file = self.ast.fileOf(tok);
         const span = self.ast.tokenSpan(tok);
 
         if (namesSelf(self.ast, tok)) {
+            if (refused) return true;
             const head = self.ast.declHead(impl);
-            const written = if (head.kind == .named and head.args.len() != 0)
+            const written = if (head.kind == .named and position == .expression)
+                self.ast.tokenText(head.name)
+            else if (head.kind == .named and head.args.len() != 0)
                 self.ast.writtenText(head)
             else
                 self.ast.implHeadText(impl);
@@ -12793,10 +12808,10 @@ const Resolver = struct {
                 .file = file,
                 .span = span,
                 .style = .primary,
-                .message = if (generic)
-                    try std.fmt.allocPrint(self.sink.arena, "a test is not instantiated, so nothing settles the parameters of `{s}`; write it with concrete arguments", .{written})
-                else
-                    try std.fmt.allocPrint(self.sink.arena, "a test inside an `impl` is resolved at module scope; write `{s}`", .{written}),
+                .message = if (generic) switch (position) {
+                    .annotation => try std.fmt.allocPrint(self.sink.arena, "a test is not instantiated, so nothing settles the parameters of `{s}`; write it with concrete arguments", .{written}),
+                    .expression => try std.fmt.allocPrint(self.sink.arena, "a test is not instantiated, so nothing settles the parameters of `Self`; write `{s}` and let the call settle them", .{written}),
+                } else try std.fmt.allocPrint(self.sink.arena, "a test inside an `impl` is resolved at module scope; write `{s}`", .{written}),
             };
             var fixes: []const Fix = &.{};
             if (!generic) {
@@ -12819,6 +12834,7 @@ const Resolver = struct {
         if (!generic) return false;
         for (self.ast.declTypeParams(impl)) |parameter| {
             if (self.ast.tokenName(parameter.name) != self.ast.tokenName(tok)) continue;
+            if (refused) return true;
             try self.sink.addErrorFmt(
                 .s_test,
                 file,
@@ -12838,7 +12854,7 @@ const Resolver = struct {
     /// what it annotates, and a poisoned value nobody diagnosed is every rule
     /// about it silently skipped.
     fn reportUnknownType(self: *Resolver, tok: TokenId) void {
-        if (self.refuseImplNameInTest(tok) catch true) return;
+        if (self.refuseImplNameInTest(tok, .annotation) catch true) return;
         // `Self` names the type of an implementation for a named type or a
         // tuple; an implementation for `()` has no name to stand for.
         const label = if (namesSelf(self.ast, tok))
@@ -13615,7 +13631,7 @@ const Resolver = struct {
             },
         };
 
-        if (try self.refuseImplNameInTest(self.ast.exprMain(id))) return;
+        if (try self.refuseImplNameInTest(self.ast.exprMain(id), .expression)) return;
         try self.sink.addErrorFmt(
             .n_undefined,
             self.ast.fileOfExpr(id),

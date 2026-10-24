@@ -395,9 +395,12 @@ top-level name, so two implementations in one module do not each declare a test
 of one name ([N-Duplicate]), and the implementation adds nothing to its
 qualified name. A test named `main`, inside an `impl` or not, is never the
 entry point ([S-Entry]); in the root module beside the program's `main` it is a
-second declaration of that name ([N-Duplicate]). A test is not instantiated, so neither `Self` nor the
-implementation's type parameters name a type in it; writing either is refused,
-and the test names the concrete types it tests instead, as `Boxed[UInt8]`.
+second declaration of that name ([N-Duplicate]). A test is not instantiated, so
+neither `Self` nor the implementation's type parameters name a type in it;
+writing either is refused, and the test names the concrete types it tests
+instead: `Boxed[UInt8]` in an annotation, and `Boxed` before a call, whose
+arguments settle the instance. Inside a trait implementation or a template,
+where the test itself is refused, neither name is reported again.
 
 A test may instead be written `test trap fn`. It succeeds only when its child
 process reaches a language trap; returning successfully, returning a failure,
