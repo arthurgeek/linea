@@ -12,11 +12,12 @@ pub enum Align {
 }
 
 // A Spec describes how a value is laid out: the padding around it, a
-// number's sign and zero padding, and the digits after a Float64's decimal
+// number's sign and zero padding, and the digits after a float's decimal
 // point. An interpolation builds one from the text after its colon, so
 // `{price:>8.2}` right-aligns a price with two decimals in eight columns. A
 // program that picks a layout at run time builds a Spec itself and passes it
-// to `write_display`, `write_debug`, `write_integer` or `write_float`.
+// to `write_display`, `write_debug`, `write_integer`, `write_float` or
+// `write_float32`.
 //
 // `fill` pads each column with one of its scalars, repeating it as a pattern
 // when it holds several; an empty fill pads with spaces. Width counts Unicode
@@ -24,15 +25,15 @@ pub enum Align {
 // left and numbers on the right. `plus` writes `+` before a number that is not
 // negative, and `zero` pads a number with zeros between its sign and its
 // digits in place of the fill and alignment. `precision` is the number of
-// digits after a Float64's point. `hex` writes an integer's digits in base 16
+// digits after a float's point. `hex` writes an integer's digits in base 16
 // with lowercase letters or capitals, so 255 is `ff` or `FF`; a negative
 // integer is written as its sign and magnitude, `-ff`, whatever its type.
 // `None` writes decimal digits. `write_integer` alone reads `hex`, as
-// `write_float` alone reads `precision`.
+// `write_float` and `write_float32` alone read `precision`.
 //
 // `Spec.default()` is the layout an interpolation without a colon uses: no
 // padding, no sign for a positive number, and the shortest digits for a
-// Float64. Struct update changes one part of it, as in
+// float. Struct update changes one part of it, as in
 // `Spec { width = 8, ..Spec.default() }`.
 @(copyable, derive(Debug, Equatable, Default))
 pub struct Spec {
@@ -283,13 +284,14 @@ fn write_number_parts[W: Writer](spec: Spec, sign: Str, digits: UInt64, body: Nu
 }
 
 // A NumberBody is the unsigned part of a number: an integer's magnitude in
-// decimal or in hexadecimal of a letter case, or a Float64's magnitude with
-// the digits its precision asks for.
+// decimal or in hexadecimal of a letter case, or a float's magnitude, held
+// exactly as a Float64, with the float type whose digits it is written with
+// and the digits its precision asks for.
 @copyable
 enum NumberBody {
     Whole(UInt64),
     Hexadecimal(UInt64, LetterCase),
-    Fraction(Float64, Option[UInt64]),
+    Fraction(Float64, FloatWidth, Option[UInt64]),
 }
 
 impl NumberBody {
@@ -298,7 +300,7 @@ impl NumberBody {
         match read self {
             Whole(_) => true,
             Hexadecimal(_, _) => true,
-            Fraction(magnitude, _) => magnitude == magnitude && magnitude != 1.0 / 0.0,
+            Fraction(magnitude, _, _) => magnitude == magnitude && magnitude != 1.0 / 0.0,
         }
     }
 
@@ -307,7 +309,7 @@ impl NumberBody {
         match read self {
             Whole(magnitude) => format_unsigned(magnitude, &w),
             Hexadecimal(magnitude, case) => write_hexadecimal(magnitude, case, &w),
-            Fraction(magnitude, precision) => write_float_magnitude(magnitude, precision, &w),
+            Fraction(magnitude, width, precision) => write_float_magnitude(magnitude, width, precision, &w),
         }
     }
 }
@@ -426,13 +428,10 @@ test fn write_integer_appends_to_what_the_writer_holds() {
     .Ok(())
 }
 
-// Write a Float64 with the spec's sign, zero padding, alignment and precision.
-// Without a precision the digits are Display's, the shortest that read back
-// as the value. With one, those digits are rounded half away from zero to
-// that many places after the point: 2.675 with two places is 2.68, and 0.5
-// with none is 1. A negative value, including -0.0, keeps its minus sign.
-// Infinity and NaN ignore the precision, and NaN takes no sign.
-pub fn write_float[W: Writer](value: Float64, spec: Spec, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+// The sign, padding and precision `write_float` and `write_float32` share,
+// over a value held exactly as a Float64 and the float type whose digits it
+// is written with.
+fn write_float_digits[W: Writer](value: Float64, width: FloatWidth, spec: Spec, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
     let negative = is_negative(value)
     let magnitude = if negative {
         -value
@@ -446,7 +445,7 @@ pub fn write_float[W: Writer](value: Float64, spec: Spec, inout w: W) -> Result[
     } else {
         ""
     }
-    let body: NumberBody = .Fraction(magnitude, copy(spec.precision))
+    let body: NumberBody = .Fraction(magnitude, width, copy(spec.precision))
     if spec.width == 0 {
         &w.write_str(sign)?
         return body.write(&w)
@@ -457,6 +456,16 @@ pub fn write_float[W: Writer](value: Float64, spec: Spec, inout w: W) -> Result[
         Err(never) => never,
     }
     write_number_parts(spec, sign, count.scalars, body, &w)
+}
+
+// Write a Float64 with the spec's sign, zero padding, alignment and precision.
+// Without a precision the digits are Display's, the shortest that read back
+// as the value. With one, those digits are rounded half away from zero to
+// that many places after the point: 2.675 with two places is 2.68, and 0.5
+// with none is 1. A negative value, including -0.0, keeps its minus sign.
+// Infinity and NaN ignore the precision, and NaN takes no sign.
+pub fn write_float[W: Writer](value: Float64, spec: Spec, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    write_float_digits(value, .Binary64, spec, &w)
 }
 
 test fn write_float_rounds_to_its_precision() {
@@ -504,10 +513,28 @@ test fn write_float_appends_to_what_the_writer_holds() {
     .Ok(())
 }
 
-// An interpolation whose format spec lays its value out calls one of the four
+// Write a Float32 as `write_float` writes a Float64, with the digits of the
+// shortest decimal that reads back as the same Float32: `Float32(0.1)` with
+// ten places is `0.1000000000`.
+pub fn write_float32[W: Writer](value: Float32, spec: Spec, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    write_float_digits(Float64(value), .Binary32, spec, &w)
+}
+
+test fn write_float32_rounds_the_binary32_digits() {
+    let cents = Spec { precision = .Some(2), ..Spec.default() }
+    expect_float32(0.125, cents, "0.13", "a half did not round away from zero")?
+    expect_float32(16777216.0, Spec { plus = true, ..Spec.padded(12) }, " +16777216.0", "padding or sign changed")?
+    expect_float32(0.1, Spec { precision = .Some(10), ..Spec.default() }, "0.1000000000", "the digits of 0.1 were not its shortest binary32 digits")?
+    expect_float32(-0.0, Spec.default(), "-0.0", "negative zero lost its sign")?
+    let zero: Float32 = 0.0
+    expect_float32(zero / zero, Spec { plus = true, ..Spec.padded(5) }, "  NaN", "NaN took a sign")?
+    .Ok(())
+}
+
+// An interpolation whose format spec lays its value out calls one of the five
 // functions below with the parts the spec wrote, and they pass a Spec to the
 // matching `write_` function. The compiler picks one by the value's type:
-// integers, Float64, and the Display or Debug text of anything else. `align`
+// integers, Float64, Float32, and the Display or Debug text of anything else. `align`
 // is 0 for none, then 1, 2 and 3 for left, right and center, `places`
 // counts only when `fraction` is set, and `hex` is 0 for decimal digits, then
 // 1 and 2 for lowercase and capital hexadecimal ones.
@@ -547,6 +574,10 @@ fn interpolate_float[W: Writer](value: Float64, fill: Str, align: UInt8, plus: B
     write_float(value, spec_of(fill, align, plus, zero, width, fraction, places, hex), &w)
 }
 
+fn interpolate_float32[W: Writer](value: Float32, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, hex: UInt8, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    write_float32(value, spec_of(fill, align, plus, zero, width, fraction, places, hex), &w)
+}
+
 test fn a_spec_of_the_written_parts_names_each_one() {
     let spec = spec_of("*", 3, true, false, 9, true, 2, 0)
     let expected = Spec { fill = "*", align = .Some(.Center), plus = true, zero = false, width = 9, precision = .Some(2), hex = .None }
@@ -580,5 +611,11 @@ fn expect_integer[T: Integer](value: T, spec: Spec, expected: Str, said: Str) ->
 fn expect_float(value: Float64, spec: Spec, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
     defer var out = String.new()
     write_float(value, spec, &out).unwrap()
+    testing.assert_eq(out.view(), expected, said)
+}
+
+fn expect_float32(value: Float32, spec: Spec, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
+    defer var out = String.new()
+    write_float32(value, spec, &out).unwrap()
     testing.assert_eq(out.view(), expected, said)
 }

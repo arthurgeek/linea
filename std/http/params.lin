@@ -374,6 +374,12 @@ impl FromPath for Float64 {
     }
 }
 
+impl FromPath for Float32 {
+    fn from_path(values: ParamValues) -> Result[Float32, ParamError] where carries(values) {
+        values.only()
+    }
+}
+
 test fn a_path_reads_a_struct_by_name_or_its_only_value() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "GET", "/?year=1999&title=x", body: "").unwrap()
@@ -385,5 +391,7 @@ test fn a_path_reads_a_struct_by_name_or_its_only_value() {
     testing.assert_eq(archive.unwrap().year, UInt32(1999), "the struct was not filled")?
     testing.assert_eq(signed, .Ok(-3), "the only value was not parsed")?
     testing.assert_eq(named, .Ok("-3"), "the only value was not read as text")?
+    let level: Result[Float32, ParamError] = FromPath.from_path(single.request().query_params().unwrap())
+    testing.assert_eq(level, .Ok(-3.0), "a Float32 was not parsed")?
     .Ok(())
 }

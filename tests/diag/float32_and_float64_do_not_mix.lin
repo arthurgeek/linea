@@ -1,0 +1,12 @@
+fn widen(value: Float64) -> Float64 {
+    value
+}
+
+fn main() -> UInt8 {
+    let narrow: Float32 = 1.5
+    let wide: Float64 = 2.5
+    let _sum = narrow + wide
+    let _rest = narrow % narrow
+    let _passed = widen(narrow)
+    0
+}

@@ -6,6 +6,19 @@ const ParseStatus = enum(u64) { ok, syntax, out_of_range, token_limit };
 
 // Input is a certified byte extent from std.mem. Outputs contain no observations.
 export fn linea_float64_parse(address: u64, length: u64, bits: *u64, offset: *u64) callconv(.c) u64 {
+    return parseDecimal(f64, address, length, bits, offset);
+}
+
+// The same as `linea_float64_parse`, rounding once to the nearest binary32
+// value. `bits` receives the binary64 encoding of that value, which holds it
+// exactly, so both widths cross the foreign interface as one kind of word.
+export fn linea_float32_parse(address: u64, length: u64, bits: *u64, offset: *u64) callconv(.c) u64 {
+    return parseDecimal(f32, address, length, bits, offset);
+}
+
+// One scanner owns the decimal grammar and its syntax offsets for both
+// widths; only the provider's rounding target differs.
+fn parseDecimal(comptime T: type, address: u64, length: u64, bits: *u64, offset: *u64) u64 {
     bits.* = 0;
     offset.* = 0;
     if (length > parse_token_limit) {
@@ -35,11 +48,14 @@ export fn linea_float64_parse(address: u64, length: u64, bits: *u64, offset: *u6
 
     // The integer-only provider rounds using 768 digits and a discarded-tail
     // flag. Its biased significand/exponent already are the IEEE fields.
-    const converted = decimal_provider.convertSlow(f64, input[magnitude_start..]);
-    const magnitude = converted.f | (@as(u64, @intCast(converted.e)) << 52);
-    const infinity = @as(u64, 0x7ff0000000000000);
+    const Bits = @Int(.unsigned, @bitSizeOf(T));
+    const fraction_bits = std.math.floatFractionalBits(T);
+    const converted = decimal_provider.convertSlow(T, input[magnitude_start..]);
+    const magnitude: Bits = @intCast(converted.f | (@as(u64, @intCast(converted.e)) << fraction_bits));
+    const infinity: Bits = @bitCast(std.math.inf(T));
     if (magnitude == infinity or (magnitude == 0 and nonzero)) return @intFromEnum(ParseStatus.out_of_range);
-    bits.* = magnitude | (if (negative) @as(u64, 1) << 63 else 0);
+    const value: T = @bitCast(magnitude | (if (negative) @as(Bits, 1) << (@bitSizeOf(T) - 1) else 0));
+    bits.* = @bitCast(@as(f64, value));
     return @intFromEnum(ParseStatus.ok);
 }
 
@@ -57,8 +73,18 @@ fn parseSyntax(at: usize, offset: *u64) u64 {
 }
 
 export fn linea_float64_debug(bits: u64, first: *u64, second: *u64, third: *u64, fourth: *u64) callconv(.c) u64 {
+    return debugWords(@as(f64, @bitCast(bits)), first, second, third, fourth);
+}
+
+// `bits` is the binary64 encoding of a binary32 value, which narrowing
+// recovers exactly; the text is the shortest that reads back as that binary32.
+export fn linea_float32_debug(bits: u64, first: *u64, second: *u64, third: *u64, fourth: *u64) callconv(.c) u64 {
+    return debugWords(@as(f32, @floatCast(@as(f64, @bitCast(bits)))), first, second, third, fourth);
+}
+
+fn debugWords(value: anytype, first: *u64, second: *u64, third: *u64, fourth: *u64) u64 {
     var buffer: [std.fmt.float.bufferSize(.decimal, f64)]u8 = undefined;
-    const text = render(@as(f64, @bitCast(bits)), &buffer);
+    const text = render(value, &buffer);
     // The notation bounds keep every result within four words. Pack by
     // numeric shifts so the caller reads the same bytes on either endianness.
     std.debug.assert(text.len <= 32);
@@ -79,6 +105,31 @@ export fn linea_float64_shortest(bits: u64, exponent: *i64) callconv(.c) u64 {
     const decimal = std.fmt.float.binaryToDecimal(u64, bits, 52, 11, false, &std.fmt.float.Backend64_TablesFull);
     exponent.* = decimal.exponent;
     return decimal.mantissa;
+}
+
+// The same for a binary32 value passed as its exact binary64 encoding: these
+// are the digits `linea_float32_debug` prints.
+export fn linea_float32_shortest(bits: u64, exponent: *i64) callconv(.c) u64 {
+    const narrow: u32 = @bitCast(@as(f32, @floatCast(@as(f64, @bitCast(bits)))));
+    const decimal = std.fmt.float.binaryToDecimal(u64, narrow, 23, 8, false, &std.fmt.float.Backend64_TablesFull);
+    exponent.* = decimal.exponent;
+    return decimal.mantissa;
+}
+
+test "binary32 shortest digits are a significand and a power of ten" {
+    const Case = struct { value: f32, significand: u64, exponent: i64 };
+    const cases = [_]Case{
+        .{ .value = 0.1, .significand = 1, .exponent = -1 },
+        .{ .value = 1.0 / 3.0, .significand = 33333334, .exponent = -8 },
+        .{ .value = 16777216.0, .significand = 16777216, .exponent = 0 },
+        .{ .value = std.math.floatTrueMin(f32), .significand = 1, .exponent = -45 },
+        .{ .value = std.math.floatMax(f32), .significand = 34028235, .exponent = 31 },
+    };
+    for (cases) |case| {
+        var exponent: i64 = 0;
+        try std.testing.expectEqual(case.significand, linea_float32_shortest(@bitCast(@as(f64, case.value)), &exponent));
+        try std.testing.expectEqual(case.exponent, exponent);
+    }
 }
 
 test "float shortest digits are a significand and a power of ten" {
@@ -163,6 +214,122 @@ test "float debug finite values round trip without losing bits" {
         var bytes: [32]u8 = undefined;
         for (&bytes, 0..) |*byte, index| byte.* = @truncate(words[index / 8] >> @as(u6, @intCast(index % 8 * 8)));
         try expectParsedBits(bytes[0..@intCast(length)], bits);
+    }
+}
+
+fn expectText32(expected: []const u8, value: f32) !void {
+    var words = [_]u64{std.math.maxInt(u64)} ** 4;
+    const length = linea_float32_debug(@bitCast(@as(f64, value)), &words[0], &words[1], &words[2], &words[3]);
+    try std.testing.expect(length <= 32);
+    var bytes: [32]u8 = undefined;
+    for (&bytes, 0..) |*byte, index| byte.* = @truncate(words[index / 8] >> @as(u6, @intCast(index % 8 * 8)));
+    try std.testing.expectEqualStrings(expected, bytes[0..@intCast(length)]);
+}
+
+test "binary32 debug prints the shortest text that reads back as binary32" {
+    const Case = struct { value: f32, text: []const u8 };
+    const cases = [_]Case{
+        .{ .value = 0.0, .text = "0.0" },
+        .{ .value = -0.0, .text = "-0.0" },
+        .{ .value = 0.1, .text = "0.1" },
+        .{ .value = 1.0 / 3.0, .text = "0.33333334" },
+        .{ .value = 16777216.0, .text = "16777216.0" },
+        .{ .value = 1e-6, .text = "0.000001" },
+        .{ .value = 1e-7, .text = "1e-7" },
+        .{ .value = 1e16, .text = "1e16" },
+        .{ .value = std.math.floatTrueMin(f32), .text = "1e-45" },
+        .{ .value = std.math.floatMin(f32), .text = "1.1754944e-38" },
+        .{ .value = std.math.floatMax(f32), .text = "3.4028235e38" },
+        .{ .value = std.math.inf(f32), .text = "inf" },
+        .{ .value = -std.math.inf(f32), .text = "-inf" },
+        .{ .value = std.math.nan(f32), .text = "NaN" },
+    };
+    for (cases) |case| try expectText32(case.text, case.value);
+}
+
+fn expectParsed32(input: []const u8, expected: u32) !void {
+    var bits: u64 = std.math.maxInt(u64);
+    var offset: u64 = std.math.maxInt(u64);
+    try std.testing.expectEqual(@as(u64, 0), linea_float32_parse(@intFromPtr(input.ptr), input.len, &bits, &offset));
+    try std.testing.expectEqual(expected, @as(u32, @bitCast(@as(f32, @floatCast(@as(f64, @bitCast(bits)))))));
+    try std.testing.expectEqual(@as(u64, 0), offset);
+}
+
+fn expectOutOfRange32(input: []const u8) !void {
+    var bits: u64 = 999;
+    var offset: u64 = 999;
+    try std.testing.expectEqual(@as(u64, 2), linea_float32_parse(@intFromPtr(input.ptr), input.len, &bits, &offset));
+    try std.testing.expectEqual(@as(u64, 0), bits);
+}
+
+test "binary32 parsing rounds once to the nearest even binary32 value" {
+    // Just above the halfway point 1 + 2^-24: rounding through binary64 would
+    // land on the halfway point and then on the even 1.0.
+    try expectParsed32("1.0000000596046447753906250000000001", 0x3f800001);
+    try expectParsed32("1.000000059604644775390625", 0x3f800000);
+    try expectParsed32("16777217", 0x4b800000);
+    try expectParsed32("16777219", 0x4b800002);
+    try expectParsed32("0.1", 0x3dcccccd);
+    try expectParsed32("-0", 0x80000000);
+    try expectParsed32("340282356779733661637539395458142568447", 0x7f7fffff);
+    try expectParsed32("7.0064923216240862e-46", 0x00000001);
+    try expectParsed32("1.1754942e-38", 0x007fffff);
+    try expectParsed32("1.1754944e-38", 0x00800000);
+    try expectParsed32("1.000000059604644775390625" ++ ("0" ** 900) ++ "1", 0x3f800001);
+    try expectOutOfRange32("340282356779733661637539395458142568448");
+    try expectOutOfRange32("7.0064923216240853e-46");
+    try expectOutOfRange32("1e39");
+    try expectOutOfRange32("-1e-50");
+}
+
+test "binary32 parsing shares the decimal grammar and its offsets" {
+    var bits: u64 = 999;
+    var offset: u64 = 999;
+    try std.testing.expectEqual(@as(u64, 1), linea_float32_parse(@intFromPtr("1.".ptr), 2, &bits, &offset));
+    try std.testing.expectEqual(@as(u64, 2), offset);
+    try std.testing.expectEqual(@as(u64, 3), linea_float32_parse(0, parse_token_limit + 1, &bits, &offset));
+}
+
+test "binary32 parsing ignores ambient rounding modes" {
+    const fenv = @cImport(@cInclude("fenv.h"));
+    const original = fenv.fegetround();
+    defer _ = fenv.fesetround(original);
+    for ([_]c_int{ fenv.FE_TONEAREST, fenv.FE_DOWNWARD, fenv.FE_UPWARD, fenv.FE_TOWARDZERO }) |mode| {
+        try std.testing.expectEqual(@as(c_int, 0), fenv.fesetround(mode));
+        try expectParsed32("0.1", 0x3dcccccd);
+        try expectParsed32("1.0000000596046447753906250000000001", 0x3f800001);
+        try expectParsed32("16777217", 0x4b800000);
+        try std.testing.expectEqual(mode, fenv.fegetround());
+    }
+}
+
+// Renders a binary32 pattern, parses the text back, and holds the result to
+// the same pattern; and the text has at most nine significant digits.
+fn expectRoundTrip32(pattern: u32) !void {
+    const value: f32 = @bitCast(pattern);
+    if (!std.math.isFinite(value)) return;
+    var words: [4]u64 = undefined;
+    const length = linea_float32_debug(@bitCast(@as(f64, value)), &words[0], &words[1], &words[2], &words[3]);
+    var bytes: [32]u8 = undefined;
+    for (&bytes, 0..) |*byte, index| byte.* = @truncate(words[index / 8] >> @as(u6, @intCast(index % 8 * 8)));
+    const text = bytes[0..@intCast(length)];
+    try expectParsed32(text, pattern);
+    var exponent: i64 = 0;
+    const significand = linea_float32_shortest(@bitCast(@as(f64, value)), &exponent);
+    try std.testing.expect(significand < 1_000_000_000);
+}
+
+test "binary32 display round trips through parsing" {
+    var pattern: u32 = 0;
+    while (true) {
+        try expectRoundTrip32(pattern);
+        pattern, const overflow = @addWithOverflow(pattern, 65537);
+        if (overflow != 0) break;
+    }
+    for (0..254) |exponent| try expectRoundTrip32(@as(u32, @intCast(exponent + 1)) << 23);
+    for ([_]u32{ 1, 0x007fffff, 0x00800000, 0x7f7fffff, 0x3f800001, 0x4b800000 }) |edge| {
+        try expectRoundTrip32(edge);
+        try expectRoundTrip32(edge | 0x80000000);
     }
 }
 

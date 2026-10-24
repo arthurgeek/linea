@@ -1,0 +1,20 @@
+fn half(x: UInt8) -> Option[UInt8] {
+    if x % 2 == 0 {
+        .Some(x / 2)
+    } else {
+        .None
+    }
+}
+
+fn main() -> UInt8 {
+    // The loop never ends and nothing returns a value, so nothing says what
+    // the closure answers and the `?` has nothing to return through.
+    let halve = |x: UInt8| {
+        var n = x
+        loop {
+            n = half(n)?
+        }
+    }
+    let _never = halve
+    0
+}

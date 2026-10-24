@@ -206,6 +206,8 @@ The library tests itself.
   ok    fmt.decimal_digits_count_every_place
   ok    fmt.each_allocation_failure_covers_every_growth_step_of_an_owned_rendering
   ok    fmt.fixed_digits_round_half_away_from_zero
+  ok    fmt.float32_debug_writes_the_shortest_binary32_decimal
+  ok    fmt.float32_display_renders_the_shortest_round_trip_decimal
   ok    fmt.float_debug_composes_with_nested_derivation
   ok    fmt.float_debug_distinguishes_adjacent_values
   ok    fmt.float_debug_names_infinities_and_canonical_nan
@@ -251,6 +253,7 @@ The library tests itself.
   ok    fmt.write_display_appends_to_what_the_writer_holds
   ok    fmt.write_display_ignores_number_parts_on_other_values
   ok    fmt.write_display_pads_text_by_its_alignment
+  ok    fmt.write_float32_rounds_the_binary32_digits
   ok    fmt.write_float_appends_to_what_the_writer_holds
   ok    fmt.write_float_pads_signs_and_names_non_finite_values
   ok    fmt.write_float_rounds_to_its_precision
@@ -1235,6 +1238,8 @@ The library tests itself.
   ok    result.unwrap_or_returns_ok_or_the_eager_fallback
   ok    result.unwrap_returns_ok
   ok    result.unwrap_traps_on_err
+  ok    scalar.a_float32_absolute_value_drops_the_sign_and_keeps_everything_else
+  ok    scalar.a_float32_nan_is_equal_to_nothing_including_itself
   ok    scalar.a_logarithm_has_defined_limits
   ok    scalar.a_nan_is_equal_to_nothing_including_itself
   ok    scalar.an_absolute_value_drops_the_sign_and_keeps_everything_else
@@ -1296,6 +1301,8 @@ The library tests itself.
   ok    text.ends_with_compares_the_trailing_bytes
   ok    text.equal_owned_and_observed_text_share_a_content_hash
   ok    text.find_respects_boundaries_and_empty_needles
+  ok    text.float32_parses_through_the_parse_trait
+  ok    text.float32_parsing_rounds_once_to_binary32
   ok    text.float64_parses_through_the_parse_trait
   ok    text.float_parsing_bounds_token_work_before_conversion
   ok    text.float_parsing_preserves_exact_values_and_signed_zero
@@ -1405,4 +1412,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1402 passed, 0 failed
+  1409 passed, 0 failed

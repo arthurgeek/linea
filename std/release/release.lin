@@ -26,7 +26,7 @@ pub trait Settle: Release {
     fn settle(sink self: Self) -> Self.Reason where carries(self)
 }
 
-// Unit, the integers, Bool, Float64 and Str own no resource, so releasing one
+// Unit, the integers, Bool, the floats and Str own no resource, so releasing one
 // runs nothing.
 impl Release for () {
     fn release(sink _self: ()) {}
@@ -69,6 +69,10 @@ impl Release for Bool {
 }
 
 impl Release for Float64 {
+    fn release(sink _self: Self) {}
+}
+
+impl Release for Float32 {
     fn release(sink _self: Self) {}
 }
 

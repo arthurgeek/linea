@@ -1,6 +1,6 @@
 // The text after an interpolation's colon lays out its value: a fill and an
 // alignment within a width counted in Unicode scalars, a sign and zero
-// padding for numbers, and the digits after a Float64's point. Numbers sit on
+// padding for numbers, and the digits after a float's point. Numbers sit on
 // the right of their width and other values on the left unless the spec
 // names a side, and a value wider than its width is written whole.
 import std.io

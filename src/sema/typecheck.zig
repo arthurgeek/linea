@@ -4484,6 +4484,56 @@ fn asksForSomething(ast: *const Ast, d: node.DeclId) bool {
     return ast.declBody(d) == ExprId.none;
 }
 
+/// Why a float type cannot hold a literal.
+const FloatLiteralRefusal = enum {
+    /// The literal rounds to an infinity.
+    too_large,
+    /// The literal is not zero and rounds to zero.
+    rounds_to_zero,
+};
+
+/// A float literal rounded once, to nearest with ties to even, at the width
+/// of the type it has, and whether that type refuses it. Every binary32 value
+/// is exact in binary64, so the rounded value is carried as an `f64` either
+/// way. Null where the text is not a finished literal, which the lexer has
+/// already reported.
+///
+/// This is the one place a float literal is rounded. A type holds a literal
+/// when its rounded value is finite and is zero only if the literal is:
+/// inexact rounding is admitted, since `0.1` is inexact in every binary format.
+fn roundFloatLiteral(text: []const u8, bits: u8) ?struct { value: f64, refusal: ?FloatLiteralRefusal } {
+    const value: f64 = switch (bits) {
+        32 => std.fmt.parseFloat(f32, text) catch return null,
+        64 => std.fmt.parseFloat(f64, text) catch return null,
+        else => unreachable,
+    };
+    if (!std.math.isFinite(value)) return .{ .value = value, .refusal = .too_large };
+    if (value == 0 and writesNonzeroDigit(text)) return .{ .value = value, .refusal = .rounds_to_zero };
+    return .{ .value = value, .refusal = null };
+}
+
+/// Whether a float literal's significand has a nonzero digit, so that it
+/// denotes a value other than zero whatever its exponent.
+fn writesNonzeroDigit(text: []const u8) bool {
+    for (text) |c| {
+        if (c == 'e' or c == 'E') return false;
+        if (c >= '1' and c <= '9') return true;
+    }
+    return false;
+}
+
+test "a float literal rounds once at its own width" {
+    const halfway_above = "1.0000000596046447753906250000000001";
+    try std.testing.expectEqual(@as(f64, 1.00000011920928955078125), roundFloatLiteral(halfway_above, 32).?.value);
+    try std.testing.expectEqual(@as(f64, 1.0000000596046448), roundFloatLiteral(halfway_above, 64).?.value);
+    try std.testing.expectEqual(FloatLiteralRefusal.too_large, roundFloatLiteral("1e39", 32).?.refusal.?);
+    try std.testing.expectEqual(@as(?FloatLiteralRefusal, null), roundFloatLiteral("1e38", 32).?.refusal);
+    try std.testing.expectEqual(FloatLiteralRefusal.rounds_to_zero, roundFloatLiteral("1e-50", 32).?.refusal.?);
+    try std.testing.expectEqual(FloatLiteralRefusal.rounds_to_zero, roundFloatLiteral("1e-400", 64).?.refusal.?);
+    try std.testing.expectEqual(@as(?FloatLiteralRefusal, null), roundFloatLiteral("0e-400", 64).?.refusal);
+    try std.testing.expectEqual(@as(?FloatLiteralRefusal, null), roundFloatLiteral("1e-45", 32).?.refusal);
+}
+
 /// Whether a value of this type is reached by address rather than held in a
 /// register.
 ///
@@ -4493,12 +4543,6 @@ fn asksForSomething(ast: *const Ast, d: node.DeclId) bool {
 pub fn livesInMemoryIn(builder: *const Typing.Builder, t: TypeId) bool {
     if (t == .poison) return false;
     return builder.layoutOf(t).isAggregate();
-}
-
-/// Remainder excludes floating-point operands; other arithmetic checks use
-/// the same declaration-level integer evidence as conversions and literals.
-fn remainderHoldsIn(t: TypeId) bool {
-    return t != .f64;
 }
 
 /// The fix a reader needs where an operator's operand type refuses it.
@@ -5018,6 +5062,9 @@ const Expected = struct {
         assignment,
         /// A `break` that settled the loop's type before this one.
         break_site,
+        /// A `return` that settled the result of a closure writing none
+        /// before this one.
+        return_site,
         /// The `while` this `break` leaves, which is always Unit.
         while_loop,
         /// The parameter an argument is passed to.
@@ -5067,6 +5114,7 @@ const Expected = struct {
                 .operand => "expected because of this operand",
                 .assignment => "expected because of this binding",
                 .break_site => "expected because of this `break`",
+                .return_site => "expected because of this `return`",
                 .while_loop => "a `while` yields `()`, whatever its body",
                 .parameter => "expected because of this parameter",
                 .payload => "expected because of what this variant carries",
@@ -5614,6 +5662,10 @@ const Checker = struct {
     /// built value that does not fit its context, so `checkInner` does not
     /// count it a refusal.
     mismatched: ExprId = .none,
+    /// The outermost negation written around the float literal being
+    /// checked, which its range error reports as the value that does not fit.
+    /// `.none` while any other expression is checked.
+    negated_float: ExprId = .none,
     /// The numbers accepted brackets' index operands fold to; `Typing.folded_indices`
     /// holds them.
     folded_indices: std.AutoHashMapUnmanaged(ExprId, u64) = .empty,
@@ -5710,10 +5762,18 @@ const Checker = struct {
     /// What the function being checked declares it returns, so a `return`
     /// answers to that rather than to its surroundings.
     current_return: ?Expected = null,
-    /// Inside a closure that writes no result and has no expected one, the
-    /// `?`s whose answer its body decides: each gives its payload, and is
-    /// reported once the body's type is known. Null elsewhere.
-    unanswered_tries: ?*std.ArrayList(UnansweredTry) = null,
+    /// In a closure that writes no result type and has none from its context,
+    /// what its first `return` carrying a value settled the result to. Each
+    /// later `return` and the body's own value answer to it, as a loop's
+    /// `break`s answer to the first. Null outside such a closure.
+    inferred_return: ?*?Expected = null,
+    /// The body of the closure `inferred_return` belongs to, whose value
+    /// answers to that result as a later `return` does.
+    inferred_body: ExprId = .none,
+    /// The `?`s of that closure reached before anything settled its result,
+    /// each giving its payload and checked against the result once its body
+    /// is checked. Null elsewhere.
+    deferred_tries: ?*std.ArrayList(UnansweredTry) = null,
     /// The `return`s of the body being checked, outside the closures in it,
     /// which a fix changing what the body answers with rewrites. Null where
     /// no body is being checked.
@@ -11754,7 +11814,7 @@ const Checker = struct {
     fn receiverType(self: *Checker, t: TypeId, at: open_types_mod.Site) std.mem.Allocator.Error!TypeId {
         var head = t;
         while (true) switch (self.builder.get(head)) {
-            .open_integer, .open_type => return self.forceInteger(t, at),
+            .open_integer, .open_float, .open_type => return self.forceInteger(t, at),
             .borrow => |observation| head = observation.referent,
             else => return self.builder.resolveOpen(t, &self.open_types),
         };
@@ -12365,9 +12425,8 @@ const Checker = struct {
     fn resolveAllOpen(self: *Checker) std.mem.Allocator.Error!void {
         // A value named outside every body is read here, once what named it
         // has been checked.
-        try self.closeScope(.{ .open = .{ .start = 0 }, .values = 0 });
-        self.open_types.fallbackAll(TypeId.literal_default);
-        try self.checkSettledRanges();
+        self.open_types.fallbackAll();
+        try self.closeScope(.{ .open = .{ .start = 0 }, .values = 0, .ranges = 0 });
         // A closure's environment record is minted while its captures may be
         // open, and it is laid out from its fields, so their types are
         // resolved where they are stored. Each record belongs to one closure
@@ -12410,17 +12469,29 @@ const Checker = struct {
         };
     }
 
-    /// Reports each value folded while its type was open that its final type
-    /// cannot hold, where the value was written and labelled where the type
-    /// was chosen. Checked once every variable has its final type, so
-    /// settling, joining and falling back all reach it.
-    fn checkSettledRanges(self: *Checker) std.mem.Allocator.Error!void {
+    /// Reports each value folded while its type was open, from the `start`th
+    /// on, that its final type cannot hold, where the value was written and
+    /// labelled where the type was chosen. Checked when the body that wrote
+    /// the values closes, once every variable it created has its final type,
+    /// so settling, joining and falling back all reach it and the reports
+    /// follow the body's other diagnostics rather than every other body's.
+    fn checkSettledRanges(self: *Checker, start: u32) std.mem.Allocator.Error!void {
         // An argument checked in both passes of a call queues its value twice;
         // one site is reported once.
         var reported: std.AutoHashMapUnmanaged(ExprId, void) = .empty;
         defer reported.deinit(self.gpa);
-        for (self.open_types.pending.items) |waiting| {
+        for (self.open_types.pending.items[start..]) |waiting| {
             const t = self.open_types.settled(waiting.v).?;
+            if (waiting.rule == .float_literal) {
+                const literal = self.literalSpelling(waiting.expr, .float_literal).?.literal;
+                const text = self.ast.tokenText(self.ast.exprMain(literal));
+                const rounded = roundFloatLiteral(text, t.floatBits().?).?;
+                if (rounded.refusal) |refusal| {
+                    if ((try reported.getOrPut(self.gpa, waiting.expr)).found_existing) continue;
+                    _ = try self.reportFloatLiteralRange(waiting.expr, t, refusal, try self.chosenLabel(waiting.v));
+                } else try self.literal_values.put(self.gpa, literal, .{ .float = rounded.value });
+                continue;
+            }
             if (self.integerLiteralFits(t, waiting.value)) continue;
             if ((try reported.getOrPut(self.gpa, waiting.expr)).found_existing) continue;
             self.folds.set(waiting.expr, .absent);
@@ -12437,8 +12508,10 @@ const Checker = struct {
                     .{(try self.typeName(t))},
                     "the result is not representable",
                 ),
+                .float_literal => unreachable,
             }
         }
+        self.open_types.pending.shrinkRetainingCapacity(start);
     }
 
     /// Where an open integer's type was chosen: the use that settled it, or
@@ -12467,16 +12540,16 @@ const Checker = struct {
         return self.builder.resolveOpen(t, &self.open_types);
     }
 
-    /// Falls back every open integer inside `t`, naming `at` as the reason
-    /// where there is one. An open type has no fallback and stays open, unless
-    /// it was joined with an open integer.
+    /// Falls back every open literal type inside `t`, naming `at` as the
+    /// reason where there is one. An open type has no fallback and stays open,
+    /// unless it was joined with an open literal's.
     fn forceLeaves(self: *Checker, t: TypeId, at: ?open_types_mod.Site) std.mem.Allocator.Error!void {
         if (!try self.builder.mentionsOpen(t)) return;
         switch (self.builder.get(t)) {
-            .open_integer, .open_type => |v| return if (at) |site|
-                self.open_types.forced(v, TypeId.literal_default, site)
+            .open_integer, .open_float, .open_type => |v| return if (at) |site|
+                self.open_types.forced(v, site)
             else
-                self.open_types.fallback(v, TypeId.literal_default),
+                self.open_types.fallback(v),
             else => {},
         }
         const Force = struct {
@@ -12493,6 +12566,14 @@ const Checker = struct {
     fn openLiteral(self: *Checker) std.mem.Allocator.Error!TypeId {
         const v = try self.open_types.create(self.gpa);
         const t = try self.builder.openInteger(v);
+        self.open_types.name(v, t);
+        return t;
+    }
+
+    /// A fresh open float type for a float literal no expected type reached.
+    fn openFloatLiteral(self: *Checker) std.mem.Allocator.Error!TypeId {
+        const v = try self.open_types.createFloat(self.gpa);
+        const t = try self.builder.openFloat(v);
         self.open_types.name(v, t);
         return t;
     }
@@ -12522,7 +12603,7 @@ const Checker = struct {
     /// The variable `t` stands for, where it is an open integer or open type.
     fn openVariable(self: *const Checker, t: TypeId) ?u32 {
         return switch (self.builder.get(t)) {
-            .open_integer, .open_type => |v| v,
+            .open_integer, .open_float, .open_type => |v| v,
             else => null,
         };
     }
@@ -12557,12 +12638,14 @@ const Checker = struct {
     }
 
     fn settleOpen(self: *Checker, v: u32, to: TypeId, at: ?open_types_mod.Site) std.mem.Allocator.Error!bool {
-        if (self.open_types.isInteger(v)) {
-            const is_integer = to.bounds() != null or self.builder.isIntegerWithin(self.generic, to);
-            if (!is_integer) return false;
-        } else if (to == .poison or to == .never or try self.mentionsVariable(to, self.open_types.find(v))) {
+        switch (self.open_types.familyOf(v)) {
+            .integer => {
+                const is_integer = to.bounds() != null or self.builder.isIntegerWithin(self.generic, to);
+                if (!is_integer) return false;
+            },
+            .float => if (!to.isFloat()) return false,
             // A type holding the variable it would settle is no type at all.
-            return false;
+            .any => if (to == .poison or to == .never or try self.mentionsVariable(to, self.open_types.find(v))) return false,
         }
         return self.open_types.settle(v, to, at) != .conflict;
     }
@@ -13685,6 +13768,14 @@ const Checker = struct {
         return if (tail == ExprId.none) id else tail;
     }
 
+    /// What a `return` or a `?` here answers to: the function's declared
+    /// result, or in a closure writing none, what its first `return` settled.
+    fn returnAnswer(self: *const Checker) ?Expected {
+        if (self.current_return) |declared| return declared;
+        const inferred = self.inferred_return orelse return null;
+        return inferred.*;
+    }
+
     /// Where an expression is, as a position that survives leaving the tree.
     fn locOf(self: *const Checker, id: ExprId) Loc {
         return .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id) };
@@ -13728,6 +13819,10 @@ const Checker = struct {
 
         for (self.ast.blockStmts(b)) |s| try self.checkStmt(s);
 
+        // A closure body whose result a `return` settled gives its value
+        // that result as its expectation, as a later `return` is given it.
+        const want_value = expected orelse if (id == self.inferred_body) self.returnAnswer() else null;
+
         if (b.tail == ExprId.none) {
             // A body with no trailing expression has no value where control
             // reaches its continuation. Where it leaves instead, no value has
@@ -13735,7 +13830,7 @@ const Checker = struct {
             // other arm to disagree with it.
             const falls_through = self.completionReaches(id);
             if (!falls_through) return self.record(id, .never);
-            if (expected) |want| {
+            if (want_value) |want| {
                 if (!want.unit_test_success and want.ty != .unit and want.ty != .poison) {
                     _ = self.reportMismatch(id, .unit, want, "this body produces nothing");
                 }
@@ -13743,7 +13838,7 @@ const Checker = struct {
             return self.record(id, .unit);
         }
 
-        const t = try self.checkResult(id, b.tail, expected);
+        const t = try self.checkResult(id, b.tail, want_value);
 
         return self.record(id, t);
     }
@@ -15866,19 +15961,37 @@ const Checker = struct {
         return if (bound.minus == TokenId.none) magnitude else -magnitude;
     }
 
-    /// Parses and range-checks the Float64 value once. Its rounded value is
+    /// Rounds a float literal to the float type it has and checks that the
+    /// type holds it. A literal an expected float type reaches is checked now;
+    /// any other is open, settled by its uses, and checked by
+    /// `checkSettledRanges` once its type is final. Its rounded value is
     /// retained for emission without admitting floats as constant expressions.
     fn checkFloatLiteral(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
         self.folds.set(id, .not_constant);
+        const written = if (self.negated_float != ExprId.none) self.negated_float else id;
+        self.negated_float = .none;
 
         const text = self.ast.tokenText(self.ast.exprMain(id));
-        const v = std.fmt.parseFloat(f64, text) catch {
+        if (Expected.typeOf(expected)) |want| if (want.isFloat()) {
             // Only an unfinished literal fails to parse, and the lexer
             // already reported it where it was written; a second message
             // here would describe one mistake twice.
-            return self.record(id, .poison);
+            const rounded = roundFloatLiteral(text, want.floatBits().?) orelse return self.record(id, .poison);
+            if (rounded.refusal) |refusal| {
+                _ = try self.reportFloatLiteralRange(written, want, refusal, .{
+                    .file = expected.?.at.file,
+                    .span = expected.?.at.span,
+                    .message = try self.expectationSource(expected.?),
+                    .style = .secondary,
+                });
+                return self.record(id, .poison);
+            }
+            try self.literal_values.put(self.gpa, id, .{ .float = rounded.value });
+            return self.record(id, want);
         };
-        if (!std.math.isFinite(v)) {
+
+        const wide = roundFloatLiteral(text, 64) orelse return self.record(id, .poison);
+        if (wide.refusal == .too_large) {
             return self.report(
                 .t_literal,
                 id,
@@ -15887,9 +16000,29 @@ const Checker = struct {
                 "no float type can hold this",
             );
         }
+        const t = try self.openFloatLiteral();
+        // The binary64 value stands until the type is final, when the text is
+        // rounded again at that width.
+        try self.literal_values.put(self.gpa, id, .{ .float = wide.value });
+        try self.open_types.awaitRange(self.gpa, .{ .v = self.builder.get(t).open_float, .expr = written, .value = 0, .rule = .float_literal });
+        return self.expect(id, t, expected);
+    }
 
-        try self.literal_values.put(self.gpa, id, .{ .float = v });
-        return self.expect(id, .f64, expected);
+    /// Refuses a float literal its type cannot hold: one that rounds to an
+    /// infinity, or a nonzero one that rounds to zero. `written` is the
+    /// literal or a negation of it, and the report names the signed value.
+    fn reportFloatLiteralRange(self: *Checker, written: ExprId, t: TypeId, refusal: FloatLiteralRefusal, origin: ?Label) std.mem.Allocator.Error!TypeId {
+        const spelling = self.literalSpelling(written, .float_literal).?;
+        const message = try std.fmt.allocPrint(self.gpa, "`{s}` cannot hold {s}{s}", .{
+            (try self.typeName(t)),
+            if (spelling.negated) "-" else "",
+            self.ast.tokenText(self.ast.exprMain(spelling.literal)),
+        });
+        const primary = switch (refusal) {
+            .too_large => "literal is out of range for its type",
+            .rounds_to_zero => "a nonzero literal that rounds to zero in this type",
+        };
+        return self.reportWithOrigin(.t_literal, written, message, primary, origin);
     }
 
     fn checkLiteral(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
@@ -16040,6 +16173,13 @@ const Checker = struct {
         // The operand is checked without a range test, because -128 is a value
         // i8 holds even though 128 is a literal it does not. Folding therefore
         // has to happen before the range check, not after.
+        // A float literal under negations is reported as the whole written
+        // value, so `--1e39` names 1e39 and spans both signs, as `--128` does.
+        const outermost = self.negated_float == ExprId.none and self.literalSpelling(id, .float_literal) != null;
+        if (outermost) self.negated_float = id;
+        defer if (outermost) {
+            self.negated_float = .none;
+        };
         const inner = try self.checkForNegation(operand, expected);
         if (inner == .poison) {
             self.foldFailed(id, &.{operand});
@@ -16160,10 +16300,21 @@ const Checker = struct {
         }
         const operand = args[0];
 
-        // No expectation flows inward: a conversion takes whatever it is given.
-        // The operand is checked before the target constrains it, so an open
-        // literal takes the default here, where the conversion needs a type.
-        const from = try self.forceInteger(try self.check(operand, null), self.literalSite(operand));
+        // A conversion takes whatever it is given, so the operand is checked
+        // before the target constrains it and an open literal takes the
+        // default here, where the conversion needs a type. A float literal
+        // converted to a float type is the exception: it is written for that
+        // type and rounds once, to the target, rather than to `Float64` and
+        // again to the target. Any other operand keeps its own type, so a
+        // binding or a sum of literals converted to `Float32` is a `Float64`
+        // narrowed.
+        const literal_target: ?Expected = if (target.isFloat() and self.literalSpelling(operand, .float_literal) != null) .{
+            .ty = target,
+            .at = .{ .file = self.ast.fileOfExpr(self.ast.call(id).callee), .span = self.ast.exprSpan(self.ast.call(id).callee) },
+            .reason = .conversion,
+        } else null;
+        const checked = try self.check(operand, literal_target);
+        const from = try self.forceInteger(checked, self.literalSite(operand));
 
         if (from == .poison or target == .poison) {
             self.foldFailed(id, &.{operand});
@@ -16176,8 +16327,8 @@ const Checker = struct {
 
         // A conversion is between numeric domains. `Bool` is a pair of names,
         // so there is no value of it to convert and none to convert into one.
-        const from_numeric = self.builder.isIntegerWithin(self.generic, from) or from == .f64;
-        const target_numeric = self.builder.isIntegerWithin(self.generic, target) or target == .f64;
+        const from_numeric = self.builder.isIntegerWithin(self.generic, from) or from.isFloat();
+        const target_numeric = self.builder.isIntegerWithin(self.generic, target) or target.isFloat();
         if (!from_numeric or !target_numeric) {
             self.foldFailed(id, &.{operand});
             return self.report(
@@ -16197,7 +16348,7 @@ const Checker = struct {
         // A conversion to a float is defined for every value and may round,
         // so there is no range to test. It also never folds: the table holds
         // an integer, and the result is not one.
-        if (target == .f64) {
+        if (target.isFloat()) {
             self.foldFailed(id, &.{operand});
             return self.expect(id, target, expected);
         }
@@ -17628,7 +17779,9 @@ const Checker = struct {
         }
 
         const value = self.ast.unaryOperand(id);
-        const frame = &self.loops.items[self.loops.items.len - 1];
+        // Re-read after the value is checked: a loop inside it grows the list.
+        const depth = self.loops.items.len - 1;
+        var frame = &self.loops.items[depth];
 
         // Checked against whatever settled the loop's type, so a disagreement
         // reports here and points at what decided. A bare `break` yields Unit
@@ -17641,7 +17794,17 @@ const Checker = struct {
                 }
             }
             break :blk TypeId.unit;
-        } else try self.check(value, frame.settled);
+        } else blk: {
+            const before = frame.settled;
+            const checked = try self.check(value, before);
+            frame = &self.loops.items[depth];
+            // A `break` inside the value may settle the loop's type first,
+            // and the value answers to it then.
+            if (before == null) if (frame.settled) |settled| if (checked != .poison and checked != .never) {
+                break :blk try self.expect(self.armValue(value), checked, settled);
+            };
+            break :blk checked;
+        };
 
         // A value that does not complete never reaches the transfer itself, so
         // it neither settles nor exits the loop.
@@ -17690,7 +17853,7 @@ const Checker = struct {
         if (self.returns_seen) |seen| try seen.append(self.gpa, id);
 
         const t = if (value == ExprId.none) blk: {
-            if (self.current_return) |want| {
+            if (self.returnAnswer()) |want| {
                 if (want.unit_test_success) {
                     try self.implicit_test_successes.put(self.gpa, id, want.ty);
                 } else if (want.ty != .unit and want.ty != .poison) {
@@ -17699,16 +17862,37 @@ const Checker = struct {
             }
             break :blk TypeId.unit;
         } else blk: {
-            var return_expected = self.current_return;
+            const before = self.returnAnswer();
+            var return_expected = before;
             if (return_expected) |*want| want.unit_test_success = false;
-            break :blk try self.check(value, return_expected);
+            // A `return` inside the value may settle the closure's result
+            // before the value is complete, so the value's own tail takes
+            // that result as a closure body's tail does, and the whole value
+            // answers to it afterwards.
+            const previous_body = self.inferred_body;
+            if (before == null and self.inferred_return != null) self.inferred_body = value;
+            defer self.inferred_body = previous_body;
+            const checked = try self.check(value, return_expected);
+            if (before == null) if (self.returnAnswer()) |settled| if (checked != .poison and checked != .never) {
+                break :blk try self.expect(self.armValue(value), checked, settled);
+            };
+            break :blk checked;
         };
-        _ = t;
 
         // A value that does not complete leaves before `return` itself can.
         if (value != ExprId.none and !self.completionReaches(value)) {
             return self.record(id, .never);
         }
+
+        // A refused value settles poison: what the closure answers is then
+        // unknown, and nothing that answers to it is reported again.
+        if (self.current_return == null) if (self.inferred_return) |inferred| if (inferred.* == null) {
+            inferred.* = .{
+                .ty = t,
+                .at = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id) },
+                .reason = .return_site,
+            };
+        };
 
         self.unwindsEveryLoop();
 
@@ -17771,7 +17955,7 @@ const Checker = struct {
         const previous_failure = self.failure_expected;
         defer self.failure_expected = previous_failure;
         self.failure_expected = null;
-        if (self.current_return) |answer| if (self.carrierOf(answer.ty)) |carrier| {
+        if (self.returnAnswer()) |answer| if (self.carrierOf(answer.ty)) |carrier| {
             if (carrier.kind == .result) self.failure_expected = .{
                 .target = self.ast.withoutGroups(operand),
                 .depth = 0,
@@ -17799,33 +17983,57 @@ const Checker = struct {
             "`?` works over exactly those two types",
         );
 
-        const want = self.current_return orelse {
-            if (self.unanswered_tries) |pending| {
-                try pending.append(self.gpa, .{ .id = id, .operand = t, .carrier = carrier, .statement = self.statementAt(id) });
-                return self.expect(id, self.payloadTypeOf(carrier), expected);
-            }
-            return self.report(
+        // `?` is a `return` on the failing path, so it leaves the loops a
+        // `return` leaves. Marked here rather than where it is lowered: what a
+        // construct does to the loops around it is a fact about the construct,
+        // and one answer to it.
+        self.unwindsEveryLoop();
+
+        const want = self.returnAnswer() orelse {
+            if (self.deferred_tries) |deferred| {
+                try deferred.append(self.gpa, .{ .id = id, .statement = self.statementAt(id) });
+            } else return self.report(
                 .t_try_answer,
                 id,
                 "this `?` may return `{s}`, and the function answers with nothing",
                 .{(try self.typeName(t))},
                 "`?` returns from the function it is written in",
             );
+            return self.expect(id, self.payloadTypeOf(carrier), expected);
         };
 
+        if (want.inference != null and self.deferred_tries != null) {
+            try self.deferred_tries.?.append(self.gpa, .{ .id = id, .statement = self.statementAt(id) });
+        } else {
+            if (!try self.answerTry(id, t, carrier, want.ty, .function, self.statementAt(id))) return self.record(id, .poison);
+        }
+
+        return self.expect(id, self.payloadTypeOf(carrier), expected);
+    }
+
+    /// Whether a `?` over `t` may return through an answer of type `answer`,
+    /// given by `answerer`, reporting why not where it may not. `where` is the
+    /// statement the `?` is the whole value of, where it is one.
+    fn answerTry(self: *Checker, id: ExprId, t: TypeId, carrier: Carrier, answer: TypeId, answerer: TryAnswerer, where: ?StatementValue) std.mem.Allocator.Error!bool {
         // The payload types are free to differ: the failing path of an
         // `Option` carries nothing, so nothing about a payload reaches the
         // caller. A `Result`'s failing path carries an error that does, which
         // is the whole of the asymmetry.
-        const answers = self.carrierOf(want.ty);
-        if (answers == null) return self.reportTryWithoutCarrier(id, t, carrier, want.ty, .function, self.statementAt(id));
-        if (answers.?.kind != carrier.kind) return self.report(
-            .t_try_answer,
-            id,
-            "this `?` may return `{s}`, and the function answers with `{s}`",
-            .{ (try self.typeName(t)), (try self.typeName(want.ty)) },
-            "`?` returns from the function it is written in",
-        );
+        const answers = self.carrierOf(answer);
+        if (answers == null) {
+            _ = try self.reportTryWithoutCarrier(id, t, carrier, answer, answerer, where);
+            return false;
+        }
+        if (answers.?.kind != carrier.kind) {
+            _ = self.report(
+                .t_try_answer,
+                id,
+                "this `?` may return `{s}`, and the {s} answers with `{s}`",
+                .{ (try self.typeName(t)), @tagName(answerer), (try self.typeName(answer)) },
+                "`?` returns from the function it is written in",
+            );
+            return false;
+        }
 
         // A different error type converts through the function's own error
         // type's `From` implementation, so the target is never in question.
@@ -17837,19 +18045,14 @@ const Checker = struct {
             const failure = self.errorTypeOf(carrier);
             const answered = self.errorTypeOf(answers.?);
             if (failure != answered and failure != .poison and answered != .poison) {
-                const conversion = try self.errorConversion(failure, answered) orelse
-                    return self.reportUnconverted(id, failure, answered);
+                const conversion = try self.errorConversion(failure, answered) orelse {
+                    _ = try self.reportUnconverted(id, failure, answered);
+                    return false;
+                };
                 try self.try_conversions.put(self.gpa, id, conversion);
             }
         }
-
-        // `?` is a `return` on the failing path, so it leaves the loops a
-        // `return` leaves. Marked here rather than where it is lowered: what a
-        // construct does to the loops around it is a fact about the construct,
-        // and one answer to it.
-        self.unwindsEveryLoop();
-
-        return self.expect(id, self.payloadTypeOf(carrier), expected);
+        return true;
     }
 
     /// Reports a `?` in a function that answers with neither an `Option` nor a
@@ -17921,9 +18124,10 @@ const Checker = struct {
         return true;
     }
 
-    /// A `?` a closure without a written result met, reported once its body
-    /// decided what the closure answers with.
-    const UnansweredTry = struct { id: ExprId, operand: TypeId, carrier: Carrier, statement: ?StatementValue };
+    /// A `?` a closure met before anything settled its result, checked once
+    /// its body decided what the closure answers with, and the statement it
+    /// is the whole value of, where it is one.
+    const UnansweredTry = struct { id: ExprId, statement: ?StatementValue };
 
     /// What answers a `?`: the function it is written in, or a closure whose
     /// result its body decided.
@@ -18329,8 +18533,8 @@ const Checker = struct {
             );
         }
 
-        if (self.ast.exprTag(id) == .rem_assign and !remainderHoldsIn(place)) {
-            return self.reportNoRemainder(id);
+        if (self.ast.exprTag(id) == .rem_assign and self.isFloatType(place)) {
+            return self.reportNoRemainder(id, place);
         }
 
         return self.expect(id, .unit, expected);
@@ -18341,12 +18545,12 @@ const Checker = struct {
     /// 754 supplies instead is a different one -- so the operator would mean
     /// two things depending on its operands' type. One reporter for the
     /// operator and its compound assignment, so the two spell one refusal.
-    fn reportNoRemainder(self: *Checker, id: ExprId) TypeId {
+    fn reportNoRemainder(self: *Checker, id: ExprId, operand: TypeId) std.mem.Allocator.Error!TypeId {
         return self.reportAtOp(
             .t_operands,
             id,
-            "`%` is not defined for `Float64`",
-            .{},
+            "`%` is not defined for `{s}`",
+            .{(try self.typeName(operand))},
             "a float division leaves no remainder to take",
         );
     }
@@ -20333,8 +20537,11 @@ const Checker = struct {
             .inference = if (expected.?.infer_lambda_result) expected.?.inference else null,
         } else null;
         const written_before_body = self.written.items.len;
-        var unanswered: std.ArrayList(UnansweredTry) = .empty;
-        defer unanswered.deinit(self.gpa);
+        // With no result type written or given, the closure's `return`s and
+        // its body's value settle it together.
+        var inferred_return: ?Expected = null;
+        var deferred_tries: std.ArrayList(UnansweredTry) = .empty;
+        defer deferred_tries.deinit(self.gpa);
         var lambda_returns: std.ArrayList(ExprId) = .empty;
         defer lambda_returns.deinit(self.gpa);
         var lambda_fixes: std.ArrayList(AnswerFix) = .empty;
@@ -20347,14 +20554,20 @@ const Checker = struct {
         defer self.answer_fixes = previous_fixes;
         const body_result = checked: {
             const previous_return = self.current_return;
+            const previous_inferred = self.inferred_return;
+            const previous_body = self.inferred_body;
+            const previous_tries = self.deferred_tries;
             const previous_failure = self.failure_expected;
-            const previous_unanswered = self.unanswered_tries;
             self.current_return = result_expected;
+            self.inferred_return = if (result_expected == null) &inferred_return else null;
+            self.inferred_body = if (result_expected == null) lambda.body else .none;
+            self.deferred_tries = if (result_expected == null or result_expected.?.inference != null) &deferred_tries else null;
             self.failure_expected = null;
-            self.unanswered_tries = if (result_expected == null) &unanswered else null;
             defer self.current_return = previous_return;
+            defer self.inferred_return = previous_inferred;
+            defer self.inferred_body = previous_body;
+            defer self.deferred_tries = previous_tries;
             defer self.failure_expected = previous_failure;
-            defer self.unanswered_tries = previous_unanswered;
             // A closure's body is a function of its own: a `break` or
             // `continue` in it has no loop to leave, and its `return` and `?`
             // leave the closure rather than the loops around it.
@@ -20375,16 +20588,42 @@ const Checker = struct {
         // the places the checker recorded as written; ownership reports the
         // refusal, since what the body takes is decided by position there.
         const uncaptured_changed = free != .none and self.writesBinding(self.res.targetOf(free), self.written.items[written_before_body..]);
-        // A `?` hands a failure on only to a result that carries it, and the
-        // body decided that this closure's does not.
-        for (unanswered.items) |pending| {
-            _ = try self.reportTryWithoutCarrier(pending.id, pending.operand, pending.carrier, body_result, .closure, pending.statement);
-            refused = true;
+        const settled_by_return = if (inferred_return) |returned| tied: {
+            if (body_result != .never and body_result != .poison) {
+                if (try self.expect(self.resultOf(lambda.body), body_result, returned) == .poison) refused = true;
+            }
+            break :tied try self.builder.resolveOpen(returned.ty, &self.open_types);
+        } else null;
+        // A body that only leaves through `return`s has the expected result,
+        // read through what those returns solved where the call is still
+        // inferring it.
+        const leaves_only = if (result_expected) |want| if (want.inference) |settling| try self.callableContext(want.ty, settling) else want.ty else null;
+        const result = settled_by_return orelse if (body_result == .never and leaves_only != null) leaves_only.? else body_result;
+        // What the deferred `?`s answer to: the result the returns and the
+        // body settled, or the inferred type parameter as they solved it.
+        const answered = if (result_expected) |want| if (want.inference) |settling| solved: {
+            const solved = try self.callableContext(want.ty, settling);
+            break :solved if (self.hasOpenParameter(solved, settling)) TypeId.never else solved;
+        } else result else result;
+        for (deferred_tries.items) |pending| {
+            // Read again: what the operand left open, the body may since have settled.
+            const tried = self.builder.exprType(self.ast.unaryOperand(pending.id));
+            const carrier = self.carrierOf(tried) orelse continue;
+            if (answered == .poison) continue;
+            if (answered == .never) {
+                _ = self.report(
+                    .t_try_answer,
+                    pending.id,
+                    "this `?` may return `{s}`, and nothing says what the closure answers",
+                    .{(try self.typeName(tried))},
+                    "write the closure's result type, as `|...| -> Option[T]`, or `return` a value from it",
+                );
+                refused = true;
+            } else if (!try self.answerTry(pending.id, tried, carrier, answered, .closure, pending.statement)) refused = true;
         }
         // A closure given its result by a callable type it is passed as
         // answers to that type, which the fix would not change.
         if (lambda_fixes.items.len > 0 and contextual == null) if (lambdaResultSite(self.ast, id)) |site| try self.attachAnswerFixes(lambda_fixes.items, site, lambda.body, lambda_returns.items);
-        const result = if (body_result == .never and result_expected != null) result_expected.?.ty else body_result;
         if (written_result != null and contextual != null) {
             if (try self.expect(id, result, .{
                 .ty = contextual.?.result,
@@ -24012,21 +24251,30 @@ const Checker = struct {
     const OpenScope = struct {
         open: open_types_mod.Body,
         values: u32,
+        /// How many folded values awaited a range before the body opened.
+        ranges: u32,
     };
 
     fn openScope(self: *const Checker) OpenScope {
-        return .{ .open = self.open_types.pushBody(), .values = @intCast(self.pending_values.items.len) };
+        return .{
+            .open = self.open_types.pushBody(),
+            .values = @intCast(self.pending_values.items.len),
+            .ranges = @intCast(self.open_types.pending.items.len),
+        };
     }
 
-    /// Closes a body: its open integers fall back, and each function value it
-    /// named without a written type is read through what its uses settled.
+    /// Closes a body: its open integers fall back, each function value it
+    /// named without a written type is read through what its uses settled,
+    /// and each value it folded while its type was open is held to the range
+    /// of the type it settled on.
     fn closeScope(self: *Checker, scope: OpenScope) std.mem.Allocator.Error!void {
-        self.open_types.fallbackBody(scope.open, TypeId.literal_default);
+        self.open_types.fallbackBody(scope.open);
         for (self.pending_values.items[scope.values..]) |pending| {
             defer pending.deinit(self.gpa);
             try self.settleValue(pending);
         }
         self.pending_values.shrinkRetainingCapacity(scope.values);
+        try self.checkSettledRanges(scope.ranges);
     }
 
     /// Reads an open function value's parameters as its uses settled them.
@@ -24357,7 +24605,7 @@ const Checker = struct {
 
     /// Check that a value's format spec asks only for parts its type takes. A
     /// sign and zero padding lay out a number, a precision counts the digits
-    /// after a Float64's point, and hexadecimal digits write an integer; fill,
+    /// after a float's point, and hexadecimal digits write an integer; fill,
     /// alignment and width lay out any value. Reports the first part the type
     /// does not take.
     fn layoutFits(self: *Checker, piece: ExprId, t: TypeId, format: node.InterpolationFormat) bool {
@@ -24368,7 +24616,7 @@ const Checker = struct {
                 piece,
                 "`{s}` is not a number, so its format spec cannot ask for {s}",
                 .{ self.typeName(t) catch return false, if (format.plus) "a `+` sign" else "zero padding" },
-                "these lay out integers and Float64; pad other values with an alignment and a width, as in `>4`",
+                "these lay out integers and floats; pad other values with an alignment and a width, as in `>4`",
             );
             return false;
         }
@@ -24386,9 +24634,9 @@ const Checker = struct {
             _ = self.report(
                 .t_format,
                 piece,
-                "`{s}` is not a Float64, so its format spec cannot ask for a precision",
+                "`{s}` is not a float, so its format spec cannot ask for a precision",
                 .{self.typeName(t) catch return false},
-                "a precision counts the digits after a Float64's point",
+                "a precision counts the digits after a float's point",
             );
             return false;
         }
@@ -25548,20 +25796,21 @@ const Checker = struct {
         return true;
     }
 
-    const LiteralSpelling = enum { not_literal, nonnegative, negated };
+    const LiteralSpelling = struct { literal: ExprId, negated: bool };
 
-    /// Whether an expression is an integer literal under any parentheses and
-    /// negations, which the literal and negation checks type from the position
-    /// alone, and whether an odd number of negations applies to it.
-    fn integerLiteralSpelling(self: *const Checker, id: ExprId) LiteralSpelling {
+    /// The literal of the kind `literal` names that an expression is under
+    /// any parentheses and negations, which the literal and negation checks
+    /// type from the position alone, and whether an odd number of negations
+    /// applies to it. Null where the expression is not one.
+    fn literalSpelling(self: *const Checker, id: ExprId, literal: node.Expr.Tag) ?LiteralSpelling {
         var at = self.ast.withoutGroups(id);
         var negated = false;
         while (self.ast.exprTag(at) == .negate) {
             negated = !negated;
             at = self.ast.withoutGroups(self.ast.unaryOperand(at));
         }
-        if (self.ast.exprTag(at) != .int_literal) return .not_literal;
-        return if (negated) .negated else .nonnegative;
+        if (self.ast.exprTag(at) != literal) return null;
+        return .{ .literal = at, .negated = negated };
     }
 
     /// A bracket over a container: the place that type's `Index` implementation
@@ -25596,15 +25845,15 @@ const Checker = struct {
         // none the literal keeps `UInt64`, and the missing implementation is
         // reported as for any other key. Anything else settles on its own,
         // and what it settled to is the key.
-        const spelling = self.integerLiteralSpelling(b.rhs);
-        const literal_key: ?Expected = if (spelling != .not_literal) blk: {
+        const spelling = self.literalSpelling(b.rhs, .int_literal);
+        const literal_key: ?Expected = if (spelling != null) blk: {
             const inferred = try self.integerIndexKey(self.generic, head);
             const key: TypeId = switch (inferred) {
                 .one => |key| key,
                 // With no key, a nonnegative literal keeps the counting type,
                 // and a negated one its own, so the missing implementation is
                 // what is reported rather than the literal's range.
-                .none => if (spelling == .negated) break :blk null else .u64,
+                .none => if (spelling.?.negated) break :blk null else .u64,
                 .many => |keys| {
                     _ = try self.check(b.rhs, null);
                     _ = self.report(
@@ -25636,7 +25885,7 @@ const Checker = struct {
             },
             // With no key the counting type, except for a negated literal,
             // which keeps the type a negative value has.
-            .none => if (spelling == .negated)
+            .none => if (spelling != null and spelling.?.negated)
                 try self.forceInteger(checked_index, self.literalSite(b.rhs))
             else settled: {
                 _ = try self.meet(checked_index, .u64, self.literalSite(b.rhs));
@@ -30807,7 +31056,7 @@ const Checker = struct {
                         if (pool.fieldCount(key.ty) < 2) try self.contribute(terms, closed_source, outer, 0);
                         return;
                     },
-                    .integer, .open_integer, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .newtype => {},
+                    .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .newtype => {},
                 }
                 for (pool.appliedTo(key.ty)) |argument| try self.childHeight(terms, argument, key.substitute, outer);
                 if (pool.appliedTo(key.ty).len == 0) try self.contribute(terms, closed_source, outer, 0);
@@ -31066,7 +31315,7 @@ const Checker = struct {
                     var at: u32 = 1;
                     while (at < pool.fieldCount(ty)) : (at += 2) if (try self.visit(pool.fieldType(ty, at))) return true;
                 },
-                .integer, .open_integer, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .newtype => {},
+                .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .newtype => {},
             }
             for (pool.appliedTo(ty)) |argument| if (try self.visit(argument)) return true;
             return false;
@@ -31732,7 +31981,7 @@ const Checker = struct {
                 // A literal nothing else typed meets the default as it meets
                 // the default of a written type: it takes it.
                 const open = self.openVariable(try self.builder.resolveOpen(f.*, &self.open_types)) orelse continue;
-                if (!self.open_types.isInteger(open)) continue;
+                if (self.open_types.familyOf(open) == .any) continue;
                 const default = try self.defaultAt(d, k);
                 if (default != .poison and try self.meet(f.*, default, self.literalSite(id))) {
                     f.* = try self.builder.resolveOpen(f.*, &self.open_types);
@@ -32980,8 +33229,12 @@ const Checker = struct {
     }
 
     fn settleMatchArm(self: *Checker, settled: *?Expected, body_expr: ExprId, body: TypeId) void {
-        if (body == .poison or body == .never) return;
-        if (settled.*) |context| if (!context.unit_test_success) return;
+        // A refused arm settles poison, which quiets an arm after it that
+        // cannot settle itself; the first arm with a real type replaces it,
+        // so the arms after that still have to agree, as an `if`'s do.
+        if (body == .never) return;
+        if (settled.*) |context| if (!context.unit_test_success and context.ty != .poison) return;
+        if (body == .poison and settled.* != null) return;
         settled.* = .{ .ty = body, .at = self.locOf(self.resultOf(body_expr)), .reason = .arm };
     }
 
@@ -33032,7 +33285,13 @@ const Checker = struct {
     }
 
     fn arithmeticHolds(self: *const Checker, t: TypeId) bool {
-        return t == .poison or t == .f64 or self.builder.get(t) == .open_integer or self.builder.isIntegerWithin(self.generic, t);
+        return t == .poison or self.isFloatType(t) or self.builder.get(t) == .open_integer or self.builder.isIntegerWithin(self.generic, t);
+    }
+
+    /// Whether `t` is a float type, or a float literal's type its uses have
+    /// not settled yet.
+    fn isFloatType(self: *const Checker, t: TypeId) bool {
+        return t.isFloat() or self.builder.get(t) == .open_float;
     }
 
     /// Whether a type answers a trait the prelude declares, where the demand
@@ -33137,11 +33396,12 @@ const Checker = struct {
             return self.record(id, .unit);
         }
 
-        const otherwise = try self.checkResult(id, c.otherwise, expected orelse Expected{
-            .ty = then,
-            .at = self.locOf(self.resultOf(c.then)),
-            .reason = .arm,
-        });
+        // A poison expectation, from an arm refused beside this construct,
+        // only quiets what cannot settle itself: a real type the first arm
+        // settled is what the second answers to, so two arms that disagree
+        // are still reported.
+        const weak = expected != null and expected.?.ty == .poison;
+        const otherwise = try self.checkResult(id, c.otherwise, if (expected != null and !weak) expected else self.armExpectation(then, c.then) orelse expected);
 
         if (then == .poison or otherwise == .poison) return self.record(id, .poison);
         if (condition == .never) return self.expect(id, .never, expected);
@@ -33178,11 +33438,7 @@ const Checker = struct {
     ) std.mem.Allocator.Error!TypeId {
         const otherwise = try self.checkResult(id, c.otherwise, null);
 
-        const then = try self.checkResult(id, c.then, Expected{
-            .ty = otherwise,
-            .at = self.locOf(self.resultOf(c.otherwise)),
-            .reason = .arm,
-        });
+        const then = try self.checkResult(id, c.then, self.armExpectation(otherwise, c.otherwise));
 
         if (then == .poison or otherwise == .poison) return self.record(id, .poison);
 
@@ -33202,6 +33458,50 @@ const Checker = struct {
         };
 
         return self.record(id, answer);
+    }
+
+    /// What an arm that was checked first asks of the other. An arm that never
+    /// completes, a `return` or a `panic`, gives the construct no value, so it
+    /// asks nothing and the other arm's type is the construct's.
+    fn armExpectation(self: *const Checker, settled: TypeId, arm: ExprId) ?Expected {
+        if (settled == .never) return null;
+        return .{ .ty = settled, .at = self.locOf(self.armValue(arm)), .reason = .arm };
+    }
+
+    /// The expression that gave a checked arm its type: through braces to
+    /// the value they yield, and into an `if` or `match` whose arms all but
+    /// one leave, to that one. Where two or more complete, they agreed on the
+    /// type together, so the construct itself is what a label names.
+    fn armValue(self: *const Checker, arm: ExprId) ExprId {
+        var at = self.resultOf(arm);
+        while (self.onlyCompletingArm(at)) |inner| at = self.resultOf(inner);
+        return at;
+    }
+
+    /// The one arm of an `if` with an `else`, or of a `match`, that completes,
+    /// or null where none or several do or `at` is neither.
+    fn onlyCompletingArm(self: *const Checker, at: ExprId) ?ExprId {
+        var found: ?ExprId = null;
+        switch (self.ast.exprTag(at)) {
+            .conditional => {
+                const c = self.ast.conditional(at);
+                if (c.otherwise == ExprId.none) return null;
+                for ([_]ExprId{ c.then, c.otherwise }) |branch| if (self.builder.exprType(branch) != .never) {
+                    if (found != null) return null;
+                    found = branch;
+                };
+            },
+            .match_, .match_read => {
+                const m = self.ast.call(at);
+                var j: usize = 1;
+                while (j < m.args.len) : (j += 2) if (self.builder.exprType(m.args[j]) != .never) {
+                    if (found != null) return null;
+                    found = m.args[j];
+                };
+            },
+            else => {},
+        }
+        return found;
     }
 
     /// The value type of two alternatives that may not both complete.
@@ -33312,9 +33612,9 @@ const Checker = struct {
             );
         }
 
-        if (self.ast.exprTag(id) == .rem and !remainderHoldsIn(lhs)) {
+        if (self.ast.exprTag(id) == .rem and self.isFloatType(lhs)) {
             self.foldFailed(id, &.{ b.lhs, b.rhs });
-            return self.reportNoRemainder(id);
+            return self.reportNoRemainder(id, lhs);
         }
 
         if (self.isSymbolicInteger(lhs)) {
@@ -33396,9 +33696,9 @@ const Checker = struct {
                     var settled_want = want;
                     settled_want.ty = try self.builder.resolveOpen(want.ty, &self.open_types);
                     const chosen: ?Label = switch (self.builder.get(actual)) {
-                        .open_integer => |v| try self.chosenLabel(v),
+                        .open_integer, .open_float => |v| try self.chosenLabel(v),
                         else => switch (self.builder.get(want.ty)) {
-                            .open_integer => |v| try self.chosenLabel(v),
+                            .open_integer, .open_float => |v| try self.chosenLabel(v),
                             else => null,
                         },
                     };

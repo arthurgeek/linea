@@ -1,0 +1,56 @@
+// An arm that never completes gives the `if` or `match` no value, so the
+// other arm decides its type: here an open literal that settles on UInt8.
+fn returns_early(early: Bool) -> UInt8 {
+    let value = if early {
+        return 4
+    } else {
+        3
+    }
+    value
+}
+
+fn returns_late(early: Bool) -> UInt8 {
+    let value = if early {
+        3
+    } else {
+        return 4
+    }
+    value
+}
+
+fn refuses_zero(count: UInt8) -> UInt8 {
+    let value = if count == 0 {
+        panic("no count")
+    } else {
+        2
+    }
+    value * count
+}
+
+fn by_match(code: UInt8) -> UInt8 {
+    let value = match code {
+        0 => return 10,
+        _ => 5,
+    }
+    value
+}
+
+fn main() -> UInt8 {
+    // The same holds inside a closure, whose `return` leaves the closure.
+    let from_closure = |early: Bool| {
+        let base = if early {
+            return 7
+        } else {
+            1
+        }
+        base + 1
+    }
+    let closed: UInt8 = from_closure(true)
+    let functions = returns_early(true) == 4 && returns_early(false) == 3 && returns_late(true) == 3 && returns_late(false) == 4
+    let others = refuses_zero(3) == 6 && by_match(0) == 10 && by_match(1) == 5
+    if functions && others && closed == 7 && from_closure(false) == 2 {
+        0
+    } else {
+        1
+    }
+}

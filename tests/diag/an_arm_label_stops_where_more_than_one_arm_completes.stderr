@@ -1,0 +1,28 @@
+error[T-Mismatch]: expected `UInt8`, found `UInt16`
+ --> tests/diag/an_arm_label_stops_where_more_than_one_arm_completes.lin:5:16
+  |
+5 |         return if c == 0 {
+  |                ^^^^^^^^^^^ expected `UInt8`, found `UInt16`
+9 |                 return b
+  |                 -------- expected because of this `return`
+error[T-Mismatch]: expected `UInt8`, found `UInt16`
+  --> tests/diag/an_arm_label_stops_where_more_than_one_arm_completes.lin:19:15
+   |
+19 |         break if c == 0 {
+   |               ^^^^^^^^^^^ expected `UInt8`, found `UInt16`
+23 |                 break b
+   |                 ------- expected because of this `break`
+error[T-Mismatch]: expected `UInt16`, found `UInt8`
+  --> tests/diag/an_arm_label_stops_where_more_than_one_arm_completes.lin:41:9
+   |
+35 |         if c == 1 {
+   |         ----------- expected because of this arm
+41 |         small
+   |         ^^^^^ expected `UInt16`, found `UInt8`
+error[T-Mismatch]: expected `UInt8`, found `UInt16`
+  --> tests/diag/an_arm_label_stops_where_more_than_one_arm_completes.lin:52:18
+   |
+51 |             0 => return b,
+   |                  -------- expected because of this `return`
+52 |             _ => a,
+   |                  ^ expected `UInt8`, found `UInt16`

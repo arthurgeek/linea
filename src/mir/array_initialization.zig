@@ -45,7 +45,7 @@ pub fn find(gpa: std.mem.Allocator, ast: *const Ast, res: *const resolve.Resolut
         const ty = typing.get(typing.bindingType(binding));
         if (ty != .array) continue;
         switch (ty.array.element) {
-            .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .bool_, .f64 => {},
+            .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .bool_, .f64, .f32 => {},
             else => continue,
         }
         const elements = ast.call(value).args;

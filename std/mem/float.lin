@@ -6,3 +6,12 @@ extern fn linea_float64_parse(address: UInt64, length: UInt64, inout bits: UInt6
 internal fn parse_float64_bits(bytes: Slice[UInt8], inout bits: UInt64, inout offset: UInt64) -> UInt64 where carries() {
     linea_float64_parse(bytes.at, bytes.len, &bits, &offset)
 }
+
+extern fn linea_float32_parse(address: UInt64, length: UInt64, inout bits: UInt64, inout offset: UInt64) -> UInt64
+
+// Parse a Float32 the same way, rounding once to the nearest Float32. The
+// runtime writes the bits of the Float64 holding that value, which it holds
+// exactly.
+internal fn parse_float32_bits(bytes: Slice[UInt8], inout bits: UInt64, inout offset: UInt64) -> UInt64 where carries() {
+    linea_float32_parse(bytes.at, bytes.len, &bits, &offset)
+}

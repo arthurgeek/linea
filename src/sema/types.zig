@@ -111,6 +111,9 @@ pub const TypeId = enum(u32) {
     /// the index-derived names the emitted IR gives aggregates.
     f64,
     never,
+    /// Reserved after `never` for the same reason `f64` follows `unit`: every
+    /// handle that existed before it keeps its index.
+    f32,
     _,
 
     pub fn at(i: u32) TypeId {
@@ -139,13 +142,36 @@ pub const TypeId = enum(u32) {
         .boolean,
         .poison,
         .unit,
-        .float,
+        .{ .float = .{ .bits = 64 } },
         .never,
+        .{ .float = .{ .bits = 32 } },
     };
 
     /// The primitives a program can name, in handle order. The resolver seeds
     /// one binding per entry, spelling each with `nameOf`.
-    pub const primitives = [_]TypeId{ .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .bool_, .f64, .never };
+    pub const primitives = [_]TypeId{ .i8, .i16, .i32, .i64, .u8, .u16, .u32, .u64, .bool_, .f64, .never, .f32 };
+
+    /// Every floating-point type, widest first.
+    pub const floats = [_]TypeId{ .f64, .f32 };
+
+    /// The type a float literal takes where nothing constrains it.
+    pub const float_literal_default: TypeId = .f64;
+
+    /// The width of a floating-point type in bits, or null when the handle
+    /// names something else. Reads the reserved descriptors, as `integerInfo`
+    /// does, so the backend can ask without the typing.
+    pub fn floatBits(self: TypeId) ?u8 {
+        const i = @intFromEnum(self);
+        if (i >= builtins.len) return null;
+        return switch (builtins[i]) {
+            .float => |info| info.bits,
+            else => null,
+        };
+    }
+
+    pub fn isFloat(self: TypeId) bool {
+        return self.floatBits() != null;
+    }
 
     /// Every integer type, read off the primitives so the two cannot differ.
     pub const integers = blk: {
@@ -215,6 +241,7 @@ pub const TypeId = enum(u32) {
             .u64 => "UInt64",
             .bool_ => "Bool",
             .f64 => "Float64",
+            .f32 => "Float32",
             .never => "Never",
             .poison => "<unknown>",
             .unit => "()",
@@ -237,12 +264,12 @@ pub const Type = union(enum) {
     /// Two values and no order. A closed domain, which is what lets a match on
     /// one be total without a catch-all.
     boolean,
-    /// A binary64 floating point number.
+    /// An IEEE 754 binary floating point number of 32 or 64 bits.
     ///
     /// Its own kind rather than an integer carrying a flag, because every
     /// routine that asks "is this an integer, how wide, how signed" must get
     /// an answer meaning *no* rather than one meaning *unsigned 64*.
-    float,
+    float: struct { bits: u8 },
     poison,
     unit,
     never,
@@ -251,6 +278,10 @@ pub const Type = union(enum) {
     /// recorded type holds one once checking returns, but the entries stay in
     /// the pool, so a pass that walks every pool type still meets them.
     open_integer: u32,
+    /// A float literal's type while its uses have not yet chosen one, held in
+    /// the same table as an open integer and settled the same way, on a float
+    /// type rather than an integer one.
+    open_float: u32,
     /// A type parameter a function value leaves unselected, while the value's
     /// later uses have not yet said what it is. The index names a variable in
     /// the same table open integers use, and like them no recorded type holds
@@ -650,12 +681,12 @@ const Arrangement = struct {
             // Every recorded use is resolved before checking finishes, so an
             // open integer left in the pool is reached only by passes that
             // scan every type. It lays out as the type it would fall back to.
-            .open_integer => .{ .size = 8, .alignment = 8 },
+            .open_integer, .open_float => .{ .size = 8, .alignment = 8 },
             // Nothing is laid out at an unselected parameter, and one left in
             // the pool is reached only by a scan of every type.
             .open_type => .{ .size = 0, .alignment = 1 },
             .boolean => .{ .size = 1, .alignment = 1 },
-            .float => .{ .size = 8, .alignment = 8 },
+            .float => |info| .{ .size = info.bits / 8, .alignment = info.bits / 8 },
             // No value, so nothing to place and nothing to align.
             .unit, .never => .{ .size = 0, .alignment = 1 },
             // Already reported. A word keeps every later arithmetic in range.
@@ -851,7 +882,7 @@ fn walkFrom(
         // acyclic by default and laid out by whoever asked for its size
         // first.
         .closure => |closure| reported = try walkFrom(gpa, pool, field_types, variant_first_fields, variant_field_counts, closure.environment, marks, path),
-        .integer, .open_integer, .open_type, .boolean, .float, .poison, .unit, .never, .parameter, .callable => {},
+        .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .parameter, .callable => {},
     }
     if (reported) return true;
 
@@ -995,7 +1026,7 @@ const CapabilityFacts = struct {
                     try self.edge(gpa, ty, array.element);
                 },
                 .closure => |closure| try self.edge(gpa, ty, closure.environment),
-                .borrow, .callable, .integer, .open_integer, .open_type, .boolean, .float, .unit, .never, .poison => {},
+                .borrow, .callable, .integer, .open_integer, .open_float, .open_type, .boolean, .float, .unit, .never, .poison => {},
             }
             if (builder.certified_storage != .none and view.declOfType(ty) == builder.certified_storage) {
                 if (view.instanceOf(ty)) |instance| {
@@ -1657,7 +1688,7 @@ pub fn crossesForeign(pool: anytype, t: TypeId) bool {
 
 fn dependencyFreeScalar(pool: anytype, ty: TypeId) bool {
     return switch (pool.get(ty)) {
-        .integer, .open_integer, .float, .boolean, .unit, .never => true,
+        .integer, .open_integer, .open_float, .float, .boolean, .unit, .never => true,
         // A newtype over a scalar holds no part a dependency could live in,
         // unless its declaration is one whose dependencies originate at the
         // value, as `std.ffi`'s views of C addresses are.
@@ -3264,17 +3295,22 @@ pub const ImplIndex = struct {
     fn settledHeld(pool: anytype, held: TypeId) TypeId {
         const table = pool.open_types orelse return held;
         return switch (pool.get(held)) {
-            .open_integer => |v| table.resolved(v),
+            .open_integer, .open_float => |v| table.resolved(v),
             else => held,
         };
     }
 
-    /// The types an integer literal whose type no use has settled may still
-    /// become, or null where `held` is not such a literal. A trait holds for
-    /// the literal exactly when it holds for every one of them, since it will
-    /// be one of them; `selectOnce` answers it that way for both lookups.
-    fn openIntegerCandidates(pool: anytype, held: TypeId) ?[]const TypeId {
-        return if (pool.get(held) == .open_integer) &TypeId.integers else null;
+    /// The types a literal whose type no use has settled may still become,
+    /// and the one it falls back to, or null where `held` is not such a
+    /// literal. A trait holds for the literal exactly when it holds for every
+    /// one of them, since it will be one of them; `selectOnce` answers it that
+    /// way for both lookups.
+    fn openLiteralCandidates(pool: anytype, held: TypeId) ?struct { types: []const TypeId, fallback: TypeId } {
+        return switch (pool.get(held)) {
+            .open_integer => .{ .types = &TypeId.integers, .fallback = TypeId.literal_default },
+            .open_float => .{ .types = &TypeId.floats, .fallback = TypeId.float_literal_default },
+            else => null,
+        };
     }
 
     /// `any`, against what this lookup has already decided.
@@ -3330,15 +3366,15 @@ pub const ImplIndex = struct {
         // for every type it may become. The choice a `.find` returns is the
         // fallback type's; which implementation runs is selected again once
         // the literal's type is settled.
-        if (openIntegerCandidates(pool, held)) |integers| {
+        if (openLiteralCandidates(pool, held)) |open| {
             var fallback: Answer(mode) = if (mode == .any) true else null;
-            for (integers) |integer| {
-                const answer = try self.selectOnce(impls, pool, decided, mode, trait, args, integer, forward);
+            for (open.types) |candidate| {
+                const answer = try self.selectOnce(impls, pool, decided, mode, trait, args, candidate, forward);
                 switch (mode) {
                     .any => if (!answer) return false,
                     .find => {
                         const choice = answer orelse return null;
-                        if (integer == TypeId.literal_default) fallback = choice;
+                        if (candidate == open.fallback) fallback = choice;
                     },
                 }
             }
@@ -5724,7 +5760,9 @@ pub const Typing = struct {
     /// refuse number parts on a value that is not a number; discovery and
     /// lowering ask once the type is concrete, to choose the routine.
     pub fn layoutShape(self: *const Typing, owner: DeclId, t: TypeId) LayoutShape {
-        if (t == .f64) return .float;
+        // A float literal its uses have not settled yet is a float whichever
+        // float type it settles on.
+        if (t.isFloat() or self.get(t) == .open_float) return .float;
         if (self.isIntegerWithin(owner, t)) return .integer;
         return .general;
     }
@@ -5744,6 +5782,7 @@ pub const Typing = struct {
         try testing.expectEqual(LayoutShape.integer, view.layoutShape(DeclId.none, literal));
         try testing.expectEqual(LayoutShape.integer, view.layoutShape(DeclId.at(7), counted));
         try testing.expectEqual(LayoutShape.float, view.layoutShape(DeclId.none, .f64));
+        try testing.expectEqual(LayoutShape.float, view.layoutShape(DeclId.none, .f32));
         try testing.expectEqual(LayoutShape.general, view.layoutShape(DeclId.none, .bool_));
         try testing.expectEqual(LayoutShape.general, view.layoutShape(DeclId.at(7), plain));
     }
@@ -5961,6 +6000,7 @@ pub const Typing = struct {
             .parameter => |p| p.name,
             // Named by the type it falls back to when no use settles it.
             .open_integer => TypeId.literal_default.nameOf(),
+            .open_float => TypeId.float_literal_default.nameOf(),
             // A type its uses have not chosen yet, written as a hole.
             .open_type => "_",
             else => t.nameOf(),
@@ -6207,7 +6247,7 @@ pub const Typing = struct {
             // kind added later decides here whether its name alone can tell
             // two of its values' types apart -- falling through by default is
             // how two instantiations would collapse to one symbol.
-            .integer, .open_integer, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .struct_, .newtype, .parameter => {},
+            .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .struct_, .newtype, .parameter => {},
         }
 
         // An interpolation's type is the other one whose name embeds the whole
@@ -6398,7 +6438,7 @@ pub const Typing = struct {
                 for (self.callableParams(signature)) |parameter| shape.parameter(parameter.convention);
                 if (shape.finish()) |exact| return .{ .callable_ = exact };
             },
-            .integer, .open_integer, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .struct_, .newtype, .parameter, .closure => {},
+            .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .struct_, .newtype, .parameter, .closure => {},
         }
         return .{ .whole = t };
     }
@@ -6410,7 +6450,7 @@ pub const Typing = struct {
     /// **Bound:** the type's own parts, once each.
     pub fn mentionsOpenType(self: *const Typing, t: TypeId) bool {
         switch (self.get(t)) {
-            .open_type, .open_integer => return true,
+            .open_type, .open_integer, .open_float => return true,
             .callable => |signature| {
                 for (self.callableParams(signature)) |parameter| if (self.mentionsOpenType(parameter.ty)) return true;
                 return self.mentionsOpenType(signature.result);
@@ -6893,7 +6933,7 @@ pub const Typing = struct {
     /// Nominal wrappers and symbolic parameters retain explicit copy semantics.
     pub fn isScalarSnapshot(self: *const Typing, t: TypeId) bool {
         return switch (self.get(t)) {
-            .integer, .open_integer, .boolean, .float => true,
+            .integer, .open_integer, .open_float, .boolean, .float => true,
             .enum_ => |e| e.ownership_policy == .copyable and e.payload_field_count == 0,
             else => false,
         };
@@ -7397,7 +7437,7 @@ pub const Typing = struct {
             // program can act on -- so the addition decides here before the
             // build succeeds.
             .closure => |closure| self.fieldOffset(closure.environment, i),
-            .integer, .open_integer, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .parameter, .array, .newtype, .callable, .borrow => 0,
+            .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .parameter, .array, .newtype, .callable, .borrow => 0,
         };
     }
 
@@ -7489,7 +7529,7 @@ pub const Typing = struct {
             // produces a second range diagnostic. An open integer holds
             // anything for now: its values are checked when its type settles.
             .poison, .open_integer => true,
-            .unit, .never, .open_type => false,
+            .unit, .never, .open_type, .open_float => false,
             // Not a numeric domain either: an enum's values are its variants,
             // and a structure's are whatever its parts hold. A parameter has
             // no domain of its own at all -- it stands for one.
@@ -8113,7 +8153,7 @@ pub const Typing = struct {
                     args[parameter.index]
                 else
                     .poison,
-                .integer, .open_integer, .open_type, .boolean, .float, .poison, .unit, .never => ty,
+                .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never => ty,
                 .struct_ => if (self.isInterpolation(ty) or self.instanceOf(ty) != null) null else ty,
                 .enum_, .newtype => if (self.instanceOf(ty) != null) null else ty,
                 .borrow, .array, .callable, .closure => null,
@@ -8134,7 +8174,7 @@ pub const Typing = struct {
 
             fn apply(self: *TypeSubstitution, builder: *Builder, ty: TypeId) std.mem.Allocator.Error!TypeId {
                 if (self.open) |table| switch (builder.get(ty)) {
-                    .open_integer, .open_type => |v| return table.resolved(v),
+                    .open_integer, .open_float, .open_type => |v| return table.resolved(v),
                     else => if (!try builder.mentionsOpen(ty)) return ty,
                 };
                 if (builder.substitutionLeaf(ty, self.decl, self.args)) |answer| return answer;
@@ -8200,7 +8240,7 @@ pub const Typing = struct {
                     return self.substituteInterpolation(ty, substitution);
                 },
                 .enum_, .newtype => {},
-                .integer, .open_integer, .open_type, .boolean, .float, .poison, .unit, .never => unreachable,
+                .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never => unreachable,
             }
 
             const origin = self.instanceOf(ty) orelse return ty;
@@ -9102,6 +9142,12 @@ pub const Typing = struct {
             return self.appendFresh(.{ .open_integer = v });
         }
 
+        /// The type standing for open-float variable `v`, created once like an
+        /// open integer's.
+        pub fn openFloat(self: *Builder, v: u32) !TypeId {
+            return self.appendFresh(.{ .open_float = v });
+        }
+
         /// The type standing for open-type variable `v`, created once like an
         /// open integer's.
         pub fn openType(self: *Builder, v: u32) !TypeId {
@@ -9255,7 +9301,7 @@ pub const Typing = struct {
 
         fn mentionsOpenOnce(self: *Builder, ty: TypeId) std.mem.Allocator.Error!bool {
             switch (self.get(ty)) {
-                .open_integer, .open_type => return true,
+                .open_integer, .open_float, .open_type => return true,
                 else => {},
             }
             // A settled reference waiting on an open receiver resolves once the
@@ -9283,7 +9329,7 @@ pub const Typing = struct {
         /// does not compile until it says what it holds.
         pub fn visitParts(self: *Builder, ty: TypeId, visitor: anytype) std.mem.Allocator.Error!void {
             switch (self.get(ty)) {
-                .integer, .boolean, .float, .poison, .unit, .never, .open_integer, .open_type, .parameter => {},
+                .integer, .boolean, .float, .poison, .unit, .never, .open_integer, .open_float, .open_type, .parameter => {},
                 .borrow => |b| try visitor.part(b.referent),
                 .array => |a| try visitor.part(a.element),
                 .callable => |signature| {
@@ -11726,7 +11772,7 @@ test "every primitive is spelled and no other handle is one" {
         try testing.expect(t.nameOf().len > 0);
         try testing.expect(t != .poison and t != .unit);
     }
-    try testing.expectEqual(@as(usize, 11), TypeId.primitives.len);
+    try testing.expectEqual(@as(usize, 12), TypeId.primitives.len);
 }
 
 test "a builtin describes itself" {
@@ -11742,6 +11788,11 @@ test "a builtin describes itself" {
     const signed = t.get(.i64).integer;
     try testing.expect(signed.signed);
     try testing.expectEqual(@as(u8, 64), signed.bits);
+
+    try testing.expectEqual(@as(u8, 64), t.get(.f64).float.bits);
+    try testing.expectEqual(@as(u8, 32), t.get(.f32).float.bits);
+    try testing.expectEqual(@as(?u8, 32), TypeId.f32.floatBits());
+    try testing.expectEqual(@as(?u8, null), TypeId.u32.floatBits());
 }
 
 test "semantic fields and variants are stored by column" {

@@ -3,7 +3,9 @@
 Status: Accepted — 2026-07-25
 
 Extended by [0207](0207-linea-converts-nothing-implicitly.md), which collects
-the rule that no conversion is implicit.
+the rule that no conversion is implicit, and by
+[0226](0226-float32-is-a-second-binary-floating-point-width.md), which adds a
+second float width.
 
 ## Context
 

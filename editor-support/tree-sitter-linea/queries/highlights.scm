@@ -112,7 +112,7 @@
 ; was then overwritten by the rule it was meant to refine, so every primitive
 ; read as an ordinary name.
 ((type_identifier) @type.builtin
- (#match? @type.builtin "^(Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64|Bool|Float64|Never)$"))
+ (#match? @type.builtin "^(Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64|Bool|Float32|Float64|Never)$"))
 
 ; -- Names -----------------------------------------------------------------
 ; The general rule first, for the reason the primitives sit after theirs: what
@@ -138,7 +138,7 @@
   index: (index_expression head: (identifier) @type)
   (#match? @type "^[A-Z]")))
 ((call_expression callee: (index_expression index: (identifier) @type.builtin))
- (#match? @type.builtin "^(Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64|Bool|Float64|Never)$"))
+ (#match? @type.builtin "^(Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64|Bool|Float32|Float64|Never)$"))
 (parameter name: (identifier) @variable.parameter)
 (named_argument name: (identifier) @variable.parameter)
 (field_expression field: (identifier) @variable.other.member)

@@ -102,11 +102,16 @@ hover consume the ordinary concrete type. Shape inference adds O(d) work for d
 nested array dimensions, with no table sized by the program or repeated walk
 of sibling elements.
 
-## Integer literals settled by use
+## Literals settled by use
 
 An integer literal checked with no expected type gets an `open_integer` pool
 entry naming a variable in the checker's `OpenTypes` table
-(`sema/open_types.zig`), a union-find with one entry per such literal. The
+(`sema/open_types.zig`), a union-find with one entry per such literal. A float
+literal gets an `open_float` entry in the same table. Each variable carries a
+family -- integer, float, or any for a function value's parameter -- which
+decides what it may settle on and what it falls back to: `Int64` for an
+integer, `Float64` for a float. Two variables of different literal families
+never join. The
 open type flows through expression, binding and instantiated types like any
 other `TypeId`. `Checker.meet`, reached from `expect`, is the one routine that
 settles or joins variables; parameter settling, callable bounds and index keys
@@ -115,17 +120,21 @@ types each kind is built from, shared by `mentionsOpen`, forcing and structural
 meeting. Operations that need a type immediately (receivers, `match`,
 conversions, a generic argument nothing settled, an implementation query that
 found nothing) fall back through `forceInteger`; each body falls back what it
-left open when it finishes.
+left open when it finishes. A float literal converted to a float type settles
+on the target instead, so it is rounded once.
 
 `resolveAllOpen` runs after every body is checked and before the obligations
 zone. It checks each value folded while open (literals, negations, arithmetic
-results) against the type it settled to, resolves closure environment fields in
+results) against the type it settled to, rounds each open float literal at its
+final width with `roundFloatLiteral` -- the one routine that rounds a float
+literal -- and refuses one that rounds to an infinity or a nonzero one that
+rounds to zero, resolves closure environment fields in
 place, and rewrites the checker's `TypeId`-bearing tables and the builder's
 recorded tables through `rewriteTypeIds`, which refuses at compile time any
 storage it cannot follow. It then asserts that no expression type mentions an
 open integer. Nothing downstream of the checker sees an open type through a
 recorded table. The open entries themselves stay in the pool: passes that walk
-every pool type lay them out as their `Int64` fallback, and MIR represents them
+every pool type lay them out as their fallback's size, and MIR represents them
 as invalid, so a use that escaped would fail verification rather than lower.
 The table and the pending list are sized by literal sites, each body's list by
 that body's literals, and the finishing pass is linear in the tables it
@@ -1861,18 +1870,22 @@ in both modes (ADR 0197).
 Floating-point Debug formatting uses the pinned Zig standard library's Ryu
 algorithm in `runtime/float.zig`. `std/fmt/float.lin` reconstructs the IEEE bits
 with exact powers of two and passes them through the integer foreign interface.
+A `Float32` crosses as the bits of the `Float64` holding the same value, which
+widening gives exactly; `linea_float32_debug` and `linea_float32_shortest`
+narrow it back and render it at binary32, so both widths share one
+reconstruction routine.
 The runtime returns at most 32 ASCII bytes packed numerically into four integers;
 the Linea adapter writes immutable character slices through the caller's Writer.
 No temporary runtime buffer becomes a Str. Reconstruction takes at most 1,023
-normalization steps for binary64, and both sides use bounded storage. The runtime
-formatter retains its input precision, so its rendering routine also accepts
-binary32 without widening; Linea exposes only Float64.
+normalization steps for binary64, and both sides use bounded storage.
 
 Checked decimal input uses the same integer foreign interface. The private
 `std.mem` adapter passes a certified byte address and extent to
 `linea_float64_parse`; status, IEEE bits and syntax offset return as integers.
 `std.text.parse_float64` reconstructs the finite result using exact powers of two,
-with at most 1,074 steps. The runtime validates the complete decimal token and
+with at most 1,074 steps. `linea_float32_parse` shares the scanner and rounds
+once to binary32 with the same provider; `std.text.parse_float32` reconstructs
+the binary64 encoding it returns and narrows it, exactly. The runtime validates the complete decimal token and
 uses the pinned Zig toolchain's integer-only conversion provider, so rounding
 is nearest-even independently of the ambient floating mode. The build copies
 four unchanged provider files into a generated module and installs their MIT

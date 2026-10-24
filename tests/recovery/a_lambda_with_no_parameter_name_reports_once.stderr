@@ -1,0 +1,26 @@
+error[S-Params]: expected a parameter name
+ --> tests/recovery/a_lambda_with_no_parameter_name_reports_once.lin:3:5
+  |
+3 |     }
+  |     ^ a parameter is a name and a type
+error[S-Lambda]: expected `|`
+ --> tests/recovery/a_lambda_with_no_parameter_name_reports_once.lin:3:5
+  |
+3 |     }
+  |     ^ this lambda parameter list is never closed
+error[S-Lambda]: expected a lambda body
+ --> tests/recovery/a_lambda_with_no_parameter_name_reports_once.lin:3:5
+  |
+3 |     }
+  |     ^ a lambda is followed by an expression or block
+error[S-Entry]: a program is a list of declarations
+ --> tests/recovery/a_lambda_with_no_parameter_name_reports_once.lin:4:5
+  |
+4 |     0
+  |     ^ expected `fn` here
+error[T-Mismatch]: expected `UInt8`, found `()`
+ --> tests/recovery/a_lambda_with_no_parameter_name_reports_once.lin:1:20
+  |
+1 | fn main() -> UInt8 {
+  |              ----- expected because of this return type
+  |                    ^ this body produces nothing

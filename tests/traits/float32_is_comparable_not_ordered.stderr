@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Ordered`, and `Float32` does not implement it
+ --> tests/traits/float32_is_comparable_not_ordered.lin:4:13
+  |
+4 |     &levels.sort()
+  |             ^^^^ the library declares both `Float32` and `Ordered`; wrap it in a type this program declares that implements `Ordered`

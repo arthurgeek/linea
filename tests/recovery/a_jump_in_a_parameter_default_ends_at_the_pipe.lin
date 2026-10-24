@@ -1,0 +1,17 @@
+fn returned() -> UInt8 {
+    let f = |x: UInt8 = return| x
+    f(1)
+}
+
+fn broken() -> UInt8 {
+    loop {
+        let f = |x: UInt8 = break| x
+        let _g = f
+        break
+    }
+    0
+}
+
+fn main() -> UInt8 {
+    returned() + broken()
+}

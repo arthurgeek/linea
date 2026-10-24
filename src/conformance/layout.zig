@@ -128,7 +128,7 @@ const Emitter = struct {
             // target. `_Bool` is not used: its width is implementation-defined
             // where this is not.
             .boolean => .{ .text = "unsigned char" },
-            .float => .{ .text = "double" },
+            .float => |info| .{ .text = if (info.bits == 32) "float" else "double" },
             .borrow => .{ .text = "const void *" },
             // A newtype represents nothing of its own, so it has nothing for a
             // C declaration to say that its base does not.
@@ -146,7 +146,7 @@ const Emitter = struct {
             // Neither reaches a layout: a parameter never reaches the backend,
             // and poison never reaches code generation. Either arriving here
             // is a defect upstream rather than a type to spell.
-            .parameter, .poison, .open_integer, .open_type, .callable => .cannot,
+            .parameter, .poison, .open_integer, .open_float, .open_type, .callable => .cannot,
         };
     }
 
@@ -224,7 +224,7 @@ const Emitter = struct {
                 .array => false,
                 else => self.partExpressible(a.element),
             },
-            .unit, .never, .parameter, .poison, .open_integer, .open_type, .callable, .closure => false,
+            .unit, .never, .parameter, .poison, .open_integer, .open_float, .open_type, .callable, .closure => false,
         };
     }
 

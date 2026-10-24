@@ -1,0 +1,19 @@
+error[T-Literal]: `Float32` cannot hold 1e39
+ --> tests/diag/a_float32_literal_is_out_of_range.lin:2:25
+  |
+2 |     let huge: Float32 = 1e39
+  |               ------- expected because of this annotation
+  |                         ^^^^ literal is out of range for its type
+error[T-Literal]: `Float32` cannot hold 1e-50
+ --> tests/diag/a_float32_literal_is_out_of_range.lin:3:25
+  |
+3 |     let tiny: Float32 = 1e-50
+  |               ------- expected because of this annotation
+  |                         ^^^^^ a nonzero literal that rounds to zero in this type
+error[T-Literal]: `Float32` cannot hold 3.5e38
+ --> tests/diag/a_float32_literal_is_out_of_range.lin:4:16
+  |
+4 |     let late = 3.5e38
+  |                ^^^^^^ literal is out of range for its type
+5 |     let narrow: Float32 = late
+  |                           ---- settled to `Float32` here

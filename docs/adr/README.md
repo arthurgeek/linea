@@ -73,7 +73,7 @@ true of a different implementation.
 | [0203](0203-zip-and-skip-require-discardable-items-and-zip-is-left-biased.md) | `zip` and `skip` require the items they dispose of to be Discardable, and `zip` is left-biased | Accepted; extends 0192 |
 | [0245](0245-iterator-adapters-are-lazy.md) | Iterator adapters are lazy, reversal needs a double-ended source, and only a terminal allocates | Proposed; would extend 0192 and 0203 |
 | [0017](0017-failure-is-a-trap-or-a-value.md) | Failure is either a trap or a value, never both | Accepted; refined by 0106 |
-| [0018](0018-the-integer-model.md) | Fixed-width integers, literals typed by context, conversions explicit | Accepted; extended by 0092, 0152 and 0207 |
+| [0018](0018-the-integer-model.md) | Fixed-width integers, literals typed by context, conversions explicit | Accepted; extended by 0092, 0152, 0207 and 0226 |
 | [0019](0019-entry-point-is-main-returning-u8.md) | A program is `fn main() -> u8` | Superseded by 0024 |
 | [0020](0020-a-constant-expression-is-defined.md) | A constant expression is defined by the language, not discovered by a pass | Accepted; extended by 0059, 0078, 0083, 0127, 0140, 0146 and 0157 |
 | [0058](0058-a-constant-declaration-is-a-binding-the-definition-covers.md) | A constant declaration is a binding the definition already covers | Superseded by 0059 |
@@ -98,11 +98,12 @@ true of a different implementation.
 | [0067](0067-a-place-is-updated-through-itself.md) | A compound assignment updates a place through itself | Accepted |
 | [0068](0068-a-declaration-may-name-a-symbol-the-runtime-provides.md) | A declaration may name a symbol the runtime provides | Accepted; extended by 0150 and 0156; `std/` clause superseded by 0171; integer-only, linear and callable clauses superseded by 0228 |
 | [0150](0150-float-math-crosses-a-checked-scalar-boundary.md) | Float math crosses a checked scalar boundary | Accepted; extends 0068; general-Float64 clause superseded by 0228 |
+| [0226](0226-float32-is-a-second-binary-floating-point-width.md) | Float32 is a second binary floating-point width | Accepted; extends 0018 and 0152 |
 | [0156](0156-every-declaration-of-an-extern-symbol-is-one-function.md) | Every declaration of an extern symbol is one function | Accepted; extends 0068 |
 | [0228](0228-a-granted-module-calls-c.md) | A granted module calls C | Accepted; supersedes clauses of 0068, 0150 and 0171; extends 0013, 0101 and 0229 |
 | [0151](0151-a-named-structure-literal-carries-a-written-type.md) | A named structure literal carries a written type | Accepted; refines 0041; extended by 0183 |
 | [0183](0183-a-structure-literal-may-take-its-other-fields-from-a-base.md) | A structure literal may take its other fields from a base | Accepted; extends 0151 and 0140 |
-| [0152](0152-an-integer-literals-type-is-settled-by-its-uses.md) | An integer literal's type is settled by its uses | Accepted; extends 0018, partially supersedes 0092; extended by 0176; method-call fallback refined by 0192 |
+| [0152](0152-an-integer-literals-type-is-settled-by-its-uses.md) | An integer literal's type is settled by its uses | Accepted; extends 0018, partially supersedes 0092; extended by 0176 and 0226; method-call fallback refined by 0192 |
 | [0144](0144-context-selects-single-payload-enum-constructor-values.md) | Context selects single-payload enum constructor values | Accepted; extends 0128 and 0132 |
 | [0069](0069-a-view-is-a-value-rooted-at-a-place.md) | A view is a value rooted at a place | Superseded by 0123 |
 | [0070](0070-explicit-failure-is-acknowledged.md) | Explicit failure is acknowledged | Accepted |

@@ -1,0 +1,11 @@
+fn main() -> UInt8 {
+    let small: UInt16 = 200
+    let f = [small] |early: Bool| {
+        if early {
+            return small
+        }
+        70000
+    }
+    let _x = f(false)
+    0
+}

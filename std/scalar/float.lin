@@ -283,3 +283,42 @@ impl Float64 {
         .Ok(())
     }
 }
+
+impl Float32 {
+    // Return whether self is NaN. NaN is the only floating-point value unequal
+    // to itself.
+    pub fn is_nan(self: Self) -> Bool {
+        self != self
+    }
+}
+
+test fn a_float32_nan_is_equal_to_nothing_including_itself() {
+    let zero: Float32 = 0.0
+    let nan = zero / zero
+    testing.assert(nan.is_nan(), "a NaN does not say it is one")?
+    testing.assert(!Float32.is_nan(-1.5), "a negative says it is a NaN")?
+    .Ok(())
+}
+
+impl Float32 {
+    // Negate negative values and return positive zero for either zero, so
+    // the result never carries a sign; NaN stays NaN.
+    pub fn abs(self: Self) -> Float32 {
+        if self < 0.0 {
+            -self
+        } else if self == 0.0 {
+            0.0
+        } else {
+            self
+        }
+    }
+}
+
+test fn a_float32_absolute_value_drops_the_sign_and_keeps_everything_else() {
+    testing.assert_eq(Float32.abs(-2.5), 2.5, "absolute value of a negative float")?
+    testing.assert_eq(Float32.abs(2.5), 2.5, "absolute value of a positive float")?
+    let zero: Float32 = 0.0
+    testing.assert(1.0 / Float32.abs(-zero) > 0.0, "absolute value of negative zero keeps its sign")?
+    testing.assert((zero / zero).abs().is_nan(), "the magnitude of a NaN is not a NaN")?
+    .Ok(())
+}

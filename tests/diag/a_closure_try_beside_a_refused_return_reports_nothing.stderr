@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `undefined_name`
+  --> tests/diag/a_closure_try_beside_a_refused_return_reports_nothing.lin:15:16
+   |
+15 |         return undefined_name(k)
+   |                ^^^^^^^^^^^^^^ no binding with this name is in scope

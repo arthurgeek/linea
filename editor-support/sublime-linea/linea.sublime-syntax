@@ -310,7 +310,7 @@ contexts:
         1: entity.name.namespace.linea
         2: punctuation.accessor.linea
         3: entity.name.type.linea
-    - match: '\b(Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64|Bool|Float64|Never)\b'
+    - match: '\b(Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64|Bool|Float32|Float64|Never)\b'
       scope: storage.type.builtin.linea
     # The type an implementation names. Built in rather than declared, so it
     # is styled as what it is and not as a type someone wrote down.

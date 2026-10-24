@@ -1,0 +1,15 @@
+error[M-Extern]: an `extern` is declared only in a module its root's manifest grants, and linea.json does not list "."
+ --> tests/ffi/a_float32_does_not_cross.lin:3:11
+  |
+3 | extern fn scale(f: Float32) -> Float32
+  |           ^^^^^ list this module under "extern" in linea.json to trust it with C, or call a module that is granted
+error[T-Extern]: `Float32` may not cross the foreign boundary: only an integer, a `Float64` or a newtype over one has a C representation the language fixes
+ --> tests/ffi/a_float32_does_not_cross.lin:3:17
+  |
+3 | extern fn scale(f: Float32) -> Float32
+  |                 ^ pass what it is made of, as integers or `Float64`
+error[T-Extern]: `Float32` may not cross the foreign boundary: only an integer, a `Float64` or a newtype over one has a C representation the language fixes
+ --> tests/ffi/a_float32_does_not_cross.lin:3:11
+  |
+3 | extern fn scale(f: Float32) -> Float32
+  |           ^^^^^ pass what it is made of, as integers or `Float64`

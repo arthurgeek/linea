@@ -1,0 +1,31 @@
+error[T-Literal]: `Float32` cannot hold -1e39
+ --> tests/diag/a_negated_float_literal_keeps_its_sign.lin:2:25
+  |
+2 |     let huge: Float32 = -1e39
+  |               ------- expected because of this annotation
+  |                         ^^^^^ literal is out of range for its type
+error[T-Literal]: `Float32` cannot hold -1e39
+ --> tests/diag/a_negated_float_literal_keeps_its_sign.lin:4:28
+  |
+4 |     let grouped: Float32 = -(1e39)
+  |                  ------- expected because of this annotation
+  |                            ^^^^^^^ literal is out of range for its type
+error[T-Literal]: `Float64` cannot hold -1e-400
+ --> tests/diag/a_negated_float_literal_keeps_its_sign.lin:3:16
+  |
+3 |     let tiny = -1e-400
+  |                ^^^^^^^ a nonzero literal that rounds to zero in this type
+5 |     let _unused = Float64(huge + grouped) + tiny
+  |                                             ---- settled to `Float64` here
+error[T-Literal]: `Float32` cannot hold 1e39
+  --> tests/diag/a_negated_float_literal_keeps_its_sign.lin:10:29
+   |
+10 |     let converted = Float32(--1e39)
+   |                     ------- expected because of this conversion
+   |                             ^^^^^^ literal is out of range for its type
+error[T-Literal]: `Float32` cannot hold 1e39
+  --> tests/diag/a_negated_float_literal_keeps_its_sign.lin:11:27
+   |
+11 |     let nested: Float32 = -(-(1e39))
+   |                 ------- expected because of this annotation
+   |                           ^^^^^^^^^^ literal is out of range for its type

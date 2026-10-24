@@ -1,0 +1,2 @@
+trap
+linea: value out of range for its type at tests/eval/a_float32_below_int32_traps.lin:4:14

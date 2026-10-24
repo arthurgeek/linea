@@ -207,15 +207,21 @@ pub const Inst = struct {
         // integer conversions are one value re-tested -- so those are a
         // `check` and these are instructions.
 
-        /// An integer becomes the nearest `Float64`. Defined for every input
-        /// and may round; the operand's own type says whether its word is
-        /// read signed.
+        /// An integer becomes the nearest value of the float type `ty`
+        /// names. Defined for every input and may round; the operand's own
+        /// type says whether its word is read signed.
         int_to_float,
-        /// A `Float64` becomes the integer `ty` names, truncating toward
+        /// A float becomes the integer `ty` names, truncating toward
         /// zero. The backend guards it: a NaN and a value whose truncation
         /// the target cannot hold trap rather than convert, because there is
         /// no integer the result could honestly be.
         float_to_int,
+        /// A `Float32` becomes the `Float64` of the same value. Exact.
+        float_extend,
+        /// A `Float64` becomes the nearest `Float32`, rounding to nearest with
+        /// ties to even; a finite value beyond binary32's range becomes the
+        /// infinity of its sign, and NaN stays NaN.
+        float_truncate,
         /// A checked runtime math operation over one or two Float64 values.
         float_math,
 
@@ -271,7 +277,7 @@ pub const Inst = struct {
                 .store => .store,
                 .add, .sub, .mul, .div, .rem => .binary,
                 .cmp_eq, .cmp_ne, .cmp_lt, .cmp_le, .cmp_gt, .cmp_ge => .binary,
-                .neg, .ret, .int_to_float, .float_to_int => .unary,
+                .neg, .ret, .int_to_float, .float_to_int, .float_extend, .float_truncate => .unary,
                 .float_math => .float_math,
                 .check => .check,
                 .call => .call,
@@ -393,7 +399,8 @@ pub const Signedness = enum { signed, unsigned };
 pub const ComputationRepresentation = union(enum) {
     integer: Signedness,
     boolean,
-    float64,
+    /// An IEEE 754 binary float of this many bits, 32 or 64.
+    float: u8,
     enum_tag,
     indirect,
     code_pointer,
@@ -407,7 +414,8 @@ pub const ComputationRepresentation = union(enum) {
 pub const StorageRepresentation = union(enum) {
     integer: struct { signedness: Signedness, bits: u8 },
     boolean,
-    float64,
+    /// An IEEE 754 binary float of this many bits, 32 or 64.
+    float: u8,
     enum_tag,
     bytes,
     code_pointer,
@@ -525,7 +533,7 @@ fn representationFor(
 
     return switch (typing.get(erased)) {
         .boolean => .{ .computation = .boolean, .storage = .boolean },
-        .float => .{ .computation = .float64, .storage = .float64 },
+        .float => |info| .{ .computation = .{ .float = info.bits }, .storage = .{ .float = info.bits } },
         .enum_ => if (layout.isAggregate())
             .{ .computation = .indirect, .storage = .bytes }
         else
@@ -543,7 +551,7 @@ fn representationFor(
         // An open integer or open type left in the pool is one no recorded use
         // still names: every use was resolved before checking finished. Like a
         // parameter, it has no representation a value could have.
-        .poison, .parameter, .open_integer, .open_type => .{ .computation = .invalid, .storage = .invalid },
+        .poison, .parameter, .open_integer, .open_float, .open_type => .{ .computation = .invalid, .storage = .invalid },
     };
 }
 
@@ -779,7 +787,8 @@ pub const Module = struct {
                 .integer => |integer| @as(u32, integer.bits) / 8,
                 .boolean => 1,
                 .enum_tag => Layout.tag_width,
-                .float64, .unit, .code_pointer, .data_pointer => Layout.word,
+                .float => |bits| @as(u32, bits) / 8,
+                .unit, .code_pointer, .data_pointer => Layout.word,
                 .bytes => self.layoutOf(mir.locals[local.index()]).size,
                 .no_value => std.debug.panic("compiler defect: a Never value cannot occupy a slot", .{}),
                 .invalid => std.debug.panic(
@@ -799,7 +808,8 @@ pub const Module = struct {
                 .integer => |integer| @as(u32, integer.bits) / 8,
                 .boolean => 1,
                 .enum_tag => Layout.tag_width,
-                .float64, .unit, .code_pointer, .data_pointer => Layout.word,
+                .float => |bits| @as(u32, bits) / 8,
+                .unit, .code_pointer, .data_pointer => Layout.word,
                 .bytes => self.layoutOf(mir.locals[local.index()]).alignment,
                 .no_value => std.debug.panic("compiler defect: a Never value cannot occupy a slot", .{}),
                 .invalid => std.debug.panic(
@@ -1174,8 +1184,8 @@ pub const Mir = struct {
     }
 
     /// The value of a float constant. The payload holds one integer whatever
-    /// the type; which reading applies is the instruction's own type's to
-    /// say, and this is the reading `Float64` names -- the bits of a double.
+    /// the type; for either float type it is the bits of the value as a
+    /// double, which holds every `Float32` value exactly.
     pub fn floatConstantOf(self: *const Mir, i: InstId) f64 {
         self.expectPayload(i, .constant);
         const bits: u64 = @intCast(self.insts.items(.data)[i.index()].constant);
@@ -1320,6 +1330,8 @@ pub const Mir = struct {
             .cmp_ge,
             .int_to_float,
             .float_to_int,
+            .float_extend,
+            .float_truncate,
             .float_math,
             .check,
             .call,
@@ -1847,7 +1859,7 @@ test "storage types decide slot extent and alignment" {
     representations.set(.u8, .{ .computation = .{ .integer = .unsigned }, .storage = .{ .integer = .{ .signedness = .unsigned, .bits = 8 } } });
     representations.set(.u16, .{ .computation = .{ .integer = .unsigned }, .storage = .{ .integer = .{ .signedness = .unsigned, .bits = 16 } } });
     representations.set(.bool_, .{ .computation = .boolean, .storage = .boolean });
-    representations.set(.f64, .{ .computation = .float64, .storage = .float64 });
+    representations.set(.f64, .{ .computation = .{ .float = 64 }, .storage = .{ .float = 64 } });
     representations.set(.unit, .{ .computation = .unit, .storage = .unit });
     representations.set(aggregate_ty, .{ .computation = .indirect, .storage = .bytes });
     representations.set(enum_ty, .{ .computation = .enum_tag, .storage = .enum_tag });

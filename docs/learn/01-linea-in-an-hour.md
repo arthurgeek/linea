@@ -178,7 +178,7 @@ The built-in types are the ones you would expect:
 | Type | Holds |
 | --- | --- |
 | `Int8` … `Int64`, `UInt8` … `UInt64` | signed and unsigned integers of 8, 16, 32 or 64 bits |
-| `Float64` | a 64-bit IEEE 754 floating-point number |
+| `Float64`, `Float32` | 64-bit and 32-bit IEEE 754 floating-point numbers |
 | `Bool` | `true` or `false` |
 | `Str` | a view of UTF-8 text, such as a string literal |
 
@@ -284,6 +284,122 @@ Dividing by zero stops the program the same way. No operation in Linea has
 undefined behaviour: each one gives a defined result or a diagnosed error, in
 every build mode. Rust panics on overflow only in debug builds; Linea does it
 in all of them.
+
+### Floating-point numbers: `Float64` and `Float32`
+
+Linea has two floating-point types: `Float64`, Rust's `f64`, and `Float32`,
+Rust's `f32`, which takes half the memory and keeps about seven significant
+digits instead of sixteen. A literal with a point or an exponent, like `1.5`
+or `2e3`, is a float, and like an integer literal it takes the type its uses
+need. Here `5.5` is a `Float32` because of the annotation, and `42.195` in
+`pace * 42.195` is one because it is multiplied by `pace`. A float literal
+nothing settles, like `distance_km`, is a `Float64`:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let distance_km = 42.195
+    let pace: Float32 = 5.5
+    let minutes = pace * 42.195
+    io.println("{distance_km} km at {pace} minutes per km takes {minutes} minutes.")?
+    .Ok(0)
+}
+```
+
+```
+42.195 km at 5.5 minutes per km takes 232.0725 minutes.
+```
+
+The two types never mix silently, just as two integer types do not:
+
+```linea
+fn main() -> UInt8 {
+    let pace: Float32 = 5.5
+    let distance_km: Float64 = 42.195
+    let minutes = pace * distance_km
+    UInt8(minutes / 60.0)
+}
+```
+
+```
+error[T-Operands]: expected `Float32`, found `Float64`
+ --> mixed_floats.lin:4:26
+  |
+4 |     let minutes = pace * distance_km
+  |                   ---- expected because of this operand
+  |                          ^^^^^^^^^^^ expected `Float32`, found `Float64`
+```
+
+Convert one side by writing the type as a function. `Float64(x)` of a
+`Float32` is exact. `Float32(x)` of a `Float64` rounds to the nearest
+`Float32`, so the digits that print change:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let pi = 3.141592653589793
+    let rounded = Float32(pi)
+    // Widening the rounded value back shows what it holds exactly.
+    io.println("{pi} became {rounded}, which is exactly {Float64(rounded)}.")?
+    .Ok(0)
+}
+```
+
+```
+3.141592653589793 became 3.1415927, which is exactly 3.1415927410125732.
+```
+
+`pi` has no annotation, so it is a `Float64`, and converting it leaves it one.
+Each type prints the shortest decimal that reads back as the same value, which
+is why `rounded` prints as `3.1415927` although it holds more digits than that.
+
+Float arithmetic never stops the program. Dividing by zero gives an infinity,
+and a result with no numeric answer, like zero divided by zero, is NaN, which
+is equal to nothing, itself included:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let zero: Float32 = 0.0
+    let nan = zero / zero
+    io.println("{1.0 / zero} {-1.0 / zero} {nan} {nan == nan}")?
+    .Ok(0)
+}
+```
+
+```
+inf -inf NaN false
+```
+
+A literal must still fit its type. `Float32` reaches about `3.4e38`, so a
+larger literal is refused where it is written, as is a literal so small it
+would round to zero:
+
+```linea
+fn main() -> UInt8 {
+    let far: Float32 = 1e39
+    let near: Float32 = 1e-50
+    UInt8(far + near)
+}
+```
+
+```
+error[T-Literal]: `Float32` cannot hold 1e39
+ --> float32_range.lin:2:24
+  |
+2 |     let far: Float32 = 1e39
+  |              ------- expected because of this annotation
+  |                        ^^^^ literal is out of range for its type
+error[T-Literal]: `Float32` cannot hold 1e-50
+ --> float32_range.lin:3:25
+  |
+3 |     let near: Float32 = 1e-50
+  |               ------- expected because of this annotation
+  |                         ^^^^^ a nonzero literal that rounds to zero in this type
+```
 
 ## `let` and `var`
 

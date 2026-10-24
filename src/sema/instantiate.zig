@@ -851,6 +851,7 @@ pub const LayoutDecls = struct {
     debug: DeclId,
     integer: DeclId,
     float: DeclId,
+    float32: DeclId,
 
     pub fn init(program: *const ExpandedProgram) LayoutDecls {
         return .{
@@ -858,6 +859,7 @@ pub const LayoutDecls = struct {
             .debug = generatedCall(program, "interpolate_debug"),
             .integer = generatedCall(program, "interpolate_integer"),
             .float = generatedCall(program, "interpolate_float"),
+            .float32 = generatedCall(program, "interpolate_float32"),
         };
     }
 
@@ -879,29 +881,32 @@ pub const LayoutDecls = struct {
         try testing.expectEqual(DeclId.none, layouts.debug);
         try testing.expectEqual(DeclId.none, layouts.integer);
         try testing.expectEqual(DeclId.none, layouts.float);
+        try testing.expectEqual(DeclId.none, layouts.float32);
     }
 
-    /// Answer the function that lays out a value of this shape in this
-    /// format. The shape is the value's concrete type's, so a generic body
-    /// lays a number out as a number once it is instantiated with one.
-    pub fn of(self: LayoutDecls, format: node.InterpolationFormat, shape: types_mod.LayoutShape) Layout {
+    /// Answer the function that lays out a value of this shape and type in
+    /// this format. The shape is the value's concrete type's, so a generic
+    /// body lays a number out as a number once it is instantiated with one;
+    /// each float type has a function of its own.
+    pub fn of(self: LayoutDecls, format: node.InterpolationFormat, shape: types_mod.LayoutShape, value: TypeId) Layout {
         return switch (shape) {
             .integer => .{ .decl = self.integer, .takes_value_type = true },
-            .float => .{ .decl = self.float, .takes_value_type = false },
+            .float => .{ .decl = if (value == .f32) self.float32 else self.float, .takes_value_type = false },
             .general => .{ .decl = if (format.debug) self.debug else self.display, .takes_value_type = true },
         };
     }
 
     test "each shape lays out through its own function" {
-        const layouts: LayoutDecls = .{ .display = DeclId.at(1), .debug = DeclId.at(2), .integer = DeclId.at(3), .float = DeclId.at(4) };
+        const layouts: LayoutDecls = .{ .display = DeclId.at(1), .debug = DeclId.at(2), .integer = DeclId.at(3), .float = DeclId.at(4), .float32 = DeclId.at(5) };
         const padded: node.InterpolationFormat = .{ .width = 4 };
         const debugged: node.InterpolationFormat = .{ .width = 4, .debug = true };
-        try testing.expectEqual(DeclId.at(1), layouts.of(padded, .general).decl);
-        try testing.expectEqual(DeclId.at(2), layouts.of(debugged, .general).decl);
-        try testing.expectEqual(DeclId.at(3), layouts.of(debugged, .integer).decl);
-        try testing.expectEqual(DeclId.at(4), layouts.of(padded, .float).decl);
-        try testing.expect(layouts.of(padded, .integer).takes_value_type);
-        try testing.expect(!layouts.of(padded, .float).takes_value_type);
+        try testing.expectEqual(DeclId.at(1), layouts.of(padded, .general, .bool_).decl);
+        try testing.expectEqual(DeclId.at(2), layouts.of(debugged, .general, .bool_).decl);
+        try testing.expectEqual(DeclId.at(3), layouts.of(debugged, .integer, .u8).decl);
+        try testing.expectEqual(DeclId.at(4), layouts.of(padded, .float, .f64).decl);
+        try testing.expectEqual(DeclId.at(5), layouts.of(padded, .float, .f32).decl);
+        try testing.expect(layouts.of(padded, .integer, .u8).takes_value_type);
+        try testing.expect(!layouts.of(padded, .float, .f32).takes_value_type);
     }
 };
 
@@ -910,7 +915,7 @@ pub const LayoutDecls = struct {
 pub const Layout = struct {
     decl: DeclId,
     /// This is true when the function's first type parameter is the value's
-    /// type. The Float64 function has none, since its value's type is fixed.
+    /// type. A float's function has none, since its value's type is fixed.
     takes_value_type: bool,
 
     /// Form the function's type arguments: the value's type where it takes
@@ -1717,7 +1722,7 @@ const Discovery = struct {
             if (i % 2 == 1) {
                 const format = self.pool.interpolationFormats(held)[i / 2];
                 if (format.laysOut()) {
-                    const layout = self.layouts.of(format, self.pool.view().layoutShape(DeclId.none, piece));
+                    const layout = self.layouts.of(format, self.pool.view().layoutShape(DeclId.none, piece), piece);
                     if (layout.decl == DeclId.none) continue;
                     const args = try layout.arguments(self.gpa, piece, settled);
                     defer self.gpa.free(args);

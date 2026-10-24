@@ -204,7 +204,7 @@ pub fn parse(text: []const u8) Parsed {
         );
         const count = number(text, &at) orelse return refuse(
             "a precision is at most 65535",
-            "no Float64 has this many digits worth writing",
+            "no float has this many digits worth writing",
         );
         format.precision = count;
         format.has_precision = true;

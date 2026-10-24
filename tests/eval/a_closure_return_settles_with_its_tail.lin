@@ -1,0 +1,44 @@
+fn main() -> UInt8 {
+    // A `return` and the tail are the closure's two results, so the literal
+    // each carries settles with the other: both are UInt8 here, where the
+    // call's result is subtracted from a UInt8.
+    let count = |early: Bool| {
+        if early {
+            return 3
+        }
+        1
+    }
+    let counted: UInt8 = 3
+    let integer = count(true) - counted == 0 && count(false) == 1
+    // Both literals are Float32, so `0.1` rounds once, to binary32.
+    let scale = |early: Bool| {
+        if early {
+            return 0.1
+        }
+        0.5
+    }
+    let tenth: Float32 = 0.1
+    let narrowed: Float32 = scale(true)
+    let float = narrowed == tenth
+    // A closure's `return` leaves that closure: the inner one answers 2 or 1,
+    // and the outer one returns what the inner one answered.
+    let outer = |early: Bool| {
+        let inner = |first: Bool| {
+            if first {
+                return 2
+            }
+            1
+        }
+        if early {
+            return inner(true)
+        }
+        inner(false)
+    }
+    let small: UInt8 = outer(true)
+    let nested = small == 2 && outer(false) == 1
+    if integer && float && nested {
+        0
+    } else {
+        1
+    }
+}

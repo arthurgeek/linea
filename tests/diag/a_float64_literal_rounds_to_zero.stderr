@@ -1,0 +1,5 @@
+error[T-Literal]: `Float64` cannot hold 1e-400
+ --> tests/diag/a_float64_literal_rounds_to_zero.lin:2:16
+  |
+2 |     let tiny = 1e-400
+  |                ^^^^^^ a nonzero literal that rounds to zero in this type

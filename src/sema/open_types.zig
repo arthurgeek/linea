@@ -27,15 +27,36 @@ pub const Pending = struct {
     expr: ExprId,
     value: i128,
     /// Which rule the value answers to: a literal as written, a negation, or
-    /// the result of an arithmetic operation.
-    rule: enum { literal, negation, operation },
+    /// the result of an arithmetic operation. A float literal carries no
+    /// folded value: its text is rounded again at the type it finally has.
+    rule: enum { literal, negation, operation, float_literal },
+};
+
+/// Which types a variable may settle on. A literal's variable must settle on a
+/// type of its own family and falls back to that family's default; a function
+/// value's parameter may settle on anything, until it is joined with a
+/// literal's variable.
+pub const Family = enum {
+    any,
+    integer,
+    float,
+
+    /// The type a variable of this family takes when no use settles it, or
+    /// null where it has none.
+    pub fn fallback(family: Family) ?TypeId {
+        return switch (family) {
+            .any => null,
+            .integer => TypeId.literal_default,
+            .float => TypeId.float_literal_default,
+        };
+    }
 };
 
 /// The variables one body created, as a prefix length of `body_created`.
 pub const Body = struct { start: u32 };
 
-/// Types the checker has not settled yet: an integer literal's, and each type
-/// parameter a function value leaves for its uses to select.
+/// Types the checker has not settled yet: an integer or float literal's, and
+/// each type parameter a function value leaves for its uses to select.
 ///
 /// One entry per literal site that met no expected type and per parameter of
 /// a function value named without one, so the table grows with the source
@@ -43,10 +64,8 @@ pub const Body = struct { start: u32 };
 /// is chosen; the rest point at their root.
 pub const OpenTypes = struct {
     parent: std.ArrayList(u32) = .empty,
-    /// Whether the variable's type must be an integer, read at its root. A
-    /// literal's variable must; a function value's parameter need not, until
-    /// it is joined with one that must.
-    integer: std.ArrayList(bool) = .empty,
+    /// Which types the variable may settle on, read at its root.
+    family: std.ArrayList(Family) = .empty,
     type_of: std.ArrayList(TypeId) = .empty,
     /// The pool type standing for each variable, so joined variables that are
     /// still open resolve to one type: their root's.
@@ -58,7 +77,7 @@ pub const OpenTypes = struct {
 
     pub fn deinit(self: *OpenTypes, gpa: Allocator) void {
         self.parent.deinit(gpa);
-        self.integer.deinit(gpa);
+        self.family.deinit(gpa);
         self.type_of.deinit(gpa);
         self.named.deinit(gpa);
         self.origin_of.deinit(gpa);
@@ -68,28 +87,33 @@ pub const OpenTypes = struct {
 
     /// A fresh variable for an integer literal.
     pub fn create(self: *OpenTypes, gpa: Allocator) !u32 {
-        return self.createOf(gpa, true);
+        return self.createOf(gpa, .integer);
+    }
+
+    /// A fresh variable for a float literal.
+    pub fn createFloat(self: *OpenTypes, gpa: Allocator) !u32 {
+        return self.createOf(gpa, .float);
     }
 
     /// A fresh variable for a type parameter, which may settle on any type.
     pub fn createType(self: *OpenTypes, gpa: Allocator) !u32 {
-        return self.createOf(gpa, false);
+        return self.createOf(gpa, .any);
     }
 
     test "a type variable settles on any type and has no fallback" {
         var table: OpenTypes = .{};
         defer table.deinit(std.testing.allocator);
         const v = try table.createType(std.testing.allocator);
-        table.fallback(v, .i64);
+        table.fallback(v);
         try std.testing.expectEqual(@as(?TypeId, null), table.settled(v));
         try std.testing.expectEqual(Outcome.settled, table.settle(v, .bool_, null));
         try std.testing.expectEqual(@as(?TypeId, .bool_), table.settled(v));
     }
 
-    fn createOf(self: *OpenTypes, gpa: Allocator, integer: bool) !u32 {
+    fn createOf(self: *OpenTypes, gpa: Allocator, family: Family) !u32 {
         const v: u32 = @intCast(self.parent.items.len);
         try self.parent.append(gpa, v);
-        try self.integer.append(gpa, integer);
+        try self.family.append(gpa, family);
         try self.type_of.append(gpa, .poison);
         try self.named.append(gpa, .poison);
         try self.origin_of.append(gpa, null);
@@ -121,9 +145,9 @@ pub const OpenTypes = struct {
         return if (held == .poison) self.named.items[root] else held;
     }
 
-    /// Whether `v`'s type must be an integer.
-    pub fn isInteger(self: *OpenTypes, v: u32) bool {
-        return self.integer.items[self.find(v)];
+    /// Which types `v` may settle on.
+    pub fn familyOf(self: *OpenTypes, v: u32) Family {
+        return self.family.items[self.find(v)];
     }
 
     test "a type variable joined with a literal's must be an integer and falls back" {
@@ -131,20 +155,20 @@ pub const OpenTypes = struct {
         defer table.deinit(std.testing.allocator);
         const parameter = try table.createType(std.testing.allocator);
         const literal = try table.create(std.testing.allocator);
-        try std.testing.expect(!table.isInteger(parameter));
+        try std.testing.expectEqual(Family.any, table.familyOf(parameter));
         _ = table.join(parameter, literal);
-        try std.testing.expect(table.isInteger(parameter));
+        try std.testing.expectEqual(Family.integer, table.familyOf(parameter));
         try std.testing.expectEqual(literal, table.find(parameter));
-        table.fallback(parameter, .i64);
+        table.fallback(parameter);
         try std.testing.expectEqual(@as(?TypeId, .i64), table.settled(parameter));
     }
 
-    /// Settles an open integer variable to `to` with no place to name as the
-    /// reason, as falling back at the end of a body does. A variable that
-    /// need not be an integer has no type to fall back to and stays open.
-    pub fn fallback(self: *OpenTypes, v: u32, to: TypeId) void {
+    /// Settles an open literal's variable to its family's default with no
+    /// place to name as the reason, as falling back at the end of a body does.
+    /// A variable of no family has no type to fall back to and stays open.
+    pub fn fallback(self: *OpenTypes, v: u32) void {
         const root = self.find(v);
-        if (!self.integer.items[root]) return;
+        const to = self.family.items[root].fallback() orelse return;
         if (self.type_of.items[root] == .poison) self.type_of.items[root] = to;
     }
 
@@ -181,17 +205,19 @@ pub const OpenTypes = struct {
     }
 
     /// Makes `a` and `b` one variable. The root is `a`'s unless only `b`'s
-    /// must be an integer, so a joined literal keeps its integer type's name.
+    /// has a family, so a joined literal keeps its literal type's name. An
+    /// integer literal's variable and a float literal's never become one: no
+    /// type is both.
     pub fn join(self: *OpenTypes, a: u32, b: u32) Outcome {
         var ra = self.find(a);
         var rb = self.find(b);
         if (ra == rb) return .agreed;
-        if (self.integer.items[rb] and !self.integer.items[ra]) std.mem.swap(u32, &ra, &rb);
+        if (self.family.items[rb] != .any and self.family.items[ra] == .any) std.mem.swap(u32, &ra, &rb);
         const ta = self.type_of.items[ra];
         const tb = self.type_of.items[rb];
         if (ta != .poison and tb != .poison and ta != tb) return .{ .conflict = ta };
+        if (self.family.items[rb] != .any and self.family.items[rb] != self.family.items[ra]) return .{ .conflict = ta };
         self.parent.items[rb] = ra;
-        self.integer.items[ra] = self.integer.items[ra] or self.integer.items[rb];
         if (ta == .poison) {
             self.type_of.items[ra] = tb;
             self.origin_of.items[ra] = self.origin_of.items[rb];
@@ -205,22 +231,26 @@ pub const OpenTypes = struct {
 
     /// Settles every variable the body created and left open, then forgets
     /// the body's list so an enclosing body walks only its own.
-    pub fn fallbackBody(self: *OpenTypes, body: Body, to: TypeId) void {
-        for (self.body_created.items[body.start..]) |v| self.fallback(v, to);
+    pub fn fallbackBody(self: *OpenTypes, body: Body) void {
+        for (self.body_created.items[body.start..]) |v| self.fallback(v);
         self.body_created.shrinkRetainingCapacity(body.start);
     }
 
-    /// Settles every integer variable still open, wherever it was created.
+    /// Settles every literal's variable still open, wherever it was created.
     /// A variable created outside any body's scope is still owed a type.
-    pub fn fallbackAll(self: *OpenTypes, to: TypeId) void {
+    pub fn fallbackAll(self: *OpenTypes) void {
         for (self.type_of.items, 0..) |held, v| {
-            if (self.parent.items[v] == v and self.integer.items[v] and held == .poison) self.type_of.items[v] = to;
+            if (self.parent.items[v] != v or held != .poison) continue;
+            if (self.family.items[v].fallback()) |to| self.type_of.items[v] = to;
         }
     }
 
-    pub fn forced(self: *OpenTypes, v: u32, to: TypeId, at: Site) void {
+    /// Falls `v` back to its family's default because an operation needs a
+    /// type now, remembering `at` as where.
+    pub fn forced(self: *OpenTypes, v: u32, at: Site) void {
         const root = self.find(v);
-        if (!self.integer.items[root] or self.type_of.items[root] != .poison) return;
+        const to = self.family.items[root].fallback() orelse return;
+        if (self.type_of.items[root] != .poison) return;
         self.type_of.items[root] = to;
         self.origin_of.items[root] = .{ .site = at, .forced = true };
     }
@@ -297,7 +327,7 @@ test "a body falls back only the variables it created and left open" {
     const inner_open = try table.create(std.testing.allocator);
     const inner_settled = try table.create(std.testing.allocator);
     _ = table.settle(inner_settled, .u8, site);
-    table.fallbackBody(body, .i64);
+    table.fallbackBody(body);
     try std.testing.expectEqual(@as(?TypeId, .i64), table.settled(inner_open));
     try std.testing.expectEqual(@as(?TypeId, .u8), table.settled(inner_settled));
     try std.testing.expectEqual(@as(?TypeId, null), table.settled(outer));
@@ -310,9 +340,21 @@ test "falling back everything settles every variable still open" {
     const open = try table.create(std.testing.allocator);
     const settled_one = try table.create(std.testing.allocator);
     _ = table.settle(settled_one, .u8, site);
-    table.fallbackAll(.i64);
+    table.fallbackAll();
     try std.testing.expectEqual(@as(?TypeId, .i64), table.settled(open));
     try std.testing.expectEqual(@as(?TypeId, .u8), table.settled(settled_one));
+}
+
+test "a float literal's variable falls back to Float64 and never joins an integer's" {
+    var table: OpenTypes = .{};
+    defer table.deinit(std.testing.allocator);
+    const float = try table.createFloat(std.testing.allocator);
+    const integer = try table.create(std.testing.allocator);
+    try std.testing.expectEqual(Outcome{ .conflict = .poison }, table.join(float, integer));
+    try std.testing.expect(table.find(float) != table.find(integer));
+    table.fallbackAll();
+    try std.testing.expectEqual(@as(?TypeId, .f64), table.settled(float));
+    try std.testing.expectEqual(@as(?TypeId, .i64), table.settled(integer));
 }
 
 test "a forced fallback is remembered as the origin" {
@@ -320,7 +362,7 @@ test "a forced fallback is remembered as the origin" {
     defer table.deinit(std.testing.allocator);
     const site: Site = .{ .file = .from(0), .span = .{ .start = 3, .end = 6 } };
     const v = try table.create(std.testing.allocator);
-    table.forced(v, .i64, site);
+    table.forced(v, site);
     const why = table.origin(v).?;
     try std.testing.expect(why.forced);
     try std.testing.expectEqual(@as(u32, 3), why.site.span.start);

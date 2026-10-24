@@ -1,5 +1,5 @@
 // A sign and zero padding lay out numbers, a precision counts the digits
-// after a Float64's point, and hexadecimal digits write an integer, so each
+// after a float's point, and hexadecimal digits write an integer, so each
 // is refused on a value of another type. A generic value is not known to be a
 // number, so it takes only fill, alignment and width.
 import std.io

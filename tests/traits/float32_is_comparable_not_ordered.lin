@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    defer var levels: Vec[Float32] = Vec.new()
+    &levels.push(0.5).unwrap()
+    &levels.sort()
+    0
+}

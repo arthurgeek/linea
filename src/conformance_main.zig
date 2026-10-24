@@ -1720,7 +1720,7 @@ const Property = enum {
             .completion_offers => "a completion offers what the point can reach and nothing else",
             .completion_recovers => "a completion answers from whatever the parser recovered",
             .settled_refs => "one recorded inside an implementation names what that implementation settled, and one read through a bound names the bound that declares it",
-            .float_round_trip => "a float constant reaches the backend as the double its literal spelled",
+            .float_round_trip => "a float constant reaches the backend as the float its literal spelled",
             .walk_consumes => "a consuming walk owes each element it hands over, and owes it once",
             .walk_lends => "a lending walk leaves what it walks live, and a consuming one takes it",
             .walk_named => "a walk that cannot abandon what it holds is refused at the walk",
@@ -1851,13 +1851,16 @@ fn checkFloatRoundTrip(
             const text = ast.tokenText(TokenId.at(@intCast(i)));
             // An unfinished literal's bytes parse to nothing; its case is
             // rejected and never reaches this property.
-            const want = std.fmt.parseFloat(f64, text) catch continue;
+            // The property reads tokens, not types, so a literal is held to a
+            // constant of either float width that rounds it once.
+            const wide = std.fmt.parseFloat(f64, text) catch continue;
+            const narrow = std.fmt.parseFloat(f32, text) catch continue;
             any = true;
-            if (!irHoldsDouble(ir_text, want)) {
+            if (!irHoldsFloat(ir_text, @bitCast(wide), "f64") and !irHoldsFloat(ir_text, @as(u32, @bitCast(narrow)), "f32")) {
                 try failures.append(gpa, .{
                     .path = display_path,
                     .what = "a float literal's constant reaches the backend changed",
-                    .expected = try std.fmt.allocPrint(gpa, "an `f64` constant holding the bits of `{s}`", .{text}),
+                    .expected = try std.fmt.allocPrint(gpa, "an `f64` or `f32` constant holding the bits of `{s}`", .{text}),
                     .actual = "no emitted constant holds those bits",
                 });
             }
@@ -1874,15 +1877,14 @@ fn spelledInATest(tests: []const token.TokenRange, at: usize) bool {
     return false;
 }
 
-/// Whether any `f64` constant in the emitted text parses back to exactly the
-/// bits of `want`.
-fn irHoldsDouble(ir_text: []const u8, want: f64) bool {
-    // A float constant is spelled as its bits in hex, typed `f64`, so the
-    // comparison is bit equality with no parsing of a rounded decimal. Only
-    // lines defining a value are read: a string literal passes user bytes
+/// Whether any constant of MLIR float type `float_type` in the emitted text
+/// has exactly the bits `want_bits`.
+fn irHoldsFloat(ir_text: []const u8, want_bits: u64, float_type: []const u8) bool {
+    // A float constant is spelled as its bits in hex, typed by its width, so
+    // the comparison is bit equality with no parsing of a rounded decimal.
+    // Only lines defining a value are read: a string literal passes user bytes
     // into a `@linea_str` blob verbatim, so a spelling found anywhere else in
     // the text is a spelling a program can forge.
-    const want_bits: u64 = @bitCast(want);
     var lines = std.mem.splitScalar(u8, ir_text, '\n');
     while (lines.next()) |line| {
         const op = std.mem.trimStart(u8, line, " ");
@@ -1891,7 +1893,8 @@ fn irHoldsDouble(ir_text: []const u8, want: f64) bool {
         const start = at + " = arith.constant 0x".len;
         var end = start;
         while (end < op.len and std.ascii.isHex(op[end])) end += 1;
-        if (!std.mem.startsWith(u8, op[end..], " : f64")) continue;
+        const typed = op[end..];
+        if (!std.mem.startsWith(u8, typed, " : ") or !std.mem.startsWith(u8, typed[3..], float_type)) continue;
         const bits = std.fmt.parseInt(u64, op[start..end], 16) catch continue;
         if (bits == want_bits) return true;
     }

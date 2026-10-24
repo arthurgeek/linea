@@ -1031,7 +1031,7 @@ const Function = struct {
                         if (!isFloat(self.module.resultRepresentationOf(mir, id)) or
                             !isInteger(self.module.resultRepresentationOf(mir, operand)))
                         {
-                            try self.report(span, "%{d} converts something other than an integer to Float64", .{id.index()});
+                            try self.report(span, "%{d} converts something other than an integer to a float", .{id.index()});
                             return false;
                         }
                     },
@@ -1039,7 +1039,23 @@ const Function = struct {
                         if (!isInteger(self.module.resultRepresentationOf(mir, id)) or
                             !isFloat(self.module.resultRepresentationOf(mir, operand)))
                         {
-                            try self.report(span, "%{d} converts something other than Float64 to an integer", .{id.index()});
+                            try self.report(span, "%{d} converts something other than a float to an integer", .{id.index()});
+                            return false;
+                        }
+                    },
+                    .float_extend => {
+                        if (floatBits(self.module.resultRepresentationOf(mir, id)) != 64 or
+                            floatBits(self.module.resultRepresentationOf(mir, operand)) != 32)
+                        {
+                            try self.report(span, "%{d} widens something other than a Float32 to a Float64", .{id.index()});
+                            return false;
+                        }
+                    },
+                    .float_truncate => {
+                        if (floatBits(self.module.resultRepresentationOf(mir, id)) != 32 or
+                            floatBits(self.module.resultRepresentationOf(mir, operand)) != 64)
+                        {
+                            try self.report(span, "%{d} narrows something other than a Float64 to a Float32", .{id.index()});
                             return false;
                         }
                     },
@@ -1322,6 +1338,8 @@ const Function = struct {
             .observe,
             .int_to_float,
             .float_to_int,
+            .float_extend,
+            .float_truncate,
             .float_math,
             .check,
             .function_addr,
@@ -1646,9 +1664,16 @@ const Function = struct {
     }
 
     fn isFloat(representation: mir_mod.ResultRepresentation) bool {
+        return floatBits(representation) != null;
+    }
+
+    fn floatBits(representation: mir_mod.ResultRepresentation) ?u8 {
         return switch (representation) {
-            .computation => |computation| computation == .float64,
-            else => false,
+            .computation => |computation| switch (computation) {
+                .float => |bits| bits,
+                else => null,
+            },
+            else => null,
         };
     }
 
@@ -1876,6 +1901,8 @@ const Function = struct {
                 .cmp_ge,
                 .int_to_float,
                 .float_to_int,
+                .float_extend,
+                .float_truncate,
                 .float_math,
                 .check,
                 .function_addr,
@@ -2089,7 +2116,7 @@ const Function = struct {
         switch (self.module.slotRepresentationOf(self.mir, local)) {
             .managed_address => return,
             .storage => |storage| switch (storage) {
-                .integer, .boolean, .float64, .enum_tag, .unit, .code_pointer, .data_pointer => return,
+                .integer, .boolean, .float, .enum_tag, .unit, .code_pointer, .data_pointer => return,
                 .bytes => try self.report(span, "%{d} has aggregate slot ${d} {s} through a named access, and it holds {d} byte(s)", .{
                     id.index(), local.index(), how, self.module.slotExtentOf(self.mir, local),
                 }),

@@ -377,6 +377,9 @@ const Parser = struct {
     /// language does not describe, so the bound is stated here rather than
     /// discovered by exhausting it.
     depth: u32 = 0,
+    /// Whether a default in a lambda's parameter list is being read, where a
+    /// `|` closes the list rather than opening a lambda a jump carries.
+    in_lambda_default: bool = false,
     /// The deepest `depth` reached inside the subtree being measured. A form
     /// read in a loop is built above operands already finished, so how tall
     /// its tree is cannot be read off the frames still open: this is what
@@ -3699,6 +3702,9 @@ const Parser = struct {
                 }
             } else {
                 pname = try self.expectName(.s_params, "expected a parameter name", "a parameter is a name and a type");
+                // Nothing that names a parameter is here, so there is no
+                // parameter: the reported token is not taken as its name.
+                if (delimiter == .pipes and pname == .none and !self.cursor.at(.colon) and !self.cursor.at(.equal)) break;
             }
 
             var written: node.TypeRef = .{ .name = .none };
@@ -3712,6 +3718,9 @@ const Parser = struct {
             var default: ExprId = ExprId.none;
             const eq = self.cursor.current();
             if (self.cursor.eat(.equal) != null) {
+                const outer_default = self.in_lambda_default;
+                self.in_lambda_default = delimiter == .pipes;
+                defer self.in_lambda_default = outer_default;
                 default = try self.parseFull();
                 if (convention == .inout) {
                     try self.reportAt(
@@ -3913,6 +3922,11 @@ const Parser = struct {
             const body = try self.builder.addLiteral(.err, self.cursor.current(), self.rangeFrom(self.cursor.current()));
             return self.builder.addLambda(open, close, invocation_token, invocation, captures.items, capture_open, capture_close, self.rangeFrom(start), params, contracts, result, result_arrow, body);
         }
+        // The body is no longer inside the parameter list, so a jump in it
+        // may carry a lambda again.
+        const outer_default = self.in_lambda_default;
+        self.in_lambda_default = false;
+        defer self.in_lambda_default = outer_default;
         const body = if (self.cursor.at(.l_brace))
             try self.parseBraced("this lambda body is never closed")
         else
@@ -5956,7 +5970,11 @@ const Parser = struct {
             return self.builder.addLiteral(.continue_, start, self.rangeFrom(start));
         }
 
-        const value = if (inExprFollow(self.cursor.peek()) or self.cursor.at(.comma) or self.cursor.precededByNewline())
+        // A `|` here opens a lambda the jump carries, except in a lambda's
+        // parameter default, where it closes the list: `|x = return| x`
+        // defaults to a bare `return`.
+        const ends = inExprFollow(self.cursor.peek()) and (!self.cursor.at(.pipe) or self.in_lambda_default);
+        const value = if (ends or self.cursor.at(.comma) or self.cursor.precededByNewline())
             ExprId.none
         else
             try self.parseExpr(1);

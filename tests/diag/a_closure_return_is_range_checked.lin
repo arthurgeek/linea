@@ -1,0 +1,24 @@
+fn main() -> UInt8 {
+    let count = |early: Bool| {
+        if early {
+            return 300
+        }
+        1
+    }
+    let byte: UInt8 = count(true)
+    let scale = |early: Bool| {
+        if early {
+            return 3e39
+        }
+        1.0
+    }
+    let narrow: Float32 = scale(true)
+    let mixed = |early: Bool| {
+        if early {
+            return true
+        }
+        1
+    }
+    let _unused = mixed(false)
+    byte + UInt8(narrow)
+}

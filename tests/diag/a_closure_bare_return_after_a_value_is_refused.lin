@@ -1,0 +1,12 @@
+fn main() -> UInt8 {
+    let f = |early: Bool| {
+        if early {
+            return 5
+        }
+        if !early {
+            return
+        }
+        6
+    }
+    f(true) - 5
+}

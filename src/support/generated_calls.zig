@@ -43,6 +43,7 @@ pub const table = [_]Call{
     .{ .module = "fmt", .name = "interpolate_debug" },
     .{ .module = "fmt", .name = "interpolate_integer" },
     .{ .module = "fmt", .name = "interpolate_float" },
+    .{ .module = "fmt", .name = "interpolate_float32" },
 };
 
 /// Whether generated code calls a declaration of this name in this module.

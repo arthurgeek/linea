@@ -158,7 +158,7 @@ fn writeInst(
             try w.print(" {s} %{d}", .{ @tagName(math.operation), math.lhs.index() });
             if (math.operation.arity() == 2) try w.print(", %{d}", .{math.rhs.index()});
         },
-        .neg, .int_to_float, .float_to_int => try w.print(" %{d}", .{mir.unaryOf(id).index()}),
+        .neg, .int_to_float, .float_to_int, .float_extend, .float_truncate => try w.print(" %{d}", .{mir.unaryOf(id).index()}),
         .check => {
             const c = mir.checkOf(id);
             try w.print(" %{d} ({s})", .{ c.value.index(), @tagName(c.kind) });
@@ -204,7 +204,7 @@ fn writeResultRepresentation(w: *std.Io.Writer, representation: mir_mod.ResultRe
                 .integer, .unit => "i64",
                 .enum_tag => tag_register,
                 .boolean => "i1",
-                .float64 => "f64",
+                .float => |bits| if (bits == 32) "f32" else "f64",
                 .indirect => "indirect",
                 .code_pointer, .data_pointer => "ptr",
                 .no_value => "no-value",
@@ -222,7 +222,7 @@ fn writeSlotRepresentation(w: *std.Io.Writer, representation: mir_mod.SlotRepres
             switch (storage) {
                 .integer => |integer| try w.print("i{d}", .{integer.bits}),
                 .boolean => try w.writeAll("i8(bool)"),
-                .float64 => try w.writeAll("f64"),
+                .float => |bits| try w.print("f{d}", .{bits}),
                 .enum_tag => try w.writeAll(tag_register),
                 .unit => try w.writeAll("i64"),
                 .bytes => try w.writeAll("bytes"),

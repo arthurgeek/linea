@@ -1,0 +1,19 @@
+fn half(x: UInt8) -> Option[UInt8] {
+    if x % 2 == 0 {
+        .Some(x / 2)
+    } else {
+        .None
+    }
+}
+
+fn main() -> UInt8 {
+    // The only `return` is refused, so what the closure answers is unknown
+    // and the `?`s report nothing more.
+    let f = |x: UInt8| {
+        let h = half(x)?
+        let k = half(h)?
+        return undefined_name(k)
+    }
+    let _f = f
+    0
+}

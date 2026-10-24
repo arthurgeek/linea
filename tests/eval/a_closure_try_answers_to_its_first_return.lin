@@ -1,0 +1,32 @@
+fn half(x: UInt8) -> Option[UInt8] {
+    if x % 2 == 0 {
+        .Some(x / 2)
+    } else {
+        .None
+    }
+}
+
+fn main() -> UInt8 {
+    // The first `return` makes the closure answer `Option[UInt8]`, so the
+    // `?` after it returns `.None` from the closure when `half` fails.
+    let quarter = |x: UInt8| {
+        if x == 0 {
+            return half(1)
+        }
+        let h = half(x)?
+        half(h)
+    }
+    let whole = match quarter(8) {
+        Some(v) => v,
+        None => 0,
+    }
+    let failed = match quarter(6) {
+        Some(_) => false,
+        None => true,
+    }
+    if whole == 2 && failed {
+        0
+    } else {
+        1
+    }
+}

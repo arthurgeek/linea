@@ -1,0 +1,26 @@
+fn halve(value: Float32) -> Float32 {
+    value / 2.0
+}
+
+fn main() -> UInt8 {
+    // An annotation, a parameter, an operand and an array sibling each make a
+    // literal a Float32, rounded once to binary32.
+    let third: Float32 = 1.0 / 3.0
+    let half = halve(1.0)
+    let sample: Float32 = 0.25
+    let gain = 0.1
+    let scaled = sample * gain
+    let samples = [Float32(1.5), 0.1]
+    let second: Float32 = samples[1]
+    // A literal nothing settles is a Float64.
+    let wide = 0.1
+    let _wide: Float64 = wide
+    let exact_third = Float64(third) == 0.3333333432674408
+    let exact_gain = Float64(gain) == 0.10000000149011612
+    let exact_second = Float64(second) == 0.10000000149011612
+    if exact_third && half == 0.5 && scaled == 0.025 && exact_gain && exact_second {
+        0
+    } else {
+        1
+    }
+}

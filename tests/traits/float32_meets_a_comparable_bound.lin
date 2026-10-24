@@ -1,0 +1,15 @@
+fn below[T: Comparable](value: T, limit: T) -> Bool {
+    value < limit
+}
+
+fn main() -> UInt8 {
+    let quiet: Float32 = 0.25
+    let loud: Float32 = 0.75
+    let nan = (quiet - quiet) / (quiet - quiet)
+    // NaN is ordered against nothing, through a generic body as directly.
+    if below(quiet, loud) && !below(loud, quiet) && !below(nan, loud) && !below(loud, nan) {
+        0
+    } else {
+        1
+    }
+}
