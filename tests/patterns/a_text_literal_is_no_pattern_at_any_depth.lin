@@ -1,0 +1,34 @@
+// Text is not compared in a pattern: `Str` is sealed outside its module, so a
+// literal naming one of its values is refused wherever it stands, and a string
+// literal stands for a number only at a range's end.
+fn top(sink x: Str) -> UInt8 {
+    match x {
+        "a" => 1,
+        _ => 0,
+    }
+}
+
+fn nested(sink x: Option[Str]) -> UInt8 {
+    match x {
+        Some("a") => 1,
+        _ => 0,
+    }
+}
+
+fn byte(x: UInt8) -> UInt8 {
+    match x {
+        "a" => 1,
+        _ => 0,
+    }
+}
+
+fn nested_byte(sink x: Option[UInt8]) -> UInt8 {
+    match x {
+        Some("a") => 1,
+        _ => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    top("b") + nested(.None) + byte(3) + nested_byte(.None)
+}

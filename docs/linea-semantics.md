@@ -914,7 +914,10 @@ to its Unicode scalar number if it contains exactly one scalar. The expected
 integer type determines the result type, with the same default as an integer
 literal when context supplies none. Thus `"a"..="z"` denotes that letter
 range. A literal containing more than one scalar remains `Str` and causes
-[T-Mismatch] for the range. This conversion applies only at a range end.
+[T-Mismatch] for the range. This conversion applies only at a range end: a
+string literal standing alone in a pattern is `Str`, which over an integer is
+[T-Mismatch]. No pattern compares text; over `Str` outside its module a literal
+is refused at any depth by [M-Opaque], as the `match` taking one apart is.
 
 `match read` observes the scrutinee without taking it apart: the value is
 lent, as with a parameter's `read` convention. `let read` applies the same
@@ -3841,8 +3844,8 @@ Where arms leave several variants of one column to `_`, as `(_, One(0))` leaves
 together, so the nine may name `(Idle, Unset)` before every missing value that
 goes with `Off`. A variant whose payload the
 pattern would leave unnamed is written bare. A variant remains in the exhaustive
-set when its payload contains `Never`; `Option[Never]` must still account for
-`Some`. Text, a type parameter and any other type no pattern takes apart are
+set when its payload contains `Never` or an enum declaring no variants;
+`Option[Never]` must still account for `Some`. Text, a type parameter and any other type no pattern takes apart are
 covered only by a binder or `_`.
 
 Coverage is decided in one pass over the arms (Maranget's usefulness): it

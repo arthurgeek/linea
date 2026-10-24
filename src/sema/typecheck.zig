@@ -14136,18 +14136,12 @@ const Checker = struct {
         // an open one is settled here, where the literal compares it.
         const settled = if (of.bounds() != null) of else try self.receiverType(of, self.literalSite(pattern));
         _ = self.record(pattern, settled);
-        switch (self.ast.exprTag(pattern)) {
-            .int_literal, .negate, .range => {},
-            else => {
-                _ = self.report(
-                    .t_mismatch,
-                    pattern,
-                    "a match over `{s}` takes a literal or a range, not a name",
-                    .{(try self.typeName(settled))},
-                    "not a literal or a range",
-                );
-                return .refused;
-            },
+        // A literal names a value of the type, which is reaching its
+        // representation as taking it apart is: the rule a `match` over a
+        // sealed type breaks, at any depth.
+        if (self.sealedHere(settled)) {
+            _ = self.reportSealed(pattern, settled, "only its own module can take one apart");
+            return .refused;
         }
         if (settled.bounds() == null) {
             _ = self.report(
@@ -14158,6 +14152,30 @@ const Checker = struct {
                 "only an integer is compared in a pattern",
             );
             return .refused;
+        }
+        switch (self.ast.exprTag(pattern)) {
+            .int_literal, .negate, .range => {},
+            // Text is a number only at a range's end, where it is one scalar.
+            .str_literal => {
+                _ = self.report(
+                    .t_mismatch,
+                    pattern,
+                    "expected `{s}`, found `Str`",
+                    .{(try self.typeName(settled))},
+                    "text names a number only at a range's end",
+                );
+                return .refused;
+            },
+            else => {
+                _ = self.report(
+                    .t_mismatch,
+                    pattern,
+                    "a match over `{s}` takes a literal or a range, not a name",
+                    .{(try self.typeName(settled))},
+                    "not a literal or a range",
+                );
+                return .refused;
+            },
         }
         const iv = try self.intArmInterval(pattern, settled) orelse return .refused;
         if (iv.lo > iv.hi) {
