@@ -1,4 +1,4 @@
-# 246. A test in an inherent `impl` is a member of nothing
+# 247. A test in an inherent `impl` is a member of nothing
 
 Status: Accepted — 2026-10-24
 
