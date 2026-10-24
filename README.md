@@ -39,7 +39,7 @@ Because the first call consumes `scores`, it no longer exists in that scope. And
 Linea is a systems programming language built in Zig. It combines two foundational ideas from programming language research:
 
 ### 1. Linear Types (used exactly once)
-Numbers copy freely. A value of your own type moves from one owner to the next, and is copied only where its type is declared `@copyable` and you write `copy(value)`. Types that manage resources go further and declare themselves `@linear`.
+Numbers and `Bool` copy freely. A value of your own type moves from one owner to the next; declare its type `@copyable` and `copy(value)` duplicates it. Types that manage resources go further and declare themselves `@linear`.
 
 A linear value **must be consumed exactly once on every execution path**. You cannot duplicate it, you cannot reuse it after transfer, and you cannot silently forget to clean it up.
 

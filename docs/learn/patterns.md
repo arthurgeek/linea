@@ -184,8 +184,11 @@ fn main() -> Result[UInt8, io.IoError] {
         io.print("{help}")?
         return .Ok(0)
     }
-    let title = matches.positional("title") else { "untitled" }
-    let format = matches.option("format") else { "table" }
+    let title = matches.positional("title") else {
+        "untitled"
+    }
+    // `option` answers the schema's default when `--format` is not given.
+    let format = matches.option("format").unwrap()
     io.println("{title} as {format}, loud: {matches.flag("loud")}")?
     .Ok(0)
 }

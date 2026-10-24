@@ -57,8 +57,9 @@ never used up twice. The compiler checks every path to make sure. Consuming
 such a value is also called *settling* it. Types like that are called **linear
 types**, and they give the language its name.
 
-Most values are ordinary: you copy them, pass them and forget them freely.
-Only a type that asks for it is linear, and the compiler checks those.
+Most values are ordinary: you pass them on and forget them freely, and
+numbers and `Bool` copy without asking. Only a type that asks for it is
+linear, and the compiler checks those.
 Linear is one of the ownership policies a type can choose, beside affine (the
 default: used at most once) and copyable; [Copying, settling and
 sealing](04-copying-settling-and-sealing.md) names them all.

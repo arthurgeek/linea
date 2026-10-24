@@ -251,14 +251,14 @@ pub enum Error {
 ```
 
 In `examples/guest-book/main.lin`, `unavailable` logs the error to
-standard error (where whoever runs the server reads it), releases the
+standard error (which the terminal running the server shows), releases the
 `BookError`, and answers the visitor with a generic `500 Internal Server
 Error`:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
-// Log the storage error to standard error, where whoever runs the server reads
-// it, and answer the visitor with a generic 500 message.
+// Log the storage error to standard error, which the terminal running the
+// server shows, and answer the visitor with a generic 500 message.
 fn unavailable(request: http.Request, sink error: BookError) -> http.Error {
     io.eprintln("guest-book: {error}")
     error.release()
