@@ -520,7 +520,7 @@ The error names the way out. Put the sequence whose items may be dropped first,
 and the payments second, where `zip` never drops one of them. Each pair is taken apart in
 the loop, and `commit` settles each payment:
 
-<!-- guide: edit 22-25 for (payment, till) in … } -->
+<!-- guide: edit 22-25 for (payment, till) in payments.zip(tills.as_slice()) { … } -->
 ```linea
     for (till, payment) in tills.as_slice().zip(payments) {
         payment.commit(&takings)

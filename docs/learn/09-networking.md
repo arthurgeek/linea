@@ -148,7 +148,7 @@ is refused, and the reason is worth seeing. Put this line in place of the three
 
 and this arm in the `match`:
 
-<!-- guide: edit 64 Ok(_) => if server_closed.is_ok() && -->
+<!-- guide: edit 64 Ok(_) => if server_closed.is_ok() &&… -->
 ```linea
         Ok(_) => if closed { 0 } else { 1 },
 ```
@@ -401,7 +401,7 @@ changes it on every call, and `into_captures()` hands the counter back when
 `serve` is done ([Calling things](02-calling-things.md#a-closure-that-changes-what-it-owns)
 shows the same closure on its own). Only the handler in `main` changes:
 
-<!-- guide: edit greeting.lin 55-56 var handler = welcome … let ended = net.serve(listener, -->
+<!-- guide: edit greeting.lin 55-56 var handler = welcome … let ended = net.serve(listener, &handler,… -->
 ```linea
     var handler = inout [sink greeted = UInt64(0)] |sink connection: net.Connection, peer: net.Address| {
         greeted += 1
@@ -1946,7 +1946,7 @@ limits. Pass `limits:` to change them. `http.Limits.default()` gives the
 standard ones, so struct update changes only what you write. In
 `stations.lin`, this serves one connection and returns:
 
-<!-- guide: edit stations.lin 126 let finished = -->
+<!-- guide: edit stations.lin 126 let finished =… -->
 ```linea
     let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
     let finished = http.listen_and_serve(net.loopback(8080), server, state: app, limits: limits) else |error| {

@@ -956,7 +956,7 @@ error[O-Move]: `distance` is lent, and this takes it
 
 Pass the arguments the wrong way round and the compiler catches that too:
 
-<!-- guide: edit 18 io.println("{pace(run, took)} seconds -->
+<!-- guide: edit 18 io.println("{pace(run, took)} seconds per kilometre")? -->
 ```linea
     io.println("{pace(took, run)} seconds per kilometre")?
 ```
@@ -1054,7 +1054,7 @@ Members pay 4250 cents.
 `it` stands for the value being checked. When you write a number directly,
 the check happens before the program ever runs:
 
-<!-- guide: edit 13 io.println("Members pay -->
+<!-- guide: edit 13 io.println("Members pay {discounted(price,… -->
 ```linea
     io.println("Members pay {discounted(price, Percent(150))} cents.")?
 ```

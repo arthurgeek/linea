@@ -103,9 +103,11 @@ until it is green.
   above it replaces line N or lines N-M of the nearest program above, or
   inserts after line N, counting lines as that program is pasted; with PATH it
   edits that file of the nearest program above that has one, which a project
-  needs. Each TEXT is the start of the line it names, trimmed: line N, and for
-  a range also line M after ` … `, so a number that names another line fails;
-  only `after 0`, the top of the file, takes none. Consecutive
+  needs. Each TEXT is the whole line it names, trimmed: line N, and for a
+  range also line M after ` … `, so a number that names another line fails.
+  A line too long to write out may be given by its start followed by `…`, at
+  least eight characters and not only punctuation. `after 0`, the top of the
+  file, names no line and takes no text. Consecutive
   edit blocks apply together, and the output after the last is what the
   edited program prints; an edit of a `check` program is only checked too.
   An edit that writes back the lines it replaces, or whose nearest program

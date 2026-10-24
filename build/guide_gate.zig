@@ -110,11 +110,9 @@ pub fn main(init: std.process.Init) !u8 {
         problems += 1;
     }
     // The pages as paths from the repository root, which an excerpt names.
-    // `build.zig` passes both directories absolute, so no working directory
-    // takes part.
-    const relative = try std.fs.path.relative(gpa, "/", null, args[5], guide);
+    const cwd = try std.process.currentPathAlloc(io, gpa);
     const pages = try gpa.alloc([]const u8, listed.len);
-    for (listed, pages) |entry, *page| page.* = try std.fs.path.join(gpa, &.{ relative, entry.file });
+    for (listed, pages) |entry, *page| page.* = try source.guidePagePath(gpa, cwd, args[5], guide, entry.file);
     var programs: std.ArrayList(source.GuideProgram) = .empty;
     var excerpts: usize = 0;
     var excluded: usize = 0;

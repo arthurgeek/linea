@@ -851,6 +851,14 @@ fn linkedPages(gpa: std.mem.Allocator, index: []const u8, wanted: enum { chapter
     return found.toOwnedSlice(gpa) catch @panic("out of memory");
 }
 
+/// The path from the repository root of the guide page `file`, given the
+/// root and the guide's directory as the gate was handed them, each relative
+/// to `cwd` unless absolute. An excerpt names a page by this path.
+pub fn guidePagePath(gpa: std.mem.Allocator, cwd: []const u8, root: []const u8, guide: []const u8, file: []const u8) ![]const u8 {
+    const directory = try std.fs.path.relative(gpa, cwd, null, root, guide);
+    return std.fs.path.join(gpa, &.{ directory, file });
+}
+
 /// Whether a link names a page in the guide's own directory: a lowercase
 /// Markdown file with no directory, such as `patterns.md`.
 /// The Markdown files among `names`, the files of the guide's directory,
@@ -1078,6 +1086,8 @@ const marker_close = "-->";
 const marker_help = "the guide markers are `<!-- guide: unchecked REASON -->`, `<!-- guide: check REASON -->`, `<!-- guide: first N diagnostics -->`, `<!-- guide: excerpt PATH -->` and `<!-- guide: edit [PATH] N TEXT | N-M TEXT … TEXT | after N TEXT -->`, and each is complete";
 
 const Marker = union(enum) {
+    /// A marker of a known kind written wrong, with what is wrong.
+    refused: []const u8,
     unchecked,
     check,
     first: usize,
@@ -1097,14 +1107,30 @@ const Edit = struct {
     /// The start of the line the edit names, the first it replaces or the
     /// one it goes after, which holds the number to the line the prose
     /// means. Only an insertion at the top of a file names no line.
-    anchor: ?[]const u8,
-    /// The start of the last line a range replaces, after ` … `.
-    last_anchor: ?[]const u8,
+    anchor: ?Anchor,
+    /// The last line a range replaces, after ` … `.
+    last_anchor: ?Anchor,
 };
+
+/// The text an edit gives for a line it names: the whole line, trimmed, or
+/// with a trailing `…` its start, for a line too long to write out.
+const Anchor = struct {
+    text: []const u8,
+    prefix: bool,
+
+    fn matches(self: Anchor, line: []const u8) bool {
+        const have = std.mem.trim(u8, line, " \t\r");
+        return if (self.prefix) std.mem.startsWith(u8, have, self.text) else std.mem.eql(u8, have, self.text);
+    }
+};
+
+/// The fewest characters a prefix anchor holds, so that it tells its line from
+/// the lines around it rather than matching `}` or `0`.
+const shortest_prefix_anchor = 8;
 
 /// The marker a `<!-- guide: ... -->` line holds, or null when it is none of
 /// the four kinds or is incomplete.
-fn guideMarker(bare: []const u8) ?Marker {
+fn guideMarker(gpa: std.mem.Allocator, bare: []const u8) ?Marker {
     if (!std.mem.endsWith(u8, bare, marker_close)) return null;
     const inner = std.mem.trim(u8, bare[marker_open.len .. bare.len - marker_close.len], " \t");
     var words = std.mem.tokenizeAny(u8, inner, " \t");
@@ -1116,7 +1142,7 @@ fn guideMarker(bare: []const u8) ?Marker {
         if (words.next() != null or path.len == 0 or path[0] == '/') return null;
         return .{ .excerpt = path };
     }
-    if (std.mem.eql(u8, kind, "edit")) return if (editMarker(&words)) |lines| .{ .edit = lines } else null;
+    if (std.mem.eql(u8, kind, "edit")) return editMarker(gpa, &words);
     if (!std.mem.eql(u8, kind, "first")) return null;
     const count = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
     const noun = words.next() orelse return null;
@@ -1128,7 +1154,7 @@ fn guideMarker(bare: []const u8) ?Marker {
 /// The words after `edit`: an optional relative path, then `N`, `N-M` or
 /// `after N`, with lines counted from 1, then the text the named line starts
 /// with; a range also names its last line, after ` … `.
-fn editMarker(words: *std.mem.TokenIterator(u8, .any)) ?Edit {
+fn editMarker(gpa: std.mem.Allocator, words: *std.mem.TokenIterator(u8, .any)) ?Marker {
     var word = words.next() orelse return null;
     var path: ?[]const u8 = null;
     if (std.mem.endsWith(u8, word, ".lin")) {
@@ -1149,19 +1175,59 @@ fn editMarker(words: *std.mem.TokenIterator(u8, .any)) ?Edit {
         lines = .{ .path = path, .start = from - 1, .count = to - from + 1, .anchor = null, .last_anchor = null };
         ranged = dash != null;
     }
+    const refuse = struct {
+        fn say(a: std.mem.Allocator, comptime format: []const u8, args: anytype) Marker {
+            return .{ .refused = std.fmt.allocPrint(a, format, args) catch @panic("out of memory") };
+        }
+    }.say;
+    const how = "the whole line, trimmed, or its start followed by `…`";
     const text = std.mem.trim(u8, words.rest(), " \t");
-    if (text.len == 0) return if (lines.count == 0 and lines.start == 0) lines else null;
     const separator = " … ";
-    if (std.mem.indexOf(u8, text, separator)) |at| {
-        if (!ranged) return null;
-        lines.anchor = std.mem.trim(u8, text[0..at], " \t");
-        lines.last_anchor = std.mem.trim(u8, text[at + separator.len ..], " \t");
-        if (lines.anchor.?.len == 0 or lines.last_anchor.?.len == 0) return null;
-    } else {
-        if (ranged) return null;
-        lines.anchor = text;
+    const split = std.mem.indexOf(u8, text, separator);
+    if (lines.count == 0 and lines.start == 0) {
+        if (text.len > 0) return refuse(gpa, "`after 0` inserts at the top of the file and names no line, so it takes no text", .{});
+        return .{ .edit = lines };
     }
-    return lines;
+    if (ranged) {
+        const at = split orelse return refuse(gpa, "this edit needs the text of line {d} and of line {d}, separated by ` … `: for each, " ++ how, .{ lines.start + 1, lines.start + lines.count });
+        lines.anchor = switch (parseAnchor(gpa, text[0..at])) {
+            .anchor => |anchor| anchor,
+            .problem => |problem| return .{ .refused = problem },
+        };
+        lines.last_anchor = switch (parseAnchor(gpa, text[at + separator.len ..])) {
+            .anchor => |anchor| anchor,
+            .problem => |problem| return .{ .refused = problem },
+        };
+        if (lines.anchor.?.text.len == 0 or lines.last_anchor.?.text.len == 0)
+            return refuse(gpa, "this edit needs the text of line {d} and of line {d}, separated by ` … `: for each, " ++ how, .{ lines.start + 1, lines.start + lines.count });
+        return .{ .edit = lines };
+    }
+    if (split != null) return refuse(gpa, "` … ` separates the two anchors of a range; this edit names one line and takes one", .{});
+    if (text.len == 0) {
+        if (lines.count == 0) return refuse(gpa, "this edit needs the text of line {d}, which it goes after: " ++ how, .{lines.start});
+        return refuse(gpa, "this edit needs the text of line {d} after its number: " ++ how, .{lines.start + 1});
+    }
+    lines.anchor = switch (parseAnchor(gpa, text)) {
+        .anchor => |anchor| anchor,
+        .problem => |problem| return .{ .refused = problem },
+    };
+    return .{ .edit = lines };
+}
+
+/// An anchor from its text in a marker, or why it cannot stand for a line.
+fn parseAnchor(gpa: std.mem.Allocator, raw: []const u8) union(enum) { anchor: Anchor, problem: []const u8 } {
+    const text = std.mem.trim(u8, raw, " \t");
+    const ellipsis = "…";
+    if (!std.mem.endsWith(u8, text, ellipsis)) return .{ .anchor = .{ .text = text, .prefix = false } };
+    const start = std.mem.trim(u8, text[0 .. text.len - ellipsis.len], " \t");
+    var letters = false;
+    for (start) |c| letters = letters or std.ascii.isAlphanumeric(c);
+    if (start.len < shortest_prefix_anchor or !letters) return .{ .problem = std.fmt.allocPrint(
+        gpa,
+        "the anchor `{s}` is a prefix of fewer than {d} characters, or only punctuation, so it would match lines it does not mean; write more of the line, or all of it without `…`",
+        .{ text, shortest_prefix_anchor },
+    ) catch @panic("out of memory") };
+    return .{ .anchor = .{ .text = start, .prefix = true } };
 }
 
 /// The path a `` `path.lin`: `` or `` `path/linea.json`: `` line labels, or a
@@ -1234,8 +1300,13 @@ fn guideFences(
         // A marker sits between a label and its block, so it keeps the label.
         if (!std.mem.startsWith(u8, bare, marker_open)) label = guideLabel(line);
         if (std.mem.startsWith(u8, bare, marker_open)) {
-            if (guideMarker(bare)) |marker| {
-                pending = .{ .line = number, .marker = marker };
+            if (guideMarker(gpa, bare)) |marker| switch (marker) {
+                .refused => |message| problems.append(gpa, .{
+                    .chapter = chapter.file,
+                    .line = number,
+                    .message = message,
+                }) catch @panic("out of memory"),
+                else => pending = .{ .line = number, .marker = marker },
             } else problems.append(gpa, .{
                 .chapter = chapter.file,
                 .line = number,
@@ -1791,21 +1862,21 @@ fn applyEdits(
         // The named line, the first one replaced or the one an insertion goes
         // after, and the last line of a range.
         const named = if (edit.count > 0) edit.start else edit.start -| 1;
-        const anchors = [_]struct { line: usize, text: ?[]const u8 }{
+        const anchors = [_]struct { line: usize, text: ?Anchor }{
             .{ .line = named, .text = edit.anchor },
             .{ .line = edit.start + edit.count -| 1, .text = edit.last_anchor },
         };
         const anchored = for (anchors) |anchor| {
             const want = anchor.text orelse continue;
             const have = std.mem.trim(u8, lineAt(base.files[file].text, anchor.line), " \t\r");
-            if (std.mem.startsWith(u8, have, want)) continue;
+            if (want.matches(have)) continue;
             problems.append(gpa, .{
                 .chapter = chapter.file,
                 .line = fence.line,
                 .message = std.fmt.allocPrint(
                     gpa,
-                    "line {d} of `{s}` is `{s}`, which does not start with the edit's anchor `{s}`; the anchors name the first line the edit replaces, or the line it goes after, and the last line of a range, so correct the number or the anchor",
-                    .{ anchor.line + 1, base.files[file].path, have, want },
+                    "line {d} of `{s}` is `{s}`, which the edit's anchor `{s}{s}` does not name; the anchors are the first line the edit replaces, or the line it goes after, and the last line of a range, each whole or as a start followed by `…`, so correct the number or the anchor",
+                    .{ anchor.line + 1, base.files[file].path, have, want.text, if (want.prefix) "…" else "" },
                 ) catch @panic("out of memory"),
             }) catch @panic("out of memory");
             break false;

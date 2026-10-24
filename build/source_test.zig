@@ -2501,7 +2501,7 @@ test "the guide gate: an edit's anchor holds its line number to the line it mean
     try testing.expectEqual(@as(usize, 1), wrong_line.programs.len);
 
     const right_line = readFixture(gpa, program ++
-        \\<!-- guide: edit 5 io.println("hi") -->
+        \\<!-- guide: edit 5 io.println("hi")? -->
         \\```linea
         \\    io.println("hello")?
         \\```
@@ -2522,13 +2522,53 @@ test "the guide gate: an edit's anchor holds its line number to the line it mean
     try testing.expectEqual(@as(usize, 1), wrong_end.problems.len);
     try testing.expect(std.mem.indexOf(u8, wrong_end.problems[0].message, ".Ok(0)") != null);
     const right_end = readFixture(gpa, program ++
-        \\<!-- guide: edit 4-5 // greet … io.println("hi") -->
+        \\<!-- guide: edit 4-5 // greet … io.println("hi")? -->
         \\```linea
         \\    io.println("hello")?
         \\```
         \\
     );
     try testing.expectEqual(@as(usize, 0), right_end.problems.len);
+
+    // An anchor is the whole line, so a shorter one that also starts another
+    // line does not stand for it.
+    const partial = readFixture(gpa, program ++
+        \\<!-- guide: edit 5 io.println( -->
+        \\```linea
+        \\    io.println("hello")?
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), partial.problems.len);
+    // A trailing `…` makes it a prefix, for a line too long to write out,
+    // and a prefix must say enough to tell one line from another.
+    const prefix = readFixture(gpa, program ++
+        \\<!-- guide: edit 5 io.println("h… -->
+        \\```linea
+        \\    io.println("hello")?
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), prefix.problems.len);
+    for ([_][]const u8{ "<!-- guide: edit 5 io.… -->", "<!-- guide: edit 5 ((((((((((… -->" }) |marker| {
+        const weak = readFixture(gpa, try std.mem.concat(gpa, u8, &.{ program, marker, "\n```linea\n    io.println(\"hello\")?\n```\n" }));
+        try testing.expectEqual(@as(usize, 1), weak.problems.len);
+        try testing.expectEqual(@as(usize, 12), weak.problems[0].line);
+        try testing.expect(std.mem.indexOf(u8, weak.problems[0].message, "8") != null);
+    }
+
+    // An anchor left out is named as what the edit lacks.
+    for ([_]struct { marker: []const u8, says: []const u8 }{
+        .{ .marker = "<!-- guide: edit 5 -->", .says = "needs the text of line 5" },
+        .{ .marker = "<!-- guide: edit after 5 -->", .says = "needs the text of line 5, which it goes after" },
+        .{ .marker = "<!-- guide: edit 4-5 // greet -->", .says = "needs the text of line 4 and of line 5" },
+        .{ .marker = "<!-- guide: edit after 0 import std.io -->", .says = "names no line" },
+    }) |case| {
+        const lacking = readFixture(gpa, try std.mem.concat(gpa, u8, &.{ program, case.marker, "\n```linea\n    io.println(\"hello\")?\n```\n" }));
+        try testing.expect(lacking.problems.len >= 1);
+        try testing.expectEqual(@as(usize, 12), lacking.problems[0].line);
+        try testing.expect(std.mem.indexOf(u8, lacking.problems[0].message, case.says) != null);
+    }
 
     // An insertion names the line it goes after.
     const insertion = readFixture(gpa, program ++
@@ -2581,7 +2621,7 @@ test "the guide gate: an edit marker must name lines of a program above it" {
         \\}
         \\```
         \\
-        \\<!-- guide: edit 1-2 fn main … 0 -->
+        \\<!-- guide: edit 1-2 fn main() -> UInt8 { … 0 -->
         \\```linea
         \\fn main() -> UInt8 {
         \\```
@@ -3148,6 +3188,17 @@ test "the guide gate: a check marker compiles a program without running it" {
     );
     try testing.expect(bare.problems.len > 0);
     try testing.expectEqual(@as(usize, 1), bare.problems[0].line);
+}
+
+test "the guide gate: a page's path from the repository root does not depend on the working directory" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    try testing.expectEqualStrings("docs/learn/02-x.md", try source.guidePagePath(gpa, "/repo", "/repo", "/repo/docs/learn", "02-x.md"));
+    try testing.expectEqualStrings("docs/learn/02-x.md", try source.guidePagePath(gpa, "/repo", ".", "docs/learn", "02-x.md"));
+    try testing.expectEqualStrings("docs/learn/02-x.md", try source.guidePagePath(gpa, "/repo/docs/learn", "/repo", ".", "02-x.md"));
+    try testing.expectEqualStrings("02-x.md", try source.guidePagePath(gpa, "/elsewhere", "/repo/docs/learn", "/repo/docs/learn", "02-x.md"));
 }
 
 test "the guide gate: every Markdown page beside the index must be linked from it" {
