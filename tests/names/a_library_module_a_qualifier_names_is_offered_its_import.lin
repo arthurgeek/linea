@@ -1,0 +1,8 @@
+// Nothing imports `text`, so the name before the dot is undefined. The
+// library's `text` module declares `hex_byte`, and the help writes its import.
+fn main() -> UInt8 {
+    match text.hex_byte(4, 2) {
+        Some(byte) => byte,
+        None => 0,
+    }
+}
