@@ -1,0 +1,14 @@
+error[T-BorrowContract]: the result has more than one eligible observation source
+  --> tests/borrows/contracts/a_function_type_is_offered_the_clause_naming_both_sources.lin:10:16
+   |
+10 | fn apply(pick: fn(a: Str, b: Str) -> Str) -> UInt8 {
+   |                ^^ the result may come from `a` or `b`; add `where carries(a)` or `where carries(b)`, or `where carries(a, b)` where it may come from either
+error[T-Mismatch]: expected `fn(read Str, read Str) -> Str where carries()`, found `fn(read Str, read Str) -> Str where carries(#1), carries(#2)`
+  --> tests/borrows/contracts/a_function_type_is_offered_the_clause_naming_both_sources.lin:15:11
+   |
+10 | fn apply(pick: fn(a: Str, b: Str) -> Str) -> UInt8 {
+   |          ---- expected because of this parameter
+15 |     apply(longer)
+   |           ^^^^^^ expected `fn(read Str, read Str) -> Str where carries()`, found `fn(read Str, read Str) -> Str where carries(#1), carries(#2)`
+   |
+   = help: `#n` in a `fn` type's clause is its parameter at position n, counted from 1, because a parameter's name is not part of the type

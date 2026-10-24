@@ -1,0 +1,5 @@
+error[T-BorrowContract]: the result has more than one eligible observation source
+ --> tests/borrows/contracts/a_clause_goes_before_a_comment_on_the_header.lin:2:4
+  |
+2 | fn pick(a: Str, b: Str) -> Str // the longer
+  |    ^^^^ the result may come from `a` or `b`; add `where carries(a)` or `where carries(b)`, or `where carries(a, b)` where it may come from either

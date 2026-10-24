@@ -1,0 +1,13 @@
+// linea fmt: off
+fn pick(a: Str, b: Str) -> Str // the longer
+{
+    if a.length() > b.length() {
+        return copy(a)
+    }
+    copy(b)
+}
+// linea fmt: on
+
+fn main() -> UInt8 {
+    UInt8(pick("a", "bb").length())
+}

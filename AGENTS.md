@@ -160,31 +160,53 @@ until it is green.
 - Every rejected case of one file is also held to its helps: a diagnostic
   carries a `Fix` for each help concrete enough to write, the edits that help
   names applied together, and the conformance runner applies each fix alone and
-  checks the case again: the error must be gone from the line it was reported
-  at. Then it follows the fixes in turn, one each round, until no error carries
+  checks the case again through `loader.checkWhole`, the passes `linea check`
+  runs. The error must be gone from the line it was reported at, and the fix
+  must add no error of its own: none that loading the text reports and did not
+  before (the fix left it not lexing or parsing), and none with a label on a
+  line the fix wrote or removed. An error is the program's own where one under
+  the same rule was reported at the line it moved to. Then it follows the fixes
+  in turn, one each round, holding each to the same, until no error carries
   one: an error a fix answered must not come back at its line, a new error
   elsewhere is the program's next mistake and is allowed, and fixes still
   offered after eight are reported as helps that undo each other. There is no
-  golden, `-Dupdate` cannot silence it, and the run fails under a floor of cases
-  that carried a fix. Fixes carried: the `where` clause [O-Escapes] and
-  [T-BorrowContract] name, on a function or a lambda; the owned copy of a
-  returned view and the owner put in place of its view, with the imports they
-  need; the result type [T-TryAnswer] names, with every `return` and the tail
-  wrapped; `.settled()` before `?` and a discarded failure handed on; the
-  [O-Leak] `defer`; a member [T-Impl] says to drop; the type a concrete
-  implementation names, in place of `Self` written in a test inside it; the
-  other allocator form of a call; and a type parameter for each of two
-  closures. Helps that carry none, because the edit is a choice the reader
-  makes: the [T-Infer] annotation and defaulted parameters (which type), the
-  arguments a test in a generic implementation means, `let … else` (what the
-  `else` block
-  does), releasing before a path leaves and [O-Merge] (where, and on which
-  path), the owned copy kept in a field or an `inout` parameter (the field's
-  type and the failure path both change, or `append` instead), the allocator
-  taken as a parameter (the signature and every caller), implementing a
-  conversion (a body to write) and the import beside it, and every help
-  outside this list's rules. A help offering an edit a tool could write
-  should carry it.
+  golden, `-Dupdate` cannot silence it, and the run fails where a kind of fix
+  (`FixKind`) is carried by no case. Fixes carried: the `where` clause
+  [O-Escapes] and [T-BorrowContract] name, on a function, a lambda or a written
+  callable type; the owned copy of a returned view and the owner put in place
+  of its view at every exit, with the imports they need; the result type
+  [T-TryAnswer] names, with every `return` and the tail wrapped; `.settled()`
+  before `?` and a discarded failure handed on; the [O-Leak] `defer`, after the
+  `let` or `var` that binds the value or first in the body of the function or
+  closure whose parameter it is; a member [T-Impl] says to drop; the type a
+  concrete implementation names, in place of `Self` written in a test inside
+  it; the other
+  allocator form of a call, where the program holds one allocator to pass; a
+  type parameter for each of two closures; the `import` an [N-Undefined]
+  qualifier names, one per module it could mean (a loaded one, the library's
+  included, that lets the file reach the name selected from it, or a
+  directory of the root's that no import loaded); and the `use`
+  [T-UnknownOperation] names, with its import. `linea check
+  --error-format=json` writes them under `fixes`, and the language server
+  offers each as a quick fix. A help whose edit is fully determined but cannot
+  be written says why in its text instead of carrying a fix: a `where` beside
+  type predicates or around a comment, the owner in place where another exit
+  returns something else, a result `main` cannot answer (only `UInt8` or a
+  `Result[UInt8, E]` whose `E` implements `Display`), a closure
+  whose result its callable type fixes, a type whose qualifier the module
+  binds to something else, and a parameter written as a pattern, which no
+  clause can name. Helps that carry none, because the edit is a choice the
+  reader makes: the [T-Infer] annotation and defaulted parameters (which
+  type), the arguments a test in a generic implementation means, `let … else`
+  (what the `else` block does), releasing before a path
+  leaves, a `defer` for a pattern's or a loop's binder, and [O-Merge] (where,
+  and on which path), the owned copy kept in a field or an `inout` parameter
+  (the field's type and the failure path both change, or `append` instead),
+  the allocator taken as a parameter (the signature and every caller), and
+  which allocator to pass where the program holds none or several,
+  implementing a conversion (a body to write) and the import beside it, and
+  every help outside this list's rules. A help offering an edit a tool could
+  write should carry it.
 
 ### CI lanes
 

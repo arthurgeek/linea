@@ -558,8 +558,47 @@ pub const Edit = struct {
 /// told and what a tool would write are one change, and a tool can title the
 /// change with the help.
 pub const Fix = struct {
+    kind: FixKind,
     note: ?u32,
     edits: []const Edit,
+};
+
+/// What a fix writes, one kind per help that carries one. A tool can choose
+/// which kinds it applies unattended, and the conformance runner counts each
+/// kind, so a help that stops carrying its fix is seen.
+pub const FixKind = enum {
+    /// The `where` clause [O-Escapes] and [T-BorrowContract] name.
+    where_clause,
+    /// An owned copy returned in place of a view, with the result declared.
+    owned_copy,
+    /// The owner returned in place of its view, with the result declared.
+    owner_in_place,
+    /// The result [T-TryAnswer] names, with every answer wrapped.
+    answer_type,
+    /// `.settled()` written before a `?`.
+    settle_before_try,
+    /// A discarded failure handed on with `?`.
+    hand_on_failure,
+    /// The `defer` [O-Leak] names.
+    deferred_release,
+    /// A member [T-Impl] says to drop, removed.
+    drop_member,
+    /// The type a concrete implementation names, written in place of `Self`
+    /// in a test inside it.
+    concrete_self,
+    /// The other allocator form of a call.
+    allocator_form,
+    /// A type parameter declared for each of two closures.
+    closure_type_parameters,
+    /// The `import` of a module a qualifier names.
+    import_module,
+    /// The `use` of a trait that declares an operation, with its import.
+    use_trait,
+
+    /// The name a tool reads, as JSON writes it.
+    pub fn text(self: FixKind) []const u8 {
+        return @tagName(self);
+    }
 };
 
 /// A single reported problem. Held as a plain struct rather than column-wise:

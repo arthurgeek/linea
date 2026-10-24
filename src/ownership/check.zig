@@ -322,6 +322,9 @@ const Checker = struct {
     cancelled: Cancellations = .empty,
     /// The declaration whose generic promises are active for this graph.
     current_owner: DeclId = .none,
+    /// The function being walked, whose body a help placing a statement
+    /// first in it writes into: a declaration's, or a closure's.
+    current_function: ?*const Function = null,
     /// Where this function's reporting walk found a Linear binding still held
     /// as its scope ended, gathered so that each binding is reported once,
     /// however many paths leave it held. Sized by the function's leaking
@@ -1234,7 +1237,7 @@ const Checker = struct {
             notes[0] = try std.fmt.allocPrint(arena, "{s}, or {s}", .{ notes[0], hint.text });
             // Where the release goes is the reader's choice; the schedule's
             // place is not, so it is the fix.
-            if (hint.edit) |edit| fixes = try arena.dupe(Fix, &.{.{ .note = 0, .edits = try arena.dupe(HelpEdit, &.{edit}) }});
+            if (hint.edit) |edit| fixes = try arena.dupe(Fix, &.{.{ .kind = .deferred_release, .note = 0, .edits = try arena.dupe(HelpEdit, &.{edit}) }});
         };
         // `let _ = badge` holds what `badge` held, and `badge` is the name the
         // reader wrote for it.
@@ -1288,16 +1291,20 @@ const Checker = struct {
             const end = self.ast.stmtLineEnd(s);
             return .{ .text = text, .edit = .{ .file = self.ast.fileOf(first), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, "\n{s}{s}", .{ self.ast.lineIndentation(first), statement }) } };
         }
-        // First in the body of the function whose parameter it is.
-        if (self.res.kindOf(b) == .parameter and self.current_owner != .none and self.ast.declTag(self.current_owner) == .function) {
-            const body = self.ast.declBody(self.current_owner);
+        // First in the body of the function or closure whose parameter it
+        // is, one level in from the line its body opens on.
+        if (self.res.kindOf(b) == .parameter) if (self.current_function) |f| {
+            const body = if (f.lambda != .none) self.ast.lambda(f.lambda).body else self.ast.declBody(f.decl);
             if (body != ExprId.none and self.ast.exprTag(body) == .block) {
                 const opening = self.ast.exprTokens(body).start;
-                const fn_indent = self.ast.lineIndentation(self.ast.declName(self.current_owner));
+                const indent = self.ast.lineIndentation(opening);
                 const end = self.ast.tokenSpan(opening).end;
-                return .{ .text = text, .edit = .{ .file = self.ast.fileOf(opening), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, "\n{s}    {s}", .{ fn_indent, statement }) } };
+                return .{ .text = text, .edit = .{ .file = self.ast.fileOf(opening), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, "\n{s}    {s}", .{ indent, statement }) } };
             }
-        }
+            // A closure written as one expression has no statement to put
+            // the schedule before, and takes braces for it.
+            return .{ .text = try std.fmt.allocPrint(arena, "write the closure's body in braces, with `defer {s}.release()` first, so every path releases it", .{name}), .edit = null };
+        };
         return .{ .text = text, .edit = null };
     }
 
@@ -2412,6 +2419,8 @@ const Checker = struct {
         if (count == 0) return;
         self.current_owner = f.owner;
         defer self.current_owner = .none;
+        self.current_function = f;
+        defer self.current_function = null;
         self.merge_origins.clearRetainingCapacity();
         self.scheduled.clearRetainingCapacity();
         self.held_by.clearRetainingCapacity();

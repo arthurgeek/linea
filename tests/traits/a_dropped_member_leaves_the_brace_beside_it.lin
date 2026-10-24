@@ -1,0 +1,25 @@
+trait Gauge {
+    fn size(self: Self) -> UInt16
+
+    fn twice(self: Self) -> UInt16 {
+        self.size() * 2
+    }
+}
+
+struct Tank {
+    litres: UInt8,
+}
+
+// linea fmt: off
+impl Gauge for Tank {
+    fn size(self: Self) -> UInt16 {
+        UInt16(self.litres)
+    }
+
+    fn twice(self: Self) -> UInt16 { UInt16(self.litres) * 3 } }
+// linea fmt: on
+
+fn main() -> UInt8 {
+    let tank = Tank { litres = 3 }
+    UInt8(tank.twice())
+}

@@ -424,6 +424,14 @@ fn loadInputs(
         }
     }
 
+    // What else an import written in the root could load, before the library
+    // is loaded and the loader reads its directories instead.
+    const unloaded = try l.unloadedRoutes(sorted);
+    errdefer {
+        for (unloaded) |route| gpa.free(route);
+        gpa.free(unloaded);
+    }
+
     // A program with no readable entry still has to be a program: every pass
     // below takes a tree, and an empty one reports the missing entry point
     // exactly as an empty file does.
@@ -540,6 +548,7 @@ fn loadInputs(
         // tests it.
         .kind = kind,
         .roots = roots,
+        .unloaded_routes = unloaded,
         .native = foreign.native,
         .link = foreign.link,
         .ast = ast,
@@ -2854,6 +2863,32 @@ const Loader = struct {
     /// Whether a directory of the supplied files is a module of the primary
     /// root, and not of a dependency or of another directory holding a
     /// manifest.
+    /// The import route of every directory of the root's own that holds
+    /// sources and that nothing loaded, once each, in the order `files`
+    /// names them: what an `import` written in the root could load besides
+    /// what it does, for a help offering one.
+    ///
+    /// **Bound:** one pass over the files.
+    fn unloadedRoutes(self: *Loader, files: []const InMemoryFile) LoadError![]const []const u8 {
+        var routes: std.ArrayList([]const u8) = .empty;
+        errdefer {
+            for (routes.items) |route| self.gpa.free(route);
+            routes.deinit(self.gpa);
+        }
+        var seen: std.StringHashMapUnmanaged(void) = .empty;
+        const a = self.scratch.allocator();
+        for (files) |f| {
+            if (!std.mem.endsWith(u8, f.path, ".lin")) continue;
+            const dir = dirOf(f.path);
+            if (std.mem.eql(u8, dir, self.primary_dir) or self.by_dir.contains(dir)) continue;
+            if (!self.ownedByPrimary(dir)) continue;
+            if ((try seen.getOrPut(a, dir)).found_existing) continue;
+            if (!try self.importableDir(dir, .primary)) continue;
+            try routes.append(self.gpa, try self.routeTo(dir, .primary));
+        }
+        return routes.toOwnedSlice(self.gpa);
+    }
+
     fn ownedByPrimary(self: *const Loader, dir: []const u8) bool {
         if (self.primary_dir.len > 0 and !within(dir, self.primary_dir)) return false;
         if (self.primary_dir.len == 0 and (std.mem.startsWith(u8, dir, "..") or std.mem.startsWith(u8, dir, "/"))) return false;
@@ -3916,6 +3951,27 @@ fn checkProgramInternal(
     try expanded.collapseGeneratedDiagnostics(sink);
 
     return .{ .expanded = expanded, .res = res, .typing = typing, .disposals = disposals, .type_arena = type_arena, .reused_library = retained != null };
+}
+
+/// Everything `linea check` reports about a loaded program: the passes
+/// `checkProgram` runs, then the rules only instance discovery settles.
+///
+/// The one entry point for asking whether a program checks, so the command
+/// line and anything that edits a program and asks again -- a help's fix
+/// applied, a rename, a mutation -- are judged by the same passes. A copy
+/// that stopped at ownership would accept an edit `check` refuses.
+pub fn checkWhole(
+    gpa: std.mem.Allocator,
+    scratch: std.mem.Allocator,
+    program: *const Program,
+    source_interner: *const Interner,
+    sink: *Sink,
+    purpose: Purpose,
+) !Semantics {
+    var semantics = try checkProgram(gpa, scratch, program, source_interner, sink, purpose);
+    errdefer semantics.deinit(gpa);
+    try checkInstantiations(gpa, &semantics, sink);
+    return semantics;
 }
 
 /// The rules only instance discovery can settle, reported.

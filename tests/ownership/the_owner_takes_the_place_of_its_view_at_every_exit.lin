@@ -1,0 +1,11 @@
+fn pick(early: Bool) -> Str {
+    let line = "x".to_owned().unwrap()
+    if early {
+        return line.view()
+    }
+    line.view()
+}
+
+fn main() -> UInt8 {
+    UInt8(pick(true).length())
+}

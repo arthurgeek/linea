@@ -690,14 +690,10 @@ pub const Handler = struct {
         const checked = try handler.check(arena, path);
         const file = checked.fileNamed(path) orelse return null;
 
-        const program = try handler.entryFor(arena, path);
-        const query = try (try handler.indexOf()).query();
         return try fix.forFile(
             arena,
             checked,
             file,
-            query,
-            program,
             params.textDocument.uri,
             params.context.diagnostics,
             handler.offset_encoding,
@@ -1415,7 +1411,7 @@ test "an undefined name a module of the program is called is offered as that imp
     try std.testing.expectEqual(@as(usize, 1), found.len);
 
     const action = found[0].code_action;
-    try std.testing.expectEqualStrings("import ledger", action.title);
+    try std.testing.expectEqualStrings("write `import ledger`: a module is reached through the import that names it", action.title);
     try std.testing.expectEqual(lsp.types.CodeAction.Kind.quickfix, action.kind.?);
     // The action names the diagnostic it resolves, which is what lets a client
     // clear the squiggle it was offered under.
@@ -1438,7 +1434,7 @@ test "a nested module is offered a root-relative sibling import" {
 
     const found = try ws.fixesFor("nested/n.lin");
     try std.testing.expectEqual(@as(usize, 1), found.len);
-    try std.testing.expectEqualStrings("import ledger", found[0].code_action.title);
+    try std.testing.expectEqualStrings("write `import ledger`: a module is reached through the import that names it", found[0].code_action.title);
     try std.testing.expectEqualStrings(
         "import ledger\n\npub fn value() -> UInt8 { ledger.size() }\n",
         try ws.appliedTo("nested/n.lin", found[0]),
@@ -1459,8 +1455,8 @@ test "a leaf two modules of the program share is offered as an import of each" {
 
     // Two paths ending in the same element are two modules, and which of them
     // was meant is the reader's to say.
-    try std.testing.expectEqualStrings("import crypto.hash", titles[0]);
-    try std.testing.expectEqualStrings("import vault.hash", titles[1]);
+    try std.testing.expectEqualStrings("write `import crypto.hash`: a module is reached through the import that names it", titles[0]);
+    try std.testing.expectEqualStrings("write `import vault.hash`: a module is reached through the import that names it", titles[1]);
 }
 
 test "a name a module exports but no module is called is offered no import" {

@@ -78,6 +78,30 @@ fn renderOne(
         if (i > 0) try w.writeByte(',');
         try std.json.Stringify.value(n, .{}, w);
     }
+
+    // Each fix names the help it writes by its index in `help`, or null for
+    // the primary label's, and each edit says which file its offsets index,
+    // for the reason a label does. Applying a fix is writing every one of its
+    // edits; they never overlap.
+    try w.writeAll("],\"fixes\":[");
+    for (d.fixes, 0..) |fix, i| {
+        if (i > 0) try w.writeByte(',');
+        try w.writeAll("{\"kind\":");
+        try std.json.Stringify.value(fix.kind.text(), .{}, w);
+        try w.writeAll(",\"help\":");
+        if (fix.note) |at| try w.print("{d}", .{at}) else try w.writeAll("null");
+        try w.writeAll(",\"edits\":[");
+        for (fix.edits, 0..) |e, j| {
+            if (j > 0) try w.writeByte(',');
+            const pos = table.mapOf(e.file).lineCol(e.span.start);
+            try w.writeAll("{\"file\":");
+            try std.json.Stringify.value(table.get(e.file).path, .{}, w);
+            try w.print(",\"line\":{d},\"column\":{d},\"start\":{d},\"end\":{d},\"text\":", .{ pos.line, pos.column, e.span.start, e.span.end });
+            try std.json.Stringify.value(e.text, .{}, w);
+            try w.writeByte('}');
+        }
+        try w.writeAll("]}");
+    }
     try w.writeAll("]}\n");
 }
 
@@ -157,6 +181,49 @@ test "advice is written under help and a fact under notes, as the human form pri
     defer second.deinit();
     try testing.expectEqual(@as(usize, 0), second.value.object.get("help").?.array.items.len);
     try testing.expectEqual(@as(usize, 0), second.value.object.get("notes").?.array.items.len);
+    try testing.expectEqual(@as(usize, 0), second.value.object.get("fixes").?.array.items.len);
+}
+
+test "a fix is written with its kind, the help it writes and every edit" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const src: Source = .{ .path = "t.lin", .text = "fn f() {\n}\n" };
+    var table: FileTable = .empty;
+    defer table.deinit(testing.allocator);
+    _ = try table.add(testing.allocator, src);
+    try table.buildMaps(testing.allocator);
+
+    var sink = Sink.init(arena.allocator());
+    try sink.add(.{
+        .severity = .err,
+        .code = .t_try_answer,
+        .message = "no answer",
+        .labels = &.{.{ .file = .from(0), .span = .{ .start = 3, .end = 4 }, .message = "here" }},
+        .notes = &.{"make it answer"},
+        .fixes = &.{.{ .kind = .answer_type, .note = 0, .edits = &.{
+            .{ .file = .from(0), .span = .{ .start = 6, .end = 6 }, .text = " -> UInt8" },
+            .{ .file = .from(0), .span = .{ .start = 9, .end = 9 }, .text = "0" },
+        } }},
+    });
+
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try renderAllJson(&out.writer, &table, &sink);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, out.written(), .{});
+    defer parsed.deinit();
+    const fixes = parsed.value.object.get("fixes").?.array.items;
+    try testing.expectEqual(@as(usize, 1), fixes.len);
+    try testing.expectEqualStrings("answer_type", fixes[0].object.get("kind").?.string);
+    try testing.expectEqual(@as(i64, 0), fixes[0].object.get("help").?.integer);
+    const edits = fixes[0].object.get("edits").?.array.items;
+    try testing.expectEqual(@as(usize, 2), edits.len);
+    try testing.expectEqualStrings("t.lin", edits[0].object.get("file").?.string);
+    try testing.expectEqual(@as(i64, 6), edits[0].object.get("start").?.integer);
+    try testing.expectEqualStrings(" -> UInt8", edits[0].object.get("text").?.string);
+    try testing.expectEqual(@as(i64, 2), edits[1].object.get("line").?.integer);
+    try testing.expectEqual(@as(i64, 1), edits[1].object.get("column").?.integer);
 }
 
 test "a message quoting the source does not scale the object it is written in" {

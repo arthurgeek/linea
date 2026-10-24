@@ -13,11 +13,9 @@ const node = @import("../syntax/node.zig");
 const token = @import("../lexer/token.zig");
 const ExprId = node.ExprId;
 const resolve_mod = @import("../sema/resolve.zig");
-const resolve = resolve_mod.resolve;
 const resolveTree = resolve_mod.resolveTree;
 const Resolution = resolve_mod.Resolution;
 const BindingId = resolve_mod.BindingId;
-const typecheck = @import("../sema/typecheck.zig").typecheck;
 const typecheckTree = @import("../sema/typecheck.zig").typecheckTree;
 const Typing = @import("../sema/types.zig").Typing;
 const CallIndex = @import("../sema/types.zig").CallIndex;
@@ -25,7 +23,6 @@ const namesAVariant = @import("../sema/typecheck.zig").namesAVariant;
 const isCatchAll = @import("../sema/typecheck.zig").isCatchAll;
 const selectsFromAValue = @import("../sema/typecheck.zig").selectsFromAValue;
 const fieldBase = @import("../sema/typecheck.zig").fieldBase;
-const checkOwnership = @import("../ownership/check.zig").check;
 const loader = @import("../driver/loader.zig");
 const FileTable = @import("../support/source.zig").FileTable;
 const FileId = @import("../support/source.zig").FileId;
@@ -1788,12 +1785,14 @@ pub fn verdictOf(gpa: std.mem.Allocator, text: []const u8, kind: ProgramKind) !V
     return .{ .rejected = sink.hasErrors(), .text = try codes.toOwnedSlice(gpa) };
 }
 
-/// What the compiler reports about one file of text, checked the way a case
-/// of that kind is, through ownership. The one compilation every property
-/// that edits a program and asks again shares, so a mutation and a help's
-/// edit are judged by the same passes. The sink is allocated from `gpa`,
-/// and `file` is the file the text was loaded as.
-pub const Diagnosed = struct { sink: Sink, file: FileId };
+/// What the compiler reports about one file of text, checked as `linea
+/// check` checks it, through `loader.checkWhole`. The one compilation every
+/// property that edits a program and asks again shares, so a mutation and a
+/// help's edit are judged by the passes a reader's `check` runs. The sink is
+/// allocated from `gpa`; `file` is the file the text was loaded as, and the
+/// first `loaded` diagnostics are the ones loading it reported -- lexing,
+/// parsing and the loader's own rules -- before any pass read it.
+pub const Diagnosed = struct { sink: Sink, file: FileId, loaded: usize };
 
 pub fn diagnose(gpa: std.mem.Allocator, text: []const u8, kind: ProgramKind) !Diagnosed {
     var sink = Sink.init(gpa);
@@ -1809,18 +1808,10 @@ pub fn diagnose(gpa: std.mem.Allocator, text: []const u8, kind: ProgramKind) !Di
     // Mutations preserve the root kind even though their one-file input
     // carries no manifest.
     program.kind = kind;
-    const resolved = try resolve(gpa, &program, &interner, &sink, .program);
-    var expanded = resolved.expanded;
-    defer expanded.deinit(gpa);
-    var res = resolved.resolution;
-    defer res.deinit(gpa);
-    var typing = try typecheck(gpa, &expanded, &res, &sink);
-    defer typing.deinit(gpa);
-    {
-        var c = try checkOwnership(gpa, gpa, &expanded, &res, &typing, &sink);
-        c.deinit(gpa);
-    }
-    return .{ .sink = sink, .file = program.primaryFile() };
+    const loaded = sink.list.items.len;
+    var semantics = try loader.checkWhole(gpa, gpa, &program, &interner, &sink, .program);
+    semantics.deinit(gpa);
+    return .{ .sink = sink, .file = program.primaryFile(), .loaded = loaded };
 }
 
 /// Whether a space-separated list of rule names holds one.

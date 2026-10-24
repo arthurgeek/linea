@@ -1,0 +1,16 @@
+fn longer(a: Str, b: Str) -> Str where carries(a, b) {
+    if a.length() > b.length() {
+        copy(a)
+    } else {
+        copy(b)
+    }
+}
+
+// A function type writes its contract as a signature does.
+fn apply(pick: fn(a: Str, b: Str) -> Str) -> UInt8 {
+    UInt8(pick("a", "bb").length())
+}
+
+fn main() -> UInt8 {
+    apply(longer)
+}

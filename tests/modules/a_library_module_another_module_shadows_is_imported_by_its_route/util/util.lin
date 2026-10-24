@@ -1,0 +1,5 @@
+import mem
+
+pub fn four(n: UInt8) -> UInt8 {
+    mem.twice(mem.twice(n))
+}
