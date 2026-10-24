@@ -2755,8 +2755,9 @@ test "a construct that takes several values says where it took them" {
     // Only the call's two arguments are transfers a construct has yet to
     // receive: a field initialiser here is a literal, which opens none.
     try testing.expectEqual(@as(u32, 2), got.pending);
-    // Three constructs take a value and say so: each `.{ … }` and the call.
-    try testing.expectEqual(@as(u32, 3), got.commits);
+    // Four constructs take a value and say so: each `.{ … }`, the call, and
+    // the `+` in `use2`, whose operands are lent until it runs.
+    try testing.expectEqual(@as(u32, 4), got.commits);
     // Nothing leaves, so nothing is left half-built.
     try testing.expectEqual(@as(u32, 0), got.escapes);
 }
@@ -2825,9 +2826,10 @@ test "what a break carries out is owed to whatever takes the loop" {
     // `e` carried out of the loop and `d` written beside it: both owed to
     // `use2`, and neither received before it begins.
     try testing.expectEqual(@as(u32, 2), got.pending);
-    // The loop is not a construct anything waits on, so the only thing that
-    // receives here is the call.
-    try testing.expectEqual(@as(u32, 1), got.commits);
+    // The loop is not a construct anything waits on, so what receives here
+    // is the call and the `+` in `use2`, whose operands are lent until it
+    // runs.
+    try testing.expectEqual(@as(u32, 2), got.commits);
 }
 
 test "a value made where it is given up is owed to the construct around it" {
