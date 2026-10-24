@@ -7593,7 +7593,7 @@ fn checkAcceptedOffers(
     defer docs.deinit();
     const files = filesOfProgram(gpa, io, &docs, program) catch return false;
 
-    var asked = try offersFix(gpa, backing, checked_library, failures, display_path, query, program, files);
+    var asked = try offersFix(gpa, backing, checked_library, failures, display_path, program, files);
 
     for ([_]Shape{ .qualified, .alone }) |shape| {
         const written = try probeWriting(gpa, query, program, shape) orelse continue;
@@ -7602,7 +7602,7 @@ fn checkAcceptedOffers(
         @memcpy(probed[0..files.len], files);
         probed[files.len] = written;
 
-        if (try offersFix(gpa, backing, checked_library, failures, display_path, query, program, probed)) asked = true;
+        if (try offersFix(gpa, backing, checked_library, failures, display_path, program, probed)) asked = true;
     }
 
     if (try acceptsCompletions(gpa, backing, checked_library, failures, display_path, query, program, files, taken)) asked = true;
@@ -10393,7 +10393,6 @@ fn offersFix(
     checked_library: *const loader.CheckedLibrary,
     failures: *std.ArrayList(Failure),
     display_path: []const u8,
-    query: lsp_workspace.Query,
     program: []const u8,
     files: []const InMemoryFile,
 ) !bool {
@@ -10459,19 +10458,27 @@ fn offersFix(
                 });
             }
 
-            for (after.rules) |rule| {
-                if (indexOfRule(before.rules, rule) != null) continue;
+            // And it adds no error of its own, judged as a help's fix is
+            // judged: the action is the compiler's `Fix`, spelled for the
+            // client, and read back into one here.
+            const written = action.code_action.edit.?.changes.?.map.get(path).?;
+            const edits = try gpa.alloc(diagnostic.Edit, written.len);
+            for (edits, written) |*e, w| e.* = .{
+                .file = file,
+                .span = .{
+                    .start = @intCast(lsp.offsets.positionToIndex(files[which].text, w.range.start, .@"utf-16")),
+                    .end = @intCast(lsp.offsets.positionToIndex(files[which].text, w.range.end, .@"utf-16")),
+                },
+                .text = w.newText,
+            };
+            if (again.fileNamed(path)) |edited| if (try gainedByFix(gpa, files[which].text, file, checked.sink.items(), edits, after_files[which].text, .{ .sink = again.sink, .file = edited, .loaded = 0 })) |what| {
                 try failures.append(gpa, .{
                     .path = display_path,
                     .what = "accepting what the server offers leaves a program that checks",
-                    .expected = try std.fmt.allocPrint(
-                        gpa,
-                        "no rule `{s}` reported before `{s}`",
-                        .{ rule, action.code_action.title },
-                    ),
-                    .actual = try std.fmt.allocPrint(gpa, "`{s}` after it", .{rule}),
+                    .expected = try std.fmt.allocPrint(gpa, "no error `{s}` made", .{action.code_action.title}),
+                    .actual = what,
                 });
-            }
+            };
         }
     }
     return asked;
@@ -17709,11 +17716,11 @@ fn applyFix(scratch: std.mem.Allocator, text: []const u8, file: FileId, fix: dia
     return .{ .text = current };
 }
 
-/// Where `line` of `text` sits once `fix` is applied: moved by the lines
+/// Where `line` of `text` sits once `edits` are applied: moved by the lines
 /// each edit starting above it adds or removes.
-fn movedLine(text: []const u8, fix: diagnostic.Fix, line: usize) usize {
+fn movedLine(text: []const u8, edits: []const diagnostic.Edit, line: usize) usize {
     var moved = line;
-    for (fix.edits) |edit| {
+    for (edits) |edit| {
         if (lineAt(text, edit.span.start) >= line) continue;
         const removed = std.mem.count(u8, text[edit.span.start..@min(edit.span.end, text.len)], "\n");
         const added = std.mem.count(u8, edit.text, "\n");
@@ -17744,10 +17751,10 @@ fn errorAtLine(diagnostics: []const Diagnostic, file: FileId, text: []const u8, 
 /// edit that removes and writes nothing wrote the line its removal joined.
 const Written = struct { first: usize, last: usize };
 
-/// The lines of `edited`, a text with `fix` applied, that each of the fix's
+/// The lines of `edited`, a text with `written` applied, that each of those
 /// edits wrote.
-fn writtenLines(scratch: std.mem.Allocator, edited: []const u8, fix: diagnostic.Fix) ![]const Written {
-    const edits = try scratch.dupe(diagnostic.Edit, fix.edits);
+fn writtenLines(scratch: std.mem.Allocator, edited: []const u8, written: []const diagnostic.Edit) ![]const Written {
+    const edits = try scratch.dupe(diagnostic.Edit, written);
     std.mem.sortUnstable(diagnostic.Edit, edits, {}, struct {
         fn earlier(_: void, a: diagnostic.Edit, b: diagnostic.Edit) bool {
             return a.span.start < b.span.start;
@@ -17770,7 +17777,8 @@ fn wroteLine(written: []const Written, line: usize) bool {
     return false;
 }
 
-/// What a fix left that it must not have: an error the program did not
+/// What `edits`, a fix applied to `text`, left that they must not have: an
+/// error the program did not
 /// have before -- no error under its rule was reported at the line it moved
 /// to -- that is the edit's own doing. Its own doing is a diagnostic loading
 /// reported, since the fix left the text not lexing or parsing as before,
@@ -17781,11 +17789,11 @@ fn gainedByFix(
     text: []const u8,
     file: FileId,
     before: []const Diagnostic,
-    fix: diagnostic.Fix,
+    edits: []const diagnostic.Edit,
     edited: []const u8,
     again: mutate.Diagnosed,
 ) !?[]const u8 {
-    const written = try writtenLines(scratch, edited, fix);
+    const written = try writtenLines(scratch, edited, edits);
     for (again.sink.list.items, 0..) |d, index| {
         if (d.severity != .err) continue;
         const code = d.code orelse continue;
@@ -17796,7 +17804,7 @@ fn gainedByFix(
             if (earlier.severity != .err or earlier.code != code) continue;
             const was = earlier.primaryLabel() orelse continue;
             if (was.file != file) continue;
-            if (movedLine(text, fix, lineAt(text, was.span.start)) == line) break true;
+            if (movedLine(text, edits, lineAt(text, was.span.start)) == line) break true;
         } else false;
         if (known) continue;
         if (index < again.loaded) return try std.fmt.allocPrint(scratch, "{s} at line {d}, which the program did not lex or parse to before: {s}", .{ code.ruleName(), line, d.message });
@@ -17852,10 +17860,10 @@ fn checkHelpEdits(
                 .refused => |why| why,
                 .text => |edited| failure: {
                     const again = try mutate.diagnose(scratch, edited, kind);
-                    const line = movedLine(text, fix, lineAt(text, label.span.start));
+                    const line = movedLine(text, fix.edits, lineAt(text, label.span.start));
                     if (errorAtLine(again.sink.list.items, again.file, edited, code, line)) |left|
                         break :failure try std.fmt.allocPrint(scratch, "{s} at line {d} is still reported: {s}", .{ code.ruleName(), line, left.message });
-                    break :failure try gainedByFix(scratch, text, file, reported, fix, edited, again);
+                    break :failure try gainedByFix(scratch, text, file, reported, fix.edits, edited, again);
                 },
             };
             if (failure) |what| try failures.append(gpa, .{
@@ -17897,11 +17905,11 @@ fn checkHelpEdits(
             .refused => |why| break why,
             .text => |t| t,
         };
-        for (answered.items) |*earlier| earlier.line = movedLine(current, fix, earlier.line);
-        try answered.append(scratch, .{ .code = next.code.?, .line = movedLine(current, fix, lineAt(current, next.primaryLabel().?.span.start)) });
+        for (answered.items) |*earlier| earlier.line = movedLine(current, fix.edits, earlier.line);
+        try answered.append(scratch, .{ .code = next.code.?, .line = movedLine(current, fix.edits, lineAt(current, next.primaryLabel().?.span.start)) });
         try applied.append(scratch, try fixText(scratch, fix));
         const again = try mutate.diagnose(scratch, edited, kind);
-        if (try gainedByFix(scratch, current, current_file, diagnostics_now, fix, edited, again)) |what| break what;
+        if (try gainedByFix(scratch, current, current_file, diagnostics_now, fix.edits, edited, again)) |what| break what;
         current = edited;
         current_file = again.file;
         diagnostics_now = again.sink.list.items;
