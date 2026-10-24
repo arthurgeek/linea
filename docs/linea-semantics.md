@@ -380,9 +380,20 @@ is.
 **[S-Test]** `test fn` declares a function called by the compiler and excluded
 from shipped artefacts. A test has **no visibility**: `pub` would export a name
 that imports cannot reach. The modifier applies only to a function. A test may
-sit at module scope or inside an inherent `impl`; inside an implementation for a
-trait it is refused. A test inside an `impl` is organized at module scope and does
-not become a callable member of the type.
+sit at module scope or inside an inherent `impl`, beside the members it tests.
+Inside an implementation for a trait it is refused, because a trait
+implementation declares only what its trait requires, and inside a template it
+is refused, because a template is instantiated for every type that satisfies
+it while the compiler writes a test's one call.
+
+A test inside an `impl` is a member of nothing: it is named, resolved and run
+exactly as if it were written at module scope. No path through the type reaches
+it. Its name shares the module's one namespace with every other test and
+top-level name, so two implementations in one module do not each declare a test
+of one name ([N-Duplicate]), and the implementation adds nothing to its
+qualified name. A test is not instantiated, so neither `Self` nor the
+implementation's type parameters name a type in it; writing either is refused,
+and the test names the concrete types it tests instead, as `Boxed[UInt8]`.
 
 A test may instead be written `test trap fn`. It succeeds only when its child
 process reaches a language trap; returning successfully, returning a failure,
