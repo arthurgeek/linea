@@ -2531,16 +2531,17 @@ const Analysis = struct {
         // A clause is not always the fix, and the owned copy needs none. It
         // names the type that owns the text and the failure making it can
         // report, so the edit can be written as read.
+        const in_result = if (self.function.signature != .poison) switch (self.typing.get(self.function.signature)) {
+            .callable => |callable| held != null and held.? == callable.result,
+            else => false,
+        } else false;
         // Under a fixed signature the result type is fixed with it, so a
-        // returned view has no owned copy to become.
-        const result_fixed = leaving == .returned and fixed != null;
+        // returned view has no owned copy to become -- whether or not that
+        // signature permits the clause where the view is the whole result.
+        const result_fixed = leaving == .returned and (fixed != null or (in_result and self.signatureFixed()));
         var missing: HelpImports = .{};
         var failure_missing: HelpImports = .{};
         if (!result_fixed and (sources.len > 0 or local != null or consumed != null or found.unnamed != null)) if (try self.ownedCopyOf(held, self.res.moduleOfFile(primary.file), &missing, &failure_missing)) |owned| {
-            const in_result = if (self.function.signature != .poison) switch (self.typing.get(self.function.signature)) {
-                .callable => |callable| held != null and held.? == callable.result,
-                else => false,
-            } else false;
             const local_owns = if (local) |owner|
                 self.typing.declOfType(self.typing.bindingType(owner)) == self.typing.declOfType(owned.ty) and !try self.deferWouldDie(owner, if (leaving == .returned) leaving.returned.exit else .none)
             else
@@ -2699,6 +2700,16 @@ const Analysis = struct {
         }
         if (try importEdit(arena, self.ast, token, missing)) |edit| try edits.append(arena, edit);
         return .{ .edits = edits.items };
+    }
+
+    /// Whether the function's signature is not the program's to change: a
+    /// member of a trait implementation answers to the signature its trait
+    /// declares, and a function named as a value to the callable type it was
+    /// passed as.
+    fn signatureFixed(self: *const Analysis) bool {
+        const decl = self.function.decl;
+        if (decl == .none) return false;
+        return self.typing.supply_index.signatureOf(decl) != null or self.typing.fixed_functions.get(decl) != null;
     }
 
     /// How a help names the function being checked: by its name, or as
