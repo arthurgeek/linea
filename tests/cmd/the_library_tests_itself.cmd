@@ -517,6 +517,7 @@ The library tests itself.
   ok    http.an_arena_parent_serves_every_exchange_from_one_request_arena
   ok    http.an_arena_too_small_for_the_limits_is_refused
   ok    http.an_arena_too_small_for_the_limits_is_refused_with_a_parent
+  ok    http.an_authority_is_a_host_and_an_optional_port
   ok    http.an_error_displays_its_status_and_message
   ok    http.an_error_is_answered_with_its_headers
   ok    http.an_error_is_answered_with_its_message
@@ -1419,4 +1420,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1416 passed, 0 failed
+  1417 passed, 0 failed
