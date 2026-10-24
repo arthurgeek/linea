@@ -1,0 +1,21 @@
+// The first call settles `choose` as taking functions that return `UInt8`, so
+// a function returning `UInt16` does not fit it, in either position.
+fn pick[R](_first: fn() -> R, otherwise: fn() -> R) -> R {
+    otherwise()
+}
+
+fn nine() -> UInt8 {
+    9
+}
+
+fn wide() -> UInt16 {
+    300
+}
+
+fn main() -> UInt8 {
+    let choose = pick
+    let settled = choose(nine, nine)
+    let _mixed = choose(nine, wide)
+    let _both = choose(wide, wide)
+    settled
+}

@@ -24250,7 +24250,7 @@ const Checker = struct {
                 self.builder.view().callableSatisfies(signature, want.ty)
             else
                 self.builder.view().callableConverts(signature, want.ty);
-            if (!fits) return self.reportMismatch(id, signature, given, "");
+            if (!fits) return self.reportMismatch(id, signature, want, "");
             if (!want.callable_context) converted = want.ty;
         }
 

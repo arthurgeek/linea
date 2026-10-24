@@ -1,0 +1,18 @@
+error[T-Mismatch]: expected `fn() -> UInt8`, found `fn() -> UInt16`
+  --> tests/function_values/a_function_value_settled_by_its_first_call_names_the_settled_signature.lin:18:31
+   |
+18 |     let _mixed = choose(nine, wide)
+   |                  ------ expected because of this parameter
+   |                               ^^^^ expected `fn() -> UInt8`, found `fn() -> UInt16`
+error[T-Mismatch]: expected `fn() -> UInt8`, found `fn() -> UInt16`
+  --> tests/function_values/a_function_value_settled_by_its_first_call_names_the_settled_signature.lin:19:24
+   |
+19 |     let _both = choose(wide, wide)
+   |                 ------ expected because of this parameter
+   |                        ^^^^ expected `fn() -> UInt8`, found `fn() -> UInt16`
+error[T-Mismatch]: expected `fn() -> UInt8`, found `fn() -> UInt16`
+  --> tests/function_values/a_function_value_settled_by_its_first_call_names_the_settled_signature.lin:19:30
+   |
+19 |     let _both = choose(wide, wide)
+   |                 ------ expected because of this parameter
+   |                              ^^^^ expected `fn() -> UInt8`, found `fn() -> UInt16`
