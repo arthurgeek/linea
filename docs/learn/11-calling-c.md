@@ -1579,4 +1579,4 @@ these checks next to the declarations, and the rest of the program gets
 Linea's guarantees about C as it does about everything else.
 
 Next: [A guest book](12-a-guest-book.md) — a SQLite wrapper library, embedded
-templates, and a CGI or standalone web application.
+templates, and the web server that answers with them.

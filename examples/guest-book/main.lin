@@ -61,8 +61,8 @@ fn proxy_trust() -> http.ProxyTrust {
     }
 }
 
-// Log the storage error to standard error, which a web server records in its
-// error log, and answer the visitor with a generic 500 message.
+// Log the storage error to standard error, where whoever runs the server reads
+// it, and answer the visitor with a generic 500 message.
 fn unavailable(request: http.Request, sink error: BookError) -> http.Error {
     io.eprintln("guest-book: {error}")
     error.release()

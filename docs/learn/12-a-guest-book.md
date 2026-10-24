@@ -251,14 +251,14 @@ pub enum Error {
 ```
 
 In `examples/guest-book/main.lin`, `unavailable` logs the error to
-standard error (where a web server records it in its error log), releases the
+standard error (where whoever runs the server reads it), releases the
 `BookError`, and answers the visitor with a generic `500 Internal Server
 Error`:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
-// Log the storage error to standard error, which a web server records in its
-// error log, and answer the visitor with a generic 500 message.
+// Log the storage error to standard error, where whoever runs the server reads
+// it, and answer the visitor with a generic 500 message.
 fn unavailable(request: http.Request, sink error: BookError) -> http.Error {
     io.eprintln("guest-book: {error}")
     error.release()
@@ -268,7 +268,7 @@ fn unavailable(request: http.Request, sink error: BookError) -> http.Error {
 
 ## The schema and the templates, embedded
 
-A CGI binary is easiest to deploy when it is a single file with no external
+A server is easiest to deploy when it is a single file with no external
 assets to locate at run time. `examples/guest-book/book/book.lin` embeds
 `schema.sql` into the executable with `embed` and runs it when opening the
 book:

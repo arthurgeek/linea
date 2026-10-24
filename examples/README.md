@@ -96,4 +96,4 @@ HTTP routing, request bodies, and responses, from two routes to a full JSON serv
 
 A complete program combining a C library wrapper, embedded assets, and HTTP routing.
 
-- [guest-book](guest-book/main.lin): signs and lists a guest book stored in SQLite, served as a CGI program; a library trusted with C, linear statements, embedded templates, a cookie and escaped HTML.
+- [guest-book](guest-book/main.lin): signs and lists a guest book stored in SQLite, served by its own HTTP server; a library trusted with C, linear statements, embedded templates, a cookie and escaped HTML.

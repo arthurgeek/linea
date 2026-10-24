@@ -23,8 +23,8 @@ io.println("{scores.length()}")? // error[O-Move]: `scores` has already been mov
 ```linea
 fn worker() -> Result[(), io.IoError] {
     let scores: Vec[UInt64] = Vec.new()
-    io.println("{scores.length()}")?
-    .Ok(()) // error[O-Leak]: `scores` is still owned when this path leaves
+    io.println("{scores.length()}")? // error[O-Leak]: `scores` is still owned when this path leaves
+    .Ok(())
 }
 ```
 
@@ -39,7 +39,7 @@ Because the first call consumes `scores`, it no longer exists in that scope. And
 Linea is a systems programming language built in Zig. It combines two foundational ideas from programming language research:
 
 ### 1. Linear Types (used exactly once)
-Most values in Linea are ordinary—you copy and pass them freely. But types that manage resources can declare themselves `@linear`.
+Numbers copy freely. A value of your own type moves from one owner to the next, and is copied only where its type is declared `@copyable` and you write `copy(value)`. Types that manage resources go further and declare themselves `@linear`.
 
 A linear value **must be consumed exactly once on every execution path**. You cannot duplicate it, you cannot reuse it after transfer, and you cannot silently forget to clean it up.
 
