@@ -100,7 +100,7 @@ true of a different implementation.
 | [0150](0150-float-math-crosses-a-checked-scalar-boundary.md) | Float math crosses a checked scalar boundary | Accepted; extends 0068; general-Float64 clause superseded by 0228 |
 | [0226](0226-float32-is-a-second-binary-floating-point-width.md) | Float32 is a second binary floating-point width | Accepted; extends 0018 and 0152 |
 | [0156](0156-every-declaration-of-an-extern-symbol-is-one-function.md) | Every declaration of an extern symbol is one function | Accepted; extends 0068 |
-| [0228](0228-a-granted-module-calls-c.md) | A granted module calls C | Accepted; supersedes clauses of 0068, 0150 and 0171; extends 0013, 0101 and 0229 |
+| [0228](0228-a-granted-module-calls-c.md) | A granted module calls C | Accepted; supersedes clauses of 0068, 0150 and 0171; extends 0013, 0101 and 0229; extended by 0246 |
 | [0151](0151-a-named-structure-literal-carries-a-written-type.md) | A named structure literal carries a written type | Accepted; refines 0041; extended by 0183 |
 | [0183](0183-a-structure-literal-may-take-its-other-fields-from-a-base.md) | A structure literal may take its other fields from a base | Accepted; extends 0151 and 0140 |
 | [0152](0152-an-integer-literals-type-is-settled-by-its-uses.md) | An integer literal's type is settled by its uses | Accepted; extends 0018, partially supersedes 0092; extended by 0176 and 0226; method-call fallback refined by 0192 |
@@ -183,6 +183,7 @@ true of a different implementation.
 | [0170](0170-a-marked-postfix-call-lends-its-receiver.md) | A marked postfix call lends its receiver | Accepted; extended by 0195 |
 | [0195](0195-a-walk-may-borrow-the-iterator-it-advances.md) | A walk may borrow the iterator it advances | Accepted; extends 0170 |
 | [0175](0175-a-borrowed-temporary-lives-until-the-end-of-its-statement.md) | A borrowed temporary lives until the end of its statement, and an interpolation borrows what it renders | Accepted; refines 0123 |
+| [0246](0246-a-call-holds-what-it-lends-until-it-runs.md) | A call holds what it lends until it runs | Accepted; extends 0034, 0204 and 0228 |
 
 ## Compiler invariants
 
@@ -234,7 +235,7 @@ ones most likely to be superseded as the compiler grows.
 | [0031](0031-fields-are-packed-at-their-natural-alignment.md) | Fields are packed at their natural alignment, in declaration order | Accepted; slot clause clarified by 0052; scalar-word consequence superseded by 0102 |
 | [0032](0032-a-module-is-a-directory.md) | A module is a directory, and the entry may be a file | Accepted; import-path clause superseded by 0111 |
 | [0033](0033-sealing-is-checked-not-omitted.md) | Sealing is checked, not omitted | Accepted; refined by 0146 |
-| [0034](0034-ownership-is-positions-and-a-graph.md) | Ownership is positions and a graph, not a type system feature | Accepted; refined by 0046 and 0114, extended by 0063; classification and copying clauses superseded by 0124 and 0125 |
+| [0034](0034-ownership-is-positions-and-a-graph.md) | Ownership is positions and a graph, not a type system feature | Accepted; refined by 0046 and 0114, extended by 0063 and 0246; classification and copying clauses superseded by 0124 and 0125 |
 | [0035](0035-representation-and-behaviour-are-declared-apart.md) | Representation and behaviour are declared apart | Accepted; extended by 0113 |
 | [0036](0036-formatting-is-comma-driven.md) | Formatting is comma-driven, and never rewrites a token | Accepted |
 | [0037](0037-comments-are-placed-by-a-token-cursor.md) | Comments are placed by a token cursor, not an attachment pass | Accepted |
@@ -300,7 +301,7 @@ ones most likely to be superseded as the compiler grows.
 | [0166](0166-an-array-compares-through-its-slice-view.md) | An array compares, hashes and prints through its slice view | Accepted; extends 0061 and 0137 |
 | [0172](0172-an-array-reports-its-length.md) | An array reports its length | Accepted; extends 0061, 0083 and 0137 |
 | [0192](0192-iterator-operations-belong-to-every-sequence.md) | Iterator operations belong to every sequence, and every iterator is a sequence | Accepted; builds on 0186 and 0187; refines 0148 and 0152; extended by 0203 |
-| [0204](0204-mir-verification-re-derives-storage-safety.md) | MIR verification re-derives the storage safety ownership promised | Accepted; extends 0049 and 0050 |
+| [0204](0204-mir-verification-re-derives-storage-safety.md) | MIR verification re-derives the storage safety ownership promised | Accepted; extends 0049 and 0050; extended by 0246 |
 
 ## Open questions
 

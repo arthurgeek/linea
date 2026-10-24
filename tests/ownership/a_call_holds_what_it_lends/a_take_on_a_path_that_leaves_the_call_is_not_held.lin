@@ -1,0 +1,50 @@
+import std.mem
+
+fn first_plus(a: mem.Vec[UInt8], extra: UInt8) -> UInt8 {
+    a[0] + extra
+}
+
+fn maybe(k: UInt8) -> Option[UInt8] {
+    if k > 5 {
+        .None
+    } else {
+        .Some(k)
+    }
+}
+
+fn returned_from_a_branch(k: UInt8) -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    let r = first_plus(
+        v,
+        if k == 1 {
+            v.release()
+            return 5
+        } else {
+            k
+        },
+    )
+    v.release()
+    r
+}
+
+fn returned_from_an_else(k: UInt8) -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    let r = first_plus(
+        v,
+        {
+            let j = maybe(k) else {
+                v.release()
+                return 9
+            }
+            j
+        },
+    )
+    v.release()
+    r
+}
+
+fn main() -> UInt8 {
+    returned_from_a_branch(1) + returned_from_a_branch(2) + returned_from_an_else(1) + returned_from_an_else(7)
+}

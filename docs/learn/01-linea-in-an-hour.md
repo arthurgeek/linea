@@ -799,6 +799,42 @@ ownership, and a number is copied instead. [Calling
 things](02-calling-things.md#-marks-a-receiver-the-call-will-change) shows the
 same table for dot calls.
 
+A call keeps what it reads until the function returns, because the function
+looks at its parameters while it runs, after every argument was passed. So one
+value cannot be both read and given away by the same call:
+
+```linea
+struct Parcel {
+    weight_grams: UInt64,
+}
+
+// `heavier` looks at `kept` after it has taken `posted`.
+fn heavier(kept: Parcel, sink posted: Parcel) -> UInt64 {
+    let sent = posted.weight_grams
+    if kept.weight_grams > sent { kept.weight_grams } else { sent }
+}
+
+fn main() -> UInt8 {
+    let gift = Parcel { weight_grams = 1200 }
+    UInt8(heavier(gift, gift) / 100)
+}
+```
+
+```
+error[O-Move]: `gift` is lent to `heavier` by another argument, and this takes it
+  --> heavier.lin:13:25
+   |
+13 |     UInt8(heavier(gift, gift) / 100)
+   |                   ---- lent to the call here
+   |                         ^^^^ this takes it while the call still needs it
+   |
+   = help: give `gift` away after the call, or lend it to both parameters
+```
+
+Rust refuses `heavier(&gift, gift)` the same way: it cannot move out of
+`gift` because it is borrowed. Pass two parcels, or post the gift after
+comparing it.
+
 ## Deciding and repeating
 
 ```linea

@@ -1,0 +1,8 @@
+error[O-Move]: `handle` is lent to `close_then_length` by another argument, and this takes it
+  --> tests/ffi/a_function_cannot_lend_and_take_one_handle/named/named.lin:17:31
+   |
+17 |     close_then_length(handle, handle)
+   |                       ------ lent to the call here
+   |                               ^^^^^^ this takes it while the call still needs it
+   |
+   = help: give `handle` away after the call, or lend it to both parameters

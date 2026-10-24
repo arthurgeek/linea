@@ -1,0 +1,47 @@
+import std.mem
+
+struct Bag { items: mem.Vec[UInt8] }
+
+fn released(sink b: mem.Vec[UInt8]) -> UInt8 {
+    b.release()
+    0
+}
+
+fn first_plus(a: mem.Vec[UInt8], extra: UInt8) -> UInt8 {
+    a[0] + extra
+}
+
+fn first_beside(a: mem.Vec[UInt8], sink b: Bag) -> UInt8 {
+    let Bag { items } = b
+    items.release()
+    a[0]
+}
+
+fn through_a_call() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    first_plus(v, released(v))
+}
+
+fn through_a_block() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    first_plus(
+        v,
+        {
+            let w = v
+            w.release()
+            0
+        },
+    )
+}
+
+fn through_a_literal() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    first_beside(v, Bag { items = v })
+}
+
+fn main() -> UInt8 {
+    through_a_call() + through_a_block() + through_a_literal()
+}

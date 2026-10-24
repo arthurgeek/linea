@@ -1,0 +1,25 @@
+error[O-Move]: `v` is lent to `first_plus` by another argument, and this takes it
+  --> tests/ownership/a_call_holds_what_it_lends/a_take_inside_another_argument_cannot_end_a_lend.lin:23:28
+   |
+23 |     first_plus(v, released(v))
+   |                - lent to the call here
+   |                            ^ this takes it while the call still needs it
+   |
+   = help: give `v` away after the call, or lend it to both parameters
+error[O-Move]: `v` is lent to `first_plus` by another argument, and this takes it
+  --> tests/ownership/a_call_holds_what_it_lends/a_take_inside_another_argument_cannot_end_a_lend.lin:32:21
+   |
+30 |         v,
+   |         - lent to the call here
+32 |             let w = v
+   |                     ^ this takes it while the call still needs it
+   |
+   = help: give `v` away after the call, or lend it to both parameters
+error[O-Move]: `v` is lent to `first_beside` by another argument, and this takes it
+  --> tests/ownership/a_call_holds_what_it_lends/a_take_inside_another_argument_cannot_end_a_lend.lin:42:35
+   |
+42 |     first_beside(v, Bag { items = v })
+   |                  - lent to the call here
+   |                                   ^ this takes it while the call still needs it
+   |
+   = help: give `v` away after the call, or lend it to both parameters

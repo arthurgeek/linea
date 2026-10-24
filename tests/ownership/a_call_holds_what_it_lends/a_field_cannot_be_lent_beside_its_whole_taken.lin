@@ -1,0 +1,33 @@
+import std.mem
+
+struct Bag { items: mem.Vec[UInt8] }
+
+fn first_after_release(a: mem.Vec[UInt8], sink b: Bag) -> UInt8 {
+    let Bag { items } = b
+    items.release()
+    a[0]
+}
+
+fn release_then_first(sink b: Bag, a: mem.Vec[UInt8]) -> UInt8 {
+    let Bag { items } = b
+    items.release()
+    a[0]
+}
+
+fn lent_first() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    let bag = Bag { items = v }
+    first_after_release(bag.items, bag)
+}
+
+fn taken_first() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    let bag = Bag { items = v }
+    release_then_first(bag, bag.items)
+}
+
+fn main() -> UInt8 {
+    lent_first() + taken_first()
+}

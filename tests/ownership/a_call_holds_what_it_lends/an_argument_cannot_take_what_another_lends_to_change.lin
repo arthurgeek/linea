@@ -1,0 +1,15 @@
+import std.mem
+
+fn grow_after_release(inout a: mem.Vec[UInt8], sink b: mem.Vec[UInt8]) -> UInt8 {
+    b.release()
+    &a.push(2).unwrap()
+    0
+}
+
+fn main() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    let answer = grow_after_release(&v, v)
+    v.release()
+    answer
+}
