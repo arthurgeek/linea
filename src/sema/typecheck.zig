@@ -31926,6 +31926,10 @@ const Checker = struct {
         }
 
         var delayed_refused = false;
+        // Lambdas whose bodies settled none of the parameters their result
+        // names, each with the parameter it was passed to and its bound.
+        var unsettled_lambdas: std.ArrayList(UnsettledLambda) = .empty;
+        defer unsettled_lambdas.deinit(self.gpa);
         var next_callback: usize = 0;
         while (next_callback < callbacks.ready.items.len) : (next_callback += 1) {
             const j = callbacks.ready.items[next_callback];
@@ -32015,6 +32019,7 @@ const Checker = struct {
                         // from it would answer each with itself, so they stay
                         // open and the call reports them as undetermined.
                         if (self.hasOpenParameter(supplied, settling)) {
+                            try unsettled_lambdas.append(self.gpa, .{ .value = value, .param = j, .bound = bound });
                             walked[j] = true;
                             continue;
                         }
@@ -32136,6 +32141,10 @@ const Checker = struct {
                 return null;
             }
         };
+
+        for (unsettled_lambdas.items) |lambda| {
+            if (!try self.settleUnsettledLambda(lambda, try paramType(self, d, lambda.param), settling)) return null;
+        }
 
         if (!context_refused and try self.reportShapeBeforeOpen(d, args, params, walked, settling)) return null;
         var left_open = false;
@@ -32423,6 +32432,47 @@ const Checker = struct {
                 return if (bounds.len == 1 and self.builder.get(bounds[0]) == .callable) bounds[0] else null;
             },
         };
+    }
+
+    const UnsettledLambda = struct { value: ExprId, param: usize, bound: TypeId };
+
+    /// Gives a lambda whose body settled nothing what the rest of the call
+    /// settled. Its signature, the type recorded for it and the callable it
+    /// converts to were read while the parameters its result names were
+    /// open, and are read again now. Where the call left one open, the call
+    /// reports it, and the lambda is left as it is. False where the lambda's
+    /// type disagrees with what the call settled, which is reported here.
+    fn settleUnsettledLambda(self: *Checker, lambda: UnsettledLambda, declared: TypeId, settling: []const Settling) std.mem.Allocator.Error!bool {
+        const signature = try self.callableContext(lambda.bound, settling);
+        if (self.hasOpenParameter(signature, settling)) return true;
+        const at = self.ast.withoutGroups(lambda.value);
+        const closure = self.res.closures.closureOf(at);
+        const descriptor = &self.closure_descriptors[closure.index()];
+        descriptor.signature = try self.callableContext(descriptor.signature, settling);
+        var got = self.builder.exprType(lambda.value);
+        // A structural callable records the signature the closure converts
+        // to, appended while the lambda was checked, so it is found among the
+        // values this call's arguments appended.
+        if (self.builder.get(got) == .callable) {
+            var index = self.function_values.items.len;
+            while (index > 0) {
+                index -= 1;
+                const value = &self.function_values.items[index];
+                if (value.at != at) continue;
+                value.signature = signature;
+                break;
+            }
+            got = signature;
+            _ = self.record(at, got);
+            if (at != lambda.value) _ = self.record(lambda.value, got);
+        }
+        for (settling) |s| {
+            var clash: ?Clash = null;
+            if (try self.settle(declared, got, s.owner, s.found, &clash)) continue;
+            try self.reportSettledTwice(lambda.value, self.ast.tokenText(s.generics[clash.?.index].name), clash.?, false, null);
+            return false;
+        }
+        return true;
     }
 
     fn callbackValueSignature(self: *Checker, ty: TypeId) std.mem.Allocator.Error!TypeId {

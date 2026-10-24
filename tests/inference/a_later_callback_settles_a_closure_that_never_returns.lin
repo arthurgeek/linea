@@ -1,0 +1,28 @@
+// The first closure never finishes, so it says nothing about `R`. The named
+// function after it settles `R` as `UInt8`, and that settles the closure's
+// result too, so the call is accepted.
+fn fallback[R](_never: fn() -> R, otherwise: fn() -> R) -> R {
+    otherwise()
+}
+
+fn nine() -> UInt8 {
+    9
+}
+
+fn main() -> UInt8 {
+    let from_named = fallback(
+        || {
+            loop {}
+        },
+        nine,
+    )
+    let from_closure = fallback(
+        || {
+            loop {}
+        },
+        || -> UInt8 {
+            1
+        },
+    )
+    from_named + from_closure
+}
