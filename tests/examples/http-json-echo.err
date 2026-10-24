@@ -1,1 +1,8 @@
-usage: http-json-echo --port PORT [--requests N]
+error: missing required option '--port'
+usage: http-json-echo [options]
+
+HTTP JSON echo server
+
+options:
+  --port <value>        port to listen on
+  --requests <value>    number of requests to serve

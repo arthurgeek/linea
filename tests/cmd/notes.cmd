@@ -91,50 +91,114 @@ An unknown command reports a usage error.
   $ ./notes nonexistent
   error: unknown command 'nonexistent'
   usage: notes <command> [options]
-  [2]
+  
+  Manage personal notes
+  
+  commands:
+    add <title>    add a new note
+    list           list matching notes
+    done <id>      mark a note as completed
+    remove <id>    delete a note by ID
+    show <id>      display single note details
+    help           display this help message
+  
+  options:
+    --json              shortcut for --format json
+    --table             shortcut for --format table
+    --format <value>    output format: table or json
+    --config <value>    path to configuration file (default: notes.cfg)
+  [64]
 
 A subcommand displays its own usage and options when requested.
 
   $ ./notes add --help
-  usage: notes add [options] <title>
+  usage: notes add <title> [options]
   
   add a new note
   
   options:
-    --tags <value>    comma-separated list of tags
+    --tags <value>        comma-separated list of tags
     --priority <value>    note priority (low, normal, high)
+  
+  global options:
+    --json                shortcut for --format json
+    --table               shortcut for --format table
+    --format <value>      output format: table or json
+    --config <value>      path to configuration file (default: notes.cfg)
 
 The help command followed by a subcommand also displays that subcommand's usage.
 
   $ ./notes help add
-  usage: notes add [options] <title>
+  usage: notes add <title> [options]
   
   add a new note
   
   options:
-    --tags <value>    comma-separated list of tags
+    --tags <value>        comma-separated list of tags
     --priority <value>    note priority (low, normal, high)
+  
+  global options:
+    --json                shortcut for --format json
+    --table               shortcut for --format table
+    --format <value>      output format: table or json
+    --config <value>      path to configuration file (default: notes.cfg)
 
 Omitting a required positional argument reports an error.
 
   $ ./notes add
   error: missing required argument 'title'
-  usage: notes <command> [options]
-  [2]
+  usage: notes add <title> [options]
+  
+  add a new note
+  
+  options:
+    --tags <value>        comma-separated list of tags
+    --priority <value>    note priority (low, normal, high)
+  
+  global options:
+    --json                shortcut for --format json
+    --table               shortcut for --format table
+    --format <value>      output format: table or json
+    --config <value>      path to configuration file (default: notes.cfg)
+  [64]
 
 Providing an invalid value for an option reports an error.
 
   $ ./notes add "Design review" --priority urgent
   error: invalid priority, expected 'low', 'normal', or 'high'
-  usage: notes <command> [options]
-  [2]
+  usage: notes add <title> [options]
+  
+  add a new note
+  
+  options:
+    --tags <value>        comma-separated list of tags
+    --priority <value>    note priority (low, normal, high)
+  
+  global options:
+    --json                shortcut for --format json
+    --table               shortcut for --format table
+    --format <value>      output format: table or json
+    --config <value>      path to configuration file (default: notes.cfg)
+  [64]
 
 Passing duplicate options across root and subcommand is rejected.
 
   $ ./notes --config a.cfg list --config b.cfg
   error: duplicate option '--config'
-  usage: notes <command> [options]
-  [2]
+  usage: notes list [options]
+  
+  list matching notes
+  
+  options:
+    --status <value>    filter by status (open, done, all)
+    --tag <value>       filter by tag
+  
+  global options:
+    --json              shortcut for --format json
+    --table             shortcut for --format table
+    --format <value>    output format: table or json
+    --config <value>    path to configuration file (default: notes.cfg)
+  [64]
 
 An explicit configuration file that does not exist is rejected.
 
@@ -146,35 +210,196 @@ Conflicting format options are rejected.
 
   $ ./notes list --json --table
   error: conflicting output format options: cannot specify both --json and --table
-  usage: notes <command> [options]
-  [2]
+  usage: notes list [options]
+  
+  list matching notes
+  
+  options:
+    --status <value>    filter by status (open, done, all)
+    --tag <value>       filter by tag
+  
+  global options:
+    --json              shortcut for --format json
+    --table             shortcut for --format table
+    --format <value>    output format: table or json
+    --config <value>    path to configuration file (default: notes.cfg)
+  [64]
 
 Providing an invalid note ID reports an error.
 
   $ ./notes done abc
   error: invalid note ID, expected a number
-  usage: notes <command> [options]
-  [2]
+  usage: notes done <id> [options]
+  
+  mark a note as completed
+  
+  global options:
+    --json              shortcut for --format json
+    --table             shortcut for --format table
+    --format <value>    output format: table or json
+    --config <value>    path to configuration file (default: notes.cfg)
+  [64]
 
 Adding a note with an empty title is rejected.
 
   $ ./notes add ""
   error: note title cannot be empty
-  usage: notes <command> [options]
-  [2]
+  usage: notes add <title> [options]
+  
+  add a new note
+  
+  options:
+    --tags <value>        comma-separated list of tags
+    --priority <value>    note priority (low, normal, high)
+  
+  global options:
+    --json                shortcut for --format json
+    --table               shortcut for --format table
+    --format <value>      output format: table or json
+    --config <value>      path to configuration file (default: notes.cfg)
+  [64]
 
 Extra unexpected positional arguments are rejected.
 
   $ ./notes add "My title" extra
   error: unexpected argument 'extra'
-  usage: notes <command> [options]
-  [2]
+  usage: notes add <title> [options]
+  
+  add a new note
+  
+  options:
+    --tags <value>        comma-separated list of tags
+    --priority <value>    note priority (low, normal, high)
+  
+  global options:
+    --json                shortcut for --format json
+    --table               shortcut for --format table
+    --format <value>      output format: table or json
+    --config <value>      path to configuration file (default: notes.cfg)
+  [64]
 
 Providing an invalid status filter reports an error.
 
   $ ./notes list --status invalid
   error: unknown status, expected 'open', 'done', or 'all'
+  usage: notes list [options]
+  
+  list matching notes
+  
+  options:
+    --status <value>    filter by status (open, done, all)
+    --tag <value>       filter by tag
+  
+  global options:
+    --json              shortcut for --format json
+    --table             shortcut for --format table
+    --format <value>    output format: table or json
+    --config <value>    path to configuration file (default: notes.cfg)
+  [64]
+
+
+An argument that is not UTF-8 is reported by its position.
+
+  $ ./notes add 'a'"$(printf '\303')"'z'
+  error: argument 2 is not valid UTF-8
+  usage: notes add <title> [options]
+  
+  add a new note
+  
+  options:
+    --tags <value>        comma-separated list of tags
+    --priority <value>    note priority (low, normal, high)
+  
+  global options:
+    --json                shortcut for --format json
+    --table               shortcut for --format table
+    --format <value>      output format: table or json
+    --config <value>      path to configuration file (default: notes.cfg)
+  [64]
+
+A value can be attached to its option with `=`.
+
+  $ ./notes list --format=json
+  [{"id":1,"title":"Write design doc","status":"done","priority":"high","tags":["work","spec"]},{"id":3,"title":"Review Linea PR","status":"open","priority":"normal","tags":["work"]}]
+
+An option followed by a declared flag has no value.
+
+  $ ./notes list --format --json
+  error: option '--format' requires a value
+  usage: notes list [options]
+  
+  list matching notes
+  
+  options:
+    --status <value>    filter by status (open, done, all)
+    --tag <value>       filter by tag
+  
+  global options:
+    --json              shortcut for --format json
+    --table             shortcut for --format table
+    --format <value>    output format: table or json
+    --config <value>    path to configuration file (default: notes.cfg)
+  [64]
+
+Help for a command that does not exist is an error.
+
+  $ ./notes help nosuch
+  error: unknown command 'nosuch'
   usage: notes <command> [options]
-  [2]
+  
+  Manage personal notes
+  
+  commands:
+    add <title>    add a new note
+    list           list matching notes
+    done <id>      mark a note as completed
+    remove <id>    delete a note by ID
+    show <id>      display single note details
+    help           display this help message
+  
+  options:
+    --json              shortcut for --format json
+    --table             shortcut for --format table
+    --format <value>    output format: table or json
+    --config <value>    path to configuration file (default: notes.cfg)
+  [64]
 
+After `--`, a word is an argument and never a command.
 
+  $ ./notes -- list
+  error: unexpected argument 'list'
+  usage: notes <command> [options]
+  
+  Manage personal notes
+  
+  commands:
+    add <title>    add a new note
+    list           list matching notes
+    done <id>      mark a note as completed
+    remove <id>    delete a note by ID
+    show <id>      display single note details
+    help           display this help message
+  
+  options:
+    --json              shortcut for --format json
+    --table             shortcut for --format table
+    --format <value>    output format: table or json
+    --config <value>    path to configuration file (default: notes.cfg)
+  [64]
+
+The help of a subcommand lists the global options too.
+
+  $ ./notes help list
+  usage: notes list [options]
+  
+  list matching notes
+  
+  options:
+    --status <value>    filter by status (open, done, all)
+    --tag <value>       filter by tag
+  
+  global options:
+    --json              shortcut for --format json
+    --table             shortcut for --format table
+    --format <value>    output format: table or json
+    --config <value>    path to configuration file (default: notes.cfg)

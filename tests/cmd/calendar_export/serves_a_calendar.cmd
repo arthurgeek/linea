@@ -51,3 +51,27 @@ naming the path value and why it could not be read.
   TIME WARN request method=GET path=/calendar/12000 status=400 bytes=35 duration=D error="the handler refused the request: 12000 is not a year from 1 to 9999"
   TIME WARN refused a year year=next
   TIME WARN request method=GET path=/calendar/next status=400 bytes=76 duration=D error="the handler refused the request: cannot read path value \"year\" from \"next\": invalid decimal syntax at byte 0"
+
+A port that is not a number is named in the error, before the usage.
+
+  $ ./calendar --port eighty
+  error: invalid value 'eighty' for option '--port'
+  usage: calendar-export [options]
+  
+  Calendar export server
+  
+  options:
+    --port <value>        port to listen on
+    --requests <value>    number of requests to serve
+  [64]
+
+Asking for help prints the help to standard output and succeeds.
+
+  $ ./calendar --help 2> /dev/null
+  usage: calendar-export [options]
+  
+  Calendar export server
+  
+  options:
+    --port <value>        port to listen on
+    --requests <value>    number of requests to serve

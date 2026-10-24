@@ -158,58 +158,58 @@ chooses.
 
 ## Declaring command-line options and commands
 
-`std.cli` reads process arguments against a command schema. The schema
-declares each flag, option and positional once; parsing answers a matches view
-of what was given, and the same schema writes the `--help` text:
+`std.cli` turns process arguments into a typed matches view from a command
+schema, generating aligned `--help` text and usage errors. Declaring a flag,
+option, positional or subcommand returns nothing: an allocation refused
+while the schema is built is kept on the command, and `parse` reports it as
+`CliError.Allocation`. A program parses its own arguments with
+`cmd.parse_args(env.args())`; this test parses a fixed list through
+`ArgCursor.from_slice`:
 
 ```linea
 import std.cli
-import std.env
-import std.io
+import std.testing
 
-fn main() -> Result[UInt8, io.IoError] {
+test fn a_schema_reads_options_in_every_spelling() {
     defer var cmd = cli.Command.new("notes", "Manage personal notes")
     &cmd.flag("loud", "--loud", "shout the summary", short: .Some("-l"))
+    &cmd.flag("quiet", "--quiet", "print nothing", short: .Some("-q"))
     &cmd.option("format", "--format", "table or json", default: .Some("table"))
-    &cmd.positional("title", "note title", required: false)
+    &cmd.positional("title", "note title", required: true)
 
-    // `parse_args` reads the process arguments against the schema; a usage
-    // error comes back as a `cli.CliError` that prints as a sentence.
-    defer let matches = cmd.parse_args(env.args()) else |error| {
-        io.eprintln("notes: {error}")
-        return .Ok(2)
+    // `-lq` is `-l -q`, and `--format=json` attaches the value with `=`.
+    let args = ["-lq", "--format=json", "Buy milk"]
+    var cursor = cli.ArgCursor.from_slice(args.as_slice())
+    defer let matches = cmd.parse(&cursor).unwrap()
+    testing.assert(matches.flag("loud") && matches.flag("quiet"), "a clustered flag was lost")?
+    testing.assert_eq(matches.option("format"), Option.Some("json"), "the attached value was lost")?
+    testing.assert_eq(matches.required_positional("title"), .Ok("Buy milk"), "the title was lost")?
+
+    // A word starting with `--` is never taken as an option's value.
+    let swallowed = ["--format", "--loud", "Buy milk"]
+    var refused = cli.ArgCursor.from_slice(swallowed.as_slice())
+    let error = match cmd.parse(&refused) {
+        Ok(m) => {
+            m.release()
+            "accepted"
+        },
+        Err(e) => match e {
+            MissingOptionValue(flag) => flag,
+            _ => "another error",
+        },
     }
-    if matches.is_help() {
-        defer let help = cmd.format_help(borrow matches)
-        io.print("{help}")?
-        return .Ok(0)
-    }
-    let title = matches.positional("title") else {
-        "untitled"
-    }
-    // `option` answers the schema's default when `--format` is not given.
-    let format = matches.option("format").unwrap()
-    io.println("{title} as {format}, loud: {matches.flag("loud")}")?
-    .Ok(0)
+    testing.assert_eq(error, "--format", "the option took the flag as its value")?
 }
 ```
 
-```text
-untitled as table, loud: false
+```
+ok    a_schema_reads_options_in_every_spelling
 ```
 
-Run with `--help`, the program prints the help `format_help` writes from the
-schema:
-
-<!-- guide: unchecked the output of the program above run with --help -->
-```text
-usage: notes [title] [options]
-
-Manage personal notes
-options:
-  -l, --loud          shout the summary
-  --format <value>    table or json (default: table)
-```
+`--` ends options and subcommands, so `notes -- --loud` takes `--loud` as the
+title, and `--format=--x` attaches a value that starts with `--`. `--help` or
+`-h` asks for help, and `cmd.format_help(borrow matches)` writes it for the
+deepest subcommand the arguments reached.
 
 Flags, options with defaults, optional and variadic positionals, and
 subcommands keep their definitions in one place. The [notes example](../../examples/notes/)
@@ -217,3 +217,4 @@ builds a multi-command CLI with table rendering, JSON export, and config
 defaults; [`bounded_echo`](../../examples/bounded_echo.lin) and
 [`tcp_echo`](../../examples/tcp_echo.lin) demonstrate servers and clients with
 subcommands, options, and variadic trailing arguments.
+

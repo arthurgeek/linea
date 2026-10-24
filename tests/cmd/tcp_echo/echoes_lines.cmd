@@ -1,17 +1,14 @@
 The echo example, built once and run as a server and as a client.
 
-A command that is not a mode and a port prints the usage and exits with 64.
+A command that is not a mode and a port names what is missing, prints the
+help of the command it reached and exits with 64.
 
   $ linea build "$LINEA_ROOT"/examples/tcp_echo.lin -o echo
   $ ./echo serve
-  usage: tcp_echo <command>
+  error: missing required argument 'port'
+  usage: tcp_echo serve <port> [clients]
   
-  Echo text over TCP
-  
-  commands:
-    serve <port> [clients]      listen for and echo connections
-    send <port> <message>...    send messages to an echo server
-  
+  listen for and echo connections
   [64]
 
   Echo text over TCP
@@ -59,3 +56,19 @@ Sending to a port nothing listens on reports a refused connection.
   $ sed -e "s/$port/PORT/" -e 's/errno [0-9]*/errno N/' err
   cannot connect to port PORT: Connect failed (ConnectionRefused) after 0 bytes; errno N
   $ cat out
+
+Asking for help prints the help of the command reached to standard output
+and succeeds.
+
+  $ ./echo --help 2> /dev/null
+  usage: tcp_echo <command>
+  
+  Echo text over TCP
+  
+  commands:
+    serve <port> [clients]      listen for and echo connections
+    send <port> <message>...    send messages to an echo server
+  $ ./echo send --help 2> /dev/null
+  usage: tcp_echo send <port> <message>...
+  
+  send messages to an echo server

@@ -1,6 +1,8 @@
 import std.cli
 import std.env
 import std.fs
+import std.io
+import std.mem
 import std.testing
 
 use cli.Command
@@ -68,7 +70,8 @@ fn parse_tags(tags_str: Str) -> Vec[String] {
     tags
 }
 
-// Build the declarative CLI command schema for notes.
+// Build the declarative CLI command schema for notes. A refused allocation
+// is kept on the command and reported when it parses or writes its help.
 pub fn build_cli() -> Command {
     var cmd = Command.new("notes", "Manage personal notes")
 
@@ -100,16 +103,37 @@ pub fn build_cli() -> Command {
     &show_cmd.positional("id", "note id", required: true)
     &cmd.subcommand(show_cmd)
 
-    var help_cmd = Command.new("help", "display this help message")
+    // Registering a subcommand named `help` makes `notes help add` ask for
+    // the help of `add`.
+    let help_cmd = Command.new("help", "display this help message")
     &cmd.subcommand(help_cmd)
 
     cmd
 }
 
+// Print `error` and the help of the command the arguments reached to
+// standard error, and return the exit status: 1 when memory ran out,
+// otherwise 64, the conventional status for a usage mistake.
+pub fn report(cmd: cli.Command, args: env.Args, error: cli.CliError) -> UInt8 {
+    io.eprintln("error: {error}")
+    if match read error { Allocation(_) => true, _ => false } {
+        return 1
+    }
+    var cursor = cli.ArgCursor.new(args)
+    let help = cmd.help_for_arguments(&cursor) else |reason| {
+        let refused: cli.CliError = .Allocation(reason)
+        io.eprintln("error: {refused}")
+        return 1
+    }
+    io.eprint(help.view())
+    help.release()
+    64
+}
+
 pub struct CliParser {}
 
 impl CliParser {
-    pub fn usage() -> String {
+    pub fn usage() -> Result[String, mem.Oom] {
         defer var cmd = build_cli()
         cmd.usage()
     }
@@ -120,14 +144,14 @@ impl CliParser {
         defer let matches = cmd.parse(&cursor)?
 
         if matches.is_help() {
-            let help_text = cmd.format_help(borrow matches)
+            let help_text = cmd.format_help(borrow matches)?
             return .Ok(.{ action = .Help(help_text), format = .None, config_path = .None })
         }
 
         // Determine global format with conflict checking
         var format: Option[OutputFormat] = .None
         if matches.flag("json") && matches.flag("table") {
-            return .Err(cli.CliError.invalid_value("conflicting output format options: cannot specify both --json and --table"))
+            return .Err(cli.CliError.InvalidValue("conflicting output format options: cannot specify both --json and --table"))
         }
         if matches.flag("json") {
             format = .Some(.Json)
@@ -137,10 +161,10 @@ impl CliParser {
         if matches.is_supplied("format") {
             let fmt_str = matches.option("format").unwrap()
             let parsed_fmt = OutputFormat.parse(fmt_str) else {
-                return .Err(cli.CliError.invalid_value("unknown format, expected 'table' or 'json'"))
+                return .Err(cli.CliError.InvalidValue("unknown format, expected 'table' or 'json'"))
             }
             if format.is_some() && format.unwrap() != parsed_fmt {
-                return .Err(cli.CliError.invalid_value("conflicting output format options"))
+                return .Err(cli.CliError.InvalidValue("conflicting output format options"))
             }
             format = .Some(parsed_fmt)
         }
@@ -150,7 +174,7 @@ impl CliParser {
         if matches.is_supplied("config") {
             let path_str = matches.option("config").unwrap()
             let parsed_p = fs.Path.from_str(path_str) else |_| {
-                return .Err(cli.CliError.invalid_value("invalid config path"))
+                return .Err(cli.CliError.InvalidValue("invalid config path"))
             }
             config_path = .Some(parsed_p)
         }
@@ -158,34 +182,29 @@ impl CliParser {
         let sub = match matches.subcommand() {
             Some(s) => s,
             None => {
-                let help_text = cmd.usage()
+                let help_text = cmd.usage()?
                 return .Ok(.{ action = .Help(help_text), format, config_path })
             },
-        }
-
-        if sub.name == "help" {
-            let help_text = cmd.usage()
-            return .Ok(.{ action = .Help(help_text), format, config_path })
         }
 
         let action = if sub.name == "add" {
             let title_str = sub.matches.required_positional("title")?
             if title_str.trim_ascii().length() == 0 {
-                return .Err(cli.CliError.invalid_value("note title cannot be empty"))
+                return .Err(cli.CliError.InvalidValue("note title cannot be empty"))
             }
             let parse_prio = |s: Str| -> Option[Priority] {
                 Priority.parse(s)
             }
             let prio = sub.matches.optional_parsed("priority", parse_prio) else |_| {
-                return .Err(cli.CliError.invalid_value("invalid priority, expected 'low', 'normal', or 'high'"))
+                return .Err(cli.CliError.InvalidValue("invalid priority, expected 'low', 'normal', or 'high'"))
             }
             let tags = match sub.matches.option("tags") {
                 Some(t_str) => parse_tags(t_str),
                 None => Vec.new(),
             }
-            let title = title_str.to_owned() else |_| {
+            let title = title_str.to_owned() else |reason| {
                 tags.release()
-                return .Err(cli.CliError.invalid_value("memory allocation failed while allocating title"))
+                return .Err(.Allocation(reason))
             }
             Action.Add(.{ title, priority = prio, tags })
         } else if sub.name == "list" {
@@ -195,7 +214,7 @@ impl CliParser {
                         Option.None
                     } else {
                         let parsed = Status.parse(s_str) else {
-                            return .Err(cli.CliError.invalid_value("unknown status, expected 'open', 'done', or 'all'"))
+                            return .Err(cli.CliError.InvalidValue("unknown status, expected 'open', 'done', or 'all'"))
                         }
                         Option.Some(parsed)
                     }
@@ -204,38 +223,36 @@ impl CliParser {
             }
             let tag: Option[String] = match sub.matches.option("tag") {
                 Some(t_str) => {
-                    let owned_t = t_str.to_owned() else |_| {
-                        return .Err(cli.CliError.invalid_value("memory allocation failed while allocating tag"))
-                    }
+                    let owned_t = t_str.to_owned()?
                     .Some(owned_t)
                 },
                 None => .None,
             }
             Action.List(.{ status, tag })
         } else if sub.name == "done" {
-            let id = sub.matches.positional_as[UInt64]("id") else |_| {
-                return .Err(cli.CliError.invalid_value("invalid note ID, expected a number"))
+            let id = sub.matches.get_positional[UInt64]("id") else |_| {
+                return .Err(cli.CliError.InvalidValue("invalid note ID, expected a number"))
             }
             Action.Done(id)
         } else if sub.name == "remove" {
-            let id = sub.matches.positional_as[UInt64]("id") else |_| {
-                return .Err(cli.CliError.invalid_value("invalid note ID, expected a number"))
+            let id = sub.matches.get_positional[UInt64]("id") else |_| {
+                return .Err(cli.CliError.InvalidValue("invalid note ID, expected a number"))
             }
             Action.Remove(id)
         } else if sub.name == "show" {
-            let id = sub.matches.positional_as[UInt64]("id") else |_| {
-                return .Err(cli.CliError.invalid_value("invalid note ID, expected a number"))
+            let id = sub.matches.get_positional[UInt64]("id") else |_| {
+                return .Err(cli.CliError.InvalidValue("invalid note ID, expected a number"))
             }
             Action.Show(.{ id })
         } else {
-            return .Err(cli.CliError.unknown_cmd(copy(sub.name)))
+            return .Err(.UnknownCommand(copy(sub.name)))
         }
 
         .Ok(.{ action, format, config_path })
     }
 
     test fn usage_contains_all_command_names() {
-        defer let text = CliParser.usage()
+        defer let text = CliParser.usage().unwrap()
         testing.assert(text.view().find("add").is_some(), "usage missing add")?
         testing.assert(text.view().find("list").is_some(), "usage missing list")?
         testing.assert(text.view().find("done").is_some(), "usage missing done")?

@@ -438,6 +438,8 @@ use mem.Lender
 use net.Accepted
 use net.Acceptor
 
+// Build the command schema. A refused allocation is kept on the command and
+// reported when it parses or writes its usage.
 fn build_cli() -> cli.Command {
     var cmd = cli.Command.new("tcp_echo", "Echo text over TCP")
     var serve_cmd = cli.Command.new("serve", "listen for and echo connections")
@@ -452,64 +454,91 @@ fn build_cli() -> cli.Command {
     cmd
 }
 
+// Print the usage to standard error and return 64, the conventional exit
+// status for a usage mistake, or 1 when memory ran out.
+fn usage_error(cmd: cli.Command) -> UInt8 {
+    let text = cmd.usage() else |reason| {
+        let error: cli.CliError = .Allocation(reason)
+        io.eprintln("error: {error}")
+        return 1
+    }
+    io.eprintln(text.view())
+    text.release()
+    64
+}
+
+// Print `error` and the help of the command the arguments reached to
+// standard error, and return the exit status: 1 when memory ran out,
+// otherwise 64, the conventional status for a usage mistake.
+fn report(cmd: cli.Command, args: env.Args, error: cli.CliError) -> UInt8 {
+    io.eprintln("error: {error}")
+    if match read error { Allocation(_) => true, _ => false } {
+        return 1
+    }
+    var cursor = cli.ArgCursor.new(args)
+    let help = cmd.help_for_arguments(&cursor) else |reason| {
+        let refused: cli.CliError = .Allocation(reason)
+        io.eprintln("error: {refused}")
+        return 1
+    }
+    io.eprint(help.view())
+    help.release()
+    64
+}
+
+// Print the help of the command `matches` reached to standard output, and
+// return the exit status: 0, or 1 when memory ran out or the write failed.
+fn print_help(cmd: cli.Command, matches: borrow cli.Matches) -> UInt8 {
+    let help = cmd.format_help(matches) else |reason| {
+        let refused: cli.CliError = .Allocation(reason)
+        io.eprintln("error: {refused}")
+        return 1
+    }
+    let written = io.print(help.view())
+    help.release()
+    match written {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}
+
 fn main() -> UInt8 {
     defer var cmd = build_cli()
     var cursor = cli.ArgCursor.new(env.args())
-    defer let matches = cmd.parse(&cursor) else |_| {
-        defer let u = cmd.usage()
-        io.eprintln(u.view())
-        return 64
+    defer let matches = cmd.parse(&cursor) else |error| {
+        return report(cmd, env.args(), error)
     }
     if matches.is_help() {
-        defer let u = cmd.usage()
-        io.eprintln(u.view())
-        return 64
+        return print_help(cmd, borrow matches)
     }
     let sub = matches.subcommand() else {
-        defer let u = cmd.usage()
-        io.eprintln(u.view())
-        return 64
+        return usage_error(cmd)
     }
     if sub.name == "serve" {
-        let port: UInt16 = sub.matches.positional_as("port") else |_| {
-            defer let u = cmd.usage()
-            io.eprintln(u.view())
-            return 64
+        let port: UInt16 = sub.matches.get_positional("port") else |error| {
+            return report(cmd, env.args(), error)
         }
-        let clients_opt: Option[UInt64] = match sub.matches.positional("clients") {
-            Some(s) => match s.parse[UInt64]() {
-                Ok(v) => .Some(v),
-                Err(_) => {
-                    defer let u = cmd.usage()
-                    io.eprintln(u.view())
-                    return 64
-                },
-            },
-            None => .None,
-        }
-        let clients = match clients_opt {
-            Some(c) => c,
-            None => UInt64.max,
+        // `clients` is optional: without it the server serves for ever.
+        let clients: UInt64 = if sub.matches.positional("clients").is_some() {
+            let count: UInt64 = sub.matches.get_positional("clients") else |error| {
+                return report(cmd, env.args(), error)
+            }
+            count
+        } else {
+            UInt64.max
         }
         return serve(port, clients)
     }
     if sub.name == "send" {
-        let port: UInt16 = sub.matches.positional_as("port") else |_| {
-            defer let u = cmd.usage()
-            io.eprintln(u.view())
-            return 64
+        let port: UInt16 = sub.matches.get_positional("port") else |error| {
+            return report(cmd, env.args(), error)
         }
-        defer let messages = sub.matches.positionals_all("message")
-        if messages.length() == 0 {
-            defer let u = cmd.usage()
-            io.eprintln(u.view())
-            return 64
+        defer let messages = sub.matches.positionals_all("message") else |reason| {
+            return report(cmd, env.args(), .Allocation(reason))
         }
         return send(port, messages)
     }
-    defer let u = cmd.usage()
-    io.eprintln(u.view())
-    64
+    usage_error(cmd)
 }
 
 fn serve(port: UInt16, clients: UInt64) -> UInt8 {

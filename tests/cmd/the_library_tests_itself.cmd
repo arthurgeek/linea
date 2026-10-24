@@ -2,8 +2,8 @@ The library tests itself.
 
   $ linea test "$LINEA_ROOT"/std > out
   $ cat out
+  ok    cli.cli_errors_display_what_went_wrong
   ok    cli.custom_usage_overrides_usage_output
-  ok    cli.duplicate_opt_creates_expected_variant
   ok    cli.expect_end_verifies_all_tokens_consumed
   ok    cli.find_flag_searches_hierarchically
   ok    cli.find_option_searches_hierarchically
@@ -16,11 +16,9 @@ The library tests itself.
   ok    cli.get_positional_parses_typed_positionals
   ok    cli.has_next_reports_available_tokens
   ok    cli.help_command_reports_active_help_target
-  ok    cli.invalid_value_creates_expected_variant
+  ok    cli.help_for_arguments_shows_the_command_a_refused_parse_reached
   ok    cli.is_help_reports_help_request
   ok    cli.is_supplied_distinguishes_user_options_from_defaults
-  ok    cli.missing_arg_creates_expected_variant
-  ok    cli.missing_value_creates_expected_variant
   ok    cli.new_creates_cursor_from_args
   ok    cli.new_creates_system_command
   ok    cli.new_in_creates_custom_allocator_command
@@ -30,12 +28,22 @@ The library tests itself.
   ok    cli.optional_parsed_converts_present_option_or_none
   ok    cli.options_all_collects_repeatable_options
   ok    cli.parse_args_parses_process_arguments
-  ok    cli.parse_cursor_aliases_parse
+  ok    cli.parse_descends_into_nested_subcommands
+  ok    cli.parse_does_not_take_a_declared_switch_as_a_value
+  ok    cli.parse_ends_subcommand_matching_at_a_double_dash
   ok    cli.parse_handles_optional_and_variadic_positionals
   ok    cli.parse_handles_subcommand_variadic_positionals
+  ok    cli.parse_lets_a_declared_short_h_name_its_own_switch
+  ok    cli.parse_names_a_missing_required_option_by_its_flag
   ok    cli.parse_parses_cursor_into_matches
+  ok    cli.parse_reads_help_only_where_a_help_subcommand_is_registered
+  ok    cli.parse_records_global_switches_where_they_are_declared
+  ok    cli.parse_refuses_a_value_attached_to_a_flag
+  ok    cli.parse_reports_every_refused_allocation
+  ok    cli.parse_splits_short_clusters_and_attached_short_values
+  ok    cli.parse_takes_a_lone_dash_as_a_positional
+  ok    cli.parse_takes_an_attached_long_option_value
   ok    cli.peek_inspects_token_without_advancing
-  ok    cli.positional_as_parses_typed_positional
   ok    cli.positional_registers_positional_arguments
   ok    cli.positional_retrieves_positional_arguments
   ok    cli.positionals_all_collects_variadic_positionals
@@ -47,10 +55,9 @@ The library tests itself.
   ok    cli.subcommand_name_returns_subcommand_identifier
   ok    cli.subcommand_registers_nested_commands
   ok    cli.subcommand_returns_matched_subcommand_record
-  ok    cli.unexpected_arg_creates_expected_variant
-  ok    cli.unknown_cmd_creates_expected_variant
-  ok    cli.unknown_opt_creates_expected_variant
+  ok    cli.usage_aligns_columns_by_characters
   ok    cli.usage_formats_aligned_help_documentation
+  ok    cli.usage_lists_positionals_before_the_subcommand
   ok    cmp.unit_values_are_equivalent
   ok    collections.a_deleted_collision_bucket_is_reused_without_allocation
   ok    collections.a_drain_settles_linear_values_without_a_release_implementation
@@ -1413,4 +1420,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1410 passed, 0 failed
+  1417 passed, 0 failed

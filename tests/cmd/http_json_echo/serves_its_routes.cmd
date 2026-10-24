@@ -119,3 +119,27 @@ it stops.
   TIME INFO request method=POST path=/echo request_id=11 status=200 bytes=25 duration=D
   TIME INFO request method=GET path=/stats request_id=12 status=200 bytes=12 duration=D
   TIME INFO stopped echoed=2
+
+A port that is not a number is named in the error, before the usage.
+
+  $ ./echo --port eighty
+  error: invalid value 'eighty' for option '--port'
+  usage: http-json-echo [options]
+  
+  HTTP JSON echo server
+  
+  options:
+    --port <value>        port to listen on
+    --requests <value>    number of requests to serve
+  [64]
+
+Asking for help prints the help to standard output and succeeds.
+
+  $ ./echo --help 2> /dev/null
+  usage: http-json-echo [options]
+  
+  HTTP JSON echo server
+  
+  options:
+    --port <value>        port to listen on
+    --requests <value>    number of requests to serve
