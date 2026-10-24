@@ -3,3 +3,6 @@ error[N-Undefined]: undefined name `hash`
   |
 4 |     hash.digest()
   |     ^^^^ no binding with this name is in scope
+  |
+  = help: write `import crypto.hash`: a module is reached through the import that names it
+  = help: write `import vault.hash`: a module is reached through the import that names it

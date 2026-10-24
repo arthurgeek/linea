@@ -3,3 +3,5 @@ error[N-Undefined]: undefined name `ledger`
   |
 7 |     ledger.size()
   |     ^^^^^^ no binding with this name is in scope
+  |
+  = help: write `import ledger`: a module is reached through the import that names it
