@@ -175,11 +175,21 @@ pub const RawAccesses = struct {
         return checked;
     }
 
-    /// Whether `d` opens a closure: its first type parameter is the callback,
-    /// which must be callable as the closure's `S`.
+    /// The fields of `ffi.Errno`, in the order its declaration lists them:
+    /// `value`, the `R` C returned, and `code`, the `errno` the runtime read
+    /// after the call. The checker certifies the library's declaration
+    /// against these names and positions, and lowering writes an `Errno`'s
+    /// fields by them.
+    pub const ErrnoField = enum(u32) { value, code };
+
+    /// The fields of `mem.Closure`, in the order its declaration lists them.
+    /// The checker certifies the library's declaration against these names
+    /// and positions, and lowering reads a closure's fields by them.
+    pub const ClosureField = enum(u32) { entry, settle, at, len, storage };
+
     /// The `R` of `ffi.Errno[R]` where `t` is one, asked of a pool being
-    /// built or of a finished typing. An `extern` answering `t` returns `R`
-    /// from C.
+    /// built or of a finished typing, or null where `t` is any other type.
+    /// An `extern` answering `t` returns `R` from C.
     pub fn errnoValue(self: RawAccesses, pool: anytype, t: TypeId) ?TypeId {
         if (self.errno == .none) return null;
         const instance = pool.instanceOf(t) orelse return null;
@@ -201,6 +211,8 @@ pub const RawAccesses = struct {
         return try pool.internCallable(params, value, contracts, declared.invocation);
     }
 
+    /// Whether `d` opens a closure: its first type parameter is the callback,
+    /// which must be callable as the closure's `S`.
     pub fn opensClosure(self: RawAccesses, d: DeclId) bool {
         return d != DeclId.none and (d == self.closure_open_in or d == self.closure_open);
     }

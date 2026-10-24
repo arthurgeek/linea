@@ -1670,16 +1670,17 @@ pub const Ast = struct {
 
     /// The arguments a call wrote, appended as a rewrite must write them: each
     /// preceded by the name it gave the parameter it fills, and each taken by
-    /// its extent.
+    /// its span.
     ///
     /// One routine, because two rewrites write a postfix call out -- the
     /// server's offer and the harness's -- and they have to write the same
     /// call. An argument that names its parameter says which parameter takes
     /// it, so dropping the name leaves the values to be paired by position, and
-    /// where the two orders differ that is a different program. By the extent
-    /// for the reason every rewrite that moves an expression uses it: a comment
-    /// written after an argument reaches the end of its line, so slicing at the
-    /// span comments out whatever the splice puts after it.
+    /// where the two orders differ that is a different program. The span stops
+    /// before the comments that end an argument's range, which every rewrite
+    /// that moves an expression needs: a comment written after an argument
+    /// reaches the end of its line, so a slice holding it comments out
+    /// whatever the splice puts after it.
     ///
     /// `separated` is whether anything already sits inside the brackets, which
     /// is what decides the first separator. Nothing here writes the receiver:
@@ -1700,7 +1701,7 @@ pub const Ast = struct {
                 try out.appendSlice(gpa, self.tokenText(name));
                 try out.appendSlice(gpa, ": ");
             }
-            try out.appendSlice(gpa, self.exprExtent(a).slice(source));
+            try out.appendSlice(gpa, self.exprSpan(a).slice(source));
         }
     }
 
@@ -1848,7 +1849,7 @@ pub const Ast = struct {
         return self.parts[0].file;
     }
 
-    /// Byte extent of a node, derived from its token range in constant time.
+    /// Byte extent of a node, derived from its token range.
     pub fn exprSpan(self: *const Ast, id: ExprId) Span {
         return self.rangeSpan(self.exprTokens(id));
     }
@@ -1857,42 +1858,38 @@ pub const Ast = struct {
         return self.rangeSpan(self.stmtTokens(id));
     }
 
-    /// The same extent, back to the last token of the node that is not trivia.
-    ///
-    /// A node's token range ends at the next token the parser had not
-    /// consumed, and the parser walks past comments -- so a comment written
-    /// after an expression sits inside that expression's range. Underlining
-    /// one is harmless, which is why `exprSpan` does not care. *Cutting text*
-    /// at one is not: a comment reaches the end of its line, so a rewrite that
-    /// splices the slice anywhere but where it came from comments out whatever
-    /// followed it there, and what fails is the compiler being blamed for
-    /// refusing the program the splice truncated.
-    ///
-    /// One routine rather than one per rewrite. Every rewrite that moves an
-    /// expression had this exposure; a second answer to "where does this
-    /// expression end for the purpose of moving it" is the drift that put it
-    /// in all of them.
-    pub fn exprExtent(self: *const Ast, id: ExprId) Span {
-        const r = self.exprTokens(id);
-        var end = r.end.index();
-        while (end > r.start.index() and self.tokenTag(TokenId.at(end - 1)).isTrivia()) {
-            end -= 1;
-        }
-        return self.rangeSpan(.{ .start = r.start, .end = TokenId.at(end) });
+    /// The spaces and tabs that begin the line holding token `t`, which is
+    /// the indentation a line written beside it takes.
+    pub fn lineIndentation(self: *const Ast, t: TokenId) []const u8 {
+        const source = self.partOf(t).source;
+        const at = self.tokenSpan(t).start;
+        const start = if (std.mem.lastIndexOfScalar(u8, source[0..at], '\n')) |nl| nl + 1 else 0;
+        var end = start;
+        while (end < at and (source[end] == ' ' or source[end] == '\t')) end += 1;
+        return source[start..end];
+    }
+
+    /// Where a line written after statement `id` is inserted: past the
+    /// statement and past a comment on the same line after it, which
+    /// describes the statement and stays on its line.
+    pub fn stmtLineEnd(self: *const Ast, id: StmtId) u32 {
+        const r = self.stmtTokens(id);
+        const end = self.stmtSpan(id).end;
+        // The first of the comments that end the statement's range.
+        var t = r.end.index();
+        while (t > r.start.index() and self.tokenTag(TokenId.at(t - 1)).isTrivia()) t -= 1;
+        if (t == r.end.index()) return end;
+        const comment = self.tokenSpan(TokenId.at(t));
+        const between = self.partOf(r.start).source[end..comment.start];
+        if (std.mem.indexOfScalar(u8, between, '\n') != null) return end;
+        return comment.end;
     }
 
     /// The byte extent of a run of tokens, which is what a diagnostic about a
-    /// construct spelled as several of them underlines.
+    /// construct spelled as several of them underlines: from its first token
+    /// to its last that is not a comment, as `TokenRange.span` gives it.
     pub fn rangeSpan(self: *const Ast, r: TokenRange) Span {
-        const spans = self.tokens.items(.span);
-        if (r.len() == 0) {
-            const at = spans[r.start.index()].start;
-            return .{ .start = at, .end = at };
-        }
-        return .{
-            .start = spans[r.start.index()].start,
-            .end = spans[r.end.index() - 1].end,
-        };
+        return r.span(self.tokens.items(.tag), self.tokens.items(.span));
     }
 
     /// Accumulates nodes while parsing. The parser owns one and discards it,

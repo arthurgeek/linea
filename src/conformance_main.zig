@@ -1997,7 +1997,7 @@ fn checkWalkConsumes(
         const d = node_mod.DeclId.at(@intCast(i));
         const body = ast.declBody(d);
         if (body == ExprId.none or !writtenIn(ast, body, text)) continue;
-        try bodies.append(gpa, .{ .at = ast.exprExtent(body), .decl = d });
+        try bodies.append(gpa, .{ .at = ast.exprSpan(body), .decl = d });
     }
     std.mem.sort(Body, bodies.items, {}, struct {
         fn before(_: void, a: Body, b: Body) bool {
@@ -2015,7 +2015,7 @@ fn checkWalkConsumes(
         const element = typing.exprType(f.args[0]);
         if (element == .poison) continue;
 
-        const at = ast.exprExtent(id);
+        const at = ast.exprSpan(id);
         const after = std.sort.upperBound(Body, bodies.items, at.start, struct {
             fn order(key: u32, b: Body) std.math.Order {
                 return std.math.order(key, b.at.start);
@@ -2027,10 +2027,10 @@ fn checkWalkConsumes(
             .none;
         if (!typing.mustConsumeWithin(owner, element)) continue;
 
-        // By the extent rather than the span: a comment written after the
+        // The span stops before the comments ending the range: a comment written after the
         // closing brace sits inside the body's range, and cutting there
         // deletes it from the text that follows.
-        const body = ast.exprExtent(f.args[1]);
+        const body = ast.exprSpan(f.args[1]);
         if (body.end > text.len) continue;
         any = true;
 
@@ -2045,7 +2045,7 @@ fn checkWalkConsumes(
         try mustRefuse(gpa, failures, display_path, "O-Move", "a walk hands over one element per iteration", try std.mem.concat(gpa, u8, &.{
             text[0 .. body.start + 1],
             "\nlet _linea_taken = ",
-            ast.exprExtent(f.args[0]).slice(text),
+            ast.exprSpan(f.args[0]).slice(text),
             "\n",
             text[body.start + 1 ..],
         }), kind);
@@ -2108,11 +2108,11 @@ fn checkWalkLends(
         // question every time it is written.
         if (ast.exprTag(f.callee) != .name_ref) continue;
 
-        const at = ast.exprExtent(id);
+        const at = ast.exprSpan(id);
         if (at.end > text.len) continue;
-        const binder = ast.exprExtent(f.args[0]);
-        const body = ast.exprExtent(f.args[1]);
-        const head = ast.exprExtent(f.callee).slice(text);
+        const binder = ast.exprSpan(f.args[0]);
+        const body = ast.exprSpan(f.args[1]);
+        const head = ast.exprSpan(f.callee).slice(text);
 
         // The binder respelled, because a body that binds nothing leaves the
         // name unread and [N-Unused] would answer for the mutation instead of

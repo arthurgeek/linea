@@ -1,0 +1,7 @@
+error[T-TryAnswer]: this `?` may return `Result[UInt8, Str]`, and the function answers with `()`
+ --> tests/try/the_answer_follows_the_comment_ending_the_last_statement.lin:6:17
+  |
+6 |     let count = parse()?
+  |                 ^^^^^^^^ `?` returns from the function it is written in
+  |
+  = help: make the function return `Result[(), Str]` and end it with `.Ok(())`, or handle the failure here with `let count = … else |_| { … }` in place of `?`

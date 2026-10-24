@@ -1,0 +1,7 @@
+error[T-TryAnswer]: this `?` may return `Result[UInt8, Str]`, and the function answers with `()`
+ --> tests/try/a_question_in_a_one_line_body_puts_the_answer_on_a_line_of_its_own.lin:5:23
+  |
+5 | fn record() { let _ = parse()? }
+  |                       ^^^^^^^^ `?` returns from the function it is written in
+  |
+  = help: make the function return `Result[(), Str]` and end it with `.Ok(())`, or handle the failure here with `let _ = … else |_| { … }` in place of `?`

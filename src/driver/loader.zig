@@ -5825,6 +5825,71 @@ test "implementationChoice runs an array's selection through its slice view" {
     try testing.expect(viewed > 0);
 }
 
+test "the answer a fix adds after a body's last statement takes that statement's indentation and follows its comment" {
+    const cases = [_]struct { code: Code, text: []const u8, after: []const u8, inserts: []const u8 }{
+        // A body on one line: the answer goes on the next line, indented as
+        // that line is, and nothing that precedes the statement on its line
+        // is written again.
+        .{
+            .code = .t_try_answer,
+            .text =
+            \\fn parse() -> Result[UInt8, Str] {
+            \\    .Ok(1)
+            \\}
+            \\
+            \\fn record() { let _ = parse()? }
+            \\
+            \\fn main() -> UInt8 {
+            \\    record()
+            \\    0
+            \\}
+            ,
+            .after = "parse()?",
+            .inserts = "\n.Ok(())",
+        },
+        // A comment on the statement's line stays on it, ahead of the answer.
+        .{
+            .code = .t_try_answer,
+            .text =
+            \\fn parse() -> Result[UInt8, Str] {
+            \\    .Ok(1)
+            \\}
+            \\
+            \\fn record() {
+            \\    let count = parse()?
+            \\    let _ = count // recorded
+            \\    // a comment on the line after
+            \\}
+            \\
+            \\fn main() -> UInt8 {
+            \\    record()
+            \\    0
+            \\}
+            ,
+            .after = "// recorded",
+            .inserts = "\n    .Ok(())",
+        },
+    };
+    var prefix = try LibraryPrefix.init(testing.allocator);
+    defer prefix.deinit();
+    for (cases) |case| {
+        var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var sink: Sink = .init(gpa);
+        _ = try checkedWithLibrary(&prefix, gpa, &sink, case.text);
+        const at: u32 = @intCast(std.mem.indexOf(u8, case.text, case.after).? + case.after.len);
+        var found = false;
+        for (sink.items()) |d| {
+            if (d.code != case.code) continue;
+            for (d.fixes) |fix| for (fix.edits) |edit| {
+                if (edit.span.start == at and edit.span.end == at and std.mem.eql(u8, edit.text, case.inserts)) found = true;
+            };
+        }
+        try testing.expect(found);
+    }
+}
+
 test "the library's erased closure declarations are found and certified" {
     var prefix = try LibraryPrefix.init(testing.allocator);
     defer prefix.deinit();

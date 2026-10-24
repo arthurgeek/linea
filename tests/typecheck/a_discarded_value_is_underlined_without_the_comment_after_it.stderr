@@ -1,0 +1,5 @@
+error[T-Discard]: this expression produces a `Bool` that is discarded
+ --> tests/typecheck/a_discarded_value_is_underlined_without_the_comment_after_it.lin:6:5
+  |
+6 |     ready() // a trailing comment
+  |     ^^^^^^^ bind it with `let _ =` to discard it deliberately

@@ -1209,32 +1209,20 @@ const Checker = struct {
         // After the statement that binds it, at that statement's indentation.
         if (s != node.StmtId.none and !self.ast.stmtIsDeferredBinding(s)) {
             const first = self.ast.stmtTokens(s).start;
-            const source = self.ast.partOf(first).source;
-            const end = self.ast.stmtSpan(s).end;
-            return .{ .text = text, .edit = .{ .file = self.ast.fileOf(first), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, "\n{s}{s}", .{ indentationOf(source, self.ast.tokenSpan(first).start), statement }) } };
+            const end = self.ast.stmtLineEnd(s);
+            return .{ .text = text, .edit = .{ .file = self.ast.fileOf(first), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, "\n{s}{s}", .{ self.ast.lineIndentation(first), statement }) } };
         }
         // First in the body of the function whose parameter it is.
         if (self.res.kindOf(b) == .parameter and self.current_owner != .none and self.ast.declTag(self.current_owner) == .function) {
             const body = self.ast.declBody(self.current_owner);
             if (body != ExprId.none and self.ast.exprTag(body) == .block) {
                 const opening = self.ast.exprTokens(body).start;
-                const source = self.ast.partOf(opening).source;
-                const name_token = self.ast.declName(self.current_owner);
-                const fn_indent = indentationOf(source, self.ast.tokenSpan(name_token).start);
+                const fn_indent = self.ast.lineIndentation(self.ast.declName(self.current_owner));
                 const end = self.ast.tokenSpan(opening).end;
                 return .{ .text = text, .edit = .{ .file = self.ast.fileOf(opening), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, "\n{s}    {s}", .{ fn_indent, statement }) } };
             }
         }
         return .{ .text = text, .edit = null };
-    }
-
-    /// The spaces and tabs a line of `source` begins with, for the line
-    /// holding byte `at`.
-    fn indentationOf(source: []const u8, at: u32) []const u8 {
-        const start = if (std.mem.lastIndexOfScalar(u8, source[0..at], '\n')) |nl| nl + 1 else 0;
-        var end = start;
-        while (end < source.len and (source[end] == ' ' or source[end] == '\t')) end += 1;
-        return source[start..end];
     }
 
     /// Names a binding for a message: by its name in backticks, or, for one a

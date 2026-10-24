@@ -627,7 +627,7 @@ const Renderer = struct {
         const count = try self.componentCount(case);
         var closing = tokens.end.index();
         while (closing > tokens.start.index() and self.ast.tokenTag(token.TokenId.at(closing - 1)).isTrivia()) closing -= 1;
-        const tail_end = self.ast.exprExtent(block.tail).end;
+        const tail_end = self.ast.exprSpan(block.tail).end;
         const trailing_end = if (closing > tokens.start.index() and self.ast.tokenTag(token.TokenId.at(closing - 1)) == .r_brace)
             self.ast.tokenSpan(token.TokenId.at(closing - 1)).start
         else
@@ -642,7 +642,7 @@ const Renderer = struct {
             try self.endOrigin(component_origin);
         }
         try self.append("let _: () = ");
-        const finalization = self.ast.exprExtent(plan.finalization);
+        const finalization = self.ast.exprSpan(plan.finalization);
         try self.renderRange(finalization.start, finalization.end, .{ .case = case });
         try self.append(";\n");
         if (self.ast.declTag(self.target) == .struct_) {

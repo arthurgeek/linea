@@ -607,13 +607,13 @@ fn visibleCallOwner(gpa: std.mem.Allocator, semantics: Semantics, call: ExprId, 
     var unavailable: std.AutoHashMapUnmanaged(BindingId, void) = .empty;
     defer unavailable.deinit(gpa);
     const part = ast.partOfFile(semantics.file) orelse return null;
-    const call_start = ast.exprExtent(call).start;
+    const call_start = ast.exprSpan(call).start;
     for (part.stmt_start..part.stmt_end) |raw| {
         const statement = node.StmtId.at(@intCast(raw));
         const tag = ast.stmtTag(statement);
         if (tag != .let_decl and !tag.isDestructure()) continue;
         const data = ast.stmtData(statement);
-        if (data.init == .none or ast.exprExtent(data.init).end <= call_start) continue;
+        if (data.init == .none or ast.exprSpan(data.init).end <= call_start) continue;
         if (tag == .let_decl) {
             const binding = res.bindingOf(statement);
             if (binding != .none) try unavailable.put(gpa, binding, {});
@@ -689,10 +689,10 @@ fn postfixWrittenOut(gpa: std.mem.Allocator, semantics: Semantics, text: []const
         // elsewhere is not one it can rewrite.
         if (ast.fileOf(ast.exprTokens(call).start) != semantics.file) continue;
 
-        // By the extent rather than the span: a comment written after the call
+        // The span stops before the comments ending the range: a comment written after the call
         // sits inside its range, and cutting there deletes it from the text
         // that follows.
-        const at = ast.exprExtent(call);
+        const at = ast.exprSpan(call);
         if (at.end > text.len) continue;
 
         // Qualify the function through a visible namespace and pass the
@@ -716,10 +716,10 @@ fn postfixWrittenOut(gpa: std.mem.Allocator, semantics: Semantics, text: []const
         for (p.args[0..receiver], 0..) |a, i| {
             if (i > 0) try out.appendSlice(gpa, ", ");
             if (i == 0 and marked) try out.append(gpa, '&');
-            // By the extent again, one argument down: a comment inside the last
+            // The span stops before trailing comments here too, one argument down: a comment inside the last
             // argument's range would be written ahead of the paren that closes
             // the written-out call and comment it out.
-            try out.appendSlice(gpa, ast.exprExtent(a).slice(text));
+            try out.appendSlice(gpa, ast.exprSpan(a).slice(text));
         }
         // The names the call wrote, carried across by the tree's own renderer,
         // which is the one the server's offer writes through as well.
@@ -754,20 +754,21 @@ fn desugarLogic(
 ) !?[]const u8 {
     for (0..ast.exprCount()) |i| {
         const id = ExprId.at(@intCast(i));
-        // By the extent rather than the span, here and at every operand below:
-        // a comment written after the operator sits inside its range, so
+        // The span stops before the comments ending the range, here and at
+        // every operand below: a comment written after the operator sits
+        // inside its range, so
         // cutting there deletes it and slicing an operand there writes it
         // inside the braces the conditional form puts around one -- where it
         // comments out the brace that closes them.
-        const at = ast.exprExtent(id);
+        const at = ast.exprSpan(id);
         if (at.end > text.len) continue;
 
         var out: std.Io.Writer.Allocating = .init(gpa);
         switch (ast.exprTag(id)) {
             .logical_and, .logical_or => {
                 const b = ast.binary(id);
-                const lhs = ast.exprExtent(b.lhs).slice(text);
-                const rhs = ast.exprExtent(b.rhs).slice(text);
+                const lhs = ast.exprSpan(b.lhs).slice(text);
+                const rhs = ast.exprSpan(b.rhs).slice(text);
                 const short = ast.exprTag(id) == .logical_and;
                 // The operand becomes a control header, where a named
                 // literal's brace would open the arm; parentheses delimit it.
@@ -784,7 +785,7 @@ fn desugarLogic(
                 // abandoning the file: another operator in it may still be one
                 // this rewrite can claim.
                 if (holdsACallThroughATrait(ast, typing, operand)) continue;
-                try out.writer.print("{s} == false", .{ast.exprExtent(operand).slice(text)});
+                try out.writer.print("{s} == false", .{ast.exprSpan(operand).slice(text)});
             },
             else => continue,
         }
@@ -816,7 +817,7 @@ fn writeOutDeferLet(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !
 
         const keyword = ast.tokenSpan(ast.stmtTokens(s).start);
         const binding = ast.tokenSpan(ast.stmtMain(s));
-        const end = ast.exprExtent(d.init).end;
+        const end = ast.exprSpan(d.init).end;
         if (end > text.len) continue;
 
         var line = keyword.start;
@@ -975,12 +976,12 @@ test "a defer let and the pair it is written out as reach one verdict" {
 /// **Bound:** one pass over the calls the checker recorded going through a
 /// trait, per `!` this walk reaches before it rewrites an operator.
 fn holdsACallThroughATrait(ast: *const Ast, typing: *const Typing, operand: ExprId) bool {
-    const within = ast.exprExtent(operand);
+    const within = ast.exprSpan(operand);
     for (typing.calls) |call| {
         const rec = call.selection.implementation orelse continue;
         if (!rec.ofATrait()) continue;
         if (call.at.index() >= ast.exprCount()) continue;
-        const at = ast.exprExtent(call.at);
+        const at = ast.exprSpan(call.at);
         if (at.start >= within.start and at.end <= within.end) return true;
     }
     return false;
@@ -1372,18 +1373,18 @@ fn rotateMatchArms(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?
             // The last arm first, and every other arm one place later.
             const from = (a + count - 1) % count;
             if (a > 0) try arms.writer.writeAll(",\n");
-            // By the extent rather than the span: a comment written after an
+            // The span stops before the comments ending the range: a comment written after an
             // arm sits inside that arm's range, and writing it between two
             // rotated arms would comment out the comma that separates them.
             try arms.writer.print("{s} => {s}", .{
-                ast.exprExtent(args[from * 2]).slice(text),
-                ast.exprExtent(args[from * 2 + 1]).slice(text),
+                ast.exprSpan(args[from * 2]).slice(text),
+                ast.exprSpan(args[from * 2 + 1]).slice(text),
             });
         }
 
         try regions.append(gpa, .{
             .start = ast.exprSpan(args[0]).start,
-            .end = ast.exprExtent(args[args.len - 1]).end,
+            .end = ast.exprSpan(args[args.len - 1]).end,
             .arms = arms.written(),
         });
     }
@@ -1460,11 +1461,11 @@ fn permuteNamedArguments(
         const count = names.len - first;
         if (count < 2) continue;
 
-        // By the extent rather than the span: a comment written after an
+        // The span stops before the comments ending the range: a comment written after an
         // argument sits inside that argument's range, and moving it into the
         // middle of the list comments out every argument after it.
         const start = ast.tokenSpan(names[first]).start;
-        const end = ast.exprExtent(args[args.len - 1]).end;
+        const end = ast.exprSpan(args[args.len - 1]).end;
 
         // The tree is of the text handed in, which is what makes a span an
         // index into it. Stated rather than guarded around: a tree of some
@@ -1479,7 +1480,7 @@ fn permuteNamedArguments(
             if (a > 0) try out.writer.writeAll(", ");
             try out.writer.print("{s}: {s}", .{
                 ast.tokenSpan(names[from]).slice(text),
-                ast.exprExtent(args[from]).slice(text),
+                ast.exprSpan(args[from]).slice(text),
             });
         }
 

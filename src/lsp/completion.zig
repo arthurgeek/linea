@@ -447,7 +447,7 @@ fn namesShadowingImports(
         if (statement != .none) {
             const init = ast.stmtData(statement).init;
             if (init != .none) {
-                const extent = ast.exprExtent(init);
+                const extent = ast.exprSpan(init);
                 if (extent.start <= offset and offset <= extent.end) continue;
             }
         }

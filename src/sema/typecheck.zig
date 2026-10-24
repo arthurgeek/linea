@@ -52,6 +52,8 @@ const article = @import("../support/article.zig");
 const constfold = @import("constfold.zig");
 const open_types_mod = @import("open_types.zig");
 const RawAccesses = @import("intrinsics.zig").RawAccesses;
+const ClosureField = RawAccesses.ClosureField;
+const ErrnoField = RawAccesses.ErrnoField;
 const FloatMath = @import("intrinsics.zig").FloatMath;
 const intrinsics = @import("intrinsics.zig");
 const usefulness = @import("usefulness.zig");
@@ -5379,6 +5381,10 @@ const Checker = struct {
     retained: ?*const RetainedTyping = null,
     program: *const ExpandedProgram,
     raw_accesses: RawAccesses,
+    /// Whether the library's `ffi.Errno` failed its certificate. An `extern`
+    /// answering one then answers poison, so the refused declaration is the
+    /// one error reported.
+    errno_refused: bool = false,
     float_math_candidates: FloatMath,
     float_math: FloatMath = .{},
     ast: *const Ast,
@@ -18181,11 +18187,8 @@ const Checker = struct {
         if (statements.len == 0) return false;
         const last = statements[statements.len - 1];
         const first = self.ast.stmtTokens(last).start;
-        const source = self.ast.partOf(first).source;
-        const start = self.ast.tokenSpan(first).start;
-        const line = if (std.mem.lastIndexOfScalar(u8, source[0..start], '\n')) |nl| nl + 1 else 0;
-        const end = self.ast.stmtSpan(last).end;
-        try edits.append(self.sink.arena, .{ .file = self.ast.fileOf(first), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(self.sink.arena, "\n{s}{s}(())", .{ source[line..start], wrap }) });
+        const end = self.ast.stmtLineEnd(last);
+        try edits.append(self.sink.arena, .{ .file = self.ast.fileOf(first), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(self.sink.arena, "\n{s}{s}(())", .{ self.ast.lineIndentation(first), wrap }) });
         return true;
     }
 
@@ -19162,13 +19165,33 @@ const Checker = struct {
             }
             if (!valid) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Storage certificate requires private move-only typed buffer containment", "declare Storage[T, A] with buffer: Option[Buffer[A]], allocator: A, at: UInt64, and len: UInt64 fields", null);
         }
+        if (raw.errno != .none) {
+            const d = raw.errno;
+            if (!self.certifiedErrno(declarations, d)) {
+                self.errno_refused = true;
+                self.reportAtToken(.t_extern, self.ast.declName(d), "the Errno certificate requires the value C returned and the errno read after it", "declare Errno[R] with value: R and code: Int32 fields, in that order", null);
+            }
+        }
         if (raw.closure != .none) {
             const d = raw.closure;
             if (!self.certifiedClosure(declarations, d)) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Closure certificate requires an opaque affine entry, release, address, length and buffer", "declare Closure[S, A] with entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, and storage: Option[Buffer[A]] fields", null);
         }
     }
 
-    /// Lowering reads a `Closure`'s entry, address and length by name and
+    /// Lowering writes an `Errno`'s fields by position: what C returned, of
+    /// the type parameter, then the `errno` read after the call.
+    fn certifiedErrno(self: *Checker, declarations: types_mod.Returns, d: DeclId) bool {
+        const ty = declarations.get(d);
+        if (self.ast.declTag(d) != .struct_ or self.ast.declTypeParams(d).len != 1 or
+            self.builder.fieldCount(ty) != std.enums.values(ErrnoField).len) return false;
+        for (std.enums.values(ErrnoField)) |field| {
+            if (!std.mem.eql(u8, self.builder.fieldName(ty, @intFromEnum(field)), @tagName(field))) return false;
+        }
+        return self.builder.fieldType(ty, @intFromEnum(ErrnoField.value)) == self.param_types[d.index()][0] and
+            self.builder.fieldType(ty, @intFromEnum(ErrnoField.code)) == .i32;
+    }
+
+    /// Lowering reads a `Closure`'s entry, address and length by position and
     /// generates what its entry and release point at, so the library's
     /// declaration must hold exactly those fields: a private field-less
     /// `ClosureEntry[S]`, the release signature, and the buffer that owns the
@@ -19178,29 +19201,29 @@ const Checker = struct {
         const ty = declarations.get(d);
         if (self.ast.declTag(d) != .struct_ or self.ast.declVisibility(d) != .opaque_ or
             self.ast.declOwnershipPolicy(d) != .affine or self.ast.declTypeParams(d).len != 2 or
-            self.builder.fieldCount(ty) != 5 or raw.closure_entry_type == .none or raw.buffer == .none) return false;
+            self.builder.fieldCount(ty) != std.enums.values(ClosureField).len or raw.closure_entry_type == .none or raw.buffer == .none) return false;
         const entry_decl = raw.closure_entry_type;
         const entry_template = declarations.get(entry_decl);
         if (self.ast.declTag(entry_decl) != .struct_ or self.ast.declVisibility(entry_decl) != .private or
             self.ast.declTypeParams(entry_decl).len != 1 or self.builder.fieldCount(entry_template) != 0) return false;
         const signature = self.param_types[d.index()][0];
         const allocator = self.param_types[d.index()][1];
-        const names = [_][]const u8{ "entry", "settle", "at", "len", "storage" };
-        for (names, 0..) |name, i| {
-            if (!std.mem.eql(u8, self.builder.fieldName(ty, @intCast(i)), name)) return false;
+        for (std.enums.values(ClosureField)) |field| {
+            if (!std.mem.eql(u8, self.builder.fieldName(ty, @intFromEnum(field)), @tagName(field))) return false;
         }
-        const entry = self.builder.fieldType(ty, 0);
+        const entry = self.builder.fieldType(ty, @intFromEnum(ClosureField.entry));
         const entry_args = self.builder.appliedTo(entry);
         if (self.builder.view().declOfType(entry) != entry_decl or entry_args.len != 1 or entry_args[0] != signature) return false;
-        const release = switch (self.builder.get(self.builder.fieldType(ty, 1))) {
+        const release = switch (self.builder.get(self.builder.fieldType(ty, @intFromEnum(ClosureField.settle)))) {
             .callable => |release| release,
             else => return false,
         };
         const release_params = self.builder.callableParams(release);
         if (release.result != .unit or release.invocation != .read or release_params.len != 2 or
             release_params[0].ty != .u64 or release_params[1].ty != .u64) return false;
-        if (self.builder.fieldType(ty, 2) != .u64 or self.builder.fieldType(ty, 3) != .u64) return false;
-        const optional = self.builder.fieldType(ty, 4);
+        if (self.builder.fieldType(ty, @intFromEnum(ClosureField.at)) != .u64 or
+            self.builder.fieldType(ty, @intFromEnum(ClosureField.len)) != .u64) return false;
+        const optional = self.builder.fieldType(ty, @intFromEnum(ClosureField.storage));
         const optional_args = self.builder.appliedTo(optional);
         if (self.option_decl == null or self.builder.view().declOfType(optional) != self.option_decl or optional_args.len != 1) return false;
         const buffer_args = self.builder.appliedTo(optional_args[0]);
@@ -19434,8 +19457,10 @@ const Checker = struct {
         // An `extern` answering `ffi.Errno[R]` returns `R` from C; the
         // `errno` beside it is read by the runtime after the call.
         const declared_answer = try self.declaredResultType(d);
-        const answers = if (category == .t_extern)
-            self.raw_accesses.errnoValue(&self.builder, declared_answer) orelse declared_answer
+        const answers = if (category != .t_extern)
+            declared_answer
+        else if (self.raw_accesses.errnoValue(&self.builder, declared_answer)) |value|
+            (if (self.errno_refused) TypeId.poison else value)
         else
             declared_answer;
         // An answer that can point somewhere, such as a `CText`, gets its
@@ -37990,6 +38015,46 @@ test "the closure certificate accepts the library's shape and rejects a changed 
         resolved.resolution.prelude = resolved.expanded.declsOf(.from(0));
         _ = try typecheckTree(gpa, &resolved, &sink);
         try testing.expectEqual(!case.valid, diagnosticSays(&sink, .t_borrow_contract, "Closure certificate"));
+    }
+}
+
+test "the Errno certificate accepts the library's shape and rejects a changed one" {
+    const cases = [_]struct { fields: []const u8, valid: bool }{
+        .{ .fields = "value: R, code: Int32", .valid = true },
+        .{ .fields = "value: R, status: Int32", .valid = false },
+        .{ .fields = "result: R, code: Int32", .valid = false },
+        .{ .fields = "value: R, code: Int64", .valid = false },
+        .{ .fields = "value: R, code: R", .valid = false },
+        .{ .fields = "code: Int32, value: R", .valid = false },
+        .{ .fields = "value: R, code: Int32, extra: Int32", .valid = false },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var sink = Sink.init(gpa);
+        const source: Source = .{ .path = "errno.lin", .text = try std.fmt.allocPrint(gpa,
+            \\@opaque
+            \\struct Errno[R] {{ {s} }}
+            \\extern fn seed() -> Errno[Int32]
+            \\fn main() -> UInt8 {{
+            \\    let _answer = seed()
+            \\    0
+            \\}}
+        , .{case.fields}) };
+        var interner: Interner = .empty;
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+        var resolved = try resolveTree(gpa, &ast, &sink);
+        resolved.modules[0].name = "ffi";
+        resolved.modules[0].library = true;
+        resolved.modules[0].externs = true;
+        resolved.resolution.prelude = resolved.expanded.declsOf(.from(0));
+        _ = try typecheckTree(gpa, &resolved, &sink);
+        try testing.expectEqual(!case.valid, diagnosticSays(&sink, .t_extern, "Errno certificate"));
+        // The refused declaration is the one error: the extern answering it
+        // is not reported again.
+        try testing.expectEqual(@as(u32, @intFromBool(!case.valid)), sink.error_count);
     }
 }
 
