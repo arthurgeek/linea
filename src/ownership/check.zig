@@ -1208,7 +1208,7 @@ const Checker = struct {
         if (s != node.StmtId.none and !self.ast.stmtIsDeferredBinding(s)) {
             const first = self.ast.stmtTokens(s).start;
             const source = self.ast.partOf(first).source;
-            const end = self.ast.stmtSpan(s).end;
+            const end = self.ast.stmtLineEnd(s);
             return .{ .text = text, .edit = .{ .file = self.ast.fileOf(first), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, "\n{s}{s}", .{ indentationOf(source, self.ast.tokenSpan(first).start), statement }) } };
         }
         // First in the body of the function whose parameter it is.

@@ -57,7 +57,7 @@ fn siteOf(semantics: Semantics, id: ExprId, text: []const u8) ?Site {
     if (id == ExprId.none or ast.exprTag(id) != .for_) return null;
     if (typing.exprType(id) != .unit) return null;
 
-    const at = ast.exprExtent(id);
+    const at = ast.exprSpan(id);
     if (at.end > text.len) return null;
 
     const f = ast.call(id);
@@ -155,14 +155,14 @@ fn dropWalksHoldingATemporary(
     var held_temporaries = semantics.typing.borrowed_temporaries.keyIterator();
     while (held_temporaries.next()) |id| {
         if (id.index() < part.expr_start or id.index() >= part.expr_end) continue;
-        try starts.append(gpa, ast.exprExtent(id.*).start);
+        try starts.append(gpa, ast.exprSpan(id.*).start);
     }
     if (starts.items.len == 0) return;
     std.mem.sort(u32, starts.items, {}, std.sort.asc(u32));
 
     var kept: usize = 0;
     for (sites.items) |site| {
-        const head = ast.exprExtent(ast.call(site.walk).callee);
+        const head = ast.exprSpan(ast.call(site.walk).callee);
         const first = std.sort.lowerBound(u32, starts.items, head.start, struct {
             fn order(key: u32, item: u32) std.math.Order {
                 return std.math.order(key, item);
@@ -248,7 +248,7 @@ const Writer = struct {
         // By the extent rather than the span: a comment written after a part
         // sits inside its range, and carried into a line of the loop it would
         // comment out what follows.
-        const at = self.semantics.ast.exprExtent(id);
+        const at = self.semantics.ast.exprSpan(id);
         try self.span(at.start, at.end);
     }
 

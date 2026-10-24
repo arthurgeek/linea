@@ -813,7 +813,7 @@ pub fn exitSpan(ast: *const Ast, exit: ExprId) Span {
     if (ast.exprTag(exit) != .block) return ast.exprSpan(exit);
     // The token range runs through trailing comments, so the brace is the
     // last token that is not trivia.
-    const span = ast.exprExtent(exit);
+    const span = ast.exprSpan(exit);
     if (span.end > span.start) return .{ .start = span.end - 1, .end = span.end };
     return span;
 }

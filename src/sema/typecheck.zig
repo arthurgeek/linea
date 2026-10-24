@@ -18152,7 +18152,7 @@ const Checker = struct {
         const source = self.ast.partOf(first).source;
         const start = self.ast.tokenSpan(first).start;
         const line = if (std.mem.lastIndexOfScalar(u8, source[0..start], '\n')) |nl| nl + 1 else 0;
-        const end = self.ast.stmtSpan(last).end;
+        const end = self.ast.stmtLineEnd(last);
         try edits.append(self.sink.arena, .{ .file = self.ast.fileOf(first), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(self.sink.arena, "\n{s}{s}(())", .{ source[line..start], wrap }) });
         return true;
     }

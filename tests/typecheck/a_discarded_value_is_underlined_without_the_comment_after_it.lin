@@ -1,0 +1,8 @@
+fn ready() -> Bool {
+    true
+}
+
+fn main() -> UInt8 {
+    ready() // a trailing comment
+    0
+}

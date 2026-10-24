@@ -32,7 +32,45 @@ pub const TokenRange = struct {
     pub fn len(self: TokenRange) u32 {
         return self.end.index() - self.start.index();
     }
+
+    /// The byte extent of these tokens, from the first to the last that is
+    /// not trivia. An empty range collapses to the position where its tokens
+    /// would have started, which is what a diagnostic about something missing
+    /// points at.
+    ///
+    /// A node's range ends at the next token the parser had not consumed, and
+    /// the parser walks past comments, so a comment written after a node sits
+    /// inside the node's range. The extent stops before it: an underline
+    /// covers what the node says, and a rewrite that cuts the node's text out
+    /// and splices it elsewhere must not carry a comment that would comment
+    /// out whatever follows it there.
+    pub fn span(self: TokenRange, tags: []const Tag, spans: []const Span) Span {
+        var end = self.end.index();
+        while (end > self.start.index() and tags[end - 1].isTrivia()) end -= 1;
+        if (end == self.start.index()) {
+            const at = spans[self.start.index()].start;
+            return .{ .start = at, .end = at };
+        }
+        return .{ .start = spans[self.start.index()].start, .end = spans[end - 1].end };
+    }
 };
+
+test "a range's span stops before the comments that end it" {
+    // `f() // note` and the token after it: the range holds the comment, the
+    // span ends at `)`.
+    const tags = [_]Tag{ .identifier, .l_paren, .r_paren, .comment, .identifier };
+    const spans = [_]Span{
+        .{ .start = 0, .end = 1 },
+        .{ .start = 1, .end = 2 },
+        .{ .start = 2, .end = 3 },
+        .{ .start = 4, .end = 11 },
+        .{ .start = 12, .end = 13 },
+    };
+    const call: TokenRange = .{ .start = TokenId.at(0), .end = TokenId.at(4) };
+    try testing.expectEqual(Span{ .start = 0, .end = 3 }, call.span(&tags, &spans));
+    const missing: TokenRange = .{ .start = TokenId.at(4), .end = TokenId.at(4) };
+    try testing.expectEqual(Span{ .start = 12, .end = 12 }, missing.span(&tags, &spans));
+}
 
 // Makes every test build compile the tests `Tag` holds, including a build
 // filtered to one of them, which would otherwise never look inside it.

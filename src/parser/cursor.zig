@@ -218,18 +218,10 @@ pub const Cursor = struct {
         try testing.expectEqualStrings("\t ", c.lineIndent(c.current()).?);
     }
 
-    /// The byte extent of a half-open token range. An empty range collapses to
-    /// the position where its tokens would have started, which is what a
-    /// diagnostic about something missing needs to point at.
+    /// The byte extent of a half-open token range, as `TokenRange.span`
+    /// gives it.
     pub fn spanOf(self: *const Cursor, range: TokenRange) Span {
-        if (range.len() == 0) {
-            const offset = self.spans[range.start.index()].start;
-            return .{ .start = offset, .end = offset };
-        }
-        return .{
-            .start = self.spans[range.start.index()].start,
-            .end = self.spans[range.end.index() - 1].end,
-        };
+        return range.span(self.tags, self.spans);
     }
 
     pub fn at(self: *const Cursor, tag: Tag) bool {

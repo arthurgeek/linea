@@ -1214,8 +1214,8 @@ fn narrowedRange(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?[]
             // flag on any other arm covers one value on its own, which is the
             // premise the narrowing rests on.
             const ends = ast.rangeEnds(pattern);
-            const lo_at = ast.exprExtent(ends.lhs);
-            const hi_at = ast.exprExtent(ends.rhs);
+            const lo_at = ast.exprSpan(ends.lhs);
+            const hi_at = ast.exprSpan(ends.rhs);
             const lo = std.fmt.parseInt(i128, text[lo_at.start..lo_at.end], 10) catch null;
             const hi = std.fmt.parseInt(i128, text[hi_at.start..hi_at.end], 10) catch null;
             if (lo != null and lo == hi) continue;
@@ -1329,7 +1329,7 @@ fn summedNewtype(gpa: std.mem.Allocator, ast: *const Ast, types_of: *const Typin
         if (!types_of.mayCopy(t)) continue;
 
         const stmt_at = ast.stmtSpan(s);
-        const init_at = ast.exprExtent(init);
+        const init_at = ast.exprSpan(init);
         const gap = try lineGap(gpa, text, stmt_at.start);
 
         return try std.mem.concat(gpa, u8, &.{
@@ -2026,7 +2026,8 @@ test "a destructure sharing a line with a trailing comment is still summed corre
     // Two statements share a line, so `lineGap` answers with a single space
     // rather than a newline, and the initialiser is trailed by a comment with
     // nothing else on its line -- the one combination where a splice cut at
-    // `exprSpan` rather than `exprExtent` lands the second half of the
+    // the end of the initialiser's token range, which holds the comment,
+    // rather than at its last significant token lands the second half of the
     // rewrite on the same line as the comment, which then comments it out.
     const out = (try mutated(gpa, .summed_newtype,
         \\@copyable type Percent = UInt8 where it in 0..=99
