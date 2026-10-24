@@ -1,0 +1,5 @@
+error[T-Impl]: `Gauge` provides `twice`, and an implementation does not supply it
+  --> tests/traits/a_dropped_member_leaves_the_brace_beside_it.lin:19:8
+   |
+19 |     fn twice(self: Self) -> UInt16 { UInt16(self.litres) * 3 } }
+   |        ^^^^^ drop it: every type implementing the trait runs the trait's own body

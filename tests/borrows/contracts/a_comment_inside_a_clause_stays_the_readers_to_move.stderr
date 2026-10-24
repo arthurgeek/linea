@@ -1,0 +1,9 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/borrows/contracts/a_comment_inside_a_clause_stays_the_readers_to_move.lin:7:5
+  |
+7 |     copy(b)
+  |     ^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: the value comes from `b`; write `where carries(a, b)` to say so (a comment inside the `where` clause stays the reader's to move)
+  = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
+  = help: the types this names are reached with `import std.mem`

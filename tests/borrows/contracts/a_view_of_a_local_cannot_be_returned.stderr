@@ -5,4 +5,4 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |     ^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
    = help: `line` belongs to `greeting` and ends when it returns, so nothing returned may observe it
-   = help: `line` owns the text already: put `line` itself where its view is, declaring `String` as the result
+   = help: `line` owns the text already: put `line` itself where its view is, declaring `String` as the result (every exit returns `String` then, and one returns `"hello"`)
