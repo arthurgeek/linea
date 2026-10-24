@@ -1,0 +1,26 @@
+// The closure's `return` names `fallback`, which is not declared, so what the
+// closure answers with is unknown. The `?` still gives `parse`'s payload, a
+// `UInt8`, and binding it as a `Bool` is a mistake of its own.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
+
+fn main() -> UInt8 {
+    let next = || {
+        if parse().is_err() {
+            return fallback
+        }
+        let n = parse()?
+        let flag: Bool = n
+        if flag {
+            1
+        } else {
+            0
+        }
+    }
+    next()
+}

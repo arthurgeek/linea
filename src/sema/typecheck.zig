@@ -1381,9 +1381,13 @@ fn typecheckInternal(
             // body checked against no expectation and a function whose return
             // type lowering never learns.
             const written_return = ast.declReturnRef(d);
+            c.answer_unknown = false;
             const want: ?Expected = if (written_return.wasWritten()) blk: {
                 const ty = try c.declaredResultType(d);
-                if (ty == .poison) break :blk null;
+                if (ty == .poison) {
+                    c.answer_unknown = true;
+                    break :blk null;
+                }
                 break :blk .{
                     .ty = ty,
                     .at = c.locOfWritten(written_return),
@@ -5762,9 +5766,16 @@ const Checker = struct {
     /// What the function being checked declares it returns, so a `return`
     /// answers to that rather than to its surroundings.
     current_return: ?Expected = null,
-    /// Who a `?` reached here answers to: `.closure` while a closure's body
-    /// is checked, `.function` elsewhere. What its reports name.
+    /// Who a `?` reached here answers to: a closure while a closure's body
+    /// is checked, the function elsewhere. What its reports name.
     try_answerer: TryAnswerer = .function,
+    /// Whether the function being checked wrote a result type that was
+    /// refused, so a `?` in it has nothing known to answer to.
+    answer_unknown: bool = false,
+    /// Whether a parameter's default is being checked. A default is a
+    /// constant, so a `?` in it answers to nothing and is refused as not
+    /// constant.
+    checking_default: bool = false,
     /// In a closure that writes no result type and has none from its context,
     /// what its first `return` carrying a value settled the result to. Each
     /// later `return` and the body's own value answer to it, as a loop's
@@ -8306,7 +8317,10 @@ const Checker = struct {
             .reason = .parameter,
         };
         if (try self.rejectParameterDefault(site.expr, site.ty)) return;
+        const was_default = self.checking_default;
+        self.checking_default = true;
         _ = try self.check(site.expr, expected);
+        self.checking_default = was_default;
         if (self.builder.exprType(site.expr) == .poison) return;
         const folded = try self.worth(site.expr);
         // An `inout` default is refused for that alone, which says all there
@@ -17992,6 +18006,11 @@ const Checker = struct {
         // and one answer to it.
         self.unwindsEveryLoop();
 
+        // A default answers to nothing, and is refused as not constant where
+        // it is declared; a function whose result was refused has nothing
+        // known to answer to. Either way the `?` still gives its payload.
+        if (self.checking_default or (self.answer_unknown and self.try_answerer == .function)) return self.expect(id, self.payloadTypeOf(carrier), expected);
+
         const want = self.returnAnswer() orelse {
             if (self.deferred_tries) |deferred| {
                 try deferred.append(self.gpa, .{ .id = id, .statement = self.statementAt(id) });
@@ -18022,8 +18041,9 @@ const Checker = struct {
         // `Option` carries nothing, so nothing about a payload reaches the
         // caller. A `Result`'s failing path carries an error that does, which
         // is the whole of the asymmetry.
-        // An answer that is already an error's consequence is not judged.
-        if (answer == .poison) return false;
+        // An answer that is already an error's consequence is not judged,
+        // and the `?` still gives its payload.
+        if (answer == .poison) return true;
         const answers = self.carrierOf(answer);
         if (answers == null) {
             _ = try self.reportTryWithoutCarrier(id, t, carrier, answer, answerer, where);
@@ -18034,8 +18054,8 @@ const Checker = struct {
                 .t_try_answer,
                 id,
                 "this `?` may return `{s}`, and the {s} answers with `{s}`",
-                .{ (try self.typeName(t)), @tagName(answerer), (try self.typeName(answer)) },
-                try std.fmt.allocPrint(self.sink.arena, "`?` returns from the {s} it is written in", .{@tagName(answerer)}),
+                .{ (try self.typeName(t)), answerer.noun(), (try self.typeName(answer)) },
+                try std.fmt.allocPrint(self.sink.arena, "`?` returns from the {s} it is written in", .{answerer.noun()}),
             );
             return false;
         }
@@ -18139,9 +18159,22 @@ const Checker = struct {
     /// is the whole value of, where it is one.
     const UnansweredTry = struct { id: ExprId, statement: ?StatementValue };
 
-    /// What answers a `?`: the function it is written in, or a closure whose
-    /// result its body decided.
-    const TryAnswerer = enum { function, closure };
+    /// What answers a `?`: the function it is written in, a closure, or a
+    /// closure whose result the callable type it is passed as fixes, which
+    /// cannot be changed to carry the failure.
+    const TryAnswerer = enum {
+        function,
+        closure,
+        given_closure,
+
+        /// What a report calls the answerer.
+        fn noun(self: TryAnswerer) []const u8 {
+            return switch (self) {
+                .function => "function",
+                .closure, .given_closure => "closure",
+            };
+        }
+    };
 
     /// The statement `id` is the whole value of, where it is one.
     fn statementAt(self: *const Checker, id: ExprId) ?StatementValue {
@@ -18156,7 +18189,7 @@ const Checker = struct {
         const written_answer = try self.helpName(answered, &missing);
         const subject = switch (answerer) {
             .function => "make the function return `",
-            .closure => "write the closure's result as `-> ",
+            .closure, .given_closure => "write the closure's result as `-> ",
         };
         const written_signature = switch (carrier.kind) {
             .result => try std.fmt.allocPrint(self.sink.arena, "{s}Result[{s}, {s}]` and end it with `.Ok({s})`", .{ subject, written_answer, try self.helpName(self.errorTypeOf(carrier), &missing), ending }),
@@ -18167,7 +18200,17 @@ const Checker = struct {
         // initialiser of a `let`, or a `let _` written for a value kept for
         // its effect.
         const binder = if (carrier.kind == .result) " |_|" else "";
-        const help = if (where) |statement| try std.fmt.allocPrint(self.sink.arena, "{s}, or handle the {s} here with `{s} {s} = … else{s} {{ … }}` in place of `?`", .{
+        const failure_word = if (carrier.kind == .result) "failure" else "absence";
+        const help = if (answerer == .given_closure) if (where) |statement| try std.fmt.allocPrint(self.sink.arena, "the call this closure is passed to fixes its result as `{s}`, so handle the {s} here with `{s} {s} = … else{s} {{ … }}` in place of `?`", .{
+            answered_name,
+            failure_word,
+            statement.keyword,
+            statement.name,
+            binder,
+        }) else try std.fmt.allocPrint(self.sink.arena, "the call this closure is passed to fixes its result as `{s}`, so handle the {s} here, with `else` or a `match`, in place of `?`", .{
+            answered_name,
+            failure_word,
+        }) else if (where) |statement| try std.fmt.allocPrint(self.sink.arena, "{s}, or handle the {s} here with `{s} {s} = … else{s} {{ … }}` in place of `?`", .{
             signature,
             if (carrier.kind == .result) "failure" else "absence",
             statement.keyword,
@@ -18175,8 +18218,8 @@ const Checker = struct {
             binder,
         }) else signature;
         const labels = try self.sink.arena.alloc(Label, 1);
-        labels[0] = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id), .message = try std.fmt.allocPrint(self.sink.arena, "`?` returns from the {s} it is written in", .{@tagName(answerer)}), .style = .primary };
-        if (self.answer_fixes) |pending| try pending.append(self.gpa, .{
+        labels[0] = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id), .message = try std.fmt.allocPrint(self.sink.arena, "`?` returns from the {s} it is written in", .{answerer.noun()}), .style = .primary };
+        if (answerer != .given_closure) if (self.answer_fixes) |pending| try pending.append(self.gpa, .{
             .diagnostic = self.sink.items().len,
             .at = self.ast.exprMain(id),
             .result = switch (carrier.kind) {
@@ -18192,7 +18235,7 @@ const Checker = struct {
         try self.sink.add(.{
             .severity = .err,
             .code = .t_try_answer,
-            .message = try std.fmt.allocPrint(self.sink.arena, "this `?` may return `{s}`, and the {s} answers with `{s}`", .{ try self.typeName(operand), @tagName(answerer), answered_name }),
+            .message = try std.fmt.allocPrint(self.sink.arena, "this `?` may return `{s}`, and the {s} answers with `{s}`", .{ try self.typeName(operand), answerer.noun(), answered_name }),
             .labels = labels,
             .notes = try self.sink.arena.dupe([]const u8, &.{help}),
         });
@@ -18367,7 +18410,7 @@ const Checker = struct {
         const message = try std.fmt.allocPrint(
             self.sink.arena,
             "this `?` may fail with `{s}`, and no `{s} for {s}` implementation converts it to the {s}'s error type",
-            .{ failure_name, if (self.from_decl) |from| try self.traitInstanceName(from, &.{failure}) else try std.fmt.allocPrint(self.sink.arena, "From[{s}]", .{failure_name}), try self.typeName(answered), @tagName(answerer) },
+            .{ failure_name, if (self.from_decl) |from| try self.traitInstanceName(from, &.{failure}) else try std.fmt.allocPrint(self.sink.arena, "From[{s}]", .{failure_name}), try self.typeName(answered), answerer.noun() },
         );
         // A failure that settles to a reason `?` can hand on is fixed by
         // settling it, and that is the one answer: wrapping or mapping it
@@ -19455,7 +19498,10 @@ const Checker = struct {
             };
             if (try self.rejectParameterDefault(p.default, declared)) continue;
             const scope = self.openScope();
+            const was_default = self.checking_default;
+            self.checking_default = true;
             _ = try self.check(p.default, want);
+            self.checking_default = was_default;
             try self.closeScope(scope);
 
             // A default is worth what the parameter's type says it is worth, so
@@ -20547,6 +20593,10 @@ const Checker = struct {
             .inference = if (expected.?.infer_lambda_result) expected.?.inference else null,
         } else null;
         const written_before_body = self.written.items.len;
+        // A closure whose result the callable type it is passed as fixes
+        // cannot change that result to carry a failure; one inferring its
+        // result through a call's type parameter can.
+        const answerer: TryAnswerer = if (contextual != null and result_expected.?.inference == null) .given_closure else .closure;
         // With no result type written or given, the closure's `return`s and
         // its body's value settle it together.
         var inferred_return: ?Expected = null;
@@ -20574,7 +20624,7 @@ const Checker = struct {
             self.inferred_body = if (result_expected == null) lambda.body else .none;
             self.deferred_tries = if (result_expected == null or result_expected.?.inference != null) &deferred_tries else null;
             self.failure_expected = null;
-            self.try_answerer = .closure;
+            self.try_answerer = answerer;
             defer self.current_return = previous_return;
             defer self.inferred_return = previous_inferred;
             defer self.inferred_body = previous_body;
@@ -20632,7 +20682,7 @@ const Checker = struct {
                     "write the closure's result type, as `|...| -> Option[T]`, or `return` a value from it",
                 );
                 refused = true;
-            } else if (!try self.answerTry(pending.id, tried, carrier, answered, .closure, pending.statement)) refused = true;
+            } else if (!try self.answerTry(pending.id, tried, carrier, answered, answerer, pending.statement)) refused = true;
         }
         // A closure given its result by a callable type it is passed as
         // answers to that type, which the fix would not change.

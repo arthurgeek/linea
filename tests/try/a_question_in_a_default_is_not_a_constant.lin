@@ -1,0 +1,19 @@
+// A default is worked out where its parameter is declared, so it is a
+// constant expression, and a `?` is not one. Neither the closure nor the
+// function the default sits in answers the `?`.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
+
+fn scaled(x: UInt8 = parse()?) -> UInt8 {
+    x * 2
+}
+
+fn main() -> UInt8 {
+    let next = |x: UInt8 = parse()?| x
+    next() + scaled()
+}

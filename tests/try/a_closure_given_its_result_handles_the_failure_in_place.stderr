@@ -1,0 +1,7 @@
+error[T-TryAnswer]: this `?` may return `Result[UInt8, Bad]`, and the closure answers with `UInt8`
+  --> tests/try/a_closure_given_its_result_handles_the_failure_in_place.lin:19:21
+   |
+19 |             let n = parse()?
+   |                     ^^^^^^^^ `?` returns from the closure it is written in
+   |
+   = help: the call this closure is passed to fixes its result as `UInt8`, so handle the failure here with `let n = … else |_| { … }` in place of `?`

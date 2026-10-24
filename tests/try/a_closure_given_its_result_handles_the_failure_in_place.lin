@@ -1,0 +1,23 @@
+// `apply` takes a closure answering `UInt8`, so the closure passed to it
+// cannot answer with a `Result`. Its `?` cannot hand the failure on, and the
+// help offers handling the failure where it happens.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
+
+fn apply(f: fn() -> UInt8) -> UInt8 {
+    f()
+}
+
+fn main() -> UInt8 {
+    apply(
+        || {
+            let n = parse()?
+            n + 1
+        },
+    )
+}
