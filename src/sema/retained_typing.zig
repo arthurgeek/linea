@@ -33,12 +33,12 @@ pub fn attach(gpa: Allocator, saved: *const types.Typing, relocation: Relocation
 fn attachField(comptime field: std.builtin.Type.StructField, gpa: Allocator, saved: *const types.Typing, relocation: Relocation, result: *types.Typing) !void {
     const name = field.name;
     if (comptime in(name, &.{
-        "literal_values",          "conversion_targets",   "integer_properties", "selected_places",      "place_projections",
-        "implicit_test_successes", "field_names",          "type_selections",    "contract_variants",    "readonly_places",
-        "carried_places",          "borrowed_temporaries", "constant_values",    "contract_parameters",  "variant_uses",
-        "interpolation_positions", "refused",              "folded_indices",     "field_name_spellings", "traversal_positions",
-        "expansion_of_impl",       "try_conversions",      "declined_contracts", "adopted_contracts",    "binding_labels",
-        "aliased",                 "defaulted_contracts",  "fixed_functions",    "refused_members",
+        "literal_values",          "conversion_targets",      "integer_properties",  "selected_places",     "place_projections",
+        "implicit_test_successes", "field_names",             "type_selections",     "contract_variants",   "readonly_places",
+        "carried_places",          "borrowed_temporaries",    "constant_values",     "contract_parameters", "variant_uses",
+        "part_selections",         "interpolation_positions", "refused",             "folded_indices",      "field_name_spellings",
+        "traversal_positions",     "expansion_of_impl",       "try_conversions",     "declined_contracts",  "adopted_contracts",
+        "binding_labels",          "aliased",                 "defaulted_contracts", "fixed_functions",     "refused_members",
     })) {
         @field(result, name) = try mapMap(gpa, relocation, @field(saved, name));
     } else if (comptime in(name, &.{

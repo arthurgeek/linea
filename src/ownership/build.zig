@@ -679,37 +679,17 @@ const Builder = struct {
         return isCatchAll(self.ast, pattern);
     }
 
-    /// The step the part at `index` of `pattern`'s arguments selects: the
-    /// field a struct pattern's label names, the component a tuple pattern's
-    /// position names, or the payload a variant's position names. A newtype's
-    /// base is its whole value, and so is a part the checker refused.
-    fn partStep(self: *const Builder, pattern: ExprId, index: usize) cfg_mod.Projection {
-        return switch (self.ast.exprTag(pattern)) {
-            .struct_pattern => self.labelProjection(self.ast.call(pattern).args[index - 1]),
-            .tuple_pattern => if (self.componentName(pattern, index)) |field| .{ .field = field } else .whole,
-            else => if (types_mod.variantOrdinalOf(&self.res.variant_ordinals, &self.typing.variant_uses, pattern)) |variant|
-                .{ .payload = .{ .variant = variant, .index = @intCast(index) } }
-            else
-                .whole,
+    /// The step a part of a pattern selects, as the checker recorded it: the
+    /// field a struct pattern's label or a tuple pattern's position names,
+    /// or the payload a variant's position names. A newtype's base is its
+    /// whole value, and so is a part the checker refused.
+    fn partStep(self: *const Builder, part: ExprId) cfg_mod.Projection {
+        const selected = self.typing.partSelection(part) orelse return .whole;
+        return switch (selected) {
+            .field => |f| .{ .field = f.name },
+            .payload => |p| .{ .payload = .{ .variant = p.variant, .index = p.index } },
+            .base => .whole,
         };
-    }
-
-    /// The part a struct pattern's binder takes: the field its label names,
-    /// where the checker accepted the label as a field of the value, and the
-    /// whole where it refused it. The checker looked the field up by this
-    /// spelling, so the spelling is the field's name.
-    fn labelProjection(self: *const Builder, label: ExprId) cfg_mod.Projection {
-        const token = self.ast.exprMain(label);
-        if (self.typing.fieldSelection(token) == null) return .whole;
-        return .{ .field = self.ast.tokenName(token) };
-    }
-
-    /// The field the component at `index` of a tuple pattern stands at, or
-    /// null where the checker refused the pattern.
-    fn componentName(self: *const Builder, pattern: ExprId, index: usize) ?StringId {
-        const decl = self.typing.declOfType(self.typing.exprType(pattern)) orelse return null;
-        if (index >= self.ast.declFields(decl).len) return null;
-        return self.ast.declFieldName(decl, index);
     }
 
     /// How a pattern's binders hold what they name: owned by the binder, lent
@@ -726,16 +706,9 @@ const Builder = struct {
     /// Binds the parts of `pattern`. `within` is the pattern node whose path
     /// the parts' steps extend, or none where `pattern` is the outermost one.
     fn bindParts(self: *Builder, pattern: ExprId, within: ExprId, at: ExprId, source: ExprId, holding: Holding) std.mem.Allocator.Error!void {
-        const stride: usize = switch (self.ast.exprTag(pattern)) {
-            .struct_pattern => 2,
-            .tuple_pattern, .call => 1,
-            // A bare variant name binds nothing, and `_` names nothing.
-            else => return,
-        };
-        const args = self.ast.call(pattern).args;
-        var i = stride - 1;
-        while (i < args.len) : (i += stride) {
-            try self.bindPart(args[i], self.partStep(pattern, i), within, pattern, at, source, holding);
+        var parts = self.ast.patternParts(pattern);
+        while (parts.next()) |part| {
+            try self.bindPart(part.node, self.partStep(part.node), within, pattern, at, source, holding);
         }
     }
 
@@ -753,20 +726,22 @@ const Builder = struct {
             if (within != ExprId.none) try self.binder_parts.put(self.gpa, binder, part);
             return self.bindHolder(binder, if (at == ExprId.none) part else at, source, projection, holding);
         }
-        switch (self.ast.exprTag(part)) {
+        switch (self.ast.patternForm(part)) {
             // A variant leaving what it carries unnamed drops it, as a bare
             // variant arm does: the op carries the part so the checker can
             // ask what it held.
-            .name_ref => if (holding == .owned and self.typing.dropsPayload(part)) {
+            .name => if (holding == .owned and self.typing.dropsPayload(part)) {
                 try self.emit(.discarded, .{ .root = BindingId.none }, part);
                 if (self.at != .none) self.ops.items(.source)[self.ops.len - 1] = part;
             },
-            .struct_pattern, .tuple_pattern, .call => {
+            .struct_, .tuple, .call => {
                 if (within == ExprId.none) try self.pattern_parts.put(self.gpa, part, .{ .within = ExprId.none, .step = step, .holder = holder });
                 try self.bindParts(part, part, at, source, holding);
             },
             // A literal or a range compares a scalar and holds nothing.
-            else => {},
+            .literal, .range => {},
+            // The checker refused the part, and what it holds is unknown.
+            .malformed, .other => {},
         }
     }
 
@@ -775,7 +750,8 @@ const Builder = struct {
     /// element is the place every binder names.
     fn lendWalkedParts(self: *Builder, pattern: ExprId, walk: ExprId, source: ExprId) std.mem.Allocator.Error!void {
         var parts = self.ast.patternParts(pattern);
-        while (parts.next()) |part| {
+        while (parts.next()) |each| {
+            const part = each.node;
             if (self.ast.partBinds(part)) {
                 const binder = self.res.targetOf(part);
                 if (binder != BindingId.none) try self.bindHolder(binder, part, source, .{ .index = walk }, .lent);
@@ -2155,9 +2131,15 @@ const Builder = struct {
         if (self.ast.exprTag(binder_pattern) == .tuple_pattern) {
             if (lending) {
                 try self.lendWalkedParts(binder_pattern, id, f.callee);
-            } else for (self.ast.call(binder_pattern).args, 0..) |component, i| {
-                const step: cfg_mod.Projection = if (self.componentName(binder_pattern, i)) |field| .{ .element_component = field } else .element;
-                try self.bindPart(component, step, ExprId.none, binder_pattern, ExprId.none, f.callee, .owned);
+            } else {
+                var components = self.ast.patternParts(binder_pattern);
+                while (components.next()) |component| {
+                    const step: cfg_mod.Projection = switch (self.partStep(component.node)) {
+                        .field => |field| .{ .element_component = field },
+                        else => .element,
+                    };
+                    try self.bindPart(component.node, step, ExprId.none, binder_pattern, ExprId.none, f.callee, .owned);
+                }
             }
         } else {
             const binder = self.res.targetOf(binder_pattern);

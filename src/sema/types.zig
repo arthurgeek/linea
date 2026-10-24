@@ -5313,6 +5313,31 @@ pub const VariantIdentity = struct {
     ordinal: VariantOrdinal,
 };
 
+/// What one part of a checked pattern selects from the value its pattern node
+/// takes apart. Recorded by the checker for every part it accepted, and read
+/// by ownership for the part's path step and by lowering for its offset, so
+/// neither works out from the pattern's layout which part a position names.
+pub const PartSelection = union(enum) {
+    /// A struct's field or a tuple's component, by its position among the
+    /// declaration's fields and its name.
+    field: struct { index: u32, name: StringId },
+    /// What a variant carries, by the variant's ordinal and the position.
+    payload: struct { variant: u32, index: u32 },
+    /// A newtype's base, which is the newtype's whole representation.
+    base,
+
+    /// The part's position among its constructor's parts, as coverage
+    /// numbers them: a field's declaration order, a payload's position, and
+    /// zero for a newtype's one base.
+    pub fn position(self: PartSelection) u32 {
+        return switch (self) {
+            .field => |f| f.index,
+            .payload => |p| p.index,
+            .base => 0,
+        };
+    }
+};
+
 /// A context-dependent variant reference or enum match arm. Payload disposal
 /// describes what a match arm leaves unnamed; references discard no payload.
 pub const VariantUse = struct {
@@ -5695,6 +5720,9 @@ pub const Typing = struct {
     /// IDs. Storage is O(V) for V uses; lookup is expected O(1). Qualified
     /// references remain in Resolution, which settled them before checking.
     variant_uses: std.AutoHashMapUnmanaged(ExprId, VariantUse) = .empty,
+    /// What each accepted part of a pattern selects, keyed by the part's
+    /// node. One entry per part.
+    part_selections: std.AutoHashMapUnmanaged(ExprId, PartSelection) = .empty,
     /// What each written type reference settled to, keyed by the token that
     /// wrote it. `.poison` where that token wrote no type, which is also what
     /// a refused one settles to -- neither has a name worth printing.
@@ -5713,6 +5741,12 @@ pub const Typing = struct {
     /// was; a type past the end is one no settled reference stands for, which
     /// is the same answer the table gives.
     standin_of: []const u32 = &.{},
+
+    /// What a part of a checked pattern selects, or null where the checker
+    /// refused the part.
+    pub fn partSelection(self: *const Typing, part: ExprId) ?PartSelection {
+        return self.part_selections.get(part);
+    }
 
     /// Whether this arm's pattern names none of what the variant it selects
     /// carries.
@@ -5976,6 +6010,7 @@ pub const Typing = struct {
         self.contextual_constraints.deinit(gpa);
         gpa.free(self.written_types);
         self.variant_uses.deinit(gpa);
+        self.part_selections.deinit(gpa);
         gpa.free(self.standins);
         gpa.free(self.standin_args);
         gpa.free(self.standin_of);

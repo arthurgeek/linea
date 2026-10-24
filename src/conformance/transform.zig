@@ -1236,14 +1236,12 @@ fn patternsApart(ast: *const Ast, text: []const u8, a: ExprId, b: ExprId) bool {
     }
     if (ta == .tuple_pattern and tb == .tuple_pattern) return partsApart(ast, text, ast.call(a).args, ast.call(b).args);
     if (ta == .struct_pattern and tb == .struct_pattern) {
-        const fa = ast.call(a).args;
-        const fb = ast.call(b).args;
-        var i: usize = 0;
-        while (i + 1 < fa.len) : (i += 2) {
-            var j: usize = 0;
-            while (j + 1 < fb.len) : (j += 2) {
-                if (!std.mem.eql(u8, ast.tokenText(ast.exprMain(fa[i])), ast.tokenText(ast.exprMain(fb[j])))) continue;
-                if (patternsApart(ast, text, fa[i + 1], fb[j + 1])) return true;
+        var fa = ast.patternParts(a);
+        while (fa.next()) |x| {
+            var fb = ast.patternParts(b);
+            while (fb.next()) |y| {
+                if (!std.mem.eql(u8, ast.tokenText(ast.exprMain(x.label)), ast.tokenText(ast.exprMain(y.label)))) continue;
+                if (patternsApart(ast, text, x.node, y.node)) return true;
             }
         }
     }
@@ -1301,7 +1299,8 @@ fn putPatternBinders(
     pattern: ExprId,
 ) std.mem.Allocator.Error!void {
     var parts = ast.patternParts(pattern);
-    while (parts.next()) |part| {
+    while (parts.next()) |each| {
+        const part = each.node;
         if (!ast.partBinds(part)) {
             try putPatternBinders(gpa, ast, res, into, part);
             continue;

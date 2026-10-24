@@ -2498,37 +2498,25 @@ const Lowerer = struct {
         return self.readThrough(m.address, m.ty, span);
     }
 
-    /// The part of `m` that the part at `index` of `pattern`'s arguments
-    /// selects. Which part is the checker's selection -- a struct pattern's
-    /// field, a tuple's position, a variant's payload position -- and the
-    /// offset is this instance's layout of it. A newtype's base is the
+    /// The part of `m` that `part`, a part of a pattern taking `m` apart,
+    /// selects. Which part is the checker's selection -- a struct's field or
+    /// a tuple's component, a variant's payload position, a newtype's base --
+    /// and the offset is this instance's layout of it. A newtype's base is the
     /// newtype's own representation.
-    fn matchedPart(self: *Lowerer, pattern: ExprId, m: Matched, index: usize, span: Span) std.mem.Allocator.Error!Matched {
-        const args = self.ast.call(pattern).args;
-        const ty = try self.typeAt(args[index]);
+    fn matchedPart(self: *Lowerer, part: ExprId, m: Matched, span: Span) std.mem.Allocator.Error!Matched {
+        const ty = try self.typeAt(part);
         const view = self.types();
-        const offset: u32 = switch (self.ast.exprTag(pattern)) {
-            .struct_pattern => blk: {
-                const selected = self.typing.fieldSelection(self.ast.exprMain(args[index - 1])) orelse
-                    @panic("compiler defect: a struct pattern's field was not settled before emission");
-                break :blk view.fieldOffset(m.ty, selected.field.index());
-            },
-            .tuple_pattern => view.fieldOffset(m.ty, @intCast(index)),
-            else => if (view.get(m.ty) == .newtype) {
+        const selected = self.typing.partSelection(part) orelse
+            @panic("compiler defect: a pattern's part was not settled before emission");
+        const offset: u32 = switch (selected) {
+            .field => |f| view.fieldOffset(m.ty, f.index),
+            .payload => |p| view.variantFieldOffset(m.ty, p.variant, p.index),
+            .base => {
                 if (m.address == .none) return .{ .ty = ty, .value = m.value };
                 return .{ .ty = ty, .address = try self.fieldAddr(m.address, ty, 0, span) };
-            } else view.variantFieldOffset(m.ty, self.variantIndex(pattern), @intCast(index)),
+            },
         };
         return .{ .ty = ty, .address = try self.fieldAddr(m.address, ty, offset, span) };
-    }
-
-    /// Where `pattern`'s parts sit among its arguments.
-    fn partStride(self: *const Lowerer, pattern: ExprId) ?usize {
-        return switch (self.ast.exprTag(pattern)) {
-            .struct_pattern => 2,
-            .tuple_pattern, .call => 1,
-            else => null,
-        };
     }
 
     /// Tests that `pattern` matches the value at `m`, its outer part first,
@@ -2541,8 +2529,8 @@ const Lowerer = struct {
         // The parts that bind are skipped before this is asked, so a bare
         // name here is the head of an arm: `_`, or a variant.
         if (isCatchAll(self.ast, pattern)) return true;
-        switch (self.ast.exprTag(pattern)) {
-            .int_literal, .negate => {
+        switch (self.ast.patternForm(pattern)) {
+            .literal => {
                 const value = try self.matchedValue(m, span);
                 const want = try self.expr(pattern);
                 const eq = try self.emit(.cmp_eq, .bool_, span, .{ .binary = .{ .lhs = value, .rhs = want } });
@@ -2556,7 +2544,7 @@ const Lowerer = struct {
                 self.block = pass;
                 return true;
             },
-            .name_ref, .call => if (self.types().get(m.ty) != .newtype) {
+            .name, .call => if (self.types().get(m.ty) != .newtype) {
                 const k = self.variantIndex(pattern);
                 const tag = if (self.isAggregate(m.ty))
                     try self.emit(.load_indirect, tag_type, span, .{ .unary = m.address })
@@ -2576,15 +2564,14 @@ const Lowerer = struct {
                     return false;
                 }
             },
-            else => {},
+            // A tuple or struct has one shape, so only its parts test.
+            .tuple, .struct_ => {},
+            .malformed, .other => @panic("compiler defect: a refused pattern reached emission"),
         }
-        const stride = self.partStride(pattern) orelse return true;
-        const args = self.ast.call(pattern).args;
-        var i = stride - 1;
-        while (i < args.len) : (i += stride) {
-            const part = args[i];
-            if (isCatchAll(self.ast, part) or self.ast.partBinds(part)) continue;
-            if (!try self.testPattern(part, try self.matchedPart(pattern, m, i, span), fail, span)) return false;
+        var parts = self.ast.patternParts(pattern);
+        while (parts.next()) |part| {
+            if (isCatchAll(self.ast, part.node) or self.ast.partBinds(part.node)) continue;
+            if (!try self.testPattern(part.node, try self.matchedPart(part.node, m, span), fail, span)) return false;
         }
         return true;
     }
@@ -2606,18 +2593,22 @@ const Lowerer = struct {
     /// value in a slot of its own. Emitted once every test passed, so only a
     /// value the pattern matched is taken apart.
     fn bindPattern(self: *Lowerer, pattern: ExprId, m: Matched, lending: bool, span: Span) std.mem.Allocator.Error!void {
-        const stride = self.partStride(pattern) orelse return;
-        const args = self.ast.call(pattern).args;
-        var i = stride - 1;
-        while (i < args.len) : (i += stride) {
-            const part = args[i];
+        var parts = self.ast.patternParts(pattern);
+        while (parts.next()) |each| {
+            const part = each.node;
             if (!self.ast.partBinds(part)) {
-                if (self.partStride(part) != null) try self.bindPattern(part, try self.matchedPart(pattern, m, i, span), lending, span);
+                switch (self.ast.patternForm(part)) {
+                    .call, .tuple, .struct_ => try self.bindPattern(part, try self.matchedPart(part, m, span), lending, span),
+                    // A variant carrying nothing, a literal and a range bind
+                    // nothing.
+                    .name, .literal, .range => {},
+                    .malformed, .other => @panic("compiler defect: a refused pattern reached emission"),
+                }
                 continue;
             }
             const target = self.res.targetOf(part);
             if (target == BindingId.none) continue;
-            const at = try self.matchedPart(pattern, m, i, span);
+            const at = try self.matchedPart(part, m, span);
             if (lending) {
                 try self.lent.put(self.gpa, target, at.address);
                 continue;
@@ -2633,11 +2624,11 @@ const Lowerer = struct {
     fn endPatternLends(self: *Lowerer, pattern: ExprId) void {
         var parts = self.ast.patternParts(pattern);
         while (parts.next()) |part| {
-            if (self.ast.partBinds(part)) {
-                const target = self.res.targetOf(part);
+            if (self.ast.partBinds(part.node)) {
+                const target = self.res.targetOf(part.node);
                 if (target != BindingId.none) _ = self.lent.remove(target);
             } else {
-                self.endPatternLends(part);
+                self.endPatternLends(part.node);
             }
         }
     }

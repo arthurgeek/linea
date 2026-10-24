@@ -1382,15 +1382,54 @@ pub const Ast = struct {
         return name_case.of(self.tokenText(self.exprMain(part))) != .capital;
     }
 
+    /// The forms a pattern node takes. Every pass that walks a pattern
+    /// switches on this with no `else`, so a form added here is a compile
+    /// error at each of them until it says what the form does.
+    pub const PatternForm = enum {
+        /// A bare name: a binder or `_` inside a pattern, `_` or a variant
+        /// carrying nothing at an arm's head, as `partBinds` and the checker
+        /// read it.
+        name,
+        /// `N(p, ...)`: a variant taking apart what it carries, or a newtype
+        /// taking apart its base.
+        call,
+        /// `(p, ...)`.
+        tuple,
+        /// `S { f: p, ... }`.
+        struct_,
+        /// An integer literal, a negated one, or a string literal.
+        literal,
+        /// `lo..hi` or `lo..=hi`.
+        range,
+        /// A part the parser could not read, reported where it stands.
+        malformed,
+        /// An expression no pattern form admits, refused by the checker.
+        other,
+    };
+
+    pub fn patternForm(self: *const Ast, pattern: ExprId) PatternForm {
+        return switch (self.exprTag(pattern)) {
+            .name_ref => .name,
+            .call => .call,
+            .tuple_pattern => .tuple,
+            .struct_pattern => .struct_,
+            .int_literal, .negate, .str_literal => .literal,
+            .range => .range,
+            .err => .malformed,
+            else => .other,
+        };
+    }
+
     /// The parts a pattern node takes its value apart into, in source order:
     /// what a variant's or newtype's pattern names inside its parentheses, a
     /// tuple pattern's components, and a struct pattern's field patterns
-    /// (each after the field it takes). Nothing for any other node.
+    /// (each after the field it takes). Nothing for any other form. The one
+    /// place a pattern's argument layout is read.
     pub fn patternParts(self: *const Ast, pattern: ExprId) PatternParts {
-        return switch (self.exprTag(pattern)) {
-            .struct_pattern => .{ .args = self.call(pattern).args, .at = 1, .stride = 2 },
-            .tuple_pattern, .call => .{ .args = self.call(pattern).args, .at = 0, .stride = 1 },
-            else => .{ .args = &.{}, .at = 0, .stride = 1 },
+        return switch (self.patternForm(pattern)) {
+            .struct_ => .{ .args = self.call(pattern).args, .at = 1, .stride = 2 },
+            .tuple, .call => .{ .args = self.call(pattern).args, .at = 0, .stride = 1 },
+            .name, .literal, .range, .malformed, .other => .{ .args = &.{}, .at = 0, .stride = 1 },
         };
     }
 
@@ -1399,9 +1438,24 @@ pub const Ast = struct {
         at: usize,
         stride: usize,
 
-        pub fn next(self: *PatternParts) ?ExprId {
+        /// One part of a pattern.
+        pub const Part = struct {
+            /// The part's own pattern.
+            node: ExprId,
+            /// Its index among the pattern node's arguments.
+            index: usize,
+            /// The field name a struct pattern writes before the part, and
+            /// `.none` for every other form.
+            label: ExprId,
+        };
+
+        pub fn next(self: *PatternParts) ?Part {
             if (self.at >= self.args.len) return null;
-            const part = self.args[self.at];
+            const part: Part = .{
+                .node = self.args[self.at],
+                .index = self.at,
+                .label = if (self.stride == 2) self.args[self.at - 1] else ExprId.none,
+            };
             self.at += self.stride;
             return part;
         }

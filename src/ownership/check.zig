@@ -1042,20 +1042,22 @@ const Checker = struct {
         while (self.cfg.pattern_parts.get(at)) |step| {
             const parent = step.holder;
             if (parent == ExprId.none) break;
-            const args = self.ast.call(parent).args;
-            const index = for (args, 0..) |a, i| {
-                if (a == at) break i;
-            } else 0;
-            try steps.append(arena, switch (self.ast.exprTag(parent)) {
-                .tuple_pattern => try std.fmt.allocPrint(arena, "component `_{d}`", .{index}),
-                .struct_pattern => try std.fmt.allocPrint(arena, "field `{s}`", .{self.ast.tokenText(self.ast.exprMain(args[index - 1]))}),
-                else => blk: {
+            var parts = self.ast.patternParts(parent);
+            const found = while (parts.next()) |p| {
+                if (p.node == at) break p;
+            } else unreachable;
+            try steps.append(arena, switch (self.ast.patternForm(parent)) {
+                .tuple => try std.fmt.allocPrint(arena, "component `_{d}`", .{found.index}),
+                .struct_ => try std.fmt.allocPrint(arena, "field `{s}`", .{self.ast.tokenText(self.ast.exprMain(found.label))}),
+                .call => blk: {
                     const name = self.ast.tokenText(self.ast.exprMain(self.ast.call(parent).callee));
-                    break :blk if (args.len > 1)
-                        try std.fmt.allocPrint(arena, "payload {d} of what `{s}` carries", .{ index, name })
+                    break :blk if (self.ast.call(parent).args.len > 1)
+                        try std.fmt.allocPrint(arena, "payload {d} of what `{s}` carries", .{ found.index, name })
                     else
                         try std.fmt.allocPrint(arena, "what `{s}` carries", .{name});
                 },
+                // Only a pattern with parts holds one.
+                .name, .literal, .range, .malformed, .other => unreachable,
             });
             if (step.within == ExprId.none) break;
             at = step.within;
