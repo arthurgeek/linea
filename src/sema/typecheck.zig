@@ -24236,12 +24236,21 @@ const Checker = struct {
 
         const signature = try self.throughValue(declared, lists, settled);
         var converted = signature;
-        if (context) |want| {
+        if (context) |given| {
+            // A signature still open, as a generic function value's is until
+            // its uses settle it, is settled by the function it is given:
+            // its open parts meet this function's, and the two are then
+            // compared as settled signatures.
+            var want = given;
+            if (try self.builder.mentionsOpen(want.ty)) {
+                _ = try self.meet(signature, want.ty, null);
+                want.ty = try self.builder.resolveOpen(want.ty, &self.open_types);
+            }
             const fits = if (want.callable_context)
                 self.builder.view().callableSatisfies(signature, want.ty)
             else
                 self.builder.view().callableConverts(signature, want.ty);
-            if (!fits) return self.reportMismatch(id, signature, want, "");
+            if (!fits) return self.reportMismatch(id, signature, given, "");
             if (!want.callable_context) converted = want.ty;
         }
 
