@@ -1,0 +1,13 @@
+enum Bad { Broken }
+
+fn parse() -> Result[UInt8, Bad] { .Ok(4) }
+
+fn pick() // picks one
+{
+    let _n = parse()?
+}
+
+fn main() -> UInt8 {
+    let _r = pick()
+    0
+}

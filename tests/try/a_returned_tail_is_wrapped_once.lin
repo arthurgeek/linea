@@ -1,0 +1,14 @@
+enum Bad { Broken }
+
+fn parse() -> Result[UInt8, Bad] { .Ok(4) }
+
+// The `return` that ends the body is wrapped once, as every `return` is.
+fn pick() -> UInt8 {
+    let n = parse()?
+    return n
+}
+
+fn main() -> UInt8 {
+    let _r = pick()
+    0
+}
