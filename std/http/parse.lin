@@ -210,7 +210,9 @@ test fn a_read_timeout_answers_408() {
         Ok(_) => return testing.assert(false, "a request that timed out was accepted"),
         Err(error) => error,
     }
-    testing.assert_eq(error, RequestError.Io(timeout), "the timeout was not reported as an input failure")?
+    // The request line's 16 bytes arrived before the read timed out.
+    let after_line = io.IoError { progress = 16, ..timeout }
+    testing.assert_eq(error, RequestError.Io(after_line), "the timeout did not report the bytes read")?
     testing.assert_eq(error.status(), Option.Some(Status.RequestTimeout), "a timeout did not answer 408")?
     .Ok(())
 }
@@ -496,7 +498,8 @@ fn line_failure[E: Into[io.IoError]](sink error: io.LineError[E], limit_status: 
     }
 }
 
-// A failed read of the connection is `Io`, holding the connection's own error.
+// A failed read of the connection is `Io`, holding the connection's own error
+// with `progress` counting every byte of the request read before it failed.
 // A read that timed out before the first byte arrived is `Closed`, as a
 // connection the client closed before sending a byte is.
 fn input_failure[E: Into[io.IoError]](sink failure: InputFailure[E]) -> RequestError {
@@ -505,7 +508,7 @@ fn input_failure[E: Into[io.IoError]](sink failure: InputFailure[E]) -> RequestE
     if stream_offset == 0 && error.progress == 0 && error.category == .TimedOut {
         return .Closed
     }
-    .Io(error)
+    .Io(io.IoError { progress = stream_offset + error.progress, ..error })
 }
 
 // Strip a line's LF and a CR just before it. A line the connection ended
