@@ -1323,7 +1323,10 @@ evaluating such an argument the builder emits a `.held` operation for each
 place its value names (through grouping, `&`, and the branches of a
 conditional, block or `match`), pending on the call. The move checker carries
 held places beside the open transfers and closes both at the call's
-`committed`; a whole-binding consume of a held root before then is [O-Move].
+`committed`; a held root that is moved where the call is reached is [O-Move],
+so a take on a path that leaves first is judged where it goes. A binary
+operator is built the same way, as the trait call it is, and the dependency
+analysis checks its operands' observations at its `committed`.
 That is the one place that decides whether a take and a lend meet in one call,
 whatever the take's position: a `sink` argument, a nested call, a `let` in a
 block argument, a literal's field. Which arguments mutate a place another names

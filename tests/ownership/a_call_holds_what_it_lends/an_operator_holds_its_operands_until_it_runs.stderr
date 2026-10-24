@@ -1,0 +1,15 @@
+error[O-Move]: `t` is lent to `==` by another argument, and this takes it
+  --> tests/ownership/a_call_holds_what_it_lends/an_operator_holds_its_operands_until_it_runs.lin:22:18
+   |
+22 |     if t == same(t) {
+   |        - lent to the call here
+   |                  ^ this takes it while the call still needs it
+   |
+   = help: give `t` away after the call, or lend it to both parameters
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ownership/a_call_holds_what_it_lends/an_operator_holds_its_operands_until_it_runs.lin:35:26
+   |
+34 |     let equal = v.as_slice() == {
+   |                 ------------ the observation is still used here
+35 |         let _ = released(v)
+   |                          ^ keep this place available until the last use of its observation

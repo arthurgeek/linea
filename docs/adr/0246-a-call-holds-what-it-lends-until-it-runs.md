@@ -48,7 +48,13 @@ callee has run.** After evaluating such an argument the ownership graph holds
 each place the argument's value names — through grouping, `&`, and the branches
 of a conditional, block or `match` — pending on the call, and the call's
 completion ends the hold. A whole-binding take of a held root before then is
-[O-Move]: the callee would read or write a value that was given away. A scalar
+[O-Move]: the callee would read or write a value that was given away. It is
+judged where the call is reached, so a take on a path that leaves first, a
+branch of an argument ending in `return` or a `let … else` that returns, is
+judged by where that path goes. An operator is a call of its trait's
+operation, `a == b` being `equals(a, b)`, so its operands are held the same
+way, and the dependency analysis asks at the operation what each operand
+observes, as it asks at a call. A scalar
 snapshot lends nothing, two lends of one place share it, and `f(p, copy(p))`
 lends `p` beside a copy of it.
 

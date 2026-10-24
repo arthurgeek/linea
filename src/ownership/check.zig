@@ -242,6 +242,7 @@ fn checkBodies(
     defer c.merge_origins.deinit(gpa);
     defer c.scheduled.deinit(gpa);
     defer c.held_by.deinit(gpa);
+    defer c.taken_while_held.deinit(gpa);
     defer c.emitted.deinit(gpa);
     defer c.leaks.deinit(gpa);
 
@@ -298,6 +299,9 @@ const Checker = struct {
     /// it runs, which the callee reads at the call's `committed`. Sized by
     /// the function's `held` operations.
     held_by: std.AutoHashMapUnmanaged(HeldBy, void) = .empty,
+    /// The takes already reported as taking what a call holds, so a call
+    /// around that call does not report the same take. Sized likewise.
+    taken_while_held: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// For each block of the function being walked, a row of bits over
     /// `scheduled`: bit `i` is set when a schedule consuming binding `i` can
     /// still run from the block's start before that binding's scope ends.
@@ -825,6 +829,17 @@ const Checker = struct {
             .array_literal => "array literal",
             .interp => "interpolation",
             .lambda => "closure",
+            .add => "+",
+            .sub => "-",
+            .mul => "*",
+            .div => "/",
+            .rem => "%",
+            .eq => "==",
+            .ne => "!=",
+            .lt => "<",
+            .le => "<=",
+            .gt => ">",
+            .ge => ">=",
             else => self.ast.exprText(self.ast.call(id).callee),
         };
     }
@@ -2410,6 +2425,7 @@ const Checker = struct {
         self.merge_origins.clearRetainingCapacity();
         self.scheduled.clearRetainingCapacity();
         self.held_by.clearRetainingCapacity();
+        self.taken_while_held.clearRetainingCapacity();
         for (self.cfg.blocks[f.blocks.start..f.blocks.end]) |blk| {
             var ops = self.cfg.opsOf(blk);
             while (ops.next()) |op| {
@@ -2636,6 +2652,19 @@ const Checker = struct {
             // close here: an inner call completing must leave the call around
             // it open, which is what makes them compose by union.
             if (tag == .committed) {
+                // What the construct still holds lent is read as it runs, so
+                // a hold whose root was taken since is a take of what the
+                // construct needs. Paths that left before reaching it are
+                // judged where they go.
+                if (report_now) for (open.items) |p| {
+                    if (!p.lends or p.for_ != at) continue;
+                    const slot = self.slotOf(p.place.root) orelse continue;
+                    if (state[slot] != .moved or self.fromMerge(moved_at[slot], p.place.root)) continue;
+                    const taken = if (moved_at[slot] != ExprId.none) moved_at[slot] else p.at;
+                    // A take held by several calls around it is one mistake.
+                    if ((try self.taken_while_held.getOrPut(self.gpa, taken)).found_existing) continue;
+                    try self.reportTakenWhileHeld(taken, p.place.root, p);
+                };
                 var kept: usize = 0;
                 for (open.items) |p| {
                     if (p.for_ == at) continue;
@@ -2760,9 +2789,11 @@ const Checker = struct {
             }
 
             // A place the call around it holds lent until it runs.
+            // One already gone where it is lent was reported as a use there.
             if (tag == .held) {
                 const p: Pending = .{ .place = self.cfg.opPlace(op), .for_ = self.cfg.opPendingFor(op), .at = at, .lends = true };
-                if (!holds(open.items, p)) try open.append(self.gpa, p);
+                const slot = self.slotOf(p.place.root) orelse continue;
+                if (state[slot] == .init and !holds(open.items, p)) try open.append(self.gpa, p);
                 continue;
             }
 
@@ -2821,13 +2852,6 @@ const Checker = struct {
                 },
 
                 .consume => {
-                    if (report_now and place.isWhole() and state[slot] == .init) {
-                        for (open.items) |p| {
-                            if (!p.lends or p.place.root != root) continue;
-                            try self.reportTakenWhileHeld(at, root, p);
-                            break;
-                        }
-                    }
                     try self.consume(op, slot, state, moved_at, journal, report_now);
 
                     // A construct that has been given a value and has not

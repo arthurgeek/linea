@@ -3213,6 +3213,13 @@ const Analysis = struct {
                 .committed => switch (self.ast.exprTag(at)) {
                     .call => try self.applyCall(state, at, report),
                     .marked => try self.applyLentStep(state, at),
+                    // The operation runs once both operands are evaluated, so
+                    // what each observes must survive the other's effects.
+                    .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge => {
+                        const operands = self.ast.binary(at);
+                        try self.stale(try self.value(state, operands.lhs), .{ .used = operands.lhs }, report);
+                        try self.stale(try self.value(state, operands.rhs), .{ .used = operands.rhs }, report);
+                    },
                     else => {},
                 },
                 // The argument's own read already asked what it observes;
@@ -3347,6 +3354,11 @@ const Analysis = struct {
                     try self.addCallUses(cells, normalized);
                 },
                 .marked => try self.addUses(cells, self.ast.unaryOperand(at)),
+                .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge => {
+                    const operands = self.ast.binary(at);
+                    try self.addUses(cells, operands.lhs);
+                    try self.addUses(cells, operands.rhs);
+                },
                 else => {},
             },
             .dies, .held, .transferred, .discarded, .replaced, .escaped, .temporaries_end, .unsettled => {},

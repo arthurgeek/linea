@@ -1119,13 +1119,19 @@ const Builder = struct {
 
             .block => try self.body(id, position),
 
-            // Both operands are read: the head is observed and the index is
-            // a number. Which element is named is a question about places,
-            // and a whole array is what a move takes.
+            // Both operands are read, and an operator is a call of the
+            // operation its trait declares, `a == b` being `equals(a, b)`:
+            // each operand is lent until both are evaluated and the
+            // operation runs, exactly as a call's arguments are.
             .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge => {
                 const p = self.ast.binary(id);
+                try self.building.append(self.gpa, id);
+                defer _ = self.building.pop();
                 try self.expr(p.lhs, .reading);
+                try self.hold(p.lhs);
                 try self.expr(p.rhs, .reading);
+                try self.hold(p.rhs);
+                try self.commit(id);
             },
 
             .assign => {

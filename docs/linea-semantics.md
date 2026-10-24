@@ -5381,7 +5381,11 @@ is a use after a move whichever way the arguments are written:
 `both(v, v)` with the second parameter `sink` would have the callee read `v`
 after it took `v`, and is rejected exactly as `both(v, v)` with the first
 parameter `sink` is. A take anywhere inside a later argument counts: a nested
-call, a `let` in a block, or a structure literal's field. A field lent beside
+call, a `let` in a block, or a structure literal's field; a take on a path that
+leaves before the call is made, such as a branch ending in `return`, lends
+nothing it takes from. An operator is a call of the operation its trait
+declares, so `a == b` lends both operands until the comparison runs, and
+`p == same(p)` with `same` taking `p` is rejected the same way. A field lent beside
 its whole, `f(s.items, s)`, names the root the move takes. Two lends of one
 place share it, and `f(p, copy(p))` lends `p` beside a copy of it. A scalar
 snapshot lends nothing. A view or a capture of the place passed beside its
