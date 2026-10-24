@@ -660,7 +660,7 @@ its `main` reports a failure the way command-line programs usually do, with a
 message on standard error, written with `io.eprintln`, and a nonzero exit
 status:
 
-<!-- guide: unchecked the program needs command-line arguments and the output is three runs -->
+<!-- guide: check the program needs command-line arguments and the output is three runs -->
 ```linea
 import std.env
 import std.io
@@ -761,15 +761,14 @@ handle each failure in the style that shape suits:
 - A `main` that answers `UInt8` suits a command that chooses its exit
   statuses, as `alarm` does. Handle each setup failure — a missing argument, a
   file that will not open, a port already taken — with `let … else |error|`,
-  printing the error and returning a status. The [guest
-  book](../../examples/guest-book/main.lin) reads its port this way, and
-  prints its usage when the argument is not a port:
+  printing the error and returning a status. `alarm` handles a time it
+  cannot read this way:
 
-  <!-- guide: excerpt examples/guest-book/main.lin -->
+  <!-- guide: excerpt docs/learn/03-errors.md -->
   ```linea
-  let port = port_arg.parse[UInt16]() else |_| {
-      io.eprintln("usage: guest-book PORT")
-      return 64
+  let count = minutes(time) else |error| {
+      io.eprintln("alarm: {time}: {error}")
+      return 1
   }
   ```
 

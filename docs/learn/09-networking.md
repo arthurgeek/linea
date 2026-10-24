@@ -431,7 +431,7 @@ fail has one `let ... else` that reports the failure and leaves, and each
 resource is closed in exactly one place: the listener in `serve`, and the
 connection in `accept_clients`, after `echo` has borrowed it.
 
-<!-- guide: unchecked the program is a server and a client started from the command line -->
+<!-- guide: check the program is a server and a client started from the command line -->
 ```linea
 // Echo text over TCP. `tcp_echo serve PORT` waits for a client, sends back
 // everything the client sends, closes that connection, and waits for the next
@@ -726,7 +726,7 @@ request, a table that says which request goes to which function, and a `main`
 that starts the server. Save it as `hello_http.lin`
 ([the example](../../examples/hello_http.lin) also carries its tests):
 
-<!-- guide: unchecked the server runs until it is stopped and the output is a curl session -->
+<!-- guide: check the server runs until it is stopped and the output is a curl session -->
 ```linea
 // A small HTTP service with two routes.
 // GET /health answers `ok`. POST /echo reads a JSON message such as
@@ -866,12 +866,11 @@ shape: other routes, shared state and logging.
 
 ### A first server
 
-<!-- guide: unchecked the server runs until it is stopped and the output is a curl session -->
+<!-- guide: check the server runs until it is stopped and the output is a curl session -->
 ```linea
 import std.http
 import std.io
 import std.json
-import std.mem
 import std.net
 
 // A handler takes what it reads and the request, and returns the answer.
@@ -1213,7 +1212,9 @@ says what it did.
 
 This server takes readings from weather stations; save it as `stations.lin`:
 
-<!-- guide: unchecked the server runs until it is stopped and the output is a curl session -->
+`stations.lin`:
+
+<!-- guide: check the server runs until it is stopped and the output is a curl session -->
 ```linea
 import std.http
 import std.io
@@ -1945,7 +1946,7 @@ limits. Pass `limits:` to change them. `http.Limits.default()` gives the
 standard ones, so struct update changes only what you write. In
 `stations.lin`, this serves one connection and returns:
 
-<!-- guide: unchecked an edit of the station server, which runs until it is stopped -->
+<!-- guide: edit stations.lin 126 -->
 ```linea
     let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
     let finished = http.listen_and_serve(net.loopback(8080), server, state: app, limits: limits) else |error| {
