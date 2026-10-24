@@ -1,6 +1,8 @@
 # 204. MIR verification re-derives the storage safety ownership promised
 
-Status: Accepted — 2026-10-02.
+Status: Accepted — 2026-10-02. Extended by
+[0246](0246-a-call-holds-what-it-lends-until-it-runs.md), which refuses a lent
+address into a root a `sink` argument of the same call moves.
 
 Extends [0049](0049-generated-code-is-verified-before-it-is-emitted.md): the
 verifier that holds the emitter to the layout table now also holds lowering to

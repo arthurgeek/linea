@@ -1,0 +1,16 @@
+@copyable
+struct Point { x: UInt8, y: UInt8 }
+
+fn sum(a: Point, sink b: Point) -> UInt8 {
+    a.x + b.y
+}
+
+fn snapshot_sum(a: UInt8, sink b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let p = Point { x = 1, y = 2 }
+    let n: UInt8 = 4
+    sum(p, copy(p)) + snapshot_sum(n, n)
+}

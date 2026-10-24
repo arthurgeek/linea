@@ -1,0 +1,18 @@
+@(opaque, linear)
+type Name = UInt64
+
+extern fn named_open() -> Name
+
+extern fn named_length(read handle: Name) -> UInt64
+
+extern fn named_close(sink handle: Name)
+
+fn close_then_length(a: Name, sink b: Name) -> UInt64 {
+    named_close(b)
+    named_length(a)
+}
+
+pub fn first_length() -> UInt64 {
+    let handle = named_open()
+    close_then_length(handle, handle)
+}

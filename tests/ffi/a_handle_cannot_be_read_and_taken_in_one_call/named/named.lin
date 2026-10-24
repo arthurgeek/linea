@@ -1,0 +1,13 @@
+@(opaque, linear)
+type Name = UInt64
+
+extern fn named_open() -> Name
+
+// C reads `a` after it closes `b`, so one handle passed as both is read after
+// it was freed.
+extern fn named_close_then_length(read a: Name, sink b: Name) -> UInt64
+
+pub fn first_length() -> UInt64 {
+    let handle = named_open()
+    named_close_then_length(handle, handle)
+}

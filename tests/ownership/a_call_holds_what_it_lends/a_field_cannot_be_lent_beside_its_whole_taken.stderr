@@ -1,0 +1,14 @@
+error[O-Move]: `bag` is lent to `first_after_release` by another argument, and this takes it
+  --> tests/ownership/a_call_holds_what_it_lends/a_field_cannot_be_lent_beside_its_whole_taken.lin:21:36
+   |
+21 |     first_after_release(bag.items, bag)
+   |                         --------- lent to the call here
+   |                                    ^^^ this takes it while the call still needs it
+   |
+   = help: give `bag` away after the call, or lend it to both parameters
+error[O-Move]: `bag` has already been moved
+  --> tests/ownership/a_call_holds_what_it_lends/a_field_cannot_be_lent_beside_its_whole_taken.lin:28:29
+   |
+28 |     release_then_first(bag, bag.items)
+   |                        --- it was taken here
+   |                             ^^^^^^^^^ it was already taken, and a value is taken once

@@ -384,7 +384,7 @@ const Change = union(enum) {
 
 const Segment = struct { start: u32, len: u32 };
 
-const Refusal = struct { kind: enum { stale, moved }, at: InstId, entity: Entity, cause: InstId };
+const Refusal = struct { kind: enum { stale, moved, lent_and_moved }, at: InstId, entity: Entity, cause: InstId };
 
 /// Whether the dense dual runs beside the trail. It repeats the fixpoint with
 /// one state per block and scans every entity at each invalidation, which is
@@ -1659,9 +1659,14 @@ pub const Phase = struct {
         };
     }
 
+    /// Whether taking `src` as a whole `ty` moves its root out: a whole owned
+    /// root or returned temporary. A lent root stays its lender's.
+    fn movesOut(self: *const Phase, src: Base, ty: TypeId) bool {
+        return self.wholeRoot(src, ty) and self.root_kind[src.root] != .lent;
+    }
+
     fn moveOut(self: *Phase, at: InstId, src: Base, ty: TypeId) !void {
-        if (!self.wholeRoot(src, ty)) return;
-        if (self.root_kind[src.root] == .lent) return;
+        if (!self.movesOut(src, ty)) return;
         try self.invalidate(src.root, Access.whole(self.root_extent[src.root]), at);
         var v = self.valuesOf(src.root);
         v.moved = true;
@@ -1806,6 +1811,11 @@ pub const Phase = struct {
     /// Every argument is read; a sink argument moves its whole root out; an
     /// inout argument changes the bytes it lends; the signature's clauses
     /// say what the result and the retained roots carry afterwards.
+    ///
+    /// A lent argument is read or written while the callee runs, which is
+    /// after a `sink` argument of the same call has been moved out, so no
+    /// address a lent argument passes may point into a root a `sink`
+    /// argument moves.
     fn callEffects(self: *Phase, id: InstId, args: []const InstId, s: types_mod.CallableSignature) !void {
         const mir = self.mir;
         for (args) |a| try self.useValue(id, a);
@@ -1813,6 +1823,15 @@ pub const Phase = struct {
         // The callable phase before this one holds every call to its
         // signature's arity.
         std.debug.assert(params.len == args.len);
+        for (args, params) |a, param| {
+            if (param.convention != .sink) continue;
+            const taken = self.base[a.index()];
+            if (!self.movesOut(taken, param.ty)) continue;
+            for (args, params) |other, other_param| {
+                if (other_param.convention == .sink) continue;
+                if (self.base[other.index()].root == taken.root) try self.refuse(.lent_and_moved, id, taken.root, a);
+            }
+        }
 
         // What the result and the retained destinations carry, from the
         // arguments as they stand before the call changes them: what the
@@ -2498,6 +2517,9 @@ pub const Phase = struct {
                 .moved => try std.fmt.allocPrint(arena, "%{d} reads {s} after %{d} moved it out", .{
                     r.at.index(), name, r.cause.index(),
                 }),
+                .lent_and_moved => try std.fmt.allocPrint(arena, "%{d} lends {s} to its callee and moves it out through %{d}", .{
+                    r.at.index(), name, r.cause.index(),
+                }),
             };
             const labels = try arena.alloc(Label, 2);
             labels[0] = .{
@@ -2511,7 +2533,7 @@ pub const Phase = struct {
                 .span = self.mir.spanOf(r.cause),
                 .message = switch (r.kind) {
                     .stale => "the storage changed here",
-                    .moved => "the value moved out here",
+                    .moved, .lent_and_moved => "the value moved out here",
                 },
                 .style = .secondary,
             };
@@ -2585,6 +2607,20 @@ fn takesTwoBig(gpa: std.mem.Allocator) !Mir {
     return b.finish(entry, .from(0));
 }
 
+/// A callee reading one `Big` and taking another by sink, returning a word.
+fn readsAndTakesBig(gpa: std.mem.Allocator) !Mir {
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.return_type = .u64;
+    b.param_count = 2;
+    _ = try b.addLocal(Harness.big, .managed_address);
+    _ = try b.addLocal(Harness.big, .value);
+    const entry = try b.addBlock();
+    const k = try b.addInst(entry, .{ .tag = .constant, .ty = .u64, .span = Span.empty, .data = .{ .constant = 0 } });
+    _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = k } });
+    return b.finish(entry, .from(0));
+}
+
 /// A callee lending out a borrow of the one `Big` it reads.
 fn returnsBorrowOfBig(gpa: std.mem.Allocator) !Mir {
     var b = Builder.init(gpa);
@@ -2617,9 +2653,10 @@ const Shapes = struct {
     /// 2 lends it for writing, 3 takes it by sink, 4 takes a word, 5 lends
     /// it for reading with `carries`, 6 returns a borrow of the `Big` it reads
     /// with `borrows`, 7 keeps a borrow of its second `Big` in its first with
-    /// `retains`, and 8 returns a borrow of the `Big` it reads with `carries`.
+    /// `retains`, 8 returns a borrow of the `Big` it reads with `carries`, and
+    /// 9 reads one `Big` and takes another by sink.
     fn callees(gpa: std.mem.Allocator, subject: Mir) ![]Mir {
-        const functions = try gpa.alloc(Mir, 9);
+        const functions = try gpa.alloc(Mir, 10);
         functions[0] = subject;
         functions[1] = try takesBig(gpa, .read);
         functions[2] = try takesBig(gpa, .inout);
@@ -2629,6 +2666,7 @@ const Shapes = struct {
         functions[6] = try returnsBorrowOfBig(gpa);
         functions[7] = try takesTwoBig(gpa);
         functions[8] = try returnsBorrowOfBig(gpa);
+        functions[9] = try readsAndTakesBig(gpa);
         return functions;
     }
 
@@ -2642,6 +2680,7 @@ const Shapes = struct {
         .{ .conventions = &.{.read}, .contracts = borrows_first },
         .{ .conventions = &.{ .inout, .read }, .contracts = retains_borrow },
         .{ .conventions = &.{.read}, .contracts = carries_first },
+        .{ .conventions = &.{ .read, .sink } },
     };
 
     const reads: FunctionId = .at(1);
@@ -2652,6 +2691,7 @@ const Shapes = struct {
     const lends_borrow: FunctionId = .at(6);
     const retains: FunctionId = .at(7);
     const carries_borrow: FunctionId = .at(8);
+    const reads_and_takes: FunctionId = .at(9);
 };
 
 fn ret(b: *Builder, block: BlockId, value: InstId) !void {
@@ -3207,6 +3247,35 @@ test "a slot is not read after it is moved out" {
     _ = read;
     try ret(&b, entry, k);
     try expectRefused(try Shapes.callees(gpa, try b.finish(entry, .from(0))), "reads slot $0 after %1 moved it out");
+}
+
+test "a slot is not lent to a call that also moves it out" {
+    const gpa = testing.allocator;
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.return_type = .u64;
+    const big = try b.addLocal(Harness.big, .value);
+    const entry = try b.addBlock();
+    const lent = try addrOf(&b, entry, big);
+    const taken = try addrOf(&b, entry, big);
+    const k = try b.addCall(entry, .value, .u64, Span.empty, Shapes.reads_and_takes, &.{ lent, taken });
+    try ret(&b, entry, k);
+    try expectRefused(try Shapes.callees(gpa, try b.finish(entry, .from(0))), "lends slot $0 to its callee and moves it out through %1");
+}
+
+test "a call may lend one slot and move out another" {
+    const gpa = testing.allocator;
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.return_type = .u64;
+    const kept = try b.addLocal(Harness.big, .value);
+    const given = try b.addLocal(Harness.big, .value);
+    const entry = try b.addBlock();
+    const lent = try addrOf(&b, entry, kept);
+    const taken = try addrOf(&b, entry, given);
+    const k = try b.addCall(entry, .value, .u64, Span.empty, Shapes.reads_and_takes, &.{ lent, taken });
+    try ret(&b, entry, k);
+    try expectAccepted(try Shapes.callees(gpa, try b.finish(entry, .from(0))));
 }
 
 test "a moved slot written part by part holds a value again" {

@@ -1,0 +1,35 @@
+import std.mem
+
+struct Box { items: mem.Vec[UInt8] }
+
+impl Box {
+    fn first_after_release(self: Self, sink other: Box) -> UInt8 {
+        let Box { items } = other
+        items.release()
+        self.items[0]
+    }
+
+    fn release_then_first(sink self: Self, other: Box) -> UInt8 {
+        let Box { items } = self
+        items.release()
+        other.items[0]
+    }
+}
+
+fn receiver_lent() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    let b = Box { items = v }
+    b.first_after_release(b)
+}
+
+fn receiver_taken() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    let b = Box { items = v }
+    b.release_then_first(b)
+}
+
+fn main() -> UInt8 {
+    receiver_lent() + receiver_taken()
+}

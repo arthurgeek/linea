@@ -72,6 +72,10 @@ const Pending = struct {
     for_: ExprId,
     /// Where the value was given up, for the label that says so.
     at: ExprId,
+    /// A place the construct holds lent rather than a value given to it: a
+    /// call's argument it does not take, which no operand evaluated after it
+    /// may take ([O-Move]).
+    lends: bool = false,
 
     /// Whether two entries are the same transfer.
     ///
@@ -80,6 +84,7 @@ const Pending = struct {
     /// and that is one transfer open, not two.
     fn same(a: Pending, b: Pending) bool {
         return a.for_ == b.for_ and
+            a.lends == b.lends and
             a.place.root == b.place.root and
             a.place.depth == b.place.depth;
     }
@@ -236,6 +241,7 @@ fn checkBodies(
     defer c.reached.deinit(gpa);
     defer c.merge_origins.deinit(gpa);
     defer c.scheduled.deinit(gpa);
+    defer c.held_by.deinit(gpa);
     defer c.emitted.deinit(gpa);
     defer c.leaks.deinit(gpa);
 
@@ -288,6 +294,10 @@ const Checker = struct {
     /// numbered by the bit it holds in a row of `awaiting`. Sized by the
     /// function's own operations.
     scheduled: std.AutoHashMapUnmanaged(BindingId, u32) = .empty,
+    /// The bindings each call of the function being walked holds lent until
+    /// it runs, which the callee reads at the call's `committed`. Sized by
+    /// the function's `held` operations.
+    held_by: std.AutoHashMapUnmanaged(HeldBy, void) = .empty,
     /// For each block of the function being walked, a row of bits over
     /// `scheduled`: bit `i` is set when a schedule consuming binding `i` can
     /// still run from the block's start before that binding's scope ends.
@@ -321,6 +331,8 @@ const Checker = struct {
     const no_slot = std.math.maxInt(u32);
     /// Spoken for while the roots are being gathered, before they are ordered.
     const claimed = no_slot - 1;
+
+    const HeldBy = struct { call: ExprId, binding: BindingId };
 
     const MergeOrigin = struct {
         at: ExprId,
@@ -891,6 +903,55 @@ const Checker = struct {
                 .{try self.nameOf(root)},
             ),
             .labels = labels,
+        });
+    }
+
+    /// Reports a place taken while the call around it still holds it lent
+    /// through another argument, which the callee reads or writes after this
+    /// take has given the value away. Where the value is copyable, a copy
+    /// taken here leaves the lent place whole, so that is the fix; otherwise
+    /// where to take it is the reader's choice.
+    fn reportTakenWhileHeld(self: *Checker, at: ExprId, root: BindingId, p: Pending) std.mem.Allocator.Error!void {
+        const arena = self.sink.arena;
+        const name = try self.nameOf(root);
+        const labels = try arena.alloc(Label, 2);
+        labels[0] = .{
+            .file = self.ast.fileOfExpr(at),
+            .span = self.ast.exprSpan(at),
+            .message = "this takes it while the call still needs it",
+            .style = .primary,
+        };
+        labels[1] = .{
+            .file = self.ast.fileOfExpr(p.at),
+            .span = self.ast.exprSpan(p.at),
+            .message = "lent to the call here",
+            .style = .secondary,
+        };
+        const copyable = self.typing.mayCopy(self.typing.bindingType(root));
+        const notes = try arena.alloc([]const u8, 1);
+        var fixes: []const Fix = &.{};
+        if (copyable) {
+            notes[0] = try std.fmt.allocPrint(arena, "pass `copy({s})` here, so the call takes a copy and reads the original", .{self.ast.exprText(at)});
+            const edit: HelpEdit = .{
+                .file = self.ast.fileOfExpr(at),
+                .span = self.ast.exprSpan(at),
+                .text = try std.fmt.allocPrint(arena, "copy({s})", .{self.ast.exprText(at)}),
+            };
+            fixes = try arena.dupe(Fix, &.{.{ .note = 0, .edits = try arena.dupe(HelpEdit, &.{edit}) }});
+        } else {
+            notes[0] = try std.fmt.allocPrint(arena, "give `{s}` away after the call, or lend it to both parameters", .{name});
+        }
+        try self.emit(.{
+            .severity = .err,
+            .code = .o_move,
+            .message = try std.fmt.allocPrint(
+                arena,
+                "`{s}` is lent to `{s}` by another argument, and this takes it",
+                .{ name, self.constructName(p.for_) },
+            ),
+            .labels = labels,
+            .notes = notes,
+            .fixes = fixes,
         });
     }
 
@@ -1690,12 +1751,15 @@ const Checker = struct {
                 // Or gone, which an exit says of a stretch of the live stack
                 // rather than of one place, so it is asked of the stretch.
                 .dies => if (self.cfg.endsScopeOf(self.cfg.opRun(op), root)) return false,
+                // A call that holds the place lent reads it when it runs.
+                .committed => if (self.held_by.contains(.{ .call = self.cfg.opAt(op), .binding = root })) return true,
                 // A construct receiving what it was given, being left before it
                 // did, or handing on a value it made itself, touches no place
                 // -- so none of them settles anything about what a copy still
                 // holds. The end of a statement's temporaries touches no place
-                // either, nor does a field a literal writes over its base's.
-                .transferred, .committed, .escaped, .value, .returned, .lent, .temporaries_end, .replaced, .unsettled => {},
+                // either, nor does a field a literal writes over its base's,
+                // and a hold is read where its call runs.
+                .transferred, .escaped, .value, .returned, .lent, .held, .temporaries_end, .replaced, .unsettled => {},
             }
         }
 
@@ -1740,7 +1804,8 @@ const Checker = struct {
                     .dies => if (self.cfg.endsScopeOf(self.cfg.opRun(op), root)) {
                         settled = true;
                     },
-                    .transferred, .committed, .escaped, .value, .returned, .lent, .temporaries_end, .replaced, .unsettled => {},
+                    .committed => if (self.held_by.contains(.{ .call = self.cfg.opAt(op), .binding = root })) return true,
+                    .transferred, .escaped, .value, .returned, .lent, .held, .temporaries_end, .replaced, .unsettled => {},
                 }
                 if (settled) break;
             }
@@ -2344,6 +2409,14 @@ const Checker = struct {
         defer self.current_owner = .none;
         self.merge_origins.clearRetainingCapacity();
         self.scheduled.clearRetainingCapacity();
+        self.held_by.clearRetainingCapacity();
+        for (self.cfg.blocks[f.blocks.start..f.blocks.end]) |blk| {
+            var ops = self.cfg.opsOf(blk);
+            while (ops.next()) |op| {
+                if (self.cfg.opTag(op) != .held) continue;
+                try self.held_by.put(self.gpa, .{ .call = self.cfg.opPendingFor(op), .binding = self.cfg.opPlace(op).root }, {});
+            }
+        }
 
         const roots = try self.rootsOf(f);
         defer {
@@ -2585,13 +2658,22 @@ const Checker = struct {
                     // does not depend on the order the blocks were walked in.
                     var earliest: ?Pending = null;
                     for (open.items) |p| {
-                        if (p.for_ != self.cfg.opPendingFor(op)) continue;
+                        if (p.lends or p.for_ != self.cfg.opPendingFor(op)) continue;
                         if (earliest == null or self.startOf(p.at) < self.startOf(earliest.?.at)) {
                             earliest = p;
                         }
                     }
                     if (earliest) |p| try self.reportUncommitted(at, p);
                 }
+                // A call control leaves never runs, so it holds nothing on
+                // the path the jump goes to.
+                var kept: usize = 0;
+                for (open.items) |p| {
+                    if (p.lends and p.for_ == self.cfg.opPendingFor(op)) continue;
+                    open.items[kept] = p;
+                    kept += 1;
+                }
+                open.shrinkRetainingCapacity(kept);
                 continue;
             }
 
@@ -2677,6 +2759,13 @@ const Checker = struct {
                 continue;
             }
 
+            // A place the call around it holds lent until it runs.
+            if (tag == .held) {
+                const p: Pending = .{ .place = self.cfg.opPlace(op), .for_ = self.cfg.opPendingFor(op), .at = at, .lends = true };
+                if (!holds(open.items, p)) try open.append(self.gpa, p);
+                continue;
+            }
+
             const place = self.cfg.opPlace(op);
             const root = place.root;
             const slot = self.slotOf(root) orelse continue;
@@ -2688,7 +2777,7 @@ const Checker = struct {
                 // no name at all, a construct
                 // receiving or being left names none, and a scope exit names a
                 // stretch of the stack.
-                .discarded, .replaced, .transferred, .committed, .escaped, .dies, .value, .returned, .lent, .temporaries_end => {},
+                .discarded, .replaced, .transferred, .committed, .escaped, .dies, .value, .returned, .lent, .held, .temporaries_end => {},
 
                 // Writing is not moving, and that is why it leaks: a move
                 // leaves the obligation with the value, a write leaves the
@@ -2732,6 +2821,13 @@ const Checker = struct {
                 },
 
                 .consume => {
+                    if (report_now and place.isWhole() and state[slot] == .init) {
+                        for (open.items) |p| {
+                            if (!p.lends or p.place.root != root) continue;
+                            try self.reportTakenWhileHeld(at, root, p);
+                            break;
+                        }
+                    }
                     try self.consume(op, slot, state, moved_at, journal, report_now);
 
                     // A construct that has been given a value and has not

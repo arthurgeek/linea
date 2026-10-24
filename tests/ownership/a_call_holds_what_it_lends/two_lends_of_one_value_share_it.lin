@@ -1,0 +1,13 @@
+import std.mem
+
+fn total(a: mem.Vec[UInt8], b: mem.Vec[UInt8]) -> UInt8 {
+    a[0] + b[0]
+}
+
+fn main() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(3).unwrap()
+    let answer = total(v, v)
+    v.release()
+    answer
+}

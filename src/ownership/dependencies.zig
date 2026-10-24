@@ -46,21 +46,47 @@ const SetId = enum(u32) { empty, _ };
 const ExclusionsId = enum(u32) { empty, _ };
 const Exclusion = struct { path: PathId, next: ExclusionsId };
 const CarriedSet = struct { set: SetId, ty: types.TypeId };
+/// What a dependency set is held by: a binding's value, an expression's
+/// value, a lend's alias, or a closure capture's source. The kind sits in the
+/// low two bits and the binding or expression above them, and only these
+/// functions read or write that layout.
 const Cell = enum(u64) {
     _,
+
+    const Kind = enum(u2) { binding, expression, alias, capture };
+
+    fn make(of: Kind, id: u32) Cell {
+        return @enumFromInt((@as(u64, id) << 2) | @intFromEnum(of));
+    }
+    fn kind(self: Cell) Kind {
+        return @enumFromInt(@as(u2, @truncate(@intFromEnum(self))));
+    }
     fn binding(b: BindingId) Cell {
-        return @enumFromInt(@as(u64, @intFromEnum(b)) << 2);
+        return make(.binding, @intFromEnum(b));
     }
     fn expression(e: ExprId) Cell {
-        return @enumFromInt((@as(u64, @intFromEnum(e)) << 2) | 1);
+        return make(.expression, @intFromEnum(e));
     }
     fn alias(b: BindingId) Cell {
-        return @enumFromInt((@as(u64, @intFromEnum(b)) << 2) | 2);
+        return make(.alias, @intFromEnum(b));
     }
     fn capture(source: ExprId) Cell {
-        return @enumFromInt((@as(u64, @intFromEnum(source)) << 2) | 3);
+        return make(.capture, @intFromEnum(source));
+    }
+    /// The binding whose lend this cell is the alias of, or null for any
+    /// other kind of cell.
+    fn aliasOf(self: Cell) ?BindingId {
+        if (self.kind() != .alias) return null;
+        return @enumFromInt(@as(u32, @intCast(@intFromEnum(self) >> 2)));
     }
 };
+
+test "a cell answers the binding it is the alias of, and only an alias does" {
+    const b: BindingId = @enumFromInt(7);
+    try std.testing.expectEqual(@as(?BindingId, b), Cell.alias(b).aliasOf());
+    try std.testing.expectEqual(@as(?BindingId, null), Cell.binding(b).aliasOf());
+    try std.testing.expectEqual(@as(?BindingId, null), Cell.capture(@enumFromInt(7)).aliasOf());
+}
 const element: u96 = 1 << 64;
 const observed: u96 = element + 1;
 const opaque_projection: u96 = element + 2;
@@ -1975,9 +2001,7 @@ const Analysis = struct {
                 const cells = self.dependents.active.get(set) orelse continue;
                 var holders = cells.keyIterator();
                 while (holders.next()) |cell| {
-                    const raw = @intFromEnum(cell.*);
-                    if (raw & 3 != 2) continue;
-                    const binding: BindingId = @enumFromInt(@as(u32, @intCast(raw >> 2)));
+                    const binding = cell.aliasOf() orelse continue;
                     if (binding == root) continue;
                     if (!self.enclosesAll(set, reached.origin.place)) continue;
                     if (for (kept.items) |held| {
@@ -3191,7 +3215,9 @@ const Analysis = struct {
                     .marked => try self.applyLentStep(state, at),
                     else => {},
                 },
-                .transferred, .discarded, .replaced, .escaped, .unsettled => {},
+                // The argument's own read already asked what it observes;
+                // the call's `committed` asks again once the others ran.
+                .held, .transferred, .discarded, .replaced, .escaped, .unsettled => {},
             }
             for (cells) |cell| try self.put(state, cell, .empty);
         }
@@ -3323,7 +3349,7 @@ const Analysis = struct {
                 .marked => try self.addUses(cells, self.ast.unaryOperand(at)),
                 else => {},
             },
-            .dies, .transferred, .discarded, .replaced, .escaped, .temporaries_end, .unsettled => {},
+            .dies, .held, .transferred, .discarded, .replaced, .escaped, .temporaries_end, .unsettled => {},
         }
         return .{ .start = start, .uses_start = uses_start, .end = cells.items.len };
     }

@@ -1,0 +1,27 @@
+import std.mem
+
+fn first_after_release(a: mem.Slice[UInt8], sink b: mem.Vec[UInt8]) -> UInt8 {
+    b.release()
+    a[0]
+}
+
+fn release_then_first(sink b: mem.Vec[UInt8], a: mem.Slice[UInt8]) -> UInt8 {
+    b.release()
+    a[0]
+}
+
+fn lent_first() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    first_after_release(v.as_slice(), v)
+}
+
+fn taken_first() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    release_then_first(v, v.as_slice())
+}
+
+fn main() -> UInt8 {
+    lent_first() + taken_first()
+}

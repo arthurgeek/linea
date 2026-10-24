@@ -1,0 +1,14 @@
+error[O-Move]: `b` is lent to `b.first_after_release` by another argument, and this takes it
+  --> tests/ownership/a_call_holds_what_it_lends/a_receiver_and_an_argument_cannot_lend_and_take_one_value.lin:23:27
+   |
+23 |     b.first_after_release(b)
+   |     - lent to the call here
+   |                           ^ this takes it while the call still needs it
+   |
+   = help: give `b` away after the call, or lend it to both parameters
+error[O-Move]: `b` has already been moved
+  --> tests/ownership/a_call_holds_what_it_lends/a_receiver_and_an_argument_cannot_lend_and_take_one_value.lin:30:26
+   |
+30 |     b.release_then_first(b)
+   |     - it was taken here
+   |                          ^ it was already taken, and a value is taken once

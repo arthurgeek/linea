@@ -1,0 +1,8 @@
+error[O-Move]: `v` is lent to `first_after_release` by another argument, and this takes it
+  --> tests/ownership/a_call_holds_what_it_lends/an_argument_cannot_take_what_another_lends.lin:15:28
+   |
+15 |     first_after_release(v, v)
+   |                         - lent to the call here
+   |                            ^ this takes it while the call still needs it
+   |
+   = help: give `v` away after the call, or lend it to both parameters

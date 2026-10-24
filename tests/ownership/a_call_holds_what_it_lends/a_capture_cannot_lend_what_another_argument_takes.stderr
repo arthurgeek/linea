@@ -1,0 +1,12 @@
+error[O-Move]: `v` has already been moved
+  --> tests/ownership/a_call_holds_what_it_lends/a_capture_cannot_lend_what_another_argument_takes.lin:22:27
+   |
+22 |     release_then_peek(v, [v] || v[0])
+   |                       - it was taken here
+   |                           ^ it was already taken, and a value is taken once
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ownership/a_call_holds_what_it_lends/a_capture_cannot_lend_what_another_argument_takes.lin:16:37
+   |
+16 |     peek_after_release([v] || v[0], v)
+   |                        ----------- the observation is still used here
+   |                                     ^ keep this place available until the last use of its observation
