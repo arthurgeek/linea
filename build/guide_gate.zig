@@ -93,8 +93,29 @@ pub fn main(init: std.process.Init) !u8 {
         std.debug.print("guide: {s}/README.md links to no page\n", .{guide});
         return 1;
     }
-    var programs: std.ArrayList(source.GuideProgram) = .empty;
     var problems: usize = 0;
+    // A Markdown page beside the index that it does not link is read by no
+    // gate, so it is refused.
+    var names: std.ArrayList([]const u8) = .empty;
+    {
+        var directory = try std.Io.Dir.cwd().openDir(io, guide, .{ .iterate = true });
+        defer directory.close(io);
+        var entries = directory.iterate();
+        while (try entries.next(io)) |entry| {
+            if (entry.kind == .file) try names.append(gpa, try gpa.dupe(u8, entry.name));
+        }
+    }
+    for (source.unlinkedGuidePages(gpa, listed, names.items)) |name| {
+        std.debug.print("{s}/{s}: the page is not linked from {s}/README.md, so the gate reads none of it; link it, or move it out of the guide\n", .{ guide, name, guide });
+        problems += 1;
+    }
+    // The pages as paths from the repository root, which an excerpt names.
+    // `build.zig` passes both directories absolute, so no working directory
+    // takes part.
+    const relative = try std.fs.path.relative(gpa, "/", null, args[5], guide);
+    const pages = try gpa.alloc([]const u8, listed.len);
+    for (listed, pages) |entry, *page| page.* = try std.fs.path.join(gpa, &.{ relative, entry.file });
+    var programs: std.ArrayList(source.GuideProgram) = .empty;
     var excerpts: usize = 0;
     var excluded: usize = 0;
     var unrun_output: std.ArrayList(source.GuideBlock) = .empty;
@@ -102,6 +123,7 @@ pub fn main(init: std.process.Init) !u8 {
         var chapter = entry;
         chapter.text = try read(io, gpa, guide, chapter.file);
         chapter.root = .{ .io = io, .dir = root };
+        chapter.pages = pages;
         const reading = source.readGuideChapter(gpa, chapter);
         for (reading.problems) |problem| {
             std.debug.print("{s}/{s}:{d}: {s}\n", .{ guide, problem.chapter, problem.line, problem.message });
@@ -152,12 +174,15 @@ pub fn main(init: std.process.Init) !u8 {
         failed += 1;
         std.debug.print("{s}/{s}", .{ guide, failure });
     }
+    var check_only: usize = 0;
+    for (programs.items) |program| check_only += @intFromBool(program.check_only);
     std.debug.print(
-        "guide: {d} programs, {d} fragments and {d} edits compiled, {d} with their pasted output compared; {d} excerpts held to their files; {d} excluded by a marker, whose {d} pasted output blocks were held to the compiler's wording; {d} failed, {d} unaccounted for\n",
+        "guide: {d} programs, {d} fragments and {d} edits compiled ({d} checked and not run), {d} with their pasted output compared; {d} excerpts held to their files; {d} excluded by a marker, {d} of them checked to still fail, whose {d} pasted output blocks and those of programs not run were held to the compiler's wording; {d} failed, {d} unaccounted for\n",
         .{
             compiled[@intFromEnum(source.GuideSource.program)], compiled[@intFromEnum(source.GuideSource.fragment)],
-            compiled[@intFromEnum(source.GuideSource.edit)],    compared,
-            excerpts,                                           excluded,
+            compiled[@intFromEnum(source.GuideSource.edit)],    check_only,
+            compared,                                           excerpts,
+            excluded,                                           compiled[@intFromEnum(source.GuideSource.unchecked)],
             unrun_output.items.len,                             failed + invented,
             problems,
         },

@@ -805,6 +805,9 @@ pub const GuideChapter = struct {
     file: []const u8,
     text: []const u8 = "",
     root: ?struct { io: std.Io, dir: std.Io.Dir } = null,
+    /// The pages the gate reads, as paths from the repository root, which an
+    /// excerpt may quote.
+    pages: []const []const u8 = &.{},
 };
 
 /// Every chapter `docs/learn/README.md` links to, in the order it lists them.
@@ -850,6 +853,21 @@ fn linkedPages(gpa: std.mem.Allocator, index: []const u8, wanted: enum { chapter
 
 /// Whether a link names a page in the guide's own directory: a lowercase
 /// Markdown file with no directory, such as `patterns.md`.
+/// The Markdown files among `names`, the files of the guide's directory,
+/// that the index links to as no page, so no gate would read them. The index
+/// itself is the one file the gate reads without a link.
+pub fn unlinkedGuidePages(gpa: std.mem.Allocator, pages: []const GuideChapter, names: []const []const u8) []const []const u8 {
+    var linked: std.StringHashMapUnmanaged(void) = .empty;
+    defer linked.deinit(gpa);
+    for (pages) |page| linked.put(gpa, page.file, {}) catch @panic("out of memory");
+    var found: std.ArrayList([]const u8) = .empty;
+    for (names) |name| {
+        if (!std.mem.endsWith(u8, name, ".md") or std.mem.eql(u8, name, "README.md")) continue;
+        if (!linked.contains(name)) found.append(gpa, name) catch @panic("out of memory");
+    }
+    return found.toOwnedSlice(gpa) catch @panic("out of memory");
+}
+
 fn isPageFile(file: []const u8) bool {
     if (file.len < 4 or !std.mem.endsWith(u8, file, ".md")) return false;
     for (file[0 .. file.len - 3]) |c| {
@@ -889,6 +907,9 @@ pub const GuideSource = enum {
     /// The program above with a run of `<!-- guide: edit LINES -->` blocks
     /// applied to it.
     edit,
+    /// A block a `<!-- guide: unchecked REASON -->` line excludes, checked
+    /// alone to hold the marker to the block still failing.
+    unchecked,
 };
 
 /// Code the guide pastes, as the gate compiles it, with the output the guide
@@ -909,6 +930,21 @@ pub const GuideProgram = struct {
     /// diagnostics -->` marker says it stops there; null when it shows all.
     expected_first: ?usize = null,
     source: GuideSource = .program,
+    /// Compiled with `linea check` and never run, as a `<!-- guide: check
+    /// REASON -->` marker asks of a program and the edits of it.
+    check_only: bool = false,
+    /// Where the blocks of an edit sit in the files it wrote, so a failure
+    /// names the block whose lines the compiler reports.
+    blocks: []const EditBlock = &.{},
+};
+
+/// The lines `first..last`, counted from 1, that one edit block wrote into
+/// `files[file]` of the edited program, and the line of the block's fence.
+pub const EditBlock = struct {
+    file: usize,
+    first: usize,
+    last: usize,
+    line: usize,
 };
 
 /// Output the guide pastes beside a block the gate does not run.
@@ -954,6 +990,13 @@ const GuideFence = struct {
     fn unchecked(self: GuideFence) bool {
         const marker = self.marker orelse return false;
         return marker == .unchecked;
+    }
+
+    /// Whether a `<!-- guide: check REASON -->` line directly above asks for
+    /// the program to be checked and not run.
+    fn checkOnly(self: GuideFence) bool {
+        const marker = self.marker orelse return false;
+        return marker == .check;
     }
 
     /// The N of a `<!-- guide: first N diagnostics -->` line directly above.
@@ -1017,20 +1060,26 @@ const GuideFence = struct {
         return false;
     }
 
-    /// A `linea` block the gate compiles as a program, rather than as a
-    /// fragment, an edit or an excerpt.
+    /// A `linea` block that is a program, or a file of one: it has an entry
+    /// point or a `.lin` label, whatever marker stands above it.
+    fn isProgramBlock(self: GuideFence) bool {
+        return std.mem.eql(u8, self.info, "linea") and (self.hasEntryPoint() or self.sourceLabel() != null);
+    }
+
+    /// A program block the gate compiles: one with no marker, or one it
+    /// checks without running.
     fn isProgram(self: GuideFence) bool {
-        return std.mem.eql(u8, self.info, "linea") and self.marker == null and
-            (self.hasEntryPoint() or self.sourceLabel() != null);
+        return self.isProgramBlock() and (self.marker == null or self.checkOnly());
     }
 };
 
 const marker_open = "<!-- guide:";
 const marker_close = "-->";
-const marker_help = "the guide markers are `<!-- guide: unchecked REASON -->`, `<!-- guide: first N diagnostics -->`, `<!-- guide: excerpt PATH -->` and `<!-- guide: edit [PATH] N | N-M | after N -->`, and each is complete";
+const marker_help = "the guide markers are `<!-- guide: unchecked REASON -->`, `<!-- guide: check REASON -->`, `<!-- guide: first N diagnostics -->`, `<!-- guide: excerpt PATH -->` and `<!-- guide: edit [PATH] N | N-M | after N -->`, and each is complete";
 
 const Marker = union(enum) {
     unchecked,
+    check,
     first: usize,
     excerpt: []const u8,
     edit: Edit,
@@ -1055,6 +1104,7 @@ fn guideMarker(bare: []const u8) ?Marker {
     var words = std.mem.tokenizeAny(u8, inner, " \t");
     const kind = words.next() orelse return null;
     if (std.mem.eql(u8, kind, "unchecked")) return if (words.next() != null) .unchecked else null;
+    if (std.mem.eql(u8, kind, "check")) return if (words.next() != null) .check else null;
     if (std.mem.eql(u8, kind, "excerpt")) {
         const path = words.next() orelse return null;
         if (words.next() != null or path.len == 0 or path[0] == '/') return null;
@@ -1160,7 +1210,9 @@ fn guideFences(
             }) catch @panic("out of memory");
             pending = null;
         }
-        label = guideLabel(line);
+        // A marker sits between a label and its block, so it keeps the label.
+        // A marker sits between a label and its block, so it keeps the label.
+        if (!std.mem.startsWith(u8, bare, marker_open)) label = guideLabel(line);
         if (std.mem.startsWith(u8, bare, marker_open)) {
             if (guideMarker(bare)) |marker| {
                 pending = .{ .line = number, .marker = marker };
@@ -1297,27 +1349,33 @@ fn claimOutput(
 /// A `linea` block is a program when it has `fn main` or a `test fn`, or
 /// when it is one of the files a `` `path.lin`: `` line labels, which together
 /// make a project once `main.lin` arrives. Its output is the block `Claim`
-/// describes. Any other `linea` block is a fragment, and every fragment is
-/// checked one way:
+/// describes. `<!-- guide: check REASON -->` above a program compiles it with
+/// `linea check` and never runs it, for a program that needs arguments or
+/// serves until stopped; the output after it is compared when it shows
+/// diagnostics, and is otherwise what a run prints. Any other `linea` block
+/// is a fragment, and every fragment is checked one way:
 ///
-/// - `<!-- guide: edit [PATH] LINES -->` above it applies it to the last
-///   program above, or with PATH to the file PATH of the last program above
-///   that has one, replacing line N, lines N-M, or inserting after line N,
-///   counted in that file as pasted. Consecutive edit blocks apply together,
-///   and the output after the last is what the edited program prints.
+/// - `<!-- guide: edit [PATH] LINES -->` above it applies it to the nearest
+///   program above, or with PATH to the nearest program above with the file
+///   PATH, replacing line N, lines N-M, or inserting after line N, counted in
+///   that file as pasted. Consecutive edit blocks apply together, and the
+///   output after the last is what the edited program prints.
 /// - `<!-- guide: excerpt PATH -->` holds it to consecutive lines of a file
-///   the build compiles, or of a program a guide page compiles.
-/// - `<!-- guide: unchecked REASON -->` excludes it, for a sketch or a
-///   signature that cannot stand alone.
+///   the build compiles, or of a program a linked guide page compiles.
 /// - Otherwise it is checked alone, as the root file of a library.
 ///
-/// Output that no block claims is refused, so a pasted error cannot sit
-/// beside code nothing compiles.
+/// `<!-- guide: unchecked REASON -->` excludes a block, for a sketch or a
+/// signature that cannot stand alone, and the block is still checked alone
+/// to hold the marker to the block failing. Output that no block claims is
+/// refused, so a pasted error cannot sit beside code nothing compiles.
 pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideReading {
     var problems: std.ArrayList(GuideProblem) = .empty;
     const fences = guideFences(gpa, chapter, &problems);
     var programs: std.ArrayList(GuideProgram) = .empty;
+    // The labelled files of a project waiting for its `main.lin`, and the
+    // line of the first of them.
     var project: std.ArrayList(GuideFile) = .empty;
+    var project_line: usize = 0;
     // Files written beside the next program, which it may embed, and the line
     // of the first of them.
     var data: std.ArrayList(GuideFile) = .empty;
@@ -1325,11 +1383,10 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
     var excerpts: usize = 0;
     var excluded: usize = 0;
     var unrun_output: std.ArrayList(GuideBlock) = .empty;
-    // The index in `programs` of the last program built from program blocks,
-    // which an edit changes, and of the last with a file at each path, which
-    // an edit naming that path changes.
-    var above: ?usize = null;
-    var by_file: std.StringHashMapUnmanaged(usize) = .empty;
+    // The nearest program above, which an edit changes, and the nearest with
+    // a file at each path, which an edit naming that path changes.
+    var above: ?Above = null;
+    var by_file: std.StringHashMapUnmanaged(Above) = .empty;
     var i: usize = 0;
     while (i < fences.len) {
         const fence = fences[i];
@@ -1356,6 +1413,14 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             }) catch @panic("out of memory");
             continue;
         }
+        if (fence.checkOnly() and !fence.isProgramBlock()) {
+            problems.append(gpa, .{
+                .chapter = chapter.file,
+                .line = fence.line,
+                .message = "`<!-- guide: check REASON -->` belongs directly above a program, a `linea` block with `fn main`, a `test fn` or a `` `path.lin`: `` label; a fragment is only ever checked",
+            }) catch @panic("out of memory");
+            continue;
+        }
         if (fence.excerpt()) |path| {
             excerpts += 1;
             if (checkExcerpt(gpa, chapter, path, fence.body)) |message| {
@@ -1369,8 +1434,32 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
         }
         if (fence.unchecked()) {
             excluded += 1;
-            // An excluded program takes the data above it with it.
-            if (is_linea) data.clearRetainingCapacity();
+            if (is_linea) {
+                if (fence.sourceLabel() == null) flushProject(gpa, chapter, &problems, &project, project_line);
+                const output = if (i < fences.len and fences[i].isOutput()) fences[i].body else null;
+                const named = if (output) |text| guideNamedFile(text) else null;
+                var files: []GuideFile = undefined;
+                if (fence.hasEntryPoint()) {
+                    // An excluded program takes the data above it with it.
+                    files = gpa.alloc(GuideFile, 1 + data.items.len) catch @panic("out of memory");
+                    files[0] = .{ .path = fence.sourceLabel() orelse named orelse "main.lin", .text = fence.body };
+                    @memcpy(files[1..], data.items);
+                } else files = fragmentLibrary(gpa, fence.sourceLabel() orelse named orelse "fragment.lin", fence.body);
+                data.clearRetainingCapacity();
+                programs.append(gpa, .{
+                    .chapter = chapter.file,
+                    .line = fence.line,
+                    .files = files,
+                    .target = files[0].path,
+                    .command = .check,
+                    .expected = null,
+                    .source = .unchecked,
+                }) catch @panic("out of memory");
+                if (fence.isProgramBlock()) {
+                    above = .{ .excluded = fence.line };
+                    by_file.put(gpa, files[0].path, .{ .excluded = fence.line }) catch @panic("out of memory");
+                }
+            }
             if (fence.isOutput()) {
                 unrun_output.append(gpa, .{ .chapter = chapter.file, .line = fence.line, .body = fence.body }) catch @panic("out of memory");
             }
@@ -1398,6 +1487,7 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
         // depends on.
         if (std.mem.eql(u8, fence.info, "json")) {
             if (fence.label) |path| if (isManifestPath(path)) {
+                if (project.items.len == 0) project_line = fence.line;
                 project.append(gpa, .{ .path = path, .text = fence.body }) catch @panic("out of memory");
             };
             continue;
@@ -1409,49 +1499,70 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             const run_start = i - 1;
             while (i < fences.len and std.mem.eql(u8, fences[i].info, "linea") and fences[i].edit() != null) i += 1;
             const run = fences[run_start..i];
-            const claim = claimOutput(gpa, chapter, fences, &i, &problems);
+            var claim = claimOutput(gpa, chapter, fences, &i, &problems);
             const named = for (run) |edit_fence| {
                 if (edit_fence.edit().?.path) |path| break path;
             } else null;
-            const base_at = if (named) |path| by_file.get(path) else above;
-            const base = if (base_at) |at| programs.items[at] else {
+            const nearest = if (named) |path| by_file.get(path) else above;
+            const base_at = switch (nearest orelse {
                 problems.append(gpa, .{
                     .chapter = chapter.file,
                     .line = fence.line,
                     .message = if (named) |path|
-                        std.fmt.allocPrint(gpa, "an edit naming `{s}` changes the last program above with that file, and none comes before it in this page", .{path}) catch @panic("out of memory")
+                        std.fmt.allocPrint(gpa, "an edit naming `{s}` changes the nearest program above with that file, and none comes before it in this page", .{path}) catch @panic("out of memory")
                     else
-                        "an edit changes the program above it, and no program comes before it in this page",
+                        "an edit changes the nearest program above it, and no program comes before it in this page",
                 }) catch @panic("out of memory");
                 continue;
+            }) {
+                .compiled => |at| at,
+                .excluded => |line| {
+                    problems.append(gpa, .{
+                        .chapter = chapter.file,
+                        .line = fence.line,
+                        .message = std.fmt.allocPrint(
+                            gpa,
+                            "this edit changes the program at line {d}, which `<!-- guide: unchecked REASON -->` excludes, so the edited program cannot be compiled; write `<!-- guide: check REASON -->` above that program if it cannot run",
+                            .{line},
+                        ) catch @panic("out of memory"),
+                    }) catch @panic("out of memory");
+                    continue;
+                },
             };
-            const files = applyEdits(gpa, chapter, base, run, &problems) orelse continue;
+            const base = programs.items[base_at];
+            const edited = applyEdits(gpa, chapter, base, run, &problems) orelse continue;
             var target = base.target;
             // A program of one file is written to the file its output names.
             if (base.files.len > 0 and std.mem.eql(u8, base.target, base.files[0].path)) {
                 if (claim.named()) |name| {
-                    files[0].path = name;
+                    edited.files[0].path = name;
                     target = name;
                 }
             }
+            if (base.check_only) checkOnlyOutput(gpa, chapter, &claim, &unrun_output);
             programs.append(gpa, .{
                 .chapter = chapter.file,
                 .line = fence.line,
-                .files = files,
+                .files = edited.files,
                 .target = target,
-                .command = claim.command(),
+                .command = if (base.check_only) .check else claim.command(),
                 .expected = claim.expected,
                 .expected_line = claim.expected_line,
                 .expected_first = claim.expected_first,
                 .source = .edit,
+                .check_only = base.check_only,
+                .blocks = edited.blocks,
             }) catch @panic("out of memory");
             continue;
         }
 
         const label = fence.sourceLabel();
-        if (label == null) project.clearRetainingCapacity();
+        if (label == null) flushProject(gpa, chapter, &problems, &project, project_line);
         const has_entry = fence.hasEntryPoint();
-        if (label) |path| project.append(gpa, .{ .path = path, .text = fence.body }) catch @panic("out of memory");
+        if (label) |path| {
+            if (project.items.len == 0) project_line = fence.line;
+            project.append(gpa, .{ .path = path, .text = fence.body }) catch @panic("out of memory");
+        }
         const is_main_file = if (label) |path| std.mem.eql(u8, std.fs.path.basename(path), "main.lin") else false;
         var sources: usize = 0;
         for (project.items) |file| sources += @intFromBool(std.mem.endsWith(u8, file.path, ".lin"));
@@ -1476,7 +1587,10 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             continue;
         }
 
-        const claim = claimOutput(gpa, chapter, fences, &i, &problems);
+        var claim = claimOutput(gpa, chapter, fences, &i, &problems);
+        const check_only = fence.checkOnly();
+        if (check_only) checkOnlyOutput(gpa, chapter, &claim, &unrun_output);
+        const command: GuideCommand = if (check_only) .check else claim.command();
         if (label != null) {
             var root: []const u8 = ".";
             if (is_main_file) {
@@ -1490,13 +1604,15 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
                 .line = fence.line,
                 .files = gpa.dupe(GuideFile, project.items) catch @panic("out of memory"),
                 .target = root,
-                .command = claim.command(),
+                .command = command,
                 .expected = claim.expected,
                 .expected_line = claim.expected_line,
                 .expected_first = claim.expected_first,
+                .check_only = check_only,
             }) catch @panic("out of memory");
-            above = programs.items.len - 1;
-            for (programs.items[above.?].files) |file| by_file.put(gpa, file.path, above.?) catch @panic("out of memory");
+            const at = programs.items.len - 1;
+            above = .{ .compiled = at };
+            for (programs.items[at].files) |file| by_file.put(gpa, file.path, .{ .compiled = at }) catch @panic("out of memory");
             project.clearRetainingCapacity();
             continue;
         }
@@ -1510,15 +1626,17 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             .line = fence.line,
             .files = files,
             .target = name,
-            .command = claim.command(),
+            .command = command,
             .expected = claim.expected,
             .expected_line = claim.expected_line,
             .expected_first = claim.expected_first,
+            .check_only = check_only,
         }) catch @panic("out of memory");
-        above = programs.items.len - 1;
+        above = .{ .compiled = programs.items.len - 1 };
         by_file.put(gpa, name, above.?) catch @panic("out of memory");
     }
     strandData(gpa, chapter, &problems, &data, data_line);
+    flushProject(gpa, chapter, &problems, &project, project_line);
     return .{
         .programs = programs.toOwnedSlice(gpa) catch @panic("out of memory"),
         .problems = problems.toOwnedSlice(gpa) catch @panic("out of memory"),
@@ -1526,6 +1644,46 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
         .excluded = excluded,
         .unrun_output = unrun_output.toOwnedSlice(gpa) catch @panic("out of memory"),
     };
+}
+
+/// The nearest program above a block: one the gate compiles, by its index in
+/// the chapter's programs, or one a marker excludes, by its line.
+const Above = union(enum) {
+    compiled: usize,
+    excluded: usize,
+};
+
+/// The output of a program checked and not run: diagnostics pasted after it
+/// are what `linea check` prints and stay compared, and anything else is what
+/// a run would print, held only to the compiler's wording.
+fn checkOnlyOutput(gpa: std.mem.Allocator, chapter: GuideChapter, claim: *Claim, unrun_output: *std.ArrayList(GuideBlock)) void {
+    const text = claim.expected orelse return;
+    if (countDiagnostics(text) > 0) return;
+    unrun_output.append(gpa, .{ .chapter = chapter.file, .line = claim.expected_line, .body = text }) catch @panic("out of memory");
+    claim.expected = null;
+    claim.expected_first = null;
+}
+
+/// Reports the labelled files of a project no `main.lin` completed, and
+/// forgets them: a file nothing compiles is a block the gate never checked.
+fn flushProject(
+    gpa: std.mem.Allocator,
+    chapter: GuideChapter,
+    problems: *std.ArrayList(GuideProblem),
+    project: *std.ArrayList(GuideFile),
+    line: usize,
+) void {
+    if (project.items.len == 0) return;
+    problems.append(gpa, .{
+        .chapter = chapter.file,
+        .line = line,
+        .message = std.fmt.allocPrint(
+            gpa,
+            "the labelled file `{s}` belongs to a project, and no `main.lin` of that project follows it before the next unlabelled block or the end of the page; label the project's `main.lin` after it, or write `<!-- guide: unchecked REASON -->` above the block",
+            .{project.items[0].path},
+        ) catch @panic("out of memory"),
+    }) catch @panic("out of memory");
+    project.clearRetainingCapacity();
 }
 
 /// A fragment written as the root file of a library at `path`, with the
@@ -1556,18 +1714,20 @@ fn isLibraryName(name: []const u8) bool {
     return true;
 }
 
-/// The files of `base` with a run of edit blocks applied, or null after
-/// reporting why the run cannot apply. Every edit counts lines in `base` as
-/// pasted, so the edits of one run must not overlap; each is compared with
-/// the others of its run, and a run is the few blocks between two outputs.
+/// The files of `base` with a run of edit blocks applied, and where each block
+/// landed, or null after reporting why the run cannot apply. Every edit counts
+/// lines in `base` as pasted, so the edits of one run must not overlap; each
+/// is compared with the others of its run, and a run is the few blocks
+/// between two outputs. An edit that writes back the lines it replaces
+/// changes nothing, and is refused.
 fn applyEdits(
     gpa: std.mem.Allocator,
     chapter: GuideChapter,
     base: GuideProgram,
     run: []const GuideFence,
     problems: *std.ArrayList(GuideProblem),
-) ?[]GuideFile {
-    const Placed = struct { file: usize, edit: Edit, body: []const u8, order: usize };
+) ?struct { files: []GuideFile, blocks: []const EditBlock } {
+    const Placed = struct { file: usize, edit: Edit, body: []const u8, order: usize, line: usize };
     var placed: std.ArrayList(Placed) = .empty;
     var linea_files: usize = 0;
     var only: usize = 0;
@@ -1622,7 +1782,7 @@ fn applyEdits(
             failed = true;
             break;
         }
-        placed.append(gpa, .{ .file = file, .edit = edit, .body = fence.body, .order = order }) catch @panic("out of memory");
+        placed.append(gpa, .{ .file = file, .edit = edit, .body = fence.body, .order = order, .line = fence.line }) catch @panic("out of memory");
     }
     if (failed) return null;
 
@@ -1636,6 +1796,7 @@ fn applyEdits(
         }
     }.lessThan);
     const files = gpa.dupe(GuideFile, base.files) catch @panic("out of memory");
+    var blocks: std.ArrayList(EditBlock) = .empty;
     var next: usize = 0;
     for (files, 0..) |*file, at| {
         const first = next;
@@ -1645,12 +1806,31 @@ fn applyEdits(
         var split = std.mem.splitScalar(u8, file.text, '\n');
         while (split.next()) |line| lines.append(gpa, line) catch @panic("out of memory");
         var out: std.ArrayList(u8) = .empty;
+        // How many lines `out` holds, so each block's place is known.
+        var written: usize = 0;
         var line: usize = 0;
         for (placed.items[first..next]) |edit| {
+            const replaced = lines.items[edit.edit.start .. edit.edit.start + edit.edit.count];
+            if (replaced.len > 0 and std.mem.eql(u8, std.mem.join(gpa, "\n", replaced) catch @panic("out of memory"), edit.body)) {
+                problems.append(gpa, .{
+                    .chapter = chapter.file,
+                    .line = edit.line,
+                    .message = std.fmt.allocPrint(
+                        gpa,
+                        "this edit writes back lines {d}-{d} of `{s}` unchanged, so it changes nothing; write the changed lines, or `<!-- guide: excerpt PATH -->` to quote code",
+                        .{ edit.edit.start + 1, edit.edit.start + edit.edit.count, file.path },
+                    ) catch @panic("out of memory"),
+                }) catch @panic("out of memory");
+                failed = true;
+            }
             for (lines.items[line..edit.edit.start]) |kept| {
                 out.appendSlice(gpa, kept) catch @panic("out of memory");
                 out.append(gpa, '\n') catch @panic("out of memory");
             }
+            written += edit.edit.start - line;
+            const body_lines = std.mem.count(u8, edit.body, "\n") + 1;
+            blocks.append(gpa, .{ .file = at, .first = written + 1, .last = written + body_lines, .line = edit.line }) catch @panic("out of memory");
+            written += body_lines;
             out.appendSlice(gpa, edit.body) catch @panic("out of memory");
             out.append(gpa, '\n') catch @panic("out of memory");
             line = edit.edit.start + edit.edit.count;
@@ -1661,65 +1841,114 @@ fn applyEdits(
         }
         file.text = out.items[0 .. out.items.len - 1];
     }
-    return files;
+    if (failed) return null;
+    return .{ .files = files, .blocks = blocks.toOwnedSlice(gpa) catch @panic("out of memory") };
 }
 
 /// Why `fragment` is not a run of consecutive lines of `path` under
 /// `chapter.root`, or null when it is. A guide page's lines are those of the
-/// programs it compiles, so an excerpt of a page quotes code the gate built.
+/// programs it compiles, so an excerpt of a page quotes code the gate built,
+/// and only a page the gate reads can be quoted.
 fn checkExcerpt(gpa: std.mem.Allocator, chapter: GuideChapter, path: []const u8, fragment: []const u8) ?[]const u8 {
+    const is_page = std.mem.endsWith(u8, path, ".md");
+    if (is_page) {
+        const linked = for (chapter.pages) |page| {
+            if (std.mem.eql(u8, page, path)) break true;
+        } else false;
+        if (!linked) return std.fmt.allocPrint(
+            gpa,
+            "the excerpt quotes `{s}`, which is not a page docs/learn/README.md links, so no program of it is compiled; quote a linked page or a file the build compiles",
+            .{path},
+        ) catch @panic("out of memory");
+    }
     const root = chapter.root orelse return std.fmt.allocPrint(gpa, "the excerpt file `{s}` could not be read", .{path}) catch @panic("out of memory");
     const file_text = root.dir.readFileAlloc(root.io, path, gpa, .limited(1 << 22)) catch {
         return std.fmt.allocPrint(gpa, "the excerpt file `{s}` could not be read", .{path}) catch @panic("out of memory");
     };
-    if (!std.mem.endsWith(u8, path, ".md")) {
-        if (isExcerptOf(gpa, fragment, file_text)) return null;
-        return std.fmt.allocPrint(gpa, "the excerpt does not match consecutive lines of `{s}`", .{path}) catch @panic("out of memory");
+    if (!is_page) {
+        const miss = excerptMiss(gpa, fragment, file_text) orelse return null;
+        return describeMiss(gpa, path, "", miss);
     }
     var ignored: std.ArrayList(GuideProblem) = .empty;
+    var closest: ?ExcerptMiss = null;
     for (guideFences(gpa, .{ .name = path, .file = path, .text = file_text }, &ignored)) |fence| {
-        if (fence.isProgram() and isExcerptOf(gpa, fragment, fence.body)) return null;
+        if (!fence.isProgram()) continue;
+        const miss = excerptMiss(gpa, fragment, fence.body) orelse return null;
+        if (closest == null or miss.matched > closest.?.matched) closest = miss;
     }
-    return std.fmt.allocPrint(gpa, "the excerpt does not match consecutive lines of a program `{s}` compiles", .{path}) catch @panic("out of memory");
+    return describeMiss(gpa, path, "a program of ", closest orelse .{ .matched = 0, .wanted = "", .found = "", .line = 0 });
 }
 
-/// Whether every line of `fragment` is a consecutive line of `file_text`, with
-/// one indentation that all the matched lines share taken off.
-fn isExcerptOf(gpa: std.mem.Allocator, fragment: []const u8, file_text: []const u8) bool {
+/// How far an excerpt follows the text it quotes before it leaves it: the
+/// lines it matched, the 1-based line of the text where it differs, and the
+/// two lines there.
+const ExcerptMiss = struct {
+    matched: usize,
+    line: usize,
+    wanted: []const u8,
+    found: []const u8,
+};
+
+fn describeMiss(gpa: std.mem.Allocator, path: []const u8, what: []const u8, miss: ExcerptMiss) []const u8 {
+    if (miss.line == 0) return std.fmt.allocPrint(
+        gpa,
+        "the excerpt does not match consecutive lines of {s}`{s}`: its first line is on no line there; copy the lines from `{s}`, or write `<!-- guide: edit LINES -->` if the block changes a program",
+        .{ what, path, path },
+    ) catch @panic("out of memory");
+    return std.fmt.allocPrint(
+        gpa,
+        "the excerpt does not match consecutive lines of {s}`{s}`: it follows {d} lines, then has `{s}` where line {d} has `{s}`; copy the lines from `{s}`, or write `<!-- guide: edit LINES -->` if the block changes a program",
+        .{ what, path, miss.matched, miss.wanted, miss.line, miss.found, path },
+    ) catch @panic("out of memory");
+}
+
+/// Null when every line of `fragment` is a consecutive line of `file_text`,
+/// with one indentation that all the matched lines share taken off, and
+/// otherwise where the closest run of lines leaves the fragment.
+fn excerptMiss(gpa: std.mem.Allocator, fragment: []const u8, file_text: []const u8) ?ExcerptMiss {
+    const none: ExcerptMiss = .{ .matched = 0, .line = 0, .wanted = "", .found = "" };
     var wanted: std.ArrayList([]const u8) = .empty;
     var frag_iter = std.mem.splitScalar(u8, fragment, '\n');
     while (frag_iter.next()) |raw| {
         wanted.append(gpa, std.mem.trimEnd(u8, raw, " \t\r")) catch @panic("out of memory");
     }
-    if (wanted.items.len == 0) return false;
     // The first line with text decides the indentation the match takes off.
     var anchor: usize = 0;
     while (anchor < wanted.items.len and wanted.items[anchor].len == 0) anchor += 1;
-    if (anchor == wanted.items.len) return false;
+    if (anchor == wanted.items.len) return none;
 
     var lines: std.ArrayList([]const u8) = .empty;
     var file_iter = std.mem.splitScalar(u8, file_text, '\n');
     while (file_iter.next()) |raw| {
         lines.append(gpa, std.mem.trimEnd(u8, raw, " \t\r")) catch @panic("out of memory");
     }
-    if (wanted.items.len > lines.items.len) return false;
-    const limit = lines.items.len - wanted.items.len + 1;
-    outer: for (0..limit) |start| {
+    var closest = none;
+    if (lines.items.len <= anchor) return closest;
+    for (0..lines.items.len - anchor) |start| {
         const at_anchor = lines.items[start + anchor];
         if (!std.mem.endsWith(u8, at_anchor, wanted.items[anchor])) continue;
         const indent = at_anchor[0 .. at_anchor.len - wanted.items[anchor].len];
         if (std.mem.trim(u8, indent, " \t").len != 0) continue;
-        for (wanted.items, 0..) |line, offset| {
+        var matched: usize = 0;
+        const left: ?usize = for (wanted.items, 0..) |line, offset| {
+            if (start + offset >= lines.items.len) break offset;
             const have = lines.items[start + offset];
-            if (line.len == 0) {
-                if (have.len != 0) continue :outer;
-                continue;
-            }
-            if (!std.mem.startsWith(u8, have, indent) or !std.mem.eql(u8, have[indent.len..], line)) continue :outer;
-        }
-        return true;
+            const same = if (line.len == 0)
+                have.len == 0
+            else
+                std.mem.startsWith(u8, have, indent) and std.mem.eql(u8, have[indent.len..], line);
+            if (!same) break offset;
+            matched += 1;
+        } else null;
+        const offset = left orelse return null;
+        if (closest.line == 0 or matched > closest.matched) closest = .{
+            .matched = matched,
+            .line = start + offset + 1,
+            .wanted = wanted.items[offset],
+            .found = if (start + offset < lines.items.len) lines.items[start + offset] else "(the end of the file)",
+        };
     }
-    return false;
+    return closest;
 }
 
 /// Reports data blocks no program took, and forgets them: a file written beside
@@ -1747,6 +1976,18 @@ fn strandData(
 /// program with no pasted output must simply pass `linea check`.
 pub fn judgeGuideProgram(gpa: std.mem.Allocator, program: GuideProgram, actual: []const u8, succeeded: bool) ?[]const u8 {
     const shown = maskStandardLocations(gpa, std.mem.trimEnd(u8, actual, " \t\r\n"));
+    const line = blamedLine(program, actual);
+    if (program.source == .unchecked) {
+        // The marker says the block does not check; one that does has
+        // outgrown it.
+        if (!succeeded and !onlyUnusedDeclarations(actual, program.files[0].text)) return null;
+        return std.fmt.allocPrint(
+            gpa,
+            "{s}:{d}: this block checks cleanly, so its `<!-- guide: unchecked REASON -->` marker is stale; remove it, " ++
+                "or write `<!-- guide: check REASON -->` above a program that cannot run\n",
+            .{ program.chapter, line },
+        ) catch @panic("out of memory");
+    }
     const pasted = maskStandardLocations(gpa, std.mem.trimEnd(u8, program.expected orelse {
         if (succeeded) return null;
         if (program.source == .fragment and onlyUnusedDeclarations(actual, program.files[0].text)) return null;
@@ -1754,6 +1995,7 @@ pub fn judgeGuideProgram(gpa: std.mem.Allocator, program: GuideProgram, actual: 
             .program => "the program is complete and pasted without output, and `linea check` refused it",
             .fragment => "this fragment is pasted without output, and `linea check` refused it alone, as the root file of a library",
             .edit => "the program above with this edit is pasted without output, and `linea check` refused it",
+            .unchecked => unreachable,
         };
         const next: []const u8 = switch (program.source) {
             .program => "",
@@ -1761,17 +2003,18 @@ pub fn judgeGuideProgram(gpa: std.mem.Allocator, program: GuideProgram, actual: 
                 "above it applies it to the program above (`N`, `N-M` or `after N`), `<!-- guide: excerpt PATH -->` holds it " ++
                 "to lines of a file the build compiles or of a program a guide page compiles, and " ++
                 "`<!-- guide: unchecked REASON -->` excludes a sketch or a signature that cannot stand alone.\n",
+            .unchecked => unreachable,
             .edit => "Correct the edit or the lines its `<!-- guide: edit LINES -->` names, which count lines of the program above as pasted, " ++
                 "or paste the output the edited program prints after it.\n",
         };
-        return std.fmt.allocPrint(gpa, "{s}:{d}: {s}:\n{s}\n{s}", .{ program.chapter, program.line, what, shown, next }) catch @panic("out of memory");
+        return std.fmt.allocPrint(gpa, "{s}:{d}: {s}:\n{s}\n{s}", .{ program.chapter, line, what, shown, next }) catch @panic("out of memory");
     }, " \t\r\n"));
     if (program.expected_first) |count| {
         if (std.mem.eql(u8, pasted, shown)) {
             return std.fmt.allocPrint(
                 gpa,
                 "{s}:{d}: the output pasted at line {d} is all of what `linea {s} {s}` prints; remove its `<!-- guide: first {d} diagnostics -->` line\n",
-                .{ program.chapter, program.line, program.expected_line, @tagName(program.command), program.target, count },
+                .{ program.chapter, line, program.expected_line, @tagName(program.command), program.target, count },
             ) catch @panic("out of memory");
         }
         if (isDiagnosticPrefix(pasted, shown, count)) return null;
@@ -1791,7 +2034,7 @@ pub fn judgeGuideProgram(gpa: std.mem.Allocator, program: GuideProgram, actual: 
             "  first difference at line {d} of the pasted block:\n    pasted: {s}\n    actual: {s}\n{s}" ++
             "The compiler printed:\n{s}\n",
         .{
-            program.chapter,           program.line,     program.expected_line,
+            program.chapter,           line,             program.expected_line,
             @tagName(program.command), program.target,   difference.number,
             difference.expected,       difference.found, marker_note,
             shown,
@@ -1799,41 +2042,92 @@ pub fn judgeGuideProgram(gpa: std.mem.Allocator, program: GuideProgram, actual: 
     ) catch @panic("out of memory");
 }
 
-/// Whether every diagnostic in `output` is `[N-Unused]` reported at a line of
-/// `body` that opens a declaration at the top of the file. A fragment shows
+/// The line of the block a failure belongs to: for an edit, the block whose
+/// lines hold the first location the compiler reports, and otherwise, or when
+/// no reported location falls in an edit's lines, the opening of the code.
+fn blamedLine(program: GuideProgram, actual: []const u8) usize {
+    var lines = std.mem.splitScalar(u8, actual, '\n');
+    while (lines.next()) |raw| {
+        const location = diagnosticLocation(std.mem.trimEnd(u8, raw, " \t\r")) orelse continue;
+        for (program.blocks) |block| {
+            if (!std.mem.eql(u8, program.files[block.file].path, location.path)) continue;
+            if (location.line >= block.first and location.line <= block.last) return block.line;
+        }
+    }
+    return program.line;
+}
+
+/// Whether every diagnostic in `output` is `[N-Unused]` naming a declaration
+/// at the top of `body`: the reported column holds the name the header gives,
+/// after a declaration keyword at the start of the line. A fragment shows
 /// declarations without the code that calls them, so its own declarations
-/// going unused says nothing about the fragment; an unused local, or any
-/// other error, does.
+/// going unused says nothing about the fragment; an unused parameter, a local,
+/// an import or any other error does.
 fn onlyUnusedDeclarations(output: []const u8, body: []const u8) bool {
     var lines = std.mem.splitScalar(u8, output, '\n');
     var diagnostics: usize = 0;
-    var awaiting_location = false;
+    var awaiting: ?[]const u8 = null;
     while (lines.next()) |raw| {
         const line = std.mem.trimEnd(u8, raw, " \t\r");
         if (line.len > 0 and line[0] != ' ') {
             const opening = diagnosticOpening(line) orelse continue;
             if (!std.mem.eql(u8, opening.kind, "error") or !std.mem.eql(u8, opening.code, "N-Unused")) return false;
-            if (awaiting_location) return false;
+            if (awaiting != null) return false;
+            const open = std.mem.indexOfScalar(u8, line, '`') orelse return false;
+            const close = std.mem.indexOfScalarPos(u8, line, open + 1, '`') orelse return false;
             diagnostics += 1;
-            awaiting_location = true;
+            awaiting = line[open + 1 .. close];
             continue;
         }
-        if (!awaiting_location) continue;
-        const arrow = std.mem.indexOf(u8, line, "--> ") orelse continue;
-        awaiting_location = false;
-        // `path:LINE:COLUMN`, read from the right so a path may hold colons.
-        const location = line[arrow + 4 ..];
-        const column_colon = std.mem.lastIndexOfScalar(u8, location, ':') orelse return false;
-        const line_colon = std.mem.lastIndexOfScalar(u8, location[0..column_colon], ':') orelse return false;
-        const number = std.fmt.parseInt(usize, location[line_colon + 1 .. column_colon], 10) catch return false;
+        const name = awaiting orelse continue;
+        const location = diagnosticLocation(line) orelse continue;
+        awaiting = null;
         var body_lines = std.mem.splitScalar(u8, body, '\n');
         var at: usize = 1;
         const reported = while (body_lines.next()) |body_line| : (at += 1) {
-            if (at == number) break body_line;
+            if (at == location.line) break body_line;
         } else return false;
-        if (reported.len == 0 or reported[0] == ' ' or reported[0] == '\t') return false;
+        if (!declaresAt(reported, location.column, name)) return false;
     }
-    return diagnostics > 0 and !awaiting_location;
+    return diagnostics > 0 and awaiting == null;
+}
+
+/// The keywords that open a declaration at the top of a file.
+const declaration_keywords = [_][]const u8{ "fn", "struct", "enum", "trait", "type", "alias", "let", "template" };
+
+/// Whether `line` declares `name` at the 1-based `column`: every word before
+/// it is `pub`, `internal` or an attribute, the last of them a declaration
+/// keyword, and the name ends where an identifier would.
+fn declaresAt(line: []const u8, column: usize, name: []const u8) bool {
+    if (column == 0 or column - 1 + name.len > line.len) return false;
+    // A declaration at the top of the file starts its line.
+    if (line[0] == ' ' or line[0] == '\t') return false;
+    const start = column - 1;
+    if (!std.mem.eql(u8, line[start .. start + name.len], name)) return false;
+    const after = start + name.len;
+    if (after < line.len and (std.ascii.isAlphanumeric(line[after]) or line[after] == '_')) return false;
+    var words = std.mem.tokenizeScalar(u8, line[0..start], ' ');
+    var last: []const u8 = "";
+    while (words.next()) |word| {
+        if (last.len > 0 and !std.mem.eql(u8, last, "pub") and !std.mem.eql(u8, last, "internal") and last[0] != '@') return false;
+        last = word;
+    }
+    for (declaration_keywords) |keyword| if (std.mem.eql(u8, last, keyword)) return true;
+    return false;
+}
+
+/// The path, line and column of a diagnostic's `--> path:LINE:COLUMN` line,
+/// read from the right so a path may hold colons.
+fn diagnosticLocation(line: []const u8) ?struct { path: []const u8, line: usize, column: usize } {
+    const arrow = std.mem.indexOf(u8, line, "--> ") orelse return null;
+    const location = line[arrow + 4 ..];
+    const column_colon = std.mem.lastIndexOfScalar(u8, location, ':') orelse return null;
+    const line_colon = std.mem.lastIndexOfScalar(u8, location[0..column_colon], ':') orelse return null;
+    return .{
+        .path = location[0..line_colon],
+        .line = std.fmt.parseInt(usize, location[line_colon + 1 .. column_colon], 10) catch return null,
+        .column = std.fmt.parseInt(usize, location[column_colon + 1 ..], 10) catch return null,
+    };
 }
 
 /// `text` with the line and column of every location inside the standard
