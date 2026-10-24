@@ -4301,7 +4301,11 @@ copyable type: its value is `value()`, and its code is reachable only through
 `failed_at(failure)`, which is `.Err(code)` when the value equals `failure` and
 `.Ok(value)` otherwise, or `failed_when(failed)`, which is `.Err(code)` when
 `failed` is true. `Errno` is not itself a type that crosses, so it is never a
-parameter and never an exported function's result.
+parameter and never an exported function's result. The compiler builds each
+`Errno` itself, so the library must declare it as `struct Errno[R]` with the
+fields `value: R` and `code: Int32`, in that order; a declaration of any other
+shape is [T-Extern] at the declaration, and an `extern` answering it is not
+checked further.
 
 The private `std.mem` declarations `slot_stride`, `slot_take`, `slot_put`, and
 `slot_place` are typed storage primitives, not foreign calls. A recognized

@@ -245,7 +245,7 @@ const Writer = struct {
     }
 
     fn part(self: *Writer, id: ExprId) std.Io.Writer.Error!void {
-        // By the extent rather than the span: a comment written after a part
+        // The span stops before the comments ending the range: a comment written after a part
         // sits inside its range, and carried into a line of the loop it would
         // comment out what follows.
         const at = self.semantics.ast.exprSpan(id);

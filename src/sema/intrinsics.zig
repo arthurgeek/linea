@@ -175,42 +175,26 @@ pub const RawAccesses = struct {
         return checked;
     }
 
-    /// The fields of an `ffi.Errno[R]` where `t` is one, asked of a pool
-    /// being built or of a finished typing: `value`, the `R` C returned, and
-    /// `code`, the `errno` the runtime read after the call. The checker reads
-    /// what C returns from `value`, and lowering writes both fields by these
-    /// indices, so the two cannot disagree about the library's declaration.
-    pub fn errnoFields(self: RawAccesses, pool: anytype, t: TypeId) ?ErrnoFields {
-        if (self.errno == .none) return null;
-        const instance = pool.instanceOf(t) orelse return null;
-        if (instance.decl != self.errno) return null;
-        const value = pool.lookupField(t, "value") orelse
-            @panic("compiler defect: the library's `ffi.Errno` declares no `value` field");
-        const code = pool.lookupField(t, "code") orelse
-            @panic("compiler defect: the library's `ffi.Errno` declares no `code` field");
-        if (code.ty != .i32) @panic("compiler defect: the library's `ffi.Errno.code` is not an `Int32`");
-        return .{
-            .value = .{ .index = value.index, .ty = value.ty },
-            .code = .{ .index = code.index, .ty = code.ty },
-        };
-    }
+    /// The fields of `ffi.Errno`, in the order its declaration lists them:
+    /// `value`, the `R` C returned, and `code`, the `errno` the runtime read
+    /// after the call. The checker certifies the library's declaration
+    /// against these names and positions, and lowering writes an `Errno`'s
+    /// fields by them.
+    pub const ErrnoField = enum(u32) { value, code };
 
     /// The fields of `mem.Closure`, in the order its declaration lists them.
     /// The checker certifies the library's declaration against these names
     /// and positions, and lowering reads a closure's fields by them.
     pub const ClosureField = enum(u32) { entry, settle, at, len, storage };
 
-    pub const ErrnoFields = struct {
-        pub const Field = struct { index: u32, ty: TypeId };
-        value: Field,
-        code: Field,
-    };
-
-    /// The `R` of `ffi.Errno[R]` where `t` is one, or null where `t` is any
-    /// other type. An `extern` answering `t` returns `R` from C.
+    /// The `R` of `ffi.Errno[R]` where `t` is one, asked of a pool being
+    /// built or of a finished typing, or null where `t` is any other type.
+    /// An `extern` answering `t` returns `R` from C.
     pub fn errnoValue(self: RawAccesses, pool: anytype, t: TypeId) ?TypeId {
-        const fields = self.errnoFields(pool, t) orelse return null;
-        return fields.value.ty;
+        if (self.errno == .none) return null;
+        const instance = pool.instanceOf(t) orelse return null;
+        if (instance.decl != self.errno) return null;
+        return pool.appliedTo(t)[0];
     }
 
     /// The signature C is called with for an `extern` of `signature`: the

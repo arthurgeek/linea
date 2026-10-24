@@ -1,0 +1,14 @@
+fn parse() -> Result[UInt8, Str] {
+    .Ok(1)
+}
+
+fn record() {
+    let count = parse()?
+    let _ = count // recorded
+    // a comment on the line after
+}
+
+fn main() -> UInt8 {
+    record()
+    0
+}

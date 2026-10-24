@@ -5300,7 +5300,7 @@ const Lowerer = struct {
         }
         const callee = self.mono.idFor(d, settled, held, impl_args);
         if (self.ast.declIsExtern(d)) {
-            if (self.library.raw.errnoFields(&self.mono.pool, ty)) |fields| return self.errnoCall(id, ty, fields, span, callee, args.items);
+            if (self.library.raw.errnoValue(&self.mono.pool, ty) != null) return self.errnoCall(id, ty, span, callee, args.items);
         }
         return self.sourceCall(id, ty, span, callee, args.items);
     }
@@ -5308,16 +5308,27 @@ const Lowerer = struct {
     /// A call to an `extern` answering `ffi.Errno[R]`: C's `R`, then the
     /// runtime's read of `errno`, emitted next so no code between the two can
     /// change it, and the `Errno` built from both.
-    fn errnoCall(self: *Lowerer, written: ExprId, ty: TypeId, fields: RawAccesses.ErrnoFields, span: Span, callee: FunctionId, args: []const InstId) !InstId {
-        const value = try self.sourceCall(written, fields.value.ty, span, callee, args);
+    fn errnoCall(self: *Lowerer, written: ExprId, ty: TypeId, span: Span, callee: FunctionId, args: []const InstId) !InstId {
+        const value_field = self.errnoField(ty, .value);
+        const code_field = self.errnoField(ty, .code);
+        const value = try self.sourceCall(written, value_field.ty, span, callee, args);
         const read = self.mono.idFor(self.library.raw.errno_read, &.{}, .poison, &.{});
-        const code = try self.directCall(fields.code.ty, span, read, &.{});
+        const code = try self.directCall(code_field.ty, span, read, &.{});
         const base = try self.baseFor(ty, span, null);
-        const value_at = try self.fieldAddr(base, fields.value.ty, self.types().fieldOffset(ty, fields.value.index), span);
-        try self.writeThrough(value_at, fields.value.ty, value, span);
-        const code_at = try self.fieldAddr(base, fields.code.ty, self.types().fieldOffset(ty, fields.code.index), span);
-        try self.writeThrough(code_at, fields.code.ty, code, span);
+        try self.writeThrough(try self.fieldAddr(base, value_field.ty, value_field.offset, span), value_field.ty, value, span);
+        try self.writeThrough(try self.fieldAddr(base, code_field.ty, code_field.offset, span), code_field.ty, code, span);
         return base;
+    }
+
+    /// The field of an `ffi.Errno` at `field`, in the order the checker
+    /// certified the library's declaration against. A program reaches
+    /// lowering only once the certificate held, so a field out of place here
+    /// is a compiler defect.
+    fn errnoField(self: *const Lowerer, ty: TypeId, field: RawAccesses.ErrnoField) LibraryField {
+        const index = @intFromEnum(field);
+        if (!std.mem.eql(u8, self.types().fieldName(ty, index), @tagName(field)))
+            std.debug.panic("compiler defect: an uncertified `ffi.Errno` reached lowering without its `{s}` field", .{@tagName(field)});
+        return .{ .ty = self.types().fieldType(ty, index), .offset = self.types().fieldOffset(ty, index) };
     }
 
     /// The field `name` of `ty`, a library type whose fields the compiler

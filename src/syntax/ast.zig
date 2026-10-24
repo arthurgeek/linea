@@ -1573,16 +1573,17 @@ pub const Ast = struct {
 
     /// The arguments a call wrote, appended as a rewrite must write them: each
     /// preceded by the name it gave the parameter it fills, and each taken by
-    /// its extent.
+    /// its span.
     ///
     /// One routine, because two rewrites write a postfix call out -- the
     /// server's offer and the harness's -- and they have to write the same
     /// call. An argument that names its parameter says which parameter takes
     /// it, so dropping the name leaves the values to be paired by position, and
-    /// where the two orders differ that is a different program. By the extent
-    /// for the reason every rewrite that moves an expression uses it: a comment
-    /// written after an argument reaches the end of its line, so slicing at the
-    /// span comments out whatever the splice puts after it.
+    /// where the two orders differ that is a different program. The span stops
+    /// before the comments that end an argument's range, which every rewrite
+    /// that moves an expression needs: a comment written after an argument
+    /// reaches the end of its line, so a slice holding it comments out
+    /// whatever the splice puts after it.
     ///
     /// `separated` is whether anything already sits inside the brackets, which
     /// is what decides the first separator. Nothing here writes the receiver:
@@ -1758,6 +1759,17 @@ pub const Ast = struct {
 
     pub fn stmtSpan(self: *const Ast, id: StmtId) Span {
         return self.rangeSpan(self.stmtTokens(id));
+    }
+
+    /// The spaces and tabs that begin the line holding token `t`, which is
+    /// the indentation a line written beside it takes.
+    pub fn lineIndentation(self: *const Ast, t: TokenId) []const u8 {
+        const source = self.partOf(t).source;
+        const at = self.tokenSpan(t).start;
+        const start = if (std.mem.lastIndexOfScalar(u8, source[0..at], '\n')) |nl| nl + 1 else 0;
+        var end = start;
+        while (end < at and (source[end] == ' ' or source[end] == '\t')) end += 1;
+        return source[start..end];
     }
 
     /// Where a line written after statement `id` is inserted: past the

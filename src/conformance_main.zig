@@ -2027,7 +2027,7 @@ fn checkWalkConsumes(
             .none;
         if (!typing.mustConsumeWithin(owner, element)) continue;
 
-        // By the extent rather than the span: a comment written after the
+        // The span stops before the comments ending the range: a comment written after the
         // closing brace sits inside the body's range, and cutting there
         // deletes it from the text that follows.
         const body = ast.exprSpan(f.args[1]);

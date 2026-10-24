@@ -689,7 +689,7 @@ fn postfixWrittenOut(gpa: std.mem.Allocator, semantics: Semantics, text: []const
         // elsewhere is not one it can rewrite.
         if (ast.fileOf(ast.exprTokens(call).start) != semantics.file) continue;
 
-        // By the extent rather than the span: a comment written after the call
+        // The span stops before the comments ending the range: a comment written after the call
         // sits inside its range, and cutting there deletes it from the text
         // that follows.
         const at = ast.exprSpan(call);
@@ -716,7 +716,7 @@ fn postfixWrittenOut(gpa: std.mem.Allocator, semantics: Semantics, text: []const
         for (p.args[0..receiver], 0..) |a, i| {
             if (i > 0) try out.appendSlice(gpa, ", ");
             if (i == 0 and marked) try out.append(gpa, '&');
-            // By the extent again, one argument down: a comment inside the last
+            // The span stops before trailing comments here too, one argument down: a comment inside the last
             // argument's range would be written ahead of the paren that closes
             // the written-out call and comment it out.
             try out.appendSlice(gpa, ast.exprSpan(a).slice(text));
@@ -754,8 +754,9 @@ fn desugarLogic(
 ) !?[]const u8 {
     for (0..ast.exprCount()) |i| {
         const id = ExprId.at(@intCast(i));
-        // By the extent rather than the span, here and at every operand below:
-        // a comment written after the operator sits inside its range, so
+        // The span stops before the comments ending the range, here and at
+        // every operand below: a comment written after the operator sits
+        // inside its range, so
         // cutting there deletes it and slicing an operand there writes it
         // inside the braces the conditional form puts around one -- where it
         // comments out the brace that closes them.
@@ -1362,7 +1363,7 @@ fn rotateMatchArms(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?
             // The last arm first, and every other arm one place later.
             const from = (a + count - 1) % count;
             if (a > 0) try arms.writer.writeAll(",\n");
-            // By the extent rather than the span: a comment written after an
+            // The span stops before the comments ending the range: a comment written after an
             // arm sits inside that arm's range, and writing it between two
             // rotated arms would comment out the comma that separates them.
             try arms.writer.print("{s} => {s}", .{
@@ -1450,7 +1451,7 @@ fn permuteNamedArguments(
         const count = names.len - first;
         if (count < 2) continue;
 
-        // By the extent rather than the span: a comment written after an
+        // The span stops before the comments ending the range: a comment written after an
         // argument sits inside that argument's range, and moving it into the
         // middle of the list comments out every argument after it.
         const start = ast.tokenSpan(names[first]).start;

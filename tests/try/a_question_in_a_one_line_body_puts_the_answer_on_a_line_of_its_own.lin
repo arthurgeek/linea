@@ -1,0 +1,10 @@
+fn parse() -> Result[UInt8, Str] {
+    .Ok(1)
+}
+
+fn record() { let _ = parse()? }
+
+fn main() -> UInt8 {
+    record()
+    0
+}
