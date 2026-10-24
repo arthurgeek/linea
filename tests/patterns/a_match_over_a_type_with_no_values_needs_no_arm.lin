@@ -1,0 +1,38 @@
+// `Never` and an enum declaring no variants have no values, so a `match` over
+// either is complete with no arms, and one with `_` is complete too. Its type
+// is `Never`, since no value reaches an arm.
+enum Nothing {}
+
+fn stop() -> Never {
+    loop {}
+}
+
+fn empty(go: Bool) -> UInt8 {
+    if go {
+        return 4
+    }
+    match stop() {}
+}
+
+fn wild(go: Bool) -> UInt8 {
+    if go {
+        return 3
+    }
+    match stop() {
+        _ => 9,
+    }
+}
+
+fn _absurd(sink n: Nothing) -> UInt8 {
+    match n {}
+}
+
+fn _second(sink p: (Nothing, UInt8)) -> UInt8 {
+    match p {
+        (_, n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    empty(true) + wild(true) - 7
+}

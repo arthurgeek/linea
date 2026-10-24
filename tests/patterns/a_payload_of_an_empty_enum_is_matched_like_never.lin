@@ -1,0 +1,36 @@
+// An enum with no variants has no value, but `Some` of one is still a value
+// `match` accounts for, as `Some` of `Never` is: `Some(_)` is an arm a value
+// can reach, and leaving it out leaves `Some` uncovered.
+enum Nothing {}
+
+fn named(sink x: Option[Nothing]) -> UInt8 {
+    match x {
+        Some(_) => 1,
+        None => 0,
+    }
+}
+
+@copyable
+enum NoError {}
+
+fn always() -> Result[UInt8, NoError] {
+    .Ok(3)
+}
+
+fn by_match() -> UInt8 {
+    match always() {
+        Ok(v) => v,
+        Err(_) => 0,
+    }
+}
+
+fn by_else() -> UInt8 {
+    let v = always() else |_| {
+        return 0
+    }
+    v
+}
+
+fn main() -> UInt8 {
+    named(.None) + by_match() + by_else() - 6
+}

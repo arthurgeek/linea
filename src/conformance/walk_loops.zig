@@ -260,7 +260,7 @@ const Writer = struct {
     fn arm(self: *Writer, binder: ExprId, body: ExprId, n: u32) std.Io.Writer.Error!void {
         const w = &self.out.writer;
         const ast = self.semantics.ast;
-        if (ast.exprTag(binder) == .tuple_pattern or ast.partBinds(binder)) {
+        if (ast.walkBinderIsTuple(binder) or ast.partBinds(binder)) {
             try w.writeAll("Some(");
             try self.part(binder);
             try w.writeAll(") => ");

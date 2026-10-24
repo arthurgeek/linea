@@ -1,0 +1,20 @@
+error[M-Opaque]: `Str` is opaque outside `text`
+ --> tests/patterns/a_text_literal_is_no_pattern_at_any_depth.lin:5:5
+  |
+5 |     match x {
+  |     ^^^^^^^^^ only its own module can take one apart
+error[M-Opaque]: `Str` is opaque outside `text`
+  --> tests/patterns/a_text_literal_is_no_pattern_at_any_depth.lin:13:14
+   |
+13 |         Some("a") => 1,
+   |              ^^^ only its own module can take one apart
+error[T-Mismatch]: expected `UInt8`, found `Str`
+  --> tests/patterns/a_text_literal_is_no_pattern_at_any_depth.lin:20:9
+   |
+20 |         "a" => 1,
+   |         ^^^ text names a number only at a range's end
+error[T-Mismatch]: expected `UInt8`, found `Str`
+  --> tests/patterns/a_text_literal_is_no_pattern_at_any_depth.lin:27:14
+   |
+27 |         Some("a") => 1,
+   |              ^^^ text names a number only at a range's end

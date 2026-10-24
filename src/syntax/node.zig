@@ -1412,10 +1412,10 @@ pub const Stmt = struct {
         let_decl,
         /// `let S { f: p, .. } = e;` -- the terminal consumer of a struct.
         ///
-        /// A statement rather than an expression, and the only form whose
-        /// binders are shallow: a plain name or `_`, never a nested pattern.
-        /// A `match` arm's struct pattern recurses; this one takes a value
-        /// apart and binds what it holds.
+        /// A statement rather than an expression: it takes a value apart and
+        /// binds what it holds. Its head is a struct, tuple or newtype
+        /// pattern, and each part is a name, `_` or a pattern nested there,
+        /// as in a `match` arm.
         let_destructure,
         /// `let read S { f: p, .. } = place` or `let read N(n) = place`.
         /// Observes a stable place instead of taking it apart, and binds each

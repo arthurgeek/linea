@@ -1,0 +1,19 @@
+// No value of `Never` exists, but the arms of a `match` over one are still
+// patterns of that type: one that takes a tuple or a `Result` apart is refused.
+fn stop() -> Never {
+    loop {}
+}
+
+fn f(go: Bool) -> UInt8 {
+    if go {
+        return 4
+    }
+    match stop() {
+        (Some(_), _) => 1,
+        Ok(Some(3)) => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    f(true) - 4
+}

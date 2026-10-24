@@ -638,6 +638,7 @@ fn typecheckInternal(
     }
     errdefer gpa.free(c.written_types);
     defer c.variant_uses.deinit(gpa);
+    defer c.part_selections.deinit(gpa);
     if (retained) |prefix| c.folded.pool = try prefix.typing.constant_pool.clone(gpa);
 
     // A declaration with no body, or one whose annotation did not read as a
@@ -1692,6 +1693,10 @@ fn typecheckInternal(
     typing.written_types = c.written_types;
     typing.variant_uses = c.variant_uses;
     c.variant_uses = .empty;
+    // Handed on rather than freed: which part of a value each pattern part
+    // selects is the checker's answer, which ownership and lowering read.
+    typing.part_selections = c.part_selections;
+    c.part_selections = .empty;
 
     // What the caret settles to, for the reader that has to interpret one: the
     // checker decided which declaration it is, so lowering reads the decision
@@ -5617,6 +5622,8 @@ const Checker = struct {
     written_types: []TypeId = &.{},
     /// Which arms name none of what the variant they select carries.
     variant_uses: std.AutoHashMapUnmanaged(ExprId, types_mod.VariantUse) = .empty,
+    /// What each accepted part of a pattern selects; see `Typing`.
+    part_selections: std.AutoHashMapUnmanaged(ExprId, types_mod.PartSelection) = .empty,
     /// The parts refused for growing or for holding their own declaration, by
     /// the token each one's type begins at. Neither can be resolved: one is
     /// the walk that does not terminate, and the other mints a type whose
@@ -6037,7 +6044,7 @@ const Checker = struct {
         @memcpy(self.binding_owners[0..prefix.seed.binding_owners.len], prefix.seed.binding_owners);
         for (prefix.seed.declarations, 0..) |checked, i| self.defaults_folded[i] = checked;
         for (0..saved.binding_types.len()) |i| self.constant_taken[i] = self.res.kindOf(BindingId.at(@intCast(i))) == .constant;
-        inline for (.{ "literal_values", "conversion_targets", "integer_properties", "selected_places", "place_projections", "implicit_test_successes", "try_conversions", "field_names", "type_selections", "contract_variants", "readonly_places", "carried_places", "borrowed_temporaries", "interpolation_positions", "refused", "folded_indices", "constant_values", "field_name_spellings", "variant_uses", "contract_parameters", "traversal_positions", "binding_labels" }) |field| {
+        inline for (.{ "literal_values", "conversion_targets", "integer_properties", "selected_places", "place_projections", "implicit_test_successes", "try_conversions", "field_names", "type_selections", "contract_variants", "readonly_places", "carried_places", "borrowed_temporaries", "interpolation_positions", "refused", "folded_indices", "constant_values", "field_name_spellings", "variant_uses", "part_selections", "contract_parameters", "traversal_positions", "binding_labels" }) |field| {
             @field(self, field) = try @field(saved, field).clone(gpa);
         }
         var plans = saved.constant_materializations.iterator();
@@ -13912,24 +13919,26 @@ const Checker = struct {
     /// Answers whether the pattern is sound. An unsound one was reported, or
     /// sits over a value that was, and takes no part in coverage.
     fn checkPattern(self: *Checker, pattern: ExprId, of: TypeId, at: ExprId) std.mem.Allocator.Error!PatternCheck {
-        return switch (self.ast.exprTag(pattern)) {
-            .struct_pattern => self.checkStructPattern(pattern, of, at),
-            .tuple_pattern => self.checkTuplePattern(pattern, of, at),
+        return switch (self.ast.patternForm(pattern)) {
+            .struct_ => self.checkStructPattern(pattern, of, at),
+            .tuple => self.checkTuplePattern(pattern, of, at),
             .call => if (self.builder.get(of) == .newtype)
                 self.checkNewtypePattern(pattern, of, at)
             else
                 self.checkVariantPattern(pattern, of, at),
-            .name_ref => if (isCatchAll(self.ast, pattern)) blk: {
+            .name => if (isCatchAll(self.ast, pattern)) blk: {
                 _ = self.record(pattern, of);
                 break :blk .matches;
             } else self.checkVariantPattern(pattern, of, at),
             // The parser said what is wrong here; a second report about the
             // hole it left would describe the recovery, not the program.
-            .err => blk: {
+            .malformed => blk: {
                 _ = self.record(pattern, .poison);
                 break :blk .refused;
             },
-            else => self.checkLiteralPattern(pattern, of),
+            // What no other form admits is refused there, as a name the
+            // grammar left where a literal or a range stands.
+            .literal, .range, .other => self.checkLiteralPattern(pattern, of),
         };
     }
 
@@ -13968,8 +13977,11 @@ const Checker = struct {
 
     /// One part of a pattern: a binder, which takes the part's type and
     /// stands for its place, or a pattern nested there, checked in turn.
-    /// `step` selects the part from the value at `at`.
-    fn checkPart(self: *Checker, part: ExprId, ty: TypeId, at: ExprId, step: Step) std.mem.Allocator.Error!PatternCheck {
+    /// `selection` is what the part takes from the value its pattern node
+    /// takes apart, recorded for ownership and lowering, and `step` the same
+    /// choice as a step of the place at `at`.
+    fn checkPart(self: *Checker, part: ExprId, ty: TypeId, at: ExprId, selection: types_mod.PartSelection, step: Step) std.mem.Allocator.Error!PatternCheck {
+        try self.part_selections.put(self.gpa, part, selection);
         if (self.ast.partBinds(part)) {
             _ = self.record(part, ty);
             const b = self.res.targetOf(part);
@@ -13981,6 +13993,14 @@ const Checker = struct {
         if (at == ExprId.none) return self.checkPattern(part, ty, ExprId.none);
         try self.pattern_places.put(self.gpa, part, .{ .of = at, .step = step });
         return self.checkPattern(part, ty, part);
+    }
+
+    /// Refuses a pattern node: each of its parts takes the poison type, so
+    /// nothing reports about them again.
+    fn refuseParts(self: *Checker, pattern: ExprId) PatternCheck {
+        var parts = self.ast.patternParts(pattern);
+        while (parts.next()) |part| self.poisonPattern(part.node);
+        return .refused;
     }
 
     /// Gives every binder of a pattern the poison type, where what it would
@@ -13999,7 +14019,7 @@ const Checker = struct {
             return;
         }
         var parts = self.ast.patternParts(pattern);
-        while (parts.next()) |part| self.settlePatternAs(part, ty);
+        while (parts.next()) |part| self.settlePatternAs(part.node, ty);
     }
 
     /// A variant's pattern: `None`, or `Some(p)` taking apart what it carries.
@@ -14009,22 +14029,15 @@ const Checker = struct {
     /// which is what a name is for. Naming more than one, or naming where
     /// there is nothing to name, is the arity rule a call already states.
     fn checkVariantPattern(self: *Checker, pattern: ExprId, of: TypeId, at: ExprId) std.mem.Allocator.Error!PatternCheck {
-        const binds = self.ast.exprTag(pattern) == .call;
-        const parts: []const ExprId = if (binds) self.ast.call(pattern).args else &.{};
+        const binds = self.ast.patternForm(pattern) == .call;
+        const written = self.ast.patternParts(pattern).count();
         const name = self.ast.tokenText(self.ast.exprMain(pattern));
         _ = self.record(pattern, of);
         if (binds) _ = self.record(self.ast.call(pattern).callee, of);
 
-        const fail = struct {
-            fn poisoned(checker: *Checker, held: []const ExprId) PatternCheck {
-                for (held) |part| checker.poisonPattern(part);
-                return .refused;
-            }
-        }.poisoned;
-
         // The value was already reported, so nothing is known about what the
         // parts name -- and nothing more to say about it.
-        if (of == .poison) return fail(self, parts);
+        if (of == .poison) return self.refuseParts(pattern);
 
         if (of.bounds() != null) {
             _ = self.report(
@@ -14034,14 +14047,14 @@ const Checker = struct {
                 .{(try self.typeName(of))},
                 "not a literal or a range",
             );
-            return fail(self, parts);
+            return self.refuseParts(pattern);
         }
 
         // Taking a sealed type apart is reaching its representation, which is
         // the same rule a literal breaks by building one.
         if (self.sealedHere(of)) {
             _ = self.reportSealed(pattern, of, "only its own module can take one apart");
-            return fail(self, parts);
+            return self.refuseParts(pattern);
         }
 
         // A view is read through, and a pattern takes the value itself apart.
@@ -14054,7 +14067,7 @@ const Checker = struct {
                 .{ name, article.before(shown), shown },
                 "a pattern takes a value apart, not a view of one",
             );
-            return fail(self, parts);
+            return self.refuseParts(pattern);
         }
 
         // A name at an arm's head names a variant, and a type that is no enum
@@ -14088,40 +14101,42 @@ const Checker = struct {
                 null,
                 try self.sink.arena.dupe([]const u8, &.{help}),
             );
-            return fail(self, parts);
+            return self.refuseParts(pattern);
         }
 
         const k = (try self.variantNamed(of, name)) orelse {
             _ = self.report(.n_variant, pattern, "the enum has no such variant", .{}, "not a variant of what is matched");
-            return fail(self, parts);
+            return self.refuseParts(pattern);
         };
         const carries = self.builder.variantFieldCount(of, k);
 
         // Every part or none. A prefix would take the first parts and leave
         // the rest unnamed, which reads as a choice and is a miscount.
-        if (parts.len != 0 and parts.len != carries) {
+        if (written != 0 and written != carries) {
             _ = self.report(
                 .t_arity,
                 pattern,
                 "expected {d} name(s), found {d}",
-                .{ carries, parts.len },
+                .{ carries, written },
                 "the wrong number of names",
             );
-            return fail(self, parts);
+            return self.refuseParts(pattern);
         }
 
         // Ownership reads what the pattern leaves unnamed; lowering reads
         // which variant it selects. Both facts belong to the checked pattern.
         try self.variant_uses.put(self.gpa, pattern, .{
             .ordinal = @enumFromInt(k),
-            .drops_payload = parts.len == 0 and carries != 0,
+            .drops_payload = written == 0 and carries != 0,
         });
 
         var sound: PatternCheck = .matches;
-        for (parts, 0..) |part, j| {
-            const ty = self.builder.variantFieldType(of, k, @intCast(j));
-            const step: Step = .{ .carried = .{ .variant = k, .index = @intCast(j) } };
-            sound = sound.join(try self.checkPart(part, ty, at, step));
+        var each = self.ast.patternParts(pattern);
+        while (each.next()) |part| {
+            const j: u32 = @intCast(part.index);
+            const ty = self.builder.variantFieldType(of, k, j);
+            const step: Step = .{ .carried = .{ .variant = k, .index = j } };
+            sound = sound.join(try self.checkPart(part.node, ty, at, .{ .payload = .{ .variant = k, .index = j } }, step));
         }
         return sound;
     }
@@ -14136,27 +14151,53 @@ const Checker = struct {
         // an open one is settled here, where the literal compares it.
         const settled = if (of.bounds() != null) of else try self.receiverType(of, self.literalSite(pattern));
         _ = self.record(pattern, settled);
-        switch (self.ast.exprTag(pattern)) {
-            .int_literal, .negate, .range => {},
-            else => {
+        const shown = try self.typeName(settled);
+        switch (self.ast.patternForm(pattern)) {
+            .literal, .range => {},
+            // A name the grammar left where a literal or a range stands, such
+            // as a path to a variant: it names a value, and only a literal or
+            // a range compares one.
+            .other => {
+                if (settled.bounds() != null) {
+                    _ = self.report(.t_mismatch, pattern, "a match over `{s}` takes a literal or a range, not a name", .{shown}, "not a literal or a range");
+                } else {
+                    const enumerated = self.builder.get(settled) == .enum_;
+                    _ = self.report(
+                        .t_mismatch,
+                        pattern,
+                        "`{s}` names a value, and a pattern does not compare against one",
+                        .{self.ast.exprText(pattern)},
+                        if (enumerated) "write the variant by its own name" else "take the value apart by its shape, or bind it",
+                    );
+                }
+                return .refused;
+            },
+            // `checkPattern` checks each of these with its own routine.
+            .name, .call, .tuple, .struct_, .malformed => unreachable,
+        }
+        const text = self.ast.exprTag(pattern) == .str_literal;
+        if (settled.bounds() == null) {
+            if (text and self.sealedHere(settled)) {
+                // Text names a value of the type, which is reaching its
+                // representation as taking it apart is: the rule a `match`
+                // over a sealed type breaks, at any depth.
+                _ = self.reportSealed(pattern, settled, "only its own module can take one apart");
+            } else if (self.ast.exprTag(pattern) != .range and !text) {
+                _ = self.report(.t_mismatch, pattern, "expected `{s}`, found an integer", .{shown}, "a number compares only an integer");
+            } else {
                 _ = self.report(
                     .t_mismatch,
                     pattern,
-                    "a match over `{s}` takes a literal or a range, not a name",
-                    .{(try self.typeName(settled))},
-                    "not a literal or a range",
+                    "{s} `{s}` is not compared against a literal or a range",
+                    .{ article.before(shown), shown },
+                    "only an integer is compared in a pattern",
                 );
-                return .refused;
-            },
+            }
+            return .refused;
         }
-        if (settled.bounds() == null) {
-            _ = self.report(
-                .t_mismatch,
-                pattern,
-                "a `{s}` is not compared against a literal or a range",
-                .{(try self.typeName(settled))},
-                "only an integer is compared in a pattern",
-            );
+        // Text is a number only at a range's end, where it is one scalar.
+        if (text) {
+            _ = self.report(.t_mismatch, pattern, "expected `{s}`, found `Str`", .{shown}, "text names a number only at a range's end");
             return .refused;
         }
         const iv = try self.intArmInterval(pattern, settled) orelse return .refused;
@@ -14184,14 +14225,7 @@ const Checker = struct {
         _ = self.record(pattern, of);
         if (p.callee != ExprId.none) _ = self.record(p.callee, of);
 
-        const fail = struct {
-            fn poisoned(checker: *Checker, held: []const ExprId) PatternCheck {
-                var i: usize = 1;
-                while (i < held.len) : (i += 2) checker.poisonPattern(held[i]);
-                return .refused;
-            }
-        }.poisoned;
-        if (of == .poison) return fail(self, p.args);
+        if (of == .poison) return self.refuseParts(pattern);
 
         // The head names the type being taken apart, and naming a different
         // one is a mistake about what this value is.
@@ -14207,7 +14241,7 @@ const Checker = struct {
                 .{ article.before(self.ast.tokenText(head_tok)), self.ast.tokenText(head_tok), article.before(try self.typeName(of)), (try self.typeName(of)) },
                 "the pattern names a different type",
             );
-            return fail(self, p.args);
+            return self.refuseParts(pattern);
         }
 
         // A generic alias heading the pattern writes the type it takes apart,
@@ -14221,7 +14255,7 @@ const Checker = struct {
                     .written = &.{written},
                     .found = try self.openAliasArguments(alias),
                 };
-                if (!try self.settleAliasHeading(pattern, head_tok, heading, &.{of})) return fail(self, p.args);
+                if (!try self.settleAliasHeading(pattern, head_tok, heading, &.{of})) return self.refuseParts(pattern);
             }
         };
 
@@ -14229,12 +14263,12 @@ const Checker = struct {
         // the same rule a literal breaks by building one.
         if (self.sealedHere(of)) {
             _ = self.reportSealed(pattern, of, "only its own module can take one apart");
-            return fail(self, p.args);
+            return self.refuseParts(pattern);
         }
 
         if (self.builder.get(of) != .struct_) {
             _ = self.report(.t_unknown_field, pattern, "`{s}` is not a struct", .{(try self.typeName(of))}, "only a struct is taken apart with braces");
-            return fail(self, p.args);
+            return self.refuseParts(pattern);
         }
 
         const count = self.builder.fieldCount(of);
@@ -14243,34 +14277,35 @@ const Checker = struct {
         @memset(named, false);
 
         var sound: PatternCheck = .matches;
-        var i: usize = 0;
-        while (i + 1 < p.args.len) : (i += 2) {
-            const name = self.ast.tokenText(self.ast.exprMain(p.args[i]));
-            _ = self.record(p.args[i], .unit);
+        var parts = self.ast.patternParts(pattern);
+        while (parts.next()) |part| {
+            const name = self.ast.tokenText(self.ast.exprMain(part.label));
+            _ = self.record(part.label, .unit);
 
             const field = if (self.builder.lookupField(of, name)) |found| found.index else {
                 _ = self.report(
                     .t_unknown_field,
-                    p.args[i],
+                    part.label,
                     "`{s}` has no field `{s}`",
                     .{ (try self.typeName(of)), name },
                     "not a field of this type",
                 );
-                self.poisonPattern(p.args[i + 1]);
+                self.poisonPattern(part.node);
                 sound = .refused;
                 continue;
             };
 
-            try self.field_names.put(self.gpa, self.ast.exprMain(p.args[i]), .{ .receiver = of, .field = @enumFromInt(field) });
+            try self.field_names.put(self.gpa, self.ast.exprMain(part.label), .{ .receiver = of, .field = @enumFromInt(field) });
 
             if (named[field]) {
-                _ = self.report(.t_duplicate_field, p.args[i], "`{s}` is named twice", .{name}, "already named above");
+                _ = self.report(.t_duplicate_field, part.label, "`{s}` is named twice", .{name}, "already named above");
                 sound = .refused;
             }
             named[field] = true;
 
-            const step: Step = .{ .field = self.ast.tokenName(self.ast.exprMain(p.args[i])) };
-            sound = sound.join(try self.checkPart(p.args[i + 1], self.builder.fieldType(of, field), at, step));
+            const field_name = self.ast.tokenName(self.ast.exprMain(part.label));
+            const selection: types_mod.PartSelection = .{ .field = .{ .index = @intCast(field), .name = field_name } };
+            sound = sound.join(try self.checkPart(part.node, self.builder.fieldType(of, field), at, selection, .{ .field = field_name }));
         }
 
         // Whole-struct: every field is named exactly once. There are no
@@ -14303,22 +14338,16 @@ const Checker = struct {
         of: TypeId,
         at: ExprId,
     ) std.mem.Allocator.Error!PatternCheck {
-        const p = self.ast.call(pattern);
         _ = self.record(pattern, of);
 
-        const fail = struct {
-            fn poisoned(checker: *Checker, held: []const ExprId) PatternCheck {
-                for (held) |part| checker.poisonPattern(part);
-                return .refused;
-            }
-        }.poisoned;
-        if (of == .poison) return fail(self, p.args);
+        if (of == .poison) return self.refuseParts(pattern);
 
         // A pattern of an arity the parser refused was reported at the `(`,
         // and is held against nothing more: not the value's kind, and not
         // its arity, which is what the refusal already said. Nor is one whose
         // `)` was never found, which may hold fewer parts than were written.
-        if (!node.isTupleArity(p.args.len) or self.ast.tuplePatternCutShort(pattern)) return fail(self, p.args);
+        const written = self.ast.patternParts(pattern).count();
+        if (!node.isTupleArity(written) or self.ast.tuplePatternCutShort(pattern)) return self.refuseParts(pattern);
 
         const settled = try self.builder.resolveOpen(of, &self.open_types);
         const instance = self.builder.instanceOf(settled);
@@ -14331,31 +14360,34 @@ const Checker = struct {
                 .{ article.before(name), name },
                 "a tuple pattern takes a tuple apart",
             );
-            return fail(self, p.args);
+            return self.refuseParts(pattern);
         }
 
         // The arity is the declaration's, read off the value.
         const count = self.builder.fieldCount(settled);
-        if (p.args.len != count) {
+        if (written != count) {
             _ = self.report(
                 .t_arity,
                 pattern,
                 "expected {d} name(s), found {d}",
-                .{ count, p.args.len },
+                .{ count, written },
                 "a tuple pattern binds every component by position",
             );
-            return fail(self, p.args);
+            return self.refuseParts(pattern);
         }
 
         // The arity check above is what makes a part's position a field of
         // the declaration.
         var sound: PatternCheck = .matches;
-        for (p.args, 0..) |part, i| {
-            if (self.ast.partBinds(part)) {
-                try self.field_names.put(self.gpa, self.ast.exprMain(part), .{ .receiver = settled, .field = @enumFromInt(i) });
+        var parts = self.ast.patternParts(pattern);
+        while (parts.next()) |part| {
+            const i: u32 = @intCast(part.index);
+            if (self.ast.partBinds(part.node)) {
+                try self.field_names.put(self.gpa, self.ast.exprMain(part.node), .{ .receiver = settled, .field = @enumFromInt(i) });
             }
-            const step: Step = .{ .field = self.ast.declFieldName(instance.?.decl, i) };
-            sound = sound.join(try self.checkPart(part, self.builder.fieldType(settled, @intCast(i)), at, step));
+            const name = self.ast.declFieldName(instance.?.decl, i);
+            const selection: types_mod.PartSelection = .{ .field = .{ .index = i, .name = name } };
+            sound = sound.join(try self.checkPart(part.node, self.builder.fieldType(settled, i), at, selection, .{ .field = name }));
         }
         return sound;
     }
@@ -14409,13 +14441,7 @@ const Checker = struct {
         _ = self.record(pattern, of);
         _ = self.record(p.callee, of);
 
-        const fail = struct {
-            fn poisoned(checker: *Checker, held: []const ExprId) PatternCheck {
-                for (held) |part| checker.poisonPattern(part);
-                return .refused;
-            }
-        }.poisoned;
-        if (of == .poison) return fail(self, p.args);
+        if (of == .poison) return self.refuseParts(pattern);
 
         // The head names the type being taken apart, compared against the
         // declaration `of` came from -- the same reason a struct pattern
@@ -14430,14 +14456,14 @@ const Checker = struct {
                 .{ article.before(head), head, article.before(try self.typeName(of)), (try self.typeName(of)) },
                 "the pattern names a different type",
             );
-            return fail(self, p.args);
+            return self.refuseParts(pattern);
         }
 
         // Taking a sealed type apart is reaching its representation, the
         // same rule a literal breaks by building one.
         if (self.sealedHere(of)) {
             _ = self.reportSealed(pattern, of, "only its own module can take one apart");
-            return fail(self, p.args);
+            return self.refuseParts(pattern);
         }
 
         // `namesTheSameType` answers by spelling as well as by declaration,
@@ -14453,33 +14479,35 @@ const Checker = struct {
                 .{(try self.typeName(of))},
                 "only a newtype's pattern takes a value apart like this",
             );
-            return fail(self, p.args);
+            return self.refuseParts(pattern);
         }
 
-        if (p.args.len != 1) {
+        const written = self.ast.patternParts(pattern);
+        if (written.count() != 1) {
             _ = self.report(
                 .t_arity,
                 pattern,
                 "expected {d} name(s), found {d}",
-                .{ 1, p.args.len },
+                .{ 1, written.count() },
                 "a newtype's pattern binds exactly the value it wraps",
             );
-            return fail(self, p.args);
+            return self.refuseParts(pattern);
         }
 
-        const base_check = try self.checkPart(p.args[0], self.builder.baseOf(of), at, .{ .field = self.ast.tokenName(head_tok) });
+        const base = written.first().?.node;
+        const base_check = try self.checkPart(base, self.builder.baseOf(of), at, .base, .{ .field = self.ast.tokenName(head_tok) });
         if (base_check != .matches) return base_check;
 
         // A literal or range outside the refinement names a value the base
         // never holds, so no value reaches the arm.
-        const compares = switch (self.ast.exprTag(p.args[0])) {
+        const compares = switch (self.ast.exprTag(base)) {
             .int_literal, .negate, .range => true,
             else => false,
         };
         if (compares and self.builder.isRefined(of)) {
             const r = self.refinedValues(of) orelse return .matches;
-            if (self.foldedInterval(p.args[0])) |iv| if (iv.hi < r.lo or iv.lo > r.hi) {
-                return self.reportEmptyPart(p.args[0], try std.fmt.allocPrint(self.sink.arena, "no `{s}` holds this value", .{head}));
+            if (self.foldedInterval(base)) |iv| if (iv.hi < r.lo or iv.lo > r.hi) {
+                return self.reportEmptyPart(base, try std.fmt.allocPrint(self.sink.arena, "no `{s}` holds this value", .{head}));
             };
         }
         return .matches;
@@ -14558,87 +14586,74 @@ const Checker = struct {
     /// value out. The whole pattern where no part says so. Bounded by the
     /// pattern's size.
     fn missedPart(self: *Checker, pattern: ExprId, missed: PatternCoverage.Witness, of: TypeId) ExprId {
-        if (isCatchAll(self.ast, pattern) or self.ast.partBinds(pattern)) return pattern;
+        if (self.takesAnything(pattern)) return pattern;
         const types: PatternTypes = .{ .checker = self };
-        switch (self.ast.exprTag(pattern)) {
-            .name_ref, .call => if (self.variant_uses.get(pattern)) |use| {
+        var ctor: usefulness.Ctor = .product;
+        const parts: []const PatternCoverage.Witness = switch (self.ast.patternForm(pattern)) {
+            .name, .call => if (self.variant_uses.get(pattern)) |use| blk: {
                 const k: u32 = @intFromEnum(use.ordinal);
-                const parts = switch (missed.shape) {
+                ctor = .{ .variant = k };
+                break :blk switch (missed.shape) {
                     .variant => |v| if (v.index == k) v.args else return pattern,
                     else => return pattern,
                 };
-                if (self.ast.exprTag(pattern) != .call) return pattern;
-                for (self.ast.call(pattern).args, 0..) |part, j| {
-                    if (j >= parts.len) break;
-                    if (self.partMisses(part, parts[j])) return self.missedPart(part, parts[j], types.part(of, .{ .variant = k }, @intCast(j)));
-                }
-                return pattern;
-            } else {
-                // A newtype: a refined one's value is its base's, read in place.
-                const inner = self.ast.call(pattern).args[0];
-                const base = switch (missed.shape) {
-                    .product => |parts| if (parts.len == 1) parts[0] else return pattern,
-                    .integers => return inner,
-                    else => return pattern,
-                };
-                return if (self.partMisses(inner, base)) self.missedPart(inner, base, types.part(of, .product, 0)) else pattern;
+            } else switch (missed.shape) {
+                // A newtype: a refined one's value is its base's, read in
+                // place.
+                .product => |p| p,
+                .integers => return self.ast.patternParts(pattern).first().?.node,
+                else => return pattern,
             },
-            .tuple_pattern => {
-                const parts = switch (missed.shape) {
-                    .product => |p| p,
-                    else => return pattern,
-                };
-                for (self.ast.call(pattern).args, 0..) |part, i| {
-                    if (i >= parts.len) break;
-                    if (self.partMisses(part, parts[i])) return self.missedPart(part, parts[i], types.part(of, .product, @intCast(i)));
-                }
-                return pattern;
+            .tuple, .struct_ => switch (missed.shape) {
+                .product => |p| p,
+                else => return pattern,
             },
-            .struct_pattern => {
-                const parts = switch (missed.shape) {
-                    .product => |p| p,
-                    else => return pattern,
-                };
-                const written = self.ast.call(pattern).args;
-                var i: usize = 0;
-                while (i + 1 < written.len) : (i += 2) {
-                    const field = self.field_names.get(self.ast.exprMain(written[i])) orelse continue;
-                    const at = field.field.index();
-                    if (at >= parts.len) continue;
-                    if (self.partMisses(written[i + 1], parts[at])) return self.missedPart(written[i + 1], parts[at], types.part(of, .product, at));
-                }
-                return pattern;
-            },
-            else => return pattern,
+            .literal, .range, .malformed, .other => return pattern,
+        };
+        var each = self.ast.patternParts(pattern);
+        while (each.next()) |part| {
+            const at = (self.part_selections.get(part.node) orelse continue).position();
+            if (at >= parts.len) continue;
+            if (self.partMisses(part.node, parts[at])) return self.missedPart(part.node, parts[at], types.part(of, ctor, at));
         }
+        return pattern;
+    }
+
+    /// Whether a pattern is `_` or a binder, which take any value.
+    fn takesAnything(self: *const Checker, pattern: ExprId) bool {
+        return isCatchAll(self.ast, pattern) or self.ast.partBinds(pattern);
     }
 
     /// Whether a part of a pattern leaves out a missed value: a binder or `_`
     /// takes anything, and a pattern takes only what it names.
     fn partMisses(self: *Checker, part: ExprId, missed: PatternCoverage.Witness) bool {
-        if (isCatchAll(self.ast, part) or self.ast.partBinds(part)) return false;
+        if (self.takesAnything(part)) return false;
         if (missed.isWild()) return false;
-        return switch (self.ast.exprTag(part)) {
-            .name_ref, .call => if (self.variant_uses.get(part)) |use| switch (missed.shape) {
+        return switch (self.ast.patternForm(part)) {
+            .name, .call => if (self.variant_uses.get(part)) |use| switch (missed.shape) {
                 .variant => |v| v.index != @intFromEnum(use.ordinal) or self.anyPartMisses(part, v.args),
                 else => true,
             } else true,
-            .tuple_pattern => switch (missed.shape) {
+            .tuple, .struct_ => switch (missed.shape) {
                 .product => |parts| self.anyPartMisses(part, parts),
                 else => true,
             },
-            .int_literal, .negate, .range => switch (missed.shape) {
+            .literal, .range => switch (missed.shape) {
                 .integers => |iv| if (self.foldedInterval(part)) |range| !(range.lo <= iv.lo and iv.hi <= range.hi) else true,
                 else => true,
             },
-            else => true,
+            .malformed, .other => true,
         };
     }
 
+    /// Whether some part of `pattern` leaves out its part of a missed value,
+    /// `parts` being the missed value's parts in the order coverage numbers
+    /// them.
     fn anyPartMisses(self: *Checker, pattern: ExprId, parts: []const PatternCoverage.Witness) bool {
-        if (self.ast.exprTag(pattern) != .call and self.ast.exprTag(pattern) != .tuple_pattern) return false;
-        for (self.ast.call(pattern).args, 0..) |part, i| {
-            if (i < parts.len and self.partMisses(part, parts[i])) return true;
+        var each = self.ast.patternParts(pattern);
+        while (each.next()) |part| {
+            const at = (self.part_selections.get(part.node) orelse continue).position();
+            if (at < parts.len and self.partMisses(part.node, parts[at])) return true;
         }
         return false;
     }
@@ -14674,7 +14689,8 @@ const Checker = struct {
             const t = self.settled(ty);
             if (t.bounds()) |b| return .{ .integer = .{ .lo = b.min, .hi = b.max } };
             return switch (self.checker.builder.get(t)) {
-                .enum_ => |e| .{ .variants = e.variant_count },
+                .enum_ => |e| if (e.variant_count == 0) .uninhabited else .{ .variants = e.variant_count },
+                .never => .uninhabited,
                 .struct_ => .{ .product = self.checker.builder.fieldCount(t) },
                 // A refined newtype is the integers its refinement admits, so
                 // its pattern is read as its base's.
@@ -14711,52 +14727,51 @@ const Checker = struct {
     fn coveragePattern(self: *Checker, arena: std.mem.Allocator, pattern: ExprId, of: TypeId) std.mem.Allocator.Error!*const usefulness.Pattern {
         // A variant's record is the checker's answer to what a bare name is:
         // at a `match` arm's head a caseless name such as `_1` names one.
-        if (!self.variant_uses.contains(pattern) and (isCatchAll(self.ast, pattern) or self.ast.partBinds(pattern))) return &usefulness.wild;
+        if (!self.variant_uses.contains(pattern) and self.takesAnything(pattern)) return &usefulness.wild;
         const types: PatternTypes = .{ .checker = self };
         const out = try arena.create(usefulness.Pattern);
-        switch (self.ast.exprTag(pattern)) {
-            .name_ref, .call => if (self.variant_uses.get(pattern)) |use| {
+        switch (self.ast.patternForm(pattern)) {
+            .name, .call => if (self.variant_uses.get(pattern)) |use| {
                 const k: u32 = @intFromEnum(use.ordinal);
-                const written: []const ExprId = if (self.ast.exprTag(pattern) == .call) self.ast.call(pattern).args else &.{};
-                const args = try arena.alloc(*const usefulness.Pattern, written.len);
-                for (written, 0..) |part, j| args[j] = try self.coveragePattern(arena, part, types.part(of, .{ .variant = k }, @intCast(j)));
-                out.* = .{ .variant = .{ .index = k, .args = args } };
+                // A variant leaving its payload unnamed names no part.
+                const count: u32 = if (self.ast.patternForm(pattern) == .call) types.arity(of, .{ .variant = k }) else 0;
+                out.* = .{ .variant = .{ .index = k, .args = try self.coverageParts(arena, pattern, of, .{ .variant = k }, count) } };
             } else if (self.builder.get(types.settled(of)) == .newtype and types.kind(of) == .integer) {
                 // A refined newtype's column is its base's integers, so the
                 // pattern is what it holds.
-                return self.coveragePattern(arena, self.ast.call(pattern).args[0], of);
-            } else if (types.kind(of) == .refused and (isCatchAll(self.ast, self.ast.call(pattern).args[0]) or self.ast.partBinds(self.ast.call(pattern).args[0]))) {
+                return self.coveragePattern(arena, self.ast.patternParts(pattern).first().?.node, of);
+            } else if (types.kind(of) == .refused and self.takesAnything(self.ast.patternParts(pattern).first().?.node)) {
                 // A refused refinement's values are unknown, but `_` or a
                 // binder inside its name takes any of them, as a bare `_`
                 // does, so it names no value coverage would have to know.
                 return &usefulness.wild;
             } else {
                 // A newtype's pattern: its one constructor, around its base.
-                const args = try arena.alloc(*const usefulness.Pattern, 1);
-                args[0] = try self.coveragePattern(arena, self.ast.call(pattern).args[0], types.part(of, .product, 0));
-                out.* = .{ .product = args };
+                out.* = .{ .product = try self.coverageParts(arena, pattern, of, .product, 1) };
             },
-            .tuple_pattern => {
-                const written = self.ast.call(pattern).args;
-                const args = try arena.alloc(*const usefulness.Pattern, written.len);
-                for (written, 0..) |part, i| args[i] = try self.coveragePattern(arena, part, types.part(of, .product, @intCast(i)));
-                out.* = .{ .product = args };
-            },
-            .struct_pattern => {
-                const args = try arena.alloc(*const usefulness.Pattern, types.arity(of, .product));
-                @memset(args, &usefulness.wild);
-                const written = self.ast.call(pattern).args;
-                var i: usize = 0;
-                while (i + 1 < written.len) : (i += 2) {
-                    const field = self.field_names.get(self.ast.exprMain(written[i])) orelse continue;
-                    const at = field.field.index();
-                    args[at] = try self.coveragePattern(arena, written[i + 1], types.part(of, .product, at));
-                }
-                out.* = .{ .product = args };
-            },
-            else => out.* = .{ .integers = self.foldedInterval(pattern) orelse return &usefulness.wild },
+            .tuple, .struct_ => out.* = .{ .product = try self.coverageParts(arena, pattern, of, .product, types.arity(of, .product)) },
+            .literal, .range => out.* = .{ .integers = self.foldedInterval(pattern) orelse return &usefulness.wild },
+            // Neither is a sound pattern, so neither reaches here; taking
+            // nothing in particular is the answer that claims nothing.
+            .malformed, .other => return &usefulness.wild,
         }
         return out;
+    }
+
+    /// The patterns for the `count` parts of constructor `c` that `pattern`
+    /// takes apart, each at the position its part selects, and a wildcard
+    /// for a part the pattern does not write.
+    fn coverageParts(self: *Checker, arena: std.mem.Allocator, pattern: ExprId, of: TypeId, c: usefulness.Ctor, count: u32) std.mem.Allocator.Error![]const *const usefulness.Pattern {
+        const types: PatternTypes = .{ .checker = self };
+        const args = try arena.alloc(*const usefulness.Pattern, count);
+        @memset(args, &usefulness.wild);
+        var each = self.ast.patternParts(pattern);
+        while (each.next()) |part| {
+            const at = (self.part_selections.get(part.node) orelse continue).position();
+            if (at >= count) continue;
+            args[at] = try self.coveragePattern(arena, part.node, types.part(of, c, at));
+        }
+        return args;
     }
 
     /// A checked literal or range pattern's interval, read from the fold
@@ -17326,10 +17341,13 @@ const Checker = struct {
     /// not read, at any depth, or a tuple naming a count of parts no tuple
     /// has.
     fn refusedByParser(self: *const Checker, pattern: ExprId) bool {
-        if (self.ast.exprTag(pattern) == .err) return true;
-        if (self.ast.exprTag(pattern) == .tuple_pattern and !node.isTupleArity(self.ast.call(pattern).args.len)) return true;
+        switch (self.ast.patternForm(pattern)) {
+            .malformed => return true,
+            .tuple => if (!node.isTupleArity(self.ast.patternParts(pattern).count())) return true,
+            .name, .call, .struct_, .literal, .range, .other => {},
+        }
         var parts = self.ast.patternParts(pattern);
-        while (parts.next()) |part| if (self.refusedByParser(part)) return true;
+        while (parts.next()) |part| if (self.refusedByParser(part.node)) return true;
         return false;
     }
 
@@ -17385,7 +17403,7 @@ const Checker = struct {
     /// use, each part receiving its component. `place` is the place a
     /// lending walk's element is.
     fn bindWalked(self: *Checker, binder: ExprId, element: TypeId, place: ?BinderPlace) std.mem.Allocator.Error!void {
-        if (self.ast.exprTag(binder) != .tuple_pattern) {
+        if (!self.ast.walkBinderIsTuple(binder)) {
             _ = self.record(binder, element);
             const target = self.res.targetOf(binder);
             if (target != BindingId.none) {
@@ -17418,7 +17436,7 @@ const Checker = struct {
     /// its own part, so they are held apart from one another as any two
     /// places are.
     fn walkLendBegin(self: *Checker, at: ExprId, binder: ExprId, writable: bool) std.mem.Allocator.Error!usize {
-        if (self.ast.exprTag(binder) != .tuple_pattern) {
+        if (!self.ast.walkBinderIsTuple(binder)) {
             try self.lendBegin(at, binder, writable);
             return 1;
         }
@@ -17432,9 +17450,10 @@ const Checker = struct {
     /// beside it against it.
     fn lendPatternBinders(self: *Checker, at: ExprId, pattern: ExprId, writable: bool, taken: *usize) std.mem.Allocator.Error!void {
         var parts = self.ast.patternParts(pattern);
-        while (parts.next()) |part| {
+        while (parts.next()) |each| {
+            const part = each.node;
             if (!self.ast.partBinds(part)) {
-                if (self.ast.exprTag(part) != .name_ref) try self.lendPatternBinders(at, part, writable, taken);
+                try self.lendPatternBinders(at, part, writable, taken);
                 continue;
             }
             const b = self.res.targetOf(part);
@@ -33074,11 +33093,6 @@ const Checker = struct {
         // comparing it, so the open type passes to the binders and settles by
         // their uses, as it does for a walk's binder and `let ... else`.
         const scrutinee = try self.receiverType(try self.check(m.callee, null), self.literalSite(m.callee));
-        if (scrutinee == .never) {
-            var j: usize = 1;
-            while (j < m.args.len) : (j += 2) _ = try self.check(m.args[j], null);
-            return self.expect(id, .never, expected);
-        }
 
         // On the scrutinee's type, not on what the arms name. A catch-all
         // names no variant and so needs nothing from a sealed type, which
@@ -33175,7 +33189,7 @@ const Checker = struct {
                     const missing = try self.witnessList(o.missing);
                     defer self.gpa.free(missing);
                     _ = if (missing.len == 0)
-                        self.report(.t_cover, id, "this `match` does not cover every variant", .{}, "add the missing arms, or a `_`")
+                        self.report(.t_cover, id, "no arm of this `match` takes a value of `{s}`", .{try self.typeName(scrutinee)}, "add an arm, or a `_`")
                     else
                         self.report(.t_cover, id, "this `match` does not cover {s}", .{missing}, "add the missing arms, or a `_`");
                     poisoned = true;
@@ -33187,6 +33201,9 @@ const Checker = struct {
         }
 
         if (poisoned) return self.record(id, .poison);
+        // A scrutinee that never yields a value leaves before any arm runs,
+        // so the `match` never completes, whatever its arms say.
+        if (scrutinee == .never) return self.expect(id, .never, expected);
         var completes = false;
         var arm_index: usize = 1;
         while (arm_index < m.args.len) : (arm_index += 2) {

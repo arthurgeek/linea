@@ -914,7 +914,10 @@ to its Unicode scalar number if it contains exactly one scalar. The expected
 integer type determines the result type, with the same default as an integer
 literal when context supplies none. Thus `"a"..="z"` denotes that letter
 range. A literal containing more than one scalar remains `Str` and causes
-[T-Mismatch] for the range. This conversion applies only at a range end.
+[T-Mismatch] for the range. This conversion applies only at a range end: a
+string literal standing alone in a pattern is `Str`, which over an integer is
+[T-Mismatch]. No pattern compares text; over `Str` outside its module a literal
+is refused at any depth by [M-Opaque], as the `match` taking one apart is.
 
 `match read` observes the scrutinee without taking it apart: the value is
 lent, as with a parameter's `read` convention. `let read` applies the same
@@ -3102,9 +3105,9 @@ one named case whose sole positional component is its base. `.reversed`
 reverses component order and nothing else. An empty struct retains an ordinary
 `Empty {}` pattern, so a consuming match still consumes the zero-component
 product as a whole. An uninhabited enum expands to `match value {}`; an ordinary
-empty match is admitted only for an enum declaring no variants, has type
-`Never`, and ends that ownership path. An empty match over an inhabited or
-non-enum type is [T-Cover].
+empty match is admitted only for a scrutinee with no values, `Never` or an
+enum declaring no variants, has type `Never`, and ends that ownership path.
+An empty match over any other type is [T-Cover].
 
 **[T-Where]** A type predicate in a trailing `where` clause constrains a type
 expression that depends on an open type parameter. The parameter may belong to
@@ -3841,9 +3844,14 @@ Where arms leave several variants of one column to `_`, as `(_, One(0))` leaves
 together, so the nine may name `(Idle, Unset)` before every missing value that
 goes with `Off`. A variant whose payload the
 pattern would leave unnamed is written bare. A variant remains in the exhaustive
-set when its payload contains `Never`; `Option[Never]` must still account for
-`Some`. Text, a type parameter and any other type no pattern takes apart are
-covered only by a binder or `_`.
+set when its payload contains `Never` or an enum declaring no variants;
+`Option[Never]` must still account for `Some`. Only those two types have no
+values: a struct or tuple holding one is still a product with one shape, so
+`match` over `(Nothing, UInt8)` needs an arm such as `(_, n)`, and a `match`
+with none is told that no arm takes a value of its type. The arms of a `match`
+over a value of either type are checked against it as any arms are, and since
+no value ever reaches them the `match` has type `Never`. Text, a type parameter and any
+other type no pattern takes apart are covered only by a binder or `_`.
 
 Coverage is decided in one pass over the arms (Maranget's usefulness): it
 answers, for each arm, whether some value matches it and no arm before it, and

@@ -20,7 +20,8 @@ const BindingId = resolve_mod.BindingId;
 /// Gives every binder of an arm's pattern, at any depth, the arm's extent.
 fn armBinders(ast: *const Ast, res: *const Resolution, extent: []?Span, pattern: ExprId, arm: Span) void {
     var parts = ast.patternParts(pattern);
-    while (parts.next()) |part| {
+    while (parts.next()) |each| {
+        const part = each.node;
         if (!ast.partBinds(part)) {
             armBinders(ast, res, extent, part, arm);
             continue;

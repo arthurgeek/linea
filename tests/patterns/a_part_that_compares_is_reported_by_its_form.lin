@@ -1,0 +1,39 @@
+// A pattern compares an integer against a literal or a range. A path naming a
+// variant is not a literal, a number does not compare text, and a range
+// compares no enum.
+@copyable
+enum Color {
+    Red,
+    Blue,
+}
+
+@copyable
+enum Edge {
+    Top,
+    Bottom,
+}
+
+fn named(sink x: (Color, UInt8)) -> UInt8 {
+    match x {
+        (Color.Blue, n) => n,
+        _ => 0,
+    }
+}
+
+fn numbered(sink x: Option[Str]) -> UInt8 {
+    match x {
+        Some(0) => 1,
+        _ => 0,
+    }
+}
+
+fn ranged(sink x: Option[Edge]) -> UInt8 {
+    match x {
+        Some(0..=1) => 1,
+        _ => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    named((.Red, 1)) + numbered(.None) + ranged(.None)
+}

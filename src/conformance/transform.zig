@@ -1220,34 +1220,41 @@ fn memberRegion(
 /// values, or two patterns of the same shape with some part apart. A range or
 /// anything else the text does not settle answers no, which keeps a match
 /// from being rotated rather than rotating one whose meaning would change.
+///
+/// Read from the text rather than asked of coverage: usefulness answers
+/// whether an arm takes a value the arms before it leave, not whether two
+/// arms share one, and a rewrite chosen by the compiler's own answer would
+/// test that answer against itself.
 fn patternsApart(ast: *const Ast, text: []const u8, a: ExprId, b: ExprId) bool {
-    const ta = ast.exprTag(a);
-    const tb = ast.exprTag(b);
     if (ast.partBinds(a) or ast.partBinds(b) or isCatchAll(ast, a) or isCatchAll(ast, b)) return false;
     if (literalInterval(ast, text, a)) |x| if (literalInterval(ast, text, b)) |y| return x[1] < y[0] or y[1] < x[0];
-    const variant_a = ta == .name_ref or ta == .call;
-    const variant_b = tb == .name_ref or tb == .call;
-    if (variant_a and variant_b) {
-        const name_a = ast.tokenText(ast.exprMain(a));
-        const name_b = ast.tokenText(ast.exprMain(b));
-        if (!std.mem.eql(u8, name_a, name_b)) return true;
-        if (ta != .call or tb != .call) return false;
-        return partsApart(ast, text, ast.call(a).args, ast.call(b).args);
-    }
-    if (ta == .tuple_pattern and tb == .tuple_pattern) return partsApart(ast, text, ast.call(a).args, ast.call(b).args);
-    if (ta == .struct_pattern and tb == .struct_pattern) {
-        const fa = ast.call(a).args;
-        const fb = ast.call(b).args;
-        var i: usize = 0;
-        while (i + 1 < fa.len) : (i += 2) {
-            var j: usize = 0;
-            while (j + 1 < fb.len) : (j += 2) {
-                if (!std.mem.eql(u8, ast.tokenText(ast.exprMain(fa[i])), ast.tokenText(ast.exprMain(fb[j])))) continue;
-                if (patternsApart(ast, text, fa[i + 1], fb[j + 1])) return true;
+    const fa = ast.patternForm(a);
+    const fb = ast.patternForm(b);
+    switch (fa) {
+        .name, .call => {
+            if (fb != .name and fb != .call) return false;
+            const name_a = ast.tokenText(ast.exprMain(a));
+            const name_b = ast.tokenText(ast.exprMain(b));
+            if (!std.mem.eql(u8, name_a, name_b)) return true;
+            if (fa != .call or fb != .call) return false;
+            return partsApart(ast, text, a, b);
+        },
+        .tuple => return fb == .tuple and partsApart(ast, text, a, b),
+        .struct_ => {
+            if (fb != .struct_) return false;
+            var xs = ast.patternParts(a);
+            while (xs.next()) |x| {
+                var ys = ast.patternParts(b);
+                while (ys.next()) |y| {
+                    if (!std.mem.eql(u8, ast.tokenText(ast.exprMain(x.label)), ast.tokenText(ast.exprMain(y.label)))) continue;
+                    if (patternsApart(ast, text, x.node, y.node)) return true;
+                }
             }
-        }
+            return false;
+        },
+        // Literals were compared above where both settle.
+        .literal, .range, .malformed, .other => return false,
     }
-    return false;
 }
 
 /// The closed interval an integer literal or a range of integer literals
@@ -1282,12 +1289,14 @@ fn literalValue(ast: *const Ast, text: []const u8, e: ExprId) ?i128 {
     return std.fmt.parseInt(i128, digits[0..n], 0) catch null;
 }
 
-/// Whether two lists of parts, taken position by position, hold a pair no
+/// Whether two patterns' parts, taken position by position, hold a pair no
 /// value matches both of.
-fn partsApart(ast: *const Ast, text: []const u8, a: []const ExprId, b: []const ExprId) bool {
-    if (a.len != b.len) return false;
-    for (a, b) |x, y| {
-        if (patternsApart(ast, text, x, y)) return true;
+fn partsApart(ast: *const Ast, text: []const u8, a: ExprId, b: ExprId) bool {
+    var xs = ast.patternParts(a);
+    var ys = ast.patternParts(b);
+    if (xs.count() != ys.count()) return false;
+    while (xs.next()) |x| {
+        if (patternsApart(ast, text, x.node, ys.next().?.node)) return true;
     }
     return false;
 }
@@ -1301,7 +1310,8 @@ fn putPatternBinders(
     pattern: ExprId,
 ) std.mem.Allocator.Error!void {
     var parts = ast.patternParts(pattern);
-    while (parts.next()) |part| {
+    while (parts.next()) |each| {
+        const part = each.node;
         if (!ast.partBinds(part)) {
             try putPatternBinders(gpa, ast, res, into, part);
             continue;

@@ -14100,28 +14100,31 @@ const Resolver = struct {
     /// unresolved, so a consumer reaching a pattern finds the binding through
     /// the map it already uses for every other name.
     fn bindParts(self: *Resolver, pattern: ExprId, mutable: bool) std.mem.Allocator.Error!void {
-        switch (self.ast.exprTag(pattern)) {
+        switch (self.ast.patternForm(pattern)) {
             // A struct pattern names the type it takes apart, then alternates
             // field and part. Which fields a type has is the checker's
             // question.
-            .struct_pattern => {
+            .struct_ => {
                 const p = self.ast.call(pattern);
                 if (p.callee != ExprId.none) try self.usePatternHead(self.ast.exprMain(p.callee));
-                var i: usize = 1;
-                while (i < p.args.len) : (i += 2) {
+                var parts = self.ast.patternParts(pattern);
+                while (parts.next()) |part| {
                     // The shorthand puts the field and the binder at one token,
                     // which the parser records by building two nodes there.
-                    const shared = self.ast.exprMain(p.args[i - 1]) == self.ast.exprMain(p.args[i]);
-                    try self.bindPart(p.args[i], shared, mutable);
+                    const shared = self.ast.exprMain(part.label) == self.ast.exprMain(part.node);
+                    try self.bindPart(part.node, shared, mutable);
                 }
             },
             // A tuple pattern names no type and takes each component by
             // position.
-            .tuple_pattern => for (self.ast.call(pattern).args) |a| try self.bindPart(a, false, mutable),
+            .tuple => {
+                var parts = self.ast.patternParts(pattern);
+                while (parts.next()) |part| try self.bindPart(part.node, false, mutable);
+            },
             // A range or a literal pattern's bounds are ordinary expressions --
             // a name a bound reaches is a name in scope, not a part this
             // pattern binds -- so they resolve the way any expression does.
-            .range, .int_literal, .negate, .str_literal => try self.expr(pattern),
+            .range, .literal => try self.expr(pattern),
             // Most spellings here are a variant, which is not a type and marks
             // nothing. A newtype's pattern spells the type itself,
             // indistinguishable from a variant's at this point in the pipeline
@@ -14129,9 +14132,12 @@ const Resolver = struct {
             // is, which finds a declared type only where the spelling is one.
             .call => {
                 try self.usePatternHead(self.ast.exprMain(self.ast.call(pattern).callee));
-                for (self.ast.call(pattern).args) |a| try self.bindPart(a, false, mutable);
+                var parts = self.ast.patternParts(pattern);
+                while (parts.next()) |part| try self.bindPart(part.node, false, mutable);
             },
-            else => {},
+            // A bare name at the head binds nothing; what the parser could not
+            // read, or no pattern admits, declares nothing either.
+            .name, .malformed, .other => {},
         }
     }
 
@@ -14533,7 +14539,7 @@ const Resolver = struct {
 
                 // The binder of a writable lend is assignable: writing through
                 // it is what the walk was written for.
-                if (self.ast.exprTag(f.args[0]) == .tuple_pattern) {
+                if (self.ast.walkBinderIsTuple(f.args[0])) {
                     try self.bindPattern(f.args[0], writes);
                 } else {
                     self.pattern_names.restart();
@@ -14542,7 +14548,7 @@ const Resolver = struct {
                 if (reflected) |reversed| {
                     // A component is not a tuple, so a pattern has nothing to
                     // take apart and no binding to plan the loop around.
-                    if (self.ast.exprTag(f.args[0]) == .tuple_pattern) {
+                    if (self.ast.walkBinderIsTuple(f.args[0])) {
                         try self.reportReflection(
                             f.args[0],
                             "a reflected component loop binds one name",

@@ -1063,13 +1063,26 @@ variant patterns, at any depth of a pattern, are settled by the checker in
 the payload is left unnamed. Ownership reads that disposal fact, and MIR reads
 the selected ordinal for construction, tag tests and payload loads.
 
-A nested pattern adds no node and no table of its own. The checker checks every
-pattern with one recursive routine, `checkPattern`, and records each part's
-answer where the outermost pattern's always was: its type by node, a variant
-pattern's ordinal in `variant_uses`, a struct field's identity in `field_names`,
-and a binder's type by binding. Ownership and lowering walk a pattern top-down
-and compose those answers into the path from the scrutinee to each part, so no
-pass selects a part a second way. The checker's own place relation for
+A nested pattern adds no node. The checker checks every pattern with one
+recursive routine, `checkPattern`, and records each part's answer where the
+outermost pattern's always was: its type by node, a variant pattern's ordinal
+in `variant_uses`, a struct field's identity in `field_names`, and a binder's
+type by binding. What each part selects from the value its pattern node takes
+apart -- a field or component by position and name, a variant's payload
+position, a newtype's base -- is `Typing.part_selections`, keyed by the part's
+node and written by `checkPart`. Ownership reads it for a part's path step,
+lowering for its offset, and coverage for the position of the part's column, so
+no pass selects a part a second way. A pattern's argument layout is read only by
+`Ast.patternParts`, which also counts a node's parts, and every walk over a
+pattern switches on `Ast.PatternForm` with no `else` (a walk's binder through
+`Ast.walkBinderIsTuple`), so a new form is a compile error at each walk until it
+says what the form does. One walk keeps an answer of its own on purpose: the
+conformance runner's `patternsApart` decides from the text whether two arms
+share no value, to choose which arms a rotation may reorder. It reads the
+layout through `patternParts` and switches on `PatternForm` like the rest, but
+does not ask coverage, which answers a different question (whether an arm
+takes a value the arms before it leave) and whose answer the rotation exists to
+test. The checker's own place relation for
 [O-Lent] and [N-Aliased] keeps, beside `binder_places`, a `pattern_places`
 entry for each nested pattern node, so a binder's place is a chain of one-step
 records ending at the value the construct took apart; ownership keeps the same
