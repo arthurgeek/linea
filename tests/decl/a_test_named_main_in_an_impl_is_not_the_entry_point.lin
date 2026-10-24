@@ -1,0 +1,17 @@
+// A test inside an `impl` is never the entry point either, so a program whose
+// only `main` is such a test declares no entry point.
+import std.testing
+
+struct Clock {
+    ticks: UInt32,
+}
+
+impl Clock {
+    pub fn new() -> Clock {
+        Clock { ticks = 0 }
+    }
+
+    test fn main() {
+        testing.assert_eq(Clock.new().ticks, 0, "a new clock has not ticked")?
+    }
+}

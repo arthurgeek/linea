@@ -1,0 +1,28 @@
+// A test is not instantiated, so a test inside a generic `impl` reads neither
+// the implementation's type parameters nor `Self`. It names concrete types.
+import std.testing
+
+struct Boxed[T] {
+    value: T,
+}
+
+impl[T] Boxed[T] {
+    pub fn new(sink value: T) -> Self {
+        Self { value = value }
+    }
+
+    test fn a_parameter_of_the_impl() {
+        let none: Option[T] = .None
+        testing.assert(none.is_none(), "nothing is held")?
+    }
+
+    test fn self_of_a_generic_impl() {
+        let boxed: Self = Boxed.new(3)
+        testing.assert_eq(boxed.value, 3, "the box holds three")?
+    }
+}
+
+fn main() -> UInt8 {
+    let boxed: Boxed[UInt8] = Boxed.new(0)
+    boxed.value
+}

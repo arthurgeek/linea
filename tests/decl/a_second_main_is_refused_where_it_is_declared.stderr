@@ -1,0 +1,12 @@
+error[N-Duplicate]: `main` is already declared
+  --> tests/decl/a_second_main_is_refused_where_it_is_declared.lin:13:4
+   |
+13 | fn main() -> Result[UInt8, io.IoError] {
+   |    ^^^^ a name is declared once
+error[S-Entry]: a program declares exactly one `main`
+  --> tests/decl/a_second_main_is_refused_where_it_is_declared.lin:13:4
+   |
+5  | fn main() -> UInt8 {
+   |    ---- the first is declared here
+13 | fn main() -> Result[UInt8, io.IoError] {
+   |    ^^^^ found 2

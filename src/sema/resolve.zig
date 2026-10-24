@@ -15,6 +15,8 @@ const interner_mod = @import("../support/interner.zig");
 const Interner = interner_mod.Interner;
 const StringId = interner_mod.StringId;
 const Label = @import("../diagnostics/diagnostic.zig").Label;
+const Fix = @import("../diagnostics/diagnostic.zig").Fix;
+const Edit = @import("../diagnostics/diagnostic.zig").Edit;
 const Code = @import("../diagnostics/diagnostic.zig").Code;
 const tokenize = @import("../lexer/lexer.zig").tokenize;
 const parse = @import("../parser/parser.zig").parse;
@@ -4878,7 +4880,7 @@ test "a `&` lending a `let` is left to the checker, and an assignment is reporte
 /// derive, a template and a `use` name what they are about rather than
 /// declaring a name.
 pub fn declaredNameKind(ast: *const Ast, d: DeclId) ?name_case.Kind {
-    const restated = ast.declTrait(d) != TokenId.none and ast.declOwner(d) != TokenId.none;
+    const restated = ast.declTrait(d) != TokenId.none and ast.memberOwner(d) != TokenId.none;
     return switch (ast.declTag(d)) {
         .struct_, .enum_, .newtype, .alias => .declared_type,
         .trait_ => .trait,
@@ -5158,7 +5160,10 @@ fn appendMembers(
 /// inside an `impl` was exempted from a rule it was never entitled to escape.
 pub fn namesTheEntryPoint(ast: *const Ast, d: DeclId) bool {
     if (ast.declTag(d) != .function) return false;
-    if (ast.declOwner(d) != TokenId.none) return false;
+    // A test is called by the test runner and nothing else, whatever it is
+    // named, so it is never the function the runtime starts.
+    if (ast.declIsTest(d)) return false;
+    if (ast.memberOwner(d) != TokenId.none) return false;
     const name = ast.declName(d);
     if (ast.tokenTag(name) != .identifier) return false;
     return std.mem.eql(u8, ast.tokenText(name), "main");
@@ -5196,11 +5201,13 @@ pub fn reachedWithoutACall(ast: *const Ast, d: DeclId, in_root: bool) bool {
 
     if (!ast.declIsTest(d)) return false;
 
-    // The same two conditions the entry point is held to. A test the parser
-    // refused -- inside a trait impl, or on something that is not a function --
-    // is not a body anything runs, so it is not exempt from being unused
-    // either.
-    return ast.declTag(d) == .function and ast.declTrait(d) == TokenId.none;
+    // Held to being a function, as an export is: `test` written on anything
+    // else is refused, and what it was written on is not a body anything
+    // runs. Where the function is written does not matter. A test the parser
+    // refused for sitting in a trait implementation or a template is still a
+    // test, and telling the reader to call it would be advice nothing can
+    // follow.
+    return ast.declTag(d) == .function;
 }
 
 /// What a compilation is for.
@@ -5341,7 +5348,7 @@ pub const Signatures = struct {
         while (k > 0) {
             k -= 1;
             const sig = DeclId.at(@intCast(k));
-            const owner = ast.declOwner(sig);
+            const owner = ast.memberOwner(sig);
             if (owner == TokenId.none) continue;
             if (ast.declIsSignature(sig)) {
                 try declared.note(gpa, @intFromEnum(owner), @intCast(k));
@@ -5395,7 +5402,7 @@ pub const Signatures = struct {
 
     /// The trait that declares `d`, or null where none does.
     pub fn traitOf(self: *const Signatures, ast: *const Ast, d: DeclId) ?DeclId {
-        const owner = ast.declOwner(d);
+        const owner = ast.memberOwner(d);
         if (owner == TokenId.none) return null;
         return self.trait_of.get(owner);
     }
@@ -6686,13 +6693,7 @@ const Resolver = struct {
             // A declaration inside a type is reached through the type's name,
             // so it is not a name in the module. Its binding is made all the
             // same: the unused rule applies to it like any other.
-            // A test inside an inherent impl is organized at module scope
-            // rather than becoming a callable member of the type.
-            if (self.ast.declOwner(d) != TokenId.none) {
-                if (self.ast.declIsTest(d)) {
-                    try self.declareTop(d);
-                    continue;
-                }
+            if (self.ast.memberOwner(d) != TokenId.none) {
                 try self.declareMember(d);
                 continue;
             }
@@ -7051,7 +7052,7 @@ const Resolver = struct {
     /// would change what `Account.` means.
     fn declareMember(self: *Resolver, d: DeclId) !void {
         const name_token = self.ast.declName(d);
-        const owner = self.ast.tokenName(self.ast.declOwner(d));
+        const owner = self.ast.tokenName(self.ast.memberOwner(d));
         const trait = self.ast.declTrait(d);
 
         const in = self.moduleOf(d);
@@ -7328,7 +7329,7 @@ const Resolver = struct {
                 // A member carries only `pub`, and a signature carries
                 // nothing: the parser accepts no other word inside either
                 // pair of braces, so there is nothing here that it let past.
-                if (self.ast.declOwner(d) != TokenId.none) continue;
+                if (self.ast.memberOwner(d) != TokenId.none) continue;
                 try self.checkModifiersOf(d);
             }
         }
@@ -7423,11 +7424,23 @@ const Resolver = struct {
         const root = self.program.root();
         var found: u32 = 0;
         var entry: DeclId = DeclId.at(0);
+        var first_main: DeclId = DeclId.none;
+        var second_main: DeclId = DeclId.none;
+        // A test named `main`, which a reader may have meant as the entry
+        // point. Kept only to say why it is not one.
+        var test_main: DeclId = DeclId.none;
         for (root.decls.start..root.decls.end) |i| {
             const d = DeclId.at(@intCast(i));
-            if (!namesTheEntryPoint(self.ast, d)) continue;
+            if (!namesTheEntryPoint(self.ast, d)) {
+                if (test_main == DeclId.none and self.ast.declIsTest(d) and
+                    self.ast.declTag(d) == .function and
+                    std.mem.eql(u8, self.ast.tokenText(self.ast.declName(d)), "main"))
+                    test_main = d;
+                continue;
+            }
             found += 1;
             entry = d;
+            if (first_main == DeclId.none) first_main = d else if (second_main == DeclId.none) second_main = d;
         }
         // Recorded whatever the count, so lowering reads the selection rather
         // than making it: a program with no entry point or with two is
@@ -7459,6 +7472,32 @@ const Resolver = struct {
         if (found == 0 and (self.purpose == .tests or self.program.kind == .library or self.program.named_module)) return;
 
         const label = try std.fmt.allocPrint(self.sink.arena, "found {d}", .{found});
+
+        // At the second `main`, which is the one to remove or rename, with the
+        // first beside it: the count alone says nothing about which two.
+        if (second_main != DeclId.none) {
+            const labels = try self.sink.arena.alloc(Label, 2);
+            labels[0] = .{ .file = self.ast.fileOfDecl(second_main), .span = self.ast.declNameSpan(second_main), .message = label, .style = .primary };
+            labels[1] = .{ .file = self.ast.fileOfDecl(first_main), .span = self.ast.declNameSpan(first_main), .message = "the first is declared here", .style = .secondary };
+            try self.sink.add(.{
+                .severity = .err,
+                .code = .s_entry,
+                .message = "a program declares exactly one `main`",
+                .labels = labels,
+            });
+            return;
+        }
+
+        if (test_main != DeclId.none) {
+            try self.sink.addError(
+                .s_entry,
+                self.ast.fileOfDecl(test_main),
+                self.ast.declNameSpan(test_main),
+                "a program declares exactly one `main`",
+                "this is a test, and a test is never the entry point; rename it and declare `fn main() -> UInt8`",
+            );
+            return;
+        }
 
         // The program's own source, never the tree's first file: the library
         // is loaded before an entry directory and after a single entry file,
@@ -11212,7 +11251,7 @@ const Resolver = struct {
                 try self.noteModule(binding);
                 continue;
             }
-            if (expanded.ast.declOwner(d) == TokenId.none) continue;
+            if (expanded.ast.memberOwner(d) == TokenId.none) continue;
             try self.declareMember(d);
         }
     }
@@ -11492,10 +11531,10 @@ const Resolver = struct {
                 // top-level name, an import's included, of another in its
                 // module's run -- the two places [N-Duplicate] asks.
                 const module = self.program.moduleOf(d);
-                const namespace: Namespace = if (source.declOwner(d) == TokenId.none or source.declIsTest(d))
+                const namespace: Namespace = if (source.memberOwner(d) == TokenId.none)
                     .{ .module_run = module }
                 else
-                    .{ .members = .{ .module = module, .owner = source.tokenName(source.declOwner(d)) } };
+                    .{ .members = .{ .module = module, .owner = source.tokenName(source.memberOwner(d)) } };
                 try checks.name(source.declName(d), kind, namespace);
             }
             switch (source.declTag(d)) {
@@ -12050,7 +12089,7 @@ const Resolver = struct {
         const of = if (self.ast.declTrait(self.generic) != TokenId.none)
             self.ast.declTrait(self.generic)
         else
-            self.ast.declOwner(self.generic);
+            self.ast.memberOwner(self.generic);
         if (self.ast.declTag(self.generic) == .trait_) return self.generic;
         if (of == TokenId.none and self.trait_scope != DeclId.none) return self.trait_scope;
         if (of == TokenId.none) return null;
@@ -12351,8 +12390,7 @@ const Resolver = struct {
         @memset(of_decl, DeclId.none);
         for (0..self.ast.declCount()) |i| {
             const d = DeclId.at(@intCast(i));
-            if (self.ast.declIsTest(d)) continue;
-            const of = self.ast.declOwner(d);
+            const of = self.ast.memberOwner(d);
             if (of == TokenId.none) continue;
             of_decl[i] = self.impl_of_head.get(of) orelse DeclId.none;
         }
@@ -12415,7 +12453,7 @@ const Resolver = struct {
             const owner = if (self.ast.declTag(self.generic) == .impl_)
                 self.ast.declHead(self.generic).name
             else
-                self.ast.declOwner(self.generic);
+                self.ast.memberOwner(self.generic);
             if (owner == TokenId.none) return .{ .unreached = wanted };
             if (self.ast.tokenTag(owner) == .keyword_borrow) return .settled;
             wanted = self.ast.tokenName(owner);
@@ -12716,12 +12754,107 @@ const Resolver = struct {
         return true;
     }
 
+    /// The implementation whose braces hold the test being resolved, or
+    /// `.none` where no test is being resolved or it sits at module scope.
+    fn implHoldingTest(self: *const Resolver) DeclId {
+        const d = self.generic;
+        if (d == DeclId.none or !self.ast.declIsTest(d)) return DeclId.none;
+        const of = self.ast.declOwner(d);
+        if (of == TokenId.none) return DeclId.none;
+        return self.impl_of_head.get(of) orelse DeclId.none;
+    }
+
+    /// Where a name `refuseImplNameInTest` reports was written: a written
+    /// type, or an expression such as the head of a call.
+    const NamePosition = enum { annotation, expression };
+
+    /// [S-Test] at `Self`, or at one of the implementation's own type
+    /// parameters, written in a test that implementation's braces hold, and
+    /// whether it was reported.
+    ///
+    /// A test there is a member of nothing and is resolved at module scope,
+    /// so neither name reaches anything. Said for what it is rather than as a
+    /// name nothing declares, because the reader wrote it beside members where
+    /// it does mean something. Where the implementation is for one concrete
+    /// type, the help writes that type in place of `Self`; under type
+    /// parameters, which arguments the test means is the reader's choice.
+    ///
+    /// What the help writes depends on `position`. A written type is the whole
+    /// head, `Boxed[UInt8]`; before a call it is the type's name, `Boxed`,
+    /// because a call settles the arguments and a bracketed head is no value.
+    ///
+    /// A test in a trait implementation or a template was refused where it
+    /// was parsed, so neither name is reported a second time inside it.
+    fn refuseImplNameInTest(self: *Resolver, tok: TokenId, position: NamePosition) std.mem.Allocator.Error!bool {
+        if (tok == TokenId.none or self.ast.tokenTag(tok) != .identifier) return false;
+        const impl = self.implHoldingTest();
+        if (impl == DeclId.none) return false;
+        const refused = self.ast.declTag(impl) != .impl_ or self.ast.declTrait(impl) != TokenId.none;
+        const generic = self.ast.declTypeParams(impl).len != 0;
+        const file = self.ast.fileOf(tok);
+        const span = self.ast.tokenSpan(tok);
+
+        if (namesSelf(self.ast, tok)) {
+            if (refused) return true;
+            const head = self.ast.declHead(impl);
+            const written = if (head.kind == .named and position == .expression)
+                self.ast.tokenText(head.name)
+            else if (head.kind == .named and head.args.len() != 0)
+                self.ast.writtenText(head)
+            else
+                self.ast.implHeadText(impl);
+            const labels = try self.sink.arena.alloc(Label, 1);
+            labels[0] = .{
+                .file = file,
+                .span = span,
+                .style = .primary,
+                .message = if (generic) switch (position) {
+                    .annotation => try std.fmt.allocPrint(self.sink.arena, "a test is not instantiated, so nothing settles the parameters of `{s}`; write it with concrete arguments", .{written}),
+                    .expression => try std.fmt.allocPrint(self.sink.arena, "a test is not instantiated, so nothing settles the parameters of `Self`; write `{s}` and let the call settle them", .{written}),
+                } else try std.fmt.allocPrint(self.sink.arena, "a test inside an `impl` is resolved at module scope; write `{s}`", .{written}),
+            };
+            var fixes: []const Fix = &.{};
+            if (!generic) {
+                const edits = try self.sink.arena.alloc(Edit, 1);
+                edits[0] = .{ .file = file, .span = span, .text = written };
+                const one = try self.sink.arena.alloc(Fix, 1);
+                one[0] = .{ .note = null, .edits = edits };
+                fixes = one;
+            }
+            try self.sink.add(.{
+                .severity = .err,
+                .code = .s_test,
+                .message = "`Self` names no type in a test",
+                .labels = labels,
+                .fixes = fixes,
+            });
+            return true;
+        }
+
+        if (!generic) return false;
+        for (self.ast.declTypeParams(impl)) |parameter| {
+            if (self.ast.tokenName(parameter.name) != self.ast.tokenName(tok)) continue;
+            if (refused) return true;
+            try self.sink.addErrorFmt(
+                .s_test,
+                file,
+                span,
+                "a test is not instantiated, so the parameters of its `impl` name no type in it; write a concrete type",
+                "`{s}` names no type in a test",
+                .{self.ast.tokenText(tok)},
+            );
+            return true;
+        }
+        return false;
+    }
+
     /// A written type naming nothing.
     ///
     /// Reported rather than left, because an annotation naming nothing poisons
     /// what it annotates, and a poisoned value nobody diagnosed is every rule
     /// about it silently skipped.
     fn reportUnknownType(self: *Resolver, tok: TokenId) void {
+        if (self.refuseImplNameInTest(tok, .annotation) catch true) return;
         // `Self` names the type of an implementation for a named type or a
         // tuple; an implementation for `()` has no name to stand for.
         const label = if (namesSelf(self.ast, tok))
@@ -13498,6 +13631,7 @@ const Resolver = struct {
             },
         };
 
+        if (try self.refuseImplNameInTest(self.ast.exprMain(id), .expression)) return;
         try self.sink.addErrorFmt(
             .n_undefined,
             self.ast.fileOfExpr(id),
@@ -13672,7 +13806,7 @@ const Resolver = struct {
             const at: u32 = @intCast(self.inherent_upto);
             const b = self.bindings.items[at];
             if (b.decl == DeclId.none) continue;
-            if (self.ast.declOwner(b.decl) == TokenId.none) continue;
+            if (self.ast.memberOwner(b.decl) == TokenId.none) continue;
             if (self.ast.declTrait(b.decl) != TokenId.none) continue;
             if (self.inherently_marked.contains(b.name)) {
                 self.bindings.items[at].used = true;
@@ -13972,7 +14106,7 @@ const Resolver = struct {
 
         if (self.in_module.get(name)) |b| {
             const held = self.bindings.items[b.index()];
-            if (held.kind != .function or held.decl == DeclId.none or self.ast.declOwner(held.decl) != TokenId.none) return;
+            if (held.kind != .function or held.decl == DeclId.none or self.ast.memberOwner(held.decl) != TokenId.none) return;
             return self.postfix_functions.put(self.gpa, at, .{ .function = b });
         }
 
@@ -13986,7 +14120,7 @@ const Resolver = struct {
             const through = self.moduleNamed(imported, file) orelse continue;
             const b = self.reachable_at.get(hereKey(import.module, name)) orelse continue;
             const held = self.bindings.items[b.index()];
-            if (held.kind != .function or held.decl == DeclId.none or self.ast.declOwner(held.decl) != TokenId.none) continue;
+            if (held.kind != .function or held.decl == DeclId.none or self.ast.memberOwner(held.decl) != TokenId.none) continue;
             if (!reachableFrom(self.program, held.reach, import.module, self.current)) continue;
             if (self.shadowsAnImport(imported)) {
                 if (shadowed == null) shadowed = .{ .function = b, .through = through, .shadowed = true };

@@ -181,7 +181,7 @@ pub fn exportsOf(
     for (0..ast.declCount()) |i| {
         const d = DeclId.at(@intCast(i));
         if (ast.declVisibility(d) == .private) continue;
-        if (ast.declOwner(d) != TokenId.none) continue;
+        if (ast.memberOwner(d) != TokenId.none) continue;
         if (ast.declName(d) == TokenId.none) continue;
         const kind = kindOf(ast.declTag(d)) orelse continue;
 

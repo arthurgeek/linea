@@ -135,10 +135,13 @@ until it is green.
   returned view and the owner put in place of its view, with the imports they
   need; the result type [T-TryAnswer] names, with every `return` and the tail
   wrapped; `.settled()` before `?` and a discarded failure handed on; the
-  [O-Leak] `defer`; a member [T-Impl] says to drop; the other allocator form of
-  a call; and a type parameter for each of two closures. Helps that carry none,
-  because the edit is a choice the reader makes: the [T-Infer] annotation and
-  defaulted parameters (which type), `let … else` (what the `else` block
+  [O-Leak] `defer`; a member [T-Impl] says to drop; the type a concrete
+  implementation names, in place of `Self` written in a test inside it; the
+  other allocator form of a call; and a type parameter for each of two
+  closures. Helps that carry none, because the edit is a choice the reader
+  makes: the [T-Infer] annotation and defaulted parameters (which type), the
+  arguments a test in a generic implementation means, `let … else` (what the
+  `else` block
   does), releasing before a path leaves and [O-Merge] (where, and on which
   path), the owned copy kept in a field or an `inout` parameter (the field's
   type and the failure path both change, or `append` instead), the allocator

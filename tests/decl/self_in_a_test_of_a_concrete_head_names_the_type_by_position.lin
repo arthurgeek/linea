@@ -1,0 +1,28 @@
+// `Self` names no type in a test inside an implementation for `Boxed[UInt8]`.
+// The help writes the whole head in an annotation and the type's name before a
+// call, whose arguments the implementation settles.
+import std.testing
+
+struct Boxed[T] {
+    value: T,
+}
+
+impl Boxed[UInt8] {
+    pub fn new(value: UInt8) -> Self {
+        Self { value = value }
+    }
+
+    test fn holds_three() {
+        let boxed: Self = Boxed.new(3)
+        testing.assert_eq(boxed.value, 3, "the box holds three")?
+    }
+
+    test fn holds_four() {
+        let boxed = Self.new(4)
+        testing.assert_eq(boxed.value, 4, "the box holds four")?
+    }
+}
+
+fn main() -> UInt8 {
+    Boxed.new(0).value
+}

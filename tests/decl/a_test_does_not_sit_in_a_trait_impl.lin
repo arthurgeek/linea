@@ -9,9 +9,10 @@ struct Box {
 }
 
 // A trait implementation declares only what the trait requires, and the
-// compiler calls a test.
+// compiler calls a test. Refused there, it is refused once.
 impl Marker for Box {
     test fn a_thing_holds() -> Result[(), IoError] {
+        let _box: Self = Box { x = 0 }
         return .Ok({})
     }
 }

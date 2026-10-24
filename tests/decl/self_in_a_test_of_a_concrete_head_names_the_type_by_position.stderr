@@ -1,0 +1,10 @@
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_in_a_test_of_a_concrete_head_names_the_type_by_position.lin:16:20
+   |
+16 |         let boxed: Self = Boxed.new(3)
+   |                    ^^^^ a test inside an `impl` is resolved at module scope; write `Boxed[UInt8]`
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_in_a_test_of_a_concrete_head_names_the_type_by_position.lin:21:21
+   |
+21 |         let boxed = Self.new(4)
+   |                     ^^^^ a test inside an `impl` is resolved at module scope; write `Boxed`

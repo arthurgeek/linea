@@ -78,7 +78,7 @@ fn symbolFor(
     const written = ast.tokenText(ast.declName(d));
     if (ast.declIsExtern(d)) return gpa.dupe(u8, written);
 
-    const owner = ast.declOwner(d);
+    const owner = ast.memberOwner(d);
     const scope: []const u8 = if (owner == TokenId.none) "" else ast.tokenText(owner);
     var spelled: std.ArrayList(u8) = .empty;
     defer spelled.deinit(gpa);

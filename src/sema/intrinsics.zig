@@ -269,7 +269,7 @@ fn closureOpenDecl(program: *const ExpandedProgram, ast: *const Ast, member: []c
     const module = program.moduleOf(closure);
     for (program.declsOf(module)) |d| {
         const name = ast.declName(d);
-        const owner = ast.declOwner(d);
+        const owner = ast.memberOwner(d);
         if (name == .none or owner == .none) continue;
         if (std.mem.eql(u8, ast.tokenText(name), member) and std.mem.eql(u8, ast.tokenText(owner), "Closure")) return d;
     }

@@ -225,7 +225,7 @@ pub const Ast = struct {
         const tag = self.declTag(id);
         return (tag == .function or tag == .projection) and
             (self.declBody(id) == ExprId.none or self.declIsProvided(id)) and
-            self.declOwner(id) != TokenId.none;
+            self.memberOwner(id) != TokenId.none;
     }
 
     /// Whether a trait's operation carries its own body, which every type
@@ -325,10 +325,29 @@ pub const Ast = struct {
         return .{ .ast = self, .at = @intCast(r.start.index()), .end = @intCast(r.end.index()) };
     }
 
-    /// The name of the type a declaration belongs to, or `.none` at the top
-    /// level.
+    /// The name after the `impl`, or the trait's name, whose braces hold this
+    /// declaration, or `.none` at the top level.
+    ///
+    /// Where a declaration is written, which is what the formatter and the
+    /// source rewrites need: a test written inside an `impl` is printed and
+    /// moved with it. Whether the declaration belongs to that type is
+    /// `memberOwner`.
     pub fn declOwner(self: *const Ast, id: DeclId) TokenId {
         return self.decls.items(.owner)[id.index()];
+    }
+
+    /// The name of the type or trait a declaration is a member of, or `.none`
+    /// where it is a member of nothing.
+    ///
+    /// A test is a member of nothing wherever it is written. Inside an `impl`
+    /// it is named, resolved and run at module scope ([S-Test]): it is not
+    /// instantiated, so the implementation's parameters and `Self` would name
+    /// nothing in it, and the compiler writes its one call, so no path through
+    /// the type reaches it. Every question about membership asks this, so that
+    /// is decided here once.
+    pub fn memberOwner(self: *const Ast, id: DeclId) TokenId {
+        if (self.declIsTest(id)) return .none;
+        return self.declOwner(id);
     }
 
     /// The trait an `impl` names, whole.
@@ -2782,7 +2801,7 @@ pub const DeclIndex = struct {
 
         var total: u32 = 0;
         for (0..ast.declCount()) |i| {
-            const of = ast.declOwner(DeclId.at(@intCast(i)));
+            const of = ast.memberOwner(DeclId.at(@intCast(i)));
             if (of == TokenId.none or of.index() >= tokens) continue;
             owner_starts[of.index() + 1] += 1;
             total += 1;
@@ -2800,7 +2819,7 @@ pub const DeclIndex = struct {
         // first should not change.
         for (0..ast.declCount()) |i| {
             const d = DeclId.at(@intCast(i));
-            const of = ast.declOwner(d);
+            const of = ast.memberOwner(d);
             if (of == TokenId.none or of.index() >= tokens) continue;
             by_owner[cursor[of.index()]] = d;
             cursor[of.index()] += 1;

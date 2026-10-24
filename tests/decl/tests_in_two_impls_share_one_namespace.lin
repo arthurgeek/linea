@@ -1,0 +1,39 @@
+// A test inside an `impl` is named at module scope like every other test, so
+// two implementations in one module do not declare tests of one name.
+import std.testing
+
+struct Inbox {
+    unread: UInt32,
+}
+
+struct Outbox {
+    queued: UInt32,
+}
+
+impl Inbox {
+    pub fn new() -> Inbox {
+        Inbox { unread = 0 }
+    }
+
+    test fn starts_empty() {
+        testing.assert_eq(Inbox.new().unread, 0, "nothing is unread")?
+    }
+}
+
+impl Outbox {
+    pub fn new() -> Outbox {
+        Outbox { queued = 0 }
+    }
+
+    test fn starts_empty() {
+        testing.assert_eq(Outbox.new().queued, 0, "nothing is queued")?
+    }
+}
+
+fn main() -> UInt8 {
+    if Inbox.new().unread + Outbox.new().queued == 0 {
+        0
+    } else {
+        1
+    }
+}

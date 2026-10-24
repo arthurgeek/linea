@@ -633,7 +633,14 @@ pub const ExpandedProgram = struct {
         for (0..source_decl_count) |i| {
             const template = DeclId.at(@intCast(i));
             if (source.ast.declTag(template) != .template_impl) continue;
-            for (decl_index.within(source.ast.declTokens(template))) |decl| active.set(decl, false);
+            // A template's members are instantiated where it is expanded, not
+            // read where they are written. A test in its braces is a member of
+            // nothing and stays an ordinary declaration of the module, refused
+            // where it was parsed and resolved like any other test.
+            for (decl_index.within(source.ast.declTokens(template))) |decl| {
+                if (decl != template and source.ast.memberOwner(decl) == .none) continue;
+                active.set(decl, false);
+            }
         }
         for (source.modules, 0..) |module, module_index| {
             for (module.decls.start..module.decls.end) |i| {

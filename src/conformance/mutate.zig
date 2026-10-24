@@ -958,7 +958,7 @@ fn abruptAfterATransfer(
     // to be one a declaration can carry: a member of an `impl` and a generic
     // function are reached by more than a name, and a type written with
     // arguments is an instantiation whose name is not what was written.
-    if (ast.declOwner(d.callee) != TokenId.none) return null;
+    if (ast.memberOwner(d.callee) != TokenId.none) return null;
     if (ast.declTypeParams(d.callee).len != 0) return null;
     const params = ast.declParams(d.callee);
     // One parameter, so the wrapper takes what the call site had to give.
@@ -1657,7 +1657,7 @@ fn wrongEntryType(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?[
         const d = node.DeclId.at(@intCast(i));
         if (ast.declTag(d) != .function) continue;
         // A member of an `impl` is not the entry point however it is spelled.
-        if (ast.declOwner(d) != TokenId.none) continue;
+        if (ast.memberOwner(d) != TokenId.none) continue;
         if (ast.tokenTag(ast.declName(d)) != .identifier) continue;
         if (!std.mem.eql(u8, ast.tokenText(ast.declName(d)), "main")) continue;
 

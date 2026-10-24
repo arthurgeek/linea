@@ -4467,6 +4467,9 @@ pub fn accessGranted(c: node.Convention) u8 {
 /// Exhaustive, with no `else`, so a member form added to the language says
 /// which of the two it is before the build succeeds.
 fn suppliesSomething(ast: *const Ast, d: node.DeclId) bool {
+    // A test written in the braces is a member of nothing, so it answers no
+    // signature even where it shares one's name.
+    if (ast.memberOwner(d) == TokenId.none) return false;
     return switch (ast.declTag(d)) {
         // A projection answers with a body for the reason a function does: the
         // trait writes the header and the implementation writes what is behind
@@ -8722,7 +8725,7 @@ const Checker = struct {
         // type nobody named: `Self` does reach the type this `impl` is for, so
         // the resolver had nothing to report about the head.
         if (!self.ast.declIsSignature(owner) and
-            self.ast.declOwner(owner) != TokenId.none and
+            self.ast.memberOwner(owner) != TokenId.none and
             self.ast.declTrait(owner) == TokenId.none)
         {
             try self.noteRefused(run.last);
@@ -11467,7 +11470,7 @@ const Checker = struct {
         /// which is `Self` whatever the arguments say.
         written: ?TypeId,
     ) std.mem.Allocator.Error!?SelfSettlement {
-        const trait = self.ast.declOwner(d);
+        const trait = self.ast.memberOwner(d);
         if (trait == TokenId.none) return null;
         if (written) |held| {
             // Reported at the type the call was written after, in front of
@@ -11978,7 +11981,7 @@ const Checker = struct {
         if (owner == node.DeclId.none) return tok;
         if (self.ast.declIsSignature(owner)) return tok;
 
-        const of = self.ast.declOwner(owner);
+        const of = self.ast.memberOwner(owner);
         return if (of == TokenId.none) tok else of;
     }
 
@@ -21965,11 +21968,11 @@ const Checker = struct {
         const name = self.ast.declName(d);
         if (name == .none) return null;
         const wanted = try std.fmt.allocPrint(self.sink.arena, "{s}_in", .{self.ast.tokenText(name)});
-        const owned_by = self.ast.declOwner(d);
+        const owned_by = self.ast.memberOwner(d);
         for (self.program.declsOf(self.program.moduleOf(d))) |other| {
             const other_name = self.ast.declName(other);
             if (other_name == .none or !std.mem.eql(u8, self.ast.tokenText(other_name), wanted)) continue;
-            const other_owner = self.ast.declOwner(other);
+            const other_owner = self.ast.memberOwner(other);
             if ((owned_by == .none) != (other_owner == .none)) continue;
             if (owned_by != .none and !std.mem.eql(u8, self.ast.tokenText(owned_by), self.ast.tokenText(other_owner))) continue;
             return wanted;
@@ -23707,7 +23710,7 @@ const Checker = struct {
             // where one is expected -- reached through the type's own name,
             // written as this module can write it -- and a method's receiver
             // is then its first parameter.
-            const owner = self.ast.tokenText(self.ast.declOwner(own.sig));
+            const owner = self.ast.tokenText(self.ast.memberOwner(own.sig));
             const path = try self.pathToType(owner, of);
             return self.report(
                 .t_unknown_field,
@@ -24045,7 +24048,7 @@ const Checker = struct {
                 .t_arity,
                 id,
                 "`{s}.{s}` takes no arguments",
-                .{ self.ast.tokenText(self.ast.declOwner(dropped.sig)), self.ast.tokenText(written) },
+                .{ self.ast.tokenText(self.ast.memberOwner(dropped.sig)), self.ast.tokenText(written) },
                 "a postfix call passes its receiver as the first argument",
             );
         }
@@ -25596,7 +25599,7 @@ const Checker = struct {
             if (forward.field == null) return self.ast.tokenText(self.ast.declName(member));
             return self.ast.tokenText(self.ast.declHead(member).name);
         }
-        return self.ast.tokenText(self.ast.declOwner(member));
+        return self.ast.tokenText(self.ast.memberOwner(member));
     }
 
     /// How the place a bracket names was written, which is what the label
@@ -27588,7 +27591,7 @@ const Checker = struct {
         try self.sink.add(.{
             .severity = .warning,
             .code = .n_shadowed,
-            .message = try std.fmt.allocPrint(self.sink.arena, "`{s}` declares `{s}` itself, so a postfix call{s} reaches that one rather than this{s}", .{ self.ast.tokenText(self.ast.declOwner(own.items[0].sig)), self.ast.tokenText(self.ast.declName(sig)), scope, elsewhere }),
+            .message = try std.fmt.allocPrint(self.sink.arena, "`{s}` declares `{s}` itself, so a postfix call{s} reaches that one rather than this{s}", .{ self.ast.tokenText(self.ast.memberOwner(own.items[0].sig)), self.ast.tokenText(self.ast.declName(sig)), scope, elsewhere }),
             .labels = labels,
         });
     }

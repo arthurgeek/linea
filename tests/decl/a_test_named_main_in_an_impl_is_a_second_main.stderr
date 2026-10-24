@@ -1,0 +1,5 @@
+error[N-Duplicate]: `main` is already declared
+  --> tests/decl/a_test_named_main_in_an_impl_is_a_second_main.lin:19:4
+   |
+19 | fn main() -> UInt8 {
+   |    ^^^^ a name is declared once

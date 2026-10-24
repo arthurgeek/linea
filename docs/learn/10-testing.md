@@ -130,11 +130,57 @@ ok    bump_increments_the_counter
 ```
 
 This keeps each method and its unit tests together without having to close and
-reopen the `impl` block around them. A test declared inside an `impl Type` is not
-a callable member of `Type` (it cannot be called as `Counter.a_new_counter_starts_at_zero`
-or `counter.bump_increments_the_counter`), and does not inherit generic type parameters
-from the enclosing `impl`. Because trait implementations supply behaviour that a trait
-declares, tests sit in inherent implementations, not in trait implementations (`impl Trait for Type`).
+reopen the `impl` block around them. The braces only decide where the test is
+written: it is a member of nothing, and it is named and checked exactly as if it
+sat at the top level of the module. Nothing calls it as
+`Counter.a_new_counter_starts_at_zero`, `linea test` reports it by its own name,
+and two tests of one name in two `impl` blocks of one module are a duplicate.
+
+The same holds for the names an `impl` gives its members. A test is not
+instantiated, so `Self` and the implementation's type parameters name nothing
+inside it, and the test names the type it tests:
+
+```linea
+import std.testing
+
+struct Meter {
+    reading: UInt32,
+}
+
+impl Meter {
+    pub fn new() -> Meter {
+        Meter { reading = 1 }
+    }
+
+    test fn a_new_meter_reads_one() {
+        let meter = Self.new()
+        testing.assert_eq(meter.reading, 1, "a new meter reads one")?
+    }
+}
+
+fn main() -> UInt8 {
+    if Meter.new().reading == 1 {
+        0
+    } else {
+        1
+    }
+}
+```
+
+```
+error[S-Test]: `Self` names no type in a test
+  --> meter.lin:13:21
+   |
+13 |         let meter = Self.new()
+   |                     ^^^^ a test inside an `impl` is resolved at module scope; write `Meter`
+```
+
+Writing `Meter.new()` fixes it. In a generic `impl[T] Boxed[T]`, a test names
+the instance it checks: `let boxed: Boxed[UInt8] = Boxed.new(3)` writes the
+whole type in the annotation and only `Boxed` before the call, whose argument
+settles `T`. Because trait implementations supply only what a trait declares, tests
+sit in inherent implementations, not in trait implementations
+(`impl Trait for Type`) or templates.
 
 ## Helpers that tests share
 

@@ -320,7 +320,9 @@ without parentheses.
 **[S-Entry]** A program is a list of declarations, exactly one of which is
 `main() -> UInt8` or `main() -> Result[UInt8, E]`. Its value is the process's
 exit status, and the runtime calls it
-([ADR 0024](adr/0024-a-program-is-a-list-of-declarations.md)).
+([ADR 0024](adr/0024-a-program-is-a-list-of-declarations.md)). A test is never
+the entry point, whatever it is named, so a program whose only `main` is a test
+declares none. A second `main` is refused where it is declared.
 
 A root built to run tests may omit the entry point; the compiler generates the
 test binary's entry point, so a module containing only tests can be tested,
@@ -380,9 +382,25 @@ is.
 **[S-Test]** `test fn` declares a function called by the compiler and excluded
 from shipped artefacts. A test has **no visibility**: `pub` would export a name
 that imports cannot reach. The modifier applies only to a function. A test may
-sit at module scope or inside an inherent `impl`; inside an implementation for a
-trait it is refused. A test inside an `impl` is organized at module scope and does
-not become a callable member of the type.
+sit at module scope or inside an inherent `impl`, beside the members it tests.
+Inside an implementation for a trait it is refused, because a trait
+implementation declares only what its trait requires, and inside a template it
+is refused, because a template is instantiated for every type that satisfies
+it while the compiler writes a test's one call.
+
+A test inside an `impl` is a member of nothing: it is named, resolved and run
+exactly as if it were written at module scope. No path through the type reaches
+it. Its name shares the module's one namespace with every other test and
+top-level name, so two implementations in one module do not each declare a test
+of one name ([N-Duplicate]), and the implementation adds nothing to its
+qualified name. A test named `main`, inside an `impl` or not, is never the
+entry point ([S-Entry]); in the root module beside the program's `main` it is a
+second declaration of that name ([N-Duplicate]). A test is not instantiated, so
+neither `Self` nor the implementation's type parameters name a type in it;
+writing either is refused, and the test names the concrete types it tests
+instead: `Boxed[UInt8]` in an annotation, and `Boxed` before a call, whose
+arguments settle the instance. Inside a trait implementation or a template,
+where the test itself is refused, neither name is reported again.
 
 A test may instead be written `test trap fn`. It succeeds only when its child
 process reaches a language trap; returning successfully, returning a failure,

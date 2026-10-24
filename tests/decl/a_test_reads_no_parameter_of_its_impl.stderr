@@ -1,0 +1,10 @@
+error[S-Test]: `T` names no type in a test
+  --> tests/decl/a_test_reads_no_parameter_of_its_impl.lin:15:26
+   |
+15 |         let none: Option[T] = .None
+   |                          ^ a test is not instantiated, so the parameters of its `impl` name no type in it; write a concrete type
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/a_test_reads_no_parameter_of_its_impl.lin:20:20
+   |
+20 |         let boxed: Self = Boxed.new(3)
+   |                    ^^^^ a test is not instantiated, so nothing settles the parameters of `Boxed[T]`; write it with concrete arguments
