@@ -1,0 +1,7 @@
+// A test is never the entry point, whatever it is named, so a program whose only
+// `main` is a test declares no entry point.
+import std.testing
+
+test fn main() {
+    testing.assert(true, "a test named main runs only under `linea test`")?
+}

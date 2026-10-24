@@ -5160,6 +5160,9 @@ fn appendMembers(
 /// inside an `impl` was exempted from a rule it was never entitled to escape.
 pub fn namesTheEntryPoint(ast: *const Ast, d: DeclId) bool {
     if (ast.declTag(d) != .function) return false;
+    // A test is called by the test runner and nothing else, whatever it is
+    // named, so it is never the function the runtime starts.
+    if (ast.declIsTest(d)) return false;
     if (ast.memberOwner(d) != TokenId.none) return false;
     const name = ast.declName(d);
     if (ast.tokenTag(name) != .identifier) return false;
@@ -7421,11 +7424,23 @@ const Resolver = struct {
         const root = self.program.root();
         var found: u32 = 0;
         var entry: DeclId = DeclId.at(0);
+        var first_main: DeclId = DeclId.none;
+        var second_main: DeclId = DeclId.none;
+        // A test named `main`, which a reader may have meant as the entry
+        // point. Kept only to say why it is not one.
+        var test_main: DeclId = DeclId.none;
         for (root.decls.start..root.decls.end) |i| {
             const d = DeclId.at(@intCast(i));
-            if (!namesTheEntryPoint(self.ast, d)) continue;
+            if (!namesTheEntryPoint(self.ast, d)) {
+                if (test_main == DeclId.none and self.ast.declIsTest(d) and
+                    self.ast.declTag(d) == .function and
+                    std.mem.eql(u8, self.ast.tokenText(self.ast.declName(d)), "main"))
+                    test_main = d;
+                continue;
+            }
             found += 1;
             entry = d;
+            if (first_main == DeclId.none) first_main = d else if (second_main == DeclId.none) second_main = d;
         }
         // Recorded whatever the count, so lowering reads the selection rather
         // than making it: a program with no entry point or with two is
@@ -7457,6 +7472,32 @@ const Resolver = struct {
         if (found == 0 and (self.purpose == .tests or self.program.kind == .library or self.program.named_module)) return;
 
         const label = try std.fmt.allocPrint(self.sink.arena, "found {d}", .{found});
+
+        // At the second `main`, which is the one to remove or rename, with the
+        // first beside it: the count alone says nothing about which two.
+        if (second_main != DeclId.none) {
+            const labels = try self.sink.arena.alloc(Label, 2);
+            labels[0] = .{ .file = self.ast.fileOfDecl(second_main), .span = self.ast.declNameSpan(second_main), .message = label, .style = .primary };
+            labels[1] = .{ .file = self.ast.fileOfDecl(first_main), .span = self.ast.declNameSpan(first_main), .message = "the first is declared here", .style = .secondary };
+            try self.sink.add(.{
+                .severity = .err,
+                .code = .s_entry,
+                .message = "a program declares exactly one `main`",
+                .labels = labels,
+            });
+            return;
+        }
+
+        if (test_main != DeclId.none) {
+            try self.sink.addError(
+                .s_entry,
+                self.ast.fileOfDecl(test_main),
+                self.ast.declNameSpan(test_main),
+                "a program declares exactly one `main`",
+                "this is a test, and a test is never the entry point; rename it and declare `fn main() -> UInt8`",
+            );
+            return;
+        }
 
         // The program's own source, never the tree's first file: the library
         // is loaded before an entry directory and after a single entry file,

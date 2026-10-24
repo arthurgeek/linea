@@ -320,7 +320,9 @@ without parentheses.
 **[S-Entry]** A program is a list of declarations, exactly one of which is
 `main() -> UInt8` or `main() -> Result[UInt8, E]`. Its value is the process's
 exit status, and the runtime calls it
-([ADR 0024](adr/0024-a-program-is-a-list-of-declarations.md)).
+([ADR 0024](adr/0024-a-program-is-a-list-of-declarations.md)). A test is never
+the entry point, whatever it is named, so a program whose only `main` is a test
+declares none. A second `main` is refused where it is declared.
 
 A root built to run tests may omit the entry point; the compiler generates the
 test binary's entry point, so a module containing only tests can be tested,
@@ -391,8 +393,9 @@ exactly as if it were written at module scope. No path through the type reaches
 it. Its name shares the module's one namespace with every other test and
 top-level name, so two implementations in one module do not each declare a test
 of one name ([N-Duplicate]), and the implementation adds nothing to its
-qualified name. In the root module a test named `main`, inside an `impl` or
-not, is a second declaration of the entry point's name ([S-Entry]). A test is not instantiated, so neither `Self` nor the
+qualified name. A test named `main`, inside an `impl` or not, is never the
+entry point ([S-Entry]); in the root module beside the program's `main` it is a
+second declaration of that name ([N-Duplicate]). A test is not instantiated, so neither `Self` nor the
 implementation's type parameters name a type in it; writing either is refused,
 and the test names the concrete types it tests instead, as `Boxed[UInt8]`.
 
