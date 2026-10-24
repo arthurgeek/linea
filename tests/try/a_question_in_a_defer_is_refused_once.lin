@@ -1,0 +1,17 @@
+enum Bad { Broken }
+
+fn parse() -> Result[UInt8, Bad] { .Ok(4) }
+
+// A `?` scheduled by a `defer` is refused for leaving, and answers nothing
+// the function could be changed to carry.
+fn pick() -> UInt8 {
+    defer {
+        let _ = parse()?
+    }
+    3
+}
+
+fn main() -> UInt8 {
+    let _r = pick()
+    0
+}
