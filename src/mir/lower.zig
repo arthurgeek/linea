@@ -2965,7 +2965,8 @@ const Lowerer = struct {
     /// building the value a second way there would be a second answer to what a
     /// `Str` is made of.
     fn strValue(self: *Lowerer, blob: u32, ty: TypeId, span: Span, dest: ?*Dest) std.mem.Allocator.Error!InstId {
-        const fields = self.types().textFields(ty) orelse return self.poison(span);
+        const fields = self.types().textFields(ty) orelse
+            @panic("compiler defect: a `Str` has no byte span of `at` and `len`");
         const at = fields.at;
         const len = fields.len;
         const base = try self.baseFor(ty, span, dest);
@@ -3076,7 +3077,7 @@ const Lowerer = struct {
         const operand = self.ast.unaryOperand(id);
         if (ty == .never) return self.expr(operand);
         const base = try self.baseFor(ty, span, dest);
-        const k = self.types().lookupField(ty, "k").?;
+        const k = self.libraryField(ty, "k");
         try self.writeInto(operand, k.ty, try self.fieldAddr(base, k.ty, k.offset, span), span);
         return base;
     }
@@ -3098,13 +3099,13 @@ const Lowerer = struct {
         }
         const base = try self.baseFor(ty, span, dest);
 
-        const lo = self.types().lookupField(ty, "lo").?;
+        const lo = self.libraryField(ty, "lo");
         try self.writeInto(ends.lhs, lo.ty, try self.fieldAddr(base, lo.ty, lo.offset, span), span);
 
-        const hi = self.types().lookupField(ty, "hi").?;
+        const hi = self.libraryField(ty, "hi");
         try self.writeInto(ends.rhs, hi.ty, try self.fieldAddr(base, hi.ty, hi.offset, span), span);
 
-        const inclusive = self.types().lookupField(ty, "inclusive").?;
+        const inclusive = self.libraryField(ty, "inclusive");
         const flag_at = try self.fieldAddr(base, inclusive.ty, inclusive.offset, span);
         const flag = try self.emit(.constant, inclusive.ty, span, .{
             .constant = @intFromBool(self.ast.rangeInclusive(id)),
@@ -4985,7 +4986,7 @@ const Lowerer = struct {
     /// the name that structure gives it.
     fn countIn(self: *Lowerer, value: InstId, of: TypeId, span: Span) std.mem.Allocator.Error!InstId {
         if (value == InstId.none) return InstId.none;
-        const k = self.types().lookupField(of, "k") orelse return InstId.none;
+        const k = self.libraryField(of, "k");
         return self.readThrough(try self.fieldAddr(value, k.ty, k.offset, span), k.ty, span);
     }
 
@@ -5319,15 +5320,35 @@ const Lowerer = struct {
         return base;
     }
 
+    /// The field `name` of `ty`, a library type whose fields the compiler
+    /// reads and writes itself: a `Slice`, `Buffer` or `Storage`, a `FromEnd`
+    /// or a `Range`. The library declares the field, so a type without it is a
+    /// compiler defect rather than a program to recover.
+    fn libraryField(self: *const Lowerer, ty: TypeId, name: []const u8) LibraryField {
+        const field = self.types().lookupField(ty, name) orelse
+            std.debug.panic("compiler defect: a library type the compiler builds has no `{s}` field", .{name});
+        return .{ .ty = field.ty, .offset = field.offset };
+    }
+
+    const LibraryField = struct { ty: TypeId, offset: u32 };
+
     fn fieldValue(self: *Lowerer, base: InstId, ty: TypeId, name: []const u8, span: Span) !InstId {
-        const field = self.types().lookupField(ty, name) orelse return self.poison(span);
+        const field = self.libraryField(ty, name);
         return self.readThrough(try self.fieldAddr(base, field.ty, field.offset, span), field.ty, span);
+    }
+
+    /// The field of a `mem.Closure` at `field`, in the order the checker
+    /// certified the library's declaration against.
+    fn closureField(self: *Lowerer, closure: InstId, ty: TypeId, field: RawAccesses.ClosureField, span: Span) !InstId {
+        const index = @intFromEnum(field);
+        const field_ty = self.types().fieldType(ty, index);
+        return self.readThrough(try self.fieldAddr(closure, field_ty, self.types().fieldOffset(ty, index), span), field_ty, span);
     }
 
     fn buildSpan(self: *Lowerer, ty: TypeId, address: InstId, count: InstId, span: Span) !InstId {
         const base = try self.baseFor(ty, span, null);
-        const at = self.types().lookupField(ty, "at") orelse return self.poison(span);
-        const len = self.types().lookupField(ty, "len") orelse return self.poison(span);
+        const at = self.libraryField(ty, "at");
+        const len = self.libraryField(ty, "len");
         try self.writeThrough(try self.fieldAddr(base, at.ty, at.offset, span), at.ty, address, span);
         try self.writeThrough(try self.fieldAddr(base, len.ty, len.offset, span), len.ty, count, span);
         return base;
@@ -5491,9 +5512,9 @@ const Lowerer = struct {
         const closure = try self.expr(callee_expr);
         const closure_type = try self.typeAt(callee_expr);
         if (closure_type == .never) return closure;
-        const entry = try self.fieldValue(closure, closure_type, "entry", span);
-        const at = try self.fieldValue(closure, closure_type, "at", span);
-        const len = try self.fieldValue(closure, closure_type, "len", span);
+        const entry = try self.closureField(closure, closure_type, .entry, span);
+        const at = try self.closureField(closure, closure_type, .at, span);
+        const len = try self.closureField(closure, closure_type, .len, span);
         var args: std.ArrayList(InstId) = .empty;
         defer args.deinit(self.gpa);
         for (normal.args, 0..) |arg, position| {

@@ -52,6 +52,7 @@ const article = @import("../support/article.zig");
 const constfold = @import("constfold.zig");
 const open_types_mod = @import("open_types.zig");
 const RawAccesses = @import("intrinsics.zig").RawAccesses;
+const ClosureField = RawAccesses.ClosureField;
 const FloatMath = @import("intrinsics.zig").FloatMath;
 const intrinsics = @import("intrinsics.zig");
 const usefulness = @import("usefulness.zig");
@@ -19146,29 +19147,29 @@ const Checker = struct {
         const ty = declarations.get(d);
         if (self.ast.declTag(d) != .struct_ or self.ast.declVisibility(d) != .opaque_ or
             self.ast.declOwnershipPolicy(d) != .affine or self.ast.declTypeParams(d).len != 2 or
-            self.builder.fieldCount(ty) != 5 or raw.closure_entry_type == .none or raw.buffer == .none) return false;
+            self.builder.fieldCount(ty) != std.enums.values(ClosureField).len or raw.closure_entry_type == .none or raw.buffer == .none) return false;
         const entry_decl = raw.closure_entry_type;
         const entry_template = declarations.get(entry_decl);
         if (self.ast.declTag(entry_decl) != .struct_ or self.ast.declVisibility(entry_decl) != .private or
             self.ast.declTypeParams(entry_decl).len != 1 or self.builder.fieldCount(entry_template) != 0) return false;
         const signature = self.param_types[d.index()][0];
         const allocator = self.param_types[d.index()][1];
-        const names = [_][]const u8{ "entry", "settle", "at", "len", "storage" };
-        for (names, 0..) |name, i| {
-            if (!std.mem.eql(u8, self.builder.fieldName(ty, @intCast(i)), name)) return false;
+        for (std.enums.values(ClosureField)) |field| {
+            if (!std.mem.eql(u8, self.builder.fieldName(ty, @intFromEnum(field)), @tagName(field))) return false;
         }
-        const entry = self.builder.fieldType(ty, 0);
+        const entry = self.builder.fieldType(ty, @intFromEnum(ClosureField.entry));
         const entry_args = self.builder.appliedTo(entry);
         if (self.builder.view().declOfType(entry) != entry_decl or entry_args.len != 1 or entry_args[0] != signature) return false;
-        const release = switch (self.builder.get(self.builder.fieldType(ty, 1))) {
+        const release = switch (self.builder.get(self.builder.fieldType(ty, @intFromEnum(ClosureField.settle)))) {
             .callable => |release| release,
             else => return false,
         };
         const release_params = self.builder.callableParams(release);
         if (release.result != .unit or release.invocation != .read or release_params.len != 2 or
             release_params[0].ty != .u64 or release_params[1].ty != .u64) return false;
-        if (self.builder.fieldType(ty, 2) != .u64 or self.builder.fieldType(ty, 3) != .u64) return false;
-        const optional = self.builder.fieldType(ty, 4);
+        if (self.builder.fieldType(ty, @intFromEnum(ClosureField.at)) != .u64 or
+            self.builder.fieldType(ty, @intFromEnum(ClosureField.len)) != .u64) return false;
+        const optional = self.builder.fieldType(ty, @intFromEnum(ClosureField.storage));
         const optional_args = self.builder.appliedTo(optional);
         if (self.option_decl == null or self.builder.view().declOfType(optional) != self.option_decl or optional_args.len != 1) return false;
         const buffer_args = self.builder.appliedTo(optional_args[0]);

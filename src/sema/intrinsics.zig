@@ -195,6 +195,11 @@ pub const RawAccesses = struct {
         };
     }
 
+    /// The fields of `mem.Closure`, in the order its declaration lists them.
+    /// The checker certifies the library's declaration against these names
+    /// and positions, and lowering reads a closure's fields by them.
+    pub const ClosureField = enum(u32) { entry, settle, at, len, storage };
+
     pub const ErrnoFields = struct {
         pub const Field = struct { index: u32, ty: TypeId };
         value: Field,
