@@ -438,6 +438,17 @@ impl Origin {
         parse_authority(trimmed, false).is_ok()
     }
 
+    test fn an_authority_is_a_host_and_an_optional_port() {
+        testing.assert(Origin.is_valid_authority("example.test"), "a host was refused")?
+        testing.assert(Origin.is_valid_authority(" example.test:8080 "), "a host and port with spaces around them were refused")?
+        testing.assert(Origin.is_valid_authority("[::1]:443"), "an IPv6 literal and port were refused")?
+        testing.assert(!Origin.is_valid_authority(""), "an empty authority was accepted")?
+        testing.assert(!Origin.is_valid_authority("example.test:http"), "a port that is not a number was accepted")?
+        testing.assert(!Origin.is_valid_authority("user@example.test"), "userinfo was accepted")?
+        testing.assert(!Origin.is_valid_authority("example.test/path"), "a path was accepted")?
+        .Ok(())
+    }
+
     // Compare two origins for same-origin equivalence.
     pub fn same_origin(self: Self, other: Self) -> Bool {
         self == other
@@ -526,11 +537,6 @@ impl Origin {
         testing.assert_eq(secure.view(), "https://example.test", "default port 443 was not omitted")?
         .Ok(())
     }
-}
-
-// Return whether `authority` is a syntactically valid HTTP authority (`host` or `host:port`).
-pub fn is_valid_authority(authority: Str) -> Bool {
-    Origin.is_valid_authority(authority)
 }
 
 // Policy configuring same-origin / CSRF verification.

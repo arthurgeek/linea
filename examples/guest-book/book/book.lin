@@ -93,7 +93,7 @@ impl Book {
         }
         var book = Book.open(path_text.view()).unwrap()
         &book.sign("Ada", "First note").unwrap()
-        book.close().unwrap()
+        book.close()
         .Ok(())
     }
 
@@ -113,7 +113,7 @@ impl Book {
     // parameters, so quotes or SQL keywords in what a visitor wrote are stored
     // as text and never read as SQL.
     pub fn sign(inout self: Self, name: Str, message: Str) -> Result[(), BookError] {
-        defer var insert = &self.database.prepare("INSERT INTO entries (name, message) VALUES (?1, ?2)")?
+        defer var insert = self.database.prepare("INSERT INTO entries (name, message) VALUES (?1, ?2)")?
         &insert.bind_text(1, name)?
         &insert.bind_text(2, message)?
         &insert.run()?
@@ -138,7 +138,7 @@ impl Book {
         if limit < 0 {
             return .Err(.NegativeLimit(limit))
         }
-        defer var select = &self.database.prepare("SELECT name, message, signed_at FROM entries ORDER BY id DESC LIMIT ?1")?
+        defer var select = self.database.prepare("SELECT name, message, signed_at FROM entries ORDER BY id DESC LIMIT ?1")?
         &select.bind_integer(1, limit)?
         defer var entries: Vec[Entry] = Vec.new()
         while &select.step()? {
@@ -192,9 +192,10 @@ impl Book {
         defer var book = Book.open_in_memory().unwrap()
         // Year 10000+ Unix timestamp is outside Linea's representable range.
         let invalid_stamp: Int64 = 300000000000
-        defer var insert = &book.database.prepare("INSERT INTO entries (name, message, signed_at) VALUES ('Eve', 'Time traveler', ?1)").unwrap()
+        var insert = book.database.prepare("INSERT INTO entries (name, message, signed_at) VALUES ('Eve', 'Time traveler', ?1)").unwrap()
         &insert.bind_integer(1, invalid_stamp).unwrap()
         &insert.run().unwrap()
+        insert.finish()
 
         let refused = match &book.newest(10) {
             Ok(entries) => {
@@ -237,25 +238,22 @@ impl Book {
     }
 
     // Close the guest book and its underlying SQLite connection.
-    pub fn close(sink self: Self) -> Result[(), BookError] {
+    pub fn close(sink self: Self) {
         let Book { database } = self
-        database.close()?
-        .Ok(())
+        database.close()
     }
 
     test fn close_consumes_the_book() {
         let book = Book.open_in_memory().unwrap()
-        book.close().unwrap()
+        book.close()
         .Ok(())
     }
 }
 
-// `Release` closes the underlying connection and drops any refusal, so `defer
-// var book` and server error paths never leak the SQLite handle; call `close()`
-// directly when a refusal must be checked.
+// `Release` closes the underlying connection, so `defer var book` and server
+// error paths never leak the SQLite handle.
 impl Release for Book {
     fn release(sink self: Self) {
-        let Book { database } = self
-        database.release()
+        self.close()
     }
 }

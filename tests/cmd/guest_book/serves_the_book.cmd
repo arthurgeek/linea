@@ -19,6 +19,7 @@ program embeds makes the `entries` table.
     ol { padding-left: 1.25rem; }
     li { margin-top: 1rem; }
     time { color: #555; font-size: 0.875rem; }
+    li p { white-space: pre-wrap; }
   </style>
   <h1>Guest book</h1>
   <form method="post" action="/sign">
@@ -50,6 +51,7 @@ from the cookie, also escaped.
     ol { padding-left: 1.25rem; }
     li { margin-top: 1rem; }
     time { color: #555; font-size: 0.875rem; }
+    li p { white-space: pre-wrap; }
   </style>
   <h1>Guest book</h1>
   <form method="post" action="/sign">

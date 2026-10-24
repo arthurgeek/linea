@@ -35,23 +35,18 @@ type StatementHandle = UInt64
 // `DatabaseHandle` once checked against zero.
 extern fn sqlite3_open_v2(filename: ffi.CText, inout database: UInt64, flags: Int32, vfs: UInt64) -> Int32
 
-// `sqlite3_next_stmt` returns the next unfinalized statement on `database`
-// after `statement`, or 0 when every statement has been finalized.
-extern fn sqlite3_next_stmt(read database: DatabaseHandle, statement: UInt64) -> UInt64
-
-// `sqlite3_close` refuses with `SQLITE_BUSY` when an unfinalized statement
-// remains on `database`, setting the connection's error message without freeing
-// the connection.
-extern fn sqlite3_close(database: DatabaseHandle) -> Int32
-
 // `sink` hands the connection handle to C for good. `sqlite3_close_v2` closes
 // the connection, or marks it to close as soon as its last statement finishes.
 extern fn sqlite3_close_v2(sink database: DatabaseHandle) -> Int32
 
 // `read` promises C only reads the connection, and `where borrows(database)`
-// ties the returned `CText` to the connection's lifetime so the text is copied
-// before the connection next changes or closes.
+// ties the returned `CText` to the connection's lifetime. SQLite rewrites the
+// sentence on the next call on the connection, so `message` copies it at once.
 extern fn sqlite3_errmsg(read database: DatabaseHandle) -> ffi.CText where borrows(database)
+
+// `sqlite3_errcode` returns the result code of the most recent call on
+// `database`, which is `SQLITE_NOMEM` after a column read ran out of memory.
+extern fn sqlite3_errcode(read database: DatabaseHandle) -> Int32
 
 // Taken without `read`, a handle parameter lends the object to C as `inout`
 // does: the connection must sit in a place that may change, and any `CText`
@@ -62,7 +57,11 @@ extern fn sqlite3_exec(database: DatabaseHandle, sql: ffi.CText, callback: UInt6
 
 extern fn sqlite3_changes64(read database: DatabaseHandle) -> Int64
 
-extern fn sqlite_shim_prepare(database: DatabaseHandle, sql: ffi.Bytes, length: Int32, inout statement: UInt64, inout unused: Int32) -> Int32
+// Preparing a statement changes nothing on the connection but its last error
+// sentence, which `message` copies as soon as it is set. Taking the connection
+// as `read` lets a `Statement` observe its `Database` while others are prepared
+// on it.
+extern fn sqlite_shim_prepare(read database: DatabaseHandle, sql: ffi.Bytes, length: Int32, inout statement: UInt64, inout unused: Int32) -> Int32
 
 extern fn sqlite_shim_bind_text(statement: StatementHandle, index: Int32, text: ffi.Bytes, length: Int32) -> Int32
 
@@ -82,8 +81,6 @@ extern fn sqlite3_column_count(read statement: StatementHandle) -> Int32
 
 extern fn sqlite3_column_int64(read statement: StatementHandle, column: Int32) -> Int64
 
-extern fn sqlite_shim_statement_message(read statement: StatementHandle) -> ffi.CText where borrows(statement)
-
 extern fn sqlite3_finalize(sink statement: StatementHandle) -> Int32
 
 let ok: Int32 = 0
@@ -94,6 +91,9 @@ let done: Int32 = 101
 
 // `SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE`.
 let read_write_create: Int32 = 6
+
+// `SQLITE_NOMEM`.
+let out_of_memory: Int32 = 7
 
 // `SQLITE_NULL`.
 let null_type: Int32 = 5
@@ -162,9 +162,13 @@ struct Database {
 }
 
 // One compiled SQL statement, stepped a row at a time. It must be finished.
+// `database` observes the connection the statement was prepared on, so while
+// the statement is open the connection cannot be closed or released, or passed
+// to `execute` or `wait_when_busy`.
 @(opaque, linear)
 struct Statement {
     handle: StatementHandle,
+    database: borrow Database,
 }
 
 impl Database {
@@ -199,7 +203,7 @@ impl Database {
         var database = Database.open(path_text.view()).unwrap()
         &database.wait_when_busy(2000).unwrap()
         &database.execute("CREATE TABLE items (name TEXT NOT NULL); INSERT INTO items VALUES ('notebook');").unwrap()
-        database.close().unwrap()
+        database.close()
         let _removed = fs.remove_file(path)
         .Ok(())
     }
@@ -262,7 +266,7 @@ impl Database {
     test fn execute_runs_a_script_of_several_statements() {
         defer var database = Database.open_in_memory().unwrap()
         &database.execute("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (10); INSERT INTO t VALUES (20);").unwrap()
-        defer var count = &database.prepare("SELECT SUM(n) FROM t").unwrap()
+        defer var count = database.prepare("SELECT SUM(n) FROM t").unwrap()
         testing.assert(&count.step().unwrap(), "SUM answered no row")?
         testing.assert_eq(count.integer(0).unwrap(), Int64(30), "script statements did not all run")?
         .Ok(())
@@ -270,7 +274,9 @@ impl Database {
 
     // Compile one SQL statement. If `sql` holds a second statement after the
     // first, the compiled statement is finished and `TrailingSql` is returned.
-    pub fn prepare(inout self: Self, sql: Str) -> Result[Statement, Error] {
+    // The statement borrows the database until it is finished; several
+    // statements may be open on one database at once.
+    pub fn prepare(self: Self, sql: Str) -> Result[Statement, Error] where borrows(.Ok: self) {
         if sql.length() > max_int32_length {
             return .Err(.TooLong)
         }
@@ -283,7 +289,7 @@ impl Database {
         if address == 0 {
             return .Err(.EmptySql)
         }
-        let statement = Statement { handle = StatementHandle(address) }
+        let statement = Statement { handle = StatementHandle(address), database = borrow self }
         if unused < 0 || UInt64(unused) > sql.length() {
             statement.finish()
             return .Err(.TrailingSql)
@@ -298,7 +304,7 @@ impl Database {
 
     test fn prepare_refuses_a_misspelt_statement_and_trailing_sql() {
         defer var database = Database.open_in_memory().unwrap()
-        defer let misspelt = match &database.prepare("SELEC 1") {
+        defer let misspelt = match database.prepare("SELEC 1") {
             Ok(statement) => {
                 statement.finish()
                 return testing.assert(false, "misspelt SQL was accepted")
@@ -311,7 +317,7 @@ impl Database {
         }
         testing.assert_eq(misspelt.view(), "near \"SELEC\": syntax error (SQLite code 1)", "SQLite's syntax error changed")?
 
-        let trailing = match &database.prepare("SELECT 1; DROP TABLE t") {
+        let trailing = match database.prepare("SELECT 1; DROP TABLE t") {
             Ok(statement) => {
                 statement.finish()
                 false
@@ -331,7 +337,7 @@ impl Database {
 
     test fn prepare_refuses_empty_sql_and_comments() {
         defer var database = Database.open_in_memory().unwrap()
-        let empty = match &database.prepare("") {
+        let empty = match database.prepare("") {
             Ok(statement) => {
                 statement.finish()
                 false
@@ -347,7 +353,7 @@ impl Database {
         }
         testing.assert(empty, "empty SQL was accepted")?
 
-        let comment_only = match &database.prepare("   -- just a comment\n   /* block */   ") {
+        let comment_only = match database.prepare("   -- just a comment\n   /* block */   ") {
             Ok(statement) => {
                 statement.finish()
                 false
@@ -378,66 +384,34 @@ impl Database {
         .Ok(())
     }
 
-    // Close the connection. Refuses with `SQLITE_BUSY` (code 5) when a
-    // compiled `Statement` on this connection has not been finished yet;
-    // the connection is then handed to `sqlite3_close_v2` so SQLite still
-    // reclaims its memory once the remaining statements finish, and the
-    // `Database` value itself is consumed (so it cannot be used or closed again).
-    pub fn close(sink self: Self) -> Result[(), Error] {
-        var database = self
-        if sqlite3_next_stmt(database.handle, 0) != 0 {
-            let code = sqlite3_close(database.handle)
-            let error = database.refused(code)
-            let Database { handle } = database
-            let _deferred = sqlite3_close_v2(handle)
-            return .Err(error)
-        }
-        let Database { handle } = database
+    // Close the connection. Every `Statement` borrows the `Database` it was
+    // prepared on, so the compiler refuses `close` while one is still open,
+    // and with none open `sqlite3_close_v2` closes the connection at once.
+    pub fn close(sink self: Self) {
+        let Database { handle } = self
         let _closed = sqlite3_close_v2(handle)
-        .Ok(())
     }
 
-    test fn close_consumes_the_connection() {
+    test fn close_consumes_the_connection_once_its_statements_finish() {
         let database = Database.open_in_memory().unwrap()
-        database.close().unwrap()
-        .Ok(())
-    }
-
-    test fn close_refuses_while_a_statement_is_open() {
-        let database = Database.open_in_memory().unwrap()
-        var borrowed = database
-        let statement = &borrowed.prepare("SELECT 1").unwrap()
-        defer let refused = match borrowed.close() {
-            Ok(_) => {
-                statement.finish()
-                return testing.assert(false, "closing a database with an open statement succeeded")
-            },
-            Err(error) => {
-                let shown = fmt.render_owned(error).unwrap()
-                error.release()
-                shown
-            },
-        }
+        let statement = database.prepare("SELECT 1").unwrap()
         statement.finish()
-        testing.assert_eq(refused.view(), "unable to close due to unfinalized statements or unfinished backups (SQLite code 5)", "the busy close refusal changed")?
+        database.close()
         .Ok(())
     }
 }
 
-// `Release` closes the connection through `sqlite3_close_v2` and drops any
-// refusal, just as `fs.File` and `net.Connection` do, so `defer var database`
-// and server failure paths never leak the native handle; call `close()`
-// directly when a refusal such as `SQLITE_BUSY` must be checked.
+// `Release` closes the connection, so `defer var database` and server failure
+// paths never leak the native handle.
 impl Release for Database {
     fn release(sink self: Self) {
-        let Database { handle } = self
-        let _closed = sqlite3_close_v2(handle)
+        self.close()
     }
 }
 
 impl Statement {
     fn refused(self: Self, code: Int32) -> Error {
-        .Refused(code, said(sqlite_shim_statement_message(self.handle)))
+        self.database.refused(code)
     }
 
     // Bind `text` to the 1-based `?` or `?N` parameter at `parameter`. SQLite
@@ -459,10 +433,10 @@ impl Statement {
     test fn bind_text_preserves_a_nul_byte_inside_the_string() {
         defer var database = Database.open_in_memory().unwrap()
         &database.execute("CREATE TABLE t (name TEXT);").unwrap()
-        defer var insert = &database.prepare("INSERT INTO t VALUES (?1)").unwrap()
+        defer var insert = database.prepare("INSERT INTO t VALUES (?1)").unwrap()
         &insert.bind_text(1, "a\u{0}b").unwrap()
         &insert.run().unwrap()
-        defer var select = &database.prepare("SELECT name FROM t").unwrap()
+        defer var select = database.prepare("SELECT name FROM t").unwrap()
         testing.assert(&select.step().unwrap(), "no row")?
         defer let name = select.text(0).unwrap()
         testing.assert_eq(name.length(), UInt64(3), "the NUL byte truncated the text")?
@@ -485,7 +459,7 @@ impl Statement {
     test fn binding_parameter_zero_is_refused() {
         defer var database = Database.open_in_memory().unwrap()
         &database.execute("CREATE TABLE t (n INTEGER, s TEXT);").unwrap()
-        defer var insert = &database.prepare("INSERT INTO t VALUES (?1, ?2)").unwrap()
+        defer var insert = database.prepare("INSERT INTO t VALUES (?1, ?2)").unwrap()
         let text_is_refused = match &insert.bind_text(0, "val") {
             Ok(_) => false,
             Err(error) => {
@@ -516,10 +490,10 @@ impl Statement {
     test fn bind_integer_binds_a_64_bit_value() {
         defer var database = Database.open_in_memory().unwrap()
         &database.execute("CREATE TABLE t (n INTEGER);").unwrap()
-        defer var insert = &database.prepare("INSERT INTO t VALUES (?1)").unwrap()
+        defer var insert = database.prepare("INSERT INTO t VALUES (?1)").unwrap()
         &insert.bind_integer(1, 9000000000).unwrap()
         &insert.run().unwrap()
-        defer var select = &database.prepare("SELECT n FROM t").unwrap()
+        defer var select = database.prepare("SELECT n FROM t").unwrap()
         testing.assert(&select.step().unwrap(), "no row")?
         testing.assert_eq(select.integer(0).unwrap(), Int64(9000000000), "the 64-bit integer changed")?
         .Ok(())
@@ -541,7 +515,7 @@ impl Statement {
     test fn step_walks_each_row_and_then_answers_false() {
         defer var database = Database.open_in_memory().unwrap()
         &database.execute("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (1), (2);").unwrap()
-        defer var select = &database.prepare("SELECT n FROM t ORDER BY n").unwrap()
+        defer var select = database.prepare("SELECT n FROM t ORDER BY n").unwrap()
         testing.assert(&select.step().unwrap(), "first row missing")?
         testing.assert_eq(select.integer(0).unwrap(), Int64(1), "first row")?
         testing.assert(&select.step().unwrap(), "second row missing")?
@@ -559,7 +533,7 @@ impl Statement {
     test fn run_reports_a_constraint_with_sqlite_s_sentence() {
         defer var database = Database.open_in_memory().unwrap()
         &database.execute("CREATE TABLE t (name TEXT NOT NULL);").unwrap()
-        defer var insert = &database.prepare("INSERT INTO t VALUES (NULL)").unwrap()
+        defer var insert = database.prepare("INSERT INTO t VALUES (NULL)").unwrap()
         defer let refused = match &insert.run() {
             Ok(_) => return testing.assert(false, "NULL was accepted into a NOT NULL column"),
             Err(error) => {
@@ -599,7 +573,12 @@ impl Statement {
         }
         let start = sqlite3_column_text(self.handle, index)
         if start.is_null() {
-            return .Err(.OutOfMemory)
+            // `sqlite3_column_text` also answers NULL for a zero-length value
+            // that is not text, such as the blob `x''`.
+            if sqlite3_errcode(self.database.handle) == out_of_memory {
+                return .Err(.OutOfMemory)
+            }
+            return .Ok(String.new_in(allocator))
         }
         let length = UInt64(sqlite3_column_bytes(self.handle, index))
         let bytes = match start.copy_bytes_in(allocator, length: length) {
@@ -622,7 +601,7 @@ impl Statement {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         defer var database = Database.open_in_memory().unwrap()
         &database.execute("CREATE TABLE t (name TEXT); INSERT INTO t VALUES ('Ada'), (NULL);").unwrap()
-        defer var select = &database.prepare("SELECT name FROM t").unwrap()
+        defer var select = database.prepare("SELECT name FROM t").unwrap()
         testing.assert(&select.step().unwrap(), "first row")?
         let first = select.text_in(arena.handle(), 0).unwrap()
         testing.assert_eq(first.view(), "Ada", "arena text")?
@@ -642,6 +621,17 @@ impl Statement {
         .Ok(())
     }
 
+    test fn text_in_reads_an_empty_value_as_empty_text() {
+        defer var database = Database.open_in_memory().unwrap()
+        defer var select = database.prepare("SELECT '', x''").unwrap()
+        testing.assert(&select.step().unwrap(), "no row")?
+        defer let empty_text = select.text(0).unwrap()
+        defer let empty_blob = select.text(1).unwrap()
+        testing.assert_eq(empty_text.view(), "", "an empty text column was not empty")?
+        testing.assert_eq(empty_blob.view(), "", "a zero-length blob was not read as empty text")?
+        .Ok(())
+    }
+
     // Copy the text at 0-based `column` of the current row into the system
     // allocator.
     pub fn text(self: Self, column: UInt32) -> Result[String[mem.SystemAllocator], Error] {
@@ -651,7 +641,7 @@ impl Statement {
     test fn text_reads_a_column_into_a_system_string() {
         defer var database = Database.open_in_memory().unwrap()
         &database.execute("CREATE TABLE t (name TEXT NOT NULL); INSERT INTO t VALUES ('Grace');").unwrap()
-        defer var select = &database.prepare("SELECT name FROM t").unwrap()
+        defer var select = database.prepare("SELECT name FROM t").unwrap()
         testing.assert(&select.step().unwrap(), "no row")?
         defer let name = select.text(0).unwrap()
         testing.assert_eq(name.view(), "Grace", "system string")?
@@ -680,7 +670,7 @@ impl Statement {
     test fn integer_reads_a_value_and_refuses_null() {
         defer var database = Database.open_in_memory().unwrap()
         &database.execute("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (42), (NULL);").unwrap()
-        defer var select = &database.prepare("SELECT n FROM t").unwrap()
+        defer var select = database.prepare("SELECT n FROM t").unwrap()
         testing.assert(&select.step().unwrap(), "first row")?
         testing.assert_eq(select.integer(0).unwrap(), Int64(42), "integer column")?
         testing.assert(&select.step().unwrap(), "second row")?
@@ -702,7 +692,7 @@ impl Statement {
     test fn column_out_of_bounds_is_refused() {
         defer var database = Database.open_in_memory().unwrap()
         &database.execute("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (1);").unwrap()
-        defer var select = &database.prepare("SELECT n FROM t").unwrap()
+        defer var select = database.prepare("SELECT n FROM t").unwrap()
         testing.assert(&select.step().unwrap(), "no row")?
         let text_invalid = match select.text(1) {
             Ok(text) => {
@@ -737,7 +727,7 @@ impl Statement {
     test fn column_count_reports_number_of_columns() {
         defer var database = Database.open_in_memory().unwrap()
         &database.execute("CREATE TABLE t (a INTEGER, b TEXT, c INTEGER);").unwrap()
-        defer var select = &database.prepare("SELECT a, b, c FROM t").unwrap()
+        defer var select = database.prepare("SELECT a, b, c FROM t").unwrap()
         testing.assert_eq(select.column_count(), UInt32(3), "column count changed")?
         .Ok(())
     }
@@ -745,7 +735,7 @@ impl Statement {
     test fn integer_converts_numeric_text_according_to_sqlite_rules() {
         defer var database = Database.open_in_memory().unwrap()
         &database.execute("CREATE TABLE t (s TEXT); INSERT INTO t VALUES ('42');").unwrap()
-        defer var select = &database.prepare("SELECT s FROM t").unwrap()
+        defer var select = database.prepare("SELECT s FROM t").unwrap()
         testing.assert(&select.step().unwrap(), "no row")?
         testing.assert_eq(select.integer(0).unwrap(), Int64(42), "sqlite casting did not convert text to integer")?
         .Ok(())
@@ -756,13 +746,13 @@ impl Statement {
     // and repeats the result code of the most recent `step`, which `step` and
     // `run` have already reported as `Error`.
     pub fn finish(sink self: Self) {
-        let Statement { handle } = self
+        let Statement { handle, database: _ } = self
         let _finalized = sqlite3_finalize(handle)
     }
 
     test fn finish_consumes_the_statement() {
         defer var database = Database.open_in_memory().unwrap()
-        let statement = &database.prepare("SELECT 1").unwrap()
+        let statement = database.prepare("SELECT 1").unwrap()
         statement.finish()
         .Ok(())
     }
