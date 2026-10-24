@@ -44,13 +44,16 @@ fn limits() -> http.Limits {
 
 // A name is one line, so it holds no control character. A message comes from
 // a `<textarea>`, whose line breaks and tabs are kept: `\t`, `\n` and `\r`
-// are allowed there, and every other ASCII control (below 32, and 127) is
-// refused in both.
+// are allowed there. Every other control character is refused in both: the
+// C0 controls below U+0020, DEL (U+007F) and the C1 controls U+0080 to U+009F.
 fn holds_control(text: Str, keeps_line_breaks: Bool) -> Bool {
-    for at in 0..text.length() {
-        let byte = text.byte(at).unwrap()
-        let is_line_break_or_tab = byte == 9 || byte == 10 || byte == 13
-        if byte == 127 || (byte < 32 && !(keeps_line_breaks && is_line_break_or_tab)) {
+    for scalar in text.scalars() {
+        let value = scalar.value
+        let is_line_break_or_tab = value == 9 || value == 10 || value == 13
+        if value < 32 && !(keeps_line_breaks && is_line_break_or_tab) {
+            return true
+        }
+        if value >= 127 && value <= 159 {
             return true
         }
     }
@@ -353,6 +356,9 @@ test fn control_characters_are_refused_and_line_breaks_in_a_message_are_kept() {
         "name=Ada&message=a%00b",
         "name=Ada&message=a%1Bb",
         "name=Ada&message=a%7Fb",
+        "name=a%C2%85b&message=hi",
+        "name=Ada&message=a%C2%9Fb",
+        "name=Ada&message=a%C2%80b",
     ]
     for read body in refused_bodies {
         var sent = http.new_request(arena.handle(), "POST", "/sign", body: body, content_type: "application/x-www-form-urlencoded").unwrap()

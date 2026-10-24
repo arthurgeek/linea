@@ -425,13 +425,16 @@ them with `white-space: pre-wrap`:
 ```linea
 // A name is one line, so it holds no control character. A message comes from
 // a `<textarea>`, whose line breaks and tabs are kept: `\t`, `\n` and `\r`
-// are allowed there, and every other ASCII control (below 32, and 127) is
-// refused in both.
+// are allowed there. Every other control character is refused in both: the
+// C0 controls below U+0020, DEL (U+007F) and the C1 controls U+0080 to U+009F.
 fn holds_control(text: Str, keeps_line_breaks: Bool) -> Bool {
-    for at in 0..text.length() {
-        let byte = text.byte(at).unwrap()
-        let is_line_break_or_tab = byte == 9 || byte == 10 || byte == 13
-        if byte == 127 || (byte < 32 && !(keeps_line_breaks && is_line_break_or_tab)) {
+    for scalar in text.scalars() {
+        let value = scalar.value
+        let is_line_break_or_tab = value == 9 || value == 10 || value == 13
+        if value < 32 && !(keeps_line_breaks && is_line_break_or_tab) {
+            return true
+        }
+        if value >= 127 && value <= 159 {
             return true
         }
     }
@@ -475,7 +478,9 @@ The server reads a whole body before `sign` runs, so the body limit must admit
 every form the page can send. `limits` derives it from the field limits: a
 browser writes each byte of a non-ASCII character as `%XX`, and a character is
 at most four bytes of UTF-8, so the longest form is `name=&message=` and 560
-characters of 12 bytes each, 6734 bytes:
+characters of 12 bytes each, 6734 bytes. A client that pads the fields with
+spaces past that size is refused with 413, which is safe, because no form the
+page produces is that large:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
