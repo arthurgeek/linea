@@ -16,6 +16,7 @@ The library tests itself.
   ok    cli.get_positional_parses_typed_positionals
   ok    cli.has_next_reports_available_tokens
   ok    cli.help_command_reports_active_help_target
+  ok    cli.help_for_arguments_shows_the_command_a_refused_parse_reached
   ok    cli.is_help_reports_help_request
   ok    cli.is_supplied_distinguishes_user_options_from_defaults
   ok    cli.new_creates_cursor_from_args
@@ -1418,4 +1419,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1415 passed, 0 failed
+  1416 passed, 0 failed

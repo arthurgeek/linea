@@ -969,7 +969,8 @@ struct FoundPositional {
 // global switch given after a subcommand is recorded for the command that
 // declared it. `ended` is set by `--`, after which every argument is a
 // positional; `help_path` is set by a registered `help` subcommand, after
-// which every argument names a subcommand.
+// which every argument names a subcommand. `lenient` passes over an argument
+// that does not fit, for `help_for_arguments`.
 @derive(Release)
 struct ParseState[A: Allocator] {
     flags: Vec[ScopedFlag, A],
@@ -980,9 +981,32 @@ struct ParseState[A: Allocator] {
     ended: Bool,
     help: Bool,
     help_path: Bool,
+    lenient: Bool,
+}
+
+// Start the state of a parse in `allocator`. A lenient parse asks for help,
+// so it checks no requirement.
+fn parse_state[A: Allocator](allocator: A, lenient: Bool) -> ParseState[A] where carries(allocator) {
+    .{
+        flags = Vec.new_in(allocator),
+        options = Vec.new_in(allocator),
+        found_flags = Vec.new_in(allocator),
+        found_options = Vec.new_in(allocator),
+        found_positionals = Vec.new_in(allocator),
+        ended = false,
+        help = lenient,
+        help_path = false,
+        lenient,
+    }
 }
 
 impl[A: Allocator] ParseState[A] {
+    // Return whether `error` stops the parse: every error does, except that a
+    // lenient parse passes over all but a refused allocation.
+    fn stops(self: Self, error: CliError) -> Bool {
+        !self.lenient || match read error { Allocation(_) => true, _ => false }
+    }
+
     // Return the flag in scope whose long form is `long`, the deepest first.
     fn long_flag(self: Self, long: Str) -> Option[ScopedFlag] where carries(.Some: self) {
         var i = self.flags.length()
@@ -1725,12 +1749,24 @@ impl[A: Allocator] Command[A] {
         var help_here = state.help
         var filled: UInt64 = 0
         while true {
-            let arg = match &cursor.next()? {
-                Some(token) => token,
-                None => break,
+            let next = &cursor.next()
+            let arg = match next {
+                Ok(found) => match found {
+                    Some(token) => token,
+                    None => break,
+                },
+                Err(error) => {
+                    if state.stops(error) {
+                        return .Err(error)
+                    }
+                    continue
+                },
             }
             if state.help_path {
                 let index = self.child_index(arg) else {
+                    if state.lenient {
+                        continue
+                    }
                     if self.subcommands.length() > 0 {
                         return .Err(.UnknownCommand(arg))
                     }
@@ -1750,11 +1786,21 @@ impl[A: Allocator] Command[A] {
                     continue
                 }
                 if arg.starts_with("--") {
-                    &state.take_long(arg, &cursor)?
+                    match &state.take_long(arg, &cursor) {
+                        Ok(_) => {},
+                        Err(error) => if state.stops(error) {
+                            return .Err(error)
+                        },
+                    }
                     continue
                 }
                 if arg.starts_with("-") && arg.length() > 1 {
-                    &state.take_short(arg, &cursor)?
+                    match &state.take_short(arg, &cursor) {
+                        Ok(_) => {},
+                        Err(error) => if state.stops(error) {
+                            return .Err(error)
+                        },
+                    }
                     continue
                 }
                 if help_registered && arg == "help" {
@@ -1771,7 +1817,12 @@ impl[A: Allocator] Command[A] {
                     None => {},
                 }
             }
-            self.take_positional(depth, arg, &filled, &state)?
+            match self.take_positional(depth, arg, &filled, &state) {
+                Ok(_) => {},
+                Err(error) => if state.stops(error) {
+                    return .Err(error)
+                },
+            }
         }
         self.settle(depth, filled, help_here, .None, &state)
     }
@@ -1846,16 +1897,7 @@ impl[A: Allocator] Command[A] {
             Some(reason) => return .Err(.Allocation(reason)),
             None => {},
         }
-        defer var state: ParseState[A] = .{
-            flags = Vec.new_in(self.allocator),
-            options = Vec.new_in(self.allocator),
-            found_flags = Vec.new_in(self.allocator),
-            found_options = Vec.new_in(self.allocator),
-            found_positionals = Vec.new_in(self.allocator),
-            ended = false,
-            help = false,
-            help_path = false,
-        }
+        defer var state = parse_state(self.allocator, false)
         self.descend(0, &state, &cursor)
     }
 
@@ -2224,6 +2266,46 @@ impl[A: Allocator] Command[A] {
             mem.Oom.is_refusal,
         )
         testing.assert(checked.is_ok(), "a refused allocation was not reported as one")?
+        .Ok(())
+    }
+
+    // Return the help for the deepest command the arguments in `cursor`
+    // reach, for the message after a refused parse: that command's
+    // requirements are not checked, and an argument that does not fit is
+    // passed over.
+    pub fn help_for_arguments(self: Self, inout cursor: ArgCursor) -> Result[String[A], mem.Oom] where carries(.Ok: self.allocator) {
+        match read self.refusal {
+            Some(reason) => return .Err(reason),
+            None => {},
+        }
+        defer var state = parse_state(self.allocator, true)
+        defer let matches = self.descend(0, &state, &cursor) else |error| {
+            return match read error {
+                Allocation(reason) => .Err(reason),
+                _ => self.usage(),
+            }
+        }
+        self.format_help(borrow matches)
+    }
+
+    test fn help_for_arguments_shows_the_command_a_refused_parse_reached() {
+        defer var root = Command.new("tool")
+        var serve_cmd = Command.new("serve", "serve requests")
+        &serve_cmd.option("port", "--port", "port to listen on", required: true)
+        &root.subcommand(serve_cmd)
+        let input = ["serve", "--bogus", "extra"]
+        var cursor = ArgCursor.from_slice(input.as_slice())
+        let refused = match root.parse(&cursor) {
+            Ok(m) => {
+                m.release()
+                false
+            },
+            Err(e) => e == CliError.UnknownOption("--bogus"),
+        }
+        testing.assert(refused, "an unknown option was accepted")?
+        var again = ArgCursor.from_slice(input.as_slice())
+        defer let help = root.help_for_arguments(&again).unwrap()
+        testing.assert(help.view().starts_with("usage: tool serve [options]\n\nserve requests"), "the help was not that of the command reached")?
         .Ok(())
     }
 
