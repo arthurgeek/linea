@@ -2,19 +2,15 @@ const std = @import("std");
 const lsp = @import("lsp");
 
 const analysis_mod = @import("analysis.zig");
-const test_library = @import("../driver/test_library.zig");
 const Analysis = analysis_mod.Analysis;
 const workspace = @import("workspace.zig");
 const node = @import("../syntax/node.zig");
 const DeclId = node.DeclId;
-const ast_mod = @import("../syntax/ast.zig");
-const Ast = ast_mod.Ast;
 const program_mod = @import("../syntax/program.zig");
 const FileId = @import("../support/source.zig").FileId;
 const TokenId = @import("../lexer/token.zig").TokenId;
 const typecheck = @import("../sema/typecheck.zig");
 const Resolution = @import("../sema/resolve.zig").Resolution;
-const Code = @import("../diagnostics/diagnostic.zig").Code;
 const Edit = @import("../diagnostics/diagnostic.zig").Edit;
 const Fix = @import("../diagnostics/diagnostic.zig").Fix;
 const publish = @import("publish.zig");
@@ -22,7 +18,6 @@ const uri_mod = @import("uri.zig");
 const placement = @import("../syntax/placement.zig");
 const Placement = placement.Placement;
 const placementIn = placement.placementIn;
-const placementForUse = placement.placementForUse;
 
 /// Every quick fix offered for the diagnostics a request carried: one
 /// action per `Fix` the compiler attached to each of them, titled with the

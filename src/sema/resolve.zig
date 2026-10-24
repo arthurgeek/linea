@@ -13743,12 +13743,6 @@ const Resolver = struct {
         }
     }
 
-    /// `p.x`, or `Colour.Red`.
-    ///
-    /// What is selected from resolves like any other expression. Whether it
-    /// names a type or a value is what decides which of the two this is, and
-    /// the checker asks that question -- except where the answer is an enum,
-    /// because a variant that names no variant is a mistake about names.
     /// Gives the [N-Undefined] just reported for `head`, the name left of a
     /// dot, one help and one fix per module of the root an `import` would
     /// bind to that name: one another import loaded, or a directory of the
@@ -13767,7 +13761,7 @@ const Resolver = struct {
         const span = self.ast.exprSpan(head);
         if (label.span.start != span.start or label.span.end != span.end) return;
         const name = self.ast.tokenText(self.ast.exprMain(head));
-        if (self.current == .none or self.moduleWrites(self.current, name)) return;
+        if (self.current == .none or self.moduleWrites(self.current, label.file, name)) return;
 
         const arena = self.sink.arena;
         var routes: std.ArrayList([]const u8) = .empty;
@@ -13803,22 +13797,30 @@ const Resolver = struct {
         try self.sink.revise(before, revised);
     }
 
-    /// Whether module `m` declares `name` at its top level or one of its
-    /// imports binds it, so an import of that name would collide.
+    /// Whether module `m` declares `name` at its top level, or an import
+    /// written in `file` binds it, so an import of that name written there
+    /// would collide. An import another file wrote binds only in that file.
     ///
     /// **Bound:** the module's declarations, once.
-    fn moduleWrites(self: *const Resolver, m: ModuleId, name: []const u8) bool {
+    fn moduleWrites(self: *const Resolver, m: ModuleId, file: FileId, name: []const u8) bool {
         const decls = self.program.get(m).decls;
         for (decls.start..decls.end) |i| {
             const d = DeclId.at(@intCast(i));
             if (self.ast.declOwner(d) != .none) continue;
             const at = self.ast.declName(d);
             if (at == .none) continue;
+            if (self.ast.declTag(d) == .import_ and self.ast.fileOf(at) != file) continue;
             if (std.mem.eql(u8, self.ast.tokenText(at), name)) return true;
         }
         return false;
     }
 
+    /// `p.x`, or `Colour.Red`.
+    ///
+    /// What is selected from resolves like any other expression. Whether it
+    /// names a type or a value is what decides which of the two this is, and
+    /// the checker asks that question -- except where the answer is an enum,
+    /// because a variant that names no variant is a mistake about names.
     fn selection(self: *Resolver, id: ExprId) std.mem.Allocator.Error!void {
         const base = self.ast.unaryOperand(id);
 
