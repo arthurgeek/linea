@@ -1,0 +1,7 @@
+error[N-Undefined]: undefined name `text`
+ --> tests/names/a_library_module_a_qualifier_names_is_offered_its_import.lin:4:11
+  |
+4 |     match text.hex_byte(4, 2) {
+  |           ^^^^ no binding with this name is in scope
+  |
+  = help: write `import std.text`: a module is reached through the import that names it
