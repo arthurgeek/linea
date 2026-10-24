@@ -1229,7 +1229,7 @@ const HeavySteps = struct {
         return run;
     }
 
-    /// Every complete program the guide pastes is compiled, and the output
+    /// Every program and fragment the guide pastes is compiled, and the output
     /// pasted beside it is held to what the compiler prints. The guide shows
     /// real errors and real output, so a compiler change that moves one makes
     /// the page false without any test noticing. It stands beside the
@@ -1981,7 +1981,7 @@ pub fn build(b: *std.Build) void {
     });
     heavy.guide_gate.root_module.addAnonymousImport("process", .{ .root_source_file = b.path("src/conformance/process.zig") });
     const run_guide = heavy.guide(b.getInstallStep());
-    const guide_step = b.step("guide", "Compile the guide's programs and hold their pasted output to what the compiler prints");
+    const guide_step = b.step("guide", "Check the guide's programs and fragments and hold their pasted output to what the compiler prints");
     guide_step.dependOn(&run_guide.step);
 
     heavy.example_tests = b.addExecutable(.{

@@ -41,7 +41,7 @@ zig build run -- <cmd> <file>  # run a subcommand
 zig fmt --check build.zig build src runtime  # what CI checks first
 zig build sweep -Drelease      # every cost dimension
 zig build sweep -Drelease -Dsweep-filter=<substring>  # one cost dimension
-zig build guide                # compile the guide's programs, compare pasted output
+zig build guide                # check the guide's programs and fragments, compare pasted output
 zig build example-tests        # linea test on every root under examples/, nested libraries included
 ```
 
@@ -83,26 +83,40 @@ until it is green.
   `.lin` file, a `.cmd` transcript, or a directory holding `main.lin`) runs that
   case alone. A walk that selects nothing fails, and so does one holding
   transcripts without `--compiler`.
-- `zig build guide` compiles every complete Linea program in `docs/learn` and
-  compares the output pasted beside it with what the compiler prints. Run it
-  after changing a chapter, a diagnostic's wording, or the library a chapter
-  shows. A `linea` block with `fn main`, a `test fn` or a `` `path.lin`: ``
-  label is a program; the bare or `text` block after it (past an optional `sh`
-  block holding `linea run|check|test PATH`) is its output, and is all of what
-  the compiler prints. A fenced block labelled `` `path/linea.json`: ``,
-  `` `path.c`: `` or `` `path.h`: `` is a file of the labelled project around
-  it, so a program that builds and calls C runs. A block showing only the
-  first diagnostics carries `<!-- guide: first N diagnostics -->` on the line
-  above it and must be exactly those N with at least one more after them.
-  Output that follows no program, or a program that cannot run, carries
-  `<!-- guide: unchecked REASON -->` above its block; its diagnostic headers, `= help:`/`= note:` lines and underline
-  labels must still read like ones the compiler prints (wording found in the
-  gate's own runs or in the `.stderr` goldens under `tests/`), so a new message
-  shown only there needs a corpus case that prints it. A `linea` block carrying
-  `<!-- guide: excerpt PATH -->` above it is counted as a fragment and held to
-  be consecutive lines of `PATH` relative to the repository root. A fenced block
-  that is neither compiled nor marked fails the gate. A location inside `std/`
-  is compared by file alone.
+- `zig build guide` checks every `linea` block on every page
+  `docs/learn/README.md` links, the appendices included, and compares the
+  output pasted beside it with what the compiler prints. Run it after changing
+  a chapter, a diagnostic's wording, or the library a chapter shows. A `linea`
+  block with `fn main`, a `test fn` or a `` `path.lin`: `` label is a program;
+  the bare or `text` block after it (past an optional `sh` block holding
+  `linea run|check|test PATH`) is its output, and is all of what the compiler
+  prints. A fenced block labelled `` `path/linea.json`: ``, `` `path.c`: `` or
+  `` `path.h`: `` is a file of the labelled project around it, so a program
+  that builds and calls C runs. Every other `linea` block is a fragment, and
+  is checked one of four ways. `<!-- guide: edit [PATH] N | N-M | after N -->`
+  above it replaces line N or lines N-M of the last program above, or inserts
+  after line N, counting lines as that program is pasted; with PATH it edits
+  that file of the last program above that has one, which a project needs.
+  Consecutive edit blocks apply together, and the output after the last is
+  what the edited program prints. `<!-- guide: excerpt PATH -->` holds it to
+  consecutive lines of `PATH` relative to the repository root, less an
+  indentation those lines share, and compiles nothing; when `PATH` is a guide
+  page the lines must come from a program that page compiles.
+  `<!-- guide: unchecked REASON -->` excludes it, for a sketch or a signature
+  that cannot stand alone. An unmarked fragment is checked alone with
+  `linea check`, as the root file of a library so it needs no `main`; an
+  `[N-Unused]` on one of its own top-level declarations is allowed, since the
+  code that would call it is not shown, and output pasted after it is compared
+  like a program's. A block showing only the first diagnostics carries
+  `<!-- guide: first N diagnostics -->` on the line above it and must be
+  exactly those N with at least one more after them. Output that follows no
+  program, or a program that cannot run, carries
+  `<!-- guide: unchecked REASON -->` above its block; its diagnostic headers,
+  `= help:`/`= note:` lines and underline labels must still read like ones the
+  compiler prints (wording found in the gate's own runs or in the `.stderr`
+  goldens under `tests/`), so a new message shown only there needs a corpus
+  case that prints it. A fenced block that is neither compiled, excerpted nor
+  marked fails the gate. A location inside `std/` is compared by file alone.
 - A case is a `.lin` file or a directory holding `main.lin`; a module is a
   directory, and its goldens sit beside the directory under its own name.
   Examples keep only what a reader wants: their goldens sit in `tests/examples/`
