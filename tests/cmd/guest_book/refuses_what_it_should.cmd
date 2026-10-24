@@ -6,11 +6,26 @@ posts, and unknown methods or paths.
   $ for i in $(seq 2400); do grep -q listening server.log && break; kill -0 $server 2>/dev/null || break; sleep 0.05; done; grep -q listening server.log || cat server.log
   $ port=$(sed -n 's/.* listening address=127.0.0.1://p' server.log)
 
-A body past the 4096-byte limit is refused with 413 before the handler reads it.
+The body limit is the longest form the page sends: a 60-character name and a
+500-character message, every character four bytes of UTF-8 written as `%XX`.
+That form is accepted, and one byte more is refused with 413 before the
+handler reads it.
 
-  $ dd if=/dev/zero bs=5000 count=1 2>/dev/null | tr '\0' 'a' > oversized
+  $ { printf 'name='; for i in $(seq 60); do printf '%%F0%%9F%%98%%80'; done; printf '&message='; for i in $(seq 500); do printf '%%F0%%9F%%98%%80'; done; } > longest
+  $ wc -c < longest | tr -d ' '
+  6734
+  $ curl -s --max-time 30 -o /dev/null -w '%{http_code}\n' -X POST --data-binary @longest "http://127.0.0.1:$port/sign"
+  303
+  $ { cat longest; printf 'a'; } > oversized
   $ curl -s --max-time 30 -o /dev/null -w '%{http_code}\n' -X POST --data-binary @oversized "http://127.0.0.1:$port/sign"
   413
+
+A control character in the name, such as a NUL or a line break, is refused
+with 422.
+
+  $ curl -s --max-time 30 -w '%{http_code}\n' -X POST --data 'name=a%00b%0D%0ASet-Cookie:+x=1&message=hi' "http://127.0.0.1:$port/sign"
+  a name holds no control characters, and a message only line breaks and tabs
+  422
 
 An empty message (after trimming spaces) is refused with 422.
 

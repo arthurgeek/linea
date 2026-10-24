@@ -87,13 +87,11 @@ error[M-Dependency]: the manifest of `sqlite` grants it `extern`, and this entry
   |                     ^^^^^^^^ write `"extern": true` in this entry to trust the signatures it declares
 ```
 
-Three small helpers in `examples/guest-book/sqlite/shim.c` bridge C idioms that
+Two small helpers in `examples/guest-book/sqlite/shim.c` bridge C idioms that
 do not cross an `extern fn` signature directly: `SQLITE_TRANSIENT` is `(void
 (*)(void *))-1`, a sentinel function pointer that asks SQLite to copy bound
-text before returning; `sqlite3_prepare_v2` reports uncompiled trailing SQL
-through a `const char **` tail pointer, which the shim turns into a byte count;
-and `sqlite3_errmsg(sqlite3_db_handle(statement))` reads a statement's error
-sentence without minting a second linear handle for its connection.
+text before returning; and `sqlite3_prepare_v2` reports uncompiled trailing SQL
+through a `const char **` tail pointer, which the shim turns into a byte count.
 
 Inside `examples/guest-book/sqlite/sqlite.lin`, the C pointers `sqlite3 *` and
 `sqlite3_stmt *` are wrapped in `@(opaque, linear)` handle types and private
@@ -117,22 +115,13 @@ type StatementHandle = UInt64
 // `DatabaseHandle` once checked against zero.
 extern fn sqlite3_open_v2(filename: ffi.CText, inout database: UInt64, flags: Int32, vfs: UInt64) -> Int32
 
-// `sqlite3_next_stmt` returns the next unfinalized statement on `database`
-// after `statement`, or 0 when every statement has been finalized.
-extern fn sqlite3_next_stmt(read database: DatabaseHandle, statement: UInt64) -> UInt64
-
-// `sqlite3_close` refuses with `SQLITE_BUSY` when an unfinalized statement
-// remains on `database`, setting the connection's error message without freeing
-// the connection.
-extern fn sqlite3_close(database: DatabaseHandle) -> Int32
-
 // `sink` hands the connection handle to C for good. `sqlite3_close_v2` closes
 // the connection, or marks it to close as soon as its last statement finishes.
 extern fn sqlite3_close_v2(sink database: DatabaseHandle) -> Int32
 
 // `read` promises C only reads the connection, and `where borrows(database)`
-// ties the returned `CText` to the connection's lifetime so the text is copied
-// before the connection next changes or closes.
+// ties the returned `CText` to the connection's lifetime. SQLite rewrites the
+// sentence on the next call on the connection, so `message` copies it at once.
 extern fn sqlite3_errmsg(read database: DatabaseHandle) -> ffi.CText where borrows(database)
 ```
 
@@ -149,27 +138,48 @@ struct Database {
 }
 
 // One compiled SQL statement, stepped a row at a time. It must be finished.
+// `database` observes the connection the statement was prepared on, so while
+// the statement is open the connection cannot be closed or released, or passed
+// to `execute` or `wait_when_busy`.
 @(opaque, linear)
 struct Statement {
     handle: StatementHandle,
+    database: borrow Database,
 }
 ```
 
-In Rust's `rusqlite`, `Statement<'conn>` borrows `Connection` for its lifetime
-and finalizes itself in `Drop`, which silently ignores any error from
-`sqlite3_finalize`. In Linea, `Statement` and `Database` are independent linear
-values: `Database.close` checks whether any `Statement` on the connection is
-still open and refuses with `SQLITE_BUSY` (code 5) if so, while still handing
-the native handle to `sqlite3_close_v2` so SQLite reclaims its memory once the
-remaining statement finishes, and the compiler refuses any path that forgets to
-settle a `Statement`:
+`Database.prepare` takes the database as `read` and returns the statement
+`where borrows(.Ok: self)`, so `database: borrow Database` holds the connection
+in place until the statement finishes. Several statements may be open on one
+database at once, as SQLite allows, and a statement reads its connection's error
+sentence and error code through that field. Closing the database while a
+statement is still open is refused at compile time:
+
+<!-- guide: unchecked diagnostic from tests/cmd/guest_book/a_statement_keeps_its_database_open.cmd -->
+```text
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> app/main.lin:8:5
+  |
+8 |     database.close()
+  |     ^^^^^^^^ keep this place available until the last use of its observation
+9 |     statement.finish()
+  |     --------- the observation is still used here
+```
+
+Because the compiler refuses that program, `Database.close` never meets an
+unfinished statement, `sqlite3_close_v2` closes the connection at once, and
+`close` cannot fail. Rust's `rusqlite` reaches the same guarantee with a
+lifetime: `Statement<'conn>` borrows `Connection`. It finalizes the statement
+in `Drop`, which silently ignores any error from `sqlite3_finalize`. In Linea,
+`Statement` is linear, so the compiler also refuses any path that forgets to
+settle one:
 
 <!-- guide: unchecked diagnostic from tests/cmd/guest_book/a_forgotten_statement_is_refused.cmd -->
 ```text
 error[O-Leak]: `_statement` (a linear `sqlite.Statement`) is still owned when this path leaves
  --> app/main.lin:6:9
   |
-6 |     let _statement = &db.prepare("SELECT COUNT(*) FROM entries")?
+6 |     let _statement = db.prepare("SELECT COUNT(*) FROM entries")?
   |         ^^^^^^^^^^ never settled on the path that reaches the end of this block
 8 | }
   | - the block ends here
@@ -212,7 +222,7 @@ and in `Book.newest`:
         if limit < 0 {
             return .Err(.NegativeLimit(limit))
         }
-        defer var select = &self.database.prepare("SELECT name, message, signed_at FROM entries ORDER BY id DESC LIMIT ?1")?
+        defer var select = self.database.prepare("SELECT name, message, signed_at FROM entries ORDER BY id DESC LIMIT ?1")?
         &select.bind_integer(1, limit)?
         defer var entries: Vec[Entry] = Vec.new()
         while &select.step()? {
@@ -405,8 +415,31 @@ answers one connection at a time, every request shares that connection.
 
 `POST /sign` extracts the URL-encoded form into `Signature` through
 `http.Form[Signature]`. Before touching the database, `sign` in
-`examples/guest-book/main.lin` checks `http.same_origin` and verifies that the
-trimmed name and message fit the scalar limits:
+`examples/guest-book/main.lin` checks `http.same_origin`, verifies that the
+trimmed name and message fit the scalar limits, and refuses control characters
+with `holds_control`. A name is one line, so it may hold none; a message comes
+from a `<textarea>`, so its line breaks and tabs are kept, and the page shows
+them with `white-space: pre-wrap`:
+
+<!-- guide: excerpt examples/guest-book/main.lin -->
+```linea
+// A name is one line, so it holds no control character. A message comes from
+// a `<textarea>`, whose line breaks and tabs are kept: `\t`, `\n` and `\r`
+// are allowed there, and every other ASCII control (below 32, and 127) is
+// refused in both.
+fn holds_control(text: Str, keeps_line_breaks: Bool) -> Bool {
+    for at in 0..text.length() {
+        let byte = text.byte(at).unwrap()
+        let is_line_break_or_tab = byte == 9 || byte == 10 || byte == 13
+        if byte == 127 || (byte < 32 && !(keeps_line_breaks && is_line_break_or_tab)) {
+            return true
+        }
+    }
+    false
+}
+```
+
+`sign` itself reads:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
@@ -422,6 +455,9 @@ fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Re
     if name.scalars().count() > longest_name || message.scalars().count() > longest_message {
         return .Err(http.error(request, .UnprocessableContent, "a name holds at most {longest_name} characters and a message {longest_message}"))
     }
+    if holds_control(name, keeps_line_breaks: false) || holds_control(message, keeps_line_breaks: true) {
+        return .Err(http.error(request, .UnprocessableContent, "a name holds no control characters, and a message only line breaks and tabs"))
+    }
     let _ = &app.book.sign(name, message) else |error| {
         return .Err(unavailable(request, error))
     }
@@ -435,9 +471,26 @@ fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Re
 
 ## Running it
 
+The server reads a whole body before `sign` runs, so the body limit must admit
+every form the page can send. `limits` derives it from the field limits: a
+browser writes each byte of a non-ASCII character as `%XX`, and a character is
+at most four bytes of UTF-8, so the longest form is `name=&message=` and 560
+characters of 12 bytes each, 6734 bytes:
+
+<!-- guide: excerpt examples/guest-book/main.lin -->
+```linea
+// The server refuses a body longer than the largest form `sign` accepts, a
+// name and a message at their longest with every scalar four bytes long. A
+// form the page's `maxlength` attributes admit always fits.
+fn limits() -> http.Limits {
+    let longest_form = "name=&message=".length() + (longest_name + longest_message) * encoded_scalar_bytes
+    http.Limits { max_body_bytes = longest_form, ..http.Limits.default() }
+}
+```
+
 `main` in `examples/guest-book/main.lin` registers the routes on
-`http.Router[App]`, caps request bodies at 4096 bytes, serves the loopback port,
-and closes `app` when finished:
+`http.Router[App]`, serves the loopback port with those limits, and closes
+`app` when finished:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
@@ -473,16 +526,11 @@ fn main() -> UInt8 {
         error.release()
         return 1
     }
-    let limits = http.Limits { max_body_bytes = 4096, ..http.Limits.default() }
-    let app = http.listen_and_serve(net.loopback(port), http.logged(logger, router), state: app, limits: limits) else |error| {
+    let app = http.listen_and_serve(net.loopback(port), http.logged(logger, router), state: app, limits: limits()) else |error| {
         io.eprintln("guest-book: {error}")
         return 1
     }
-    let _ = app.close() else |error| {
-        io.eprintln("guest-book: {error}")
-        error.release()
-        return 1
-    }
+    app.close()
     0
 }
 ```
@@ -522,6 +570,7 @@ input, both HTML-escaped:
   ol { padding-left: 1.25rem; }
   li { margin-top: 1rem; }
   time { color: #555; font-size: 0.875rem; }
+  li p { white-space: pre-wrap; }
 </style>
 <h1>Guest book</h1>
 <form method="post" action="/sign">
@@ -563,14 +612,17 @@ needs:
   `linea.json` keeps every `extern fn` and C shim inside one reviewed boundary,
   and an application opts in with `"extern": true` on the dependency.
 - `@(opaque, linear)` handles make both `Database` and `Statement` resources the
-  compiler tracks across every path; `Database.close` reports `SQLITE_BUSY` if a
-  statement is left open, and `defer var` / `defer let` settle statements and
-  partial row allocations on early `?` returns.
+  compiler tracks across every path; a `Statement` borrows its `Database`, so
+  closing the database while a statement is open is refused at compile time,
+  and `defer var` / `defer let` settle statements and partial row allocations
+  on early `?` returns.
 - `sqlite.Error` copies SQLite's message before the statement or connection
   closes, and `unavailable` logs that detail to standard error while answering
   the visitor with a generic 500 response.
 - `embed` packages `schema.sql` and the HTML templates into the binary, and
   `Page` streams the template and entries directly into `http.html` with every
   visitor string HTML-escaped and timestamps formatted as RFC 3339.
+- `limits` derives the body limit from the field limits, so every form the page
+  sends fits, and `holds_control` keeps control characters out of a signature.
 - `http.listen_and_serve` runs `http.Router[App]` and its routes, returning
-  `App` on completion so `close()` is checked explicitly.
+  `App` on completion so `close()` closes the book.
