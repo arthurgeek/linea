@@ -18166,12 +18166,15 @@ const Checker = struct {
         function,
         closure,
         given_closure,
+        /// A closure whose type is written where it is given: a binding's
+        /// annotation or a function's result.
+        typed_closure,
 
         /// What a report calls the answerer.
         fn noun(self: TryAnswerer) []const u8 {
             return switch (self) {
                 .function => "function",
-                .closure, .given_closure => "closure",
+                .closure, .given_closure, .typed_closure => "closure",
             };
         }
     };
@@ -18190,6 +18193,7 @@ const Checker = struct {
         const subject = switch (answerer) {
             .function => "make the function return `",
             .closure, .given_closure => "write the closure's result as `-> ",
+            .typed_closure => "write the result of the type given for this closure as `",
         };
         const written_signature = switch (carrier.kind) {
             .result => try std.fmt.allocPrint(self.sink.arena, "{s}Result[{s}, {s}]` and end it with `.Ok({s})`", .{ subject, written_answer, try self.helpName(self.errorTypeOf(carrier), &missing), ending }),
@@ -18219,7 +18223,8 @@ const Checker = struct {
         }) else signature;
         const labels = try self.sink.arena.alloc(Label, 1);
         labels[0] = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id), .message = try std.fmt.allocPrint(self.sink.arena, "`?` returns from the {s} it is written in", .{answerer.noun()}), .style = .primary };
-        if (answerer != .given_closure) if (self.answer_fixes) |pending| try pending.append(self.gpa, .{
+        // Only a result written on the body it answers for is the fix's to edit.
+        if (answerer == .function or answerer == .closure) if (self.answer_fixes) |pending| try pending.append(self.gpa, .{
             .diagnostic = self.sink.items().len,
             .at = self.ast.exprMain(id),
             .result = switch (carrier.kind) {
@@ -20593,10 +20598,16 @@ const Checker = struct {
             .inference = if (expected.?.infer_lambda_result) expected.?.inference else null,
         } else null;
         const written_before_body = self.written.items.len;
-        // A closure whose result the callable type it is passed as fixes
-        // cannot change that result to carry a failure; one inferring its
-        // result through a call's type parameter can.
-        const answerer: TryAnswerer = if (contextual != null and result_expected.?.inference == null) .given_closure else .closure;
+        // A closure passed to a parameter whose callable type is concrete
+        // cannot change its result to carry a failure. One whose result a
+        // call's type parameter follows, or whose type an annotation or a
+        // function's result gives, can: the reader writes that type.
+        const answerer: TryAnswerer = if (contextual == null or expected.?.inference != null)
+            .closure
+        else if (expected.?.reason == .parameter)
+            .given_closure
+        else
+            .typed_closure;
         // With no result type written or given, the closure's `return`s and
         // its body's value settle it together.
         var inferred_return: ?Expected = null;

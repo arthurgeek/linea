@@ -1,0 +1,19 @@
+// The binding writes the closure's type, `fn() -> UInt8`, and the closure's
+// `?` cannot hand `parse`'s failure on through `UInt8`. That type is the
+// program's own to change, so the help offers the result it would write to
+// carry the failure.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
+
+fn main() -> UInt8 {
+    let next: fn() -> UInt8 = || {
+        let n = parse()?
+        n + 1
+    }
+    next()
+}

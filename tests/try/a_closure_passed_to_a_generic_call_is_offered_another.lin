@@ -1,0 +1,24 @@
+// `apply` answers with whatever its closure answers, so the closure's
+// written `UInt8` is the program's own to change. The help offers the
+// result that would carry `parse`'s failure.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
+
+fn apply[R](f: fn() -> R) -> R {
+    f()
+}
+
+fn main() -> UInt8 {
+    let _ = apply(
+        || -> UInt8 {
+            let n = parse()?
+            n + 1
+        },
+    )
+    0
+}
