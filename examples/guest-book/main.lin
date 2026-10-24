@@ -42,22 +42,53 @@ fn limits() -> http.Limits {
     http.Limits { max_body_bytes = longest_form, ..http.Limits.default() }
 }
 
-// A name is one line, so it holds no control character. A message comes from
-// a `<textarea>`, whose line breaks and tabs are kept: `\t`, `\n` and `\r`
-// are allowed there. Every other control character is refused in both: the
-// C0 controls below U+0020, DEL (U+007F) and the C1 controls U+0080 to U+009F.
-fn holds_control(text: Str, keeps_line_breaks: Bool) -> Bool {
+// Whether `text` holds a character that does not belong in a signature. A
+// name is one line, so it holds no control character. A message comes from a
+// `<textarea>`, whose tabs and line breaks are kept: `\t` and `\n` are allowed
+// there, after `with_lf_line_breaks` has turned every CR into LF. Refused in
+// both are the C0 controls below U+0020, DEL (U+007F), the C1 controls U+0080
+// to U+009F, the line and paragraph separators U+2028 and U+2029, the
+// bidirectional controls U+200E, U+200F, U+202A to U+202E and U+2066 to U+2069,
+// which can make a name display reversed, and the byte order mark U+FEFF.
+fn holds_disallowed_character(text: Str, keeps_line_breaks: Bool) -> Bool {
     for scalar in text.scalars() {
         let value = scalar.value
-        let is_line_break_or_tab = value == 9 || value == 10 || value == 13
-        if value < 32 && !(keeps_line_breaks && is_line_break_or_tab) {
+        if value < 32 {
+            if !(keeps_line_breaks && (value == 9 || value == 10)) {
+                return true
+            }
+        } else if value >= 127 && value <= 159 {
             return true
-        }
-        if value >= 127 && value <= 159 {
+        } else if value == 8206 || value == 8207 || (value >= 8232 && value <= 8238) || (value >= 8294 && value <= 8297) || value == 65279 {
             return true
         }
     }
     false
+}
+
+// A browser sends each line break in a `<textarea>` as CRLF, and the form's
+// `maxlength` counts it as one character. `with_lf_line_breaks` writes every
+// CRLF, and every lone CR, as LF, so a message is counted and stored with one
+// character per line break.
+fn with_lf_line_breaks[A: Allocator](allocator: A, text: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
+    defer var written = String.new_in(allocator)
+    var start: UInt64 = 0
+    var at: UInt64 = 0
+    while at < text.length() {
+        if text.byte(at).unwrap() == 13 {
+            &written.append(text.slice(start, at).unwrap())?
+            &written.append("\n")?
+            at += 1
+            if at < text.length() && text.byte(at).unwrap() == 10 {
+                at += 1
+            }
+            start = at
+        } else {
+            at += 1
+        }
+    }
+    &written.append(text.slice(start, text.length()).unwrap())?
+    .Ok(written)
 }
 
 // Read the database file's path from `GUEST_BOOK_DATABASE`, without the spaces
@@ -175,14 +206,15 @@ fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Re
         return .Err(http.error(request, .Forbidden, "a signature is accepted only from this guest book's own page"))
     }
     let name = form.value.name.trim_ascii()
-    let message = form.value.message.trim_ascii()
+    let message_text = with_lf_line_breaks(request.allocator(), form.value.message.trim_ascii())?
+    let message = message_text.view()
     if name.length() == 0 || message.length() == 0 {
         return .Err(http.error(request, .UnprocessableContent, "a signature needs a name and a message"))
     }
     if name.scalars().count() > longest_name || message.scalars().count() > longest_message {
         return .Err(http.error(request, .UnprocessableContent, "a name holds at most {longest_name} characters and a message {longest_message}"))
     }
-    if holds_control(name, keeps_line_breaks: false) || holds_control(message, keeps_line_breaks: true) {
+    if holds_disallowed_character(name, keeps_line_breaks: false) || holds_disallowed_character(message, keeps_line_breaks: true) {
         return .Err(http.error(request, .UnprocessableContent, "a name holds no control characters, and a message only line breaks and tabs"))
     }
     let _ = &app.book.sign(name, message) else |error| {
@@ -342,7 +374,7 @@ test fn the_longest_non_ascii_signature_fits_the_body_limit() {
     .Ok(())
 }
 
-test fn control_characters_are_refused_and_line_breaks_in_a_message_are_kept() {
+test fn control_and_format_characters_are_refused_and_line_breaks_in_a_message_are_kept() {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router).unwrap()
     defer var app = App.in_memory().unwrap()
@@ -359,6 +391,14 @@ test fn control_characters_are_refused_and_line_breaks_in_a_message_are_kept() {
         "name=a%C2%85b&message=hi",
         "name=Ada&message=a%C2%9Fb",
         "name=Ada&message=a%C2%80b",
+        "name=a%E2%80%AEb&message=hi",
+        "name=a%E2%80%8Fb&message=hi",
+        "name=a%E2%81%A6b&message=hi",
+        "name=a%EF%BB%BFb&message=hi",
+        "name=a%E2%80%A8b&message=hi",
+        "name=Ada&message=a%E2%80%A9b",
+        "name=Ada&message=a%E2%80%AAb",
+        "name=Ada&message=a%E2%80%8Eb",
     ]
     for read body in refused_bodies {
         var sent = http.new_request(arena.handle(), "POST", "/sign", body: body, content_type: "application/x-www-form-urlencoded").unwrap()
@@ -370,14 +410,36 @@ test fn control_characters_are_refused_and_line_breaks_in_a_message_are_kept() {
         testing.assert_eq(refused.status(), http.Status.UnprocessableContent, "the status was not 422")?
     }
 
-    var lines = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=one%0D%0Atwo%09three", content_type: "application/x-www-form-urlencoded").unwrap()
+    // A browser sends a line break as CRLF; the message stores it as LF, as
+    // it stores a lone CR.
+    var lines = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=one%0D%0Atwo%09three%0Dfour", content_type: "application/x-www-form-urlencoded").unwrap()
     &lines.add_header("Host", "example.test").unwrap()
     let accepted = &router.serve_http(&app, lines.request()).unwrap()
     testing.assert_eq(accepted.status(), http.Status.SeeOther, "a message with line breaks and a tab was refused")?
     var get = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
     let home_page = &router.serve_http(&app, get.request()).unwrap()
     let html_body = home_page.text().unwrap()
-    testing.assert(html_body.find("<p>one\r\ntwo\tthree</p>").is_some(), "the message lost its line break or tab")?
+    testing.assert(html_body.find("<p>one\ntwo\tthree\nfour</p>").is_some(), "the message did not keep its line breaks as LF and its tab")?
+    .Ok(())
+}
+
+test fn a_line_break_counts_once_towards_the_message_limit() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    defer var app = App.in_memory().unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 131072)
+
+    // 250 lines of `a`, each ended by the CRLF a browser sends, are 500
+    // characters as the form's `maxlength` counts them.
+    defer var body = String.new()
+    &body.append("name=Ada&message=").unwrap()
+    for _ in 0..250 {
+        &body.append("a%0D%0A").unwrap()
+    }
+    var lines = http.new_request(arena.handle(), "POST", "/sign", body: body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
+    &lines.add_header("Host", "example.test").unwrap()
+    let accepted = &router.serve_http(&app, lines.request()).unwrap()
+    testing.assert_eq(accepted.status(), http.Status.SeeOther, "a message of 500 characters with CRLF line breaks was refused")?
     .Ok(())
 }
 

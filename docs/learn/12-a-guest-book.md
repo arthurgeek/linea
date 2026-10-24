@@ -417,28 +417,63 @@ answers one connection at a time, every request shares that connection.
 `http.Form[Signature]`. Before touching the database, `sign` in
 `examples/guest-book/main.lin` checks `http.same_origin`, verifies that the
 trimmed name and message fit the scalar limits, and refuses control characters
-with `holds_control`. A name is one line, so it may hold none; a message comes
-from a `<textarea>`, so its line breaks and tabs are kept, and the page shows
-them with `white-space: pre-wrap`:
+with `holds_disallowed_character`. A name is one line, so it may hold none; a
+message comes from a `<textarea>`, so its line breaks and tabs are kept, and
+the page shows them with `white-space: pre-wrap`. Bidirectional controls such
+as U+202E, which would make a name display reversed, are refused in both. A
+browser sends each line break as CRLF but its `maxlength` counts it once, so
+`with_lf_line_breaks` turns every CRLF and lone CR into LF before the message
+is counted and stored:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
-// A name is one line, so it holds no control character. A message comes from
-// a `<textarea>`, whose line breaks and tabs are kept: `\t`, `\n` and `\r`
-// are allowed there. Every other control character is refused in both: the
-// C0 controls below U+0020, DEL (U+007F) and the C1 controls U+0080 to U+009F.
-fn holds_control(text: Str, keeps_line_breaks: Bool) -> Bool {
+// Whether `text` holds a character that does not belong in a signature. A
+// name is one line, so it holds no control character. A message comes from a
+// `<textarea>`, whose tabs and line breaks are kept: `\t` and `\n` are allowed
+// there, after `with_lf_line_breaks` has turned every CR into LF. Refused in
+// both are the C0 controls below U+0020, DEL (U+007F), the C1 controls U+0080
+// to U+009F, the line and paragraph separators U+2028 and U+2029, the
+// bidirectional controls U+200E, U+200F, U+202A to U+202E and U+2066 to U+2069,
+// which can make a name display reversed, and the byte order mark U+FEFF.
+fn holds_disallowed_character(text: Str, keeps_line_breaks: Bool) -> Bool {
     for scalar in text.scalars() {
         let value = scalar.value
-        let is_line_break_or_tab = value == 9 || value == 10 || value == 13
-        if value < 32 && !(keeps_line_breaks && is_line_break_or_tab) {
+        if value < 32 {
+            if !(keeps_line_breaks && (value == 9 || value == 10)) {
+                return true
+            }
+        } else if value >= 127 && value <= 159 {
             return true
-        }
-        if value >= 127 && value <= 159 {
+        } else if value == 8206 || value == 8207 || (value >= 8232 && value <= 8238) || (value >= 8294 && value <= 8297) || value == 65279 {
             return true
         }
     }
     false
+}
+
+// A browser sends each line break in a `<textarea>` as CRLF, and the form's
+// `maxlength` counts it as one character. `with_lf_line_breaks` writes every
+// CRLF, and every lone CR, as LF, so a message is counted and stored with one
+// character per line break.
+fn with_lf_line_breaks[A: Allocator](allocator: A, text: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
+    defer var written = String.new_in(allocator)
+    var start: UInt64 = 0
+    var at: UInt64 = 0
+    while at < text.length() {
+        if text.byte(at).unwrap() == 13 {
+            &written.append(text.slice(start, at).unwrap())?
+            &written.append("\n")?
+            at += 1
+            if at < text.length() && text.byte(at).unwrap() == 10 {
+                at += 1
+            }
+            start = at
+        } else {
+            at += 1
+        }
+    }
+    &written.append(text.slice(start, text.length()).unwrap())?
+    .Ok(written)
 }
 ```
 
@@ -451,14 +486,15 @@ fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Re
         return .Err(http.error(request, .Forbidden, "a signature is accepted only from this guest book's own page"))
     }
     let name = form.value.name.trim_ascii()
-    let message = form.value.message.trim_ascii()
+    let message_text = with_lf_line_breaks(request.allocator(), form.value.message.trim_ascii())?
+    let message = message_text.view()
     if name.length() == 0 || message.length() == 0 {
         return .Err(http.error(request, .UnprocessableContent, "a signature needs a name and a message"))
     }
     if name.scalars().count() > longest_name || message.scalars().count() > longest_message {
         return .Err(http.error(request, .UnprocessableContent, "a name holds at most {longest_name} characters and a message {longest_message}"))
     }
-    if holds_control(name, keeps_line_breaks: false) || holds_control(message, keeps_line_breaks: true) {
+    if holds_disallowed_character(name, keeps_line_breaks: false) || holds_disallowed_character(message, keeps_line_breaks: true) {
         return .Err(http.error(request, .UnprocessableContent, "a name holds no control characters, and a message only line breaks and tabs"))
     }
     let _ = &app.book.sign(name, message) else |error| {
@@ -478,7 +514,8 @@ The server reads a whole body before `sign` runs, so the body limit must admit
 every form the page can send. `limits` derives it from the field limits: a
 browser writes each byte of a non-ASCII character as `%XX`, and a character is
 at most four bytes of UTF-8, so the longest form is `name=&message=` and 560
-characters of 12 bytes each, 6734 bytes. A client that pads the fields with
+characters of 12 bytes each, 6734 bytes. A line break counts as one character
+and is sent as `%0D%0A`, 6 bytes, so it stays within that bound. A client that pads the fields with
 spaces past that size is refused with 413, which is safe, because no form the
 page produces is that large:
 
@@ -628,6 +665,7 @@ needs:
   `Page` streams the template and entries directly into `http.html` with every
   visitor string HTML-escaped and timestamps formatted as RFC 3339.
 - `limits` derives the body limit from the field limits, so every form the page
-  sends fits, and `holds_control` keeps control characters out of a signature.
+  sends fits, and `holds_disallowed_character` keeps control and bidirectional
+  characters out of a signature.
 - `http.listen_and_serve` runs `http.Router[App]` and its routes, returning
   `App` on completion so `close()` closes the book.
