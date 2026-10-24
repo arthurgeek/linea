@@ -3845,8 +3845,8 @@ together, so the nine may name `(Idle, Unset)` before every missing value that
 goes with `Off`. A variant whose payload the
 pattern would leave unnamed is written bare. A variant remains in the exhaustive
 set when its payload contains `Never` or an enum declaring no variants;
-`Option[Never]` must still account for `Some`. Text, a type parameter and any other type no pattern takes apart are
-covered only by a binder or `_`.
+`Option[Never]` must still account for `Some`. Text, a type parameter and any
+other type no pattern takes apart are covered only by a binder or `_`.
 
 Coverage is decided in one pass over the arms (Maranget's usefulness): it
 answers, for each arm, whether some value matches it and no arm before it, and
