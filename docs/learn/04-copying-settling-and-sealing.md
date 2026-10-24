@@ -701,7 +701,7 @@ error[O-Merge]: the paths here disagree about `ticket`
 doors stay shut, what happens to the ticket? Say so with a second ending,
 `refund`, and an `else` that calls it, and the program compiles:
 
-<!-- guide: edit after 11 } -->
+<!-- guide: edit end -->
 ```linea
 fn refund(sink ticket: Ticket) -> Result[(), io.IoError] {
     let Ticket { seat } = ticket
@@ -709,13 +709,10 @@ fn refund(sink ticket: Ticket) -> Result[(), io.IoError] {
 }
 ```
 
-<!-- guide: edit 16-18 if doors_open { … } -->
+<!-- guide: edit after 17 redeem(ticket)? -->
 ```linea
-    if doors_open {
-        redeem(ticket)?
     } else {
         refund(ticket)?
-    }
 ```
 
 ```
@@ -853,11 +850,12 @@ cents. Her second is not, so its 1500 cents return to her.
 Forget the `rollback` branch and the money would leave Alice's account without
 reaching anyone. That program does not compile:
 
-<!-- guide: edit 37-41 Some(transfer) => if approved { … }, -->
+<!-- guide: edit 37-42 Some(transfer) => if approved { … None => {}, -->
 ```linea
         Some(transfer) => if approved {
             commit(transfer, &to)
         },
+        None => {},
 ```
 
 ```
@@ -1115,7 +1113,7 @@ If every path takes the value, the `defer` can never run, and that is a
 mistake worth hearing about. Replace `tidy` with this version, which archives
 every note:
 
-<!-- guide: edit 16-24 fn tidy(sink note: Note) -> Result[(), io.IoError] { … } -->
+<!-- guide: edit fn tidy -->
 ```linea
 fn tidy(sink note: Note) -> Result[(), io.IoError] {
     defer note.release()
@@ -1253,7 +1251,7 @@ the arms to agree. There are two ways to make them agree. The `?` form above
 leaves the function before the commit when the check fails. Or the committing
 arm can leave the function itself:
 
-<!-- guide: edit 20-28 fn send(cents: UInt64, limit: UInt64) -> UInt64 { … } -->
+<!-- guide: edit fn send -->
 ```linea
 fn send(cents: UInt64, limit: UInt64) -> UInt64 {
     let transfer = Transfer { cents }

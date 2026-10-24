@@ -99,15 +99,20 @@ until it is green.
   `linea check` and never runs it; the output after it is compared when it
   shows diagnostics, and is otherwise what a run prints, held to the wording
   rule below. Every other `linea` block is a fragment, checked one of three
-  ways. `<!-- guide: edit [PATH] N TEXT | N-M TEXT … TEXT | after N TEXT -->`
+  ways. `<!-- guide: edit [PATH] N TEXT | N-M TEXT … TEXT | after N TEXT | fn NAME | end -->`
   above it replaces line N or lines N-M of the nearest program above, or
   inserts after line N, counting lines as that program is pasted; with PATH it
   edits that file of the nearest program above that has one, which a project
   needs. Each TEXT is the whole line it names, trimmed: line N, and for a
-  range also line M after ` … `, so a number that names another line fails.
-  A line too long to write out may be given by its start followed by `…`, at
-  least eight characters and not only punctuation. `after 0`, the top of the
-  file, names no line and takes no text. Consecutive
+  range also line M after ` … `, and it must match that line alone in the
+  file, so a number that names another line fails and a `}` that closes two
+  blocks names neither. A line too long to write out may be given by its
+  start followed by `…`, at least eight characters and not only punctuation.
+  Where the line to name is not distinctive, the edit names a neighbouring
+  line that is, or `<!-- guide: edit [PATH] fn NAME -->` replaces the
+  function `fn NAME`, from its line to the `}` that ends it at the start of a
+  line, and `<!-- guide: edit [PATH] end -->` appends to the file. `after 0`,
+  the top of the file, names no line and takes no text. Consecutive
   edit blocks apply together, and the output after the last is what the
   edited program prints; an edit of a `check` program is only checked too.
   An edit that writes back the lines it replaces, or whose nearest program

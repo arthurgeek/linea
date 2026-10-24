@@ -1110,6 +1110,11 @@ const Edit = struct {
     anchor: ?Anchor,
     /// The last line a range replaces, after ` … `.
     last_anchor: ?Anchor,
+    /// `fn NAME`: the function the edit replaces, from its line to the `}`
+    /// that ends it at the start of a line.
+    declaration: ?[]const u8 = null,
+    /// `end`: the edit goes after the file's last line.
+    at_end: bool = false,
 };
 
 /// The text an edit gives for a line it names: the whole line, trimmed, or
@@ -1161,6 +1166,14 @@ fn editMarker(gpa: std.mem.Allocator, words: *std.mem.TokenIterator(u8, .any)) ?
         if (word[0] == '/') return null;
         path = word;
         word = words.next() orelse return null;
+    }
+    if (std.mem.eql(u8, word, "end") or std.mem.eql(u8, word, "fn")) {
+        var lines: Edit = .{ .path = path, .start = 0, .count = 0, .anchor = null, .last_anchor = null };
+        if (std.mem.eql(u8, word, "end")) {
+            lines.at_end = true;
+        } else lines.declaration = words.next() orelse return null;
+        if (words.next() != null) return null;
+        return .{ .edit = lines };
     }
     var lines: Edit = undefined;
     var ranged = false;
@@ -1830,7 +1843,7 @@ fn applyEdits(
     };
     var failed = false;
     for (run, 0..) |fence, order| {
-        const edit = fence.edit().?;
+        var edit = fence.edit().?;
         const file: usize = if (edit.path) |path| found: {
             for (base.files, 0..) |candidate, at| if (std.mem.eql(u8, candidate.path, path)) break :found at;
             problems.append(gpa, .{
@@ -1850,6 +1863,25 @@ fn applyEdits(
             continue;
         };
         const length = std.mem.count(u8, base.files[file].text, "\n") + 1;
+        if (edit.at_end) edit.start = length;
+        if (edit.declaration) |name| {
+            if (declarationLines(base.files[file].text, name)) |lines| {
+                edit.start = lines.start;
+                edit.count = lines.count;
+            } else {
+                problems.append(gpa, .{
+                    .chapter = chapter.file,
+                    .line = fence.line,
+                    .message = std.fmt.allocPrint(
+                        gpa,
+                        "`{s}` has no one function `fn {s}` at the start of a line, closed by a `}}` at the start of a later line, for the edit to replace",
+                        .{ base.files[file].path, name },
+                    ) catch @panic("out of memory"),
+                }) catch @panic("out of memory");
+                failed = true;
+                continue;
+            }
+        }
         if (edit.start + edit.count > length) {
             problems.append(gpa, .{
                 .chapter = chapter.file,
@@ -1869,7 +1901,22 @@ fn applyEdits(
         const anchored = for (anchors) |anchor| {
             const want = anchor.text orelse continue;
             const have = std.mem.trim(u8, lineAt(base.files[file].text, anchor.line), " \t\r");
-            if (want.matches(have)) continue;
+            if (want.matches(have)) {
+                // A line another line repeats, such as `}`, cannot say which
+                // of them the number means.
+                const others = matchingLines(gpa, base.files[file].text, want);
+                if (others.len == 1) continue;
+                problems.append(gpa, .{
+                    .chapter = chapter.file,
+                    .line = fence.line,
+                    .message = std.fmt.allocPrint(
+                        gpa,
+                        "the anchor `{s}{s}` matches lines {s} of `{s}`, so it cannot tell which one the edit means; anchor the edit on a line no other repeats, or write `fn NAME` to replace a function or `end` to append",
+                        .{ want.text, if (want.prefix) "…" else "", listNumbers(gpa, others), base.files[file].path },
+                    ) catch @panic("out of memory"),
+                }) catch @panic("out of memory");
+                break false;
+            }
             problems.append(gpa, .{
                 .chapter = chapter.file,
                 .line = fence.line,
@@ -1962,6 +2009,53 @@ fn applyEdits(
     }
     if (failed) return null;
     return .{ .files = files, .blocks = blocks.toOwnedSlice(gpa) catch @panic("out of memory") };
+}
+
+/// The 1-based numbers of the lines of `text` that `anchor` matches.
+fn matchingLines(gpa: std.mem.Allocator, text: []const u8, anchor: Anchor) []const usize {
+    var found: std.ArrayList(usize) = .empty;
+    var split = std.mem.splitScalar(u8, text, '\n');
+    var at: usize = 1;
+    while (split.next()) |line| : (at += 1) {
+        if (anchor.matches(line)) found.append(gpa, at) catch @panic("out of memory");
+    }
+    return found.items;
+}
+
+/// `3 and 7`, or `3, 5 and 7`.
+fn listNumbers(gpa: std.mem.Allocator, numbers: []const usize) []const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (numbers, 0..) |number, at| {
+        if (at > 0) out.appendSlice(gpa, if (at + 1 == numbers.len) " and " else ", ") catch @panic("out of memory");
+        out.print(gpa, "{d}", .{number}) catch @panic("out of memory");
+    }
+    return out.items;
+}
+
+/// The 0-based first line and the line count of the one function `fn name`
+/// that opens a line of `text`, through the next line that is `}` alone, or
+/// null when there is not exactly one.
+fn declarationLines(text: []const u8, name: []const u8) ?struct { start: usize, count: usize } {
+    var start: ?usize = null;
+    var end: ?usize = null;
+    var split = std.mem.splitScalar(u8, text, '\n');
+    var at: usize = 0;
+    while (split.next()) |raw| : (at += 1) {
+        const line = std.mem.trimEnd(u8, raw, " \t\r");
+        if (start != null and end == null and std.mem.eql(u8, line, "}")) end = at;
+        var rest = line;
+        for ([_][]const u8{ "pub ", "internal " }) |modifier| {
+            if (std.mem.startsWith(u8, rest, modifier)) rest = rest[modifier.len..];
+        }
+        if (!std.mem.startsWith(u8, rest, "fn ") or !std.mem.startsWith(u8, rest[3..], name)) continue;
+        const after = rest[3 + name.len ..];
+        if (after.len == 0 or (after[0] != '(' and after[0] != '[')) continue;
+        if (start != null) return null;
+        start = at;
+    }
+    const first = start orelse return null;
+    const last = end orelse return null;
+    return .{ .start = first, .count = last - first + 1 };
 }
 
 /// The 0-based line `index` of `text`, or the empty string past its end.

@@ -2581,6 +2581,89 @@ test "the guide gate: an edit's anchor holds its line number to the line it mean
     try testing.expectEqual(@as(usize, 1), insertion.problems.len);
 }
 
+test "the guide gate: an anchor names one line of its file, and a declaration or the end names itself" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const program =
+        \\```linea
+        \\fn twice(n: UInt8) -> UInt8 {
+        \\    n * 2
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    twice(0)
+        \\}
+        \\```
+        \\
+    ;
+    // `}` closes both functions, so it cannot say which one line 3 is.
+    const shared = readFixture(gpa, program ++
+        \\<!-- guide: edit 3 } -->
+        \\```linea
+        \\}
+        \\fn thrice(n: UInt8) -> UInt8 { n * 3 }
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), shared.problems.len);
+    try testing.expectEqual(@as(usize, 11), shared.problems[0].line);
+    try testing.expect(std.mem.indexOf(u8, shared.problems[0].message, "lines 3 and 7") != null);
+
+    // A short line that no other line repeats names itself.
+    const unique = readFixture(gpa, program ++
+        \\<!-- guide: edit 6 twice(0) -->
+        \\```linea
+        \\    twice(1)
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), unique.problems.len);
+
+    // `fn NAME` replaces that function, from its line to the `}` that ends
+    // it at the start of a line.
+    const declaration = readFixture(gpa, program ++
+        \\<!-- guide: edit fn twice -->
+        \\```linea
+        \\fn twice(n: UInt8) -> UInt8 {
+        \\    n + n
+        \\}
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), declaration.problems.len);
+    try testing.expectEqualStrings(
+        \\fn twice(n: UInt8) -> UInt8 {
+        \\    n + n
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    twice(0)
+        \\}
+    , declaration.programs[1].files[0].text);
+    const no_such = readFixture(gpa, program ++
+        \\<!-- guide: edit fn thrice -->
+        \\```linea
+        \\fn thrice(n: UInt8) -> UInt8 { n * 3 }
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), no_such.problems.len);
+    try testing.expect(std.mem.indexOf(u8, no_such.problems[0].message, "fn thrice") != null);
+
+    // `end` appends to the file, and names no line.
+    const appended = readFixture(gpa, program ++
+        \\<!-- guide: edit end -->
+        \\```linea
+        \\fn thrice(n: UInt8) -> UInt8 { n * 3 }
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), appended.problems.len);
+    try testing.expect(std.mem.endsWith(u8, appended.programs[1].files[0].text, "}\nfn thrice(n: UInt8) -> UInt8 { n * 3 }"));
+}
+
 test "the guide gate: an edit marker must name lines of a program above it" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();

@@ -541,7 +541,7 @@ not observed, so the caller can point it at another room, as
 `selected = borrow studio` does. The hall it pointed *into* is what has to stay
 put. Rename the hall while the dashboard still shows it:
 
-<!-- guide: edit 35-36 selected = borrow studio … io.println("showing the… -->
+<!-- guide: edit 35-36 selected = borrow studio … io.println("showing the {dashboard.shown.name}, selected… -->
 ```linea
     selected = borrow studio
     // Renaming the hall is refused, because the dashboard shows it.
@@ -598,7 +598,7 @@ Three different things, and the difference tells you what the clauses are for.
 value is never inferred, not even when there is only one parameter it could
 mean. Take the clause off `label`:
 
-<!-- guide: edit station.lin 10-12 fn label(station: Station) -> Str where borrows(station) { … } -->
+<!-- guide: edit station.lin fn label -->
 ```linea
 fn label(station: Station) -> Str {
     station.name.view()
