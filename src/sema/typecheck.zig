@@ -5771,12 +5771,9 @@ const Checker = struct {
     /// answers to that result as a later `return` does.
     inferred_body: ExprId = .none,
     /// The `?`s of that closure reached before anything settled its result,
-    /// each checked against the result once its body is checked.
-    deferred_tries: ?*std.ArrayList(ExprId) = null,
-    /// Inside a closure that writes no result and has no expected one, the
-    /// `?`s whose answer its body decides: each gives its payload, and is
-    /// reported once the body's type is known. Null elsewhere.
-    unanswered_tries: ?*std.ArrayList(UnansweredTry) = null,
+    /// each giving its payload and checked against the result once its body
+    /// is checked. Null elsewhere.
+    deferred_tries: ?*std.ArrayList(UnansweredTry) = null,
     /// The `return`s of the body being checked, outside the closures in it,
     /// which a fix changing what the body answers with rewrites. Null where
     /// no body is being checked.
@@ -17994,9 +17991,7 @@ const Checker = struct {
 
         const want = self.returnAnswer() orelse {
             if (self.deferred_tries) |deferred| {
-                try deferred.append(self.gpa, id);
-            } else if (self.unanswered_tries) |pending| {
-                try pending.append(self.gpa, .{ .id = id, .operand = t, .carrier = carrier, .statement = self.statementAt(id) });
+                try deferred.append(self.gpa, .{ .id = id, .statement = self.statementAt(id) });
             } else return self.report(
                 .t_try_answer,
                 id,
@@ -18008,32 +18003,33 @@ const Checker = struct {
         };
 
         if (want.inference != null and self.deferred_tries != null) {
-            try self.deferred_tries.?.append(self.gpa, id);
+            try self.deferred_tries.?.append(self.gpa, .{ .id = id, .statement = self.statementAt(id) });
         } else {
-            if (!try self.answerTry(id, t, carrier, want.ty)) return self.record(id, .poison);
+            if (!try self.answerTry(id, t, carrier, want.ty, .function, self.statementAt(id))) return self.record(id, .poison);
         }
 
         return self.expect(id, self.payloadTypeOf(carrier), expected);
     }
 
     /// Whether a `?` over `t` may return through an answer of type `answer`,
-    /// reporting why not where it may not.
-    fn answerTry(self: *Checker, id: ExprId, t: TypeId, carrier: Carrier, answer: TypeId) std.mem.Allocator.Error!bool {
+    /// given by `answerer`, reporting why not where it may not. `where` is the
+    /// statement the `?` is the whole value of, where it is one.
+    fn answerTry(self: *Checker, id: ExprId, t: TypeId, carrier: Carrier, answer: TypeId, answerer: TryAnswerer, where: ?StatementValue) std.mem.Allocator.Error!bool {
         // The payload types are free to differ: the failing path of an
         // `Option` carries nothing, so nothing about a payload reaches the
         // caller. A `Result`'s failing path carries an error that does, which
         // is the whole of the asymmetry.
         const answers = self.carrierOf(answer);
         if (answers == null) {
-            _ = try self.reportTryWithoutCarrier(id, t, carrier, answer, .function, self.statementAt(id));
+            _ = try self.reportTryWithoutCarrier(id, t, carrier, answer, answerer, where);
             return false;
         }
         if (answers.?.kind != carrier.kind) {
             _ = self.report(
                 .t_try_answer,
                 id,
-                "this `?` may return `{s}`, and the function answers with `{s}`",
-                .{ (try self.typeName(t)), (try self.typeName(answer)) },
+                "this `?` may return `{s}`, and the {s} answers with `{s}`",
+                .{ (try self.typeName(t)), @tagName(answerer), (try self.typeName(answer)) },
                 "`?` returns from the function it is written in",
             );
             return false;
@@ -18128,9 +18124,10 @@ const Checker = struct {
         return true;
     }
 
-    /// A `?` a closure without a written result met, reported once its body
-    /// decided what the closure answers with.
-    const UnansweredTry = struct { id: ExprId, operand: TypeId, carrier: Carrier, statement: ?StatementValue };
+    /// A `?` a closure met before anything settled its result, checked once
+    /// its body decided what the closure answers with, and the statement it
+    /// is the whole value of, where it is one.
+    const UnansweredTry = struct { id: ExprId, statement: ?StatementValue };
 
     /// What answers a `?`: the function it is written in, or a closure whose
     /// result its body decided.
@@ -20543,10 +20540,8 @@ const Checker = struct {
         // With no result type written or given, the closure's `return`s and
         // its body's value settle it together.
         var inferred_return: ?Expected = null;
-        var deferred_tries: std.ArrayList(ExprId) = .empty;
+        var deferred_tries: std.ArrayList(UnansweredTry) = .empty;
         defer deferred_tries.deinit(self.gpa);
-        var unanswered: std.ArrayList(UnansweredTry) = .empty;
-        defer unanswered.deinit(self.gpa);
         var lambda_returns: std.ArrayList(ExprId) = .empty;
         defer lambda_returns.deinit(self.gpa);
         var lambda_fixes: std.ArrayList(AnswerFix) = .empty;
@@ -20563,19 +20558,16 @@ const Checker = struct {
             const previous_body = self.inferred_body;
             const previous_tries = self.deferred_tries;
             const previous_failure = self.failure_expected;
-            const previous_unanswered = self.unanswered_tries;
             self.current_return = result_expected;
             self.inferred_return = if (result_expected == null) &inferred_return else null;
             self.inferred_body = if (result_expected == null) lambda.body else .none;
             self.deferred_tries = if (result_expected == null or result_expected.?.inference != null) &deferred_tries else null;
             self.failure_expected = null;
-            self.unanswered_tries = if (result_expected == null) &unanswered else null;
             defer self.current_return = previous_return;
             defer self.inferred_return = previous_inferred;
             defer self.inferred_body = previous_body;
             defer self.deferred_tries = previous_tries;
             defer self.failure_expected = previous_failure;
-            defer self.unanswered_tries = previous_unanswered;
             // A closure's body is a function of its own: a `break` or
             // `continue` in it has no loop to leave, and its `return` and `?`
             // leave the closure rather than the loops around it.
@@ -20613,26 +20605,21 @@ const Checker = struct {
             const solved = try self.callableContext(want.ty, settling);
             break :solved if (self.hasOpenParameter(solved, settling)) TypeId.never else solved;
         } else result else result;
-        for (deferred_tries.items) |at| {
-            const tried = self.builder.exprType(self.ast.unaryOperand(at));
+        for (deferred_tries.items) |pending| {
+            // Read again: what the operand left open, the body may since have settled.
+            const tried = self.builder.exprType(self.ast.unaryOperand(pending.id));
             const carrier = self.carrierOf(tried) orelse continue;
             if (answered == .poison) continue;
             if (answered == .never) {
                 _ = self.report(
                     .t_try_answer,
-                    at,
+                    pending.id,
                     "this `?` may return `{s}`, and nothing says what the closure answers",
                     .{(try self.typeName(tried))},
                     "write the closure's result type, as `|...| -> Option[T]`, or `return` a value from it",
                 );
                 refused = true;
-            } else if (!try self.answerTry(at, tried, carrier, answered)) refused = true;
-        }
-        // A `?` hands a failure on only to a result that carries it, and the
-        // body decided that this closure's does not.
-        for (unanswered.items) |pending| {
-            _ = try self.reportTryWithoutCarrier(pending.id, pending.operand, pending.carrier, body_result, .closure, pending.statement);
-            refused = true;
+            } else if (!try self.answerTry(pending.id, tried, carrier, answered, .closure, pending.statement)) refused = true;
         }
         // A closure given its result by a callable type it is passed as
         // answers to that type, which the fix would not change.
