@@ -1,0 +1,5 @@
+// Nothing imports `ledger`, so the name before the dot is undefined. The
+// root holds a module of that name, and the quick fix writes its import.
+fn main() -> UInt8 {
+    ledger.size()
+}

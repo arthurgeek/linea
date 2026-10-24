@@ -336,6 +336,10 @@ pub const Program = struct {
     /// One row per loaded root, indexed by `RootId`; empty for a program
     /// assembled without the loader, which holds no dependency.
     roots: []const RootFacts = &.{},
+    /// The import route of every directory of the root's own holding sources
+    /// that no import loaded, so a help can offer the import that loads one.
+    /// Empty for a program assembled without the loader. Owned.
+    unloaded_routes: []const []const u8 = &.{},
     /// Whether the entry is a module a named file selected rather than the
     /// root's own module. Such a module need declare no `main` to be
     /// checked; running it needs one.
@@ -495,6 +499,8 @@ pub const Program = struct {
         }
         for (self.import_routes) |route| gpa.free(route);
         gpa.free(self.import_routes);
+        for (self.unloaded_routes) |route| gpa.free(route);
+        gpa.free(self.unloaded_routes);
         for (self.roots) |r| {
             gpa.free(r.name);
             gpa.free(r.dir);
