@@ -1304,6 +1304,14 @@ test "the guide's chapters are the numbered files its index links to, in its ord
     try testing.expectEqualStrings("01-linea-in-an-hour.md", chapters[0].file);
     try testing.expectEqualStrings("Errors", chapters[1].name);
     try testing.expectEqualStrings("03-errors.md", chapters[1].file);
+
+    // The gate reads the appendices beside the chapters too.
+    const pages = source.guidePages(gpa, index);
+    try testing.expectEqual(@as(usize, 3), pages.len);
+    try testing.expectEqualStrings("01-linea-in-an-hour.md", pages[0].file);
+    try testing.expectEqualStrings("03-errors.md", pages[1].file);
+    try testing.expectEqualStrings("errors.md", pages[2].file);
+    try testing.expectEqualStrings("Errors the guide shows", pages[2].name);
 }
 
 test "a heading's anchor is the one GitHub gives it" {
@@ -2006,7 +2014,9 @@ test "the guide gate: a data block with no program after it is reported" {
         \\
     );
     try testing.expectEqual(@as(usize, 1), before_a_fragment.problems.len);
-    try testing.expectEqual(@as(usize, 0), before_a_fragment.programs.len);
+    try testing.expectEqual(@as(usize, 1), before_a_fragment.programs.len);
+    try testing.expectEqual(source.GuideSource.fragment, before_a_fragment.programs[0].source);
+    try testing.expectEqual(@as(usize, 2), before_a_fragment.programs[0].files.len);
 }
 
 test "the guide gate: a line naming something other than a .lin file above a Linea block is prose, and the block is compiled" {
@@ -2151,33 +2161,303 @@ test "the guide gate: a labelled manifest and C source join the project" {
     try testing.expectEqualStrings("tally", reading.programs[0].target);
 }
 
-test "the guide gate: a fragment passes uncounted as a program, and a fragment with output is refused" {
+test "the guide gate: an unmarked fragment is checked alone as the root file of a library" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
 
     const bare = readFixture(gpa,
         \\```linea
-        \\let x = 1
+        \\pub fn twice(n: UInt64) -> UInt64 {
+        \\    n * 2
+        \\}
         \\```
         \\
     );
     try testing.expectEqual(@as(usize, 0), bare.problems.len);
-    try testing.expectEqual(@as(usize, 0), bare.programs.len);
-    try testing.expectEqual(@as(usize, 1), bare.fragments);
+    try testing.expectEqual(@as(usize, 1), bare.programs.len);
+    const alone = bare.programs[0];
+    try testing.expectEqual(source.GuideSource.fragment, alone.source);
+    try testing.expectEqual(source.GuideCommand.check, alone.command);
+    try testing.expectEqualStrings("fragment.lin", alone.target);
+    try testing.expectEqual(@as(usize, 2), alone.files.len);
+    try testing.expectEqualStrings("fragment.lin", alone.files[0].path);
+    try testing.expectEqualStrings("linea.json", alone.files[1].path);
+    try testing.expect(std.mem.indexOf(u8, alone.files[1].text, "\"library\"") != null);
+    try testing.expect(std.mem.indexOf(u8, alone.files[1].text, "\"fragment\"") != null);
+    try testing.expect(source.judgeGuideProgram(gpa, alone, "", true) == null);
 
-    const refused = readFixture(gpa,
+    // Output pasted after a fragment is what checking it alone prints, and
+    // the file it names is the file the fragment is written to.
+    const with_output = readFixture(gpa,
+        \\```linea
+        \\@sealed
+        \\struct Ticket {}
+        \\```
+        \\
+        \\```
+        \\error[S-Entry]: attribute names are closed
+        \\ --> policies_closed.lin:1:2
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), with_output.problems.len);
+    try testing.expectEqual(@as(usize, 1), with_output.programs.len);
+    try testing.expectEqualStrings("policies_closed.lin", with_output.programs[0].target);
+    try testing.expect(std.mem.indexOf(u8, with_output.programs[0].files[1].text, "\"policies_closed\"") != null);
+    try testing.expectEqual(source.GuideCommand.check, with_output.programs[0].command);
+    try testing.expect(with_output.programs[0].expected != null);
+}
+
+test "the guide gate: an unmarked fragment that does not check names itself and the markers that place it" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const reading = readFixture(gpa,
+        \\Prose.
+        \\
+        \\```linea
+        \\let total = basket.length()
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), reading.programs.len);
+    const failure = source.judgeGuideProgram(gpa, reading.programs[0], "error[S-Parse]: expected a declaration\n", false).?;
+    try testing.expect(std.mem.indexOf(u8, failure, "01-fixture.md:3:") != null);
+    try testing.expect(std.mem.indexOf(u8, failure, "fragment") != null);
+    try testing.expect(std.mem.indexOf(u8, failure, "expected a declaration") != null);
+    try testing.expect(std.mem.indexOf(u8, failure, "<!-- guide: edit LINES -->") != null);
+    try testing.expect(std.mem.indexOf(u8, failure, "<!-- guide: excerpt PATH -->") != null);
+    try testing.expect(std.mem.indexOf(u8, failure, "<!-- guide: unchecked REASON -->") != null);
+}
+
+test "the guide gate: an edit marker applies the fragment to the program above and claims the output after it" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const reading = readFixture(gpa,
+        \\```linea
+        \\fn main() -> UInt8 {
+        \\    let a = 1
+        \\    let b = 2
+        \\    a + b
+        \\}
+        \\```
+        \\
+        \\Replace `b`, and add a line after it:
+        \\
+        \\<!-- guide: edit 3 -->
+        \\```linea
+        \\    let b = "two"
+        \\```
+        \\
+        \\<!-- guide: edit after 3 -->
+        \\```linea
+        \\    let c = b
+        \\```
+        \\
+        \\```
+        \\error[T-Mismatch]: expected `UInt8`, found `Str`
+        \\ --> two.lin:4:9
+        \\```
+        \\
+        \\A second edit of the same program, which must check:
+        \\
+        \\<!-- guide: edit 2-3 -->
+        \\```linea
+        \\    let a = 3
+        \\    let b = 4
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), reading.problems.len);
+    try testing.expectEqual(@as(usize, 3), reading.programs.len);
+
+    const edited = reading.programs[1];
+    try testing.expectEqual(source.GuideSource.edit, edited.source);
+    try testing.expectEqual(@as(usize, 12), edited.line);
+    try testing.expectEqualStrings("two.lin", edited.target);
+    try testing.expectEqual(source.GuideCommand.run, edited.command);
+    try testing.expectEqualStrings(
+        \\fn main() -> UInt8 {
+        \\    let a = 1
+        \\    let b = "two"
+        \\    let c = b
+        \\    a + b
+        \\}
+    , edited.files[0].text);
+    try testing.expectEqual(@as(usize, 21), edited.expected_line);
+
+    // Each run of edits starts again from the program as it is pasted.
+    const again = reading.programs[2];
+    try testing.expectEqual(source.GuideCommand.check, again.command);
+    try testing.expectEqualStrings(
+        \\fn main() -> UInt8 {
+        \\    let a = 3
+        \\    let b = 4
+        \\    a + b
+        \\}
+    , again.files[0].text);
+
+    const failure = source.judgeGuideProgram(gpa, again, "error[T-Mismatch]: no\n", false).?;
+    try testing.expect(std.mem.indexOf(u8, failure, "01-fixture.md:29:") != null);
+    try testing.expect(std.mem.indexOf(u8, failure, "edit") != null);
+}
+
+test "the guide gate: an edit of a project names the file it changes" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const reading = readFixture(gpa,
+        \\`shop/prices.lin`:
+        \\
+        \\```linea
+        \\pub fn price() -> UInt8 {
+        \\    3
+        \\}
+        \\```
+        \\
+        \\`shop/main.lin`:
+        \\
+        \\```linea
+        \\import prices
+        \\
+        \\fn main() -> UInt8 {
+        \\    prices.price()
+        \\}
+        \\```
+        \\
+        \\<!-- guide: edit shop/prices.lin 2 -->
+        \\```linea
+        \\    4
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), reading.problems.len);
+    try testing.expectEqual(@as(usize, 2), reading.programs.len);
+    const edited = reading.programs[1];
+    try testing.expectEqualStrings("shop", edited.target);
+    try testing.expectEqualStrings("pub fn price() -> UInt8 {\n    4\n}", edited.files[0].text);
+    try testing.expectEqualStrings(reading.programs[0].files[1].text, edited.files[1].text);
+
+    // A project has several files, so an edit of one says which.
+    const unnamed = readFixture(gpa,
+        \\`shop/prices.lin`:
+        \\
+        \\```linea
+        \\pub fn price() -> UInt8 {
+        \\    3
+        \\}
+        \\```
+        \\
+        \\`shop/main.lin`:
+        \\
+        \\```linea
+        \\import prices
+        \\
+        \\fn main() -> UInt8 {
+        \\    prices.price()
+        \\}
+        \\```
+        \\
+        \\<!-- guide: edit 2 -->
+        \\```linea
+        \\    1
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), unnamed.problems.len);
+    try testing.expectEqual(@as(usize, 20), unnamed.problems[0].line);
+}
+
+test "the guide gate: an edit marker must name lines of a program above it" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const no_program = readFixture(gpa,
+        \\<!-- guide: edit 1 -->
         \\```linea
         \\let x = 1
         \\```
         \\
+    );
+    try testing.expectEqual(@as(usize, 1), no_program.problems.len);
+    try testing.expectEqual(@as(usize, 2), no_program.problems[0].line);
+    try testing.expectEqual(@as(usize, 0), no_program.programs.len);
+
+    const out_of_range = readFixture(gpa,
+        \\```linea
+        \\fn main() -> UInt8 {
+        \\    0
+        \\}
         \\```
-        \\error[T-Mismatch]: pasted beside an edit nothing compiles
+        \\
+        \\<!-- guide: edit 2-9 -->
+        \\```linea
+        \\    1
         \\```
         \\
     );
-    try testing.expectEqual(@as(usize, 1), refused.problems.len);
-    try testing.expectEqual(@as(usize, 5), refused.problems[0].line);
+    try testing.expectEqual(@as(usize, 1), out_of_range.problems.len);
+    try testing.expectEqual(@as(usize, 8), out_of_range.problems[0].line);
+    try testing.expectEqual(@as(usize, 1), out_of_range.programs.len);
+
+    const overlapping = readFixture(gpa,
+        \\```linea
+        \\fn main() -> UInt8 {
+        \\    0
+        \\}
+        \\```
+        \\
+        \\<!-- guide: edit 1-2 -->
+        \\```linea
+        \\fn main() -> UInt8 {
+        \\```
+        \\
+        \\<!-- guide: edit 2 -->
+        \\```linea
+        \\    1
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), overlapping.problems.len);
+    try testing.expectEqual(@as(usize, 13), overlapping.problems[0].line);
+
+    // A marker that does not parse is reported where it is written.
+    for ([_][]const u8{
+        "<!-- guide: edit -->",
+        "<!-- guide: edit 3-2 -->",
+        "<!-- guide: edit 0 -->",
+        "<!-- guide: edit after -->",
+        "<!-- guide: edit after 2 3 -->",
+        "<!-- guide: edit /abs.lin 2 -->",
+    }) |marker| {
+        const text = try std.mem.concat(gpa, u8, &.{ marker, "\n```linea\nlet x = 1\n```\n" });
+        const malformed = readFixture(gpa, text);
+        try testing.expect(malformed.problems.len > 0);
+        try testing.expectEqual(@as(usize, 1), malformed.problems[0].line);
+    }
+}
+
+test "the guide gate: an unchecked marker excludes a fragment and the output after it" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const reading = readFixture(gpa,
+        \\<!-- guide: unchecked a signature without its body -->
+        \\```linea
+        \\fn label(station: Station) -> Str where borrows(station)
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), reading.problems.len);
+    try testing.expectEqual(@as(usize, 0), reading.programs.len);
+    try testing.expectEqual(@as(usize, 1), reading.excluded);
 }
 
 test "the guide gate: an explicit marker excludes a block and the output beside it, and needs a reason" {
@@ -2298,7 +2578,64 @@ test "the guide gate: an excerpt marker holds a fragment to consecutive lines of
     );
     try testing.expectEqual(@as(usize, 0), matching.problems.len);
     try testing.expectEqual(@as(usize, 0), matching.programs.len);
-    try testing.expectEqual(@as(usize, 1), matching.fragments);
+    try testing.expectEqual(@as(usize, 1), matching.excerpts);
+
+    // The fragment may drop an indentation every line of the file shares.
+    const dedented = readWithRoot(gpa, io, tmp.dir,
+        \\<!-- guide: excerpt examples/guest-book/main.lin -->
+        \\```linea
+        \\&router.route("GET /", home)?
+        \\&router.route("POST /sign", sign)
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), dedented.problems.len);
+    const uneven = readWithRoot(gpa, io, tmp.dir,
+        \\<!-- guide: excerpt examples/guest-book/main.lin -->
+        \\```linea
+        \\fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+        \\&router.route("GET /", home)?
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), uneven.problems.len);
+
+    // An excerpt of a guide page quotes a program that page compiles, never
+    // one of its fragments.
+    try tmp.dir.createDirPath(io, "docs/learn");
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "docs/learn/05-pages.md",
+        .data =
+        \\```linea
+        \\fn main() -> UInt8 {
+        \\    let kept = 0
+        \\    kept
+        \\}
+        \\```
+        \\
+        \\<!-- guide: unchecked a sketch -->
+        \\```linea
+        \\    let sketched = 0
+        \\```
+        \\
+        ,
+    });
+    const from_program = readWithRoot(gpa, io, tmp.dir,
+        \\<!-- guide: excerpt docs/learn/05-pages.md -->
+        \\```linea
+        \\let kept = 0
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), from_program.problems.len);
+    const from_sketch = readWithRoot(gpa, io, tmp.dir,
+        \\<!-- guide: excerpt docs/learn/05-pages.md -->
+        \\```linea
+        \\let sketched = 0
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), from_sketch.problems.len);
 
     const altered = readWithRoot(gpa, io, tmp.dir,
         \\Prose.

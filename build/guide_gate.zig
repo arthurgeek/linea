@@ -1,5 +1,5 @@
-//! Compiles every complete program the guide pastes and holds the output
-//! pasted beside it to what the compiler prints.
+//! Compiles every program and fragment the guide pastes and holds the output
+//! pasted beside each to what the compiler prints.
 //!
 //! Usage: `guide-gate <guide directory> <linea> <scratch directory> <tests directory> <repository root> [walkers]`.
 //! Reading the guide is `source.zig`'s job and judging a result is too; this
@@ -88,14 +88,14 @@ pub fn main(init: std.process.Init) !u8 {
         }
     }.file;
 
-    const listed = source.guideChapters(gpa, try read(io, gpa, guide, "README.md"));
+    const listed = source.guidePages(gpa, try read(io, gpa, guide, "README.md"));
     if (listed.len == 0) {
-        std.debug.print("guide: {s}/README.md links to no chapter\n", .{guide});
+        std.debug.print("guide: {s}/README.md links to no page\n", .{guide});
         return 1;
     }
     var programs: std.ArrayList(source.GuideProgram) = .empty;
     var problems: usize = 0;
-    var fragments: usize = 0;
+    var excerpts: usize = 0;
     var excluded: usize = 0;
     var unrun_output: std.ArrayList(source.GuideBlock) = .empty;
     for (listed) |entry| {
@@ -107,7 +107,7 @@ pub fn main(init: std.process.Init) !u8 {
             std.debug.print("{s}/{s}:{d}: {s}\n", .{ guide, problem.chapter, problem.line, problem.message });
         }
         problems += reading.problems.len;
-        fragments += reading.fragments;
+        excerpts += reading.excerpts;
         excluded += reading.excluded;
         try unrun_output.appendSlice(gpa, reading.unrun_output);
         try programs.appendSlice(gpa, reading.programs);
@@ -144,15 +144,23 @@ pub fn main(init: std.process.Init) !u8 {
 
     var failed: usize = 0;
     var compared: usize = 0;
+    var compiled: [@typeInfo(source.GuideSource).@"enum".fields.len]usize = @splat(0);
     for (outcomes, programs.items) |outcome, program| {
+        compiled[@intFromEnum(program.source)] += 1;
         if (program.expected != null) compared += 1;
         const failure = outcome.failure orelse continue;
         failed += 1;
         std.debug.print("{s}/{s}", .{ guide, failure });
     }
     std.debug.print(
-        "guide: {d} programs compiled, {d} with their pasted output compared; {d} fragments, {d} excluded by a marker, whose {d} pasted output blocks were held to the compiler's wording; {d} failed, {d} unaccounted for\n",
-        .{ programs.items.len, compared, fragments, excluded, unrun_output.items.len, failed + invented, problems },
+        "guide: {d} programs, {d} fragments and {d} edits compiled, {d} with their pasted output compared; {d} excerpts held to their files; {d} excluded by a marker, whose {d} pasted output blocks were held to the compiler's wording; {d} failed, {d} unaccounted for\n",
+        .{
+            compiled[@intFromEnum(source.GuideSource.program)], compiled[@intFromEnum(source.GuideSource.fragment)],
+            compiled[@intFromEnum(source.GuideSource.edit)],    compared,
+            excerpts,                                           excluded,
+            unrun_output.items.len,                             failed + invented,
+            problems,
+        },
     );
     return if (failed + invented + problems == 0) 0 else 1;
 }
