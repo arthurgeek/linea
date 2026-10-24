@@ -1966,6 +1966,7 @@ pub fn build(b: *std.Build) void {
             run_narrowed.addArg("--sanitize");
             run_narrowed.addArg(@tagName(sanitize));
             if (update_goldens) run_narrowed.addArg("--update");
+            if (opt_levels) run_narrowed.addArg("--levels");
             run_narrowed.has_side_effects = true;
             break :narrowed &run_narrowed.step;
         },
