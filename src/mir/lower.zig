@@ -3912,7 +3912,7 @@ const Lowerer = struct {
     /// Binds a lending walk's binder to the place the position names. A tuple
     /// pattern's binders each name their component of that place.
     fn lendWalked(self: *Lowerer, binder: ExprId, item: TypeId, place: InstId, span: Span) std.mem.Allocator.Error!void {
-        if (self.ast.exprTag(binder) == .tuple_pattern)
+        if (self.ast.walkBinderIsTuple(binder))
             return self.bindPattern(binder, self.matchedValueOf(item, place), true, span);
         const target = self.res.targetOf(binder);
         if (target != BindingId.none) try self.lent.put(self.gpa, target, place);
@@ -3920,7 +3920,7 @@ const Lowerer = struct {
 
     /// Ends what `lendWalked` bound, at the end of the body.
     fn unlendWalked(self: *Lowerer, binder: ExprId) void {
-        if (self.ast.exprTag(binder) == .tuple_pattern) return self.endPatternLends(binder);
+        if (self.ast.walkBinderIsTuple(binder)) return self.endPatternLends(binder);
         const target = self.res.targetOf(binder);
         if (target != BindingId.none) _ = self.lent.remove(target);
     }
@@ -3929,7 +3929,7 @@ const Lowerer = struct {
     /// which is `carried`. A tuple pattern's binders each take their component
     /// of it.
     fn takeWalked(self: *Lowerer, binder: ExprId, item: TypeId, carried: InstId, span: Span) std.mem.Allocator.Error!void {
-        if (self.ast.exprTag(binder) == .tuple_pattern)
+        if (self.ast.walkBinderIsTuple(binder))
             return self.bindPattern(binder, self.matchedValueOf(item, carried), false, span);
         const local = try self.b.addLocal(item, .value);
         const target = self.res.targetOf(binder);

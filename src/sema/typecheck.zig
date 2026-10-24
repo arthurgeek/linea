@@ -14029,8 +14029,8 @@ const Checker = struct {
     /// which is what a name is for. Naming more than one, or naming where
     /// there is nothing to name, is the arity rule a call already states.
     fn checkVariantPattern(self: *Checker, pattern: ExprId, of: TypeId, at: ExprId) std.mem.Allocator.Error!PatternCheck {
-        const binds = self.ast.exprTag(pattern) == .call;
-        const parts: []const ExprId = if (binds) self.ast.call(pattern).args else &.{};
+        const binds = self.ast.patternForm(pattern) == .call;
+        const written = self.ast.patternParts(pattern).count();
         const name = self.ast.tokenText(self.ast.exprMain(pattern));
         _ = self.record(pattern, of);
         if (binds) _ = self.record(self.ast.call(pattern).callee, of);
@@ -14112,12 +14112,12 @@ const Checker = struct {
 
         // Every part or none. A prefix would take the first parts and leave
         // the rest unnamed, which reads as a choice and is a miscount.
-        if (parts.len != 0 and parts.len != carries) {
+        if (written != 0 and written != carries) {
             _ = self.report(
                 .t_arity,
                 pattern,
                 "expected {d} name(s), found {d}",
-                .{ carries, parts.len },
+                .{ carries, written },
                 "the wrong number of names",
             );
             return self.refuseParts(pattern);
@@ -14127,7 +14127,7 @@ const Checker = struct {
         // which variant it selects. Both facts belong to the checked pattern.
         try self.variant_uses.put(self.gpa, pattern, .{
             .ordinal = @enumFromInt(k),
-            .drops_payload = parts.len == 0 and carries != 0,
+            .drops_payload = written == 0 and carries != 0,
         });
 
         var sound: PatternCheck = .matches;
@@ -14151,46 +14151,54 @@ const Checker = struct {
         // an open one is settled here, where the literal compares it.
         const settled = if (of.bounds() != null) of else try self.receiverType(of, self.literalSite(pattern));
         _ = self.record(pattern, settled);
-        // A literal names a value of the type, which is reaching its
-        // representation as taking it apart is: the rule a `match` over a
-        // sealed type breaks, at any depth.
-        if (self.sealedHere(settled)) {
-            _ = self.reportSealed(pattern, settled, "only its own module can take one apart");
-            return .refused;
+        const shown = try self.typeName(settled);
+        switch (self.ast.patternForm(pattern)) {
+            .literal, .range => {},
+            // A name the grammar left where a literal or a range stands, such
+            // as a path to a variant: it names a value, and only a literal or
+            // a range compares one.
+            .other => {
+                if (settled.bounds() != null) {
+                    _ = self.report(.t_mismatch, pattern, "a match over `{s}` takes a literal or a range, not a name", .{shown}, "not a literal or a range");
+                } else {
+                    const enumerated = self.builder.get(settled) == .enum_;
+                    _ = self.report(
+                        .t_mismatch,
+                        pattern,
+                        "`{s}` names a value, and a pattern does not compare against one",
+                        .{self.ast.exprText(pattern)},
+                        if (enumerated) "write the variant by its own name" else "take the value apart by its shape, or bind it",
+                    );
+                }
+                return .refused;
+            },
+            // `checkPattern` checks each of these with its own routine.
+            .name, .call, .tuple, .struct_, .malformed => unreachable,
         }
+        const text = self.ast.exprTag(pattern) == .str_literal;
         if (settled.bounds() == null) {
-            _ = self.report(
-                .t_mismatch,
-                pattern,
-                "a `{s}` is not compared against a literal or a range",
-                .{(try self.typeName(settled))},
-                "only an integer is compared in a pattern",
-            );
+            if (text and self.sealedHere(settled)) {
+                // Text names a value of the type, which is reaching its
+                // representation as taking it apart is: the rule a `match`
+                // over a sealed type breaks, at any depth.
+                _ = self.reportSealed(pattern, settled, "only its own module can take one apart");
+            } else if (self.ast.exprTag(pattern) != .range and !text) {
+                _ = self.report(.t_mismatch, pattern, "expected `{s}`, found an integer", .{shown}, "a number compares only an integer");
+            } else {
+                _ = self.report(
+                    .t_mismatch,
+                    pattern,
+                    "{s} `{s}` is not compared against a literal or a range",
+                    .{ article.before(shown), shown },
+                    "only an integer is compared in a pattern",
+                );
+            }
             return .refused;
         }
-        switch (self.ast.exprTag(pattern)) {
-            .int_literal, .negate, .range => {},
-            // Text is a number only at a range's end, where it is one scalar.
-            .str_literal => {
-                _ = self.report(
-                    .t_mismatch,
-                    pattern,
-                    "expected `{s}`, found `Str`",
-                    .{(try self.typeName(settled))},
-                    "text names a number only at a range's end",
-                );
-                return .refused;
-            },
-            else => {
-                _ = self.report(
-                    .t_mismatch,
-                    pattern,
-                    "a match over `{s}` takes a literal or a range, not a name",
-                    .{(try self.typeName(settled))},
-                    "not a literal or a range",
-                );
-                return .refused;
-            },
+        // Text is a number only at a range's end, where it is one scalar.
+        if (text) {
+            _ = self.report(.t_mismatch, pattern, "expected `{s}`, found `Str`", .{shown}, "text names a number only at a range's end");
+            return .refused;
         }
         const iv = try self.intArmInterval(pattern, settled) orelse return .refused;
         if (iv.lo > iv.hi) {
@@ -14330,7 +14338,6 @@ const Checker = struct {
         of: TypeId,
         at: ExprId,
     ) std.mem.Allocator.Error!PatternCheck {
-        const p = self.ast.call(pattern);
         _ = self.record(pattern, of);
 
         if (of == .poison) return self.refuseParts(pattern);
@@ -14339,7 +14346,8 @@ const Checker = struct {
         // and is held against nothing more: not the value's kind, and not
         // its arity, which is what the refusal already said. Nor is one whose
         // `)` was never found, which may hold fewer parts than were written.
-        if (!node.isTupleArity(p.args.len) or self.ast.tuplePatternCutShort(pattern)) return self.refuseParts(pattern);
+        const written = self.ast.patternParts(pattern).count();
+        if (!node.isTupleArity(written) or self.ast.tuplePatternCutShort(pattern)) return self.refuseParts(pattern);
 
         const settled = try self.builder.resolveOpen(of, &self.open_types);
         const instance = self.builder.instanceOf(settled);
@@ -14357,12 +14365,12 @@ const Checker = struct {
 
         // The arity is the declaration's, read off the value.
         const count = self.builder.fieldCount(settled);
-        if (p.args.len != count) {
+        if (written != count) {
             _ = self.report(
                 .t_arity,
                 pattern,
                 "expected {d} name(s), found {d}",
-                .{ count, p.args.len },
+                .{ count, written },
                 "a tuple pattern binds every component by position",
             );
             return self.refuseParts(pattern);
@@ -14474,30 +14482,32 @@ const Checker = struct {
             return self.refuseParts(pattern);
         }
 
-        if (p.args.len != 1) {
+        const written = self.ast.patternParts(pattern);
+        if (written.count() != 1) {
             _ = self.report(
                 .t_arity,
                 pattern,
                 "expected {d} name(s), found {d}",
-                .{ 1, p.args.len },
+                .{ 1, written.count() },
                 "a newtype's pattern binds exactly the value it wraps",
             );
             return self.refuseParts(pattern);
         }
 
-        const base_check = try self.checkPart(p.args[0], self.builder.baseOf(of), at, .base, .{ .field = self.ast.tokenName(head_tok) });
+        const base = written.first().?.node;
+        const base_check = try self.checkPart(base, self.builder.baseOf(of), at, .base, .{ .field = self.ast.tokenName(head_tok) });
         if (base_check != .matches) return base_check;
 
         // A literal or range outside the refinement names a value the base
         // never holds, so no value reaches the arm.
-        const compares = switch (self.ast.exprTag(p.args[0])) {
+        const compares = switch (self.ast.exprTag(base)) {
             .int_literal, .negate, .range => true,
             else => false,
         };
         if (compares and self.builder.isRefined(of)) {
             const r = self.refinedValues(of) orelse return .matches;
-            if (self.foldedInterval(p.args[0])) |iv| if (iv.hi < r.lo or iv.lo > r.hi) {
-                return self.reportEmptyPart(p.args[0], try std.fmt.allocPrint(self.sink.arena, "no `{s}` holds this value", .{head}));
+            if (self.foldedInterval(base)) |iv| if (iv.hi < r.lo or iv.lo > r.hi) {
+                return self.reportEmptyPart(base, try std.fmt.allocPrint(self.sink.arena, "no `{s}` holds this value", .{head}));
             };
         }
         return .matches;
@@ -14576,7 +14586,7 @@ const Checker = struct {
     /// value out. The whole pattern where no part says so. Bounded by the
     /// pattern's size.
     fn missedPart(self: *Checker, pattern: ExprId, missed: PatternCoverage.Witness, of: TypeId) ExprId {
-        if (isCatchAll(self.ast, pattern) or self.ast.partBinds(pattern)) return pattern;
+        if (self.takesAnything(pattern)) return pattern;
         const types: PatternTypes = .{ .checker = self };
         var ctor: usefulness.Ctor = .product;
         const parts: []const PatternCoverage.Witness = switch (self.ast.patternForm(pattern)) {
@@ -14591,7 +14601,7 @@ const Checker = struct {
                 // A newtype: a refined one's value is its base's, read in
                 // place.
                 .product => |p| p,
-                .integers => return self.ast.call(pattern).args[0],
+                .integers => return self.ast.patternParts(pattern).first().?.node,
                 else => return pattern,
             },
             .tuple, .struct_ => switch (missed.shape) {
@@ -14609,10 +14619,15 @@ const Checker = struct {
         return pattern;
     }
 
+    /// Whether a pattern is `_` or a binder, which take any value.
+    fn takesAnything(self: *const Checker, pattern: ExprId) bool {
+        return isCatchAll(self.ast, pattern) or self.ast.partBinds(pattern);
+    }
+
     /// Whether a part of a pattern leaves out a missed value: a binder or `_`
     /// takes anything, and a pattern takes only what it names.
     fn partMisses(self: *Checker, part: ExprId, missed: PatternCoverage.Witness) bool {
-        if (isCatchAll(self.ast, part) or self.ast.partBinds(part)) return false;
+        if (self.takesAnything(part)) return false;
         if (missed.isWild()) return false;
         return switch (self.ast.patternForm(part)) {
             .name, .call => if (self.variant_uses.get(part)) |use| switch (missed.shape) {
@@ -14674,7 +14689,8 @@ const Checker = struct {
             const t = self.settled(ty);
             if (t.bounds()) |b| return .{ .integer = .{ .lo = b.min, .hi = b.max } };
             return switch (self.checker.builder.get(t)) {
-                .enum_ => |e| .{ .variants = e.variant_count },
+                .enum_ => |e| if (e.variant_count == 0) .uninhabited else .{ .variants = e.variant_count },
+                .never => .uninhabited,
                 .struct_ => .{ .product = self.checker.builder.fieldCount(t) },
                 // A refined newtype is the integers its refinement admits, so
                 // its pattern is read as its base's.
@@ -14711,7 +14727,7 @@ const Checker = struct {
     fn coveragePattern(self: *Checker, arena: std.mem.Allocator, pattern: ExprId, of: TypeId) std.mem.Allocator.Error!*const usefulness.Pattern {
         // A variant's record is the checker's answer to what a bare name is:
         // at a `match` arm's head a caseless name such as `_1` names one.
-        if (!self.variant_uses.contains(pattern) and (isCatchAll(self.ast, pattern) or self.ast.partBinds(pattern))) return &usefulness.wild;
+        if (!self.variant_uses.contains(pattern) and self.takesAnything(pattern)) return &usefulness.wild;
         const types: PatternTypes = .{ .checker = self };
         const out = try arena.create(usefulness.Pattern);
         switch (self.ast.patternForm(pattern)) {
@@ -14723,8 +14739,8 @@ const Checker = struct {
             } else if (self.builder.get(types.settled(of)) == .newtype and types.kind(of) == .integer) {
                 // A refined newtype's column is its base's integers, so the
                 // pattern is what it holds.
-                return self.coveragePattern(arena, self.ast.call(pattern).args[0], of);
-            } else if (types.kind(of) == .refused and (isCatchAll(self.ast, self.ast.call(pattern).args[0]) or self.ast.partBinds(self.ast.call(pattern).args[0]))) {
+                return self.coveragePattern(arena, self.ast.patternParts(pattern).first().?.node, of);
+            } else if (types.kind(of) == .refused and self.takesAnything(self.ast.patternParts(pattern).first().?.node)) {
                 // A refused refinement's values are unknown, but `_` or a
                 // binder inside its name takes any of them, as a bare `_`
                 // does, so it names no value coverage would have to know.
@@ -17325,8 +17341,11 @@ const Checker = struct {
     /// not read, at any depth, or a tuple naming a count of parts no tuple
     /// has.
     fn refusedByParser(self: *const Checker, pattern: ExprId) bool {
-        if (self.ast.exprTag(pattern) == .err) return true;
-        if (self.ast.exprTag(pattern) == .tuple_pattern and !node.isTupleArity(self.ast.call(pattern).args.len)) return true;
+        switch (self.ast.patternForm(pattern)) {
+            .malformed => return true,
+            .tuple => if (!node.isTupleArity(self.ast.patternParts(pattern).count())) return true,
+            .name, .call, .struct_, .literal, .range, .other => {},
+        }
         var parts = self.ast.patternParts(pattern);
         while (parts.next()) |part| if (self.refusedByParser(part.node)) return true;
         return false;
@@ -17384,7 +17403,7 @@ const Checker = struct {
     /// use, each part receiving its component. `place` is the place a
     /// lending walk's element is.
     fn bindWalked(self: *Checker, binder: ExprId, element: TypeId, place: ?BinderPlace) std.mem.Allocator.Error!void {
-        if (self.ast.exprTag(binder) != .tuple_pattern) {
+        if (!self.ast.walkBinderIsTuple(binder)) {
             _ = self.record(binder, element);
             const target = self.res.targetOf(binder);
             if (target != BindingId.none) {
@@ -17417,7 +17436,7 @@ const Checker = struct {
     /// its own part, so they are held apart from one another as any two
     /// places are.
     fn walkLendBegin(self: *Checker, at: ExprId, binder: ExprId, writable: bool) std.mem.Allocator.Error!usize {
-        if (self.ast.exprTag(binder) != .tuple_pattern) {
+        if (!self.ast.walkBinderIsTuple(binder)) {
             try self.lendBegin(at, binder, writable);
             return 1;
         }
@@ -33074,11 +33093,6 @@ const Checker = struct {
         // comparing it, so the open type passes to the binders and settles by
         // their uses, as it does for a walk's binder and `let ... else`.
         const scrutinee = try self.receiverType(try self.check(m.callee, null), self.literalSite(m.callee));
-        if (scrutinee == .never) {
-            var j: usize = 1;
-            while (j < m.args.len) : (j += 2) _ = try self.check(m.args[j], null);
-            return self.expect(id, .never, expected);
-        }
 
         // On the scrutinee's type, not on what the arms name. A catch-all
         // names no variant and so needs nothing from a sealed type, which
@@ -33175,7 +33189,7 @@ const Checker = struct {
                     const missing = try self.witnessList(o.missing);
                     defer self.gpa.free(missing);
                     _ = if (missing.len == 0)
-                        self.report(.t_cover, id, "this `match` does not cover every variant", .{}, "add the missing arms, or a `_`")
+                        self.report(.t_cover, id, "no arm of this `match` takes a value of `{s}`", .{try self.typeName(scrutinee)}, "add an arm, or a `_`")
                     else
                         self.report(.t_cover, id, "this `match` does not cover {s}", .{missing}, "add the missing arms, or a `_`");
                     poisoned = true;
@@ -33187,6 +33201,9 @@ const Checker = struct {
         }
 
         if (poisoned) return self.record(id, .poison);
+        // A scrutinee that never yields a value leaves before any arm runs,
+        // so the `match` never completes, whatever its arms say.
+        if (scrutinee == .never) return self.expect(id, .never, expected);
         var completes = false;
         var arm_index: usize = 1;
         while (arm_index < m.args.len) : (arm_index += 2) {

@@ -1420,6 +1420,18 @@ pub const Ast = struct {
         };
     }
 
+    /// Whether a walk's binder is a tuple pattern, which takes each element
+    /// apart, rather than one name for the whole element. The grammar gives a
+    /// `for` a name, a tuple pattern, or a part it could not read, which binds
+    /// as a name binding nothing does.
+    pub fn walkBinderIsTuple(self: *const Ast, binder: ExprId) bool {
+        return switch (self.patternForm(binder)) {
+            .tuple => true,
+            .name, .malformed => false,
+            .call, .struct_, .literal, .range, .other => unreachable,
+        };
+    }
+
     /// The parts a pattern node takes its value apart into, in source order:
     /// what a variant's or newtype's pattern names inside its parentheses, a
     /// tuple pattern's components, and a struct pattern's field patterns
@@ -1448,6 +1460,18 @@ pub const Ast = struct {
             /// `.none` for every other form.
             label: ExprId,
         };
+
+        /// How many parts the pattern node writes.
+        pub fn count(self: PatternParts) usize {
+            if (self.at >= self.args.len) return 0;
+            return (self.args.len - self.at + self.stride - 1) / self.stride;
+        }
+
+        /// The first part, or null where the node writes none.
+        pub fn first(self: PatternParts) ?Part {
+            var copy = self;
+            return copy.next();
+        }
 
         pub fn next(self: *PatternParts) ?Part {
             if (self.at >= self.args.len) return null;

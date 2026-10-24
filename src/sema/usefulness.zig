@@ -51,8 +51,14 @@ pub const Interval = struct {
 
 /// What constructors a type is built by, as far as a pattern can name them.
 pub const Kind = union(enum) {
-    /// An enum with this many variants.
+    /// An enum with this many variants, at least one.
     variants: u32,
+    /// A type with no values: `Never`, or an enum declaring no variants.
+    /// Nothing builds one, so no rows over it leave nothing untaken, which is
+    /// the empty `match` it is taken apart with. As a part of another
+    /// pattern it is a column like an opaque type's: a wildcard there is
+    /// reached, and `Some` of one is a value coverage accounts for.
+    uninhabited,
     /// A struct, tuple or newtype: one constructor of this many parts.
     product: u32,
     /// An integer type with these bounds.
@@ -210,13 +216,10 @@ pub fn Coverage(comptime Context: type) type {
         /// before them and, where `query` is a type, which of its values no
         /// row matches.
         pub fn check(self: *Self, rows: []const Row, query: ?Ty) Error!Outcome {
-            // No value of an enum with no variants is ever made, so no rows
-            // over one leave nothing untaken: the empty `match` it is taken
-            // apart with. A part of that type inside another pattern is a
-            // column like an opaque type's, which `split_column` answers.
-            if (rows.len == 0) if (query) |ty| switch (self.context.kind(ty)) {
-                .variants => |n| if (n == 0) return .{ .reached = &.{}, .missing = &.{} },
-                else => {},
+            // The one place a type with no values needs no rows; see
+            // `Kind.uninhabited`.
+            if (rows.len == 0) if (query) |ty| if (self.context.kind(ty) == .uninhabited) {
+                return .{ .reached = &.{}, .missing = &.{} };
             };
             const count = rows.len + @intFromBool(query != null);
             const refs = try self.arena.alloc(Ref, count);
@@ -297,14 +300,7 @@ pub fn Coverage(comptime Context: type) type {
             var out: std.ArrayList(Branch) = .empty;
             switch (self.context.kind(ty)) {
                 .product => try out.append(self.arena, try self.branch(rows, ty, .product)),
-                // An enum with no variants has no constructor a row can name,
-                // so its column is split as an opaque type's is: a wildcard
-                // there is reached, and a value no row takes is any value.
-                // `Some` of one is a value coverage accounts for, as `Some`
-                // of `Never` is.
-                .variants => |count| if (count == 0) {
-                    try out.append(self.arena, try self.rest(rows, ty, try self.anyValue(ty)));
-                } else {
+                .variants => |count| {
                     // The variants the rows name, sorted, and nothing sized by
                     // the enum: a column split again under every branch of the
                     // one before it pays for what its rows name each time,
@@ -346,7 +342,9 @@ pub fn Coverage(comptime Context: type) type {
                     try out.append(self.arena, try self.rest(rows, ty, absent.items));
                 },
                 .integer => |bounds| try self.integers(&out, rows, ty, bounds),
-                .opaque_ => try out.append(self.arena, try self.rest(rows, ty, try self.anyValue(ty))),
+                // No constructor a row can name: a wildcard there is reached,
+                // and a value no row takes is any value.
+                .opaque_, .uninhabited => try out.append(self.arena, try self.rest(rows, ty, try self.anyValue(ty))),
                 // A wildcard takes any value whatever the type holds, so a
                 // column every row leaves to one is split as an opaque type's
                 // is, and the other columns are still judged. A row naming a
@@ -628,7 +626,7 @@ const TestTypes = struct {
             .bit => .{ .variants = 2 },
             .byte => .{ .integer = .{ .lo = 0, .hi = 3 } },
             .opt, .nest, .hollow => .{ .variants = 2 },
-            .empty => .{ .variants = 0 },
+            .empty => .uninhabited,
             .pair => .{ .product = 2 },
             .text => .opaque_,
             .refused => .refused,

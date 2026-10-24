@@ -1,0 +1,15 @@
+error[T-Mismatch]: `Color.Blue` names a value, and a pattern does not compare against one
+  --> tests/patterns/a_part_that_compares_is_reported_by_its_form.lin:18:10
+   |
+18 |         (Color.Blue, n) => n,
+   |          ^^^^^^^^^^ write the variant by its own name
+error[T-Mismatch]: expected `Str`, found an integer
+  --> tests/patterns/a_part_that_compares_is_reported_by_its_form.lin:25:14
+   |
+25 |         Some(0) => 1,
+   |              ^ a number compares only an integer
+error[T-Mismatch]: an `Edge` is not compared against a literal or a range
+  --> tests/patterns/a_part_that_compares_is_reported_by_its_form.lin:32:14
+   |
+32 |         Some(0..=1) => 1,
+   |              ^^^^^ only an integer is compared in a pattern

@@ -14539,7 +14539,7 @@ const Resolver = struct {
 
                 // The binder of a writable lend is assignable: writing through
                 // it is what the walk was written for.
-                if (self.ast.exprTag(f.args[0]) == .tuple_pattern) {
+                if (self.ast.walkBinderIsTuple(f.args[0])) {
                     try self.bindPattern(f.args[0], writes);
                 } else {
                     self.pattern_names.restart();
@@ -14548,7 +14548,7 @@ const Resolver = struct {
                 if (reflected) |reversed| {
                     // A component is not a tuple, so a pattern has nothing to
                     // take apart and no binding to plan the loop around.
-                    if (self.ast.exprTag(f.args[0]) == .tuple_pattern) {
+                    if (self.ast.walkBinderIsTuple(f.args[0])) {
                         try self.reportReflection(
                             f.args[0],
                             "a reflected component loop binds one name",

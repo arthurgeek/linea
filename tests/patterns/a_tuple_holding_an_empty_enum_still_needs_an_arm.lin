@@ -1,0 +1,15 @@
+// A tuple holding a type with no values is still a product with one shape, so
+// a `match` over it needs an arm, as one over a number does.
+enum Nothing {}
+
+fn _pair(sink p: (Nothing, UInt8)) -> UInt8 {
+    match p {}
+}
+
+fn _number(n: UInt8) -> UInt8 {
+    match n {}
+}
+
+fn main() -> UInt8 {
+    0
+}

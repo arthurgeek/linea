@@ -1,0 +1,12 @@
+error[T-Mismatch]: this takes a tuple apart, and the value is a `Never`
+  --> tests/patterns/the_arms_of_a_match_over_never_are_checked.lin:12:9
+   |
+12 |         (Some(_), _) => 1,
+   |         ^^^^^^^^^^^^ a tuple pattern takes a tuple apart
+error[N-Variant]: `Never` is not an enum, so `Ok` names no variant of it
+  --> tests/patterns/the_arms_of_a_match_over_never_are_checked.lin:13:9
+   |
+13 |         Ok(Some(3)) => 2,
+   |         ^^^^^^^^^^^ a name at an arm's head names a variant
+   |
+   = help: write `_` to match any value

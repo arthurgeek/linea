@@ -2128,7 +2128,7 @@ const Builder = struct {
         // lending walk gives every binder the whole element's place; an
         // owning one gives each the component its path selects.
         const binder_pattern = f.args[0];
-        if (self.ast.exprTag(binder_pattern) == .tuple_pattern) {
+        if (self.ast.walkBinderIsTuple(binder_pattern)) {
             if (lending) {
                 try self.lendWalkedParts(binder_pattern, id, f.callee);
             } else {

@@ -1051,7 +1051,7 @@ const Checker = struct {
                 .struct_ => try std.fmt.allocPrint(arena, "field `{s}`", .{self.ast.tokenText(self.ast.exprMain(found.label))}),
                 .call => blk: {
                     const name = self.ast.tokenText(self.ast.exprMain(self.ast.call(parent).callee));
-                    break :blk if (self.ast.call(parent).args.len > 1)
+                    break :blk if (self.ast.patternParts(parent).count() > 1)
                         try std.fmt.allocPrint(arena, "payload {d} of what `{s}` carries", .{ found.index, name })
                     else
                         try std.fmt.allocPrint(arena, "what `{s}` carries", .{name});

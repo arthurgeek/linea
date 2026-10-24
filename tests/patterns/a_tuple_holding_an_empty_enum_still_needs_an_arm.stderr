@@ -1,0 +1,10 @@
+error[T-Cover]: no arm of this `match` takes a value of `(Nothing, UInt8)`
+ --> tests/patterns/a_tuple_holding_an_empty_enum_still_needs_an_arm.lin:6:5
+  |
+6 |     match p {}
+  |     ^^^^^^^^^^ add an arm, or a `_`
+error[T-Cover]: no arm of this `match` takes a value of `UInt8`
+  --> tests/patterns/a_tuple_holding_an_empty_enum_still_needs_an_arm.lin:10:5
+   |
+10 |     match n {}
+   |     ^^^^^^^^^^ add an arm, or a `_`
