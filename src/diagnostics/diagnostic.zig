@@ -583,6 +583,9 @@ pub const FixKind = enum {
     deferred_release,
     /// A member [T-Impl] says to drop, removed.
     drop_member,
+    /// The type a concrete implementation names, written in place of `Self`
+    /// in a test inside it.
+    concrete_self,
     /// The other allocator form of a call.
     allocator_form,
     /// A type parameter declared for each of two closures.

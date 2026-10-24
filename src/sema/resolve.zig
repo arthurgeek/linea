@@ -12820,7 +12820,7 @@ const Resolver = struct {
                 const edits = try self.sink.arena.alloc(Edit, 1);
                 edits[0] = .{ .file = file, .span = span, .text = written };
                 const one = try self.sink.arena.alloc(Fix, 1);
-                one[0] = .{ .note = null, .edits = edits };
+                one[0] = .{ .kind = .concrete_self, .note = null, .edits = edits };
                 fixes = one;
             }
             try self.sink.add(.{
