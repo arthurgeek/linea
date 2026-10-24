@@ -260,6 +260,8 @@ test fn a_schema_reads_options_in_every_spelling() {
 
 ```
 ok    a_schema_reads_options_in_every_spelling
+
+1 passed, 0 failed
 ```
 
 `--` ends options and subcommands, so `notes -- --loud` takes `--loud` as the
