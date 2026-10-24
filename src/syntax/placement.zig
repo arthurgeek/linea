@@ -117,13 +117,29 @@ fn aboveComments(text: []const u8, line: u32) u32 {
 /// `text`: its whole lines, the comment lines directly above it, which are
 /// written about it, and one blank line above those where one separates it
 /// from what precedes, so what is left reads as if it had never been written.
+///
+/// Only the lines the declaration has to itself. Code written before it on
+/// its first line keeps that line, and the declaration goes with the spaces
+/// before it; code written after it on its last line, such as the `}`
+/// closing what holds it, stays, starting the line the declaration began.
 pub fn removal(text: []const u8, span: Span) Span {
-    var start = aboveComments(text, lineStart(text, span.start));
+    const first = lineStart(text, span.start);
+    if (std.mem.trim(u8, text[first..span.start], " \t").len != 0) {
+        var start = span.start;
+        while (start > first and (text[start - 1] == ' ' or text[start - 1] == '\t')) start -= 1;
+        return .{ .start = start, .end = span.end };
+    }
+    var start = aboveComments(text, first);
     if (start > 0) {
         const previous = lineStart(text, start - 1);
         if (std.mem.trim(u8, text[previous .. start - 1], " \t\r").len == 0) start = previous;
     }
-    return .{ .start = start, .end = lineAfter(text, span.end) };
+    const after = lineAfter(text, span.end);
+    const rest = std.mem.trim(u8, text[span.end..after], " \t\r\n");
+    if (rest.len == 0 or std.mem.startsWith(u8, rest, "//")) return .{ .start = start, .end = after };
+    var end = span.end;
+    while (end < after and (text[end] == ' ' or text[end] == '\t')) end += 1;
+    return .{ .start = start, .end = end };
 }
 
 test removal {
@@ -147,4 +163,32 @@ test removal {
         \\}
         \\
     , left);
+}
+
+test "a removal leaves the code sharing the declaration's lines" {
+    const gpa = std.testing.allocator;
+    const after =
+        \\impl Named for Station {
+        \\    fn name(self: Self) -> Str { "" }
+        \\
+        \\    fn label(self: Self) -> Str { "" } }
+        \\
+    ;
+    const at: u32 = @intCast(std.mem.indexOf(u8, after, "fn label").?);
+    const gone = removal(after, .{ .start = at, .end = at + @as(u32, @intCast("fn label(self: Self) -> Str { \"\" }".len)) });
+    const left = try std.mem.concat(gpa, u8, &.{ after[0..gone.start], after[gone.end..] });
+    defer gpa.free(left);
+    try std.testing.expectEqualStrings(
+        \\impl Named for Station {
+        \\    fn name(self: Self) -> Str { "" }
+        \\}
+        \\
+    , left);
+
+    const before = "impl Named for Station { fn label(self: Self) -> Str { \"\" }\n}\n";
+    const from: u32 = @intCast(std.mem.indexOf(u8, before, "fn label").?);
+    const cut = removal(before, .{ .start = from, .end = from + @as(u32, @intCast("fn label(self: Self) -> Str { \"\" }".len)) });
+    const kept = try std.mem.concat(gpa, u8, &.{ before[0..cut.start], before[cut.end..] });
+    defer gpa.free(kept);
+    try std.testing.expectEqualStrings("impl Named for Station {\n}\n", kept);
 }
