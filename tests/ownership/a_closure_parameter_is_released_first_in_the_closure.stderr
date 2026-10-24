@@ -1,0 +1,9 @@
+error[O-Leak]: `s` (a linear `String[mem.SystemAllocator]`) is still owned when this path leaves
+ --> tests/ownership/a_closure_parameter_is_released_first_in_the_closure.lin:4:13
+  |
+2 |     let f = |sink s: String| -> UInt8 {
+  |                   - acquired here
+4 |             return 1
+  |             ^^^^^^ still owned here
+  |
+  = help: settle it first with `s.release()`, or write `defer s.release()` where it is bound so every path releases it

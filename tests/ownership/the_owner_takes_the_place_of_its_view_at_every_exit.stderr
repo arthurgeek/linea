@@ -1,0 +1,19 @@
+error[O-Leak]: `line` (a linear `String[mem.SystemAllocator]`) is still owned when this path leaves
+ --> tests/ownership/the_owner_takes_the_place_of_its_view_at_every_exit.lin:4:9
+  |
+2 |     let line = "x".to_owned().unwrap()
+  |         ---- acquired here
+4 |         return line.view()
+  |         ^^^^^^ still owned here
+7 | }
+  | - also still owned where the block ends
+  |
+  = help: settle it first with `line.release()`, or declare it `defer let line = …` so every path releases it
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/ownership/the_owner_takes_the_place_of_its_view_at_every_exit.lin:6:5
+  |
+6 |     line.view()
+  |     ^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `line` belongs to `pick` and ends when it returns, so nothing returned may observe it
+  = help: `line` owns the text already: put `line` itself where its view is, declaring `String` as the result

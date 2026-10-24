@@ -3,3 +3,5 @@ error[N-Undefined]: undefined name `util`
   |
 5 |     util.one() + helper()
   |     ^^^^ no binding with this name is in scope
+  |
+  = help: write `import util`: a module is reached through the import that names it

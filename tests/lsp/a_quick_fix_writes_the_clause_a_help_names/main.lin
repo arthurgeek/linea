@@ -1,0 +1,12 @@
+// The result may come from either parameter, and the help names the clause
+// that says so. An editor offers that clause as a quick fix.
+fn pick(a: Str, b: Str) -> Str where carries(a) {
+    if a.length() > b.length() {
+        return copy(a)
+    }
+    copy(b)
+}
+
+fn main() -> UInt8 {
+    UInt8(pick("a", "bb").length())
+}

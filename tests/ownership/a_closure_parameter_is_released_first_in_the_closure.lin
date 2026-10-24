@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    let f = |sink s: String| -> UInt8 {
+        if s.length() > 3 {
+            return 1
+        }
+        s.release()
+        0
+    }
+    f(String.new())
+}

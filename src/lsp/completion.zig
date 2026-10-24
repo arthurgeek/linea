@@ -1002,7 +1002,6 @@ fn appendOperationsElsewhere(
         .eachElsewhere(gpa, held, &applicable);
     if (applicable.items.len == 0) return;
 
-    const place = placement.placementForUse(ast, part, part.source);
     const replaced = replacedRange(ast, part, sel, offset, encoding);
 
     // One edit per trait rather than per operation: a trait declaring three
@@ -1049,7 +1048,6 @@ fn appendOperationsElsewhere(
                 file,
                 a.trait,
                 part.source,
-                place,
                 encoding,
             );
             errdefer release(gpa, made);

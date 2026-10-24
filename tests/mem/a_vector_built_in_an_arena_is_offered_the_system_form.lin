@@ -1,0 +1,13 @@
+import std.mem
+
+use mem.Lender
+
+// `Vec[UInt8]` leaves its allocator to the default, and `Vec.new_in` builds in
+// the arena. The help names the system form of the call, which builds where
+// the annotation says.
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), size: 4096)
+    defer arena.release()
+    defer let bytes: Vec[UInt8] = Vec.new_in(arena.handle())
+    UInt8(bytes.length())
+}

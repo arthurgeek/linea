@@ -4,4 +4,4 @@ error[T-TryAnswer]: this `?` may return `Result[(UInt8, UInt8), Bad]`, and the f
 13 |     let (a, b) = parse()?
    |                  ^^^^^^^^ `?` returns from the function it is written in
    |
-   = help: make the function return `Result[UInt8, Bad]` and end it with `.Ok(…)`, or handle the failure here with `let (a, b) = … else |_| { … }` in place of `?`
+   = help: `main` answers `UInt8`, or `Result[UInt8, E]` where `E` implements `Display`, and `Bad` does not, so handle the failure here with `let (a, b) = … else |_| { … }` in place of `?`

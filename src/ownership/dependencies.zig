@@ -14,6 +14,7 @@ const resolve_mod = @import("../sema/resolve.zig");
 const Resolution = resolve_mod.Resolution;
 const types = @import("../sema/types.zig");
 const helpTypeName = @import("../sema/typecheck.zig").helpTypeName;
+const HelpImports = @import("../sema/typecheck.zig").HelpImports;
 const importNote = @import("../sema/typecheck.zig").importNote;
 const clauseEdit = @import("../sema/typecheck.zig").clauseEdit;
 const lambdaClauseEdit = @import("../sema/typecheck.zig").lambdaClauseEdit;
@@ -2317,6 +2318,9 @@ const Analysis = struct {
         positions: []const u32,
         local: ?BindingId,
         consumed: ?BindingId,
+        /// A parameter written as a pattern rather than a name, which no
+        /// clause can name.
+        unnamed: ?BindingId,
     };
 
     fn escapeSources(self: *const Analysis, origins: []const Origin) !EscapeSources {
@@ -2325,6 +2329,7 @@ const Analysis = struct {
         var positions: std.ArrayList(u32) = .empty;
         var local: ?BindingId = null;
         var consumed: ?BindingId = null;
+        var unnamed: ?BindingId = null;
         for (origins) |origin| {
             if (origin.temporary != .none or origin.lent != .none) continue;
             const root = origin.place.root;
@@ -2340,7 +2345,12 @@ const Analysis = struct {
                 if (consumed == null) consumed = root;
                 continue;
             }
-            const spelling = self.ast.tokenText(self.res.declaringToken(root));
+            const declared = self.res.declaringToken(root);
+            if (self.ast.tokenTag(declared) != .identifier) {
+                if (unnamed == null) unnamed = root;
+                continue;
+            }
+            const spelling = self.ast.tokenText(declared);
             const listed = for (sources.items) |source| {
                 if (std.mem.eql(u8, source.spelling, spelling)) break true;
             } else false;
@@ -2348,7 +2358,7 @@ const Analysis = struct {
             try sources.append(arena, .{ .spelling = spelling, .borrows = !origin.external });
             try positions.append(arena, position.?);
         }
-        return .{ .sources = sources.items, .positions = positions.items, .local = local, .consumed = consumed };
+        return .{ .sources = sources.items, .positions = positions.items, .local = local, .consumed = consumed, .unnamed = unnamed };
     }
 
     /// The whole clause the function needs, from `wholeClause`: what the
@@ -2469,27 +2479,28 @@ const Analysis = struct {
         // Where a local owner or a consumed parameter also supplies the
         // value, the clause answers only the part that comes from parameters,
         // and the help says so rather than offering it as the fix.
-        const partial = local != null or consumed != null;
-        // The clause help, where there is one, is also a fix a tool can
-        // write: the whole clause in place of the one the signature wrote.
-        // Only where the clause answers every origin leaving here: a local
-        // owner or a consumed parameter is one no clause can permit.
-        const edit = if (sources.len > 0 and fixed == null and !partial)
-            if (self.function.decl != .none)
-                try clauseEdit(arena, self.ast, self.function.decl, clause)
-            else
-                try lambdaClauseEdit(arena, self.ast, self.function.lambda, clause)
-        else
-            null;
+        const partial = local != null or consumed != null or found.unnamed != null;
         var fixes: std.ArrayList(diagnostics.Fix) = .empty;
-        if (edit) |clause_edit| try fixes.append(arena, .{ .note = @intCast(notes.items.len), .edits = try arena.dupe(diagnostics.Edit, &.{clause_edit}) });
         const others: []const u8 = if (shared) try std.fmt.allocPrint(arena, ", which also names what {s}'s other escapes need", .{try self.functionName()}) else "";
         if (sources.len > 0) if (fixed) |why| try notes.append(arena, why) else if (partial) {
             try notes.append(arena, try std.fmt.allocPrint(arena, "part of the value comes from {s}, which `{s}` would permit; the rest no clause can", .{ named.items, clause }));
-        } else switch (leaving) {
-            .returned => try notes.append(arena, try std.fmt.allocPrint(arena, "the value comes from {s}; write `{s}` to say so{s}", .{ named.items, clause, others })),
-            .retained => |destination| try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` keeps a value that comes from {s}; write `{s}` to say so{s}", .{ self.ast.tokenText(self.res.declaringToken(destination)), named.items, clause, others })),
+        } else {
+            // The clause help is also a fix a tool can write: the whole
+            // clause in place of the one the signature wrote. Only here,
+            // where the clause answers every origin leaving: a local owner
+            // or a consumed parameter is one no clause can permit.
+            const edit = if (self.function.decl != .none)
+                try clauseEdit(arena, self.ast, self.function.decl, clause)
+            else
+                try lambdaClauseEdit(arena, self.ast, self.function.lambda, clause);
+            const clause_note: u32 = @intCast(notes.items.len);
+            try notes.append(arena, try edit.explained(arena, switch (leaving) {
+                .returned => try std.fmt.allocPrint(arena, "the value comes from {s}; write `{s}` to say so{s}", .{ named.items, clause, others }),
+                .retained => |destination| try std.fmt.allocPrint(arena, "`{s}` keeps a value that comes from {s}; write `{s}` to say so{s}", .{ self.ast.tokenText(self.res.declaringToken(destination)), named.items, clause, others }),
+            }));
+            if (edit == .edit) try fixes.append(arena, .{ .kind = .where_clause, .note = clause_note, .edits = try arena.dupe(diagnostics.Edit, &.{edit.edit}) });
         };
+        if (found.unnamed != null) try notes.append(arena, try std.fmt.allocPrint(arena, "the value comes from a parameter written as a pattern, and a clause names a parameter by its name: bind it to a name, and take it apart in {s}'s body", .{try self.functionName()}));
         if (consumed) |owner| try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` is consumed by {s} and ends when it returns, so no clause lets anything observe it past the return", .{
             self.ast.tokenText(self.res.declaringToken(owner)),
             try self.functionName(),
@@ -2520,29 +2531,36 @@ const Analysis = struct {
         // A clause is not always the fix, and the owned copy needs none. It
         // names the type that owns the text and the failure making it can
         // report, so the edit can be written as read.
+        const in_result = if (self.function.signature != .poison) switch (self.typing.get(self.function.signature)) {
+            .callable => |callable| held != null and held.? == callable.result,
+            else => false,
+        } else false;
         // Under a fixed signature the result type is fixed with it, so a
-        // returned view has no owned copy to become.
-        const result_fixed = leaving == .returned and fixed != null;
-        var missing: std.ArrayList([]const u8) = .empty;
-        var failure_missing: std.ArrayList([]const u8) = .empty;
-        if (!result_fixed and (sources.len > 0 or local != null or consumed != null)) if (try self.ownedCopyOf(held, self.res.moduleOfFile(primary.file), &missing, &failure_missing)) |owned| {
-            const in_result = if (self.function.signature != .poison) switch (self.typing.get(self.function.signature)) {
-                .callable => |callable| held != null and held.? == callable.result,
-                else => false,
-            } else false;
+        // returned view has no owned copy to become -- whether or not that
+        // signature permits the clause where the view is the whole result.
+        const result_fixed = leaving == .returned and (fixed != null or (in_result and self.signatureFixed()));
+        var missing: HelpImports = .{};
+        var failure_missing: HelpImports = .{};
+        if (!result_fixed and (sources.len > 0 or local != null or consumed != null or found.unnamed != null)) if (try self.ownedCopyOf(held, self.res.moduleOfFile(primary.file), &missing, &failure_missing)) |owned| {
             const local_owns = if (local) |owner|
                 self.typing.declOfType(self.typing.bindingType(owner)) == self.typing.declOfType(owned.ty) and !try self.deferWouldDie(owner, if (leaving == .returned) leaving.returned.exit else .none)
             else
                 false;
+            // The owner in place is offered with its fix, or with why
+            // there is none.
+            const in_place: ?OwnerInPlace = if (leaving == .returned and in_result and !lends and local_owns and missing.taken == null) try self.ownerInPlaceEdits(local.?, owned.name, missing) else null;
             const owned_note = notes.items.len;
             try notes.append(arena, if (lends)
                 try std.fmt.allocPrint(arena, "or keep it in the system allocator: declare `{s}` in place of the type built in `{s}`, and build it with `….to_owned()`, which can fail with `{s}`", .{ owned.name, self.ast.tokenText(self.res.declaringToken(local.?)), owned.failure })
             else if (leaving == .returned and local_owns)
-                try std.fmt.allocPrint(arena, "`{s}` owns the text already: put `{s}` itself where its view is, declaring `{s}` {s}", .{
+                try std.fmt.allocPrint(arena, "`{s}` owns the text already: put `{s}` itself where its view is, declaring `{s}` {s}{s}{s}{s}", .{
                     self.ast.tokenText(self.res.declaringToken(local.?)),
                     self.ast.tokenText(self.res.declaringToken(local.?)),
                     owned.name,
                     if (in_result) "as the result" else "there",
+                    if (in_place != null and in_place.? == .why) " (" else "",
+                    if (in_place != null and in_place.? == .why) in_place.?.why else "",
+                    if (in_place != null and in_place.? == .why) ")" else "",
                 })
             else switch (leaving) {
                 .returned => if (in_result)
@@ -2553,21 +2571,17 @@ const Analysis = struct {
             });
             // The owner itself is written as its type alone; a copy's result
             // also names the failure.
-            if (!(leaving == .returned and local_owns)) for (failure_missing.items) |route| {
-                const listed = for (missing.items) |earlier| {
-                    if (std.mem.eql(u8, earlier, route)) break true;
-                } else false;
-                if (!listed) try missing.append(arena, route);
-            };
-            if (try importNote(arena, missing.items)) |note| try notes.append(arena, note);
+            if (!(leaving == .returned and local_owns)) try missing.join(arena, failure_missing);
+            if (try importNote(arena, missing)) |note| try notes.append(arena, note);
             // The result the help names, written, and what it says to return
             // in place of the view: the owner itself, or a copy of what every
             // exit returns.
-            if (leaving == .returned and in_result and !lends) {
+            // A spelling no import makes right is not one a tool can write.
+            if (leaving == .returned and in_result and !lends and missing.taken == null) {
                 const help: u32 = @intCast(owned_note);
                 if (local_owns) {
-                    if (try self.ownerInPlaceEdits(primary, local.?, owned.name, missing.items)) |edits| try fixes.append(arena, .{ .note = help, .edits = edits });
-                } else if (try self.ownedCopyEdits(primary.file, try std.fmt.allocPrint(arena, "Result[{s}, {s}]", .{ owned.name, owned.failure }), missing.items)) |edits| try fixes.append(arena, .{ .note = help, .edits = edits });
+                    if (in_place.? == .edits) try fixes.append(arena, .{ .kind = .owner_in_place, .note = help, .edits = in_place.?.edits });
+                } else try fixes.append(arena, .{ .kind = .owned_copy, .note = help, .edits = try self.ownedCopyEdits(primary.file, try std.fmt.allocPrint(arena, "Result[{s}, {s}]", .{ owned.name, owned.failure }), missing) });
             }
         };
         var labels: std.ArrayList(diagnostics.Label) = .empty;
@@ -2589,27 +2603,23 @@ const Analysis = struct {
     }
 
     /// Where this function's result type is written, or goes.
-    fn resultSite(self: *const Analysis) ?@import("../sema/typecheck.zig").ResultSite {
+    fn resultSite(self: *const Analysis) @import("../sema/typecheck.zig").ResultSite {
         if (self.function.decl != .none) return resultSiteOf(self.ast, self.function.decl);
         return lambdaResultSite(self.ast, self.function.lambda);
     }
 
-    /// The edits answering with `result` and returning `….to_owned()` of the
-    /// value every exit returns, with the imports `missing` names: the fix of
-    /// the owned copy's help. Null where the result has no site.
+    /// The value each exit of this function returns, once each: a block's
+    /// tail followed down to what it ends with. A `?`'s failing path returns
+    /// the failure rather than a value of the result, so it is not one.
     ///
-    /// **Bound:** the function's operations.
-    fn ownedCopyEdits(self: *const Analysis, file: FileId, result: []const u8, missing: []const []const u8) !?[]const diagnostics.Edit {
+    /// **Bound:** the function's operations, and its exits once each.
+    fn returnedValues(self: *const Analysis) ![]const ExprId {
         const arena = self.sink.arena;
-        const site = self.resultSite() orelse return null;
-        var edits: std.ArrayList(diagnostics.Edit) = .empty;
-        try edits.append(arena, try site.edit(arena, file, result));
         var seen: std.ArrayList(ExprId) = .empty;
         for (0..self.function.blocks.end - self.function.blocks.start) |index| {
             var ops = self.cfg.opsOf(self.cfg.blocks[self.function.blocks.start + index]);
             while (ops.next()) |op| {
                 if (self.cfg.opTag(op) != .returned) continue;
-                // A `?`'s failing path returns the failure, not the view.
                 if (self.cfg.ops.items(.projection)[op.index()] == .payload) continue;
                 var exits = self.cfg.ops.items(.source)[op.index()];
                 if (exits == .none) continue;
@@ -2622,40 +2632,84 @@ const Analysis = struct {
                 if (self.ast.exprTag(exits) == .block) continue;
                 if (std.mem.indexOfScalar(ExprId, seen.items, exits) != null) continue;
                 try seen.append(arena, exits);
-                const span = self.ast.exprSpan(exits);
-                const at = self.ast.fileOfExpr(exits);
-                const postfix = switch (self.ast.exprTag(exits)) {
-                    .name_ref, .call, .field, .index, .copy_, .str_literal, .interp, .grouped, .try_ => true,
-                    else => false,
-                };
-                if (!postfix) try edits.append(arena, .{ .file = at, .span = .{ .start = span.start, .end = span.start }, .text = "(" });
-                try edits.append(arena, .{ .file = at, .span = .{ .start = span.end, .end = span.end }, .text = if (postfix) ".to_owned()" else ").to_owned()" });
             }
         }
-        if (seen.items.len == 0) return null;
-        if (try importEdit(arena, self.ast, self.ast.exprMain(seen.items[0]), missing)) |edit| try edits.append(arena, edit);
+        return seen.items;
+    }
+
+    /// The edits answering with `result` and returning `….to_owned()` of the
+    /// value every exit returns, with the imports `missing` names: the fix of
+    /// the owned copy's help. Asked of a view leaving through an exit, so
+    /// there is one.
+    fn ownedCopyEdits(self: *const Analysis, file: FileId, result: []const u8, missing: HelpImports) ![]const diagnostics.Edit {
+        const arena = self.sink.arena;
+        const values = try self.returnedValues();
+        std.debug.assert(values.len > 0);
+        var edits: std.ArrayList(diagnostics.Edit) = .empty;
+        try edits.append(arena, try self.resultSite().edit(arena, file, result));
+        for (values) |exits| {
+            const span = self.ast.exprSpan(exits);
+            const at = self.ast.fileOfExpr(exits);
+            // `….to_owned()` reads what it copies, so a `copy(…)` around it
+            // copies a view nothing takes.
+            if (self.ast.exprTag(exits) == .copy_) {
+                const copied = self.ast.unaryOperand(exits);
+                const text = self.ast.exprText(copied);
+                try edits.append(arena, .{ .file = at, .span = span, .text = if (takesPostfix(self.ast.exprTag(copied)))
+                    try std.fmt.allocPrint(arena, "{s}.to_owned()", .{text})
+                else
+                    try std.fmt.allocPrint(arena, "({s}).to_owned()", .{text}) });
+                continue;
+            }
+            const postfix = takesPostfix(self.ast.exprTag(exits));
+            if (!postfix) try edits.append(arena, .{ .file = at, .span = .{ .start = span.start, .end = span.start }, .text = "(" });
+            try edits.append(arena, .{ .file = at, .span = .{ .start = span.end, .end = span.end }, .text = if (postfix) ".to_owned()" else ").to_owned()" });
+        }
+        if (try importEdit(arena, self.ast, self.ast.exprMain(values[0]), missing)) |edit| try edits.append(arena, edit);
         return edits.items;
     }
 
-    /// The edits putting `owner` where its view `primary` is, written as
-    /// `owner.view()`, and declaring the result `owned`: the fix of the help
-    /// saying the local owns the text already. Null where the view is written
-    /// some other way.
-    fn ownerInPlaceEdits(self: *const Analysis, primary: diagnostics.Label, owner: BindingId, owned: []const u8, missing: []const []const u8) !?[]const diagnostics.Edit {
+    /// Whether an expression of this kind takes a `.to_owned()` written
+    /// after it without parentheses.
+    fn takesPostfix(tag: node.Expr.Tag) bool {
+        return switch (tag) {
+            .name_ref, .call, .field, .index, .copy_, .str_literal, .interp, .grouped, .try_ => true,
+            else => false,
+        };
+    }
+
+    /// The owner-in-place help's fix, or why a tool cannot write it.
+    const OwnerInPlace = union(enum) { edits: []const diagnostics.Edit, why: []const u8 };
+
+    /// The edits putting `owner` where each exit returns its view, written
+    /// as `owner.view()`, and declaring the result `owned`: the fix of the
+    /// help saying the local owns the text already. Refused where an exit
+    /// returns anything else, since the owner cannot stand for a view of
+    /// something it does not hold and the result type changes for every
+    /// exit at once.
+    fn ownerInPlaceEdits(self: *const Analysis, owner: BindingId, owned: []const u8, missing: HelpImports) !OwnerInPlace {
         const arena = self.sink.arena;
-        const site = self.resultSite() orelse return null;
-        const name = self.ast.tokenText(self.res.declaringToken(owner));
         const token = self.res.declaringToken(owner);
-        const source = self.ast.partOf(token).source;
-        if (primary.file != self.ast.fileOf(token) or primary.span.end > source.len) return null;
-        const written = source[primary.span.start..primary.span.end];
+        const name = self.ast.tokenText(token);
         const view = try std.fmt.allocPrint(arena, "{s}.view()", .{name});
-        if (!std.mem.eql(u8, written, view)) return null;
         var edits: std.ArrayList(diagnostics.Edit) = .empty;
-        try edits.append(arena, try site.edit(arena, primary.file, owned));
-        try edits.append(arena, .{ .file = primary.file, .span = primary.span, .text = name });
+        try edits.append(arena, try self.resultSite().edit(arena, self.ast.fileOf(token), owned));
+        for (try self.returnedValues()) |exits| {
+            if (!std.mem.eql(u8, self.ast.exprText(exits), view)) return .{ .why = try std.fmt.allocPrint(arena, "every exit returns `{s}` then, and one returns `{s}`", .{ owned, self.ast.exprText(exits) }) };
+            try edits.append(arena, .{ .file = self.ast.fileOfExpr(exits), .span = self.ast.exprSpan(exits), .text = name });
+        }
         if (try importEdit(arena, self.ast, token, missing)) |edit| try edits.append(arena, edit);
-        return edits.items;
+        return .{ .edits = edits.items };
+    }
+
+    /// Whether the function's signature is not the program's to change: a
+    /// member of a trait implementation answers to the signature its trait
+    /// declares, and a function named as a value to the callable type it was
+    /// passed as.
+    fn signatureFixed(self: *const Analysis) bool {
+        const decl = self.function.decl;
+        if (decl == .none) return false;
+        return self.typing.supply_index.signatureOf(decl) != null or self.typing.fixed_functions.get(decl) != null;
     }
 
     /// How a help names the function being checked: by its name, or as
@@ -2779,7 +2833,7 @@ const Analysis = struct {
     /// declares no `to_owned` answering a `Result`.
     ///
     /// **Bound:** the members `held`'s declaration holds, once per report.
-    fn ownedCopyOf(self: *const Analysis, held: ?types.TypeId, from: ModuleId, missing: *std.ArrayList([]const u8), failure_missing: *std.ArrayList([]const u8)) std.mem.Allocator.Error!?struct { ty: types.TypeId, name: []const u8, failure: []const u8 } {
+    fn ownedCopyOf(self: *const Analysis, held: ?types.TypeId, from: ModuleId, missing: *HelpImports, failure_missing: *HelpImports) std.mem.Allocator.Error!?struct { ty: types.TypeId, name: []const u8, failure: []const u8 } {
         const declared = self.typing.declOfType(held orelse return null) orelse return null;
         var members = self.res.membersOfType(declared);
         while (members.next()) |member| {

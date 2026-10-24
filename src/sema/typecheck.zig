@@ -14,6 +14,7 @@ const Diagnostic = @import("../diagnostics/diagnostic.zig").Diagnostic;
 const Label = @import("../diagnostics/diagnostic.zig").Label;
 const HelpEdit = @import("../diagnostics/diagnostic.zig").Edit;
 const HelpFix = @import("../diagnostics/diagnostic.zig").Fix;
+const FixKind = @import("../diagnostics/diagnostic.zig").FixKind;
 const placement = @import("../syntax/placement.zig");
 const LabelStyle = @import("../diagnostics/diagnostic.zig").LabelStyle;
 const Sink = @import("../diagnostics/sink.zig").Sink;
@@ -1428,7 +1429,7 @@ fn typecheckInternal(
             const actual = try c.checkBody(body, want);
             c.returns_seen = null;
             c.answer_fixes = null;
-            if (answer_fixes.items.len > 0) if (resultSiteOf(ast, d)) |site| try c.attachAnswerFixes(answer_fixes.items, site, body, returns.items);
+            if (answer_fixes.items.len > 0) try c.attachAnswerFixes(answer_fixes.items, resultSiteOf(ast, d), body, returns.items);
             try c.closeScope(scope);
             if (want) |context| if (context.unit_test_success and actual == .unit) {
                 try c.implicit_test_successes.put(gpa, body, context.ty);
@@ -3783,30 +3784,80 @@ pub fn writtenTypeName(
     t: TypeId,
 ) std.mem.Allocator.Error![]const u8 {
     var out: std.Io.Writer.Allocating = .init(arena);
-    writeTypeName(&out.writer, ast, program, res, pool, from, t) catch return error.OutOfMemory;
+    const writer: TypeWriter = .{ .arena = arena, .ast = ast, .program = program, .res = res, .pool = pool, .from = from, .help = null };
+    writer.write(&out.writer, t) catch return error.OutOfMemory;
     return out.toOwnedSlice() catch return error.OutOfMemory;
 }
 
+/// The last token before `token` in its file that is not a comment, or
+/// none where only comments precede it. An edit placed after "the token
+/// before the body" lands after the code, never inside a comment written
+/// between a header and its `{`.
+pub fn codeBefore(ast: *const Ast, token: TokenId) TokenId {
+    const first = ast.partOf(token).token_start;
+    var at = token.index();
+    while (at > first) {
+        at -= 1;
+        const candidate = TokenId.at(@intCast(at));
+        if (!ast.tokenTag(candidate).isTrivia()) return candidate;
+    }
+    return .none;
+}
+
+/// Whether a comment sits among the tokens from `first` to `last`, so an
+/// edit replacing their span would delete it.
+fn holdsComment(ast: *const Ast, first: TokenId, last: TokenId) bool {
+    var at = first.index();
+    while (at <= last.index()) : (at += 1) {
+        if (ast.tokenTag(TokenId.at(@intCast(at))).isTrivia()) return true;
+    }
+    return false;
+}
+
+/// A clause help's edit, or why no tool can write it: a sentence the help
+/// says instead of leaving a reader to wonder why nothing was applied.
+pub const ClauseEdit = union(enum) {
+    edit: HelpEdit,
+    why: []const u8,
+
+    /// `help` with the reason appended where there is one.
+    pub fn explained(self: ClauseEdit, arena: std.mem.Allocator, help: []const u8) std.mem.Allocator.Error![]const u8 {
+        return switch (self) {
+            .edit => help,
+            .why => |why| std.fmt.allocPrint(arena, "{s} ({s})", .{ help, why }),
+        };
+    }
+};
+
+const clause_beside_predicates = "the clause goes beside the type predicates this `where` already states";
+const clause_around_comment = "a comment inside the `where` clause stays the reader's to move";
+
 /// The edit writing `clause` as `d`'s `where` clause: in place of the one it
-/// wrote, or after its result where it wrote none. Null where `d` has no body
-/// to find the clause's end by, or where its `where` also holds type
-/// predicates, which the clause named does not carry.
-pub fn clauseEdit(arena: std.mem.Allocator, ast: *const Ast, d: node.DeclId, clause: []const u8) std.mem.Allocator.Error!?HelpEdit {
-    if (d == .none) return null;
+/// wrote, or after its header where it wrote none. Refused where its `where`
+/// also holds type predicates, which the clause named does not carry, and
+/// where a comment sits inside the clause it would replace.
+pub fn clauseEdit(arena: std.mem.Allocator, ast: *const Ast, d: node.DeclId, clause: []const u8) std.mem.Allocator.Error!ClauseEdit {
+    std.debug.assert(d != .none);
+    if (ast.declWherePredicates(d).len != 0) return .{ .why = clause_beside_predicates };
     const body = ast.declBody(d);
-    if (body == .none) return null;
-    if (ast.declWherePredicates(d).len != 0) return null;
-    const opening = ast.exprTokens(body).start;
-    if (opening.index() == 0) return null;
-    const before = TokenId.at(opening.index() - 1);
-    const where = ast.declWhereToken(d);
-    if (where != .none) return .{
-        .file = ast.fileOf(where),
-        .span = .{ .start = ast.tokenSpan(where).start, .end = ast.tokenSpan(before).end },
-        .text = clause,
+    // The header's last token: before the body where there is one, and the
+    // declaration's own last otherwise.
+    const last = if (body != .none) codeBefore(ast, ast.exprTokens(body).start) else last: {
+        const tail = TokenId.at(ast.declTokens(d).end.index() - 1);
+        break :last if (ast.tokenTag(tail).isTrivia()) codeBefore(ast, tail) else tail;
     };
-    const end = ast.tokenSpan(before).end;
-    return .{ .file = ast.fileOf(before), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, " {s}", .{clause}) };
+    std.debug.assert(last != .none);
+    const where = ast.declWhereToken(d);
+    if (where != .none) {
+        if (holdsComment(ast, where, last)) return .{ .why = clause_around_comment };
+        return .{ .edit = .{
+            .file = ast.fileOf(where),
+            .span = .{ .start = ast.tokenSpan(where).start, .end = ast.tokenSpan(last).end },
+            .text = clause,
+        } };
+    }
+    const end = ast.tokenSpan(last).end;
+    return .{ .edit = .{ .file = ast.fileOf(last), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, " {s}", .{clause}) } };
 }
 
 /// Where a body's result type is written, or goes, for a fix that changes
@@ -3829,62 +3880,147 @@ pub const ResultSite = union(enum) {
     }
 };
 
-/// Where the declaration `d`'s result type is written, or goes.
-pub fn resultSiteOf(ast: *const Ast, d: node.DeclId) ?ResultSite {
-    if (d == .none) return null;
+/// Where the declaration `d`, a function with a body, writes its result
+/// type, or where one goes: after the code before its `where` or its body.
+pub fn resultSiteOf(ast: *const Ast, d: node.DeclId) ResultSite {
     const written = ast.declReturnRef(d);
     if (written.wasWritten()) return .{ .replace = ast.writtenSpan(written) };
     const body = ast.declBody(d);
-    if (body == ExprId.none) return null;
-    const opening = ast.exprTokens(body).start;
+    std.debug.assert(body != ExprId.none);
     const where = ast.declWhereToken(d);
-    const before = if (where != .none) where else opening;
-    if (before.index() == 0) return null;
-    return .{ .arrow_after = ast.tokenSpan(TokenId.at(before.index() - 1)).end };
+    const before = codeBefore(ast, if (where != .none) where else ast.exprTokens(body).start);
+    std.debug.assert(before != .none);
+    return .{ .arrow_after = ast.tokenSpan(before).end };
 }
 
 /// Where the lambda `lambda`'s result type is written, or goes.
-pub fn lambdaResultSite(ast: *const Ast, lambda: ExprId) ?ResultSite {
-    if (lambda == .none or ast.exprTag(lambda) != .lambda) return null;
+pub fn lambdaResultSite(ast: *const Ast, lambda: ExprId) ResultSite {
+    std.debug.assert(ast.exprTag(lambda) == .lambda);
     const written = ast.lambda(lambda);
     if (written.result.wasWritten()) return .{ .replace = ast.writtenSpan(written.result) };
     if (written.result_arrow != .none) return .{ .after_arrow = ast.tokenSpan(written.result_arrow).end };
-    if (written.close == .none) return null;
+    std.debug.assert(written.close != .none);
     return .{ .arrow_after = ast.tokenSpan(written.close).end };
 }
 
 /// The edit writing `clause` as the `where` clause of the lambda `lambda`, in
 /// its header between its parameters and its body: in place of the one it
 /// wrote, after its result where it wrote one, and as `-> where …` where it
-/// wrote neither.
+/// wrote neither. Refused where a comment sits inside the clause it would
+/// replace.
 ///
 /// **Bound:** the tokens of the lambda's header.
-pub fn lambdaClauseEdit(arena: std.mem.Allocator, ast: *const Ast, lambda: ExprId, clause: []const u8) std.mem.Allocator.Error!?HelpEdit {
-    if (lambda == .none or ast.exprTag(lambda) != .lambda) return null;
+pub fn lambdaClauseEdit(arena: std.mem.Allocator, ast: *const Ast, lambda: ExprId, clause: []const u8) std.mem.Allocator.Error!ClauseEdit {
+    std.debug.assert(ast.exprTag(lambda) == .lambda);
     const written = ast.lambda(lambda);
     const opening = ast.exprTokens(written.body).start;
-    if (written.close == .none or opening.index() <= written.close.index()) return null;
-    const last = TokenId.at(opening.index() - 1);
+    std.debug.assert(written.close != .none and opening.index() > written.close.index());
+    const last = codeBefore(ast, opening);
     var at = written.close.index() + 1;
     while (at < opening.index()) : (at += 1) {
         const token = TokenId.at(@intCast(at));
         if (ast.tokenTag(token) != .keyword_where) continue;
-        return .{ .file = ast.fileOf(token), .span = .{ .start = ast.tokenSpan(token).start, .end = ast.tokenSpan(last).end }, .text = clause };
+        if (holdsComment(ast, token, last)) return .{ .why = clause_around_comment };
+        return .{ .edit = .{ .file = ast.fileOf(token), .span = .{ .start = ast.tokenSpan(token).start, .end = ast.tokenSpan(last).end }, .text = clause } };
     }
     const end = ast.tokenSpan(last).end;
     const text = if (written.result_arrow != .none)
         try std.fmt.allocPrint(arena, " {s}", .{clause})
     else
         try std.fmt.allocPrint(arena, " -> {s}", .{clause});
-    return .{ .file = ast.fileOf(last), .span = .{ .start = end, .end = end }, .text = text };
+    return .{ .edit = .{ .file = ast.fileOf(last), .span = .{ .start = end, .end = end }, .text = text } };
+}
+
+/// What a type written into a help needs before a reader can copy it in.
+pub const HelpImports = struct {
+    /// The import route of every module the spelling names that the module
+    /// it is written for does not import, once each.
+    routes: std.ArrayList([]const u8) = .empty,
+    /// A qualifier the spelling writes that the module already binds to
+    /// another module or a declaration, with the route of the module it
+    /// means: no plain import makes the spelling name the type. Null where
+    /// there is none.
+    taken: ?Taken = null,
+
+    pub const Taken = struct { qualifier: []const u8, route: []const u8 };
+
+    /// Adds `route` to the routes, unless it is there already.
+    fn need(self: *HelpImports, arena: std.mem.Allocator, route: []const u8) std.mem.Allocator.Error!void {
+        for (self.routes.items) |listed| if (std.mem.eql(u8, listed, route)) return;
+        try self.routes.append(arena, route);
+    }
+
+    /// Everything `other` needs, added to this.
+    pub fn join(self: *HelpImports, arena: std.mem.Allocator, other: HelpImports) std.mem.Allocator.Error!void {
+        for (other.routes.items) |route| try self.need(arena, route);
+        if (self.taken == null) self.taken = other.taken;
+    }
+};
+
+/// The `use` that brings `trait` into scope in `file`, and the edits that
+/// write it: the module the resolution's `useRoute` names, and the import
+/// that route needs where the file has none.
+///
+/// **The one answer to how a `use` is written**, for the checker's fix and
+/// for the editor's completion that writes one, so the two cannot come to
+/// write different text.
+pub const UseWriting = struct {
+    /// What the `use` names: the module, a dot and the trait.
+    path: []const u8,
+    /// The path of the import the `use` needs, or null where the file
+    /// already imports the module it names.
+    import_path: ?[]const u8,
+    /// The edits, in the order they sit in the file: the `use`, or the
+    /// import and the `use` written together where the two go in one place,
+    /// or the import and then the `use` where they go apart.
+    held: [2]HelpEdit,
+    count: u8,
+
+    pub fn edits(self: *const UseWriting) []const HelpEdit {
+        return self.held[0..self.count];
+    }
+};
+
+pub fn useWriting(
+    arena: std.mem.Allocator,
+    program: *const Program,
+    ast: *const Ast,
+    res: *const Resolution,
+    file: FileId,
+    trait: node.DeclId,
+) std.mem.Allocator.Error!UseWriting {
+    const route = res.useRoute(program, ast, file, trait);
+    const path = try std.fmt.allocPrint(arena, "{s}.{s}", .{ route.module, ast.tokenText(ast.declName(trait)) });
+    const part = ast.partOfFile(file).?;
+    const text = part.source;
+    const place = placement.placementForUse(ast, part, text);
+    // Written only where it is returned: the caller may own every text it is
+    // handed, so a text made and then set aside would leak.
+    const needed = route.import orelse return .{ .path = path, .import_path = null, .held = .{ try useAlone(arena, file, place, path), undefined }, .count = 1 };
+    const above = placement.placementIn(ast, part, text);
+    // A file with no `use` yet opens its group right below the imports, where
+    // the new import goes too, so the two are written as one edit: the
+    // import, a blank line, the `use`, and whatever spacing the import's own
+    // placement leaves after it.
+    if (above.at == place.at) {
+        const together: HelpEdit = .{ .file = file, .span = .{ .start = above.at, .end = above.at }, .text = try std.fmt.allocPrint(arena, "{s}import {s}\n\nuse {s}\n{s}", .{ above.lead, needed, path, above.trail[1..] }) };
+        return .{ .path = path, .import_path = needed, .held = .{ together, undefined }, .count = 1 };
+    }
+    const import: HelpEdit = .{ .file = file, .span = .{ .start = above.at, .end = above.at }, .text = try std.fmt.allocPrint(arena, "{s}import {s}{s}", .{ above.lead, needed, above.trail }) };
+    errdefer arena.free(import.text);
+    return .{ .path = path, .import_path = needed, .held = .{ import, try useAlone(arena, file, place, path) }, .count = 2 };
+}
+
+/// The edit writing `use path` where `place` puts it.
+fn useAlone(arena: std.mem.Allocator, file: FileId, place: placement.Placement, path: []const u8) std.mem.Allocator.Error!HelpEdit {
+    return .{ .file = file, .span = .{ .start = place.at, .end = place.at }, .text = try std.fmt.allocPrint(arena, "{s}use {s}{s}", .{ place.lead, path, place.trail }) };
 }
 
 /// A type written into a help, for a reader in module `from` to copy into
 /// the program: as `writtenTypeName` writes it, with each trailing argument
 /// that is its parameter's written default left out (`String`, not
-/// `String[mem.SystemAllocator]`), and the import route of every module the
-/// spelling names that `from` does not import appended to `missing`, so the
-/// help can say what to import.
+/// `String[mem.SystemAllocator]`), and what `needs` records, so the help
+/// can say what to import.
 ///
 /// **Bound:** one walk over the type's arguments, as `writtenTypeName`.
 pub fn helpTypeName(
@@ -3895,189 +4031,169 @@ pub fn helpTypeName(
     pool: *const Typing,
     from: ModuleId,
     t: TypeId,
-    missing: *std.ArrayList([]const u8),
+    needs: *HelpImports,
 ) std.mem.Allocator.Error![]const u8 {
     var out: std.Io.Writer.Allocating = .init(arena);
-    writeHelpTypeName(&out.writer, arena, ast, program, res, pool, from, t, missing) catch return error.OutOfMemory;
+    const writer: TypeWriter = .{ .arena = arena, .ast = ast, .program = program, .res = res, .pool = pool, .from = from, .help = needs };
+    writer.write(&out.writer, t) catch return error.OutOfMemory;
     return out.toOwnedSlice() catch return error.OutOfMemory;
 }
 
-fn writeHelpTypeName(
-    w: *std.Io.Writer,
+/// Writes a type for a reader in module `from`: the one writer behind
+/// `writtenTypeName` and `helpTypeName`. Where `help` is set the spelling
+/// is one to copy into the program -- trailing arguments a declaration's
+/// written defaults name are left out, and every module the spelling names
+/// that `from` cannot write it through yet is recorded there.
+const TypeWriter = struct {
     arena: std.mem.Allocator,
     ast: *const Ast,
     program: *const ExpandedProgram,
     res: *const Resolution,
     pool: *const Typing,
     from: ModuleId,
-    t: TypeId,
-    missing: *std.ArrayList([]const u8),
-) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
-    if (pool.instanceOf(t)) |instance| {
-        const args = pool.argsOf(instance);
-        const tuple = pool.isTupleDecl(instance.decl);
-        // Trailing arguments its declaration's written defaults name are
-        // left out, which is how a program writes them.
+    help: ?*HelpImports,
+
+    const Error = std.Io.Writer.Error || std.mem.Allocator.Error;
+
+    fn write(self: TypeWriter, w: *std.Io.Writer, t: TypeId) Error!void {
+        const pool = self.pool;
+        if (pool.instanceOf(t)) |instance| {
+            const args = pool.argsOf(instance);
+            // A tuple is written as its components in parentheses, which is
+            // the spelling the pool minted for it; the declaration's name is
+            // not what a program writes.
+            const tuple = pool.isTupleDecl(instance.decl);
+            const shown = if (tuple or self.help == null) args.len else self.shownArguments(instance.decl, args);
+            if (tuple) try w.writeAll("(") else {
+                try self.declared(w, instance.decl);
+                if (shown == 0) return;
+                try w.writeAll("[");
+            }
+            for (args[0..shown], 0..) |arg, i| {
+                if (i > 0) try w.writeAll(", ");
+                try self.write(w, arg);
+            }
+            return w.writeAll(if (tuple) ")" else "]");
+        }
+        switch (pool.get(t)) {
+            .array => |a| {
+                try w.writeAll("[");
+                try self.write(w, a.element);
+                return w.print("; {d}]", .{a.count});
+            },
+            .borrow => |b| {
+                try w.writeAll("borrow ");
+                return self.write(w, b.referent);
+            },
+            .struct_, .enum_, .newtype => if (pool.declOfType(t)) |d| return self.declared(w, d),
+            else => {},
+        }
+        return w.writeAll(pool.nameOf(t));
+    }
+
+    /// How many of `args` a program writes: the trailing ones each naming
+    /// its parameter's written default are left out.
+    fn shownArguments(self: TypeWriter, decl: node.DeclId, args: []const TypeId) usize {
+        const parameters = self.ast.declTypeParams(decl);
         var shown = args.len;
-        if (!tuple) {
-            const parameters = ast.declTypeParams(instance.decl);
-            while (shown > 0 and shown <= parameters.len) : (shown -= 1) {
-                const default = parameters[shown - 1].default;
-                if (!default.wasWritten() or default.name == .none) break;
-                const named = res.writtenAt(default.name);
-                if (named == BindingId.none) break;
-                const argument = pool.declOfType(args[shown - 1]) orelse break;
-                if (res.declaredBy(named) != argument or pool.instanceOf(args[shown - 1]) != null) break;
+        while (shown > 0 and shown <= parameters.len) : (shown -= 1) {
+            const default = parameters[shown - 1].default;
+            if (!default.wasWritten() or default.name == .none) break;
+            const named = self.res.writtenAt(default.name);
+            if (named == BindingId.none) break;
+            const argument = self.pool.declOfType(args[shown - 1]) orelse break;
+            if (self.res.declaredBy(named) != argument or self.pool.instanceOf(args[shown - 1]) != null) break;
+        }
+        return shown;
+    }
+
+    /// A declaration's name as `from` writes it: bare where the module names
+    /// it so, and through the module `writableQualifier` names otherwise.
+    fn declared(self: TypeWriter, w: *std.Io.Writer, d: node.DeclId) Error!void {
+        const name = self.ast.declName(d);
+        if (self.from != .none) {
+            if (self.res.typeNamed(self.from, self.ast.tokenName(name))) |named| if (named == d) return w.writeAll(self.ast.tokenText(name));
+            const module = self.program.moduleOf(d);
+            if (module != .none and module != self.from) {
+                const q = writableQualifier(self.ast, self.program, self.res, self.from, module, d);
+                try w.print("{s}.", .{q.name});
+                if (self.help) |needs| if (!q.imported) {
+                    // The route the resolver reads an import of that module
+                    // by, so the import written resolves to it.
+                    const route = if (self.program.source.importRoute(self.from, q.module)) |r| r.syntax else self.program.modulePath(q.module);
+                    if (bindsElsewhere(self.ast, self.program, self.from, q)) {
+                        if (needs.taken == null) needs.taken = .{ .qualifier = q.name, .route = route };
+                    } else try needs.need(self.arena, route);
+                };
             }
         }
-        if (tuple) try w.writeAll("(") else {
-            try writeHelpDeclaredName(w, arena, ast, program, res, from, instance.decl, missing);
-            if (shown == 0) return;
-            try w.writeAll("[");
-        }
-        for (args[0..shown], 0..) |arg, i| {
-            if (i > 0) try w.writeAll(", ");
-            try writeHelpTypeName(w, arena, ast, program, res, pool, from, arg, missing);
-        }
-        return w.writeAll(if (tuple) ")" else "]");
+        return w.writeAll(self.ast.tokenText(name));
     }
-    switch (pool.get(t)) {
-        .array => |a| {
-            try w.writeAll("[");
-            try writeHelpTypeName(w, arena, ast, program, res, pool, from, a.element, missing);
-            return w.print("; {d}]", .{a.count});
-        },
-        .borrow => |b| {
-            try w.writeAll("borrow ");
-            return writeHelpTypeName(w, arena, ast, program, res, pool, from, b.referent, missing);
-        },
-        .struct_, .enum_, .newtype => if (pool.declOfType(t)) |d| return writeHelpDeclaredName(w, arena, ast, program, res, from, d, missing),
-        else => {},
+};
+
+/// Whether `from` already binds the name `q` writes to something other than
+/// the module `q` means: another module's import, or a declaration of its
+/// own. An import of that module would then be a second binding of the name.
+///
+/// **Bound:** the imports and declarations `from` writes, once each; only
+/// while a report is being written.
+fn bindsElsewhere(ast: *const Ast, program: *const ExpandedProgram, from: ModuleId, q: Qualifier) bool {
+    for (program.get(from).imports) |import| {
+        if (import.module == q.module) continue;
+        if (std.mem.eql(u8, ast.tokenText(ast.declName(import.decl)), q.name)) return true;
     }
-    return w.writeAll(pool.nameOf(t));
+    for (program.declsOf(from)) |d| {
+        if (ast.declOwner(d) != .none) continue;
+        const name = ast.declName(d);
+        if (name == .none or ast.declTag(d) == .import_) continue;
+        if (std.mem.eql(u8, ast.tokenText(name), q.name)) return true;
+    }
+    return false;
 }
 
-fn writeHelpDeclaredName(
-    w: *std.Io.Writer,
-    arena: std.mem.Allocator,
-    ast: *const Ast,
-    program: *const ExpandedProgram,
-    res: *const Resolution,
-    from: ModuleId,
-    d: node.DeclId,
-    missing: *std.ArrayList([]const u8),
-) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
-    try writeDeclaredName(w, ast, program, res, from, d);
-    if (from == .none) return;
-    if (res.typeNamed(from, ast.tokenName(ast.declName(d)))) |named| if (named == d) return;
-    const module = program.moduleOf(d);
-    if (module == .none or module == from) return;
-    const qualifier = writableQualifier(ast, program, res, from, module, d);
-    for (program.get(from).imports) |import| if (std.mem.eql(u8, ast.tokenText(ast.declName(import.decl)), qualifier)) return;
-    // Not imported: the module the qualifier names is reached by its route.
-    for (program.modules, 0..) |candidate, index| {
-        if (!std.mem.eql(u8, candidate.name, qualifier)) continue;
-        const route = program.modulePath(ModuleId.from(@intCast(index)));
-        for (missing.items) |listed| if (std.mem.eql(u8, listed, route)) return;
-        try missing.append(arena, route);
-        return;
-    }
-}
-
-/// The note a help adds where the types it writes need modules the reader
-/// has not imported, or null where they need none.
-/// The edit writing an `import` of every route in `missing` into the file
+/// The edit writing an `import` of every route `needs` names into the file
 /// holding `at`, where `placement.placementIn` puts an import. Null where
 /// nothing is missing.
-pub fn importEdit(arena: std.mem.Allocator, ast: *const Ast, at: TokenId, missing: []const []const u8) std.mem.Allocator.Error!?HelpEdit {
+pub fn importEdit(arena: std.mem.Allocator, ast: *const Ast, at: TokenId, needs: HelpImports) std.mem.Allocator.Error!?HelpEdit {
+    std.debug.assert(needs.taken == null);
+    const missing = needs.routes.items;
     if (missing.len == 0) return null;
     const part = ast.partOf(at);
     const place = placement.placementIn(ast, part, part.source);
     var out: std.ArrayList(u8) = .empty;
     try out.appendSlice(arena, place.lead);
-    for (missing, 0..) |route, i| {
-        const earlier = for (missing[0..i]) |before| {
-            if (std.mem.eql(u8, before, route)) break true;
-        } else false;
-        if (earlier) continue;
-        try out.print(arena, "{s}import {s}", .{ if (i == 0) "" else "\n", route });
-    }
+    for (missing, 0..) |route, i| try out.print(arena, "{s}import {s}", .{ if (i == 0) "" else "\n", route });
     try out.appendSlice(arena, place.trail);
     return .{ .file = ast.fileOf(at), .span = .{ .start = place.at, .end = place.at }, .text = out.items };
 }
 
-pub fn importNote(arena: std.mem.Allocator, missing: []const []const u8) std.mem.Allocator.Error!?[]const u8 {
+/// The note a help adds where the types it writes need modules the reader
+/// has not imported, or a qualifier the module already binds to something
+/// else; null where they need nothing.
+pub fn importNote(arena: std.mem.Allocator, needs: HelpImports) std.mem.Allocator.Error!?[]const u8 {
+    if (needs.taken) |taken| return try std.fmt.allocPrint(arena, "`{s}` names something else here, so reach `{s}` with `import {s} as` a name of its own, and write that name in place of `{s}`", .{ taken.qualifier, taken.route, taken.route, taken.qualifier });
+    const missing = needs.routes.items;
     if (missing.len == 0) return null;
     var out: std.ArrayList(u8) = .empty;
     for (missing, 0..) |route, i| try out.print(arena, "{s}`import {s}`", .{ if (i == 0) "" else if (i + 1 == missing.len) " and " else ", ", route });
     return try std.fmt.allocPrint(arena, "the types this names are reached with {s}", .{out.items});
 }
 
-fn writeTypeName(
-    w: *std.Io.Writer,
-    ast: *const Ast,
-    program: *const ExpandedProgram,
-    res: *const Resolution,
-    pool: *const Typing,
-    from: ModuleId,
-    t: TypeId,
-) std.Io.Writer.Error!void {
-    if (pool.instanceOf(t)) |instance| {
-        // A tuple is written as its components in parentheses, which is the
-        // spelling the pool minted for it; the declaration's name is not what
-        // a program writes.
-        const tuple = pool.isTupleDecl(instance.decl);
-        if (tuple) try w.writeAll("(") else {
-            try writeDeclaredName(w, ast, program, res, from, instance.decl);
-            try w.writeAll("[");
-        }
-        for (pool.argsOf(instance), 0..) |arg, i| {
-            if (i > 0) try w.writeAll(", ");
-            try writeTypeName(w, ast, program, res, pool, from, arg);
-        }
-        return w.writeAll(if (tuple) ")" else "]");
-    }
-    switch (pool.get(t)) {
-        .array => |a| {
-            try w.writeAll("[");
-            try writeTypeName(w, ast, program, res, pool, from, a.element);
-            return w.print("; {d}]", .{a.count});
-        },
-        .borrow => |b| {
-            try w.writeAll("borrow ");
-            return writeTypeName(w, ast, program, res, pool, from, b.referent);
-        },
-        .struct_, .enum_, .newtype => if (pool.declOfType(t)) |d| return writeDeclaredName(w, ast, program, res, from, d),
-        else => {},
-    }
-    return w.writeAll(pool.nameOf(t));
-}
+/// The module name a reader in `from` writes before a declaration of
+/// `module`, and the module that name is: the name of `from`'s import of
+/// that module, or of an import that re-exports the declaration publicly.
+/// Where `from` imports neither, a library declaration re-exported publicly
+/// by the module enclosing its own is written through that module, as
+/// `io.IoError` for the `IoError` that `std/io/core` declares and `std/io`
+/// exports; any other declaration through its declaring module's own name.
+const Qualifier = struct {
+    name: []const u8,
+    /// The module the name stands for.
+    module: ModuleId,
+    /// Whether `from` already imports it under that name.
+    imported: bool,
+};
 
-fn writeDeclaredName(
-    w: *std.Io.Writer,
-    ast: *const Ast,
-    program: *const ExpandedProgram,
-    res: *const Resolution,
-    from: ModuleId,
-    d: node.DeclId,
-) std.Io.Writer.Error!void {
-    const name = ast.declName(d);
-    if (from != .none) {
-        if (res.typeNamed(from, ast.tokenName(name))) |named| if (named == d) return w.writeAll(ast.tokenText(name));
-        const module = program.moduleOf(d);
-        if (module != .none and module != from) try w.print("{s}.", .{writableQualifier(ast, program, res, from, module, d)});
-    }
-    return w.writeAll(ast.tokenText(name));
-}
-
-/// The module name a reader in `from` writes before a declaration of `module`:
-/// the name of `from`'s import of that module, or of an import that re-exports
-/// the declaration publicly. Where `from` imports neither, a library
-/// declaration re-exported publicly by the module enclosing its own is
-/// written through that module, as `io.IoError` for the `IoError` that
-/// `std/io/core` declares and `std/io` exports; any other declaration through
-/// its declaring module's own name.
-///
 /// **Bound:** the imports `from` writes, once each, and for a library
 /// declaration no import reaches, the program's modules, once; only while a
 /// report is being written.
@@ -4088,26 +4204,26 @@ fn writableQualifier(
     from: ModuleId,
     module: ModuleId,
     d: node.DeclId,
-) []const u8 {
+) Qualifier {
     const imports = program.get(from).imports;
     for (imports) |import| {
-        if (import.module == module) return ast.tokenText(ast.declName(import.decl));
+        if (import.module == module) return .{ .name = ast.tokenText(ast.declName(import.decl)), .module = module, .imported = true };
     }
     const name = ast.tokenName(ast.declName(d));
     for (imports) |import| {
         if (import.module == .none) continue;
         const b = res.namedIn(import.module, name) orelse continue;
         if (res.declaredBy(b) != d or res.isAmbient(b) or res.namingReachOf(b) != .public) continue;
-        return ast.tokenText(ast.declName(import.decl));
+        return .{ .name = ast.tokenText(ast.declName(import.decl)), .module = import.module, .imported = true };
     }
     const declaring = program.get(module);
     if (declaring.library) if (std.fs.path.dirname(declaring.dir)) |parent| for (program.modules, 0..) |enclosing, index| {
         if (!std.mem.eql(u8, enclosing.dir, parent)) continue;
         const b = res.namedIn(ModuleId.from(@intCast(index)), name) orelse break;
         if (res.declaredBy(b) != d or res.isAmbient(b) or res.namingReachOf(b) != .public) break;
-        return enclosing.name;
+        return .{ .name = enclosing.name, .module = ModuleId.from(@intCast(index)), .imported = false };
     };
-    return declaring.name;
+    return .{ .name = declaring.name, .module = module, .imported = false };
 }
 
 test "a type is written with its arguments as the module writes them" {
@@ -5775,6 +5891,9 @@ const Checker = struct {
     /// Whether the function being checked wrote a result type that was
     /// refused, so a `?` in it has nothing known to answer to.
     answer_unknown: bool = false,
+    /// Whether the `defer` being checked was refused for scheduling what
+    /// leaves, so a `?` in it answers nothing a function could change.
+    schedule_refused: bool = false,
     /// Whether a parameter's default is being checked. A default is a
     /// constant, so a `?` in it answers to nothing and is refused as not
     /// constant.
@@ -7617,8 +7736,9 @@ const Checker = struct {
             try self.noteContractRoots(self.ast.params[written.params.start..written.params.end], self.ast.contracts[written.contracts.start..written.contracts.end]);
             return .poison;
         }
+        var outcome: ContractOutcome = .{ .callable = ref };
         const contracts = if (self.callable_effects_ready)
-            try self.normalizeContracts(params.items, self.ast.params[written.params.start..written.params.end], result, self.ast.contracts[written.contracts.start..written.contracts.end], ref.at, null, null)
+            try self.normalizeContracts(params.items, self.ast.params[written.params.start..written.params.end], result, self.ast.contracts[written.contracts.start..written.contracts.end], ref.at, null, &outcome)
         else
             &.{};
         defer types_mod.freeContracts(self.gpa, contracts);
@@ -7823,10 +7943,19 @@ const Checker = struct {
         decl: node.DeclId = .none,
         /// The lambda the signature belongs to, where it is one.
         lambda: ExprId = .none,
+        /// The written callable type the signature is, where it is one: the
+        /// type, whose clause goes after its result.
+        callable: ?node.TypeRef = null,
 
         /// The edit writing `clause` where this signature is written.
-        fn clauseFix(self: ContractOutcome, arena: std.mem.Allocator, ast: *const Ast, clause: []const u8) std.mem.Allocator.Error!?HelpEdit {
+        fn clauseFix(self: ContractOutcome, arena: std.mem.Allocator, ast: *const Ast, clause: []const u8) std.mem.Allocator.Error!ClauseEdit {
             if (self.decl != .none) return clauseEdit(arena, ast, self.decl, clause);
+            if (self.callable) |ref| {
+                // A callable type writing a clause has no ambiguity to
+                // report, so the clause goes after the result it has.
+                const end = ast.writtenSpan(ref).end;
+                return .{ .edit = .{ .file = ast.fileOf(ref.at), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, " {s}", .{clause}) } };
+            }
             return lambdaClauseEdit(arena, ast, self.lambda, clause);
         }
     };
@@ -7863,7 +7992,7 @@ const Checker = struct {
         return found;
     }
 
-    fn normalizeContracts(self: *Checker, params: []types_mod.CallableParam, declared_params: []const node.Param, result: TypeId, written: []const node.Contract, at: TokenId, closure: ?resolve_mod.ClosureId, outcome: ?*ContractOutcome) ![]const types_mod.CallableContract {
+    fn normalizeContracts(self: *Checker, params: []types_mod.CallableParam, declared_params: []const node.Param, result: TypeId, written: []const node.Contract, at: TokenId, closure: ?resolve_mod.ClosureId, outcome: *ContractOutcome) ![]const types_mod.CallableContract {
         var contracts: std.ArrayList(types_mod.CallableContract) = .empty;
         errdefer {
             for (contracts.items) |contract| {
@@ -7947,9 +8076,7 @@ const Checker = struct {
         }
         // The body is not checked against the remainder of a dropped clause:
         // the refusal is its error.
-        if (dropped) if (outcome) |out| {
-            out.declined = true;
-        };
+        if (dropped) outcome.declined = true;
         const carriers: CarrierParameters = if (written.len == 0) try self.carrierParameters(params, result) else .{};
         if (written.len == 0) switch (try types_mod.inferredSource(&self.builder, params, result, carriers.sole())) {
             .none => {},
@@ -7991,42 +8118,41 @@ const Checker = struct {
                         try carried.print(self.gpa, "{s}`{s}`", .{ alternative, try types_mod.sourceClause(self.sink.arena, &.{source}) });
                         listed_carriers += 1;
                     }
-                    const help = try std.fmt.allocPrint(self.sink.arena, "{s} are carriers, so none is the default source; add {s}, or `{s}` where it may come from {s}", .{
-                        named.items,
-                        carried.items,
-                        try types_mod.sourceClause(self.sink.arena, carrying.items),
-                        if (listed_carriers == 2) "either" else "any of them",
-                    });
-                    const reported = self.sink.items().len;
-                    self.reportAtToken(.t_borrow_contract, at, "the result has more than one eligible observation source, and several parameters are carriers", help, null);
+                    const every_clause = try types_mod.sourceClause(self.sink.arena, carrying.items);
                     // The clause naming every carrier answers whichever the
                     // body uses.
-                    if (outcome) |out| if (try out.clauseFix(self.sink.arena, self.ast, try types_mod.sourceClause(self.sink.arena, carrying.items))) |edit|
-                        try self.addFix(reported, null, &.{edit});
+                    const edit = try outcome.clauseFix(self.sink.arena, self.ast, every_clause);
+                    const help = try edit.explained(self.sink.arena, try std.fmt.allocPrint(self.sink.arena, "{s} are carriers, so none is the default source; add {s}, or `{s}` where it may come from {s}", .{
+                        named.items,
+                        carried.items,
+                        every_clause,
+                        if (listed_carriers == 2) "either" else "any of them",
+                    }));
+                    const reported = self.sink.items().len;
+                    self.reportAtToken(.t_borrow_contract, at, "the result has more than one eligible observation source, and several parameters are carriers", help, null);
+                    if (edit == .edit and self.sink.items().len > reported) try self.addFix(reported, .where_clause, null, &.{edit.edit});
                 } else {
                     const every_clause = try types_mod.sourceClause(self.sink.arena, every.items);
-                    const help = try std.fmt.allocPrint(self.sink.arena, "the result may come from {s}; add {s}, or `{s}` where it may come from {s}", .{
+                    // The clause naming every candidate is the one edit that
+                    // answers whichever the body uses.
+                    const edit = try outcome.clauseFix(self.sink.arena, self.ast, every_clause);
+                    const help = try edit.explained(self.sink.arena, try std.fmt.allocPrint(self.sink.arena, "the result may come from {s}; add {s}, or `{s}` where it may come from {s}", .{
                         sources.items,
                         clauses.items,
                         every_clause,
                         if (listed == 2) "either" else "any of them",
-                    });
+                    }));
                     const reported = self.sink.items().len;
                     self.reportAtToken(.t_borrow_contract, at, "the result has more than one eligible observation source", help, null);
-                    // The clause naming every candidate is the one edit that
-                    // answers whichever the body uses.
-                    if (outcome) |out| if (try out.clauseFix(self.sink.arena, self.ast, every_clause)) |edit|
-                        try self.addFix(reported, null, &.{edit});
+                    if (edit == .edit and self.sink.items().len > reported) try self.addFix(reported, .where_clause, null, &.{edit.edit});
                 }
                 // The body has no contract to be checked against, so the
                 // ambiguity is the only error it reports.
-                if (outcome) |out| out.declined = true;
+                outcome.declined = true;
             },
             .one => |source| {
                 if (source.place) params[source.parameter].stable_address = true;
-                if (source.by_carrier) if (outcome) |out| {
-                    out.carrier = source.parameter;
-                };
+                if (source.by_carrier) outcome.carrier = source.parameter;
                 const spelling = try self.gpa.dupe(u8, params[source.parameter].spelling);
                 errdefer self.gpa.free(spelling);
                 try contracts.append(self.gpa, .{ .kind = if (source.place) .borrows else .carries, .source = .{ .root = .{ .parameter = source.parameter }, .spelling = spelling } });
@@ -8403,7 +8529,7 @@ const Checker = struct {
     /// writes two different types the same way.
     /// How a help writes `t` for the reader to copy, by `helpTypeName`,
     /// adding to `missing` the modules the spelling needs imported.
-    fn helpName(self: *const Checker, t: TypeId, missing: *std.ArrayList([]const u8)) std.mem.Allocator.Error![]const u8 {
+    fn helpName(self: *const Checker, t: TypeId, missing: *HelpImports) std.mem.Allocator.Error![]const u8 {
         const pool = self.builder.view();
         return helpTypeName(self.sink.arena, self.ast, self.program, self.res, &pool, self.current, t, missing);
     }
@@ -12971,8 +13097,9 @@ const Checker = struct {
         if (reached == trait) return null;
         const module = self.program.moduleOf(trait);
         if (module == .none) return null;
-        for (self.program.get(self.current).imports) |import| if (import.module == module) return null;
-        return self.program.modulePath(module);
+        const q = writableQualifier(self.ast, self.program, self.res, self.current, module, trait);
+        if (q.imported) return null;
+        return self.program.modulePath(q.module);
     }
 
     /// A trait applied to `args` as a report writes it to the module being
@@ -12985,7 +13112,7 @@ const Checker = struct {
         const shadowed = if (self.res.traitNamed(self.current, self.ast.tokenName(self.ast.declName(trait)))) |reached| reached != trait else false;
         const module = self.program.moduleOf(trait);
         const name = if (shadowed and module != .none)
-            try std.fmt.allocPrint(self.sink.arena, "{s}.{s}", .{ writableQualifier(self.ast, self.program, self.res, self.current, module, trait), bare })
+            try std.fmt.allocPrint(self.sink.arena, "{s}.{s}", .{ writableQualifier(self.ast, self.program, self.res, self.current, module, trait).name, bare })
         else
             bare;
         if (args.len == 0) return name;
@@ -13595,7 +13722,7 @@ const Checker = struct {
             .notes = all_notes,
         }) catch {};
         if (allocators_note) |note| if (self.allocatorFormEdits(id, note.form) catch null) |edits| {
-            self.addFix(self.sink.items().len - 1, allocators_at.?, edits) catch {};
+            self.addFix(self.sink.items().len - 1, .allocator_form, allocators_at.?, edits) catch {};
         };
         return self.recordMismatch(id);
     }
@@ -14847,7 +14974,11 @@ const Checker = struct {
             // a value computed and thrown away.
             .expr_stmt => try self.checkForEffect(s),
             .defer_stmt => {
-                try self.refuseAbruptSchedule(s);
+                // A `?` the schedule was refused for answers nothing, so it
+                // is not also judged against what the function answers.
+                const previous = self.schedule_refused;
+                defer self.schedule_refused = previous;
+                self.schedule_refused = try self.refuseAbruptSchedule(s);
                 try self.checkForEffect(s);
             },
             .let_decl => try self.checkLet(s),
@@ -14970,9 +15101,9 @@ const Checker = struct {
     /// Read from the tree rather than from a lattice: which forms leave is a
     /// question about what was written, and the same question a `break` inside
     /// a loop operand already answers by where it sits.
-    fn refuseAbruptSchedule(self: *Checker, s: StmtId) !void {
+    fn refuseAbruptSchedule(self: *Checker, s: StmtId) !bool {
         const scheduled = self.ast.stmtData(s).init;
-        if (scheduled == ExprId.none) return;
+        if (scheduled == ExprId.none) return false;
 
         try self.findTheLeaves();
         const extent = self.ast.exprTokens(scheduled);
@@ -14988,10 +15119,10 @@ const Checker = struct {
             const mid = lo + (hi - lo) / 2;
             if (self.leaves.items[mid].at < extent.start.index()) lo = mid + 1 else hi = mid;
         }
-        if (lo == self.leaves.items.len) return;
+        if (lo == self.leaves.items.len) return false;
 
         const found = self.leaves.items[lo];
-        if (found.at >= extent.end.index()) return;
+        if (found.at >= extent.end.index()) return false;
 
         _ = self.report(
             .s_defer,
@@ -15000,6 +15131,7 @@ const Checker = struct {
             .{},
             try std.fmt.allocPrint(self.sink.arena, "{s} inside a `defer`", .{found.what}),
         );
+        return true;
     }
 
     /// Every expression that leaves, in the order they are written.
@@ -15113,7 +15245,7 @@ const Checker = struct {
             if (self.payloadTypeOf(carrier) != .unit) return;
         }
         const end = self.ast.exprSpan(value).end;
-        try self.addFix(reported, null, &.{.{ .file = self.ast.fileOfExpr(value), .span = .{ .start = end, .end = end }, .text = text }});
+        try self.addFix(reported, .hand_on_failure, null, &.{.{ .file = self.ast.fileOfExpr(value), .span = .{ .start = end, .end = end }, .text = text }});
     }
 
     fn checkLet(self: *Checker, s: StmtId) !void {
@@ -16942,23 +17074,26 @@ const Checker = struct {
         }
     }
 
-    /// Adds a note to the diagnostic the sink holds at `at`.
     /// The fix writing the help at `note` of the diagnostic at `at`, or its
     /// primary label's where `note` is null: `edits`, applied together.
-    fn addFix(self: *Checker, at: usize, note: ?u32, edits: []const HelpEdit) std.mem.Allocator.Error!void {
+    /// `at` is a report this checker made, so one the sink does not hold is
+    /// the checker's mistake.
+    fn addFix(self: *Checker, at: usize, kind: FixKind, note: ?u32, edits: []const HelpEdit) std.mem.Allocator.Error!void {
         const items = self.sink.items();
-        if (at >= items.len) return;
+        if (at >= items.len) @panic("compiler defect: a fix for a report the sink does not hold");
         var reported = items[at];
         const fixes = try self.sink.arena.alloc(HelpFix, reported.fixes.len + 1);
         @memcpy(fixes[0..reported.fixes.len], reported.fixes);
-        fixes[reported.fixes.len] = .{ .note = note, .edits = try self.sink.arena.dupe(HelpEdit, edits) };
+        fixes[reported.fixes.len] = .{ .kind = kind, .note = note, .edits = try self.sink.arena.dupe(HelpEdit, edits) };
         reported.fixes = fixes;
         try self.sink.revise(at, reported);
     }
 
+    /// Adds a note to the diagnostic the sink holds at `at`, a report this
+    /// checker made.
     fn addNote(self: *Checker, at: usize, note: []const u8) std.mem.Allocator.Error!void {
         const items = self.sink.items();
-        if (at >= items.len) return;
+        if (at >= items.len) @panic("compiler defect: a note for a report the sink does not hold");
         var reported = items[at];
         const notes = try self.sink.arena.alloc([]const u8, reported.notes.len + 1);
         @memcpy(notes[0..reported.notes.len], reported.notes);
@@ -18012,7 +18147,7 @@ const Checker = struct {
         // A default answers to nothing, and is refused as not constant where
         // it is declared; a function whose result was refused has nothing
         // known to answer to. Either way the `?` still gives its payload.
-        if (self.checking_default or (self.answer_unknown and self.try_answerer == .function)) return self.expect(id, self.payloadTypeOf(carrier), expected);
+        if (self.checking_default or (self.answer_unknown and self.try_answerer == .function) or (self.schedule_refused and self.try_answerer == .function)) return self.expect(id, self.payloadTypeOf(carrier), expected);
 
         const want = self.returnAnswer() orelse {
             if (self.deferred_tries) |deferred| {
@@ -18095,7 +18230,7 @@ const Checker = struct {
         at: TokenId,
         result: []const u8,
         wrap: []const u8,
-        imports: []const []const u8,
+        imports: HelpImports,
     };
 
     /// Gives each fix in `pending` its edits: the result at `site`, each
@@ -18113,9 +18248,9 @@ const Checker = struct {
                     try edits.append(arena, .{ .file = file, .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, " {s}(())", .{fix.wrap}) });
                 } else try self.wrapEdits(&edits, value, fix.wrap);
             }
-            if (!try self.wrapTail(&edits, body, fix.wrap)) continue;
+            try self.wrapTail(&edits, body, fix.wrap);
             if (try importEdit(arena, self.ast, fix.at, fix.imports)) |edit| try edits.append(arena, edit);
-            try self.addFix(fix.diagnostic, 0, edits.items);
+            try self.addFix(fix.diagnostic, .answer_type, 0, edits.items);
         }
     }
 
@@ -18130,23 +18265,25 @@ const Checker = struct {
     /// Wraps what `body` answers with where it ends: its tail, or `wrap(())`
     /// after its last statement where it has no tail. A body that is one
     /// expression is a closure's, which takes a block once it writes its
-    /// result, so it is wrapped in braces as well. False where it holds
-    /// nothing to put the answer after.
-    fn wrapTail(self: *Checker, edits: *std.ArrayList(HelpEdit), body: ExprId, wrap: []const u8) std.mem.Allocator.Error!bool {
+    /// result, so it is wrapped in braces as well. A body holding a `?` holds
+    /// at least that statement to put the answer after.
+    fn wrapTail(self: *Checker, edits: *std.ArrayList(HelpEdit), body: ExprId, wrap: []const u8) std.mem.Allocator.Error!void {
         if (self.ast.exprTag(body) != .block) {
             const span = self.ast.exprSpan(body);
             const file = self.ast.fileOfExpr(body);
             try edits.append(self.sink.arena, .{ .file = file, .span = .{ .start = span.start, .end = span.start }, .text = try std.fmt.allocPrint(self.sink.arena, "{{ {s}(", .{wrap}) });
             try edits.append(self.sink.arena, .{ .file = file, .span = .{ .start = span.end, .end = span.end }, .text = ") }" });
-            return true;
+            return;
         }
         const b = self.ast.blockOf(body);
         if (b.tail != ExprId.none) {
-            try self.wrapEdits(edits, b.tail, wrap);
-            return true;
+            // A tail that is a `return` is one of the returns, already
+            // wrapped where its value is.
+            if (self.ast.exprTag(self.ast.withoutGroups(b.tail)) != .return_) try self.wrapEdits(edits, b.tail, wrap);
+            return;
         }
         const statements = self.ast.blockStmts(b);
-        if (statements.len == 0) return false;
+        std.debug.assert(statements.len > 0);
         const last = statements[statements.len - 1];
         const first = self.ast.stmtTokens(last).start;
         const source = self.ast.partOf(first).source;
@@ -18154,7 +18291,6 @@ const Checker = struct {
         const line = if (std.mem.lastIndexOfScalar(u8, source[0..start], '\n')) |nl| nl + 1 else 0;
         const end = self.ast.stmtSpan(last).end;
         try edits.append(self.sink.arena, .{ .file = self.ast.fileOf(first), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(self.sink.arena, "\n{s}{s}(())", .{ source[line..start], wrap }) });
-        return true;
     }
 
     /// A `?` a closure met before anything settled its result, checked once
@@ -18191,7 +18327,7 @@ const Checker = struct {
     fn reportTryWithoutCarrier(self: *Checker, id: ExprId, operand: TypeId, carrier: Carrier, answered: TypeId, answerer: TryAnswerer, where: ?StatementValue) std.mem.Allocator.Error!TypeId {
         const answered_name = try self.typeName(answered);
         const ending = if (answered == .unit) "()" else "…";
-        var missing: std.ArrayList([]const u8) = .empty;
+        var missing: HelpImports = .{};
         const written_answer = try self.helpName(answered, &missing);
         const subject = switch (answerer) {
             .function => "make the function return `",
@@ -18202,24 +18338,25 @@ const Checker = struct {
             .result => try std.fmt.allocPrint(self.sink.arena, "{s}Result[{s}, {s}]` and end it with `.Ok({s})`", .{ subject, written_answer, try self.helpName(self.errorTypeOf(carrier), &missing), ending }),
             .option => try std.fmt.allocPrint(self.sink.arena, "{s}Option[{s}]` and end it with `.Some({s})`", .{ subject, written_answer, ending }),
         };
-        const signature = if (try importNote(self.sink.arena, missing.items)) |note| try std.fmt.allocPrint(self.sink.arena, "{s} ({s})", .{ written_signature, note }) else written_signature;
+        const signature = if (try importNote(self.sink.arena, missing)) |note| try std.fmt.allocPrint(self.sink.arena, "{s} ({s})", .{ written_signature, note }) else written_signature;
         // `else` handles a failure only as the whole of a statement: the
         // initialiser of a `let`, or a `let _` written for a value kept for
         // its effect.
         const binder = if (carrier.kind == .result) " |_|" else "";
         const failure_word = if (carrier.kind == .result) "failure" else "absence";
-        const help = if (answerer == .given_closure) if (where) |statement| try std.fmt.allocPrint(self.sink.arena, "the call this closure is passed to fixes its result as `{s}`, so handle the {s} here with `{s} {s} = … else{s} {{ … }}` in place of `?`", .{
-            answered_name,
+        const fixed = try self.answerFixedBy(answered, answered_name, carrier, answerer);
+        const help = if (fixed) |why| if (where) |statement| try std.fmt.allocPrint(self.sink.arena, "{s}, so handle the {s} here with `{s} {s} = … else{s} {{ … }}` in place of `?`", .{
+            why,
             failure_word,
             statement.keyword,
             statement.name,
             binder,
-        }) else try std.fmt.allocPrint(self.sink.arena, "the call this closure is passed to fixes its result as `{s}`, so handle the {s} here, with `else` or a `match`, in place of `?`", .{
-            answered_name,
+        }) else try std.fmt.allocPrint(self.sink.arena, "{s}, so handle the {s} here, with `else` or a `match`, in place of `?`", .{
+            why,
             failure_word,
         }) else if (where) |statement| try std.fmt.allocPrint(self.sink.arena, "{s}, or handle the {s} here with `{s} {s} = … else{s} {{ … }}` in place of `?`", .{
             signature,
-            if (carrier.kind == .result) "failure" else "absence",
+            failure_word,
             statement.keyword,
             statement.name,
             binder,
@@ -18228,8 +18365,10 @@ const Checker = struct {
         const labels = try self.sink.arena.alloc(Label, if (typed_at != null) 2 else 1);
         labels[0] = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id), .message = try std.fmt.allocPrint(self.sink.arena, "`?` returns from the {s} it is written in", .{answerer.noun()}), .style = .primary };
         if (typed_at) |at| labels[1] = .{ .file = at.file, .span = at.span, .message = "the closure's type is given here", .style = .secondary };
-        // Only a result written on the body it answers for is the fix's to edit.
-        if (answerer == .function or answerer == .closure) if (self.answer_fixes) |pending| try pending.append(self.gpa, .{
+        // Only a result written on the body it answers for is the fix's to
+        // edit, and a spelling no import makes right is not one a tool can
+        // write.
+        if ((answerer == .function or answerer == .closure) and fixed == null and missing.taken == null) if (self.answer_fixes) |pending| try pending.append(self.gpa, .{
             .diagnostic = self.sink.items().len,
             .at = self.ast.exprMain(id),
             .result = switch (carrier.kind) {
@@ -18240,7 +18379,7 @@ const Checker = struct {
                 .result => ".Ok",
                 .option => ".Some",
             },
-            .imports = try self.sink.arena.dupe([]const u8, missing.items),
+            .imports = missing,
         });
         try self.sink.add(.{
             .severity = .err,
@@ -18250,6 +18389,29 @@ const Checker = struct {
             .notes = try self.sink.arena.dupe([]const u8, &.{help}),
         });
         return self.record(id, .poison);
+    }
+
+    /// Why the answerer of a `?` cannot be changed to carry `carrier`'s
+    /// failure, or null where it can: a closure whose result the callable
+    /// type it is passed as fixes, and `main`, which answers `UInt8` or
+    /// `Result[UInt8, E]` with `E` implementing `Display`, since a failure
+    /// leaving the program is rendered. `answered` is what the answerer
+    /// answers with now. A test answers a `Result` already, so its `?` is
+    /// judged as a conversion rather than here.
+    fn answerFixedBy(self: *Checker, answered: TypeId, answered_name: []const u8, carrier: Carrier, answerer: TryAnswerer) std.mem.Allocator.Error!?[]const u8 {
+        const arena = self.sink.arena;
+        switch (answerer) {
+            .given_closure => return try std.fmt.allocPrint(arena, "the call this closure is passed to fixes its result as `{s}`", .{answered_name}),
+            .closure, .typed_closure => return null,
+            .function => {},
+        }
+        if (self.generic == .none or self.generic != self.res.entry) return null;
+        const answers = "`main` answers `UInt8`, or `Result[UInt8, E]` where `E` implements `Display`";
+        if (carrier.kind == .option or answered != .u8) return answers;
+        const failure = self.errorTypeOf(carrier);
+        const display = self.display_decl orelse return null;
+        if (failure == .poison or try implementsAnyOf(self.gpa, &self.impl_index, self.implementations, &self.builder, display, failure)) return null;
+        return try std.fmt.allocPrint(arena, "{s}, and `{s}` does not", .{ answers, try self.typeName(failure) });
     }
 
     /// An expression a statement is made of, and which statement.
@@ -18467,7 +18629,7 @@ const Checker = struct {
             const question = self.ast.exprTokens(id).end;
             if (question.index() > 0) {
                 const at = self.ast.tokenSpan(TokenId.at(question.index() - 1)).start;
-                try self.addFix(reported, 0, &.{.{ .file = self.ast.fileOfExpr(id), .span = .{ .start = at, .end = at }, .text = ".settled()" }});
+                try self.addFix(reported, .settle_before_try, 0, &.{.{ .file = self.ast.fileOfExpr(id), .span = .{ .start = at, .end = at }, .text = ".settled()" }});
             }
         }
         return self.record(id, .poison);
@@ -19851,7 +20013,9 @@ const Checker = struct {
         const d = self.declaringType(ty) orelse return spelled;
         var out: std.Io.Writer.Allocating = .init(self.gpa);
         errdefer out.deinit();
-        writeDeclaredName(&out.writer, self.ast, self.program, self.res, self.current, d) catch return error.OutOfMemory;
+        const pool = self.builder.view();
+        const writer: TypeWriter = .{ .arena = self.gpa, .ast = self.ast, .program = self.program, .res = self.res, .pool = &pool, .from = self.current, .help = null };
+        writer.declared(&out.writer, d) catch return error.OutOfMemory;
         return out.toOwnedSlice();
     }
 
@@ -20705,7 +20869,7 @@ const Checker = struct {
         }
         // A closure given its result by a callable type it is passed as
         // answers to that type, which the fix would not change.
-        if (lambda_fixes.items.len > 0 and contextual == null) if (lambdaResultSite(self.ast, id)) |site| try self.attachAnswerFixes(lambda_fixes.items, site, lambda.body, lambda_returns.items);
+        if (lambda_fixes.items.len > 0 and contextual == null) try self.attachAnswerFixes(lambda_fixes.items, lambdaResultSite(self.ast, id), lambda.body, lambda_returns.items);
         if (written_result != null and contextual != null) {
             if (try self.expect(id, result, .{
                 .ty = contextual.?.result,
@@ -21789,7 +21953,7 @@ const Checker = struct {
             _ = self.report(.t_mismatch, at, "each closure has its own type, so `{s}`, settled by one, cannot stand for this one too", .{parameter}, "one type parameter, two closures");
             if (self.sink.items().len > reported) {
                 try self.addNote(reported, try std.fmt.allocPrint(self.sink.arena, "declare a type parameter for each closure, with `{s}`'s bound", .{parameter}));
-                if (site) |where| if (try self.ownParameterEdits(where)) |edits| try self.addFix(reported, 0, edits);
+                if (site) |where| if (try self.ownParameterEdits(where)) |edits| try self.addFix(reported, .closure_type_parameters, 0, edits);
                 try self.addNote(reported, try self.closuresNote(clash.was, clash.got));
             }
             return;
@@ -21900,9 +22064,9 @@ const Checker = struct {
         const in_found = try self.typeName(had[at]);
         const default = if (parameters[at].default.wasWritten()) try self.defaultAt(want.decl, at) else .poison;
         if (wanted[at] == default) {
-            var missing: std.ArrayList([]const u8) = .empty;
+            var missing: HelpImports = .{};
             const written = try self.helpName(found, &missing);
-            const imports = if (try importNote(self.sink.arena, missing.items)) |note| try std.fmt.allocPrint(self.sink.arena, "; {s}", .{note}) else "";
+            const imports = if (try importNote(self.sink.arena, missing)) |note| try std.fmt.allocPrint(self.sink.arena, "; {s}", .{note}) else "";
             return .{ .form = .system, .text = try std.fmt.allocPrint(
                 self.sink.arena,
                 "only their allocators differ: the `{s}` expected is in `{s}`, the default where a type leaves its allocator out, and this one is in `{s}`; build it with the system form of the call that made it, without `_in`, or write `{s}` where the `{s}` expected is declared{s}",
@@ -24661,23 +24825,26 @@ const Checker = struct {
     ) std.mem.Allocator.Error!TypeId {
         const declares = self.ast.tokenText(self.ast.declName(trait));
         const file = self.ast.fileOf(self.ast.exprMain(id));
-        const route = self.res.useRoute(self.program.source, self.ast, file, trait);
+        const writing = try useWriting(self.sink.arena, self.program.source, self.ast, self.res, file, trait);
 
-        return self.report(
+        const reported = self.sink.items().len;
+        const t = self.report(
             .t_unknown_operation,
             id,
             "`{s}` is declared by `{s}`, which is not in scope here",
             .{ name, declares },
-            if (route.import) |needed| try std.fmt.allocPrint(
+            if (writing.import_path) |needed| try std.fmt.allocPrint(
                 self.gpa,
-                "write `import {s}` and `use {s}.{s}`: an operation is reached through the trait that declares it",
-                .{ needed, route.module, declares },
+                "write `import {s}` and `use {s}`: an operation is reached through the trait that declares it",
+                .{ needed, writing.path },
             ) else try std.fmt.allocPrint(
                 self.gpa,
-                "write `use {s}.{s}`: an operation is reached through the trait that declares it",
-                .{ route.module, declares },
+                "write `use {s}`: an operation is reached through the trait that declares it",
+                .{writing.path},
             ),
         );
+        if (self.sink.items().len > reported) try self.addFix(reported, .use_trait, null, writing.edits());
+        return t;
     }
 
     fn rendersItself(self: *const Checker, ty: TypeId, trait: node.DeclId) bool {
@@ -27412,7 +27579,7 @@ const Checker = struct {
         const name = self.ast.declName(member);
         const part = self.ast.partOf(name);
         const gone = placement.removal(part.source, self.ast.declSpan(member));
-        try self.addFix(self.sink.items().len - 1, null, &.{.{ .file = self.ast.fileOf(name), .span = gone, .text = "" }});
+        try self.addFix(self.sink.items().len - 1, .drop_member, null, &.{.{ .file = self.ast.fileOf(name), .span = gone, .text = "" }});
     }
 
     /// Whether `member`'s body is exactly a call of `own` -- written
@@ -31623,7 +31790,7 @@ const Checker = struct {
         const with_open = try self.gpa.alloc(TypeId, s.found.len);
         defer self.gpa.free(with_open);
         for (s.found, own, with_open) |f, parameter, *slot| slot.* = if (f == .poison) parameter else f;
-        var missing: std.ArrayList([]const u8) = .empty;
+        var missing: HelpImports = .{};
         const annotation = try self.helpName(try self.builder.substitute(row.ty, s.owner.index(), with_open), &missing);
         // Every parameter the call left open is named, since the annotation
         // has to say what each of them is.
@@ -31637,7 +31804,7 @@ const Checker = struct {
             try open.print(self.sink.arena, "{s}`{s}`", .{ joiner, self.ast.tokenText(g.name) });
             listed += 1;
         }
-        const imports = if (try importNote(self.sink.arena, missing.items)) |note| try std.fmt.allocPrint(self.sink.arena, "; {s}", .{note}) else "";
+        const imports = if (try importNote(self.sink.arena, missing)) |note| try std.fmt.allocPrint(self.sink.arena, "; {s}", .{note}) else "";
         return try std.fmt.allocPrint(self.sink.arena, "say what {s} {s} where `{s}` is declared: `{s} {s}: {s} = {s}`, with {s} in place of {s}{s}", .{
             open.items,
             if (count == 1) "is" else "are",
