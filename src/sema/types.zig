@@ -3127,7 +3127,20 @@ pub const ImplIndex = struct {
         gpa: std.mem.Allocator,
         scope: DeclId = .none,
         seen: std.AutoHashMapUnmanaged(u64, bool) = .empty,
-        active: std.HashMapUnmanaged(PreparedImplementationKey, bool, PreparedImplementationKey.Context, std.hash_map.default_max_load_percentage) = .empty,
+        /// Holds each key being decided, with whether its header matched and
+        /// the index of its frame.
+        active: std.HashMapUnmanaged(PreparedImplementationKey, Active, PreparedImplementationKey.Context, std.hash_map.default_max_load_percentage) = .empty,
+        /// Holds the answer of each key decided under an assumption about a
+        /// key still being decided, with the scope that assumption lives in.
+        /// Such an answer cannot be recorded for every lookup, but it holds
+        /// for the rest of this one while its scope is alive, so a key that a
+        /// cycle of derived implementations reaches along many paths is
+        /// decided once rather than once per path.
+        provisional: std.HashMapUnmanaged(PreparedImplementationKey, Provisional, PreparedImplementationKey.Context, std.hash_map.default_max_load_percentage) = .empty,
+        /// One scope per frame opened, joined into its parent's when the
+        /// frame closes with the answer its cycles assumed of it, and dead
+        /// when it closes with the other answer or at the outermost frame.
+        scopes: std.ArrayList(Scope) = .empty,
         prerequisite_sizes: std.AutoHashMapUnmanaged(ImplementationId, u128) = .empty,
         measure_seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
         measure_sizes: std.AutoHashMapUnmanaged(TypeId, u32) = .empty,
@@ -3210,7 +3223,82 @@ pub const ImplIndex = struct {
         const Frame = struct {
             key: PreparedImplementationKey,
             derived: bool,
+            scope: u32,
+            /// Whether a cycle closing at this key assumed it applies, or
+            /// assumed it does not.
+            assumed_holds: bool = false,
+            assumed_fails: bool = false,
         };
+
+        const Active = struct {
+            header_matches: bool,
+            frame: u32,
+        };
+
+        const Provisional = struct {
+            answer: ImplementationCandidate,
+            scope: u32,
+            /// Whether the answer is a refusal by an enclosing key's measure.
+            measured: bool,
+        };
+
+        const Scope = struct {
+            /// The scope this one was joined into, or itself while it is open
+            /// or dead.
+            parent: u32,
+            dead: bool = false,
+            /// The frame an open scope belongs to.
+            frame: u32,
+        };
+
+        /// Opens the scope of the frame about to be pushed at `frame`.
+        fn openScope(self: *Decided, frame: u32) !u32 {
+            const id: u32 = @intCast(self.scopes.items.len);
+            try self.scopes.append(self.gpa, .{ .parent = id, .frame = frame });
+            return id;
+        }
+
+        /// The open or dead scope `scope` has been joined into, compressing
+        /// the path to it.
+        fn rootScope(self: *Decided, scope: u32) u32 {
+            var root = scope;
+            while (self.scopes.items[root].parent != root) root = self.scopes.items[root].parent;
+            var at = scope;
+            while (at != root) {
+                const next = self.scopes.items[at].parent;
+                self.scopes.items[at].parent = root;
+                at = next;
+            }
+            return root;
+        }
+
+        /// Closes the scope of the innermost frame, and says whether the
+        /// answers decided under it stand: they do when the frame's answer is
+        /// the one its cycles assumed. Under an enclosing frame they then
+        /// stay usable under that frame's scope. At the outermost frame they
+        /// rest on nothing still being decided, and the caller records them.
+        fn closeScope(self: *Decided, applies: bool) bool {
+            const frame = self.frames.items[self.frames.items.len - 1];
+            const kept = if (applies) !frame.assumed_fails else !frame.assumed_holds;
+            if (!kept) {
+                self.scopes.items[frame.scope].dead = true;
+            } else if (self.frames.items.len > 1) {
+                self.scopes.items[frame.scope].parent = self.frames.items[self.frames.items.len - 2].scope;
+            }
+            return kept;
+        }
+
+        /// The answer recorded for `key_` under a scope still alive, if any.
+        /// Reading it makes what is being decided rest on the same
+        /// assumption, through the frame that scope belongs to.
+        fn provisionalAnswer(self: *Decided, key_: PreparedImplementationKey) !?ImplementationCandidate {
+            const entry = self.provisional.get(key_) orelse return null;
+            const root = self.rootScope(entry.scope);
+            if (self.scopes.items[root].dead) return null;
+            try self.assumed.append(self.gpa, self.frames.items[self.scopes.items[root].frame].key);
+            if (entry.measured) self.recursive_refusals += 1;
+            return entry.answer;
+        }
 
         /// Says whether the cycle closing at `closing` passes through a derived
         /// implementation, that is, whether some frame from `closing`'s own to
@@ -3231,6 +3319,8 @@ pub const ImplIndex = struct {
         fn deinit(self: *Decided) void {
             self.frames.deinit(self.gpa);
             self.assumed.deinit(self.gpa);
+            self.provisional.deinit(self.gpa);
+            self.scopes.deinit(self.gpa);
             self.seen.deinit(self.gpa);
             self.active.deinit(self.gpa);
             self.prerequisite_sizes.deinit(self.gpa);
@@ -4217,7 +4307,7 @@ pub const ImplIndex = struct {
             header_matches = true;
             // A recursive bound may fail, but its matching ordinary header
             // still blocks a default.
-            decided.active.getPtr(key_).?.* = true;
+            decided.active.getPtr(key_).?.header_matches = true;
             const previous_size = decided.prerequisite_sizes.get(@enumFromInt(at));
             if (im.predicates.len > 0) {
                 const size = try decided.keySize(pool, held, args);
@@ -10624,7 +10714,8 @@ pub const Typing = struct {
                 return answer;
             };
             if (self.sealed) @panic("implementation applicability was not prepared before emission");
-            if (decided.active.get(key_)) |header_matches| {
+            if (try decided.provisionalAnswer(key_)) |answer| return answer;
+            if (decided.active.get(key_)) |active| {
                 // A question that reaches back to itself is a cycle. One that
                 // passes through a derived implementation is assumed to hold:
                 // a derived body recurses through the fields of a finite
@@ -10633,39 +10724,76 @@ pub const Typing = struct {
                 // the answer rests on this key, so nothing decided under it is
                 // recorded until the key itself is settled.
                 try decided.assumed.append(self.gpa, key_);
-                if (header_matches and decided.cycleIsDerived(key_)) {
+                const frame = &decided.frames.items[active.frame];
+                if (active.header_matches and decided.cycleIsDerived(key_)) {
                     if (try self.coinductiveArguments(impls, decided, impls[at], args, held)) |bindings| {
+                        frame.assumed_holds = true;
                         return .{ .header_matches = true, .arguments = bindings };
                     }
                 }
-                return .{ .header_matches = header_matches };
+                frame.assumed_fails = true;
+                return .{ .header_matches = active.header_matches };
             }
-            try decided.active.put(self.gpa, key_, false);
+            const depth: u32 = @intCast(decided.frames.items.len);
+            try decided.active.put(self.gpa, key_, .{ .header_matches = false, .frame = depth });
             defer _ = decided.active.remove(key_);
-            try decided.frames.append(self.gpa, .{ .key = key_, .derived = impls[at].derived });
+            try decided.frames.append(self.gpa, .{ .key = key_, .derived = impls[at].derived, .scope = try decided.openScope(depth) });
             defer _ = decided.frames.pop();
             const before = decided.recursive_refusals;
             const independent = decided.prerequisite_sizes.count() == 0;
             const assumed_before = decided.assumed.items.len;
             const answer = try index.checkCandidate(impls, self, decided, at, args, held, key_);
             defer if (answer.arguments) |values| self.gpa.free(values);
-            // A refusal caused by an enclosing obligation's measure must not
-            // poison a later independent query for this same key.
-            if (!independent and answer.arguments == null and decided.recursive_refusals != before) return answer;
+            const kept = decided.closeScope(answer.arguments != null);
+            if (depth == 0) {
+                // Every key decided under this one is settled with it. Those
+                // its cycles answered as assumed hold for every lookup, except
+                // a refusal by a measure, which only this one's chain shares.
+                if (kept and decided.granted == null) {
+                    var entries = decided.provisional.iterator();
+                    while (entries.next()) |entry| {
+                        if (entry.value_ptr.measured or decided.scopes.items[decided.rootScope(entry.value_ptr.scope)].dead) continue;
+                        _ = try self.prepared_implementations.record(self.gpa, entry.key_ptr.*, entry.value_ptr.answer);
+                    }
+                }
+                decided.provisional.clearRetainingCapacity();
+                decided.scopes.clearRetainingCapacity();
+            }
             // Assumptions about this key are settled by its own answer. One
             // about an enclosing key is not settled yet, so an answer resting
-            // on it is returned without being recorded.
-            var kept = assumed_before;
+            // on it is not recorded. Only the outermost such key is kept: the
+            // enclosing frames up to it are what the answer rests on, and each
+            // of them settles only its own.
+            var outermost: ?PreparedImplementationKey = null;
+            var outermost_frame: u32 = depth;
             for (decided.assumed.items[assumed_before..]) |assumed| {
                 if (PreparedImplementationKey.Context.eql(.{}, assumed, key_)) continue;
-                decided.assumed.items[kept] = assumed;
-                kept += 1;
+                const frame = decided.active.get(assumed).?.frame;
+                if (frame < outermost_frame) {
+                    outermost = assumed;
+                    outermost_frame = frame;
+                }
             }
-            decided.assumed.items.len = kept;
-            if (kept != assumed_before or decided.granted != null) return .{
-                .header_matches = answer.header_matches,
-                .arguments = if (answer.arguments) |values| try self.prepared_implementations.retainArguments(self.gpa, values) else null,
-            };
+            decided.assumed.items.len = assumed_before;
+            if (outermost) |assumed| decided.assumed.appendAssumeCapacity(assumed);
+            // A refusal caused by an enclosing obligation's measure must not
+            // poison a later independent query for this same key.
+            const measured = !independent and answer.arguments == null and decided.recursive_refusals != before;
+            if (measured or outermost != null or decided.granted != null) {
+                const unrecorded: ImplementationCandidate = .{
+                    .header_matches = answer.header_matches,
+                    .arguments = if (answer.arguments) |values| try self.prepared_implementations.retainArguments(self.gpa, values) else null,
+                };
+                // What this lookup decided under an enclosing frame holds
+                // while that frame's scope does.
+                if (depth > 0 and decided.granted == null) try decided.provisional.put(self.gpa, .{
+                    .scope = key_.scope,
+                    .receiver = key_.receiver,
+                    .implementation = key_.implementation,
+                    .args = try self.prepared_implementations.retainArguments(self.gpa, key_.args),
+                }, .{ .answer = unrecorded, .scope = decided.frames.items[depth - 1].scope, .measured = measured });
+                return unrecorded;
+            }
             return self.prepared_implementations.record(self.gpa, key_, answer);
         }
 

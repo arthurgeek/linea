@@ -4283,6 +4283,32 @@ fn genericDerivePredicatesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// `n` derived implementations in one cycle, each requiring the next two
+/// around a ring. Releasing the first reaches every one of them along as many
+/// paths as the Fibonacci numbers count, so the sweep holds a lookup to
+/// deciding each implementation once rather than once per path.
+fn derivedCycleModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    std.debug.assert(n > 0);
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    try w.writeAll(
+        "trait Settle {}\n\n" ++
+            "impl Settle for UInt8 {}\n\n" ++
+            "template impl Settle where reflect.components: Settle {}\n\n",
+    );
+    for (0..n) |i| {
+        try w.print("struct Ring{d}[X] {{ x: X }}\n\n", .{i});
+        try w.print("derive[X: Settle] Settle for Ring{d}[X] where Ring{d}[X]: Settle, Ring{d}[X]: Settle\n\n", .{ i, (i + 1) % n, (i + 2) % n });
+    }
+    try w.writeAll(
+        "fn settled[T: Settle](_value: T) {}\n\n" ++
+            "fn main() -> UInt8 {\n    let ring: Ring0[UInt8] = .{ x = 0 }\n    settled(ring)\n    0\n}\n",
+    );
+    return out.toOwnedSlice();
+}
+
 /// One generated implementation with `n` components and one requirement.
 fn componentRequirementComponentsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     std.debug.assert(n > 0);
@@ -6346,6 +6372,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "construction repeated derives", .n = 1000, .cost = throughTheTree(constructionDerivesModule) },
     .{ .name = "derive group entries", .n = 4000, .cost = throughTheTree(deriveGroupEntriesModule) },
     .{ .name = "generic derive predicates", .n = 20000, .cost = throughTheTree(genericDerivePredicatesModule) },
+    .{ .name = "derived implementations in one cycle", .n = 2000, .cost = throughTheTree(derivedCycleModule) },
     .{ .name = "component requirement components", .n = 8000, .cost = throughTheTree(componentRequirementComponentsModule) },
     .{ .name = "component requirements", .n = 8000, .cost = throughTheTree(componentRequirementsModule) },
     .{ .name = "component requirement rows", .n = 160000, .cost = throughTheTree(componentRequirementRowsModule) },
