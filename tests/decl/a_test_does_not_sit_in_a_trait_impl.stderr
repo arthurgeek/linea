@@ -8,13 +8,3 @@ error[N-Unused]: `Box` is never used
   |
 7 | struct Box {
   |        ^^^ name it in an annotation, or remove it
-error[N-Unused]: `a_thing_holds` is never used
-  --> tests/decl/a_test_does_not_sit_in_a_trait_impl.lin:14:13
-   |
-14 |     test fn a_thing_holds() -> Result[(), IoError] {
-   |             ^^^^^^^^^^^^^ call it, or name it with a leading `_`
-error[T-Impl]: `Marker` declares no `a_thing_holds`
-  --> tests/decl/a_test_does_not_sit_in_a_trait_impl.lin:14:13
-   |
-14 |     test fn a_thing_holds() -> Result[(), IoError] {
-   |             ^^^^^^^^^^^^^ declare it on the trait, or move it to an inherent `impl`

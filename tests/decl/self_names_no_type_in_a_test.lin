@@ -1,0 +1,31 @@
+// A test inside an `impl` is resolved at module scope, so `Self` names no type
+// in it, in an annotation or before a call.
+import std.testing
+
+struct Meter {
+    reading: UInt32,
+}
+
+impl Meter {
+    pub fn new() -> Meter {
+        Meter { reading = 1 }
+    }
+
+    test fn self_in_an_annotation() {
+        let meter: Self = Meter.new()
+        testing.assert_eq(meter.reading, 1, "a new meter reads one")?
+    }
+
+    test fn self_before_a_call() {
+        let meter = Self.new()
+        testing.assert_eq(meter.reading, 1, "a new meter reads one")?
+    }
+}
+
+fn main() -> UInt8 {
+    if Meter.new().reading == 1 {
+        0
+    } else {
+        1
+    }
+}

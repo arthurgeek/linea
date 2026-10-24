@@ -2261,7 +2261,7 @@ const Analysis = struct {
         const labels = try self.sink.arena.dupe(diagnostics.Label, &.{ primary, .{
             .file = self.ast.fileOf(name),
             .span = self.ast.tokenSpan(name),
-            .message = try std.fmt.allocPrint(self.sink.arena, "this implementation adopts `{s}.{s}`'s `{s}`", .{ self.ast.tokenText(self.ast.declOwner(sig.?)), self.ast.tokenText(name), clause }),
+            .message = try std.fmt.allocPrint(self.sink.arena, "this implementation adopts `{s}.{s}`'s `{s}`", .{ self.ast.tokenText(self.ast.memberOwner(sig.?)), self.ast.tokenText(name), clause }),
             .style = .secondary,
         } });
         try self.sink.add(.{ .severity = .err, .code = .o_escapes, .message = message, .labels = labels });
@@ -2684,7 +2684,7 @@ const Analysis = struct {
         var why: []const u8 = "";
         if (self.typing.supply_index.signatureOf(decl)) |sig| {
             fixed = self.typing.declSignature(sig);
-            const trait = self.ast.declOwner(sig);
+            const trait = self.ast.memberOwner(sig);
             const module = self.program.moduleOf(sig);
             const qualifier = if (module == self.program.moduleOf(decl)) "" else try std.fmt.allocPrint(self.sink.arena, "{s}.", .{self.program.get(module).name});
             // The program can widen a trait it declares, and only that one.

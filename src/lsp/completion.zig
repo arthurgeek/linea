@@ -1530,7 +1530,7 @@ fn appendOperations(
         // What declares it: the trait, or the type itself for an inherent one.
         // Beside the label rather than in it, because two items reading the
         // same name is the whole point -- the description is what says which.
-        const through = ast.tokenText(ast.declOwner(a.sig));
+        const through = ast.tokenText(ast.memberOwner(a.sig));
 
         // Which spelling the item writes. An item the postfix form does not
         // reach needs the qualifier; the one it reaches keeps its dot.

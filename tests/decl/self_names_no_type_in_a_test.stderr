@@ -1,0 +1,10 @@
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_names_no_type_in_a_test.lin:15:20
+   |
+15 |         let meter: Self = Meter.new()
+   |                    ^^^^ a test inside an `impl` is resolved at module scope; write `Meter`
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_names_no_type_in_a_test.lin:20:21
+   |
+20 |         let meter = Self.new()
+   |                     ^^^^ a test inside an `impl` is resolved at module scope; write `Meter`

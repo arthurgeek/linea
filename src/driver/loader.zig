@@ -5841,8 +5841,8 @@ test "the library's erased closure declarations are found and certified" {
     // `open_in` and `open` are the ones `Closure` declares, not another type's
     // of those names.
     const ast = &semantics.expanded.ast;
-    try testing.expectEqualStrings("Closure", ast.tokenText(ast.declOwner(raw.closure_open_in)));
-    try testing.expectEqualStrings("Closure", ast.tokenText(ast.declOwner(raw.closure_open)));
+    try testing.expectEqualStrings("Closure", ast.tokenText(ast.memberOwner(raw.closure_open_in)));
+    try testing.expectEqualStrings("Closure", ast.tokenText(ast.memberOwner(raw.closure_open)));
     try testing.expect(raw.erasure(raw.closure_size) and !raw.erasure(raw.closure_open_in) and !raw.erasure(raw.closure_open));
 }
 

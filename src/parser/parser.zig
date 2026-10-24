@@ -1126,9 +1126,10 @@ const Parser = struct {
                 );
             }
 
-            // A test may sit inside an inherent impl, organizing tests beside
-            // the type's members. In a trait implementation, in a template or
-            // with visibility it is refused by [S-Test].
+            // A test may sit inside an inherent impl, beside the members it
+            // tests, and is a member of nothing there. In a trait
+            // implementation, in a template or with visibility it is refused
+            // by [S-Test].
             const is_test = self.cursor.eat(.keyword_test) != null;
             const expects_trap = is_test and self.cursor.eat(.keyword_trap) != null;
             if (is_test) {
@@ -1235,7 +1236,9 @@ const Parser = struct {
             if (declared) |d| {
                 self.builder.markVisibility(d, visibility, at);
                 self.builder.markOwner(d, of);
-                self.builder.markTrait(d, trait_ref);
+                // A test answers no trait, refused here or not: it is a member
+                // of nothing, so no trait's signatures are paired with it.
+                if (!is_test) self.builder.markTrait(d, trait_ref);
                 self.builder.markTest(d, is_test);
                 self.builder.markExpectedTrap(d, expects_trap);
             } else {
@@ -9631,6 +9634,43 @@ test "attributes after the visibility keep their policy and derives" {
     try testing.expectEqual(node.OwnershipPolicy.linear, ast.declOwnershipPolicy(d));
     try testing.expectEqual(node.Visibility.pub_, ast.declVisibility(d));
     try testing.expectEqual(@as(usize, 2), ast.attachedDeriveTraitRange(d).len());
+}
+
+test "a test in an impl is written inside it and a member of nothing" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    const source: Source = .{ .path = "t.lin", .text =
+        \\trait Marker {}
+        \\struct P { x: UInt8 }
+        \\impl P {
+        \\    fn get() -> UInt8 { 0 }
+        \\    test fn holds() {}
+        \\}
+        \\impl Marker for P {
+        \\    test fn refused() {}
+        \\}
+    };
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    const ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    try testing.expectEqual(@as(usize, 1), sink.items().len);
+    try testing.expectEqualStrings("a test does not sit in a trait implementation", sink.items()[0].message);
+    var functions: usize = 0;
+    for (0..ast.declCount()) |i| {
+        const d = node.DeclId.at(@intCast(i));
+        if (ast.declTag(d) != .function) continue;
+        functions += 1;
+        try testing.expectEqualStrings("P", ast.tokenText(ast.declOwner(d)));
+        if (ast.declIsTest(d)) {
+            try testing.expectEqual(TokenId.none, ast.memberOwner(d));
+            try testing.expectEqual(TokenId.none, ast.declTrait(d));
+        } else {
+            try testing.expectEqualStrings("P", ast.tokenText(ast.memberOwner(d)));
+        }
+    }
+    try testing.expectEqual(@as(usize, 3), functions);
 }
 
 test "a dangling attribute reports its missing nominal declaration once" {

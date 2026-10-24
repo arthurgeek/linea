@@ -12210,7 +12210,7 @@ fn implKey(
     d: node_mod.DeclId,
     member: []const u8,
 ) !?[]const u8 {
-    const of = ast.declOwner(d);
+    const of = ast.memberOwner(d);
     const trait = ast.declTrait(d);
     if (of == TokenId.none or trait == TokenId.none) return null;
 
@@ -12350,7 +12350,7 @@ fn checkSettledRefs(
                 found.value_ptr.twice = true;
                 continue;
             }
-            found.value_ptr.* = .{ .written = written, .of = ast.declOwner(d) };
+            found.value_ptr.* = .{ .written = written, .of = ast.memberOwner(d) };
 
             // A trait taking type parameters is one no settled reference is
             // read through, so a key naming it without them would answer for
@@ -12364,7 +12364,7 @@ fn checkSettledRefs(
             if (ast.declTypeParams(answers).len != 0) continue;
             const anywhere = try settlingKey(
                 gpa,
-                ast.tokenText(ast.declOwner(d)),
+                ast.tokenText(ast.memberOwner(d)),
                 ast.tokenText(ast.declTrait(d)),
                 ast.tokenText(ast.declName(d)),
             );
@@ -12373,7 +12373,7 @@ fn checkSettledRefs(
                 also.value_ptr.twice = true;
                 continue;
             }
-            also.value_ptr.* = .{ .written = written, .of = ast.declOwner(d) };
+            also.value_ptr.* = .{ .written = written, .of = ast.memberOwner(d) };
         }
     }
 
@@ -13534,7 +13534,7 @@ const TraitsWritten = struct {
         for (program.modules) |m| {
             for (m.decls.start..m.decls.end) |i| {
                 const d = node_mod.DeclId.at(@intCast(i));
-                const owner = ast.declOwner(d);
+                const owner = ast.memberOwner(d);
                 if (owner != TokenId.none) {
                     try self.members.put(gpa, .{
                         .owner = @intFromEnum(owner),
@@ -13627,7 +13627,7 @@ const ModulesWritten = struct {
                 // A member is reached under the type or trait owning it rather
                 // than under the module, so it is not what a name after a
                 // module's dot can reach.
-                if (ast.declOwner(d) != TokenId.none) continue;
+                if (ast.memberOwner(d) != TokenId.none) continue;
                 if (!declaresAType(ast.declTag(d))) continue;
                 if (ast.declVisibility(d) == .private) continue;
 

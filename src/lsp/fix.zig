@@ -237,7 +237,7 @@ pub fn takenFromAnImportIn(
             // A member is reached through the type or trait that holds it
             // rather than by a name of the module's, so it is not a name an
             // import would collide with.
-            if (ast.declOwner(d) != TokenId.none) continue;
+            if (ast.memberOwner(d) != TokenId.none) continue;
             // Nor is an import another file wrote, which binds only there.
             if (ast.declTag(d) == .import_ and of != file) continue;
             const at = ast.declName(d);

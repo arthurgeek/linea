@@ -1,0 +1,5 @@
+error[N-Duplicate]: `starts_empty` is already declared
+  --> tests/decl/tests_in_two_impls_share_one_namespace.lin:28:13
+   |
+28 |     test fn starts_empty() {
+   |             ^^^^^^^^^^^^ a name is declared once
