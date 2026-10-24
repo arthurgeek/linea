@@ -8,10 +8,8 @@ fn main() -> UInt8 {
     let invocation = match parsed {
         Ok(inv) => inv,
         Err(err) => {
-            let _ = io.eprintln("error: {err}")
-            let _ = io.eprintln("usage: notes <command> [options]")
-            err.release()
-            return 2
+            defer var cmd = build_cli()
+            return report(cmd, args, err)
         },
     }
 

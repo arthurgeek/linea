@@ -6,4 +6,3 @@ HTTP JSON echo server
 options:
   --port <value>        port to listen on
   --requests <value>    number of requests to serve
-

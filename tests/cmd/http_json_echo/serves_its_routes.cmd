@@ -131,5 +131,15 @@ A port that is not a number is named in the error, before the usage.
   options:
     --port <value>        port to listen on
     --requests <value>    number of requests to serve
-  
   [64]
+
+Asking for help prints the help to standard output and succeeds.
+
+  $ ./echo --help 2> /dev/null
+  usage: http-json-echo [options]
+  
+  HTTP JSON echo server
+  
+  options:
+    --port <value>        port to listen on
+    --requests <value>    number of requests to serve

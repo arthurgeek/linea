@@ -117,8 +117,9 @@ struct Options {
     requests: Option[UInt64],
 }
 
-// Read `--port PORT` and an optional `--requests N`, in either order. A
-// mistake is printed with the usage, and the exit status for it returned.
+// Read `--port PORT` and an optional `--requests N`, in either order, or
+// return the exit status to stop with: a request for help is answered, and a
+// mistake is printed with the help.
 fn parse_options(args: env.Args) -> Result[Options, UInt8] {
     defer var cmd = cli.Command.new("countdown-server", "Countdown server")
     &cmd.option("port", "--port", "port to listen on", required: true)
@@ -126,31 +127,53 @@ fn parse_options(args: env.Args) -> Result[Options, UInt8] {
 
     var cursor = cli.ArgCursor.new(args)
     defer let matches = cmd.parse(&cursor) else |error| {
-        return .Err(report(cmd, error))
+        return .Err(report(cmd, args, error))
+    }
+    if matches.is_help() {
+        return .Err(print_help(cmd, borrow matches))
     }
     let port: UInt16 = matches.get("port") else |error| {
-        return .Err(report(cmd, error))
+        return .Err(report(cmd, args, error))
     }
     let requests: Option[UInt64] = matches.get_optional("requests") else |error| {
-        return .Err(report(cmd, error))
+        return .Err(report(cmd, args, error))
     }
     .Ok(.{ port, requests })
 }
 
-// Print `error` and the usage to standard error, and return the exit status:
-// 1 when memory ran out, otherwise 64, the conventional status for a usage
-// mistake.
-fn report(cmd: cli.Command, error: cli.CliError) -> UInt8 {
+// Print `error` and the help of the command the arguments reached to
+// standard error, and return the exit status: 1 when memory ran out,
+// otherwise 64, the conventional status for a usage mistake.
+fn report(cmd: cli.Command, args: env.Args, error: cli.CliError) -> UInt8 {
     io.eprintln("error: {error}")
     if match read error { Allocation(_) => true, _ => false } {
         return 1
     }
-    let usage = cmd.usage() else |_| {
+    var cursor = cli.ArgCursor.new(args)
+    let help = cmd.help_for_arguments(&cursor) else |reason| {
+        let refused: cli.CliError = .Allocation(reason)
+        io.eprintln("error: {refused}")
         return 1
     }
-    io.eprintln(usage.view())
-    usage.release()
+    io.eprint(help.view())
+    help.release()
     64
+}
+
+// Print the help of the command `matches` reached to standard output, and
+// return the exit status: 0, or 1 when memory ran out or the write failed.
+fn print_help(cmd: cli.Command, matches: borrow cli.Matches) -> UInt8 {
+    let help = cmd.format_help(matches) else |reason| {
+        let refused: cli.CliError = .Allocation(reason)
+        io.eprintln("error: {refused}")
+        return 1
+    }
+    let written = io.print(help.view())
+    help.release()
+    match written {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
 }
 
 // The tests hand the handler a state whose logger writes only errors, so the

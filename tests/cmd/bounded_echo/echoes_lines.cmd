@@ -38,3 +38,17 @@ Sending to a port nothing listens on reports a refused connection.
   $ sed -e "s/$port/PORT/" -e 's/errno [0-9]*/errno N/' err
   bounded_echo: cannot connect to 127.0.0.1:PORT: Connect failed (ConnectionRefused) after 0 bytes; errno N
   $ cat out
+
+A missing option is named, and the help shown is that of the command it
+belongs to.
+
+  $ ./echo serve
+  error: missing required option '--port'
+  usage: bounded_echo serve [options]
+  
+  run the bounded echo server
+  
+  options:
+    --port <value>           port to listen on
+    --connections <value>    maximum connections to accept
+  [64]

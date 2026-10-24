@@ -41,5 +41,15 @@ A port that is not a number is named in the error, before the usage.
   options:
     --port <value>        port to listen on
     --requests <value>    number of requests to serve
-  
   [64]
+
+Asking for help prints the help to standard output and succeeds.
+
+  $ ./countdown --help 2> /dev/null
+  usage: countdown-server [options]
+  
+  Countdown server
+  
+  options:
+    --port <value>        port to listen on
+    --requests <value>    number of requests to serve

@@ -43,36 +43,61 @@ fn usage_error(cmd: cli.Command) -> UInt8 {
     64
 }
 
-// Print `error` to standard error and return the exit status: 1 when memory
-// ran out, otherwise 64 after printing the usage.
-fn report(cmd: cli.Command, error: cli.CliError) -> UInt8 {
+// Print `error` and the help of the command the arguments reached to
+// standard error, and return the exit status: 1 when memory ran out,
+// otherwise 64, the conventional status for a usage mistake.
+fn report(cmd: cli.Command, args: env.Args, error: cli.CliError) -> UInt8 {
     io.eprintln("error: {error}")
     if match read error { Allocation(_) => true, _ => false } {
         return 1
     }
-    usage_error(cmd)
+    var cursor = cli.ArgCursor.new(args)
+    let help = cmd.help_for_arguments(&cursor) else |reason| {
+        let refused: cli.CliError = .Allocation(reason)
+        io.eprintln("error: {refused}")
+        return 1
+    }
+    io.eprint(help.view())
+    help.release()
+    64
+}
+
+// Print the help of the command `matches` reached to standard output, and
+// return the exit status: 0, or 1 when memory ran out or the write failed.
+fn print_help(cmd: cli.Command, matches: borrow cli.Matches) -> UInt8 {
+    let help = cmd.format_help(matches) else |reason| {
+        let refused: cli.CliError = .Allocation(reason)
+        io.eprintln("error: {refused}")
+        return 1
+    }
+    let written = io.print(help.view())
+    help.release()
+    match written {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
 }
 
 fn main() -> UInt8 {
     defer var cmd = build_cli()
     var cursor = cli.ArgCursor.new(env.args())
     defer let matches = cmd.parse(&cursor) else |error| {
-        return report(cmd, error)
+        return report(cmd, env.args(), error)
     }
     if matches.is_help() {
-        return usage_error(cmd)
+        return print_help(cmd, borrow matches)
     }
     let sub = matches.subcommand() else {
         return usage_error(cmd)
     }
     if sub.name == "serve" {
         let port: UInt16 = sub.matches.get_positional("port") else |error| {
-            return report(cmd, error)
+            return report(cmd, env.args(), error)
         }
         // `clients` is optional: without it the server serves for ever.
         let clients: UInt64 = if sub.matches.positional("clients").is_some() {
             let count: UInt64 = sub.matches.get_positional("clients") else |error| {
-                return report(cmd, error)
+                return report(cmd, env.args(), error)
             }
             count
         } else {
@@ -82,10 +107,10 @@ fn main() -> UInt8 {
     }
     if sub.name == "send" {
         let port: UInt16 = sub.matches.get_positional("port") else |error| {
-            return report(cmd, error)
+            return report(cmd, env.args(), error)
         }
         defer let messages = sub.matches.positionals_all("message") else |reason| {
-            return report(cmd, .Allocation(reason))
+            return report(cmd, env.args(), .Allocation(reason))
         }
         return send(port, messages)
     }

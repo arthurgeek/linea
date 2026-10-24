@@ -1,6 +1,7 @@
 import std.cli
 import std.env
 import std.fs
+import std.io
 import std.mem
 import std.testing
 
@@ -108,6 +109,25 @@ pub fn build_cli() -> Command {
     &cmd.subcommand(help_cmd)
 
     cmd
+}
+
+// Print `error` and the help of the command the arguments reached to
+// standard error, and return the exit status: 1 when memory ran out,
+// otherwise 64, the conventional status for a usage mistake.
+pub fn report(cmd: cli.Command, args: env.Args, error: cli.CliError) -> UInt8 {
+    io.eprintln("error: {error}")
+    if match read error { Allocation(_) => true, _ => false } {
+        return 1
+    }
+    var cursor = cli.ArgCursor.new(args)
+    let help = cmd.help_for_arguments(&cursor) else |reason| {
+        let refused: cli.CliError = .Allocation(reason)
+        io.eprintln("error: {refused}")
+        return 1
+    }
+    io.eprint(help.view())
+    help.release()
+    64
 }
 
 pub struct CliParser {}
