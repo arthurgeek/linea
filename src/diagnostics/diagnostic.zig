@@ -594,6 +594,8 @@ pub const FixKind = enum {
     import_module,
     /// The `use` of a trait that declares an operation, with its import.
     use_trait,
+    /// `copy(value)` passed to a call that both lends and takes the value.
+    copy_argument,
 
     /// The name a tool reads, as JSON writes it.
     pub fn text(self: FixKind) []const u8 {
