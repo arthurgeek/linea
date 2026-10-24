@@ -3,12 +3,12 @@ finishing it is refused at compile time.
 
   $ mkdir app
   $ printf '{ "dependencies": { "sqlite": { "path": "%s/examples/guest-book/sqlite", "extern": true } } }\n' "$LINEA_ROOT" > app/linea.json
-  $ printf 'import sqlite\n\nuse sqlite.Database\n\npub fn check_count(inout db: Database) -> Result[(), sqlite.Error] {\n    let _statement = &db.prepare("SELECT COUNT(*) FROM entries")?\n    .Ok(())\n}\n\nfn main() -> UInt8 {\n    0\n}\n' > app/main.lin
+  $ printf 'import sqlite\n\nuse sqlite.Database\n\npub fn check_count(db: Database) -> Result[(), sqlite.Error] {\n    let _statement = db.prepare("SELECT COUNT(*) FROM entries")?\n    .Ok(())\n}\n\nfn main() -> UInt8 {\n    0\n}\n' > app/main.lin
   $ linea check app
   error[O-Leak]: `_statement` (a linear `sqlite.Statement`) is still owned when this path leaves
    --> app/main.lin:6:9
     |
-  6 |     let _statement = &db.prepare("SELECT COUNT(*) FROM entries")?
+  6 |     let _statement = db.prepare("SELECT COUNT(*) FROM entries")?
     |         ^^^^^^^^^^ never settled on the path that reaches the end of this block
   8 | }
     | - the block ends here
