@@ -159,10 +159,10 @@ chooses.
 ## Declaring command-line options and commands
 
 `std.cli` turns process arguments into a typed matches view from a command
-schema, generating aligned `--help` text and usage errors. Adding a flag,
-option, positional or subcommand can fail with `mem.Oom`, so each returns a
-`Result`; a test settles it with `unwrap()`, and a program hands it on with
-`?`. A program parses its own arguments with
+schema, generating aligned `--help` text and usage errors. Declaring a flag,
+option, positional or subcommand returns nothing: an allocation refused
+while the schema is built is kept on the command, and `parse` reports it as
+`CliError.Allocation`. A program parses its own arguments with
 `cmd.parse_args(env.args())`; this test parses a fixed list through
 `ArgCursor.from_slice`:
 
@@ -172,10 +172,10 @@ import std.testing
 
 test fn a_schema_reads_options_in_every_spelling() {
     defer var cmd = cli.Command.new("notes", "Manage personal notes")
-    &cmd.flag("loud", "--loud", "shout the summary", short: .Some("-l")).unwrap()
-    &cmd.flag("quiet", "--quiet", "print nothing", short: .Some("-q")).unwrap()
-    &cmd.option("format", "--format", "table or json", default: .Some("table")).unwrap()
-    &cmd.positional("title", "note title", required: true).unwrap()
+    &cmd.flag("loud", "--loud", "shout the summary", short: .Some("-l"))
+    &cmd.flag("quiet", "--quiet", "print nothing", short: .Some("-q"))
+    &cmd.option("format", "--format", "table or json", default: .Some("table"))
+    &cmd.positional("title", "note title", required: true)
 
     // `-lq` is `-l -q`, and `--format=json` attaches the value with `=`.
     let args = ["-lq", "--format=json", "Buy milk"]
@@ -185,7 +185,7 @@ test fn a_schema_reads_options_in_every_spelling() {
     testing.assert_eq(matches.option("format"), Option.Some("json"), "the attached value was lost")?
     testing.assert_eq(matches.required_positional("title"), .Ok("Buy milk"), "the title was lost")?
 
-    // A declared flag is never taken as an option's value.
+    // A word starting with `--` is never taken as an option's value.
     let swallowed = ["--format", "--loud", "Buy milk"]
     var refused = cli.ArgCursor.from_slice(swallowed.as_slice())
     let error = match cmd.parse(&refused) {
@@ -207,8 +207,9 @@ ok    a_schema_reads_options_in_every_spelling
 ```
 
 `--` ends options and subcommands, so `notes -- --loud` takes `--loud` as the
-title. `--help` or `-h` asks for help, and `cmd.format_help(borrow matches)`
-writes it for the subcommand the arguments reached.
+title, and `--format=--x` attaches a value that starts with `--`. `--help` or
+`-h` asks for help, and `cmd.format_help(borrow matches)` writes it for the
+deepest subcommand the arguments reached.
 
 Flags, options with defaults, optional and variadic positionals, and
 subcommands keep their definitions in one place. The [notes example](../../examples/notes/)
