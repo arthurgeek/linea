@@ -1949,8 +1949,10 @@ helpers, allocation failures and testing a server.
 | `linea init <directory>` | start a project; `--library` starts a library |
 
 A `<path>` is a single `.lin` file or a project directory. `linea lsp` serves
-editors; `linea fmt --check <path>` reports the files the formatter would
-change without writing them; `linea build --keep` retains the intermediate
+editors, and offers the edit a `help:` line names as a quick fix;
+`linea check --error-format=json <path>` writes each diagnostic as one line of
+JSON, with those same edits under `fixes`; `linea fmt --check <path>` reports
+the files the formatter would change without writing them; `linea build --keep` retains the intermediate
 files; and `linea emit-mlir <path>` prints the generated MLIR.
 
 ## What you have seen

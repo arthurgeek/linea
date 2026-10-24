@@ -1,6 +1,8 @@
 fn main() -> UInt8 {
     let pair = (String.new(), String.new())
-    let first = |(x, _y): (String, String)| -> Str { x.view() }
+    let first = |(x, _y): (String, String)| -> Str {
+        x.view()
+    }
     let n = first(pair).length()
     let (a, b) = pair
     a.release()

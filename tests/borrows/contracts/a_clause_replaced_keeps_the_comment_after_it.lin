@@ -1,4 +1,5 @@
-fn pick(a: Str, b: Str) -> Str where carries(a) // the longer
+fn pick(a: Str, b: Str) -> Str where
+    carries(a) // the longer
 {
     if a.length() > b.length() {
         return copy(a)

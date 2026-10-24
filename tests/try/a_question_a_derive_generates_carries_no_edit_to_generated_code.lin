@@ -2,7 +2,9 @@ struct Mark {}
 
 enum Bad { Broken }
 
-fn parse() -> Result[UInt8, Bad] { .Ok(1) }
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(1)
+}
 
 trait Structural {
     fn value(self: Self) -> UInt8

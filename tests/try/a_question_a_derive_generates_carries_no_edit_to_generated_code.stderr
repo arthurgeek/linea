@@ -1,0 +1,7 @@
+error[T-TryAnswer]: this `?` may return `Result[UInt8, Bad]`, and the function answers with `UInt8`
+  --> tests/try/a_question_a_derive_generates_carries_no_edit_to_generated_code.lin:20:8
+   |
+20 | derive Structural for Mark
+   |        ^^^^^^^^^^ `?` returns from the function it is written in
+   |
+   = help: make the function return `Result[UInt8, Bad]` and end it with `.Ok(…)`, or handle the failure here with `let n = … else |_| { … }` in place of `?`

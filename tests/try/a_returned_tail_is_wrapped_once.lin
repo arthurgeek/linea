@@ -1,6 +1,8 @@
 enum Bad { Broken }
 
-fn parse() -> Result[UInt8, Bad] { .Ok(4) }
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
 
 // The `return` that ends the body is wrapped once, as every `return` is.
 fn pick() -> UInt8 {
