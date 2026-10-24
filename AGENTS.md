@@ -41,7 +41,7 @@ zig build run -- <cmd> <file>  # run a subcommand
 zig fmt --check build.zig build src runtime  # what CI checks first
 zig build sweep -Drelease      # every cost dimension
 zig build sweep -Drelease -Dsweep-filter=<substring>  # one cost dimension
-zig build guide                # compile the guide's programs, compare pasted output
+zig build guide                # check the guide's programs and fragments, compare pasted output
 zig build example-tests        # linea test on every root under examples/, nested libraries included
 ```
 
@@ -83,26 +83,62 @@ until it is green.
   `.lin` file, a `.cmd` transcript, or a directory holding `main.lin`) runs that
   case alone. A walk that selects nothing fails, and so does one holding
   transcripts without `--compiler`.
-- `zig build guide` compiles every complete Linea program in `docs/learn` and
-  compares the output pasted beside it with what the compiler prints. Run it
-  after changing a chapter, a diagnostic's wording, or the library a chapter
-  shows. A `linea` block with `fn main`, a `test fn` or a `` `path.lin`: ``
-  label is a program; the bare or `text` block after it (past an optional `sh`
-  block holding `linea run|check|test PATH`) is its output, and is all of what
-  the compiler prints. A fenced block labelled `` `path/linea.json`: ``,
-  `` `path.c`: `` or `` `path.h`: `` is a file of the labelled project around
-  it, so a program that builds and calls C runs. A block showing only the
+- `zig build guide` checks every `linea` block on every page
+  `docs/learn/README.md` links, the appendices included, and compares the
+  output pasted beside it with what the compiler prints; a Markdown page in
+  `docs/learn` the index does not link fails the gate. Run it after changing
+  a chapter, a diagnostic's wording, or the library a chapter shows. A `linea`
+  block with `fn main`, a `test fn` or a `` `path.lin`: `` label is a program;
+  the bare or `text` block after it (past an optional `sh` block holding
+  `linea run|check|test PATH`) is its output, and is all of what the compiler
+  prints. A fenced block labelled `` `path/linea.json`: ``, `` `path.c`: `` or
+  `` `path.h`: `` is a file of the labelled project around it, so a program
+  that builds and calls C runs; a labelled file no `main.lin` of its project
+  follows fails. `<!-- guide: check REASON -->` above a program that cannot
+  run (it needs arguments, or serves until stopped) compiles it with
+  `linea check` and never runs it; the output after it is compared when it
+  shows diagnostics, and is otherwise what a run prints, held to the wording
+  rule below. Every other `linea` block is a fragment, checked one of three
+  ways. `<!-- guide: edit [PATH] N TEXT | N-M TEXT … TEXT | after N TEXT | fn NAME | end -->`
+  above it replaces line N or lines N-M of the nearest program above, or
+  inserts after line N, counting lines as that program is pasted; with PATH it
+  edits that file of the nearest program above that has one, which a project
+  needs. Each TEXT is the whole line it names, trimmed: line N, and for a
+  range also line M after ` … `, and it must match that line alone in the
+  file, so a number that names another line fails and a `}` that closes two
+  blocks names neither. A line too long to write out may be given by its
+  start followed by `…`, at least eight characters and not only punctuation.
+  Where the line to name is not distinctive, the edit names a neighbouring
+  line that is, or `<!-- guide: edit [PATH] fn NAME -->` replaces the
+  function `fn NAME`, from its line to the `}` that ends it at the start of a
+  line, and `<!-- guide: edit [PATH] end -->` appends to the file. `after 0`,
+  the top of the file, names no line and takes no text. Consecutive
+  edit blocks apply together, and the output after the last is what the
+  edited program prints; an edit of a `check` program is only checked too.
+  An edit that writes back the lines it replaces, or whose nearest program
+  is excluded, fails, and a failure names the block whose lines the compiler
+  reports. `<!-- guide: excerpt PATH -->` holds it to consecutive lines of
+  `PATH` relative to the repository root, less an indentation those lines
+  share, and compiles nothing; when `PATH` is a guide page it must be one the
+  index links, and the lines must come from a program that page compiles. An
+  unmarked fragment is checked alone with `linea check`, as the root file of
+  a library so it needs no `main`; an `[N-Unused]` naming one of its own
+  top-level declarations is allowed, since the code that would call it is not
+  shown, and output pasted after it is compared like a program's.
+  `<!-- guide: unchecked REASON -->` above a block excludes it and the output
+  after it, for a sketch, a signature or a program missing what it needs; a
+  `linea` block it excludes is still checked alone, and must fail, so a
+  marker that is no longer needed fails the gate. A block showing only the
   first diagnostics carries `<!-- guide: first N diagnostics -->` on the line
   above it and must be exactly those N with at least one more after them.
-  Output that follows no program, or a program that cannot run, carries
-  `<!-- guide: unchecked REASON -->` above its block; its diagnostic headers, `= help:`/`= note:` lines and underline
-  labels must still read like ones the compiler prints (wording found in the
-  gate's own runs or in the `.stderr` goldens under `tests/`), so a new message
-  shown only there needs a corpus case that prints it. A `linea` block carrying
-  `<!-- guide: excerpt PATH -->` above it is counted as a fragment and held to
-  be consecutive lines of `PATH` relative to the repository root. A fenced block
-  that is neither compiled nor marked fails the gate. A location inside `std/`
-  is compared by file alone.
+  Output that follows no program carries `<!-- guide: unchecked REASON -->`
+  above its block; its diagnostic headers, `= help:`/`= note:` lines and
+  underline labels, like those of output a program does not run to print,
+  must still read like ones the compiler prints (wording found in the gate's
+  own runs or in the `.stderr` goldens under `tests/`), so a new message shown
+  only there needs a corpus case that prints it. A marker may sit between a
+  label and its block. A fenced block that is neither compiled, excerpted nor
+  marked fails the gate. A location inside `std/` is compared by file alone.
 - A case is a `.lin` file or a directory holding `main.lin`; a module is a
   directory, and its goldens sit beside the directory under its own name.
   Examples keep only what a reader wants: their goldens sit in `tests/examples/`

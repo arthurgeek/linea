@@ -520,14 +520,15 @@ The error names the way out. Put the sequence whose items may be dropped first,
 and the payments second, where `zip` never drops one of them. Each pair is taken apart in
 the loop, and `commit` settles each payment:
 
+<!-- guide: edit 22-26 for (payment, till) in payments.zip(tills.as_slice()) { … io.println("took {takings} cents")? -->
 ```linea
     for (till, payment) in tills.as_slice().zip(payments) {
         payment.commit(&takings)
         io.println("{*till} till done, {takings} cents so far")?
     }
+    io.println("took {takings} cents")?
 ```
 
-<!-- guide: unchecked the output of an edited or partial program -->
 ```
 north till done, 250 cents so far
 south till done, 570 cents so far

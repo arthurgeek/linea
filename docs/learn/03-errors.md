@@ -660,7 +660,7 @@ its `main` reports a failure the way command-line programs usually do, with a
 message on standard error, written with `io.eprintln`, and a nonzero exit
 status:
 
-<!-- guide: unchecked the program needs command-line arguments and the output is three runs -->
+<!-- guide: check the program needs command-line arguments and the output is three runs -->
 ```linea
 import std.env
 import std.io
@@ -761,12 +761,14 @@ handle each failure in the style that shape suits:
 - A `main` that answers `UInt8` suits a command that chooses its exit
   statuses, as `alarm` does. Handle each setup failure — a missing argument, a
   file that will not open, a port already taken — with `let … else |error|`,
-  printing the error and returning a status:
+  printing the error and returning a status. `alarm` handles a time it
+  cannot read this way:
 
+  <!-- guide: excerpt docs/learn/03-errors.md -->
   ```linea
-  let port = written.parse[UInt16]() else |error| {
-      io.eprintln("cannot read the port {written}: {error}")
-      return 64
+  let count = minutes(time) else |error| {
+      io.eprintln("alarm: {time}: {error}")
+      return 1
   }
   ```
 
@@ -937,11 +939,11 @@ is written `let read Meters(m) = distance`. `read` looks inside without taking
 the value apart. Leave `read` out and the pattern tries to take a value the
 function was only lent:
 
+<!-- guide: edit 10 let read Meters(m) = distance -->
 ```linea
-let Meters(m) = distance
+    let Meters(m) = distance
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[O-Move]: `distance` is lent, and this takes it
   --> pace_lent.lin:10:21
@@ -954,11 +956,12 @@ error[O-Move]: `distance` is lent, and this takes it
 
 Pass the arguments the wrong way round and the compiler catches that too:
 
+<!-- guide: edit 18 io.println("{pace(run, took)} seconds per kilometre")? -->
 ```linea
-io.println("{pace(took, run)} seconds per kilometre")?
+    io.println("{pace(took, run)} seconds per kilometre")?
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
+<!-- guide: first 1 diagnostic -->
 ```
 error[T-Mismatch]: expected `Meters`, found `Seconds`
   --> pace_mixed.lin:18:23
@@ -1051,11 +1054,11 @@ Members pay 4250 cents.
 `it` stands for the value being checked. When you write a number directly,
 the check happens before the program ever runs:
 
+<!-- guide: edit 13 io.println("Members pay {discounted(price,… -->
 ```linea
-io.println("Members pay {discounted(price, Percent(150))} cents.")?
+    io.println("Members pay {discounted(price, Percent(150))} cents.")?
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[T-Refine]: 150 is not in 0..=100 for Percent
   --> percent_150.lin:13:48

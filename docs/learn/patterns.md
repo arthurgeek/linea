@@ -7,22 +7,35 @@ code, and a link to the section that teaches it with a program you can run.
 ## Settling what an operation hands back
 
 An operation that can fail either hands back what you gave it, or owns
-something you must settle. Four endings cover almost every case:
+something you must settle. Four endings cover almost every case. Turn a
+refused insert or push into its reason, dropping what it handed back:
 
+<!-- guide: excerpt docs/learn/03-errors.md -->
 ```linea
-// Turn a refused insert or push into its reason, dropping what it handed back.
 let _earlier = &bookings.insert(room, nights).settled()?
+```
 
-// Gather a chain into a new Vec; `else` handles the refusal and `iterator: _`
-// drops the finished chain.
-let { values: names, iterator: _ } = chain.collect().settled() else |_| {
+Gather a chain into a new `Vec`; `else` handles the refusal and `iterator: _`
+drops the finished chain:
+
+<!-- guide: excerpt docs/learn/05-iterating.md -->
+```linea
+let { values: names, iterator: _ } = order.as_slice().map(|sink line| copy(line.item)).collect().settled() else |_| {
     return .Ok(1)
 }
+```
 
-// Schedule the ending of a value that must be released, beside the value.
-defer names.release()
+Schedule the ending of a value that must be released, beside the value:
 
-// Empty a vector or a drain, then free it; a nonempty one comes back as `Err`.
+<!-- guide: excerpt docs/learn/06-borrowing.md -->
+```linea
+defer station.release()
+```
+
+Empty a vector or a drain, then free it; a nonempty one comes back as `Err`:
+
+<!-- guide: excerpt docs/learn/05-iterating.md -->
+```linea
 match pending.finish() {
     Ok(_) => {},
     Err(_) => panic("a payment was left in the queue"),
@@ -41,11 +54,23 @@ A drain hands out items that must each be consumed. Bind it, walk it lent with
 `for x in &pending`, and settle it with `finish()`. The walk may stop early,
 and the items it did not reach stay in `pending` for a second walk:
 
+<!-- guide: excerpt docs/learn/05-iterating.md -->
 ```linea
 var pending = queue.drain()
 for payment in &pending {
+    // The first payment that would take the till past its limit is
+    // refunded, and the walk stops there.
+    if takings + payment.cents > till_limit {
+        refunded += payment.refund()
+        break
+    }
     payment.commit(&takings)
 }
+// Refund the payments the first walk did not reach.
+for payment in &pending {
+    refunded += payment.refund()
+}
+// Every payment has been handed over, so `finish` completes the drain.
 match pending.finish() {
     Ok(_) => {},
     Err(_) => panic("a payment was left in the queue"),
@@ -63,9 +88,15 @@ program you can run.
 `enumerate` pairs each item with its position and `zip` pairs the items of two
 sequences. A `for` takes each pair apart with a tuple pattern:
 
+<!-- guide: excerpt docs/learn/05-iterating.md -->
 ```linea
-for (i, item) in order.as_slice().enumerate() { /* ... */ }
-for (item, price) in order.as_slice().zip(cents.as_slice()) { /* ... */ }
+for (i, item) in order.as_slice().enumerate() {
+    io.println("{i + 1}. {*item}")?
+}
+// `zip` pairs the items of two sequences and stops when either ends.
+for (item, price) in order.as_slice().zip(cents.as_slice()) {
+    io.println("{*item} costs {*price} cents")?
+}
 ```
 
 [Iterating](05-iterating.md#pairs-from-enumerate-and-zip) shows both.
@@ -75,8 +106,9 @@ for (item, price) in order.as_slice().zip(cents.as_slice()) { /* ... */ }
 A tuple groups two to eight values without naming a struct, and a pattern
 takes it apart:
 
+<!-- guide: excerpt docs/learn/01-linea-in-an-hour.md -->
 ```linea
-let (low, high) = bounds
+let (lo, hi) = bounds(prices)
 ```
 
 [Linea in an hour](01-linea-in-an-hour.md#tuples) introduces tuples; use a
@@ -87,6 +119,7 @@ struct when the parts deserve names.
 `net.serve` is the accept loop. You write what happens to one connection, and
 `serve` calls it for each one, closing the listener on every way out:
 
+<!-- guide: excerpt docs/learn/09-networking.md -->
 ```linea
 let ended = net.serve(listener, &handler, connections: .Some(2))
 ```
@@ -98,10 +131,18 @@ A handler that is a closure can keep state across connections, and
 ## Reading one input from a request
 
 An HTTP handler names each input as a parameter, and the router answers the
-request with the refusal when an input cannot be read:
+request with the refusal when an input cannot be read. The [JSON echo
+server](../../examples/http-json-echo/main.lin) greets the name in its path:
 
+<!-- guide: excerpt examples/http-json-echo/main.lin -->
 ```linea
-fn forecast(city: http.Path[Str], request: http.Request) -> Result[http.Response, http.Error]
+// `http.Path[Str]` reads the route's only path value, `{name}`, which the
+// router has percent-decoded, and `.value` is the text.
+fn greet(inout app: App, name: http.Path[Str], request: http.Request) -> Result[http.Response, http.Error] {
+    app.logger.info("greeting", log.field("name", name.value))
+    // `http.json` encodes the greeting, escaping any quote in the name.
+    http.json(request, Greeting { hello = copy(name.value) })
+}
 ```
 
 `http.Path`, `http.Query`, `http.Json` and `http.Form` are the extractors the
@@ -113,6 +154,7 @@ library offers, and a type of your own can implement `http.Extract`
 A colon after an interpolated value lays it out: a width and an alignment, zero
 padding, or decimal places.
 
+<!-- guide: excerpt docs/learn/08-text.md -->
 ```linea
 io.println("{line.item:<10}{line.quantity:>4}{line.price:>8.2}")?
 ```
@@ -122,11 +164,23 @@ errors for a spec the value cannot take.
 
 ## Keeping state and logging around a router
 
-`http.with_state` owns the state your routes share and lends it to each one,
-and `http.logged` wraps a handler so every request leaves one log line:
+`http.logged` wraps a handler so every request leaves one log line, and
+`http.listen_and_serve` owns the state your routes share, given as `state:`,
+and lends it to the route that answers each request. The [countdown
+server](../../examples/countdown-server/main.lin) does both:
 
+<!-- guide: excerpt examples/countdown-server/main.lin -->
 ```linea
-var server = http.with_state(app, http.logged(copy(logger), router))
+let server = http.logged(copy(logger), router)
+let app = App { logger = copy(logger) }
+```
+
+<!-- guide: excerpt examples/countdown-server/main.lin -->
+```linea
+let finished = http.listen_and_serve(net.loopback(options.port), server, state: app, limits: limits) else |error| {
+    logger.error("serving stopped", log.field("error", error))
+    return 1
+}
 ```
 
 [Networking](09-networking.md#shared-state) teaches the state and
@@ -137,6 +191,7 @@ var server = http.with_state(app, http.logged(copy(logger), router))
 `..` fills in every field you do not write from another value of the same
 type, so a change to one field reads as one line:
 
+<!-- guide: excerpt docs/learn/01-linea-in-an-hour.md -->
 ```linea
 let oat = Order { oat_milk = true, ..flat_white }
 ```
@@ -149,6 +204,7 @@ update with `Default`.
 Anything that allocates takes an allocator as an argument, and a container
 names it in its type:
 
+<!-- guide: excerpt docs/learn/01-linea-in-an-hour.md -->
 ```linea
 var basket: Vec[Str] = Vec.new()
 ```

@@ -33,10 +33,16 @@ you — but it is not a corner of the language.
 
 ## Reading a value takes nothing
 
-A parameter is read by default. This function looks at a station and returns a
-number, and nothing it returns points at anything:
+A parameter is read by default. A weather station holds its name and a count
+of samples, and `describe` looks at one and returns the count. Nothing it
+returns points at anything:
 
 ```linea
+struct Station {
+    name: String,
+    samples: UInt64,
+}
+
 fn describe(station: Station) -> UInt64 {
     station.samples
 }
@@ -57,6 +63,8 @@ A few types do not own what they show you:
 A view is cheap to copy and pass around, and it keeps working only as long as
 the thing underneath it stays put. Here is a weather station that owns its
 name, as a `String`, and a function that hands out a view of it:
+
+`station.lin`:
 
 ```linea
 import std.io
@@ -92,9 +100,10 @@ Harbour has 7 letters
 owns ([Memory](07-memory.md) covers allocators), and `defer station.release()`
 frees it when `main` ends. `title` is a `Str` pointing into the station's name.
 
-Linea is strict about the view outliving its owner. Free the station before the
-last use of `title`:
+Linea is strict about the view outliving its owner. In place of the `defer`,
+free the station yourself before the last use of `title`:
 
+<!-- guide: edit 19-21 defer station.release() … io.println("{title} has {title.length()} letters")? -->
 ```linea
     let title = label(station)
     // Releasing the station frees the name that `title` points into.
@@ -102,14 +111,13 @@ last use of `title`:
     io.println("{title} has {title.length()} letters")?
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> station_early.lin:22:5
+  --> station_early.lin:21:5
    |
-22 |     station.release()
+21 |     station.release()
    |     ^^^^^^^ keep this place available until the last use of its observation
-23 |     io.println("{title} has {title.length()} letters")?
+22 |     io.println("{title} has {title.length()} letters")?
    |                  ----- the observation is still used here
 ```
 
@@ -326,6 +334,7 @@ instead of a `'a`. The next sections explain the clauses.
 
 Look again at `label`:
 
+<!-- guide: excerpt docs/learn/06-borrowing.md -->
 ```linea
 // The returned view points into the station's own name.
 fn label(station: Station) -> Str where borrows(station) {
@@ -532,6 +541,7 @@ not observed, so the caller can point it at another room, as
 `selected = borrow studio` does. The hall it pointed *into* is what has to stay
 put. Rename the hall while the dashboard still shows it:
 
+<!-- guide: edit 35-36 selected = borrow studio … io.println("showing the {dashboard.shown.name}, selected… -->
 ```linea
     selected = borrow studio
     // Renaming the hall is refused, because the dashboard shows it.
@@ -539,7 +549,6 @@ put. Rename the hall while the dashboard still shows it:
     io.println("showing the {dashboard.shown.name}, selected the {selected.name}")?
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
   --> dashboard_rename.lin:37:5
@@ -553,6 +562,7 @@ error[O-Borrow]: this operation invalidates a place that a later observation sti
 With `borrow`, as in `watch`, the dashboard observes the caller's own variable,
 so `stage` is the one that freezes:
 
+<!-- guide: edit 39-40 watch(&dashboard, stage) … io.println("showing the {dashboard.shown.name}")? -->
 ```linea
     watch(&dashboard, stage)
     // Changing the stage is refused, because the dashboard watches `stage` itself.
@@ -560,7 +570,6 @@ so `stage` is the one that freezes:
     io.println("showing the {dashboard.shown.name}")?
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
   --> dashboard_stage.lin:41:5
@@ -589,18 +598,18 @@ Three different things, and the difference tells you what the clauses are for.
 value is never inferred, not even when there is only one parameter it could
 mean. Take the clause off `label`:
 
+<!-- guide: edit station.lin fn label -->
 ```linea
 fn label(station: Station) -> Str {
     station.name.view()
 }
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
-  --> station_noclause.lin:12:5
+  --> station_noclause.lin:11:5
    |
-12 |     station.name.view()
+11 |     station.name.view()
    |     ^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
    = help: the value comes from `station`; write `where borrows(station)` to say so
@@ -615,6 +624,7 @@ signature does not admit that. The help names both ways out: say so with
 run out of memory, so that version answers `Result[String, mem.Oom]`, which
 needs `import std.mem` beside `import std.io`:
 
+<!-- guide: unchecked the owned copy changes what `main` receives, and `main` is not shown changing with it -->
 ```linea
 fn label(station: Station) -> Result[String, mem.Oom] {
     station.name.view().to_owned()
@@ -1075,6 +1085,7 @@ whatever it points at. Owned text is a `String`.
 
 Look again at `first_field`:
 
+<!-- guide: unchecked a signature without its body -->
 ```linea
 fn first_field(line: Str) -> Option[Str] where carries(.Some: line)
 ```
@@ -1083,6 +1094,7 @@ The `.Some:` prefix narrows the promise to one part of the result. A `.None`
 points at nothing, so there is no reason to pin anything when the answer comes
 back empty. The same trick separates success from failure:
 
+<!-- guide: unchecked a where clause without its signature -->
 ```linea
 where borrows(.Ok: self), carries(.Err.Input.reason: self.reader)
 ```
@@ -1138,23 +1150,12 @@ on the next line. Before that, it belongs to the closure: reading it, changing
 it or lending it again is `[O-Borrow]`. Ask for the count before the chain is
 walked:
 
-An operation that walks at once, such as `fold`, `for_each`, `any` or `find`,
-takes such a closure too, and the lend ends when the call returns:
-
-```linea
-var inspected = UInt64(0)
-let heavy = arrivals.any(inout [limit, inout inspected] |sink parcel| {
-    inspected += 1
-    *parcel > limit
-})
-```
-
+<!-- guide: edit 15 let shipped = accepted.fold(0, |sink grams,… -->
 ```linea
     io.println("{inspected} parcels inspected so far")?
     let shipped = accepted.fold(0, |sink grams, sink parcel| grams + *parcel)
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
   --> inspected_early.lin:15:18
@@ -1167,6 +1168,25 @@ error[O-Borrow]: this operation uses a place lent `inout` to a value that is sti
    |                   -------- a value holding the lend is still used here
    |
    = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure
+```
+
+An operation that walks at once, such as `fold`, `for_each`, `any` or `find`,
+takes such a closure too, and the lend ends when the call returns. `any` stops
+at the first parcel over the limit, so `inspected` counts only the parcels it
+looked at, and `main` reads it on the next line:
+
+<!-- guide: edit 6-16 var inspected = 0 … io.println("{shipped} grams shipped;… -->
+```linea
+    var inspected = UInt64(0)
+    let heavy = arrivals.as_slice().any(inout [limit, inout inspected] |sink parcel| {
+        inspected += 1
+        *parcel > limit
+    })
+    io.println("over the limit: {heavy}; {inspected} parcels inspected")?
+```
+
+```
+over the limit: true; 3 parcels inspected
 ```
 
 The lend cannot leave the function that made it, either: a value holding it
@@ -1222,6 +1242,7 @@ Move `inspected = 0` below the last use of `kept` and the program compiles.
 
 Linea relates a result to an argument by naming the parameter:
 
+<!-- guide: unchecked a signature without its body -->
 ```linea
 fn label(station: Station) -> Str where borrows(station)
 ```

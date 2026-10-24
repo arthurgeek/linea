@@ -139,23 +139,30 @@ client received: pong
 `main` closes each resource in its own `let`, and checks the results
 afterwards. The shorter-looking `server.close().is_ok() && client.close().is_ok()`
 is refused, and the reason is worth seeing. Put this line in place of the three
-`close` lets, and `Ok(_) => if closed { 0 } else { 1 }` in the `match`:
+`close` lets:
 
+<!-- guide: edit 60-62 let server_closed = server.close() … let listener_closed = listener.close() -->
 ```linea
     let closed = server.close().is_ok() && client.close().is_ok() && listener.close().is_ok()
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
+and this arm in the `match`:
+
+<!-- guide: edit 64 Ok(_) => if server_closed.is_ok() &&… -->
+```linea
+        Ok(_) => if closed { 0 } else { 1 },
+```
+
 ```
 error[O-Merge]: the paths here disagree about `client`
-  --> loopback_shortcircuit.lin:64:18
+  --> loopback_shortcircuit.lin:60:18
    |
-64 |     let closed = server.close().is_ok() && client.close().is_ok() && listener.close().is_ok()
+60 |     let closed = server.close().is_ok() && client.close().is_ok() && listener.close().is_ok()
    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ consume it on the other path too, or on neither
 error[O-Merge]: the paths here disagree about `listener`
-  --> loopback_shortcircuit.lin:64:18
+  --> loopback_shortcircuit.lin:60:18
    |
-64 |     let closed = server.close().is_ok() && client.close().is_ok() && listener.close().is_ok()
+60 |     let closed = server.close().is_ok() && client.close().is_ok() && listener.close().is_ok()
    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ consume it on the other path too, or on neither
 ```
 
@@ -205,6 +212,7 @@ A listener has two endings. `close()` closes it and reports a failure as a
 report a failure, so it drops one; it is what a `defer` usually calls. Here
 `close` is the right choice, in place of the final `0`:
 
+<!-- guide: edit 14 0 -->
 ```linea
     match listener.close() {
         Ok(_) => 0,
@@ -240,6 +248,8 @@ Linea, forgetting is a compile error.
 The accept loop above is the same for every TCP server: accept, hand the
 connection to something, repeat. `net.serve` is that loop. You write the
 function that deals with one connection, and `serve` calls it for each one:
+
+`greeting.lin`:
 
 ```linea
 import std.io
@@ -391,6 +401,7 @@ changes it on every call, and `into_captures()` hands the counter back when
 `serve` is done ([Calling things](02-calling-things.md#a-closure-that-changes-what-it-owns)
 shows the same closure on its own). Only the handler in `main` changes:
 
+<!-- guide: edit greeting.lin 55-56 var handler = welcome … let ended = net.serve(listener, &handler,… -->
 ```linea
     var handler = inout [sink greeted = UInt64(0)] |sink connection: net.Connection, peer: net.Address| {
         greeted += 1
@@ -401,7 +412,6 @@ shows the same closure on its own). Only the handler in `main` changes:
     let _printed = io.println("greeted {greeted} visitors")
 ```
 
-<!-- guide: unchecked the output of an edited or partial program -->
 ```
 greeted 2 visitors
 first: welcome
@@ -421,7 +431,7 @@ fail has one `let ... else` that reports the failure and leaves, and each
 resource is closed in exactly one place: the listener in `serve`, and the
 connection in `accept_clients`, after `echo` has borrowed it.
 
-<!-- guide: unchecked the program is a server and a client started from the command line -->
+<!-- guide: check the program is a server and a client started from the command line -->
 ```linea
 // Echo text over TCP. `tcp_echo serve PORT` waits for a client, sends back
 // everything the client sends, closes that connection, and waits for the next
@@ -703,6 +713,7 @@ It also logs what happens, and reads lines through an `io.BufferedReader`
 instead of reading until the client stops. The limits are a few lines at the top
 of its connection handler:
 
+<!-- guide: excerpt examples/bounded_echo.lin -->
 ```linea
     var bounded = connection
     let _ = &bounded.set_timeouts(read_ms: bounds.session_ms, write_ms: bounds.session_ms) else |error| {
@@ -744,7 +755,7 @@ request, a table that says which request goes to which function, and a `main`
 that starts the server. Save it as `hello_http.lin`
 ([the example](../../examples/hello_http.lin) also carries its tests):
 
-<!-- guide: unchecked the server runs until it is stopped and the output is a curl session -->
+<!-- guide: check the server runs until it is stopped and the output is a curl session -->
 ```linea
 // A small HTTP service with two routes.
 // GET /health answers `ok`. POST /echo reads a JSON message such as
@@ -884,12 +895,11 @@ shape: other routes, shared state and logging.
 
 ### A first server
 
-<!-- guide: unchecked the server runs until it is stopped and the output is a curl session -->
+<!-- guide: check the server runs until it is stopped and the output is a curl session -->
 ```linea
 import std.http
 import std.io
 import std.json
-import std.mem
 import std.net
 
 // A handler takes what it reads and the request, and returns the answer.
@@ -1005,6 +1015,7 @@ not found
 A handler's parameters name what it needs, and the router builds each one
 from the request before it calls the handler:
 
+<!-- guide: unchecked a signature without its body -->
 ```linea
 fn forecast(city: http.Path[Str], request: http.Request) -> Result[http.Response, http.Error]
 ```
@@ -1230,7 +1241,9 @@ says what it did.
 
 This server takes readings from weather stations; save it as `stations.lin`:
 
-<!-- guide: unchecked the server runs until it is stopped and the output is a curl session -->
+`stations.lin`:
+
+<!-- guide: check the server runs until it is stopped and the output is a curl session -->
 ```linea
 import std.http
 import std.io
@@ -1239,8 +1252,8 @@ import std.log
 import std.mem
 import std.net
 
-// `App` is the state every route shares. `http.with_state` owns it and lends
-// it to the route that answers each request as `inout app`.
+// `App` is the state every route shares. `http.listen_and_serve` owns it and
+// lends it to the route that answers each request as `inout app`.
 @derive(Release)
 struct App {
     logger: log.Logger[io.Descriptor],
@@ -1813,10 +1826,12 @@ itself — a line now, the next a second later — calls `body.flush()` to send
 each line before it waits. The [countdown server](../../examples/countdown-server/main.lin)
 counts down to a launch this way. Its handler checks the count and streams:
 
+<!-- guide: excerpt examples/countdown-server/main.lin -->
 ```linea
+// `http.Path[UInt64]` reads the route's only path value, `{seconds}`, as a
+// number before `countdown` runs, and the router answers 400 when it is not
+// one. `.value` is the number.
 fn countdown(inout app: App, path: http.Path[UInt64], request: http.Request) -> Result[http.Response, http.Error] {
-    // `http.Path[UInt64]` reads the route's only path value, `{seconds}`, as a
-    // number, and the router answers 400 when it is not one.
     let seconds = path.value
     if seconds < 1 || seconds > longest_countdown {
         return .Err(http.error(request, .BadRequest, "{seconds} is not a count from 1 to {longest_countdown}"))
@@ -1828,15 +1843,15 @@ fn countdown(inout app: App, path: http.Path[UInt64], request: http.Request) -> 
 
 and the body writes one line a second:
 
+<!-- guide: excerpt examples/countdown-server/main.lin -->
 ```linea
 fn count_down(seconds: UInt64, inout body: http.BodyWriter) -> Result[(), http.Error] {
     let tick = time.Duration.from_seconds(1)
-    var left = seconds
-    while left > 0 {
+    // `seconds..0` counts down to 1, and walks nothing when `seconds` is 0.
+    for left in seconds..0 {
         "T-{left}\n".fmt(&body)?
         let _sent = &body.flush()?
         time.sleep(tick)
-        left -= 1
     }
     &body.write_str("liftoff\n")?
     .Ok(())
@@ -1919,6 +1934,8 @@ This one counts the responses it has passed on, works over any state `S`, and
 keeps its count in a field of its own:
 
 ```linea
+import std.http
+
 use http.Handler
 use http.Observer
 
@@ -1958,6 +1975,7 @@ limits. Pass `limits:` to change them. `http.Limits.default()` gives the
 standard ones, so struct update changes only what you write. In
 `stations.lin`, this serves one connection and returns:
 
+<!-- guide: edit stations.lin 126 let finished =… -->
 ```linea
     let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
     let finished = http.listen_and_serve(net.loopback(8080), server, state: app, limits: limits) else |error| {

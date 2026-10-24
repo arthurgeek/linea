@@ -85,7 +85,7 @@ struct Ticket {
 }
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
+<!-- guide: first 1 diagnostic -->
 ```
 error[S-Entry]: attribute names are closed
  --> policies_closed.lin:1:2
@@ -108,7 +108,7 @@ struct Ticket {
 }
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
+<!-- guide: first 1 diagnostic -->
 ```
 error[S-Entry]: linear and copyable are exclusive
  --> policies_exclusive.lin:1:1
@@ -701,6 +701,7 @@ error[O-Merge]: the paths here disagree about `ticket`
 doors stay shut, what happens to the ticket? Say so with a second ending,
 `refund`, and an `else` that calls it, and the program compiles:
 
+<!-- guide: edit end -->
 ```linea
 fn refund(sink ticket: Ticket) -> Result[(), io.IoError] {
     let Ticket { seat } = ticket
@@ -708,15 +709,12 @@ fn refund(sink ticket: Ticket) -> Result[(), io.IoError] {
 }
 ```
 
+<!-- guide: edit after 17 redeem(ticket)? -->
 ```linea
-    if doors_open {
-        redeem(ticket)?
     } else {
         refund(ticket)?
-    }
 ```
 
-<!-- guide: unchecked the output of an edited or partial program -->
 ```
 Seat 14C refunded.
 ```
@@ -852,13 +850,14 @@ cents. Her second is not, so its 1500 cents return to her.
 Forget the `rollback` branch and the money would leave Alice's account without
 reaching anyone. That program does not compile:
 
+<!-- guide: edit 37-42 Some(transfer) => if approved { … None => {}, -->
 ```linea
-Some(transfer) => if approved {
-    commit(transfer, &to)
-},
+        Some(transfer) => if approved {
+            commit(transfer, &to)
+        },
+        None => {},
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[N-Unused]: `rollback` is never used
   --> transfer_forgot.lin:30:4
@@ -1114,6 +1113,7 @@ If every path takes the value, the `defer` can never run, and that is a
 mistake worth hearing about. Replace `tidy` with this version, which archives
 every note:
 
+<!-- guide: edit fn tidy -->
 ```linea
 fn tidy(sink note: Note) -> Result[(), io.IoError] {
     defer note.release()
@@ -1121,12 +1121,11 @@ fn tidy(sink note: Note) -> Result[(), io.IoError] {
 }
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[O-DeferDead]: what this schedules never runs: the value is gone on every path out
-  --> archive_always.lin:18:11
+  --> archive_always.lin:17:11
    |
-18 |     defer note.release()
+17 |     defer note.release()
    |           ^^^^^^^^^^^^^^ delete the `defer`, or move what takes the value after it
 ```
 
@@ -1252,6 +1251,7 @@ the arms to agree. There are two ways to make them agree. The `?` form above
 leaves the function before the commit when the check fails. Or the committing
 arm can leave the function itself:
 
+<!-- guide: edit fn send -->
 ```linea
 fn send(cents: UInt64, limit: UInt64) -> UInt64 {
     let transfer = Transfer { cents }
@@ -1263,7 +1263,6 @@ fn send(cents: UInt64, limit: UInt64) -> UInt64 {
 }
 ```
 
-<!-- guide: unchecked the output of an edited or partial program -->
 ```
 sent 300 cents
 sent 0 cents
@@ -1538,11 +1537,11 @@ Inside `box_office`, `Ticket` is an ordinary struct. Outside it, every way into
 the fields is closed, each with `[M-Opaque]`. Each attempt below is one edit
 to `main.lin`. Building a ticket, on a line after `let back = yours.refund()`:
 
+<!-- guide: edit box-office/main.lin after 11 let back = yours.refund() -->
 ```linea
-let _forged = Ticket { seat = "1A", cents = 0 }
+    let _forged = Ticket { seat = "1A", cents = 0 }
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[M-Opaque]: `Ticket` is opaque outside `box_office`
   --> box-office/main.lin:12:19
@@ -1553,11 +1552,11 @@ error[M-Opaque]: `Ticket` is opaque outside `box_office`
 
 Leaving the type name out does not help:
 
+<!-- guide: edit box-office/main.lin after 11 let back = yours.refund() -->
 ```linea
-let _forged: Ticket = .{ seat = "1A", cents = 0 }
+    let _forged: Ticket = .{ seat = "1A", cents = 0 }
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[M-Opaque]: `Ticket` is opaque outside `box_office`
   --> box-office/main.lin:12:27
@@ -1568,11 +1567,11 @@ error[M-Opaque]: `Ticket` is opaque outside `box_office`
 
 Reading a field, on a line before `let back = yours.refund()`:
 
+<!-- guide: edit box-office/main.lin after 10 let greeted = mine.redeem() -->
 ```linea
-let _price = yours.cents
+    let _price = yours.cents
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[M-Opaque]: `Ticket` is opaque outside `box_office`
   --> box-office/main.lin:11:18
@@ -1632,6 +1631,7 @@ outside the module cannot drop the value, which Rust always allows.
 
 Look again at `seat_label`:
 
+<!-- guide: excerpt docs/learn/04-copying-settling-and-sealing.md -->
 ```linea
 pub fn seat_label(self: Self) -> Str where carries(self.seat) {
     copy(self.seat)
@@ -1650,21 +1650,27 @@ letting them touch the field. It also means that renaming `seat` changes what
 interface.
 
 Any other module is not allowed to name the field, even in a clause. Add
-this function to `main.lin`, and write `let seat = seat_of(mine)` in place of
-`let seat = mine.seat_label()`:
+this function to `main.lin`:
 
+<!-- guide: edit box-office/main.lin after 4 use box_office.Ticket -->
 ```linea
 fn seat_of(ticket: Ticket) -> Str where carries(ticket.seat) {
     ticket.seat_label()
 }
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
+and call it in place of `let seat = mine.seat_label()`:
+
+<!-- guide: edit box-office/main.lin 9 let seat = mine.seat_label() -->
+```linea
+    let seat = seat_of(mine)
+```
+
 ```
 error[M-Opaque]: `Ticket` is opaque outside `box_office`
- --> box-office/main.lin:6:56
+ --> box-office/main.lin:5:56
   |
-6 | fn seat_of(ticket: Ticket) -> Str where carries(ticket.seat) {
+5 | fn seat_of(ticket: Ticket) -> Str where carries(ticket.seat) {
   |                                                        ^^^^ only its own module's contracts can name its parts
 ```
 

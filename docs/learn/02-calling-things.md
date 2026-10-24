@@ -55,11 +55,14 @@ The hall is idle at 22 degrees.
 `thermostat.needs_heat()` is a **dot call**. The value before the dot, the
 *receiver*, becomes the operation's first parameter, `self`, and `Self` is the
 type the `impl` is for. The same call can be spelled out with the type's name,
-and the two forms mean exactly the same thing:
+and the two forms mean exactly the same thing. In place of `&hall.warm_up(5)`,
+`main` could warm the hall only while it needs heat, spelling both calls out:
 
+<!-- guide: edit 26 &hall.warm_up(5) -->
 ```linea
-Thermostat.needs_heat(hall)      // This is the same call as hall.needs_heat().
-Thermostat.warm_up(&hall, 5)     // This is the same call as &hall.warm_up(5).
+    if Thermostat.needs_heat(hall) {    // The same call as hall.needs_heat().
+        Thermostat.warm_up(&hall, 5)    // The same call as &hall.warm_up(5).
+    }
 ```
 
 The dot form is shorter and is what you will usually write. The spelled-out
@@ -1469,13 +1472,13 @@ While the closure is still going to be called, `total` is lent to it, and
 `main` may not use `total` by its own name. Print the running total between
 two weighings:
 
+<!-- guide: edit 10-11 &weigh(1200) … &weigh(50) -->
 ```linea
     &weigh(1200)
     io.println("{total} grams so far")?
     &weigh(50)
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
   --> weigh_early.lin:11:18
