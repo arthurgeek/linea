@@ -1,7 +1,7 @@
-error[T-TryAnswer]: this `?` may return `Result[UInt8, RenderError]`, and the function answers with `UInt8`
+error[T-TryAnswer]: this `?` may return `Result[UInt8, RenderError]`, and the closure answers with `UInt8`
  --> tests/constructor_callables/contextual_variants/lambda_without_carrier_cannot_use_outer_error_context.lin:7:9
   |
 7 |         mapped?
-  |         ^^^^^^^ `?` returns from the function it is written in
+  |         ^^^^^^^ `?` returns from the closure it is written in
   |
-  = help: make the function return `Result[UInt8, RenderError]` and end it with `.Ok(…)`
+  = help: write the closure's result as `-> Result[UInt8, RenderError]` and end it with `.Ok(…)`

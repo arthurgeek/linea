@@ -1,0 +1,7 @@
+error[T-TryAnswer]: this `?` may return `Result[UInt8, Bad]`, and the closure answers with `UInt8`
+  --> tests/try/a_closure_of_one_expression_is_offered_a_block.lin:14:19
+   |
+14 |     let next = || parse()?
+   |                   ^^^^^^^^ `?` returns from the closure it is written in
+   |
+   = help: write the closure's result as `-> Result[UInt8, Bad]` and end it with `.Ok(…)`

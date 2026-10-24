@@ -2,6 +2,6 @@ error[T-TryAnswer]: this `?` may return `Result[UInt8, Bad]`, and the closure an
   --> tests/try/a_closure_without_a_result_is_offered_one.lin:14:17
    |
 14 |         let n = parse()?
-   |                 ^^^^^^^^ `?` returns from the function it is written in
+   |                 ^^^^^^^^ `?` returns from the closure it is written in
    |
    = help: write the closure's result as `-> Result[UInt8, Bad]` and end it with `.Ok(…)`, or handle the failure here with `let n = … else |_| { … }` in place of `?`

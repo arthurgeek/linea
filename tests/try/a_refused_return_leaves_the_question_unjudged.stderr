@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `fallback`
+  --> tests/try/a_refused_return_leaves_the_question_unjudged.lin:15:20
+   |
+15 |             return fallback
+   |                    ^^^^^^^^ no binding with this name is in scope

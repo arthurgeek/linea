@@ -1,0 +1,16 @@
+// A closure whose body is one expression answers with that expression's
+// payload, so its `?` cannot hand the failure on. The fix writes the result
+// and puts the body in a block, because a closure that writes its result
+// has a block for a body.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
+
+fn main() -> UInt8 {
+    let next = || parse()?
+    next()
+}

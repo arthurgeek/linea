@@ -1,0 +1,21 @@
+// The closure's first `return` settles its result to `UInt8` before the `?`
+// is reached, and the `?` still answers to the closure, not to `main`. The
+// help offers the result the closure would write to carry the failure.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
+
+fn main() -> UInt8 {
+    let next = || {
+        if parse().is_err() {
+            return UInt8(1)
+        }
+        let n = parse()?
+        n + 1
+    }
+    next()
+}
