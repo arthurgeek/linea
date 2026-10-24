@@ -955,7 +955,7 @@ const Checker = struct {
                 .span = self.ast.exprSpan(at),
                 .text = try std.fmt.allocPrint(arena, "copy({s})", .{self.ast.exprText(at)}),
             };
-            fixes = try arena.dupe(Fix, &.{.{ .note = 0, .edits = try arena.dupe(HelpEdit, &.{edit}) }});
+            fixes = try arena.dupe(Fix, &.{.{ .kind = .copy_argument, .note = 0, .edits = try arena.dupe(HelpEdit, &.{edit}) }});
         } else {
             notes[0] = try std.fmt.allocPrint(arena, "give `{s}` away after the call, or lend it to both parameters", .{name});
         }
