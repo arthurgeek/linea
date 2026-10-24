@@ -1,0 +1,26 @@
+// `choose` holds `pick` with `R` left for its uses to settle. A named function
+// passed to it settles `R` as the type that function returns, whether it comes
+// before or after a closure that never finishes.
+fn pick[R](_never: fn() -> R, otherwise: fn() -> R) -> R {
+    otherwise()
+}
+
+fn nine() -> UInt8 {
+    9
+}
+
+fn one() -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    let choose = pick
+    let first = choose(
+        || {
+            loop {}
+        },
+        nine,
+    )
+    let second = choose(one, one)
+    first + second
+}

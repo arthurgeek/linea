@@ -1,0 +1,256 @@
+// Each `Stop` derives `Settle` only where the next two stops around the ring
+// do, so asking about `Stop0[UInt8]` reaches every stop along more paths than
+// a program could walk. Each stop is decided once, and the ring settles.
+trait Settle {}
+
+impl Settle for UInt8 {}
+
+template impl Settle where reflect.components: Settle {}
+
+struct Stop0[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop0[X] where Stop1[X]: Settle, Stop2[X]: Settle
+
+struct Stop1[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop1[X] where Stop2[X]: Settle, Stop3[X]: Settle
+
+struct Stop2[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop2[X] where Stop3[X]: Settle, Stop4[X]: Settle
+
+struct Stop3[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop3[X] where Stop4[X]: Settle, Stop5[X]: Settle
+
+struct Stop4[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop4[X] where Stop5[X]: Settle, Stop6[X]: Settle
+
+struct Stop5[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop5[X] where Stop6[X]: Settle, Stop7[X]: Settle
+
+struct Stop6[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop6[X] where Stop7[X]: Settle, Stop8[X]: Settle
+
+struct Stop7[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop7[X] where Stop8[X]: Settle, Stop9[X]: Settle
+
+struct Stop8[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop8[X] where Stop9[X]: Settle, Stop10[X]: Settle
+
+struct Stop9[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop9[X] where Stop10[X]: Settle, Stop11[X]: Settle
+
+struct Stop10[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop10[X] where Stop11[X]: Settle, Stop12[X]: Settle
+
+struct Stop11[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop11[X] where Stop12[X]: Settle, Stop13[X]: Settle
+
+struct Stop12[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop12[X] where Stop13[X]: Settle, Stop14[X]: Settle
+
+struct Stop13[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop13[X] where Stop14[X]: Settle, Stop15[X]: Settle
+
+struct Stop14[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop14[X] where Stop15[X]: Settle, Stop16[X]: Settle
+
+struct Stop15[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop15[X] where Stop16[X]: Settle, Stop17[X]: Settle
+
+struct Stop16[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop16[X] where Stop17[X]: Settle, Stop18[X]: Settle
+
+struct Stop17[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop17[X] where Stop18[X]: Settle, Stop19[X]: Settle
+
+struct Stop18[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop18[X] where Stop19[X]: Settle, Stop20[X]: Settle
+
+struct Stop19[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop19[X] where Stop20[X]: Settle, Stop21[X]: Settle
+
+struct Stop20[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop20[X] where Stop21[X]: Settle, Stop22[X]: Settle
+
+struct Stop21[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop21[X] where Stop22[X]: Settle, Stop23[X]: Settle
+
+struct Stop22[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop22[X] where Stop23[X]: Settle, Stop24[X]: Settle
+
+struct Stop23[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop23[X] where Stop24[X]: Settle, Stop25[X]: Settle
+
+struct Stop24[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop24[X] where Stop25[X]: Settle, Stop26[X]: Settle
+
+struct Stop25[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop25[X] where Stop26[X]: Settle, Stop27[X]: Settle
+
+struct Stop26[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop26[X] where Stop27[X]: Settle, Stop28[X]: Settle
+
+struct Stop27[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop27[X] where Stop28[X]: Settle, Stop29[X]: Settle
+
+struct Stop28[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop28[X] where Stop29[X]: Settle, Stop30[X]: Settle
+
+struct Stop29[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop29[X] where Stop30[X]: Settle, Stop31[X]: Settle
+
+struct Stop30[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop30[X] where Stop31[X]: Settle, Stop32[X]: Settle
+
+struct Stop31[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop31[X] where Stop32[X]: Settle, Stop33[X]: Settle
+
+struct Stop32[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop32[X] where Stop33[X]: Settle, Stop34[X]: Settle
+
+struct Stop33[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop33[X] where Stop34[X]: Settle, Stop35[X]: Settle
+
+struct Stop34[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop34[X] where Stop35[X]: Settle, Stop36[X]: Settle
+
+struct Stop35[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop35[X] where Stop36[X]: Settle, Stop37[X]: Settle
+
+struct Stop36[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop36[X] where Stop37[X]: Settle, Stop38[X]: Settle
+
+struct Stop37[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop37[X] where Stop38[X]: Settle, Stop39[X]: Settle
+
+struct Stop38[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop38[X] where Stop39[X]: Settle, Stop0[X]: Settle
+
+struct Stop39[X] {
+    x: X,
+}
+
+derive[X: Settle] Settle for Stop39[X] where Stop0[X]: Settle, Stop1[X]: Settle
+
+fn settled[T: Settle](_value: T) {}
+
+fn main() -> UInt8 {
+    let stop: Stop0[UInt8] = .{ x = 0 }
+    settled(stop)
+    0
+}

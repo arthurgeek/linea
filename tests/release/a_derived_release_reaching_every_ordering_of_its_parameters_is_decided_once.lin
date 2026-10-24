@@ -1,0 +1,29 @@
+// The derived `Release` of `Shelf` asks about a `Shelf` with each adjacent pair
+// of its parameters swapped, so releasing one reaches all 720 orderings of six
+// element types. Each ordering is decided once, so the program is accepted
+// without walking every path between them.
+import std.mem
+
+use mem.SystemAllocator
+
+@derive(Release)
+struct Shelf[X0, X1, X2, X3, X4, X5] {
+    v0: Vec[X0, SystemAllocator],
+    v1: Vec[X1, SystemAllocator],
+    v2: Vec[X2, SystemAllocator],
+    v3: Vec[X3, SystemAllocator],
+    v4: Vec[X4, SystemAllocator],
+    v5: Vec[X5, SystemAllocator],
+    s0: Vec[Shelf[X1, X0, X2, X3, X4, X5], SystemAllocator],
+    s1: Vec[Shelf[X0, X2, X1, X3, X4, X5], SystemAllocator],
+    s2: Vec[Shelf[X0, X1, X3, X2, X4, X5], SystemAllocator],
+    s3: Vec[Shelf[X0, X1, X2, X4, X3, X5], SystemAllocator],
+    s4: Vec[Shelf[X0, X1, X2, X3, X5, X4], SystemAllocator],
+}
+
+fn main() -> UInt8 {
+    var held: Vec[Shelf[UInt8, UInt16, UInt32, UInt64, Int8, Int16], SystemAllocator] = Vec.new()
+    let count = held.length()
+    held.release()
+    UInt8(count)
+}
