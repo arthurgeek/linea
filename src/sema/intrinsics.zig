@@ -175,16 +175,37 @@ pub const RawAccesses = struct {
         return checked;
     }
 
-    /// Whether `d` opens a closure: its first type parameter is the callback,
-    /// which must be callable as the closure's `S`.
-    /// The `R` of `ffi.Errno[R]` where `t` is one, asked of a pool being
-    /// built or of a finished typing. An `extern` answering `t` returns `R`
-    /// from C.
-    pub fn errnoValue(self: RawAccesses, pool: anytype, t: TypeId) ?TypeId {
+    /// The fields of an `ffi.Errno[R]` where `t` is one, asked of a pool
+    /// being built or of a finished typing: `value`, the `R` C returned, and
+    /// `code`, the `errno` the runtime read after the call. The checker reads
+    /// what C returns from `value`, and lowering writes both fields by these
+    /// indices, so the two cannot disagree about the library's declaration.
+    pub fn errnoFields(self: RawAccesses, pool: anytype, t: TypeId) ?ErrnoFields {
         if (self.errno == .none) return null;
         const instance = pool.instanceOf(t) orelse return null;
         if (instance.decl != self.errno) return null;
-        return pool.appliedTo(t)[0];
+        const value = pool.lookupField(t, "value") orelse
+            @panic("compiler defect: the library's `ffi.Errno` declares no `value` field");
+        const code = pool.lookupField(t, "code") orelse
+            @panic("compiler defect: the library's `ffi.Errno` declares no `code` field");
+        if (code.ty != .i32) @panic("compiler defect: the library's `ffi.Errno.code` is not an `Int32`");
+        return .{
+            .value = .{ .index = value.index, .ty = value.ty },
+            .code = .{ .index = code.index, .ty = code.ty },
+        };
+    }
+
+    pub const ErrnoFields = struct {
+        pub const Field = struct { index: u32, ty: TypeId };
+        value: Field,
+        code: Field,
+    };
+
+    /// The `R` of `ffi.Errno[R]` where `t` is one, or null where `t` is any
+    /// other type. An `extern` answering `t` returns `R` from C.
+    pub fn errnoValue(self: RawAccesses, pool: anytype, t: TypeId) ?TypeId {
+        const fields = self.errnoFields(pool, t) orelse return null;
+        return fields.value.ty;
     }
 
     /// The signature C is called with for an `extern` of `signature`: the
@@ -201,6 +222,8 @@ pub const RawAccesses = struct {
         return try pool.internCallable(params, value, contracts, declared.invocation);
     }
 
+    /// Whether `d` opens a closure: its first type parameter is the callback,
+    /// which must be callable as the closure's `S`.
     pub fn opensClosure(self: RawAccesses, d: DeclId) bool {
         return d != DeclId.none and (d == self.closure_open_in or d == self.closure_open);
     }

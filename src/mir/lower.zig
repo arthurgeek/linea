@@ -5299,7 +5299,7 @@ const Lowerer = struct {
         }
         const callee = self.mono.idFor(d, settled, held, impl_args);
         if (self.ast.declIsExtern(d)) {
-            if (self.library.raw.errnoValue(&self.mono.pool, ty)) |value| return self.errnoCall(id, ty, value, span, callee, args.items);
+            if (self.library.raw.errnoFields(&self.mono.pool, ty)) |fields| return self.errnoCall(id, ty, fields, span, callee, args.items);
         }
         return self.sourceCall(id, ty, span, callee, args.items);
     }
@@ -5307,15 +5307,15 @@ const Lowerer = struct {
     /// A call to an `extern` answering `ffi.Errno[R]`: C's `R`, then the
     /// runtime's read of `errno`, emitted next so no code between the two can
     /// change it, and the `Errno` built from both.
-    fn errnoCall(self: *Lowerer, written: ExprId, ty: TypeId, value_ty: TypeId, span: Span, callee: FunctionId, args: []const InstId) !InstId {
-        const value = try self.sourceCall(written, value_ty, span, callee, args);
+    fn errnoCall(self: *Lowerer, written: ExprId, ty: TypeId, fields: RawAccesses.ErrnoFields, span: Span, callee: FunctionId, args: []const InstId) !InstId {
+        const value = try self.sourceCall(written, fields.value.ty, span, callee, args);
         const read = self.mono.idFor(self.library.raw.errno_read, &.{}, .poison, &.{});
-        const code = try self.directCall(.i32, span, read, &.{});
+        const code = try self.directCall(fields.code.ty, span, read, &.{});
         const base = try self.baseFor(ty, span, null);
-        const value_field = self.types().lookupField(ty, "value") orelse return self.poison(span);
-        const code_field = self.types().lookupField(ty, "code") orelse return self.poison(span);
-        try self.writeThrough(try self.fieldAddr(base, value_field.ty, value_field.offset, span), value_field.ty, value, span);
-        try self.writeThrough(try self.fieldAddr(base, code_field.ty, code_field.offset, span), code_field.ty, code, span);
+        const value_at = try self.fieldAddr(base, fields.value.ty, self.types().fieldOffset(ty, fields.value.index), span);
+        try self.writeThrough(value_at, fields.value.ty, value, span);
+        const code_at = try self.fieldAddr(base, fields.code.ty, self.types().fieldOffset(ty, fields.code.index), span);
+        try self.writeThrough(code_at, fields.code.ty, code, span);
         return base;
     }
 
