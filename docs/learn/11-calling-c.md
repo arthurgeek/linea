@@ -740,7 +740,7 @@ call that may change the greeter is allowed only in a method taking the
 greeter `inout` or `sink`, as `rename` does. That `inout` is what refuses the
 stale read in this function, added to the end of `greeter.lin`:
 
-<!-- guide: edit greeting/greeter/greeter.lin after 70 -->
+<!-- guide: edit greeting/greeter/greeter.lin after 70 } -->
 ```linea
 fn stale(inout person: Greeter) -> String {
     let name = greeter_name(person.handle)
@@ -771,7 +771,7 @@ A method that took the greeter as a plain `self` could not call
 `greeter_rename` at all, because `self.handle` is then a place that may not
 change:
 
-<!-- guide: edit greeting/greeter/greeter.lin after 70 -->
+<!-- guide: edit greeting/greeter/greeter.lin after 70 } -->
 ```linea
 impl Greeter {
     pub fn rename_quietly(self: Self, name: Str) {

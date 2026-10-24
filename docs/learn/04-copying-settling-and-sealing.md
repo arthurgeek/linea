@@ -701,7 +701,7 @@ error[O-Merge]: the paths here disagree about `ticket`
 doors stay shut, what happens to the ticket? Say so with a second ending,
 `refund`, and an `else` that calls it, and the program compiles:
 
-<!-- guide: edit after 11 -->
+<!-- guide: edit after 11 } -->
 ```linea
 fn refund(sink ticket: Ticket) -> Result[(), io.IoError] {
     let Ticket { seat } = ticket
@@ -709,7 +709,7 @@ fn refund(sink ticket: Ticket) -> Result[(), io.IoError] {
 }
 ```
 
-<!-- guide: edit 16-18 -->
+<!-- guide: edit 16-18 if doors_open { -->
 ```linea
     if doors_open {
         redeem(ticket)?
@@ -853,7 +853,7 @@ cents. Her second is not, so its 1500 cents return to her.
 Forget the `rollback` branch and the money would leave Alice's account without
 reaching anyone. That program does not compile:
 
-<!-- guide: edit 37-41 -->
+<!-- guide: edit 37-41 Some(transfer) => if approved { -->
 ```linea
         Some(transfer) => if approved {
             commit(transfer, &to)
@@ -1115,7 +1115,7 @@ If every path takes the value, the `defer` can never run, and that is a
 mistake worth hearing about. Replace `tidy` with this version, which archives
 every note:
 
-<!-- guide: edit 16-24 -->
+<!-- guide: edit 16-24 fn tidy(sink note: Note) -> Result[(), -->
 ```linea
 fn tidy(sink note: Note) -> Result[(), io.IoError] {
     defer note.release()
@@ -1253,7 +1253,7 @@ the arms to agree. There are two ways to make them agree. The `?` form above
 leaves the function before the commit when the check fails. Or the committing
 arm can leave the function itself:
 
-<!-- guide: edit 20-28 -->
+<!-- guide: edit 20-28 fn send(cents: UInt64, limit: UInt64) -->
 ```linea
 fn send(cents: UInt64, limit: UInt64) -> UInt64 {
     let transfer = Transfer { cents }
@@ -1539,7 +1539,7 @@ Inside `box_office`, `Ticket` is an ordinary struct. Outside it, every way into
 the fields is closed, each with `[M-Opaque]`. Each attempt below is one edit
 to `main.lin`. Building a ticket, on a line after `let back = yours.refund()`:
 
-<!-- guide: edit box-office/main.lin after 11 -->
+<!-- guide: edit box-office/main.lin after 11 let back = yours.refund() -->
 ```linea
     let _forged = Ticket { seat = "1A", cents = 0 }
 ```
@@ -1554,7 +1554,7 @@ error[M-Opaque]: `Ticket` is opaque outside `box_office`
 
 Leaving the type name out does not help:
 
-<!-- guide: edit box-office/main.lin after 11 -->
+<!-- guide: edit box-office/main.lin after 11 let back = yours.refund() -->
 ```linea
     let _forged: Ticket = .{ seat = "1A", cents = 0 }
 ```
@@ -1569,7 +1569,7 @@ error[M-Opaque]: `Ticket` is opaque outside `box_office`
 
 Reading a field, on a line before `let back = yours.refund()`:
 
-<!-- guide: edit box-office/main.lin after 10 -->
+<!-- guide: edit box-office/main.lin after 10 let greeted = mine.redeem() -->
 ```linea
     let _price = yours.cents
 ```
@@ -1654,7 +1654,7 @@ interface.
 Any other module is not allowed to name the field, even in a clause. Add
 this function to `main.lin`:
 
-<!-- guide: edit box-office/main.lin after 5 -->
+<!-- guide: edit box-office/main.lin after 4 use box_office.Ticket -->
 ```linea
 fn seat_of(ticket: Ticket) -> Str where carries(ticket.seat) {
     ticket.seat_label()
@@ -1663,16 +1663,16 @@ fn seat_of(ticket: Ticket) -> Str where carries(ticket.seat) {
 
 and call it in place of `let seat = mine.seat_label()`:
 
-<!-- guide: edit box-office/main.lin 9 -->
+<!-- guide: edit box-office/main.lin 9 let seat = mine.seat_label() -->
 ```linea
     let seat = seat_of(mine)
 ```
 
 ```
 error[M-Opaque]: `Ticket` is opaque outside `box_office`
- --> box-office/main.lin:6:56
+ --> box-office/main.lin:5:56
   |
-6 | fn seat_of(ticket: Ticket) -> Str where carries(ticket.seat) {
+5 | fn seat_of(ticket: Ticket) -> Str where carries(ticket.seat) {
   |                                                        ^^^^ only its own module's contracts can name its parts
 ```
 

@@ -58,7 +58,7 @@ type the `impl` is for. The same call can be spelled out with the type's name,
 and the two forms mean exactly the same thing. In place of `&hall.warm_up(5)`,
 `main` could warm the hall only while it needs heat, spelling both calls out:
 
-<!-- guide: edit 26 -->
+<!-- guide: edit 26 &hall.warm_up(5) -->
 ```linea
     if Thermostat.needs_heat(hall) {    // The same call as hall.needs_heat().
         Thermostat.warm_up(&hall, 5)    // The same call as &hall.warm_up(5).
@@ -1472,7 +1472,7 @@ While the closure is still going to be called, `total` is lent to it, and
 `main` may not use `total` by its own name. Print the running total between
 two weighings:
 
-<!-- guide: edit 10-11 -->
+<!-- guide: edit 10-11 &weigh(1200) -->
 ```linea
     &weigh(1200)
     io.println("{total} grams so far")?

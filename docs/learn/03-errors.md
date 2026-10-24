@@ -939,7 +939,7 @@ is written `let read Meters(m) = distance`. `read` looks inside without taking
 the value apart. Leave `read` out and the pattern tries to take a value the
 function was only lent:
 
-<!-- guide: edit 10 -->
+<!-- guide: edit 10 let read Meters(m) = distance -->
 ```linea
     let Meters(m) = distance
 ```
@@ -956,7 +956,7 @@ error[O-Move]: `distance` is lent, and this takes it
 
 Pass the arguments the wrong way round and the compiler catches that too:
 
-<!-- guide: edit 18 -->
+<!-- guide: edit 18 io.println("{pace(run, took)} seconds -->
 ```linea
     io.println("{pace(took, run)} seconds per kilometre")?
 ```
@@ -1054,7 +1054,7 @@ Members pay 4250 cents.
 `it` stands for the value being checked. When you write a number directly,
 the check happens before the program ever runs:
 
-<!-- guide: edit 13 -->
+<!-- guide: edit 13 io.println("Members pay -->
 ```linea
     io.println("Members pay {discounted(price, Percent(150))} cents.")?
 ```

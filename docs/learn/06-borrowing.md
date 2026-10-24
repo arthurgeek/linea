@@ -103,7 +103,7 @@ frees it when `main` ends. `title` is a `Str` pointing into the station's name.
 Linea is strict about the view outliving its owner. In place of the `defer`,
 free the station yourself before the last use of `title`:
 
-<!-- guide: edit 19-21 -->
+<!-- guide: edit 19-21 defer station.release() -->
 ```linea
     let title = label(station)
     // Releasing the station frees the name that `title` points into.
@@ -541,7 +541,7 @@ not observed, so the caller can point it at another room, as
 `selected = borrow studio` does. The hall it pointed *into* is what has to stay
 put. Rename the hall while the dashboard still shows it:
 
-<!-- guide: edit 35-36 -->
+<!-- guide: edit 35-36 selected = borrow studio -->
 ```linea
     selected = borrow studio
     // Renaming the hall is refused, because the dashboard shows it.
@@ -562,7 +562,7 @@ error[O-Borrow]: this operation invalidates a place that a later observation sti
 With `borrow`, as in `watch`, the dashboard observes the caller's own variable,
 so `stage` is the one that freezes:
 
-<!-- guide: edit 39-40 -->
+<!-- guide: edit 39-40 watch(&dashboard, stage) -->
 ```linea
     watch(&dashboard, stage)
     // Changing the stage is refused, because the dashboard watches `stage` itself.
@@ -598,7 +598,7 @@ Three different things, and the difference tells you what the clauses are for.
 value is never inferred, not even when there is only one parameter it could
 mean. Take the clause off `label`:
 
-<!-- guide: edit station.lin 10-12 -->
+<!-- guide: edit station.lin 10-12 fn label(station: Station) -> Str where -->
 ```linea
 fn label(station: Station) -> Str {
     station.name.view()
@@ -1150,7 +1150,7 @@ on the next line. Before that, it belongs to the closure: reading it, changing
 it or lending it again is `[O-Borrow]`. Ask for the count before the chain is
 walked:
 
-<!-- guide: edit 15 -->
+<!-- guide: edit 15 let shipped = accepted.fold(0, |sink -->
 ```linea
     io.println("{inspected} parcels inspected so far")?
     let shipped = accepted.fold(0, |sink grams, sink parcel| grams + *parcel)
@@ -1175,7 +1175,7 @@ takes such a closure too, and the lend ends when the call returns. `any` stops
 at the first parcel over the limit, so `inspected` counts only the parcels it
 looked at, and `main` reads it on the next line:
 
-<!-- guide: edit 6-16 -->
+<!-- guide: edit 6-16 var inspected = 0 -->
 ```linea
     var inspected = UInt64(0)
     let heavy = arrivals.as_slice().any(inout [limit, inout inspected] |sink parcel| {

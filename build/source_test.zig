@@ -2295,12 +2295,12 @@ test "the guide gate: an edit marker applies the fragment to the program above a
         \\
         \\Replace `b`, and add a line after it:
         \\
-        \\<!-- guide: edit 3 -->
+        \\<!-- guide: edit 3 let b = 2 -->
         \\```linea
         \\    let b = "two"
         \\```
         \\
-        \\<!-- guide: edit after 3 -->
+        \\<!-- guide: edit after 3 let b = 2 -->
         \\```linea
         \\    let c = b
         \\```
@@ -2312,7 +2312,7 @@ test "the guide gate: an edit marker applies the fragment to the program above a
         \\
         \\A second edit of the same program, which must check:
         \\
-        \\<!-- guide: edit 2-3 -->
+        \\<!-- guide: edit 2-3 let a = 1 -->
         \\```linea
         \\    let a = 3
         \\    let b = 4
@@ -2377,7 +2377,7 @@ test "the guide gate: an edit of a project names the file it changes" {
         \\}
         \\```
         \\
-        \\<!-- guide: edit shop/prices.lin 2 -->
+        \\<!-- guide: edit shop/prices.lin 2 3 -->
         \\```linea
         \\    4
         \\```
@@ -2410,7 +2410,7 @@ test "the guide gate: an edit of a project names the file it changes" {
         \\}
         \\```
         \\
-        \\<!-- guide: edit 2 -->
+        \\<!-- guide: edit 2 3 -->
         \\```linea
         \\    1
         \\```
@@ -2440,7 +2440,7 @@ test "the guide gate: an edit naming a file changes the last program above with 
         \\}
         \\```
         \\
-        \\<!-- guide: edit station.lin 2 -->
+        \\<!-- guide: edit station.lin 2 0 -->
         \\```linea
         \\    2
         \\```
@@ -2458,7 +2458,7 @@ test "the guide gate: an edit naming a file changes the last program above with 
         \\}
         \\```
         \\
-        \\<!-- guide: edit station.lin 2 -->
+        \\<!-- guide: edit station.lin 2 3 -->
         \\```linea
         \\    3
         \\```
@@ -2469,13 +2469,65 @@ test "the guide gate: an edit naming a file changes the last program above with 
     try testing.expectEqual(@as(usize, 1), missing.programs.len);
 }
 
+test "the guide gate: an edit's anchor holds its line number to the line it means" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const program =
+        \\```linea
+        \\import std.io
+        \\
+        \\fn main() -> Result[UInt8, io.IoError] {
+        \\    // greet
+        \\    io.println("hi")?
+        \\    .Ok(0)
+        \\}
+        \\```
+        \\
+        \\Replace the greeting:
+        \\
+    ;
+    const wrong_line = readFixture(gpa, program ++
+        \\<!-- guide: edit 4 io.println("hi") -->
+        \\```linea
+        \\    io.println("hello")?
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), wrong_line.problems.len);
+    try testing.expectEqual(@as(usize, 13), wrong_line.problems[0].line);
+    try testing.expect(std.mem.indexOf(u8, wrong_line.problems[0].message, "// greet") != null);
+    try testing.expectEqual(@as(usize, 1), wrong_line.programs.len);
+
+    const right_line = readFixture(gpa, program ++
+        \\<!-- guide: edit 5 io.println("hi") -->
+        \\```linea
+        \\    io.println("hello")?
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), right_line.problems.len);
+    try testing.expectEqual(@as(usize, 2), right_line.programs.len);
+
+    // An insertion names the line it goes after.
+    const insertion = readFixture(gpa, program ++
+        \\<!-- guide: edit after 5 .Ok(0) -->
+        \\```linea
+        \\    io.println("again")?
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), insertion.problems.len);
+}
+
 test "the guide gate: an edit marker must name lines of a program above it" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
 
     const no_program = readFixture(gpa,
-        \\<!-- guide: edit 1 -->
+        \\<!-- guide: edit 1 let x = 1 -->
         \\```linea
         \\let x = 1
         \\```
@@ -2492,7 +2544,7 @@ test "the guide gate: an edit marker must name lines of a program above it" {
         \\}
         \\```
         \\
-        \\<!-- guide: edit 2-9 -->
+        \\<!-- guide: edit 2-9 0 -->
         \\```linea
         \\    1
         \\```
@@ -2509,12 +2561,12 @@ test "the guide gate: an edit marker must name lines of a program above it" {
         \\}
         \\```
         \\
-        \\<!-- guide: edit 1-2 -->
+        \\<!-- guide: edit 1-2 fn main -->
         \\```linea
         \\fn main() -> UInt8 {
         \\```
         \\
-        \\<!-- guide: edit 2 -->
+        \\<!-- guide: edit 2 0 -->
         \\```linea
         \\    1
         \\```
@@ -2529,7 +2581,9 @@ test "the guide gate: an edit marker must name lines of a program above it" {
         "<!-- guide: edit 3-2 -->",
         "<!-- guide: edit 0 -->",
         "<!-- guide: edit after -->",
-        "<!-- guide: edit after 2 3 -->",
+        "<!-- guide: edit after two -->",
+        "<!-- guide: edit 2 -->",
+        "<!-- guide: edit after 2 -->",
         "<!-- guide: edit /abs.lin 2 -->",
     }) |marker| {
         const text = try std.mem.concat(gpa, u8, &.{ marker, "\n```linea\nlet x = 1\n```\n" });
@@ -2905,7 +2959,7 @@ test "the guide gate: an edit applies to the nearest program, and an excluded on
         \\}
         \\```
         \\
-        \\<!-- guide: edit 2 -->
+        \\<!-- guide: edit 2 while -->
         \\```linea
         \\    1
         \\```
@@ -2929,7 +2983,7 @@ test "the guide gate: an edit that changes nothing is refused" {
         \\}
         \\```
         \\
-        \\<!-- guide: edit 2 -->
+        \\<!-- guide: edit 2 0 -->
         \\```linea
         \\    0
         \\```
@@ -2954,12 +3008,12 @@ test "the guide gate: a failed edit names the block whose lines the compiler rep
         \\}
         \\```
         \\
-        \\<!-- guide: edit 2 -->
+        \\<!-- guide: edit 2 let a = 1 -->
         \\```linea
         \\    let a = 3
         \\```
         \\
-        \\<!-- guide: edit after 3 -->
+        \\<!-- guide: edit after 3 let b = 2 -->
         \\```linea
         \\    let c = "three"
         \\    let d = c + 1
@@ -3000,7 +3054,7 @@ test "the guide gate: a check marker compiles a program without running it" {
         \\listening
         \\```
         \\
-        \\<!-- guide: edit 3 -->
+        \\<!-- guide: edit 3 0 -->
         \\```linea
         \\    "zero"
         \\```
@@ -3010,7 +3064,7 @@ test "the guide gate: a check marker compiles a program without running it" {
         \\ --> main.lin:3:5
         \\```
         \\
-        \\<!-- guide: edit 3 -->
+        \\<!-- guide: edit 3 0 -->
         \\```linea
         \\    1
         \\```

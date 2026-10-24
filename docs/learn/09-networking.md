@@ -141,14 +141,14 @@ afterwards. The shorter-looking `server.close().is_ok() && client.close().is_ok(
 is refused, and the reason is worth seeing. Put this line in place of the three
 `close` lets:
 
-<!-- guide: edit 60-62 -->
+<!-- guide: edit 60-62 let server_closed = server.close() -->
 ```linea
     let closed = server.close().is_ok() && client.close().is_ok() && listener.close().is_ok()
 ```
 
 and this arm in the `match`:
 
-<!-- guide: edit 64 -->
+<!-- guide: edit 64 Ok(_) => if server_closed.is_ok() && -->
 ```linea
         Ok(_) => if closed { 0 } else { 1 },
 ```
@@ -212,7 +212,7 @@ A listener has two endings. `close()` closes it and reports a failure as a
 report a failure, so it drops one; it is what a `defer` usually calls. Here
 `close` is the right choice, in place of the final `0`:
 
-<!-- guide: edit 14 -->
+<!-- guide: edit 14 0 -->
 ```linea
     match listener.close() {
         Ok(_) => 0,
@@ -401,7 +401,7 @@ changes it on every call, and `into_captures()` hands the counter back when
 `serve` is done ([Calling things](02-calling-things.md#a-closure-that-changes-what-it-owns)
 shows the same closure on its own). Only the handler in `main` changes:
 
-<!-- guide: edit greeting.lin 55-56 -->
+<!-- guide: edit greeting.lin 55-56 var handler = welcome -->
 ```linea
     var handler = inout [sink greeted = UInt64(0)] |sink connection: net.Connection, peer: net.Address| {
         greeted += 1
@@ -1946,7 +1946,7 @@ limits. Pass `limits:` to change them. `http.Limits.default()` gives the
 standard ones, so struct update changes only what you write. In
 `stations.lin`, this serves one connection and returns:
 
-<!-- guide: edit stations.lin 126 -->
+<!-- guide: edit stations.lin 126 let finished = -->
 ```linea
     let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
     let finished = http.listen_and_serve(net.loopback(8080), server, state: app, limits: limits) else |error| {
