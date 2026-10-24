@@ -438,78 +438,81 @@ use mem.Lender
 use net.Accepted
 use net.Acceptor
 
-fn build_cli() -> cli.Command {
-    var cmd = cli.Command.new("tcp_echo", "Echo text over TCP")
-    var serve_cmd = cli.Command.new("serve", "listen for and echo connections")
-    &serve_cmd.positional("port", "port to listen on", required: true)
-    &serve_cmd.positional("clients", "number of clients to serve", required: false)
-    &cmd.subcommand(serve_cmd)
+// Build the command schema. Each `?` hands back a refused allocation, and
+// `defer var` releases a command that was not yet registered when that
+// happens.
+fn build_cli() -> Result[cli.Command, mem.Oom] {
+    defer var cmd = cli.Command.new("tcp_echo", "Echo text over TCP")
+    defer var serve_cmd = cli.Command.new("serve", "listen for and echo connections")
+    &serve_cmd.positional("port", "port to listen on", required: true)?
+    &serve_cmd.positional("clients", "number of clients to serve", required: false)?
+    &cmd.subcommand(serve_cmd)?
 
-    var send_cmd = cli.Command.new("send", "send messages to an echo server")
-    &send_cmd.positional("port", "server port to connect to", required: true)
-    &send_cmd.positional("message", "messages to send", required: true, variadic: true)
-    &cmd.subcommand(send_cmd)
-    cmd
+    defer var send_cmd = cli.Command.new("send", "send messages to an echo server")
+    &send_cmd.positional("port", "server port to connect to", required: true)?
+    &send_cmd.positional("message", "messages to send", required: true, variadic: true)?
+    &cmd.subcommand(send_cmd)?
+    .Ok(cmd)
+}
+
+// Print the usage to standard error and return 64, the conventional exit
+// status for a usage mistake.
+fn usage_error(cmd: cli.Command) -> UInt8 {
+    match cmd.usage() {
+        Ok(text) => {
+            io.eprintln(text.view())
+            text.release()
+        },
+        Err(_) => io.eprintln("out of memory"),
+    }
+    64
 }
 
 fn main() -> UInt8 {
-    defer var cmd = build_cli()
+    defer var cmd = build_cli() else |_| {
+        io.eprintln("out of memory")
+        return 1
+    }
     var cursor = cli.ArgCursor.new(env.args())
-    defer let matches = cmd.parse(&cursor) else |_| {
-        defer let u = cmd.usage()
-        io.eprintln(u.view())
-        return 64
+    defer let matches = cmd.parse(&cursor) else |error| {
+        io.eprintln("error: {error}")
+        return usage_error(cmd)
     }
     if matches.is_help() {
-        defer let u = cmd.usage()
-        io.eprintln(u.view())
-        return 64
+        return usage_error(cmd)
     }
     let sub = matches.subcommand() else {
-        defer let u = cmd.usage()
-        io.eprintln(u.view())
-        return 64
+        return usage_error(cmd)
     }
     if sub.name == "serve" {
-        let port: UInt16 = sub.matches.positional_as("port") else |_| {
-            defer let u = cmd.usage()
-            io.eprintln(u.view())
-            return 64
+        let port: UInt16 = sub.matches.get_positional("port") else |error| {
+            io.eprintln("error: {error}")
+            return usage_error(cmd)
         }
-        let clients_opt: Option[UInt64] = match sub.matches.positional("clients") {
-            Some(s) => match s.parse[UInt64]() {
-                Ok(v) => .Some(v),
-                Err(_) => {
-                    defer let u = cmd.usage()
-                    io.eprintln(u.view())
-                    return 64
-                },
-            },
-            None => .None,
-        }
-        let clients = match clients_opt {
-            Some(c) => c,
-            None => UInt64.max,
+        // `clients` is optional: without it the server serves for ever.
+        let clients: UInt64 = if sub.matches.positional("clients").is_some() {
+            let count: UInt64 = sub.matches.get_positional("clients") else |error| {
+                io.eprintln("error: {error}")
+                return usage_error(cmd)
+            }
+            count
+        } else {
+            UInt64.max
         }
         return serve(port, clients)
     }
     if sub.name == "send" {
-        let port: UInt16 = sub.matches.positional_as("port") else |_| {
-            defer let u = cmd.usage()
-            io.eprintln(u.view())
-            return 64
+        let port: UInt16 = sub.matches.get_positional("port") else |error| {
+            io.eprintln("error: {error}")
+            return usage_error(cmd)
         }
-        defer let messages = sub.matches.positionals_all("message")
-        if messages.length() == 0 {
-            defer let u = cmd.usage()
-            io.eprintln(u.view())
-            return 64
+        defer let messages = sub.matches.positionals_all("message") else |_| {
+            io.eprintln("out of memory")
+            return 1
         }
         return send(port, messages)
     }
-    defer let u = cmd.usage()
-    io.eprintln(u.view())
-    64
+    usage_error(cmd)
 }
 
 fn serve(port: UInt16, clients: UInt64) -> UInt8 {
