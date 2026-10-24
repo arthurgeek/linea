@@ -703,7 +703,10 @@ pub fn run(process: std.process.Init) !u8 {
             } else {
                 // `run` and `check` differ only in whether the value is printed,
                 // so a file that checks clean is a file that runs.
-                var settled = try checkProgram(gpa, process.gpa, &program, &interner, &sink, purpose);
+                var settled = if (is_check)
+                    try loader.checkWhole(gpa, process.gpa, &program, &interner, &sink, purpose)
+                else
+                    try checkProgram(gpa, process.gpa, &program, &interner, &sink, purpose);
                 defer settled.deinit(gpa);
                 const res = &settled.res;
                 const typing = &settled.typing;
@@ -976,8 +979,6 @@ pub fn run(process: std.process.Init) !u8 {
                             }
                         }
                     }
-                } else if (is_check) {
-                    try loader.checkInstantiations(gpa, &settled, &sink);
                 }
             }
         }

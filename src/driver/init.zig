@@ -332,8 +332,7 @@ test "init starts programs and libraries the compiler accepts" {
         const program = try loader.loadFromDisk(gpa, testing.io, &files, &sink, &interner, root, .tests, true);
         try testing.expect(!sink.hasErrors());
         try testing.expectEqual(kind, program.kind);
-        const semantics = try loader.checkProgram(gpa, testing.allocator, &program, &interner, &sink, .tests);
-        try loader.checkInstantiations(gpa, &semantics, &sink);
+        const semantics = try loader.checkWhole(gpa, testing.allocator, &program, &interner, &sink, .tests);
         try testing.expect(!sink.hasErrors());
         try testing.expectEqual(@as(usize, 1), semantics.res.tests.len);
         if (kind == .library) {

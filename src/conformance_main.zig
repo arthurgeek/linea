@@ -1527,16 +1527,20 @@ const Property = enum {
     /// A help a reader follows verbatim and is told the same thing again is
     /// worse than none, and nothing in the help's wording says whether it
     /// works. So each edit a diagnostic carries, the machine-readable form of
-    /// one of its helps, is applied to the case and the case is checked again:
-    /// the error the help answered must be gone from where it was reported. A
-    /// different error elsewhere is the program's next mistake and is allowed.
-    /// Where the edit leaves the same rule at the same line with an edit of
-    /// its own, that one is followed in turn, a bounded number of times, so
-    /// two helps that each undo the other are reported rather than chased.
+    /// one of its helps, is applied to the case and the case is checked again
+    /// as `linea check` checks it: the error the help answered must be gone
+    /// from where it was reported, and the edit must add no error of its own
+    /// -- none loading reports that it did not before, and none pointing at a
+    /// line the edit wrote. A different error elsewhere is the program's next
+    /// mistake and is allowed. Then the fixes are followed in turn, a bounded
+    /// number of times, so two helps that each undo the other are reported
+    /// rather than chased.
     ///
     /// There is no golden: the case is its own expectation, and `-Dupdate`
     /// has nothing to accept. Counted per case of one file; a case is
-    /// checked where at least one of its diagnostics carried an edit.
+    /// checked where at least one of its diagnostics carried an edit, and
+    /// the cases are counted again by the kind of fix they carried, so a
+    /// kind of help that stops writing its fix is seen.
     help_edits,
 
     /// A range pattern's exhaustiveness is the type's own bounds.
@@ -10411,8 +10415,6 @@ fn offersFix(
             gpa,
             &checked,
             file,
-            query,
-            program,
             path,
             diagnostics,
             .@"utf-16",
@@ -11154,8 +11156,7 @@ fn renameHolds(
     var sink = Sink.init(a);
     var interner: Interner = .empty;
     const program = try loadFromMemory(a, &table, &sink, &interner, case.entry, after, .program, true, .borrow);
-    const semantics = try checkProgram(a, backing, &program, &interner, &sink, .program);
-    try loader.checkInstantiations(a, &semantics, &sink);
+    _ = try loader.checkWhole(a, backing, &program, &interner, &sink, .program);
 
     if (sink.hasErrors()) {
         try table.buildMaps(a);
@@ -15876,6 +15877,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
     // still clear every floor, and at 0 a sound corpus reports itself broken.
     var rewrites: std.EnumMap(Transform, u32) = .{};
     var mutations: std.EnumMap(Mutation, u32) = .{};
+    var fix_kinds: FixKinds = .{};
     var damages: std.EnumMap(Damage, u32) = .{};
     var layouts_compared: u32 = 0;
     var levels_agreed: u32 = 0;
@@ -16267,6 +16269,9 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         for (std.enums.values(Mutation)) |k| {
             if (one.mutations.get(k)) |n| mutations.put(k, (mutations.get(k) orelse 0) + n);
         }
+        for (std.enums.values(diagnostic.FixKind)) |k| {
+            if (one.fix_kinds.get(k)) |n| fix_kinds.put(k, (fix_kinds.get(k) orelse 0) + n);
+        }
         for (std.enums.values(diagnostic.Code)) |c| {
             if (one.rules_reached.contains(c)) rules_reached.put(c, {});
         }
@@ -16451,6 +16456,21 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
                 .what = try std.fmt.allocPrint(gpa, "reaches too few checking that {s}", .{m.why()}),
                 .expected = try std.fmt.allocPrint(gpa, "at least {d}% of {d}", .{ m.generatedFloor(), programs }),
                 .actual = try std.fmt.allocPrint(gpa, "{d}", .{made}),
+            });
+        }
+    }
+    // A help's fix counted by kind as well as by case: one kind of fix the
+    // corpus carries plenty of would clear a floor over all of them while
+    // another kind had stopped being written at all.
+    for (std.enums.values(diagnostic.FixKind)) |k| {
+        const n = fix_kinds.get(k) orelse 0;
+        std.debug.print("conformance: {d} case(s) carried a fix of kind {s}\n", .{ n, k.text() });
+        if (every_property and !options.properties and n < 1) {
+            try failures.append(gpa, .{
+                .path = "the corpus",
+                .what = try std.fmt.allocPrint(gpa, "reaches too few cases whose helps carry a fix of kind {s}", .{k.text()}),
+                .expected = try std.fmt.allocPrint(gpa, "at least {d}", .{@as(u32, 1)}),
+                .actual = try std.fmt.allocPrint(gpa, "{d} from the corpus", .{n}),
             });
         }
     }
@@ -17720,14 +17740,88 @@ fn errorAtLine(diagnostics: []const Diagnostic, file: FileId, text: []const u8, 
     return null;
 }
 
+/// The lines of the edited text one edit of a fix wrote, first to last. An
+/// edit that removes and writes nothing wrote the line its removal joined.
+const Written = struct { first: usize, last: usize };
+
+/// The lines of `edited`, a text with `fix` applied, that each of the fix's
+/// edits wrote.
+fn writtenLines(scratch: std.mem.Allocator, edited: []const u8, fix: diagnostic.Fix) ![]const Written {
+    const edits = try scratch.dupe(diagnostic.Edit, fix.edits);
+    std.mem.sortUnstable(diagnostic.Edit, edits, {}, struct {
+        fn earlier(_: void, a: diagnostic.Edit, b: diagnostic.Edit) bool {
+            return a.span.start < b.span.start;
+        }
+    }.earlier);
+    const lines = try scratch.alloc(Written, edits.len);
+    // How far the edits before this one moved its start.
+    var moved: i64 = 0;
+    for (edits, lines) |edit, *line| {
+        const start: u32 = @intCast(@as(i64, edit.span.start) + moved);
+        line.* = .{ .first = lineAt(edited, start), .last = lineAt(edited, start + @as(u32, @intCast(edit.text.len))) };
+        moved += @as(i64, @intCast(edit.text.len)) - @as(i64, edit.span.end - edit.span.start);
+    }
+    return lines;
+}
+
+/// Whether `line` is one of `written`.
+fn wroteLine(written: []const Written, line: usize) bool {
+    for (written) |w| if (line >= w.first and line <= w.last) return true;
+    return false;
+}
+
+/// What a fix left that it must not have: an error the program did not
+/// have before -- no error under its rule was reported at the line it moved
+/// to -- that is the edit's own doing. Its own doing is a diagnostic loading
+/// reported, since the fix left the text not lexing or parsing as before,
+/// or one with a label on a line the fix wrote or removed. Any other new
+/// error is the program's next mistake. Null where the fix left none.
+fn gainedByFix(
+    scratch: std.mem.Allocator,
+    text: []const u8,
+    file: FileId,
+    before: []const Diagnostic,
+    fix: diagnostic.Fix,
+    edited: []const u8,
+    again: mutate.Diagnosed,
+) !?[]const u8 {
+    const written = try writtenLines(scratch, edited, fix);
+    for (again.sink.list.items, 0..) |d, index| {
+        if (d.severity != .err) continue;
+        const code = d.code orelse continue;
+        const label = d.primaryLabel() orelse continue;
+        if (label.file != again.file) continue;
+        const line = lineAt(edited, label.span.start);
+        const known = for (before) |earlier| {
+            if (earlier.severity != .err or earlier.code != code) continue;
+            const was = earlier.primaryLabel() orelse continue;
+            if (was.file != file) continue;
+            if (movedLine(text, fix, lineAt(text, was.span.start)) == line) break true;
+        } else false;
+        if (known) continue;
+        if (index < again.loaded) return try std.fmt.allocPrint(scratch, "{s} at line {d}, which the program did not lex or parse to before: {s}", .{ code.ruleName(), line, d.message });
+        for (d.labels) |l| {
+            if (l.file != again.file) continue;
+            const at = lineAt(edited, l.span.start);
+            if (wroteLine(written, at)) return try std.fmt.allocPrint(scratch, "{s} at line {d}, pointing at line {d}, which the fix wrote: {s}", .{ code.ruleName(), line, at, d.message });
+        }
+    }
+    return null;
+}
+
+/// How many cases carried a fix of each kind, for the floors: a kind no case
+/// carries is a help that stopped writing its fix.
+pub const FixKinds = std.EnumMap(diagnostic.FixKind, u32);
+
 /// Property `help_edits`: every fix a diagnostic of the case carries,
 /// applied alone to `text`, the case's one file, must leave no error under
-/// that diagnostic's rule at its line. Then the fixes are followed in turn,
-/// the first one each round, until no error carries one: an error a fix
-/// answered must not come back at its line, whichever later fix brings it
-/// back, and the fixes must run out within `help_edit_rounds`. A new error
-/// elsewhere is the program's next mistake. Whether any diagnostic carried
-/// a fix.
+/// that diagnostic's rule at its line, and no error `gainedByFix` reports.
+/// Then the fixes are followed in turn, the first one each round, until no
+/// error carries one: each fix is held to the same, an error a fix answered
+/// must not come back at its line, whichever later fix brings it back, and
+/// the fixes must run out within `help_edit_rounds`. A new error elsewhere
+/// is the program's next mistake. The kinds of fix the case's diagnostics
+/// carried, empty where none did.
 ///
 /// **Bound:** one compilation per fix the case's diagnostics carry, and one
 /// per round, at most `help_edit_rounds`.
@@ -17739,11 +17833,11 @@ fn checkHelpEdits(
     file: FileId,
     text: []const u8,
     kind: ProgramKind,
-) !bool {
+) !std.EnumSet(diagnostic.FixKind) {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const scratch = arena.allocator();
-    var carried = false;
+    var carried: std.EnumSet(diagnostic.FixKind) = .initEmpty();
 
     // Each fix alone.
     for (reported) |d| {
@@ -17752,26 +17846,27 @@ fn checkHelpEdits(
         const label = d.primaryLabel() orelse continue;
         if (label.file != file) continue;
         for (d.fixes) |fix| {
-            carried = true;
+            carried.insert(fix.kind);
             const help = if (fix.note) |at| d.notes[at] else label.message;
             const failure: ?[]const u8 = switch (try applyFix(scratch, text, file, fix)) {
                 .refused => |why| why,
                 .text => |edited| failure: {
                     const again = try mutate.diagnose(scratch, edited, kind);
                     const line = movedLine(text, fix, lineAt(text, label.span.start));
-                    const left = errorAtLine(again.sink.list.items, again.file, edited, code, line) orelse break :failure null;
-                    break :failure try std.fmt.allocPrint(scratch, "{s} at line {d} is still reported: {s}", .{ code.ruleName(), line, left.message });
+                    if (errorAtLine(again.sink.list.items, again.file, edited, code, line)) |left|
+                        break :failure try std.fmt.allocPrint(scratch, "{s} at line {d} is still reported: {s}", .{ code.ruleName(), line, left.message });
+                    break :failure try gainedByFix(scratch, text, file, reported, fix, edited, again);
                 },
             };
             if (failure) |what| try failures.append(gpa, .{
                 .path = display_path,
-                .what = "a help's edit, applied, leaves the error it was written for",
-                .expected = try std.fmt.allocPrint(gpa, "no {s} at line {d} after writing {s}, as the help \"{s}\" says", .{ code.ruleName(), lineAt(text, label.span.start), try fixText(scratch, fix), help }),
+                .what = "a help's edit, applied, leaves the error it was written for or one of its own",
+                .expected = try std.fmt.allocPrint(gpa, "no {s} at line {d}, and no error the edit made, after writing {s}, as the help \"{s}\" says", .{ code.ruleName(), lineAt(text, label.span.start), try fixText(scratch, fix), help }),
                 .actual = try gpa.dupe(u8, what),
             });
         }
     }
-    if (!carried) return false;
+    if (carried.count() == 0) return carried;
 
     // The fixes in turn.
     var answered: std.ArrayList(HelpAnswered) = .empty;
@@ -17806,6 +17901,7 @@ fn checkHelpEdits(
         try answered.append(scratch, .{ .code = next.code.?, .line = movedLine(current, fix, lineAt(current, next.primaryLabel().?.span.start)) });
         try applied.append(scratch, try fixText(scratch, fix));
         const again = try mutate.diagnose(scratch, edited, kind);
+        if (try gainedByFix(scratch, current, current_file, diagnostics_now, fix, edited, again)) |what| break what;
         current = edited;
         current_file = again.file;
         diagnostics_now = again.sink.list.items;
@@ -17815,12 +17911,12 @@ fn checkHelpEdits(
         for (applied.items, 0..) |t, i| try edits.print(gpa, "{s}{s}", .{ if (i == 0) "" else ", then ", t });
         try failures.append(gpa, .{
             .path = display_path,
-            .what = "a help's edit, applied, leaves the error it was written for",
-            .expected = try std.fmt.allocPrint(gpa, "each error a help's fix answers gone for good, after writing {s}", .{edits.items}),
+            .what = "a help's edit, applied, leaves the error it was written for or one of its own",
+            .expected = try std.fmt.allocPrint(gpa, "each error a help's fix answers gone for good, and no error an edit made, after writing {s}", .{edits.items}),
             .actual = try gpa.dupe(u8, what),
         });
     }
-    return true;
+    return carried;
 }
 
 /// The line, counted from 1, that byte `offset` of `text` sits on.
@@ -19771,6 +19867,8 @@ const Work = struct {
     materialized_derives: u32 = 0,
     damages: std.EnumMap(Damage, u32) = .{},
     mutations: std.EnumMap(Mutation, u32) = .{},
+    /// The cases that carried a fix of each kind.
+    fix_kinds: FixKinds = .{},
     rules_reached: std.EnumMap(diagnostic.Code, void) = .{},
     terminator_witnesses: TerminatorWitnesses = .initFill(false),
     /// The functions this walker's cases declare, the library's excluded,
@@ -20797,11 +20895,13 @@ fn checkCase(
     // Every case, counted where one of its diagnostics carried a fix. A case
     // of several files is passed over: the fix is written into one file's
     // text and recompiled alone.
-    var edits_applied = false;
+    var kinds_carried: std.EnumSet(diagnostic.FixKind) = .initEmpty();
     if (env.corpus_properties and case.files.len == 1 and sink.hasErrors()) {
-        edits_applied = try checkHelpEdits(gpa, &w.failures, display_path, sink.items(), program.primaryFile(), case.files[0].text, program.kind);
+        kinds_carried = try checkHelpEdits(gpa, &w.failures, display_path, sink.items(), program.primaryFile(), case.files[0].text, program.kind);
     }
-    tally(&w.properties, &w.passed_over, .help_edits, edits_applied);
+    tally(&w.properties, &w.passed_over, .help_edits, kinds_carried.count() > 0);
+    var kinds = kinds_carried.iterator();
+    while (kinds.next()) |k| w.fix_kinds.put(k, (w.fix_kinds.get(k) orelse 0) + 1);
 
     // And the one the mutation asserts, counted from what it did rather than
     // asked again: a case is checked here exactly where it claimed it, so a
