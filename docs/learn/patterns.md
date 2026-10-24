@@ -158,24 +158,57 @@ chooses.
 
 ## Declaring command-line options and commands
 
-`std.cli` turns process arguments into a typed matches view from a command
-schema, generating aligned `--help` text and usage errors:
+`std.cli` reads process arguments against a command schema. The schema
+declares each flag, option and positional once; parsing answers a matches view
+of what was given, and the same schema writes the `--help` text:
 
 ```linea
-var cmd = cli.Command.new("notes", "Manage personal notes")
-&cmd.flag("loud", "--loud", "shout the summary", short: .Some("-l"))
-&cmd.option("format", "--format", "table or json", default: .Some("table"))
-&cmd.positional("title", "note title", required: true)
+import std.cli
+import std.env
+import std.io
 
-let matches = &cmd.parse(env.args())?
-defer matches.release()
+fn main() -> Result[UInt8, io.IoError] {
+    defer var cmd = cli.Command.new("notes", "Manage personal notes")
+    &cmd.flag("loud", "--loud", "shout the summary", short: .Some("-l"))
+    &cmd.option("format", "--format", "table or json", default: .Some("table"))
+    &cmd.positional("title", "note title", required: false)
 
-if matches.is_help() {
-    io.print(matches.help_text().view())?
-    return .Ok(0)
+    // `parse_args` reads the process arguments against the schema; a usage
+    // error comes back as a `cli.CliError` that prints as a sentence.
+    defer let matches = cmd.parse_args(env.args()) else |error| {
+        io.eprintln("notes: {error}")
+        return .Ok(2)
+    }
+    if matches.is_help() {
+        defer let help = cmd.format_help(borrow matches)
+        io.print("{help}")?
+        return .Ok(0)
+    }
+    let title = matches.positional("title") else {
+        "untitled"
+    }
+    // `option` answers the schema's default when `--format` is not given.
+    let format = matches.option("format").unwrap()
+    io.println("{title} as {format}, loud: {matches.flag("loud")}")?
+    .Ok(0)
 }
-let title = matches.required_positional("title")?
-let is_loud = matches.flag("loud")
+```
+
+```text
+untitled as table, loud: false
+```
+
+Run with `--help`, the program prints the help `format_help` writes from the
+schema:
+
+<!-- guide: unchecked the output of the program above run with --help -->
+```text
+usage: notes [title] [options]
+
+Manage personal notes
+options:
+  -l, --loud          shout the summary
+  --format <value>    table or json (default: table)
 ```
 
 Flags, options with defaults, optional and variadic positionals, and
@@ -184,4 +217,3 @@ builds a multi-command CLI with table rendering, JSON export, and config
 defaults; [`bounded_echo`](../../examples/bounded_echo.lin) and
 [`tcp_echo`](../../examples/tcp_echo.lin) demonstrate servers and clients with
 subcommands, options, and variadic trailing arguments.
-
