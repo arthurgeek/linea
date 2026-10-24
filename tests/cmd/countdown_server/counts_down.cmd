@@ -29,3 +29,17 @@ the refusal is logged as a warning.
   TIME INFO starting a countdown seconds=1
   TIME INFO request method=GET path=/countdown/1 status=200 bytes=12 duration=D
   TIME WARN request method=GET path=/countdown/60 status=400 bytes=31 duration=D error="the handler refused the request: 60 is not a count from 1 to 10"
+
+A port that is not a number is named in the error, before the usage.
+
+  $ ./countdown --port eighty
+  error: invalid value 'eighty' for option '--port'
+  usage: countdown-server [options]
+  
+  Countdown server
+  
+  options:
+    --port <value>        port to listen on
+    --requests <value>    number of requests to serve
+  
+  [64]

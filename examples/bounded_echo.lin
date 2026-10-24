@@ -13,7 +13,6 @@ import std.cli
 import std.env
 import std.io
 import std.log
-import std.mem
 import std.net
 import std.testing
 import std.time
@@ -35,21 +34,20 @@ struct ServeOptions {
     connections: Option[UInt64],
 }
 
-// Build the command schema. Each `?` hands back a refused allocation, and
-// `defer var` releases a command that was not yet registered when that
-// happens.
-fn build_cli() -> Result[cli.Command, mem.Oom] {
-    defer var cmd = cli.Command.new("bounded_echo", "Bounded echo server and client")
-    defer var serve_cmd = cli.Command.new("serve", "run the bounded echo server")
-    &serve_cmd.option("port", "--port", "port to listen on", required: true)?
-    &serve_cmd.option("connections", "--connections", "maximum connections to accept")?
-    &cmd.subcommand(serve_cmd)?
+// Build the command schema. A refused allocation is kept on the command and
+// reported when it parses or writes its usage.
+fn build_cli() -> cli.Command {
+    var cmd = cli.Command.new("bounded_echo", "Bounded echo server and client")
+    var serve_cmd = cli.Command.new("serve", "run the bounded echo server")
+    &serve_cmd.option("port", "--port", "port to listen on", required: true)
+    &serve_cmd.option("connections", "--connections", "maximum connections to accept")
+    &cmd.subcommand(serve_cmd)
 
-    defer var send_cmd = cli.Command.new("send", "send lines to an echo server")
-    &send_cmd.option("port", "--port", "server port to connect to", required: true)?
-    &send_cmd.positional("message", "messages to send", required: true, variadic: true)?
-    &cmd.subcommand(send_cmd)?
-    .Ok(cmd)
+    var send_cmd = cli.Command.new("send", "send lines to an echo server")
+    &send_cmd.option("port", "--port", "server port to connect to", required: true)
+    &send_cmd.positional("message", "messages to send", required: true, variadic: true)
+    &cmd.subcommand(send_cmd)
+    cmd
 }
 
 // Print the usage to standard error and return 64, the conventional exit
@@ -66,10 +64,7 @@ fn usage_error(cmd: cli.Command) -> UInt8 {
 }
 
 fn main() -> UInt8 {
-    defer var cmd = build_cli() else |_| {
-        io.eprintln("out of memory")
-        return 1
-    }
+    defer var cmd = build_cli()
     var cursor = cli.ArgCursor.new(env.args())
     defer let matches = cmd.parse(&cursor) else |error| {
         io.eprintln("error: {error}")

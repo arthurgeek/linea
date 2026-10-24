@@ -1,1 +1,9 @@
-usage: countdown-server --port PORT [--requests N]
+error: missing required option '--port'
+usage: countdown-server [options]
+
+Countdown server
+
+options:
+  --port <value>        port to listen on
+  --requests <value>    number of requests to serve
+

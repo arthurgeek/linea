@@ -69,59 +69,58 @@ fn parse_tags(tags_str: Str) -> Vec[String] {
     tags
 }
 
-// Build the declarative CLI command schema for notes. Each `?` hands back a
-// refused allocation; `defer var` releases a command that was not yet
-// registered when that happens.
-pub fn build_cli() -> Result[Command, mem.Oom] {
-    defer var cmd = Command.new("notes", "Manage personal notes")
+// Build the declarative CLI command schema for notes. A refused allocation
+// is kept on the command and reported when it parses or writes its help.
+pub fn build_cli() -> Command {
+    var cmd = Command.new("notes", "Manage personal notes")
 
-    &cmd.flag("json", "--json", "shortcut for --format json", global: true)?
-    &cmd.flag("table", "--table", "shortcut for --format table", global: true)?
-    &cmd.option("format", "--format", "output format: table or json", global: true)?
-    &cmd.option("config", "--config", "path to configuration file", default: .Some("notes.cfg"), global: true)?
+    &cmd.flag("json", "--json", "shortcut for --format json", global: true)
+    &cmd.flag("table", "--table", "shortcut for --format table", global: true)
+    &cmd.option("format", "--format", "output format: table or json", global: true)
+    &cmd.option("config", "--config", "path to configuration file", default: .Some("notes.cfg"), global: true)
 
-    defer var add_cmd = Command.new("add", "add a new note")
-    &add_cmd.positional("title", "note title", required: true)?
-    &add_cmd.option("tags", "--tags", "comma-separated list of tags")?
-    &add_cmd.option("priority", "--priority", "note priority (low, normal, high)")?
-    &cmd.subcommand(add_cmd)?
+    var add_cmd = Command.new("add", "add a new note")
+    &add_cmd.positional("title", "note title", required: true)
+    &add_cmd.option("tags", "--tags", "comma-separated list of tags")
+    &add_cmd.option("priority", "--priority", "note priority (low, normal, high)")
+    &cmd.subcommand(add_cmd)
 
-    defer var list_cmd = Command.new("list", "list matching notes")
-    &list_cmd.option("status", "--status", "filter by status (open, done, all)")?
-    &list_cmd.option("tag", "--tag", "filter by tag")?
-    &cmd.subcommand(list_cmd)?
+    var list_cmd = Command.new("list", "list matching notes")
+    &list_cmd.option("status", "--status", "filter by status (open, done, all)")
+    &list_cmd.option("tag", "--tag", "filter by tag")
+    &cmd.subcommand(list_cmd)
 
-    defer var done_cmd = Command.new("done", "mark a note as completed")
-    &done_cmd.positional("id", "note id", required: true)?
-    &cmd.subcommand(done_cmd)?
+    var done_cmd = Command.new("done", "mark a note as completed")
+    &done_cmd.positional("id", "note id", required: true)
+    &cmd.subcommand(done_cmd)
 
-    defer var remove_cmd = Command.new("remove", "delete a note by ID")
-    &remove_cmd.positional("id", "note id", required: true)?
-    &cmd.subcommand(remove_cmd)?
+    var remove_cmd = Command.new("remove", "delete a note by ID")
+    &remove_cmd.positional("id", "note id", required: true)
+    &cmd.subcommand(remove_cmd)
 
-    defer var show_cmd = Command.new("show", "display single note details")
-    &show_cmd.positional("id", "note id", required: true)?
-    &cmd.subcommand(show_cmd)?
+    var show_cmd = Command.new("show", "display single note details")
+    &show_cmd.positional("id", "note id", required: true)
+    &cmd.subcommand(show_cmd)
 
     // Registering a subcommand named `help` makes `notes help add` ask for
     // the help of `add`.
     let help_cmd = Command.new("help", "display this help message")
-    &cmd.subcommand(help_cmd)?
+    &cmd.subcommand(help_cmd)
 
-    .Ok(cmd)
+    cmd
 }
 
 pub struct CliParser {}
 
 impl CliParser {
     pub fn usage() -> Result[String, mem.Oom] {
-        defer var cmd = build_cli()?
+        defer var cmd = build_cli()
         cmd.usage()
     }
 
     pub fn parse(args: env.Args) -> Result[CliInvocation, cli.CliError] where carries(.Ok: args), carries(.Err: args) {
         var cursor = cli.ArgCursor.new(args)
-        defer var cmd = build_cli()?
+        defer var cmd = build_cli()
         defer let matches = cmd.parse(&cursor)?
 
         if matches.is_help() {

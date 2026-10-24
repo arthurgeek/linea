@@ -121,9 +121,8 @@ fn write_date[W: Writer](inout out: W, year: UInt64, month: UInt64, day: UInt64)
 }
 
 fn main() -> UInt8 {
-    let options = parse_options(env.args()) else {
-        io.eprintln("usage: calendar-export --port PORT [--requests N]")
-        return 64
+    let options = parse_options(env.args()) else |status| {
+        return status
     }
     let logger = log.to_stderr(minimum: .Info)
     // The annotation names the state the routes take, `App`.
@@ -164,28 +163,40 @@ struct Options {
     requests: Option[UInt64],
 }
 
-// Read `--port PORT` and an optional `--requests N`, in either order.
-fn parse_options(args: env.Args) -> Option[Options] {
+// Read `--port PORT` and an optional `--requests N`, in either order. A
+// mistake is printed with the usage, and the exit status for it returned.
+fn parse_options(args: env.Args) -> Result[Options, UInt8] {
     defer var cmd = cli.Command.new("calendar-export", "Calendar export server")
-    let _ = &cmd.option("port", "--port", "port to listen on", required: true) else |_| {
-        return .None
-    }
-    let _ = &cmd.option("requests", "--requests", "number of requests to serve") else |_| {
-        return .None
-    }
+    &cmd.option("port", "--port", "port to listen on", required: true)
+    &cmd.option("requests", "--requests", "number of requests to serve")
 
     var cursor = cli.ArgCursor.new(args)
-    defer let matches = cmd.parse(&cursor) else |_| {
-        return .None
+    defer let matches = cmd.parse(&cursor) else |error| {
+        return .Err(report(cmd, error))
     }
+    let port: UInt16 = matches.get("port") else |error| {
+        return .Err(report(cmd, error))
+    }
+    let requests: Option[UInt64] = matches.get_optional("requests") else |error| {
+        return .Err(report(cmd, error))
+    }
+    .Ok(.{ port, requests })
+}
 
-    let port: UInt16 = matches.get("port") else |_| {
-        return .None
+// Print `error` and the usage to standard error, and return the exit status:
+// 1 when memory ran out, otherwise 64, the conventional status for a usage
+// mistake.
+fn report(cmd: cli.Command, error: cli.CliError) -> UInt8 {
+    io.eprintln("error: {error}")
+    if match read error { Allocation(_) => true, _ => false } {
+        return 1
     }
-    let requests: Option[UInt64] = matches.get_optional("requests") else |_| {
-        return .None
+    let usage = cmd.usage() else |_| {
+        return 1
     }
-    .Some(.{ port, requests })
+    io.eprintln(usage.view())
+    usage.release()
+    64
 }
 
 test fn leap_years_follow_the_gregorian_rule() {

@@ -1,1 +1,9 @@
-usage: calendar-export --port PORT [--requests N]
+error: missing required option '--port'
+usage: calendar-export [options]
+
+Calendar export server
+
+options:
+  --port <value>        port to listen on
+  --requests <value>    number of requests to serve
+
