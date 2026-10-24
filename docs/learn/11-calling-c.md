@@ -738,8 +738,9 @@ handle by value either way, so the declaration says which calls only read:
 `greeter_name` marks its parameter `read`, and `greeter_rename` does not. A
 call that may change the greeter is allowed only in a method taking the
 greeter `inout` or `sink`, as `rename` does. That `inout` is what refuses the
-stale read:
+stale read in this function, added to the end of `greeter.lin`:
 
+<!-- guide: edit greeting/greeter/greeter.lin after 70 -->
 ```linea
 fn stale(inout person: Greeter) -> String {
     let name = greeter_name(person.handle)
@@ -748,21 +749,29 @@ fn stale(inout person: Greeter) -> String {
 }
 ```
 
-<!-- guide: unchecked a fragment added to the end of the greeter module above, shown for the error it gets -->
 ```
-error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> greeting/greeter/greeter.lin:74:5
+error[N-Unused]: `stale` is never used
+  --> greeting/greeter/greeter.lin:71:4
    |
-74 |     &person.rename("Grace")
+71 | fn stale(inout person: Greeter) -> String {
+   |    ^^^^^ call it, or name it with a leading `_`
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> greeting/greeter/greeter.lin:73:5
+   |
+73 |     &person.rename("Grace")
    |     ^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-75 |     copied(name)
+74 |     copied(name)
    |            ---- the observation is still used here
 ```
+
+The first error only says that nothing calls `stale` yet; the second is the
+refusal.
 
 A method that took the greeter as a plain `self` could not call
 `greeter_rename` at all, because `self.handle` is then a place that may not
 change:
 
+<!-- guide: edit greeting/greeter/greeter.lin after 70 -->
 ```linea
 impl Greeter {
     pub fn rename_quietly(self: Self, name: Str) {
@@ -775,12 +784,11 @@ impl Greeter {
 }
 ```
 
-<!-- guide: unchecked a fragment added to the end of the greeter module above, shown for the error it gets -->
 ```
 error[T-ExternHandle]: `greeter_rename` may change the object this handle holds, so the handle is lent from a place that may change
-  --> greeting/greeter/greeter.lin:77:24
+  --> greeting/greeter/greeter.lin:76:24
    |
-77 |         greeter_rename(self.handle, copied.text())
+76 |         greeter_rename(self.handle, copied.text())
    |                        ^^^^^^^^^^^ pass a handle held in a `var` or an `inout` parameter, or mark `greeter` `read` if C only reads it
 ```
 

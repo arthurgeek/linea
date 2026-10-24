@@ -761,11 +761,14 @@ handle each failure in the style that shape suits:
 - A `main` that answers `UInt8` suits a command that chooses its exit
   statuses, as `alarm` does. Handle each setup failure — a missing argument, a
   file that will not open, a port already taken — with `let … else |error|`,
-  printing the error and returning a status:
+  printing the error and returning a status. The [guest
+  book](../../examples/guest-book/main.lin) reads its port this way, and
+  prints its usage when the argument is not a port:
 
+  <!-- guide: excerpt examples/guest-book/main.lin -->
   ```linea
-  let port = written.parse[UInt16]() else |error| {
-      io.eprintln("cannot read the port {written}: {error}")
+  let port = port_arg.parse[UInt16]() else |_| {
+      io.eprintln("usage: guest-book PORT")
       return 64
   }
   ```
@@ -937,11 +940,11 @@ is written `let read Meters(m) = distance`. `read` looks inside without taking
 the value apart. Leave `read` out and the pattern tries to take a value the
 function was only lent:
 
+<!-- guide: edit 10 -->
 ```linea
-let Meters(m) = distance
+    let Meters(m) = distance
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[O-Move]: `distance` is lent, and this takes it
   --> pace_lent.lin:10:21
@@ -954,11 +957,12 @@ error[O-Move]: `distance` is lent, and this takes it
 
 Pass the arguments the wrong way round and the compiler catches that too:
 
+<!-- guide: edit 18 -->
 ```linea
-io.println("{pace(took, run)} seconds per kilometre")?
+    io.println("{pace(took, run)} seconds per kilometre")?
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
+<!-- guide: first 1 diagnostic -->
 ```
 error[T-Mismatch]: expected `Meters`, found `Seconds`
   --> pace_mixed.lin:18:23
@@ -1051,11 +1055,11 @@ Members pay 4250 cents.
 `it` stands for the value being checked. When you write a number directly,
 the check happens before the program ever runs:
 
+<!-- guide: edit 13 -->
 ```linea
-io.println("Members pay {discounted(price, Percent(150))} cents.")?
+    io.println("Members pay {discounted(price, Percent(150))} cents.")?
 ```
 
-<!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[T-Refine]: 150 is not in 0..=100 for Percent
   --> percent_150.lin:13:48
