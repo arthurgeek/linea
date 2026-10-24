@@ -11,7 +11,10 @@ callables, and "Not an FFI" in
 its own, [0101](0101-a-library-publishes-what-it-exports.md), whose thunk
 and boundary predicate it shares, and
 [0229](0229-an-application-depends-on-a-library-by-path.md), whose open
-question of a library's link line it answers.
+question of a library's link line it answers. Extended by
+[0246](0246-a-call-holds-what-it-lends-until-it-runs.md): a handle passed
+`read` and `sink` to one call is [O-Move], and a handle lent to change is a
+mutation of the one [N-Aliased] routine.
 
 ## Context
 

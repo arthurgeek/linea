@@ -369,9 +369,10 @@ const Builder = struct {
             .tag = tag,
             .place = place,
             .at = at,
-            // Only a transfer is left open by the construct around it. A read
-            // hands nothing over, so there is nothing waiting to be received.
-            .pending_for = if (tag == .consume or tag == .transferred)
+            // Only a transfer is left open by the construct around it, and a
+            // lend the construct holds until it runs. A read hands nothing
+            // over, so there is nothing waiting to be received.
+            .pending_for = if (tag == .consume or tag == .transferred or tag == .held)
                 self.constructAt(self.building.items.len)
             else
                 ExprId.none,
@@ -1094,13 +1095,19 @@ const Builder = struct {
 
             .block => try self.body(id, position),
 
-            // Both operands are read: the head is observed and the index is
-            // a number. Which element is named is a question about places,
-            // and a whole array is what a move takes.
+            // Both operands are read, and an operator is a call of the
+            // operation its trait declares, `a == b` being `equals(a, b)`:
+            // each operand is lent until both are evaluated and the
+            // operation runs, exactly as a call's arguments are.
             .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge => {
                 const p = self.ast.binary(id);
+                try self.building.append(self.gpa, id);
+                defer _ = self.building.pop();
                 try self.expr(p.lhs, .reading);
+                try self.hold(p.lhs);
                 try self.expr(p.rhs, .reading);
+                try self.hold(p.rhs);
+                try self.commit(id);
             },
 
             .assign => {
@@ -1629,20 +1636,67 @@ const Builder = struct {
         defer _ = self.building.pop();
 
         const normalized = normal.?;
-        if (normalized.target.calleeIsValue()) try self.expr(c.callee, if (normalized.callee_convention == .sink) .consuming else .reading);
+        // The callee runs once every argument is evaluated, and reads or
+        // writes what it was lent while it runs, so each place a lent operand
+        // names is held from where it is evaluated until the call: `use(v, v)`
+        // with the second parameter `sink` would read `v` after the callee
+        // took it.
+        if (normalized.target.calleeIsValue()) {
+            const lent = normalized.callee_convention != .sink;
+            try self.expr(c.callee, if (lent) .reading else .consuming);
+            if (lent) try self.hold(c.callee);
+        }
         for (normalized.args, 0..) |a, i| {
             // A parameter the call omitted receives a constant spliced at
             // lowering. It names no place, was moved from nowhere and belongs
             // to nobody, so there is nothing here for the graph to hold.
             if (a == ExprId.none) continue;
 
-            const position: Position = if (normalized.argumentConvention(self.typing, i) == .sink)
-                .consuming
-            else
-                .reading;
-            try self.expr(a, position);
+            if (normalized.argumentConvention(self.typing, i) == .sink) {
+                try self.expr(a, .consuming);
+            } else {
+                try self.expr(a, .reading);
+                try self.hold(a);
+            }
         }
         try self.commit(id);
+    }
+
+    /// Lends the call being built every place a lent argument's value names,
+    /// until the call is made: the place itself, or each place a branch of the
+    /// argument yields, since a branch sits where its construct sits. A
+    /// scalar snapshot is a value of its own and lends nothing.
+    fn hold(self: *Builder, id: ExprId) std.mem.Allocator.Error!void {
+        if (id == ExprId.none) return;
+        const at = self.ast.withoutGroups(id);
+        switch (self.ast.exprTag(at)) {
+            .marked => try self.hold(self.ast.unaryOperand(at)),
+            .conditional => {
+                const c = self.ast.conditional(at);
+                try self.hold(c.then);
+                try self.hold(c.otherwise);
+            },
+            .block => try self.hold(self.ast.blockOf(at).tail),
+            .match_, .match_read => {
+                const m = self.ast.call(at);
+                var i: usize = 1;
+                while (i < m.args.len) : (i += 2) try self.hold(m.args[i]);
+            },
+            .name_ref, .param_argument, .field, .index, .dereference => {
+                if (self.rejectedPlace(at)) return;
+                if (self.typing.isScalarSnapshot(self.placeType(at))) return;
+                const path = self.pathOf(at);
+                if (!self.ast.refersToBinding(path.root)) return;
+                const b = self.res.targetOf(path.root);
+                if (b == BindingId.none) return;
+                switch (self.res.kindOf(b)) {
+                    .local, .parameter, .binder, .capture => {},
+                    .constant, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => return,
+                }
+                try self.emit(.held, .{ .root = b, .depth = path.depth }, at);
+            },
+            else => {},
+        }
     }
 
     /// A closure refused for naming a binding of the body around it without
@@ -2375,7 +2429,7 @@ fn graphOf(gpa: std.mem.Allocator, text: []const u8) !Built {
             },
             .committed => got.commits += 1,
             .escaped => got.escapes += 1,
-            .copied, .discarded, .replaced, .value, .returned, .lent, .temporaries_end, .unsettled => {},
+            .copied, .discarded, .replaced, .value, .returned, .lent, .held, .temporaries_end, .unsettled => {},
         }
     }
 
@@ -2683,8 +2737,9 @@ test "a construct that takes several values says where it took them" {
     // Only the call's two arguments are transfers a construct has yet to
     // receive: a field initialiser here is a literal, which opens none.
     try testing.expectEqual(@as(u32, 2), got.pending);
-    // Three constructs take a value and say so: each `.{ … }` and the call.
-    try testing.expectEqual(@as(u32, 3), got.commits);
+    // Four constructs take a value and say so: each `.{ … }`, the call, and
+    // the `+` in `use2`, whose operands are lent until it runs.
+    try testing.expectEqual(@as(u32, 4), got.commits);
     // Nothing leaves, so nothing is left half-built.
     try testing.expectEqual(@as(u32, 0), got.escapes);
 }
@@ -2753,9 +2808,10 @@ test "what a break carries out is owed to whatever takes the loop" {
     // `e` carried out of the loop and `d` written beside it: both owed to
     // `use2`, and neither received before it begins.
     try testing.expectEqual(@as(u32, 2), got.pending);
-    // The loop is not a construct anything waits on, so the only thing that
-    // receives here is the call.
-    try testing.expectEqual(@as(u32, 1), got.commits);
+    // The loop is not a construct anything waits on, so what receives here
+    // is the call and the `+` in `use2`, whose operands are lent until it
+    // runs.
+    try testing.expectEqual(@as(u32, 2), got.commits);
 }
 
 test "a value made where it is given up is owed to the construct around it" {

@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/ownership/a_call_holds_what_it_lends/an_argument_cannot_take_what_another_lends_to_change.lin:12:41
+   |
+12 |     let answer = grow_after_release(&v, v)
+   |                                     -- mutated by this argument
+   |                                         ^ already passed `&` here

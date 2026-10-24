@@ -4400,7 +4400,8 @@ moved. The compiler believes a
 written `read`, and believes that each handle is the only one naming its
 object: an `extern` answering a handle answers a new or handed-over object,
 and the module trusted with C never builds a handle from an address another
-handle holds.
+handle holds. A handle taken `sink` beside a `read` or plain lend of the same
+handle moves what the call still lends, which is [O-Move].
 
 **[T-ExternAgreement]** Every `extern` declaration of one symbol names the one
 function the runtime provides under that symbol, so each module may declare the
@@ -5397,9 +5398,28 @@ independent Copyable aggregate part.
 ### §5.5 What is checked
 
 **[O-Move]** The following are rejected: using a moved or uninitialised binding;
-moving part of a binding; moving from a `read` parameter; and moving from a
-`match read` or `let read` binder. Use-after-free and double-free both access a
-moved root, so they share this rule and diagnostic code.
+moving part of a binding; moving from a `read` parameter; moving from a
+`match read` or `let read` binder; and moving a binding that another argument
+of the same call lends. Use-after-free and double-free both access a moved
+root, so they share this rule and diagnostic code.
+
+A call lends every argument it does not take, and its receiver, for as long as
+the callee runs, which is after every argument has been evaluated. A place such
+an argument names, or that a branch of it yields, is held from where the
+argument is evaluated until the call is made, so taking it in a later argument
+is a use after a move whichever way the arguments are written:
+`both(v, v)` with the second parameter `sink` would have the callee read `v`
+after it took `v`, and is rejected exactly as `both(v, v)` with the first
+parameter `sink` is. A take anywhere inside a later argument counts: a nested
+call, a `let` in a block, or a structure literal's field; a take on a path that
+leaves before the call is made, such as a branch ending in `return`, lends
+nothing it takes from. An operator is a call of the operation its trait
+declares, so `a == b` lends both operands until the comparison runs, and
+`p == same(p)` with `same` taking `p` is rejected the same way. A field lent beside
+its whole, `f(s.items, s)`, names the root the move takes. Two lends of one
+place share it, and `f(p, copy(p))` lends `p` beside a copy of it. A scalar
+snapshot lends nothing. A view or a capture of the place passed beside its
+owner is an observation, and the take that ends it is [O-Borrow].
 
 Writing a field uses its containing binding: `p.f = v` reads `p` to locate the
 field. The read is invalid if `p` has moved, even on the left-hand side of `=`.

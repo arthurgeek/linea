@@ -14,9 +14,16 @@
 //! and that is a failure.
 //!
 //! The owner is a whole local, a vector held in a structure's field -- changed
-//! through the field or through an `inout` of the whole structure -- or a
-//! fixed array, so a live observation is held against every way one place
-//! can overlap another.
+//! through the field or through an `inout` of the whole structure -- a fixed
+//! array, or a handle to an object C holds, whose text C answers, so a live
+//! observation is held against every way one place can overlap another.
+//!
+//! One meeting puts the observation and the operation in one call: the
+//! observation is lent to the call by one argument, and the operation runs
+//! inside another, or is the argument a `sink` parameter takes. The owner
+//! itself lent beside a take of it is an observation of its own, refused by
+//! [O-Move] rather than [O-Borrow], since what the call holds is the place
+//! and not a view of it.
 //!
 //! Cells are enumerated rather than drawn. The cross product is a few hundred
 //! programs, each compiled once against the checked library, and only the
@@ -49,6 +56,9 @@ pub const Storage = enum {
     /// owner is the walk's binder, and every operation and observation sits
     /// inside the walk's body.
     walked,
+    /// A handle to a block C allocates, sealed in the program's own root,
+    /// which its manifest grants `extern`. C answers text inside the block.
+    handle,
 
     /// How the cell's program names the owner where the template says
     /// `owner`.
@@ -82,7 +92,16 @@ pub const Storage = enum {
             \\&owner.insert(2, 20).unwrap().release()
             \\&owner.insert(3, 30).unwrap().release()
             ,
-            .scalar, .array => unreachable,
+            .scalar, .array, .handle => unreachable,
+        };
+    }
+
+    /// The manifest the program is compiled under, where it needs one: a
+    /// handle is a type only a root trusted with C may seal.
+    fn manifest(self: Storage) ?[]const u8 {
+        return switch (self) {
+            .handle => "{ \"extern\": [\".\"] }",
+            else => null,
         };
     }
 
@@ -126,6 +145,13 @@ pub const Operation = enum {
     walk_push,
     /// A clear through a `for inout` walk's binder.
     walk_clear,
+    /// An `extern` call taking the handle without `read`, which lets C change
+    /// the block: `memset` clears it.
+    handle_change,
+    /// The handle given to C to free, then a new block opened.
+    handle_close,
+    /// The handle lent `inout` to a function that frees it and opens another.
+    handle_renew,
 
     pub fn storage(self: Operation) Storage {
         return switch (self) {
@@ -135,6 +161,7 @@ pub const Operation = enum {
             .reset_holder, .field_push => .field,
             .element_write, .array_assign => .array,
             .walk_push, .walk_clear => .walked,
+            .handle_change, .handle_close, .handle_renew => .handle,
         };
     }
 
@@ -150,8 +177,19 @@ pub const Operation = enum {
     /// is opened again right after, so the program can go on using it.
     pub fn consumes(self: Operation) bool {
         return switch (self) {
-            .release, .drain, .finish, .release_map, .drain_map => true,
+            .release, .drain, .finish, .release_map, .drain_map, .handle_close => true,
             else => false,
+        };
+    }
+
+    /// What opens the owner again after a consuming operation, so the program
+    /// can go on using it.
+    fn reopen(self: Operation) []const u8 {
+        return switch (self) {
+            .release, .drain, .finish => "owner = Vec.new()",
+            .release_map, .drain_map => "owner = collections.Map.new()",
+            .handle_close => "owner = calloc(1, 16)",
+            else => unreachable,
         };
     }
 
@@ -204,6 +242,9 @@ pub const Operation = enum {
             .array_assign => "owner = [UInt64(4), 5, 6]",
             .walk_push => "&owner.push(4).unwrap()",
             .walk_clear => "&owner.clear()",
+            .handle_change => "let _cleared = memset(owner, 0, 16)",
+            .handle_close => "free(owner)\nowner = calloc(1, 16)",
+            .handle_renew => "renew(&owner)",
         };
     }
 
@@ -235,8 +276,20 @@ pub const Operation = enum {
             .reset_holder => "reset(&holder)",
             .field_push, .walk_push => "&owner.push(4).unwrap()",
             .walk_clear => "&owner.clear()",
+            .handle_change => "match memset(owner, 0, 16) { _ => {} }",
+            .handle_close => "free(owner)",
+            .handle_renew => "renew(&owner)",
             .index_write, .assign, .compound_assign, .element_write, .array_assign => null,
         };
+    }
+
+    /// The operation as the statements of a block written as a call's
+    /// argument, ending in the block's value: a consuming one gives the owner
+    /// up there and the owner is opened again after the call, since the
+    /// argument may not assign a place the call is lent.
+    fn inArgument(self: Operation) []const u8 {
+        if (self.consumes()) return self.expression().?;
+        return self.statements();
     }
 };
 
@@ -281,6 +334,11 @@ pub const Observation = enum {
     bare_mapped,
     /// The same walk over a map's entries.
     bare_entries,
+    /// Text C answers from inside the block a handle holds.
+    text,
+    /// The owner itself, lent to a call beside an argument that takes it. It
+    /// is made by the call, so it meets an operation only there.
+    argument,
 
     /// Whether the observation can be made of the storage. A vector held in
     /// a field and a fixed array are observed as a vector is, through their
@@ -293,6 +351,8 @@ pub const Observation = enum {
             .inout_capture => storage == .vec or storage == .walked,
             .value_view, .entries, .map_inout_capture, .bare_entries => storage == .map,
             .scalar_inout_capture, .scalar_read_capture => storage == .scalar,
+            .text => storage == .handle,
+            .argument => storage == .vec or storage == .map or storage == .handle,
         };
     }
 
@@ -335,8 +395,10 @@ pub const Observation = enum {
             \\}
             ,
             .scalar_read_capture => "let seen = [owner] || owner",
-            // The walk is opened by the loop that walks it.
-            .bare_slice, .bare_iterator, .bare_mapped, .bare_entries => "",
+            .text => "let seen = strchr(owner, 0)",
+            // The walk is opened by the loop that walks it, and the owner is
+            // lent by the call it is an argument of.
+            .bare_slice, .bare_iterator, .bare_mapped, .bare_entries, .argument => "",
         };
     }
 
@@ -364,9 +426,24 @@ pub const Observation = enum {
             .read_capture, .scalar_read_capture => "seen()",
             .inout_capture, .map_inout_capture, .scalar_inout_capture => "&seen()",
             .entries => "match Iterator.next(&seen) { Some(entry) => entry.value, None => 0 }",
-            // A bare walk is used only by walking it, inside a `for` meeting.
-            .bare_slice, .bare_iterator, .bare_mapped, .bare_entries => unreachable,
+            .text => "seen.length()",
+            // A bare walk is used only by walking it, inside a `for` meeting,
+            // and a lent owner only by the call it is lent to.
+            .bare_slice, .bare_iterator, .bare_mapped, .bare_entries, .argument => unreachable,
         };
+    }
+
+    /// What the call of a `one_call` meeting is lent: the observation, or the
+    /// owner itself.
+    fn lent(self: Observation) []const u8 {
+        return if (self == .argument) "owner" else "seen";
+    }
+
+    /// The rule that refuses the observation used across the operation: a
+    /// view or capture is ended by it, and the owner lent itself is a place
+    /// the call holds while another argument takes it.
+    pub fn refusal(self: Observation) []const u8 {
+        return if (self == .argument) "O-Move" else "O-Borrow";
     }
 
     /// How a `for` loop walks `seen`, where it can: the sequence it names and
@@ -378,7 +455,7 @@ pub const Observation = enum {
             .mapped => .{ .sequence = "seen", .item = "item" },
             .entries => .{ .sequence = "seen", .item = "item.value" },
             .element, .wrapped, .read_capture, .inout_capture, .value_view, .map_inout_capture, .scalar_inout_capture, .scalar_read_capture => null,
-            .bare_slice, .bare_iterator, .bare_mapped, .bare_entries => null,
+            .bare_slice, .bare_iterator, .bare_mapped, .bare_entries, .text, .argument => null,
         };
     }
 };
@@ -398,6 +475,11 @@ pub const Meeting = enum {
     closure_between,
     deferred,
     match_arm,
+    /// In one call: the observation is lent to `meet` by its first argument,
+    /// and the operation runs inside the second, as a block, or is the second
+    /// where a `sink` parameter takes the owner. The `ended` program lends the
+    /// observation to one call and runs the operation after it.
+    one_call,
 
     fn loops(self: Meeting) bool {
         return self == .for_body or self == .while_body;
@@ -428,7 +510,23 @@ pub const Cell = struct {
         // A second `inout` capture of the place the closure holds is refused
         // whatever the observation does.
         if (self.meeting == .closure_between and (self.observation == .inout_capture or self.observation == .map_inout_capture or self.observation == .scalar_inout_capture)) return false;
+        // The owner lent itself exists only in the call it is lent to, and
+        // meets only what takes it there: an operation that writes it inside
+        // another argument is [N-Aliased], whatever the call holds.
+        if (self.observation == .argument) return self.meeting == .one_call and self.operation.consumes();
+        // A walk is used by walking it, which no call does.
+        if (self.meeting == .one_call and self.observation == .lent_walk) return false;
         return true;
+    }
+
+    /// The rule that refuses the cell's `live` program.
+    pub fn refusal(self: Cell) []const u8 {
+        return self.observation.refusal();
+    }
+
+    /// The manifest both of the cell's programs are compiled under, or null.
+    pub fn manifest(self: Cell) ?[]const u8 {
+        return self.operation.storage().manifest();
     }
 
     test "a cell applies only where its program can say something about the observation" {
@@ -437,6 +535,17 @@ pub const Cell = struct {
         try testing.expect(!(Cell{ .operation = .push, .observation = .value_view, .meeting = .straight }).applies());
         try testing.expect(!(Cell{ .operation = .release, .observation = .slice, .meeting = .while_body }).applies());
         try testing.expect(!(Cell{ .operation = .index_write, .observation = .slice, .meeting = .deferred }).applies());
+        try testing.expect((Cell{ .operation = .release, .observation = .argument, .meeting = .one_call }).applies());
+        try testing.expect(!(Cell{ .operation = .push, .observation = .argument, .meeting = .one_call }).applies());
+        try testing.expect(!(Cell{ .operation = .release, .observation = .argument, .meeting = .straight }).applies());
+        try testing.expect(!(Cell{ .operation = .push, .observation = .lent_walk, .meeting = .one_call }).applies());
+    }
+
+    test "the owner lent itself is refused as a take of what a call holds" {
+        try testing.expectEqualStrings("O-Move", (Cell{ .operation = .release, .observation = .argument, .meeting = .one_call }).refusal());
+        try testing.expectEqualStrings("O-Borrow", (Cell{ .operation = .release, .observation = .slice, .meeting = .one_call }).refusal());
+        try testing.expectEqualStrings("{ \"extern\": [\".\"] }", (Cell{ .operation = .handle_close, .observation = .text, .meeting = .straight }).manifest().?);
+        try testing.expect((Cell{ .operation = .push, .observation = .slice, .meeting = .straight }).manifest() == null);
     }
 
     /// The cell's name, which is also how a failure names it.
@@ -475,22 +584,26 @@ test "the matrix holds every applicable cell of the three axes" {
     const all = try cells(testing.allocator);
     defer testing.allocator.free(all);
 
-    // Ten vector operations meet ten vector observations, six map operations
-    // meet three map observations, and two assignments meet two captures,
-    // at seven meetings. Consuming operations leave both loops, assignments
-    // leave `defer`, and an `inout` capture leaves the meeting between two
-    // calls of a closure already holding the place. Bare walks meet only the
-    // non-consuming operations, in a `for` body. A field and an array meet
-    // the nine observations a slice offers, less `defer` for an array's
-    // assignments, and the three bare walks. A walked owner's two operations
-    // meet everything a vector's do.
-    const vec = 10 * 10 * 7 - 3 * 10 * 2 - 1 * 10 - 10 * 1 + 7 * 3;
-    const map = 6 * 3 * 7 - 2 * 3 * 2 - 6 * 1 + 4 * 1;
-    const scalar = 2 * 2 * 7 - 2 * 2 - 2 * 1;
-    const field = 2 * (9 * 7 + 3);
-    const array = 2 * (9 * 6 + 3);
-    const walked = 2 * (10 * 7 - 1 + 3);
-    try testing.expectEqual(@as(usize, vec + map + scalar + field + array + walked), all.len);
+    // Ten vector operations meet ten vector observations, six map
+    // operations meet three map observations, and two assignments meet two
+    // captures, at eight meetings. Consuming operations leave both loops,
+    // assignments leave `defer`, an `inout` capture leaves the meeting between
+    // two calls of a closure already holding the place, and a lent walk leaves
+    // the meeting in one call. Bare walks meet only the non-consuming
+    // operations, in a `for` body. The owner lent itself meets each consuming
+    // operation in one call. A field and an array meet the nine observations a
+    // slice offers, less `defer` for an array's assignments and the lent walk
+    // in one call, and the three bare walks. A walked owner's two operations
+    // meet everything a vector's do. A handle's three operations meet the text
+    // C answers from it, and its close meets the handle lent itself.
+    const vec = 10 * 10 * 8 - 3 * 10 * 2 - 1 * 10 - 10 * 1 - 10 * 1 + 7 * 3 + 3;
+    const map = 6 * 3 * 8 - 2 * 3 * 2 - 6 * 1 + 4 * 1 + 2;
+    const scalar = 2 * 2 * 8 - 2 * 2 - 2 * 1;
+    const field = 2 * (9 * 8 - 1 + 3);
+    const array = 2 * (9 * 7 - 1 + 3);
+    const walked = 2 * (10 * 8 - 1 - 1 + 3);
+    const handle = 3 * 8 - 1 * 2 + 1;
+    try testing.expectEqual(@as(usize, vec + map + scalar + field + array + walked + handle), all.len);
     for (all) |cell| try testing.expect(cell.applies());
     // The shape the matrix exists for is one of its cells.
     var motivating = false;
@@ -504,6 +617,14 @@ test "the matrix holds every applicable cell of the three axes" {
     var through_structure = false;
     for (all) |cell| through_structure = through_structure or (cell.operation == .reset_holder and cell.observation == .slice and cell.meeting == .straight);
     try testing.expect(through_structure);
+    // So are an owner lent and taken in one call, and a handle's text met
+    // with each change C may make.
+    var lent_and_taken = false;
+    for (all) |cell| lent_and_taken = lent_and_taken or (cell.operation == .release and cell.observation == .argument and cell.meeting == .one_call);
+    try testing.expect(lent_and_taken);
+    var handle_text = false;
+    for (all) |cell| handle_text = handle_text or (cell.operation == .handle_change and cell.observation == .text and cell.meeting == .straight);
+    try testing.expect(handle_text);
 }
 
 /// A use of the observation that adds what it reads to `total`. A lent walk
@@ -574,14 +695,58 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
                 \\
             );
         },
+        .handle => {
+            if (observation == .text) try w.raw("import std.ffi\n\n");
+            try w.raw(
+                \\@(opaque, linear)
+                \\type Block = UInt64
+                \\
+                \\extern fn calloc(count: UInt64, size: UInt64) -> Block
+                \\
+                \\extern fn free(sink block: Block)
+                \\
+                \\
+            );
+            if (observation == .text) try w.raw("extern fn strchr(read text: Block, character: Int32) -> ffi.CText where borrows(text)\n\n");
+            if (operation == .handle_change) try w.raw("extern fn memset(block: Block, value: Int32, count: UInt64) -> UInt64\n\n");
+            if (operation == .handle_renew) try w.raw(
+                \\fn renew(inout block: Block) {
+                \\    free(block)
+                \\    block = calloc(1, 16)
+                \\}
+                \\
+                \\
+            );
+        },
         .scalar, .array => {},
     }
+    // A vector lent to a call beside its own release is, in the `live`
+    // program, given straight to the `sink` parameter that releases it.
+    const gives_directly = operation == .release and observation == .argument and cell.meeting == .one_call and live;
+    if (cell.meeting == .one_call) try w.raw(if (gives_directly)
+        \\fn meet[T](_lent: T, sink taken: Vec[UInt64, mem.SystemAllocator]) -> UInt64 {
+        \\    taken.release()
+        \\    0
+        \\}
+        \\
+        \\
+    else
+        \\fn meet[T](_lent: T, done: UInt64) -> UInt64 {
+        \\    done
+        \\}
+        \\
+        \\
+    );
     if (observation == .wrapped) {
         if (storage == .array) try w.raw("import std.mem\n\n");
         try w.raw(
             \\@copyable
             \\type Wrapped = mem.Slice[UInt64]
             \\
+            \\
+        );
+        // A call lends the wrapped slice itself and reads nothing through it.
+        if (cell.meeting != .one_call) try w.raw(
             \\fn first(wrapped: Wrapped) -> UInt64 {
             \\    let Wrapped(view) = copy(wrapped)
             \\    view[0]
@@ -614,6 +779,7 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
             try w.line(1, storage.fill());
         },
         .array => try w.line(1, "var owner = [UInt64(1), 2, 3]"),
+        .handle => try w.line(1, "var owner = calloc(1, 16)"),
         .walked => {
             try w.line(1, "var owners: [Vec[UInt64, mem.SystemAllocator]; 1] = [Vec.new()]");
             try w.line(1, "for inout owner in owners {");
@@ -740,10 +906,25 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
             try w.line(1, "}");
             if (live) try use(w, 1, observation);
         },
+        .one_call => if (live) {
+            if (gives_directly) {
+                try w.print(1, "total += meet({s}, owner)", .{observation.lent()});
+            } else {
+                try w.print(1, "total += meet({s}, {{", .{observation.lent()});
+                try w.line(2, operation.inArgument());
+                try w.line(2, "0");
+                try w.line(1, "})");
+            }
+            if (operation.consumes()) try w.line(1, operation.reopen());
+        } else {
+            try w.print(1, "total += meet({s}, 0)", .{observation.lent()});
+            try w.line(1, operation.statements());
+        },
     }
 
     switch (storage) {
         .vec, .map => if (!settled) try w.line(1, "owner.release()"),
+        .handle => if (!settled) try w.line(1, "free(owner)"),
         .field => try w.line(1, "let Holder { items } = holder\nitems.release()"),
         .scalar, .array => {},
         .walked => {
@@ -755,7 +936,7 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
     const measured = switch (storage) {
         .scalar => "total + owner",
         .array => "total + owner[0]",
-        .vec, .map, .field, .walked => "total",
+        .vec, .map, .field, .walked, .handle => "total",
     };
     try w.print(1, "if {s} > {d} {{", .{ measured, total_bound });
     try w.line(2, "1");

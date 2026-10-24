@@ -200,6 +200,12 @@ pub const Op = struct {
         transferred,
         /// A pattern names a part without acquiring its ownership obligation.
         lent,
+        /// A call lends the place an argument it does not take names, for as
+        /// long as the call runs: the callee reads it, or writes it, after
+        /// every argument has been evaluated. `pending_for` is the call, whose
+        /// `committed` ends the lend, and a take of the place before then is
+        /// [O-Move].
+        held,
         /// Becomes initialised: a `let`, a parameter's arrival, an assignment
         /// refilling a hole.
         init,

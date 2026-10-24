@@ -619,6 +619,7 @@ fn typecheckInternal(
     defer gpa.free(c.binder_places);
     defer c.lent_now.deinit(gpa);
     defer c.aliased.deinit(gpa);
+    defer c.lent_handles.deinit(gpa);
     defer c.pattern_places.deinit(gpa);
     defer {
         var names = c.variant_names.valueIterator();
@@ -5775,6 +5776,12 @@ const Checker = struct {
     /// the same write and describe one mistake twice. Which rule owns the
     /// context decides, rather than each hedging about the other.
     aliased: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// The arguments an `extern` call lends C to change: a handle at a
+    /// parameter taken without `read` ([T-ExternHandle]). Each is a place the
+    /// call mutates, as an argument passed `&` is, so `N-Aliased` asks about
+    /// it, and the place must be one that may change. Sized by the program's
+    /// handle arguments.
+    lent_handles: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// The loops enclosing the expression being checked, innermost last. A
     /// `break` reads the last entry, which is what makes it leave the nearest
     /// enclosing loop of either kind.
@@ -19772,10 +19779,11 @@ const Checker = struct {
     /// [T-ExternHandle] at a call: an `extern` that takes a handle without
     /// `read` may change the object it holds, so the call lends the
     /// argument's place as `inout` would, and the place must be one that may
-    /// change. Ownership ends the place's earlier observations at the call.
-    /// One walk over the calls.
+    /// change. Ownership ends the place's earlier observations at the call,
+    /// and `N-Aliased` refuses another argument naming it. One walk over the
+    /// calls.
     fn checkHandleChanges(self: *Checker) std.mem.Allocator.Error!void {
-        const pool = self.builder.view();
+        if (self.lent_handles.count() == 0) return;
         for (self.calls.items) |call| {
             const callee = switch (call.target) {
                 .declared => |decl| decl,
@@ -19785,29 +19793,8 @@ const Checker = struct {
             const declared = self.ast.declParams(callee);
             for (call.args, 0..) |arg, k| {
                 if (arg == ExprId.none or k >= declared.len) continue;
-                const t = try self.declaredParamType(callee, k);
-                if (!intrinsics.changesForeignHandle(self.program, self.ast, &pool, callee, k, t)) continue;
-                if (self.res.placeIsMutable(self.ast, arg)) {
-                    // Lent to change, the place is this call's only path to
-                    // the object, as an `&` argument's is ([N-Aliased]).
-                    for (call.args, 0..) |other, j| {
-                        if (j == k or other == ExprId.none) continue;
-                        if (!self.namesPlace(other, arg, false, BindingId.none)) continue;
-                        _ = self.reportWithOrigin(
-                            .n_aliased,
-                            other,
-                            "this names a handle another argument lends C to change",
-                            "pass two different handles, or mark the changing parameter `read` if C only reads it",
-                            .{
-                                .file = self.ast.fileOfExpr(arg),
-                                .span = self.ast.exprSpan(arg),
-                                .message = "lent to change here",
-                                .style = .secondary,
-                            },
-                        );
-                    }
-                    continue;
-                }
+                if (!self.lent_handles.contains(arg)) continue;
+                if (self.res.placeIsMutable(self.ast, arg)) continue;
                 const label = try std.fmt.allocPrint(
                     self.sink.arena,
                     "pass a handle held in a `var` or an `inout` parameter, or mark `{s}` `read` if C only reads it",
@@ -22657,6 +22644,13 @@ const Checker = struct {
             for (callable_params, self.builder.callableParams(source_signature.callable)) |*param, source_param| param.stable_address = source_param.stable_address;
         }
         try self.checkStableArguments(args, callable_params, receiver_adjustments);
+        if (self.ast.declIsExtern(d)) {
+            const pool = self.builder.view();
+            for (args, callable_params, 0..) |a, param, j| {
+                if (a == ExprId.none) continue;
+                if (intrinsics.changesForeignHandle(self.program, self.ast, &pool, d, j, param.ty)) try self.lent_handles.put(self.gpa, a, {});
+            }
+        }
         try self.checkExclusivity(args, if (postfix) lentReceiver(self.ast, self.res, id, written.len > 0) else ExprId.none);
 
         const returns = try self.throughTrait(
@@ -23103,7 +23097,8 @@ const Checker = struct {
     /// Refuses a call whose arguments name one place where one of them
     /// mutates it. `lent` is the receiver a marked postfix call lends, one of
     /// `args`, or none: it is a place mutated exactly as an argument passed
-    /// `&` is, though the mark is written before the call.
+    /// `&` is, though the mark is written before the call. A handle an
+    /// `extern` takes without `read` is one too, recorded in `lent_handles`.
     fn checkExclusivity(self: *Checker, args: []const ExprId, lent: ExprId) std.mem.Allocator.Error!void {
 
         // Once per pair, not once per direction: two arguments naming one
@@ -23115,7 +23110,7 @@ const Checker = struct {
         var mutates = lent != ExprId.none;
         if (!mutates) for (args) |a| {
             if (a == ExprId.none) continue;
-            if (self.sharedMutation(a, ExprId.none, true, BindingId.none) != ExprId.none) {
+            if (self.lent_handles.contains(a) or self.sharedMutation(a, ExprId.none, true, BindingId.none) != ExprId.none) {
                 mutates = true;
                 break;
             }
@@ -23137,9 +23132,24 @@ const Checker = struct {
                 // Which of the mutations it is decides the wording and nothing
                 // else: a reader sent to the other argument needs to be told
                 // what to look for there.
+                try self.aliased.put(self.gpa, mutation, {});
+                if (self.lent_handles.contains(mutation)) {
+                    _ = self.reportWithOrigin(
+                        .n_aliased,
+                        other,
+                        "this names a handle another argument lends C to change",
+                        "pass two different handles, or mark the changing parameter `read` if C only reads it",
+                        .{
+                            .file = self.ast.fileOfExpr(mutation),
+                            .span = self.ast.exprSpan(mutation),
+                            .message = "lent to change here",
+                            .style = .secondary,
+                        },
+                    );
+                    continue;
+                }
                 const receiver = mutation == lent;
                 const marked = receiver or self.ast.exprTag(mutation) == .marked or self.ast.exprTag(mutation) == .call;
-                try self.aliased.put(self.gpa, mutation, {});
                 _ = self.reportWithOrigin(
                     .n_aliased,
                     other,
@@ -23169,10 +23179,11 @@ const Checker = struct {
     }
 
     /// The mutation inside argument `within` whose place `other` also names,
-    /// or none. The lent receiver is itself that mutation where `other` names
-    /// its place, as an argument passed `&` is.
+    /// or none. The lent receiver and a handle lent to C to change are
+    /// themselves that mutation where `other` names their place, as an
+    /// argument passed `&` is.
     fn argumentMutation(self: *const Checker, within: ExprId, other: ExprId, lent: ExprId) ExprId {
-        if (within == lent and self.namesPlace(other, within, false, BindingId.none)) return within;
+        if ((within == lent or self.lent_handles.contains(within)) and self.namesPlace(other, within, false, BindingId.none)) return within;
         return self.sharedMutation(within, other, false, BindingId.none);
     }
 
@@ -23259,16 +23270,19 @@ const Checker = struct {
         }
 
         if (tag == .call) {
+            const at = self.call_of[within.index()];
             const lent = self.lentBy(within);
             if (lent != ExprId.none) {
                 if (self.namesPlace(other, lent, any, except)) return within;
-            } else {
-                const at = self.call_of[within.index()];
-                if (at != no_call and self.calls.items[at].callee_convention == .inout) {
-                    const callee = self.ast.call(within).callee;
-                    if (self.namesPlace(other, callee, any, except)) return within;
-                }
+            } else if (at != no_call and self.calls.items[at].callee_convention == .inout) {
+                const callee = self.ast.call(within).callee;
+                if (self.namesPlace(other, callee, any, except)) return within;
             }
+            // A handle an `extern` lends C to change is mutated by the call,
+            // wherever the call sits.
+            if (at != no_call and self.lent_handles.count() != 0) for (self.calls.items[at].args) |arg| {
+                if (arg != ExprId.none and self.lent_handles.contains(arg) and self.namesPlace(other, arg, any, except)) return arg;
+            };
         }
 
         // An assignment's left side is the place it writes, and holds no

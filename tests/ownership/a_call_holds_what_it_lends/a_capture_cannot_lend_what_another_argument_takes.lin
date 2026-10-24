@@ -1,0 +1,27 @@
+import std.mem
+
+fn peek_after_release[F: fn() -> UInt8](peek: F, sink b: mem.Vec[UInt8]) -> UInt8 {
+    b.release()
+    peek()
+}
+
+fn release_then_peek[F: fn() -> UInt8](sink b: mem.Vec[UInt8], peek: F) -> UInt8 {
+    b.release()
+    peek()
+}
+
+fn lent_first() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    peek_after_release([v] || v[0], v)
+}
+
+fn taken_first() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    release_then_peek(v, [v] || v[0])
+}
+
+fn main() -> UInt8 {
+    lent_first() + taken_first()
+}

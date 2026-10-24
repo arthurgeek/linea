@@ -5,7 +5,9 @@ Status: Accepted — 2026-07-27; refined by
 distinction this record did not have to: a concrete type's universe is declared
 and an instantiation's is computed. Extended by
 [0063](0063-disposal-is-scheduled-never-inserted.md), which schedules a written
-disposal at scope exit and inserts none.
+disposal at scope exit and inserts none. Extended by
+[0246](0246-a-call-holds-what-it-lends-until-it-runs.md), under which a call
+holds what it lends until it runs, so a take in a later argument is [O-Move].
 
 The two-universe default is superseded by [0124](0124-copyability-and-settlement-are-independent-capabilities.md); the universal explicit-copy clause is superseded by [0125](0125-scalar-value-positions-take-snapshots.md).
 

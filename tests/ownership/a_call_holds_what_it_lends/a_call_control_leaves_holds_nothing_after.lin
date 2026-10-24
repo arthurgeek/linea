@@ -1,0 +1,23 @@
+import std.mem
+
+fn first_plus(a: mem.Vec[UInt8], extra: UInt8) -> UInt8 {
+    a[0] + extra
+}
+
+fn main() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(4).unwrap()
+    var total: UInt8 = 0
+    for k in UInt8(0)..3 {
+        total += first_plus(
+            v,
+            if k == 1 {
+                continue
+            } else {
+                k
+            },
+        )
+    }
+    v.release()
+    total
+}

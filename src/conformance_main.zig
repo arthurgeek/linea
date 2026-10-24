@@ -8134,12 +8134,16 @@ fn compileWithLibrary(
     prefix: *const loader.CheckedLibrary,
     display_path: []const u8,
     text: []const u8,
+    /// The root's `linea.json`, for a program whose root a manifest grants
+    /// something, or null for one without.
+    manifest: ?[]const u8,
 ) !LibraryVerdict {
     var table: FileTable = .empty;
     var sink = Sink.init(scratch);
     var interner: Interner = .empty;
-    const files = [_]InMemoryFile{.{ .path = "main.lin", .text = text }};
-    var loaded = try prefix.loadFromMemory(scratch, &table, &sink, &interner, "main.lin", &files, .program, .borrow);
+    const both = [_]InMemoryFile{ .{ .path = "main.lin", .text = text }, .{ .path = "linea.json", .text = manifest orelse "" } };
+    const files = if (manifest == null) both[0..1] else both[0..];
+    var loaded = try prefix.loadFromMemory(scratch, &table, &sink, &interner, "main.lin", files, .program, .borrow);
     try table.buildMaps(scratch);
     // The job's own arena serves as the checker's scratch as well: everything
     // here is released with the job, and the page allocator, taking a system
@@ -8233,7 +8237,8 @@ const SoundnessResult = struct {
 };
 
 /// The rule that refuses an operation while an observation of its owner is
-/// still to be used.
+/// still to be used. A matrix cell names its own, since the owner lent to a
+/// call beside a take of it is [O-Move]'s.
 const invalidation_rule = "O-Borrow";
 
 /// Holds a refusal of a program whose only change from an accepted one is an
@@ -8249,6 +8254,7 @@ fn refusedByInvalidation(
     failures: *std.ArrayList(Failure),
     first_rules: *std.ArrayList([]const u8),
     display_path: []const u8,
+    expected_rule: []const u8,
     rules: []const u8,
     report: []const u8,
     text: []const u8,
@@ -8257,11 +8263,11 @@ fn refusedByInvalidation(
     var first: ?[]const u8 = null;
     while (lines.next()) |rule| {
         if (first == null) first = rule;
-        if (std.mem.eql(u8, rule, invalidation_rule)) continue;
+        if (std.mem.eql(u8, rule, expected_rule)) continue;
         try failures.append(scratch, .{
             .path = display_path,
             .what = "refused by a rule other than the invalidation rule",
-            .expected = "a refusal by [" ++ invalidation_rule ++ "] alone, since only an owner operation moved",
+            .expected = try std.fmt.allocPrint(scratch, "a refusal by [{s}] alone, since only an owner operation moved", .{expected_rule}),
             .actual = try std.fmt.allocPrint(scratch, "{s}--- program ---\n{s}", .{ report, text }),
         });
         return;
@@ -8331,12 +8337,12 @@ fn checkMatrixCell(
         const text = try matrix.render(scratch, cell, liveness);
         const display_path = try std.fmt.allocPrint(scratch, "soundness/{f}/{s}", .{ cell, @tagName(liveness) });
         const name = try std.fmt.allocPrint(scratch, "soundness{d}{s}", .{ ordinal, @tagName(liveness) });
-        switch (try compileWithLibrary(scratch, &failures, settings.library, display_path, text)) {
+        switch (try compileWithLibrary(scratch, &failures, settings.library, display_path, text, cell.manifest())) {
             .broken => {},
             .refused => |refusal| switch (liveness) {
                 .live => {
                     result.refused_live += 1;
-                    try refusedByInvalidation(scratch, &failures, &refusal_rules, display_path, refusal.rules, refusal.report, text);
+                    try refusedByInvalidation(scratch, &failures, &refusal_rules, display_path, cell.refusal(), refusal.rules, refusal.report, text);
                 },
                 // The ended program uses the observation before the
                 // operation, so a refusal is the template failing and the
@@ -8351,7 +8357,9 @@ fn checkMatrixCell(
             .accepted => |ir| {
                 if (liveness == .live) {
                     result.accepted_live += 1;
-                    try failures.append(scratch, acceptedAcrossAnOperation(display_path, text));
+                    var failure = acceptedAcrossAnOperation(display_path, text);
+                    failure.expected = try std.fmt.allocPrint(scratch, "refused by [{s}]", .{cell.refusal()});
+                    try failures.append(scratch, failure);
                     continue;
                 }
                 const ran = (try runAccepted(scratch, io, settings, &failures, &result, display_path, name, ir, text)) orelse continue;
@@ -8530,7 +8538,7 @@ fn checkStorageProgram(
     const display_path = try std.fmt.allocPrint(scratch, "storage/{s}.lin", .{label});
     const name = try std.fmt.allocPrint(scratch, "storage{s}", .{label});
 
-    switch (try compileWithLibrary(scratch, &failures, settings.library, display_path, generated.text)) {
+    switch (try compileWithLibrary(scratch, &failures, settings.library, display_path, generated.text, null)) {
         .broken => {},
         .refused => |refusal| try failures.append(scratch, .{
             .path = display_path,
@@ -8561,11 +8569,11 @@ fn checkStorageProgram(
         const m = (try storage_gen.mutant(scratch, generated, choices, @intCast(k))) orelse break;
         result.mutants += 1;
         const mutant_path = try std.fmt.allocPrint(scratch, "storage/{s}.mutant{d}.lin", .{ label, k });
-        switch (try compileWithLibrary(scratch, &failures, settings.library, mutant_path, m.text)) {
+        switch (try compileWithLibrary(scratch, &failures, settings.library, mutant_path, m.text, null)) {
             .broken => {},
             .refused => |refusal| {
                 result.mutants_refused += 1;
-                try refusedByInvalidation(scratch, &failures, &refusal_rules, mutant_path, refusal.rules, refusal.report, m.text);
+                try refusedByInvalidation(scratch, &failures, &refusal_rules, mutant_path, invalidation_rule, refusal.rules, refusal.report, m.text);
             },
             .accepted => {
                 result.accepted_live += 1;

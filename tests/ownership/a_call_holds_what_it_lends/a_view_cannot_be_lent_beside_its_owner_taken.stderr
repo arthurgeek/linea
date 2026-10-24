@@ -1,0 +1,12 @@
+error[O-Move]: `v` has already been moved
+  --> tests/ownership/a_call_holds_what_it_lends/a_view_cannot_be_lent_beside_its_owner_taken.lin:22:27
+   |
+22 |     release_then_first(v, v.as_slice())
+   |                        - it was taken here
+   |                           ^ it was already taken, and a value is taken once
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ownership/a_call_holds_what_it_lends/a_view_cannot_be_lent_beside_its_owner_taken.lin:16:39
+   |
+16 |     first_after_release(v.as_slice(), v)
+   |                         ------------ the observation is still used here
+   |                                       ^ keep this place available until the last use of its observation

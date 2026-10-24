@@ -1,0 +1,8 @@
+error[O-Move]: `p` is lent to `sum` by another argument, and this takes it
+  --> tests/ownership/a_call_holds_what_it_lends/a_copyable_value_cannot_be_lent_and_taken_in_one_call.lin:10:12
+   |
+10 |     sum(p, p)
+   |         - lent to the call here
+   |            ^ this takes it while the call still needs it
+   |
+   = help: pass `copy(p)` here, so the call takes a copy and reads the original

@@ -1331,6 +1331,22 @@ normalised calls, including postfix receivers absent from the written argument
 list. It determines moves from consuming **positions**. A new expression form
 must propagate its enclosing position to the appropriate subexpressions.
 
+A call lends each argument it does not take until the callee has run. After
+evaluating such an argument the builder emits a `.held` operation for each
+place its value names (through grouping, `&`, and the branches of a
+conditional, block or `match`), pending on the call. The move checker carries
+held places beside the open transfers and closes both at the call's
+`committed`; a held root that is moved where the call is reached is [O-Move],
+so a take on a path that leaves first is judged where it goes. A binary
+operator is built the same way, as the trait call it is, and the dependency
+analysis checks its operands' observations at its `committed`.
+That is the one place that decides whether a take and a lend meet in one call,
+whatever the take's position: a `sink` argument, a nested call, a `let` in a
+block argument, a literal's field. Which arguments mutate a place another names
+is the checker's [N-Aliased], answered from the argument list; a view or a
+capture passed beside the owner it observes is the dependency analysis's
+[O-Borrow].
+
 Traversal initializers are ownership bodies too. The existing CFG builder
 starts them with their written parameters and visits the initializer in its
 consuming position. The ordinary read-parameter rules prevent a traversal from
@@ -1737,7 +1753,10 @@ it checks:
   callee's `CallableSignature`) or a whole-root `move_value` source moves an
   owned slot or a returned temporary out; a later read of it on any path is a
   defect, and a `sink` of it is the double settlement. A part move has no state,
-  and a lent root is never moved.
+  and a lent root is never moved. A call's arguments are read before the call
+  and its moves applied after, but the callee reads a lent argument after a
+  `sink` argument of the same call was moved, so an address a lent argument
+  passes may not point into a root a `sink` argument of that call moves.
 - **Kills.** Any write to a root kills `moved` and `stale`: a whole write
   replaces the slot's set, an exact part write replaces the dependencies held in
   the written range, a write through a computed address replaces none, and

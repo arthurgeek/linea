@@ -1,0 +1,48 @@
+import std.mem
+
+struct Token { n: UInt8 }
+
+impl Equatable for Token {
+    fn equals(self: Token, other: Token) -> Bool {
+        self.n == other.n
+    }
+}
+
+fn same(sink t: Token) -> Token {
+    t
+}
+
+fn released(sink b: mem.Vec[UInt8]) -> UInt8 {
+    b.release()
+    0
+}
+
+fn token_beside_its_take() -> UInt8 {
+    let t = Token { n = 1 }
+    if t == same(t) {
+        1
+    } else {
+        0
+    }
+}
+
+fn view_beside_its_owners_release() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(1).unwrap()
+    var w: mem.Vec[UInt8] = mem.Vec.new()
+    &w.push(1).unwrap()
+    let equal = v.as_slice() == {
+        let _ = released(v)
+        w.as_slice()
+    }
+    w.release()
+    if equal {
+        1
+    } else {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    token_beside_its_take() + view_beside_its_owners_release()
+}
