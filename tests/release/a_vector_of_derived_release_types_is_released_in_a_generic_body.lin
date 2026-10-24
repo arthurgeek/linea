@@ -1,0 +1,34 @@
+// `Command` and `Subcommand` derive `Release` through each other inside a
+// `Vec`, and a `Vec` of either releases by releasing each element. So
+// `defer var` ends a vector of them in a function generic over its allocator,
+// where the element types are written with that allocator's parameter.
+import std.mem
+
+@derive(Release)
+struct Subcommand[A: Allocator] {
+    name: Str,
+    command: Command[A],
+}
+
+@derive(Release)
+struct Command[A: Allocator] {
+    words: Vec[Str, A],
+    subcommands: Vec[Subcommand[A], A],
+}
+
+fn empty_command[A: Allocator](allocator: A) -> Command[A] where carries(allocator) {
+    .{ words = Vec.new_in(allocator), subcommands = Vec.new_in(allocator) }
+}
+
+fn count_commands[A: Allocator](allocator: A) -> UInt64 {
+    defer var commands: Vec[Command[A], A] = Vec.new_in(allocator)
+    defer var subcommands: Vec[Subcommand[A], A] = Vec.new_in(allocator)
+    &commands.push(empty_command(allocator)).unwrap()
+    &subcommands.push(.{ name = "test", command = empty_command(allocator) }).unwrap()
+    &subcommands.push(.{ name = "run", command = empty_command(allocator) }).unwrap()
+    commands.length() + subcommands.length()
+}
+
+fn main() -> UInt8 {
+    UInt8(count_commands(mem.system()))
+}

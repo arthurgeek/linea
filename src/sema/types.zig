@@ -3163,6 +3163,20 @@ pub const ImplIndex = struct {
             return total;
         }
 
+        /// Whether a row asked again inside its own requirements, for a key
+        /// of `size`, is refused because the key grew past the one that row
+        /// is already being asked for. A key no larger is asked: a row whose
+        /// requirements reach it again for an equal or smaller key, such as a
+        /// `Vec[Command[A], A]` whose element's derived `Release` asks about
+        /// `Vec[Str, A]`, is answered like any other. That still ends: along
+        /// one chain the keys never grow and never repeat (a repeat is a
+        /// cycle, which `active` catches), and only finitely many keys are
+        /// built from the program's types without growing.
+        fn outgrows(self: *const Decided, at: u32, size: u128) bool {
+            const previous = self.prerequisite_sizes.get(@enumFromInt(at)) orelse return false;
+            return size > previous;
+        }
+
         fn rootSize(self: *Decided, pool: anytype, root: TypeId) !u32 {
             if (self.measure_sizes.get(root)) |size| return size;
             self.measure_seen.clearRetainingCapacity();
@@ -4207,10 +4221,10 @@ pub const ImplIndex = struct {
             const previous_size = decided.prerequisite_sizes.get(@enumFromInt(at));
             if (im.predicates.len > 0) {
                 const size = try decided.keySize(pool, held, args);
-                if (previous_size) |previous| if (size >= previous) {
+                if (decided.outgrows(at, size)) {
                     decided.recursive_refusals += 1;
                     break :blk false;
-                };
+                }
                 try decided.prerequisite_sizes.put(decided.gpa, @enumFromInt(at), size);
             }
             defer if (im.predicates.len > 0) {
@@ -10601,12 +10615,12 @@ pub const Typing = struct {
             // written to it: the record holds what applies, and a granted
             // lookup asks what would apply.
             if (decided.granted == null) if (self.prepared_implementations.answers.get(key_)) |answer| {
-                if (answer.arguments != null) if (decided.prerequisite_sizes.get(@enumFromInt(at))) |previous| {
-                    if (try decided.keySize(self, held, args) >= previous) {
+                if (answer.arguments != null and decided.prerequisite_sizes.contains(@enumFromInt(at))) {
+                    if (decided.outgrows(at, try decided.keySize(self, held, args))) {
                         decided.recursive_refusals += 1;
                         return .{ .header_matches = answer.header_matches };
                     }
-                };
+                }
                 return answer;
             };
             if (self.sealed) @panic("implementation applicability was not prepared before emission");
