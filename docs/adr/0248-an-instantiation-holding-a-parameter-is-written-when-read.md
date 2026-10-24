@@ -44,10 +44,15 @@ minted, as before, because lowering lays out every one it reaches.
   fields, payloads, array elements, newtype bases, closure environments and
   observed referents — so a written type holds only written types. A layout, a
   cycle walk or a copyability check follows parts and never arguments, so it
-  meets no unwritten type.
+  meets no unwritten type. A declared type's parts come from source, so the
+  cycle and width walks first write every unwritten instantiation a written
+  type holds (`writeHeldParts`). While an instantiation is being written it is
+  `writing`: a type the write reaches through itself reads what is written so
+  far, and no fact table records it until the write is done.
 - The builder's part accessors (`fieldType`, `lookupField`,
-  `variantFieldCount`, `variantFieldType`) write an unwritten type before they
-  answer, and so do its capability, dependency and writer queries.
+  `variantFieldCount`, `variantFieldType`, `isScalarSnapshot`) write an
+  unwritten type before they answer, and so do its capability, dependency and
+  writer queries.
 - The capability, dependency and writer tables record a type's edges once its
   parts are written. A recorded type holding an unwritten one leaves it for the
   builder to write before the facts are read; in the writer table, whose edges
