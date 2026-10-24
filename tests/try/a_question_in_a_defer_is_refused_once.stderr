@@ -1,0 +1,5 @@
+error[S-Defer]: a `defer` runs where control leaves, so what it schedules may not leave as well
+  --> tests/try/a_question_in_a_defer_is_refused_once.lin:11:17
+   |
+11 |         let _ = parse()?
+   |                 ^^^^^^^^ `?` inside a `defer`

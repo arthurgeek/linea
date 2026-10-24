@@ -1,0 +1,7 @@
+error[T-TryAnswer]: this `?` may return `Result[UInt8, Bad]`, and the function answers with `()`
+  --> tests/try/the_result_goes_before_a_comment_on_the_header.lin:10:14
+   |
+10 |     let _n = parse()?
+   |              ^^^^^^^^ `?` returns from the function it is written in
+   |
+   = help: make the function return `Result[(), Bad]` and end it with `.Ok(())`, or handle the failure here with `let _n = … else |_| { … }` in place of `?`
