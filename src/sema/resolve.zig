@@ -13877,16 +13877,18 @@ const Resolver = struct {
         }
     }
 
-    /// Gives the [N-Undefined] just reported for `head`, the name left of a
-    /// dot, one help and one fix per module of the root an `import` would
-    /// bind to that name: one another import loaded, or a directory of the
-    /// root's that none did. Which of two is meant is the reader's to say,
-    /// so each is offered. None where the module already writes the name,
-    /// since an import of it would be a second declaration of it.
+    /// Gives the [N-Undefined] just reported for `head`, the name left of the
+    /// dot in `selection`, one help and one fix per module an `import` would
+    /// bind to that name: a loaded module, the library's included, that lets
+    /// this one reach the name selected from it, or a directory of the
+    /// root's that no import loaded, whose names nothing has read yet. Which
+    /// of two is meant is the reader's to say, so each is offered. None where
+    /// the file already writes the name, since an import of it would be a
+    /// second declaration of it.
     ///
     /// **Bound:** the program's modules and the root's unloaded directories,
     /// once each; only where a head was undefined.
-    fn offerImports(self: *Resolver, head: ExprId, before: usize) std.mem.Allocator.Error!void {
+    fn offerImports(self: *Resolver, selection_id: ExprId, head: ExprId, before: usize) std.mem.Allocator.Error!void {
         const items = self.sink.items();
         if (items.len != before + 1) return;
         const reported = items[before];
@@ -13899,9 +13901,13 @@ const Resolver = struct {
 
         const arena = self.sink.arena;
         var routes: std.ArrayList([]const u8) = .empty;
+        const selected = self.ast.tokenName(self.ast.exprMain(selection_id));
         for (self.program.modules, 0..) |m, index| {
-            if (m.library or !std.mem.eql(u8, m.name, name)) continue;
-            const route = self.program.importRoute(self.current, ModuleId.from(@intCast(index))) orelse continue;
+            if (!std.mem.eql(u8, m.name, name)) continue;
+            const target = ModuleId.from(@intCast(index));
+            const b = self.reachable_at.get(hereKey(target, selected)) orelse continue;
+            if (!reachableFrom(self.program, self.bindings.items[b.index()].reach, target, self.current)) continue;
+            const route = self.program.importRoute(self.current, target) orelse continue;
             try routes.append(arena, route.syntax);
         }
         for (self.program.unloaded_routes) |route| {
@@ -13968,8 +13974,8 @@ const Resolver = struct {
 
         const before = self.sink.items().len;
         try self.expr(base);
-        if (self.ast.exprTag(base) == .name_ref) try self.offerImports(base, before);
         if (!self.selectsAName(id)) return;
+        if (self.ast.exprTag(base) == .name_ref) try self.offerImports(id, base, before);
 
         // A postfix call reaches a type's own operation, and which type the
         // receiver is is the checker's to know rather than this pass's. What
