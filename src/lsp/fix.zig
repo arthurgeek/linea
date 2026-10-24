@@ -97,6 +97,14 @@ fn editOf(
         try lists.items[at].append(gpa, textEdit(checked.table.get(e.file).text, e, encoding));
     }
     for (keys.items, lists.items) |k, list| {
+        // In the order they sit in the document, the order a client that
+        // applies them from the last backwards reads them in.
+        std.mem.sort(lsp.types.TextEdit, list.items, {}, struct {
+            fn before(_: void, a: lsp.types.TextEdit, b: lsp.types.TextEdit) bool {
+                if (a.range.start.line != b.range.start.line) return a.range.start.line < b.range.start.line;
+                return a.range.start.character < b.range.start.character;
+            }
+        }.before);
         const named = if (k == file) uri else try uri_mod.uriOf(gpa, checked.table.get(k).path);
         try changes.put(gpa, named, list.items);
     }
