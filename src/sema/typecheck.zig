@@ -15631,17 +15631,27 @@ const Checker = struct {
             }
             const actual = try self.checkInner(id, if (self.builder.get(resolved) == .parameter) null else context);
             if (actual == .poison or actual == .never) return actual;
-            for (settling) |slot| {
-                var clash: ?Clash = null;
-                if (!try self.settleByInContext(resolved, actual, slot.owner, slot.found, &clash, .signature_types, settling))
-                    return self.reportMismatch(id, actual, want, "");
-            }
-            const settled_actual = try self.callableContext(actual, settling);
-            context.ty = try self.callableContext(resolved, settling);
-            context.inference = null;
-            return self.expect(id, settled_actual, context);
+            return self.settleExpected(id, actual, want, resolved);
         };
         return self.checkInner(id, expected);
+    }
+
+    /// Meets `actual`, the type `id` has, with `want`, whose type parameters
+    /// `want.inference` is still settling: the parameters `resolved` (`want`'s
+    /// type as far as they are settled) leaves open are settled from `actual`,
+    /// then the two are compared as settled types.
+    fn settleExpected(self: *Checker, id: ExprId, actual: TypeId, want: Expected, resolved: TypeId) std.mem.Allocator.Error!TypeId {
+        const settling = want.inference.?;
+        var context = want;
+        context.inference = null;
+        for (settling) |slot| {
+            var clash: ?Clash = null;
+            if (!try self.settleByInContext(resolved, actual, slot.owner, slot.found, &clash, .signature_types, settling))
+                return self.reportMismatch(id, actual, want, "");
+        }
+        const settled_actual = try self.callableContext(actual, settling);
+        context.ty = try self.callableContext(resolved, settling);
+        return self.expect(id, settled_actual, context);
     }
 
     /// Checks one expression. A poison result no mismatch report accounts for
@@ -20706,13 +20716,16 @@ const Checker = struct {
         // A closure given its result by a callable type it is passed as
         // answers to that type, which the fix would not change.
         if (lambda_fixes.items.len > 0 and contextual == null) if (lambdaResultSite(self.ast, id)) |site| try self.attachAnswerFixes(lambda_fixes.items, site, lambda.body, lambda_returns.items);
+        // A written result meets the contextual one as the body's value meets
+        // it when none is written: settling what the call is still inferring.
         if (written_result != null and contextual != null) {
-            if (try self.expect(id, result, .{
-                .ty = contextual.?.result,
-                .at = expected.?.at,
-                .reason = expected.?.reason,
-                .inference = if (expected.?.infer_lambda_result) expected.?.inference else null,
-            }) == .poison) refused = true;
+            var want: Expected = .{ .ty = contextual.?.result, .at = expected.?.at, .reason = expected.?.reason };
+            const inferring = if (expected.?.infer_lambda_result) expected.?.inference else null;
+            const met = if (inferring) |settling| settled: {
+                want.inference = settling;
+                break :settled try self.settleExpected(id, result, want, try self.callableContext(want.ty, settling));
+            } else try self.expect(id, result, want);
+            if (met == .poison) refused = true;
         }
         self.closure_descriptors[closure.index()].invocation = lambda.invocation;
         // An omitted clause inherits the contextual parameter contract. Authored
@@ -31996,6 +32009,15 @@ const Checker = struct {
                     });
                     if (infer_result and got != .poison) {
                         const supplied = try self.callbackValueSignature(got);
+                        // A lambda whose body settled nothing, such as one
+                        // that never finishes, is typed with the parameters
+                        // it left open standing for themselves. Settling them
+                        // from it would answer each with itself, so they stay
+                        // open and the call reports them as undetermined.
+                        if (self.hasOpenParameter(supplied, settling)) {
+                            walked[j] = true;
+                            continue;
+                        }
                         if (!try self.settleCallbackResult(bound, supplied, settling, value)) {
                             walked[j] = true;
                             delayed_refused = true;

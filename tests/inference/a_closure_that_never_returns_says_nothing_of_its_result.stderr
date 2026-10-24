@@ -1,0 +1,5 @@
+error[T-Infer]: nothing here says what `R` is
+ --> tests/inference/a_closure_that_never_returns_says_nothing_of_its_result.lin:8:13
+  |
+8 |     let r = apply(
+  |             ^^^^^^ no argument determines it, and nothing expects a type of it

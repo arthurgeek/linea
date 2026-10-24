@@ -1,0 +1,14 @@
+// A closure whose body never finishes gives no value, so nothing settles `R`
+// and the call says so once.
+fn apply[R](f: fn() -> R) -> R {
+    f()
+}
+
+fn main() -> UInt8 {
+    let r = apply(
+        || {
+            loop {}
+        },
+    )
+    r + 1
+}

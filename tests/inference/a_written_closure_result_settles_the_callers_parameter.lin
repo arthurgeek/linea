@@ -1,0 +1,40 @@
+// A callback's result type settles `R` whether the closure writes it, the body
+// gives it, or the callback is a named function, so each call's value has the
+// type its callback returns.
+fn apply[R](f: fn() -> R) -> R {
+    f()
+}
+
+fn apply_to[T, R](x: T, f: fn(x: T) -> R) -> R {
+    f(x)
+}
+
+fn two() -> UInt8 {
+    2
+}
+
+fn main() -> UInt8 {
+    let one = apply(
+        || -> UInt8 {
+            1
+        },
+    )
+    let maybe = apply(
+        || -> Option[UInt8] {
+            .Some(3)
+        },
+    )
+    let three = match maybe {
+        Some(n) => n,
+        None => 0,
+    }
+    let start: UInt8 = 4
+    let five = apply_to(
+        start,
+        |n: UInt8| -> UInt8 {
+            n + 1
+        },
+    )
+    let six = apply_to(start, |n: UInt8| n + 2)
+    one + two() + apply(two) + three + five + six
+}
