@@ -1,0 +1,21 @@
+// The closure's `return` names `fallback`, which is not declared, so what the
+// closure answers with is unknown. The `?` after it is not judged against an
+// unknown result, and only the `return` is reported.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
+
+fn main() -> UInt8 {
+    let next = || {
+        if parse().is_err() {
+            return fallback
+        }
+        let n = parse()?
+        n + 1
+    }
+    next()
+}

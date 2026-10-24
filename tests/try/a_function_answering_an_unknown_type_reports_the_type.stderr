@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Missing`
+  --> tests/try/a_function_answering_an_unknown_type_reports_the_type.lin:12:16
+   |
+12 | fn helper() -> Missing {
+   |                ^^^^^^^ no type with this name is declared here

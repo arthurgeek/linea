@@ -1,0 +1,10 @@
+error[T-Default]: a default is worked out where the parameter is declared, so it is a constant expression
+  --> tests/try/a_question_in_a_default_is_not_a_constant.lin:12:22
+   |
+12 | fn scaled(x: UInt8 = parse()?) -> UInt8 {
+   |                      ^^^^^^^^ this is not a constant
+error[T-Default]: a default is worked out where the parameter is declared, so it is a constant expression
+  --> tests/try/a_question_in_a_default_is_not_a_constant.lin:17:28
+   |
+17 |     let next = |x: UInt8 = parse()?| x
+   |                            ^^^^^^^^ this is not a constant
