@@ -163,8 +163,12 @@ from one declared answer into another passes through one of these: a member
 reaches another member, a delegation another delegation, and a part another
 type's parts only through a settled reference, written or substituted, or an
 alias. A demand made while a written reference is read is that reference's
-link, not a second one. Parts, members, delegations and capability questions
-add no link. A structure nested inside another 45,000 times adds none, because
+link, not a second one, and a reference read through a parameter's bounds,
+`T.Item` in `struct H[T: Tr]`, reads no other declared answer and is no
+link. A generic member or alias is read once, at its parameters, so its own
+height is that of what it reads there; what it reads at each argument is
+counted where the argument's reference is. Parts, members, delegations and
+capability questions add no link. A structure nested inside another 45,000 times adds none, because
 reading what it owns is a walk with its own stack (`AnswerSettling.owned`),
 not a recursion. Counting links therefore bounds the recursion, and nothing
 else needs bounding.
@@ -202,8 +206,7 @@ is refused. That is new; such a chain was accepted before.
   rounds rejected below re-read the whole program per link. Sweep
   dimensions for both chain shapes hold this.
 - The transitive demand of a capability question visits each owned-part edge
-  once over the whole check, because a declaration whose parts are read is
-  never visited again.
+  once over the whole check: see *One walk over what types own* below.
 - Capability facts must not be rebuilt each time a part is read. Today a
   replaced field marks the whole fact graph dirty, and the next question
   rebuilds it from scratch. Reading parts lazily, between capability
@@ -255,10 +258,35 @@ parts are read.
 The rule is exactly a cycle in the demand graph. When the question arrives,
 `AnswerSettling.owned` first reads every other waiting part of the type, and
 of the types the type owns. Only a waiting part that is itself still on the
-reading stack blocks the answer. Which parts wait is recorded when they are
+reading stack blocks the answer, however many types lie between: a part of
+`Y` asking about `B`, with `B` holding an `X` that holds the `Y`, is refused
+whichever declaration asks about `X` first. Which parts wait is recorded when they are
 first read, from what the reading passed over, not from how the part is
 written, so no spelling of the dependency escapes the rule. The rule does
 not depend on the order of a type's fields.
+
+### One walk over what types own
+
+A question asked while a part is read starts a walk of its own, inside the
+walk that was reading the part, and that walk can reach the types the outer
+walk has open. The walks are one depth-first search over the graph whose
+edges are owned parts, and its strongly connected components are found as
+in Tarjan's algorithm (`AnswerSettling.OwnedWalk`):
+
+- a type is pushed once: its waiting parts are read and what it owns is
+  listed;
+- a type reached again while its component is open is a back edge, which
+  joins its component; reached from a nested walk, it is also a dependency
+  on every part the outer walk is still reading below it;
+- a component is decided when its root is popped: complete, or, where it
+  depends on a part still being read further out, watched until that part
+  is read and complete then.
+
+Every type is pushed and decided once over the whole settling, and every
+edge followed once, so the walk is linear in the owned-part graph whatever
+order declarations, or questions, come in. A type asked about while its
+component is open is watched with the part the open walk is reading, which
+is what makes a nested question about it the cycle above.
 
 A recursive type with no such part is unaffected. In
 `struct Node { log: Ledger[Node] }` with `Ledger[phantom T: Discardable]`,

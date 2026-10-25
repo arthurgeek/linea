@@ -2630,7 +2630,9 @@ rule for recursive types.
 links, where a link is a settled reference (`S1.Reading`, `B.Elem`,
 `Chooser[S1].Out`) or an alias. A settled reference counts where it is
 written and also where a template's is read at an argument: `type Item =
-H[S1]` with `struct H[T: Tr] { v: T.Item }` reads `S1.Item`. Parts, the
+H[S1]` with `struct H[T: Tr] { v: T.Item }` reads `S1.Item`. A reference read
+through a parameter's bounds, `T.Item` itself, reads no other answer and is
+no link. Parts, the
 members and delegations a reference reaches, and capability questions add
 none. The count is the most
 links any answer rests on, so it is the same in every declaration order. A

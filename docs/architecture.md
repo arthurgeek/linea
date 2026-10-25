@@ -776,9 +776,11 @@ edge to that table, and a callable shape gaining its effects changes nothing
 a table reads, so the capability and containment tables are not rebuilt as
 parts are read (`Builder.partChanged`). `readPartShapes` records in
 `unsettled_parts` the parts whose first reading passed over a settled
-reference; only those wait on settled answers, and `AnswerSettling.owned`, a
-walk with its own stack, reads only those. A chain of answers passes through
-at most 1000 links, settled references and aliases ([T-AnswerDepth]);
+reference; only those wait on settled answers, and `AnswerSettling.owned`
+reads only those, in one depth-first search over owned parts shared by every
+nested question (`OwnedWalk`), whose strongly connected components are each
+decided once. A chain of answers passes through at most 1000 links, settled
+references that read another answer and aliases ([T-AnswerDepth]);
 `AnswerSettling.enter` and `leave` record each answer's height in links.
 `Typing.Builder.implementationRow` retains concrete implementation selections
 for instantiation and emission. A derived `Release` component that is discardable and not proven to implement

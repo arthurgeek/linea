@@ -8179,6 +8179,10 @@ pub const Typing = struct {
 
         /// Whether the complete-template refill has run.
         refilled: bool = false,
+        /// How many `fillInstance` calls are running, one inside another: a
+        /// member demanded while an instantiation's parts are written is read
+        /// for a part, not for a definition.
+        filling: u32 = 0,
         /// How many instantiations have had their parts written for the
         /// first time, so a caller can tell whether settling wrote any.
         parts_written: usize = 0,
@@ -9101,6 +9105,8 @@ pub const Typing = struct {
         /// **Bound:** one substitution per part of each instantiation written,
         /// and an instantiation already written is not written again.
         fn fillInstance(self: *Builder, first: u32) std.mem.Allocator.Error!void {
+            self.filling += 1;
+            defer self.filling -= 1;
             var pending: std.ArrayList(u32) = .empty;
             defer pending.deinit(self.gpa);
             try pending.append(self.gpa, first);

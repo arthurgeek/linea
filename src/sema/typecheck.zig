@@ -8732,12 +8732,13 @@ const Checker = struct {
 
     /// What a written settled reference names, `builder.settledAtWithin`'s
     /// answer. While declared types are being settled, a reference that
-    /// reaches a member whose own written type is still being read leads back
-    /// to that member and names no type. The cycle is reported once, at the
-    /// definition on it written first, naming what each definition on it is
-    /// written as. A member reached only while an instantiation is filled is
-    /// not reported: the instantiation is filled again once every member is
-    /// settled.
+    /// reaches a member whose own written type is still being read, directly
+    /// or through what a generic implementation's definition reads at its
+    /// arguments, leads back to that member and names no type. The cycle is
+    /// reported once, at the definition on it written first, naming what each
+    /// definition on it is written as. A member reached only while an
+    /// instantiation's parts are written is not reported: that is a cycle
+    /// through a type's parts, which the layout check answers.
     fn settledReference(
         self: *Checker,
         run: Run,
@@ -8754,14 +8755,21 @@ const Checker = struct {
         const settled = try self.builder.settledAtWithin(scope, trait, args, held, member, named);
         const reached = settling.closed;
         settling.closed = .none;
-        if (reached != .none and settled.ty == .poison) {
-            settling.cycles += 1;
+        if (reached != .none) {
             try self.noteRefused(run.last);
-            const cycle = try settling.definitionsFrom(reached);
-            for (cycle) |frame| try settling.cyclic.put(self.gpa, frame.reading.answer, {});
-            try self.reportDefinitionCycle(cycle);
+            try self.reportCycleThrough(reached);
         }
         return settled;
+    }
+
+    /// Reports the cycle of definitions a demand of `reached`, still being
+    /// read, closed, and makes every definition on it read as poison.
+    fn reportCycleThrough(self: *Checker, reached: DeclId) std.mem.Allocator.Error!void {
+        const settling = self.settling.?;
+        settling.cycles += 1;
+        const cycle = try settling.definitionsFrom(reached);
+        for (cycle) |frame| try settling.cyclic.put(self.gpa, frame.reading.answer, {});
+        try self.reportDefinitionCycle(cycle);
     }
 
     /// Reports the associated type definitions that read one another, in the
@@ -27549,10 +27557,10 @@ const Checker = struct {
         /// Types whose owned and applied declarations have every part read,
         /// each with the height of the tallest chain its parts rest on.
         complete: std.AutoHashMapUnmanaged(TypeId, u32) = .empty,
-        /// Types an `owned` walk has open, so a recursive type is walked once.
-        visiting: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
         /// Types whose capabilities wait on a settled part being read.
         watch: types_mod.Typing.CapabilityWatch = .{},
+        /// The walk `owned` makes over what types own; see `OwnedWalk`.
+        walk: OwnedWalk = .{},
         /// The member demanded while its own written type was being read,
         /// since `settledReference` last looked.
         closed: node.DeclId = .none,
@@ -27587,7 +27595,10 @@ const Checker = struct {
             /// read anew wherever it is written.
             reference,
         };
-        const Frame = struct { reading: Read, tallest: u32 = 0 };
+        /// `reached` is whether a reference frame read another declared
+        /// answer: one read through a parameter's bounds reads none, and is
+        /// no link.
+        const Frame = struct { reading: Read, tallest: u32 = 0, reached: bool = false };
 
         /// How many settled references and aliases a chain of declared
         /// answers may pass through.
@@ -27618,7 +27629,8 @@ const Checker = struct {
             const frame = self.frames.pop().?;
             const height = if (isLink(frame.reading)) linked: {
                 self.links_open -= 1;
-                break :linked frame.tallest + 1;
+                const counted = frame.reading == .alias or frame.reached;
+                break :linked if (counted) frame.tallest + 1 else frame.tallest;
             } else frame.tallest;
             if (frame.reading != .reference) try self.heights.put(self.checker.gpa, frame.reading, height);
             if (height > max_depth) try self.reportTooDeep(self.start() orelse frame.reading);
@@ -27669,8 +27681,8 @@ const Checker = struct {
             self.readable.deinit(gpa);
             self.parts.deinit(gpa);
             self.complete.deinit(gpa);
-            self.visiting.deinit(gpa);
             self.watch.watched.deinit(gpa);
+            self.walk.deinit(gpa);
             self.frames.deinit(gpa);
             self.cycle_frames.deinit(gpa);
             self.cyclic.deinit(gpa);
@@ -27723,6 +27735,10 @@ const Checker = struct {
         /// while its own written type is being read still reads as poison,
         /// and `closed` records it for `settledReference` to report.
         fn settle(self: *AnswerSettling, member: node.DeclId) std.mem.Allocator.Error!void {
+            if (self.frames.items.len != 0) {
+                const top = &self.frames.items[self.frames.items.len - 1];
+                if (top.reading == .reference) top.reached = true;
+            }
             // Members of a retained library are settled with that library.
             const state = self.answers.getPtr(member) orelse return;
             switch (state.*) {
@@ -27730,7 +27746,7 @@ const Checker = struct {
                 .reading => {
                     // A delegation reaching itself through its backing chain
                     // is reported by `settleDelegation`.
-                    if (self.checker.ast.declTag(member) != .impl_) self.closed = member;
+                    if (self.checker.ast.declTag(member) != .impl_ and self.checker.builder.filling == 0) self.closed = member;
                     return;
                 },
                 .unread => {},
@@ -27748,179 +27764,288 @@ const Checker = struct {
                 try c.delegatedElement(member)
             else
                 try c.settleMember(member);
+            // A cycle closed where no written reference took it, such as
+            // through a generic alias applied at this member's own type.
+            if (self.closed != .none) {
+                const reached = self.closed;
+                self.closed = .none;
+                try c.reportCycleThrough(reached);
+            }
             if (self.cyclic.contains(member)) c.decl_returns.set(member, .poison);
             state.* = .settled;
             try self.leave();
         }
 
-        /// One type an `owned` walk visits: its children, a range of the
-        /// walk's `edges`; the declaration it waits on, if any; the tallest
-        /// chain its parts rest on; and whether it holds a type another walk
-        /// still has open, whose answer is not known yet.
-        const OwnedVisit = struct { ty: TypeId, first: u32, count: u32, next: u32 = 0, waits: ?node.DeclId = null, height: u32 = 0, partial: bool = false };
+        /// No part being read that a type's capabilities depend on.
+        const no_floor = std.math.maxInt(u32);
+
+        /// A type the walk has reached and not yet decided: on the
+        /// component stack, either on the walk's path (`open`) or finished
+        /// with its component still open.
+        const OwnedNode = struct {
+            index: u32,
+            lowlink: u32,
+            height: u32 = 0,
+            /// A position in `frames`: every unsettled part still being read
+            /// from this position on is one this type's capabilities depend
+            /// on. `no_floor` where there is none.
+            floor: u32 = no_floor,
+            open: bool = true,
+        };
+
+        /// A type on the walk's path, and the range of `edges` it owns.
+        const PathFrame = struct { ty: TypeId, first: u32, count: u32, next: u32 = 0 };
+
+        /// An unsettled part being read, at its position in `frames`.
+        const OpenPart = struct { position: u32, serial: u32, decl: node.DeclId };
+
+        /// A type decided to wait on an unsettled part being read: watched,
+        /// and complete once that part is read when `closed`, its component
+        /// having closed.
+        const Waiting = struct { serial: u32, position: u32, height: u32, closed: bool };
+
+        /// One walk over what types own, shared by every question asked while
+        /// declared answers are settled: a question asked while a part is
+        /// read starts a nested walk, which reaches the types the outer walks
+        /// have open as the strongly connected components of one graph.
+        ///
+        /// A type is pushed once, its parts read and what it owns listed; a
+        /// type reached again while its component is open is a back edge, as
+        /// in Tarjan's algorithm, and the component is decided when its root
+        /// is popped: complete, or, where it holds a type whose part is still
+        /// being read below it, waiting on that part and complete once the
+        /// part is read. A nested question reaching a type an outer walk has
+        /// open depends on the part the outer walk is reading, which is the
+        /// cycle [T-Bound] names. Each type is pushed and decided once over
+        /// the whole settling, and each edge followed once.
+        const OwnedWalk = struct {
+            nodes: std.AutoHashMapUnmanaged(TypeId, OwnedNode) = .empty,
+            /// By node index: the length of `frames` when the node was pushed.
+            floors: std.ArrayList(u32) = .empty,
+            component: std.ArrayList(TypeId) = .empty,
+            path: std.ArrayList(PathFrame) = .empty,
+            edges: std.ArrayList(TypeId) = .empty,
+            /// Type arguments of the instantiations pushed, asked about once
+            /// the walk that pushed them returns.
+            applied: std.ArrayList(TypeId) = .empty,
+            /// The unsettled parts being read, outermost first.
+            parts: std.ArrayList(OpenPart) = .empty,
+            part_positions: std.AutoHashMapUnmanaged(DeclaredPart, u32) = .empty,
+            serial: u32 = 0,
+            waiting: std.AutoHashMapUnmanaged(TypeId, Waiting) = .empty,
+            /// By part serial: the types that may wait on that part.
+            waiting_on: std.AutoHashMapUnmanaged(u32, std.ArrayList(TypeId)) = .empty,
+
+            fn deinit(self: *OwnedWalk, gpa: std.mem.Allocator) void {
+                self.nodes.deinit(gpa);
+                self.floors.deinit(gpa);
+                self.component.deinit(gpa);
+                self.path.deinit(gpa);
+                self.edges.deinit(gpa);
+                self.applied.deinit(gpa);
+                self.parts.deinit(gpa);
+                self.part_positions.deinit(gpa);
+                self.waiting.deinit(gpa);
+                var lists = self.waiting_on.valueIterator();
+                while (lists.next()) |list| list.deinit(gpa);
+                self.waiting_on.deinit(gpa);
+            }
+
+            /// The outermost unsettled part being read at or after `floor`.
+            fn openPartAt(self: *const OwnedWalk, floor: u32) ?OpenPart {
+                if (floor == no_floor) return null;
+                var lo: usize = 0;
+                var hi: usize = self.parts.items.len;
+                while (lo < hi) {
+                    const mid = lo + (hi - lo) / 2;
+                    if (self.parts.items[mid].position < floor) lo = mid + 1 else hi = mid;
+                }
+                return if (lo < self.parts.items.len) self.parts.items[lo] else null;
+            }
+
+            /// Where the parts a type on the component stack depends on
+            /// begin: from its own push while it is on the path, and from
+            /// the open type its component reaches back to once it is not.
+            fn floorOf(self: *const OwnedWalk, n: OwnedNode) u32 {
+                return @min(n.floor, self.floors.items[if (n.open) n.index else n.lowlink]);
+            }
+
+            fn openPart(self: *OwnedWalk, gpa: std.mem.Allocator, part: DeclaredPart, position: u32) std.mem.Allocator.Error!void {
+                try self.parts.append(gpa, .{ .position = position, .serial = self.serial, .decl = part.decl });
+                self.serial += 1;
+                try self.part_positions.put(gpa, part, position);
+            }
+        };
+
+        /// Records that `part`, read since `openPart`, is read: every type
+        /// that waited on it stops being watched, and one whose component
+        /// closed is complete.
+        fn closePart(self: *AnswerSettling, part: DeclaredPart) std.mem.Allocator.Error!void {
+            const gpa = self.checker.gpa;
+            const walk = &self.walk;
+            const open = walk.parts.pop().?;
+            _ = walk.part_positions.remove(part);
+            var list = (walk.waiting_on.fetchRemove(open.serial) orelse return).value;
+            defer list.deinit(gpa);
+            for (list.items) |ty| {
+                const waiting = walk.waiting.get(ty) orelse continue;
+                if (waiting.serial != open.serial) continue;
+                _ = walk.waiting.remove(ty);
+                _ = self.watch.watched.remove(ty);
+                if (waiting.closed) try self.complete.put(gpa, ty, waiting.height);
+            }
+        }
+
+        /// Watches `ty` while the outermost unsettled part being read at or
+        /// after `floor` is read; one `closed` with no such part is complete.
+        fn waitOn(self: *AnswerSettling, ty: TypeId, height: u32, floor: u32, closed: bool) std.mem.Allocator.Error!void {
+            const gpa = self.checker.gpa;
+            const walk = &self.walk;
+            const open = walk.openPartAt(floor) orelse {
+                _ = walk.waiting.remove(ty);
+                _ = self.watch.watched.remove(ty);
+                if (closed) try self.complete.put(gpa, ty, height);
+                return;
+            };
+            try self.watch.watched.put(gpa, ty, open.decl);
+            try walk.waiting.put(gpa, ty, .{ .serial = open.serial, .position = open.position, .height = height, .closed = closed });
+            const list = try walk.waiting_on.getOrPut(gpa, open.serial);
+            if (!list.found_existing) list.value_ptr.* = .empty;
+            try list.value_ptr.append(gpa, ty);
+        }
 
         /// Reads, before a capability or an implementation is asked of `root`,
         /// every part of each declaration it owns or is applied to whose type
         /// waited on a settled answer; every other part already holds its
         /// type. A type whose capabilities depend on such a part while that
         /// part is being read is watched, and a question asked of it is the
-        /// cycle `readPart` reports.
-        ///
-        /// A depth-first walk with an explicit stack, so nesting as deep as a
-        /// program writes costs no recursion. Each type is visited once over
-        /// the whole settling, except one that waited on a part then being
-        /// read, which is visited again once asked about again.
+        /// cycle `readPart` reports. See `OwnedWalk`.
         fn owned(self: *AnswerSettling, root: TypeId) std.mem.Allocator.Error!void {
-            const c = self.checker;
-            const gpa = c.gpa;
-            if (root == .poison or self.visiting.contains(root)) return;
+            const gpa = self.checker.gpa;
+            const walk = &self.walk;
+            if (root == .poison) return;
             if (self.complete.get(root)) |height| return self.raise(height);
+            if (walk.waiting.get(root)) |waiting| if (waiting.closed) return self.raise(waiting.height);
+            if (walk.nodes.get(root)) |n| {
+                // Its component is still open: the question depends on what
+                // the walk that has it open is reading.
+                try self.waitOn(root, n.height, walk.floorOf(n), false);
+                return self.raise(n.height);
+            }
 
-            var walk: OwnedWalk = .{};
-            defer walk.deinit(gpa);
-            defer for (walk.visits.items) |visit| {
-                _ = self.visiting.remove(visit.ty);
-            };
-
-            try self.beginVisit(&walk, root);
-            var root_height: u32 = 0;
-            while (walk.open.items.len != 0) {
-                const at = walk.open.items[walk.open.items.len - 1];
-                const visit = &walk.visits.items[at];
-                if (visit.next < visit.count) {
-                    const child: TypeId = @enumFromInt(walk.edges.items[visit.first + visit.next]);
-                    visit.next += 1;
+            const base = walk.path.items.len;
+            const applied_base = walk.applied.items.len;
+            try self.push(root);
+            while (walk.path.items.len > base) {
+                const top = &walk.path.items[walk.path.items.len - 1];
+                if (top.next < top.count) {
+                    const child = walk.edges.items[top.first + top.next];
+                    top.next += 1;
+                    const ty = top.ty;
                     if (child == .poison) continue;
-                    if (walk.at_of.get(child)) |j| {
-                        // Finished below, or open above. A cycle back to an
-                        // open visit adds no height, which is the recursion
-                        // a capability assumes of itself, but what that
-                        // visit waits on is waited on here too.
-                        if (walk.done.contains(j)) {
-                            absorb(visit, walk.visits.items[j]);
-                        } else visit.waits = visit.waits orelse walk.visits.items[j].waits;
-                        continue;
-                    }
+                    const me = walk.nodes.getPtr(ty).?;
                     if (self.complete.get(child)) |height| {
-                        visit.height = @max(visit.height, height);
+                        me.height = @max(me.height, height);
                         continue;
                     }
-                    if (self.visiting.contains(child)) {
-                        // Open in an outer walk, which reads one of its
-                        // parts or reads what it holds: this type waits on
-                        // that part, or on what the outer walk finds.
-                        if (try self.readingDeclOf(child)) |waiting| {
-                            visit.waits = visit.waits orelse waiting;
-                        } else visit.partial = true;
+                    if (walk.waiting.get(child)) |waiting| if (waiting.closed) {
+                        me.height = @max(me.height, waiting.height);
+                        me.floor = @min(me.floor, waiting.position);
+                        continue;
+                    };
+                    if (walk.nodes.get(child)) |reached| {
+                        // A back edge: a recursion through the type, which
+                        // adds no height and joins its component.
+                        me.lowlink = @min(me.lowlink, reached.index);
+                        me.floor = @min(me.floor, walk.floorOf(reached));
                         continue;
                     }
-                    try self.beginVisit(&walk, child);
+                    try self.push(child);
                     continue;
                 }
-                _ = walk.open.pop();
-                try walk.done.put(gpa, at, {});
-                const finished = walk.visits.items[at];
-                if (finished.waits) |waiting| {
-                    try self.watch.watched.put(gpa, finished.ty, waiting);
-                } else {
-                    _ = self.watch.watched.remove(finished.ty);
-                    if (!finished.partial) try self.complete.put(gpa, finished.ty, finished.height);
+                const frame = walk.path.pop().?;
+                walk.edges.shrinkRetainingCapacity(frame.first);
+                const n = walk.nodes.getPtr(frame.ty).?;
+                n.open = false;
+                const done = n.*;
+                var waits = done.floor;
+                if (done.lowlink == done.index) {
+                    waits = try self.closeComponent(frame.ty, done);
+                } else try self.waitOn(frame.ty, done.height, walk.floorOf(done), false);
+                if (walk.path.items.len > base) {
+                    const parent = walk.nodes.getPtr(walk.path.items[walk.path.items.len - 1].ty).?;
+                    parent.lowlink = @min(parent.lowlink, done.lowlink);
+                    parent.floor = @min(parent.floor, waits);
+                    parent.height = @max(parent.height, done.height);
                 }
-                if (walk.open.items.len != 0) {
-                    absorb(&walk.visits.items[walk.open.items[walk.open.items.len - 1]], finished);
-                } else root_height = finished.height;
             }
-            self.raise(root_height);
-            for (walk.applied.items) |argument| try self.owned(argument);
+            self.raise(if (self.complete.get(root)) |height| height else if (walk.waiting.get(root)) |waiting| waiting.height else if (walk.nodes.get(root)) |n| n.height else 0);
+
+            const arguments = try gpa.dupe(TypeId, walk.applied.items[applied_base..]);
+            defer gpa.free(arguments);
+            walk.applied.shrinkRetainingCapacity(applied_base);
+            for (arguments) |argument| try self.owned(argument);
         }
 
-        /// What an `owned` walk holds while it runs.
-        const OwnedWalk = struct {
-            visits: std.ArrayList(OwnedVisit) = .empty,
-            edges: std.ArrayList(u32) = .empty,
-            at_of: std.AutoHashMapUnmanaged(TypeId, u32) = .empty,
-            done: std.AutoHashMapUnmanaged(u32, void) = .empty,
-            /// Visits not yet finished, innermost last.
-            open: std.ArrayList(u32) = .empty,
-            /// Type arguments of the instantiations visited.
-            applied: std.ArrayList(TypeId) = .empty,
-
-            fn deinit(self: *OwnedWalk, gpa: std.mem.Allocator) void {
-                self.visits.deinit(gpa);
-                self.edges.deinit(gpa);
-                self.at_of.deinit(gpa);
-                self.done.deinit(gpa);
-                self.open.deinit(gpa);
-                self.applied.deinit(gpa);
+        /// Decides the component whose root `root` is, popping it: complete,
+        /// or waiting on the outermost part still being read that one of its
+        /// types depends on. Returns the floor its holder takes from it.
+        fn closeComponent(self: *AnswerSettling, root: TypeId, n: OwnedNode) std.mem.Allocator.Error!u32 {
+            const walk = &self.walk;
+            const open = walk.openPartAt(n.floor);
+            while (walk.component.pop()) |member| {
+                const removed = walk.nodes.fetchRemove(member).?.value;
+                try self.waitOn(member, removed.height, if (open) |part| part.position else no_floor, true);
+                if (member == root) break;
             }
-        };
-
-        fn absorb(into: *OwnedVisit, child: OwnedVisit) void {
-            into.waits = into.waits orelse child.waits;
-            into.height = @max(into.height, child.height);
-            into.partial = into.partial or child.partial;
+            return if (open) |part| part.position else no_floor;
         }
 
-        /// The declaration of `ty` if one of its parts is being read.
-        fn readingDeclOf(self: *AnswerSettling, ty: TypeId) std.mem.Allocator.Error!?node.DeclId {
-            const c = self.checker;
-            const d = c.builder.view().declOfType(ty) orelse return null;
-            for (0..c.partCount(d)) |k| {
-                if (self.parts.get(.{ .decl = d, .index = @intCast(k) }) == .reading) return d;
-            }
-            return null;
-        }
-
-        /// Opens a visit of `ty`: reads its declaration's unsettled parts,
-        /// then lists what it owns.
-        fn beginVisit(self: *AnswerSettling, walk: *OwnedWalk, ty: TypeId) std.mem.Allocator.Error!void {
+        /// Pushes `ty`: reads its declaration's unsettled parts, then lists
+        /// what it owns.
+        fn push(self: *AnswerSettling, ty: TypeId) std.mem.Allocator.Error!void {
             const c = self.checker;
             const gpa = c.gpa;
-            try self.visiting.put(gpa, ty, {});
-            var visit: OwnedVisit = .{ .ty = ty, .first = 0, .count = 0 };
+            const walk = &self.walk;
+            const index: u32 = @intCast(walk.floors.items.len);
+            try walk.floors.append(gpa, @intCast(self.frames.items.len));
+            try walk.nodes.put(gpa, ty, .{ .index = index, .lowlink = index });
+            try walk.component.append(gpa, ty);
+            var floor: u32 = no_floor;
+            var height: u32 = 0;
             if (c.builder.view().declOfType(ty)) |d| if (self.readable.contains(d)) {
                 for (0..c.partCount(d)) |k| {
                     const part: DeclaredPart = .{ .decl = d, .index = @intCast(k) };
                     if (!c.unsettled_parts.contains(part)) continue;
                     // An unsettled part being read now is what this question
                     // is being asked from: its type depends on the answer.
-                    if (try c.readPart(part) == .reading and visit.waits == null) visit.waits = d;
-                    if (self.heights.get(.{ .part = part })) |height| visit.height = @max(visit.height, height);
+                    if (try c.readPart(part) == .reading) {
+                        if (walk.part_positions.get(part)) |position| floor = @min(floor, position);
+                    }
+                    if (self.heights.get(.{ .part = part })) |part_height| height = @max(height, part_height);
                 }
                 if (c.builder.instanceOf(ty) != null) try c.builder.refillInstance(ty);
             };
-            // Listed after the parts are read: reading one may grow the tables
-            // the children sit in.
-            visit.first = @intCast(walk.edges.items.len);
+            // Reading a part may push and decide other types, and grow the
+            // tables the children sit in, so they are listed after.
+            const n = walk.nodes.getPtr(ty).?;
+            n.floor = @min(n.floor, floor);
+            n.height = @max(n.height, height);
+            const first: u32 = @intCast(walk.edges.items.len);
             switch (c.builder.get(ty)) {
-                .struct_ => for (0..c.builder.fieldCount(ty)) |k| try walk.edges.append(gpa, @intFromEnum(try c.builder.fieldType(ty, @intCast(k)))),
+                .struct_ => for (0..c.builder.fieldCount(ty)) |k| try walk.edges.append(gpa, try c.builder.fieldType(ty, @intCast(k))),
                 .enum_ => for (0..c.builder.variantCount(ty)) |v| {
                     for (0..try c.builder.variantFieldCount(ty, @intCast(v))) |f|
-                        try walk.edges.append(gpa, @intFromEnum(try c.builder.variantFieldType(ty, @intCast(v), @intCast(f))));
+                        try walk.edges.append(gpa, try c.builder.variantFieldType(ty, @intCast(v), @intCast(f)));
                 },
-                .newtype => |newtype| try walk.edges.append(gpa, @intFromEnum(newtype.base)),
-                .array => |array| try walk.edges.append(gpa, @intFromEnum(array.element)),
+                .newtype => |newtype| try walk.edges.append(gpa, newtype.base),
+                .array => |array| try walk.edges.append(gpa, array.element),
                 else => {},
             }
-            visit.count = @intCast(walk.edges.items.len - visit.first);
             // An argument is asked about where a bound names it, which reads
             // its own capabilities rather than `ty`'s.
             if (c.builder.instanceOf(ty)) |instance| try walk.applied.appendSlice(gpa, c.builder.argsOf(instance));
-            const at: u32 = @intCast(walk.visits.items.len);
-            try walk.at_of.put(gpa, ty, at);
-            try walk.visits.append(gpa, visit);
-            try walk.open.append(gpa, at);
-        }
-
-        /// Stops watching the types that waited on `decl`'s parts.
-        fn unwatch(self: *AnswerSettling, gpa: std.mem.Allocator, decl: node.DeclId) std.mem.Allocator.Error!void {
-            var waited: std.ArrayList(TypeId) = .empty;
-            defer waited.deinit(gpa);
-            var entries = self.watch.watched.iterator();
-            while (entries.next()) |entry| {
-                if (entry.value_ptr.* == decl) try waited.append(gpa, entry.key_ptr.*);
-            }
-            for (waited.items) |ty| _ = self.watch.watched.remove(ty);
+            try walk.path.append(gpa, .{ .ty = ty, .first = first, .count = @as(u32, @intCast(walk.edges.items.len)) - first });
         }
     };
 
@@ -28046,7 +28171,10 @@ const Checker = struct {
             },
         };
         entry.value_ptr.* = .reading;
+        const position: u32 = @intCast(settling.frames.items.len);
         _ = try settling.enter(.{ .part = part });
+        const tracked = self.unsettled_parts.contains(part);
+        if (tracked) try settling.walk.openPart(self.gpa, part, position);
 
         const saved_module = self.current;
         const saved_generic = self.generic;
@@ -28087,8 +28215,8 @@ const Checker = struct {
         };
         try self.setPart(part, ty);
         try settling.parts.put(self.gpa, part, .read);
+        if (tracked) try settling.closePart(part);
         try settling.leave();
-        if (self.unsettled_parts.contains(part)) try settling.unwatch(self.gpa, part.decl);
         return .read;
     }
 

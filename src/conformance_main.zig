@@ -4815,13 +4815,14 @@ test "a part asking about a type that holds the part's own holder is refused in 
         "struct Y {\n    p: Chooser[B].Out,\n}\n",
         "struct B {\n    x: X,\n}\n",
     }, 0, &.{.t_bound});
-    // Two parts asking about one type that holds both.
+    // Two parts asking about one type that holds both: one cycle, reported
+    // once, whichever part is read first.
     try expectEveryOrder(pick_trait ++ chooser_impl, &.{
         "struct X {\n    y0: Y0,\n    y1: Y1,\n}\n",
         "struct Y0 {\n    p: Chooser[B0].Out,\n}\n",
         "struct Y1 {\n    p: Chooser[B0].Out,\n}\n",
         "struct B0 {\n    b: X,\n}\n",
-    }, 0, &.{ .t_bound, .t_bound });
+    }, 0, &.{.t_bound});
     // Three parts, a chain of holders back to theirs, and an earlier question.
     try expectEveryOrder(pick_trait ++ chooser_impl, &.{
         "struct _Zed {\n    z: Chooser[X].Out,\n}\n",
@@ -4831,7 +4832,7 @@ test "a part asking about a type that holds the part's own holder is refused in 
         "struct Y2 {\n    p: Chooser[B0].Out,\n}\n",
         "struct B0 {\n    b: B1,\n}\n",
         "struct B1 {\n    b: X,\n}\n",
-    }, 24, &.{ .t_bound, .t_bound, .t_bound });
+    }, 24, &.{.t_bound});
 }
 
 test "parts asking an unbounded implementation about their holder are accepted in every declaration order" {

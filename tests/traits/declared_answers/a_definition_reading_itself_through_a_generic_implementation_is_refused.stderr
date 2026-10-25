@@ -1,0 +1,5 @@
+error[T-Impl]: this associated type is defined through itself: `Ay.Reading` is `W[Ay].Reading`
+  --> tests/traits/declared_answers/a_definition_reading_itself_through_a_generic_implementation_is_refused.lin:18:20
+   |
+18 |     type Reading = W[Ay].Reading
+   |                    ^^^^^^^^^^^^^ define it as a type that does not read back to itself
