@@ -1,0 +1,40 @@
+// `Holder`'s default is `Chooser[Tray].Out`, a `Vec` only if `Tray` can be
+// discarded, and `Tray` holds a `Holder`: `Tray`'s parts depend on that
+// answer, so the vector is never dropped unreleased.
+trait Pick {
+    type Out
+
+    fn toss(sink self: Self) -> UInt8
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = Vec[UInt64]
+
+    fn toss(sink _self: Self) -> UInt8 {
+        7
+    }
+}
+
+struct Holder[T = Chooser[Tray].Out] {
+    v: T,
+}
+
+struct Tray {
+    held: Holder,
+}
+
+fn toss_it[P: Pick](sink p: P) -> UInt8 {
+    p.toss()
+}
+
+fn main() -> UInt8 {
+    var v: Vec[UInt64] = Vec.new()
+    &v.push(5).unwrap()
+    let tray = Tray { held = .{ v = v } }
+    let c: Chooser[Tray] = .{ t = tray }
+    toss_it(c)
+}

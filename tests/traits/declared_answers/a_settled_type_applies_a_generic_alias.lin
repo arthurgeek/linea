@@ -1,0 +1,34 @@
+// `Desk.Item` is `Boxed[Other.Item]`, and `Other.Item` is `Boxed[UInt8]`, so
+// `Sample.x` is an `Option[Option[UInt8]]`.
+trait Counter {
+    type Item
+}
+
+struct Sample {
+    x: Desk.Item,
+}
+
+alias Boxed[T] = Option[T]
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = Boxed[Other.Item]
+}
+
+struct Other {}
+
+impl Counter for Other {
+    type Item = Boxed[UInt8]
+}
+
+fn main() -> UInt8 {
+    let sample = Sample { x = .Some(.Some(3)) }
+    match read sample.x {
+        Some(inner) => match read inner {
+            Some(value) => value,
+            None => 0,
+        },
+        None => 0,
+    }
+}

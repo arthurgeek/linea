@@ -580,6 +580,14 @@ fn typecheckInternal(
         c.expansions.deinit(gpa);
     }
     defer c.delegation_state.deinit(gpa);
+    defer c.delegation_cycles.deinit(gpa);
+    defer c.unsettled_parts.deinit(gpa);
+    defer c.unsettled_heads.deinit(gpa);
+    defer {
+        var places = c.payload_places.valueIterator();
+        while (places.next()) |held| gpa.free(held.*);
+        c.payload_places.deinit(gpa);
+    }
     defer c.range_places.deinit(gpa);
     defer c.projected_at.deinit(gpa);
     defer c.written.deinit(gpa);
@@ -1025,7 +1033,7 @@ fn typecheckInternal(
     // A shape read before a part was refused may be one reading it would
     // not terminate, so aliases are read again from here.
     c.alias_shapes.clearRetainingCapacity();
-    try c.fillDeclaredParts(false);
+    try c.readPartShapes();
     try c.builder.refillInstances();
     c.callable_effects_ready = true;
 
@@ -1124,8 +1132,15 @@ fn typecheckInternal(
         // head or trait arguments off: it supplies none, and its head is the
         // primitive it was seeded for.
         if (i.isAmbient()) continue;
+        // A head or trait argument that reaches a settled type, through a
+        // parameter's default, is read again once declared answers are: no
+        // implementation head is settled yet to answer it.
+        c.deferring_selections = true;
+        c.skipped_selection = false;
         i.args = try c.traitArgumentsOf(i.decl);
         try c.settleHead(i);
+        c.deferring_selections = false;
+        if (c.skipped_selection) try c.unsettled_heads.append(gpa, @intCast(i - implementations.ptr));
         try c.settleImplementationPredicates(i);
     }
 
@@ -1140,76 +1155,54 @@ fn typecheckInternal(
     try c.refuseOverlappingImplementations(implementations);
     z_overlap.end();
 
-    // Before a part is resolved, because resolving one is what does not
-    // terminate: a part that grows its own declaration's argument mints a type
-    // per level until the stack ends, and one that holds its own declaration
-    // mints a type that contains itself.
-    const z_parts = tracy.beginZone(@src(), "tc.parts");
-    try c.fillDeclaredParts(true);
-
-    // Every alias is read once with callable effects settled, whether or not
-    // anything names it: a published alias nothing in this program writes
-    // still answers for the bounds its own written type must meet. A retained
-    // library's alias is answered from that library's typing, and kept here
-    // too so tooling reads every alias from one table.
-    for (0..ast.declCount()) |i| {
-        const d = node.DeclId.at(@intCast(i));
-        if (ast.declTag(d) != .alias) continue;
-        try c.alias_types.put(gpa, d, try c.aliasedType(d));
-    }
-
-    // Asked once, after every type is entered and before any layout is: a
-    // type on a cycle has no size to compute, and every pass below here asks
-    // for one.
-    // Every template is complete now, so every instantiation made while one
-    // was still being read is filled again from the finished thing.
-    try c.builder.refillInstances();
-    try c.checkStorageCertificates(type_of_decl);
-
-    try c.reportLayoutCycles(type_of_decl);
-    try c.reportCopyabilityDeclarations(type_of_decl);
-
-    z_parts.end();
-
     const observation_traits = try @import("observations.zig").compute(gpa, ast, resolution);
     errdefer gpa.free(observation_traits);
     c.builder.observation_traits = observation_traits;
     const z_signatures = tracy.beginZone(@src(), "tc.signatures");
 
     // Which member of each implementation supplies which member of its trait,
-    // and what each declared type was settled to. Before any signature is read
-    // and any body is walked, because `Self.Item` written in either is that
-    // pairing followed by that type -- and a written type read before the
-    // answer exists is a type nobody named.
+    // and what each declared type was settled to. Before any signature is
+    // read and any body is walked, because `Self.Item` or `Counter.Item`
+    // written in either is that pairing followed by that type -- and a
+    // written type read before the answer exists is a type nobody named.
     try c.pairImplementationMembers();
     c.supply = try types_mod.SupplyIndex.build(gpa, ast.declCount(), c.supplied.items);
     errdefer c.supply.deinit(gpa);
     c.builder.supply = c.supply;
-    try c.settleDeclaredTypes();
+
+    // Before a part is resolved, because resolving one is what does not
+    // terminate: a part that grows its own declaration's argument mints a type
+    // per level until the stack ends, and one that holds its own declaration
+    // mints a type that contains itself.
+    const z_parts = tracy.beginZone(@src(), "tc.parts");
+    try c.settleDeclaredAnswers();
+    try c.settleDeferredHeads(implementations);
+
+    // Every template is complete and every settled type known, so every
+    // instantiation is filled again from its template. A part written as a
+    // settled reference through a parameter stands for whatever an
+    // implementation settles the name to, and an instantiation minted while
+    // that member was still being read took poison for it.
+    try c.builder.refillInstances();
+    try c.checkRefinements();
+    try c.checkStorageCertificates(type_of_decl);
+
+    // Asked once, after every type is entered and settled and before any
+    // layout is: a type on a cycle has no size to compute, and every pass
+    // below here asks for one. An implementation may close a layout the
+    // declaration alone does not -- settling `Iter` to `S[Box]` is what makes
+    // an `S[Box]` hold an `S[Box]` -- so the question is asked of the minted
+    // instantiations as well as of the written parts.
+    try c.reportLayoutCycles(type_of_decl);
+    try c.reportCopyabilityDeclarations(type_of_decl);
+
+    z_parts.end();
+
+    try c.dischargeSettledBounds();
     for (implementations) |implementation| {
         if (!implementation.isAmbient() and ast.declDelegation(implementation.decl) != .none)
             _ = try c.settleDelegation(implementation.decl);
     }
-
-    // And again, now that every implementation has settled what its trait
-    // declared. A part written as a settled reference stands for whatever an
-    // implementation settles the name to, and an instantiation minted before
-    // that answer existed took poison for it: what a value of the type holds
-    // was decided here rather than where the type was minted, so this is the
-    // first point the pool says what it is.
-    //
-    // Which is what makes the cycle askable at all. An implementation may
-    // close a layout the declaration alone does not -- settling `Iter` to
-    // `S[Box]` is what makes an `S[Box]` hold an `S[Box]` -- and the argument
-    // that closes it is the implementation's choice, so the answer belongs to
-    // the type the argument makes and not to the declaration. Asked of the
-    // written parts before instantiation and of the minted types after
-    // settlement, through the one routine that answers it either time.
-    //
-    // **Bound:** one pass over the instantiations, as the refill above is,
-    // and one walk of the pool.
-    try c.builder.refillInstances();
-    try c.reportLayoutCycles(type_of_decl);
 
     // Install written constant types before defaults can force initializers.
     // Unannotated constants acquire their type when their initializer is checked.
@@ -5531,6 +5524,27 @@ const Checker = struct {
     /// threading it through each caller would put a parameter meaning "not
     /// applicable" on all of them.
     self_at_call: ?TypeId = null,
+    /// What `settleDeclaredAnswers` has read and is reading; null outside it.
+    settling: ?*AnswerSettling = null,
+    /// Field delegations reported as reaching themselves through their own
+    /// backing field, which `settleDelegation` does not report again.
+    delegation_cycles: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty,
+    /// Whether a structural selection is passed over rather than read: while
+    /// parts are first read for their callable shapes and while
+    /// implementation heads are settled, nothing could answer one yet.
+    deferring_selections: bool = false,
+    /// Whether a selection was passed over since this was last cleared.
+    skipped_selection: bool = false,
+    /// Declared parts whose first reading passed over a selection, so the
+    /// type they hold is known only once settled answers are. Every other
+    /// part's first reading is already its type, up to callable effects,
+    /// which no capability reads.
+    unsettled_parts: std.AutoHashMapUnmanaged(DeclaredPart, void) = .empty,
+    /// Implementations whose head or trait arguments passed over a
+    /// selection, read again once declared answers are settled.
+    unsettled_heads: std.ArrayList(u32) = .empty,
+    /// Where each enum's payloads sit, by declaration; see `payloadAt`.
+    payload_places: std.AutoHashMapUnmanaged(node.DeclId, []const PayloadPlace) = .empty,
     /// Whether `self_at_call` is a `Self` a call or an implementation settled,
     /// rather than the signature's own symbolic one. A signature's written
     /// types are then read at that type, and what they read there is not what
@@ -5714,9 +5728,11 @@ const Checker = struct {
     /// the shapes the first reading of declared parts sees, kept so a chain
     /// of aliases is read once per alias rather than once per use.
     alias_shapes: std.AutoHashMapUnmanaged(DeclId, TypeId) = .empty,
-    /// The aliases whose written type is being read. An alias reached again
-    /// while its own type is read is a cycle, which the resolver reported.
-    aliases_reading: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// The aliases whose written type is being read, each with how many
+    /// settled types were being read when its reading began. An alias reached
+    /// again while its own type is read is a cycle, which the resolver
+    /// reported unless a settled type joins the two readings.
+    aliases_reading: std.AutoHashMapUnmanaged(DeclId, u32) = .empty,
     /// The defaults being read, by declaration and parameter: a default that
     /// reaches itself through the types it omits arguments of is a cycle.
     defaults_reading: std.AutoHashMapUnmanaged(u64, void) = .empty,
@@ -6479,93 +6495,84 @@ const Checker = struct {
         return self.resultOfRef(m, d, ref);
     }
 
-    /// Resolves representation through the ordinary type reader. The first
-    /// visit provides callable shapes; the second records their source effects
-    /// after every aggregate's owned parts are available.
-    fn fillDeclaredParts(self: *Checker, check_refinements: bool) !void {
+    /// Reads every declared part for its callable shape, before
+    /// implementation heads are settled. A settled reference is not read
+    /// here: nothing could answer it yet, and a part that names one, however
+    /// it is reached -- written, through an alias, or through a parameter's
+    /// default -- is recorded in `unsettled_parts`. `settleDeclaredAnswers`
+    /// reads each part again once everything it names can be settled.
+    fn readPartShapes(self: *Checker) !void {
         const saved_module = self.current;
         const saved_generic = self.generic;
+        self.deferring_selections = true;
         defer {
             self.current = saved_module;
             self.generic = saved_generic;
+            self.deferring_selections = false;
         }
         for (self.program.modules, 0..) |_, mi| {
             self.current = ModuleId.from(mi);
             for (self.program.declsOf(self.current)) |d| {
-
-                // Its own parameters answer while its parts are read: `x: A` in a
-                // generic structure names the parameter, not a module-level type
-                // that happens to share the letter.
+                // Its own parameters answer while its parts are read.
                 self.generic = d;
                 defer self.generic = node.DeclId.none;
-
-                if (self.ast.declTag(d) == .struct_) {
-                    for (self.ast.declFields(d), 0..) |f, k| {
-                        self.builder.setFieldType(
-                            self.type_of_decl.get(d),
-                            @intCast(k),
-                            try self.typeOfPart(f.written),
-                        );
-                    }
-                    continue;
+                switch (self.ast.declTag(d)) {
+                    .struct_, .enum_, .newtype => {},
+                    else => continue,
                 }
-                if (self.ast.declTag(d) == .newtype) {
-                    const base = try self.typeOfPart(self.ast.declReturnRef(d));
-                    self.builder.setNewtypeBase(self.type_of_decl.get(d), base);
+                for (0..self.partCount(d)) |k| {
+                    const part: DeclaredPart = .{ .decl = d, .index = @intCast(k) };
+                    self.skipped_selection = false;
+                    try self.setPart(part, try self.typeOfPart(try self.partRef(part)));
+                    if (self.skipped_selection) try self.unsettled_parts.put(self.gpa, part, {});
+                }
+            }
+        }
+    }
 
-                    // Only where a clause was written: an unrefined newtype
-                    // admits every value its base does, whatever the base is,
-                    // and there is nothing here for [T-Refine] to say.
-                    if (check_refinements and self.ast.newtypeRefinement(d) != null and base != .poison) {
-                        switch (self.builder.get(base)) {
-                            // A clause narrows what the base admits and cannot
-                            // reach past it: a bound the base cannot hold names
-                            // values no construction could ever supply, so the
-                            // contract is a lie whichever door reads it. Asked of
-                            // the folded interval rather than of the tokens, so
-                            // one test covers both spellings of the range, and
-                            // only where that interval exists -- an empty one is
-                            // reported where it was folded and has no ends for
-                            // this to be about.
-                            .integer => {
-                                const r = self.builder.refinementOf(self.type_of_decl.get(d));
-                                if (r.lo <= r.hi and !(self.builder.holds(base, r.lo) and self.builder.holds(base, r.hi))) {
-                                    try self.sink.addErrorFmt(
-                                        .t_refine,
-                                        self.ast.fileOfDecl(d),
-                                        self.ast.declNameSpan(d),
-                                        "narrow the range to what the base can hold",
-                                        "{d}..={d} reaches outside `{s}`, which `{s}` refines",
-                                        .{ r.lo, r.hi, (try self.typeName(base)), self.ast.tokenText(self.ast.declName(d)) },
-                                    );
-                                }
-                            },
-                            else => try self.sink.addErrorFmt(
+    /// Whether each refined newtype's clause fits its base, asked once the
+    /// base is final.
+    fn checkRefinements(self: *Checker) std.mem.Allocator.Error!void {
+        for (self.program.modules, 0..) |_, mi| {
+            for (self.program.declsOf(ModuleId.from(mi))) |d| {
+                if (self.ast.declTag(d) != .newtype) continue;
+                // Only where a clause was written: an unrefined newtype
+                // admits every value its base does, whatever the base is,
+                // and there is nothing here for [T-Refine] to say.
+                if (self.ast.newtypeRefinement(d) == null) continue;
+                const base = self.builder.get(self.type_of_decl.get(d)).newtype.base;
+                if (base == .poison) continue;
+                switch (self.builder.get(base)) {
+                    // A clause narrows what the base admits and cannot
+                    // reach past it: a bound the base cannot hold names
+                    // values no construction could ever supply, so the
+                    // contract is a lie whichever door reads it. Asked of
+                    // the folded interval rather than of the tokens, so
+                    // one test covers both spellings of the range, and
+                    // only where that interval exists -- an empty one is
+                    // reported where it was folded and has no ends for
+                    // this to be about.
+                    .integer => {
+                        const r = self.builder.refinementOf(self.type_of_decl.get(d));
+                        if (r.lo <= r.hi and !(self.builder.holds(base, r.lo) and self.builder.holds(base, r.hi))) {
+                            try self.sink.addErrorFmt(
                                 .t_refine,
                                 self.ast.fileOfDecl(d),
                                 self.ast.declNameSpan(d),
-                                "only an integer type may be refined",
-                                "`{s}` refines `{s}`, which is not an integer type",
-                                .{ self.ast.tokenText(self.ast.declName(d)), (try self.typeName(base)) },
-                            ),
+                                "narrow the range to what the base can hold",
+                                "{d}..={d} reaches outside `{s}`, which `{s}` refines",
+                                .{ r.lo, r.hi, (try self.typeName(base)), self.ast.tokenText(self.ast.declName(d)) },
+                            );
                         }
-                    }
-                    continue;
-                }
-                if (self.ast.declTag(d) != .enum_) continue;
-
-                for (self.ast.declVariants(d), 0..) |v, k| {
-                    const carried = self.ast.variantFields(v);
-                    if (carried.len == 0) continue;
-
-                    for (carried, 0..) |field, j| {
-                        self.builder.setVariantFieldType(
-                            self.type_of_decl.get(d),
-                            @intCast(k),
-                            @intCast(j),
-                            try self.typeOfPart(field.written),
-                        );
-                    }
+                    },
+                    else => try self.sink.addErrorFmt(
+                        .t_refine,
+                        self.ast.fileOfDecl(d),
+                        self.ast.declNameSpan(d),
+                        "only an integer type may be refined",
+                        "`{s}` refines `{s}`, which is not an integer type",
+                        .{ self.ast.tokenText(self.ast.declName(d)), (try self.typeName(base)) },
+                    ),
                 }
             }
         }
@@ -8704,39 +8711,131 @@ const Checker = struct {
             try self.refuseTypeArity(run.span, run.last, 0, 0, ref.args.len(), null);
             return .{};
         }
-        const step: Selected = if (refNamesSelf(self.ast, base))
-            try self.selfSelected(owner, ref, run, ref.name)
-        else if (base.kind == .named and self.headParameter(owner, base.name) != null) blk: {
-            const head = self.headParameter(owner, base.name).?;
-            break :blk try self.throughBounds(ref, run, .{
-                .bounds = self.boundsOnParameter(head.ty),
-                .named = base.name,
-                .ty = head.ty,
-                .settled_once = true,
-            }, ref.name);
-        } else blk: {
-            if (from.ty == .poison) return .{};
-            if (from.declared != .none and self.ast.declBounds(from.declared).len != 0) {
-                break :blk try self.throughBounds(ref, run, .{
-                    .bounds = self.ast.declBounds(from.declared),
-                    .named = from.named,
-                    .ty = from.ty,
-                    .settled_once = from.settled_once,
-                }, ref.name);
-            }
-            break :blk try self.structuralSelected(owner, ref, run, from.ty);
+        // Each settled reference read while declared answers are settled is
+        // one link of the chain they depend on one another through.
+        if (self.settling) |settling| if (!try settling.enter(.reference)) {
+            try self.noteRefused(run.last);
+            return .{};
         };
+        const step = try self.selectedStep(owner, ref, run, base, from);
         if (ref.dot != .none) {
             if (self.type_selections.getPtr(ref.dot)) |selection| {
                 selection.declaration = step.declared;
                 selection.head_definition = step.head_definition;
             }
         }
+        if (self.settling) |settling| try settling.leave();
         if (step.settled_once) self.recordWritten(owner, ref.name, step.ty);
         return step;
     }
 
+    /// What a written settled reference names, `builder.settledAtWithin`'s
+    /// answer. While declared types are being settled, a reference that
+    /// reaches a member whose own written type is still being read leads back
+    /// to that member and names no type. The cycle is reported once, at the
+    /// definition on it written first, naming what each definition on it is
+    /// written as. A member reached only while an instantiation is filled is
+    /// not reported: the instantiation is filled again once every member is
+    /// settled.
+    fn settledReference(
+        self: *Checker,
+        run: Run,
+        scope: DeclId,
+        trait: u32,
+        args: []const TypeId,
+        held: TypeId,
+        member: DeclId,
+        named: []const u8,
+    ) std.mem.Allocator.Error!types_mod.Typing.Builder.SettledMember {
+        const settling = self.settling orelse
+            return self.builder.settledAtWithin(scope, trait, args, held, member, named);
+        settling.closed = .none;
+        const settled = try self.builder.settledAtWithin(scope, trait, args, held, member, named);
+        const reached = settling.closed;
+        settling.closed = .none;
+        if (reached != .none and settled.ty == .poison) {
+            settling.cycles += 1;
+            try self.noteRefused(run.last);
+            try self.reportDefinitionCycle(try settling.definitionsFrom(reached));
+        }
+        return settled;
+    }
+
+    /// Reports the associated type definitions that read one another, in the
+    /// order they read one another, at the one written first, naming each as
+    /// `Type.Name` with what it is written as.
+    fn reportDefinitionCycle(self: *Checker, cycle: []const AnswerSettling.Frame) std.mem.Allocator.Error!void {
+        var first: usize = 0;
+        for (cycle, 0..) |frame, k| {
+            if (frame.reading.answer.index() < cycle[first].reading.answer.index()) first = k;
+        }
+        var chain: std.ArrayList(u8) = .empty;
+        defer chain.deinit(self.gpa);
+        for (0..cycle.len) |k| {
+            const step = cycle[(first + k) % cycle.len].reading.answer;
+            try chain.print(self.gpa, "{s}`{s}` is `{s}`", .{
+                if (k == 0) "" else ", ",
+                try self.definitionName(step),
+                try spellWrittenOwned(self.sink.arena, self.ast, self.ast.declReturnRef(step)),
+            });
+        }
+        const written = self.ast.declReturnRef(cycle[first].reading.answer);
+        try self.sink.addErrorFmt(
+            .t_impl,
+            self.ast.fileOf(written.at),
+            self.ast.wholeWrittenSpan(written),
+            "define it as a type that does not read back to itself",
+            "this associated type is defined through itself: {s}",
+            .{chain.items},
+        );
+    }
+
+    /// An implementation's associated type definition as a program reads
+    /// it, `Ping.Dual`: the implementation's type, then the name.
+    fn definitionName(self: *Checker, member: node.DeclId) std.mem.Allocator.Error![]const u8 {
+        const name = self.ast.tokenText(self.ast.declName(member));
+        const row = self.enclosingRow(member) orelse return name;
+        return std.fmt.allocPrint(self.sink.arena, "{s}.{s}", .{ try self.typeName(row.ty), name });
+    }
+
+    /// What one selection step of a settled reference reaches, from what the
+    /// steps before it reached.
+    fn selectedStep(self: *Checker, owner: node.DeclId, ref: node.TypeRef, run: Run, base: node.TypeRef, from: Selected) std.mem.Allocator.Error!Selected {
+        if (refNamesSelf(self.ast, base)) return self.selfSelected(owner, ref, run, ref.name);
+        if (base.kind == .named and self.headParameter(owner, base.name) != null) {
+            const head = self.headParameter(owner, base.name).?;
+            return self.throughBounds(ref, run, .{
+                .bounds = self.boundsOnParameter(head.ty),
+                .named = base.name,
+                .ty = head.ty,
+                .settled_once = true,
+            }, ref.name);
+        }
+        if (from.ty == .poison) return .{};
+        if (from.declared != .none and self.ast.declBounds(from.declared).len != 0) {
+            return self.throughBounds(ref, run, .{
+                .bounds = self.ast.declBounds(from.declared),
+                .named = from.named,
+                .ty = from.ty,
+                .settled_once = from.settled_once,
+            }, ref.name);
+        }
+        return self.structuralSelected(owner, ref, run, from.ty);
+    }
+
     fn structuralSelected(self: *Checker, owner: DeclId, ref: node.TypeRef, run: Run, held: TypeId) std.mem.Allocator.Error!Selected {
+        // The first visit to declared parts runs before implementation heads
+        // are settled, so `Wrap[UInt8].E` would find no implementation of a
+        // generic head and be refused. Nothing is answered or reported then;
+        // the second visit reads the part again.
+        if (self.deferring_selections) {
+            self.skipped_selection = true;
+            return .{};
+        }
+        // A subject holding a type not yet answered, or already reported, has
+        // no implementation to look for: `Picker[Board.Elem]` while the
+        // delegation is still being settled. Nothing is reported for it.
+        if (self.argumentPoisoned(held)) return .{};
         // A signature read where a call reaches it is read in the caller's
         // scope: the type its `Self` stands for is the caller's, and so is
         // what proves the implementation that type answers through.
@@ -8762,10 +8861,7 @@ const Checker = struct {
         // Interning can move pool arrays backing the selected key.
         const args = try self.gpa.dupe(TypeId, selected.args);
         defer self.gpa.free(args);
-        const reading = self.builder.reading_reference;
-        self.builder.reading_reference = true;
-        defer self.builder.reading_reference = reading;
-        const settled = try self.builder.settledAtWithin(scope, selected.trait.index(), args, held, selected.sig, self.ast.tokenText(ref.name));
+        const settled = try self.settledReference(run, scope, selected.trait.index(), args, held, selected.sig, self.ast.tokenText(ref.name));
         return .{ .ty = settled.ty, .declared = selected.sig, .named = ref.name, .settled_once = true, .head_definition = settled.head_definition };
     }
 
@@ -9013,7 +9109,8 @@ const Checker = struct {
 
         // In the scope of the declaration being read, so its `where` clauses
         // prove what the implementation answering needs.
-        const settled = try self.builder.settledAtWithin(
+        const settled = try self.settledReference(
+            run,
             self.generic,
             @intCast(trait.index()),
             args,
@@ -9981,10 +10078,36 @@ const Checker = struct {
     /// `alias_types`. An alias reached again while its own type is read is a
     /// cycle, answered with poison: the resolver reported it.
     fn aliasedType(self: *Checker, alias: node.DeclId) std.mem.Allocator.Error!TypeId {
-        if (self.settledAlias(alias)) |held| return held;
+        if (self.settledAlias(alias)) |held| {
+            if (self.settling) |settling| settling.note(.{ .alias = alias });
+            return held;
+        }
         const kept = if (self.callable_effects_ready) &self.alias_types else &self.alias_shapes;
-        if (kept.get(alias)) |held| return held;
-        if (self.aliases_reading.contains(alias)) {
+        if (kept.get(alias)) |held| {
+            if (self.settling) |settling| settling.note(.{ .alias = alias });
+            return held;
+        }
+        if (self.aliases_reading.get(alias)) |began_at| {
+            // Reached again from inside a settled type its own reading
+            // demanded: `alias Al = Mirror.Reading` with `Reading =
+            // Option[Al]`. The resolver sees only the alias and the
+            // implementation, not the settled reference joining them.
+            if (self.settling) |settling| if (settling.depth > began_at) {
+                const name = self.ast.declName(alias);
+                if (self.refusedBefore(name)) return .poison;
+                const written = self.ast.declReturnRef(alias);
+                try self.noteRefused(name);
+                settling.cycles += 1;
+                try self.sink.addErrorFmt(
+                    .t_impl,
+                    self.ast.fileOf(written.at),
+                    self.ast.writtenSpan(written),
+                    "write a type here that does not lead back to it",
+                    "`{s}` leads back to itself through a settled type",
+                    .{self.ast.tokenText(self.ast.declName(alias))},
+                );
+                return .poison;
+            };
             // The resolver reports an alias that names itself. One reached
             // again through the default of a type it names is not visible to
             // it, so the cycle is reported where the default is read.
@@ -10004,7 +10127,10 @@ const Checker = struct {
             }
             return .poison;
         }
-        try self.aliases_reading.put(self.gpa, alias, {});
+        // An alias read while declared answers are settled is one of them,
+        // and counts toward how deep they depend on one another.
+        if (self.settling) |settling| if (!try settling.enter(.{ .alias = alias })) return .poison;
+        try self.aliases_reading.put(self.gpa, alias, if (self.settling) |settling| settling.depth else 0);
         defer _ = self.aliases_reading.remove(alias);
 
         const outer = self.generic;
@@ -10017,10 +10143,12 @@ const Checker = struct {
         for (self.refused_parts.items) |seen| {
             if (seen != written.at) continue;
             try kept.put(self.gpa, alias, .poison);
+            if (self.settling) |settling| try settling.leave();
             return .poison;
         }
         const named = try self.typeOfRefOf(self.program.moduleOf(alias), alias, written);
         try kept.put(self.gpa, alias, named);
+        if (self.settling) |settling| try settling.leave();
         return named;
     }
 
@@ -12297,7 +12425,7 @@ const Checker = struct {
             defer self.gpa.free(cycle.path);
 
             try self.reportCycle(cycle, type_of_decl);
-            self.breakCycle(cycle);
+            try self.breakCycle(cycle);
         }
     }
 
@@ -12406,7 +12534,7 @@ const Checker = struct {
     /// interned, so its element type is shared by every other use of it and
     /// its edge is never the one. A cycle of instantiations alone breaks at
     /// the last of them.
-    fn breakCycle(self: *Checker, cycle: Cycle) void {
+    fn breakCycle(self: *Checker, cycle: Cycle) std.mem.Allocator.Error!void {
         var edge: ?usize = null;
         var at = cycle.path.len;
         while (at > 0) {
@@ -12423,7 +12551,7 @@ const Checker = struct {
 
         switch (self.builder.get(last)) {
             .newtype => {
-                if (self.builder.baseOf(last) == back) self.builder.setNewtypeBase(last, .poison);
+                if (self.builder.baseOf(last) == back) try self.builder.setNewtypeBase(last, .poison);
                 return;
             },
             else => {},
@@ -12431,12 +12559,12 @@ const Checker = struct {
 
         for (0..self.builder.fieldCount(last)) |i| {
             if (self.builder.view().fieldType(last, @intCast(i)) != back) continue;
-            self.builder.setFieldType(last, @intCast(i), .poison);
+            try self.builder.setFieldType(last, @intCast(i), .poison);
         }
         for (0..self.builder.variantCount(last)) |i| {
             for (0..self.builder.view().variantFieldCount(last, @intCast(i))) |f| {
                 if (self.builder.view().variantFieldType(last, @intCast(i), @intCast(f)) != back) continue;
-                self.builder.setVariantFieldType(last, @intCast(i), @intCast(f), .poison);
+                try self.builder.setVariantFieldType(last, @intCast(i), @intCast(f), .poison);
             }
         }
     }
@@ -12617,7 +12745,7 @@ const Checker = struct {
             while (field < shape.field_count) : (field += 1) {
                 const held = self.builder.fields.items(.ty)[shape.first_field + field];
                 if (!try self.builder.mentionsOpen(held)) continue;
-                self.builder.setFieldType(t, field, try self.builder.resolveOpen(held, &self.open_types));
+                try self.builder.setFieldType(t, field, try self.builder.resolveOpen(held, &self.open_types));
             }
         }
         const Resolve = struct {
@@ -26408,18 +26536,23 @@ const Checker = struct {
         return row;
     }
 
-    /// Settle a field delegate in its implementation's generic environment.
-    /// Each declaration is visited once; backing edges are followed recursively.
-    fn settleDelegation(self: *Checker, impl: node.DeclId) std.mem.Allocator.Error!?u32 {
-        if (self.expansion_of_impl.get(impl)) |row| return row;
+    /// What a field delegation answers `Elem` with, and through what.
+    const DelegationAnswer = struct {
+        field: u32,
+        field_type: TypeId,
+        key: TypeId,
+        settled: TypeId,
+        deferred_trait: ?node.DeclId = null,
+        backing: ?types_mod.Implementation = null,
+        /// Owned by the caller.
+        backing_args: []TypeId = &.{},
+    };
+
+    /// The element a field delegation answers `Elem` with, read from the
+    /// field as its type now stands. Null where the delegation is refused,
+    /// which is reported only when `reporting` is set.
+    fn delegationAnswer(self: *Checker, impl: node.DeclId, reporting: bool) std.mem.Allocator.Error!?DelegationAnswer {
         const field_token = self.ast.declDelegation(impl);
-        if (field_token == .none) return null;
-        if (self.delegation_state.get(impl)) |state| {
-            if (state == .in_progress) try self.delegationError(impl, "a delegated projection reaches itself");
-            return null;
-        }
-        try self.delegation_state.put(self.gpa, impl, .in_progress);
-        defer self.delegation_state.getPtr(impl).?.* = .done;
         const implementation = (self.rowFor(impl) orelse return null).*;
         const trait = self.index_decl orelse return null;
         const elem = self.index_elem orelse return null;
@@ -26433,52 +26566,132 @@ const Checker = struct {
             self.generic = previous_generic;
         }
         const declaration = self.declaringType(implementation.ty) orelse {
-            try self.delegationError(impl, "field delegation requires a named type with stored fields");
+            if (reporting) try self.delegationError(impl, "field delegation requires a named type with stored fields");
             return null;
         };
         if (self.program.moduleOf(declaration) != self.current) {
-            try self.delegationError(impl, "declare field delegation in the type's defining module");
+            if (reporting) try self.delegationError(impl, "declare field delegation in the type's defining module");
             return null;
         }
+        // While declared answers are settled, the backing field is read
+        // first. One being read now names this delegation's own element.
+        if (self.settling != null and self.ast.declTag(declaration) == .struct_) {
+            for (self.ast.declFields(declaration), 0..) |f, k| {
+                if (!std.mem.eql(u8, self.ast.tokenText(f.name), self.ast.tokenText(field_token))) continue;
+                switch (try self.readPart(.{ .decl = declaration, .index = @intCast(k) })) {
+                    .read => {},
+                    .reading => {
+                        // The field is still the one the `via` names, for
+                        // the editor's definition and references.
+                        try self.field_names.put(self.gpa, field_token, .{ .receiver = implementation.ty, .field = @enumFromInt(k) });
+                        try self.delegation_cycles.put(self.gpa, impl, {});
+                        try self.delegationError(impl, "a delegated projection reaches itself");
+                        self.settling.?.cycles += 1;
+                        return null;
+                    },
+                }
+                if (self.builder.instanceOf(implementation.ty) != null) try self.builder.refillInstance(implementation.ty);
+                break;
+            }
+        }
         const field = (try self.builder.lookupField(implementation.ty, self.ast.tokenText(field_token))) orelse {
-            try self.delegationError(impl, "the delegated name is not a stored field of this type");
+            if (reporting) try self.delegationError(impl, "the delegated name is not a stored field of this type");
             return null;
         };
-        try self.field_names.put(self.gpa, field_token, .{ .receiver = implementation.ty, .field = @enumFromInt(field.index) });
+        if (reporting) try self.field_names.put(self.gpa, field_token, .{ .receiver = implementation.ty, .field = @enumFromInt(field.index) });
+        // A field whose type was refused, or reached a reported cycle, has
+        // nothing to delegate to and nothing more to report.
+        if (field.ty == .poison) return null;
         const key = implementation.args[0];
-        var delegate: types_mod.DelegatedProjection = .{ .field_name = self.ast.tokenName(field_token), .field = field.index, .field_type = field.ty, .key_type = key };
-        var settled: TypeId = .poison;
+        var answer: DelegationAnswer = .{ .field = field.index, .field_type = field.ty, .key = key, .settled = .poison };
         switch (self.builder.get(field.ty)) {
             .array => |array| {
                 const integer = self.builder.isIntegerWithin(impl, key);
                 const from_end = if (self.fromEndType()) |back| key == back else false;
                 if (!integer and !(from_end and try self.arrayInterprets(field.ty, key))) {
-                    try self.delegationError(impl, "the backing array does not support this element indexing key");
+                    if (reporting) try self.delegationError(impl, "the backing array does not support this element indexing key");
                     return null;
                 }
-                settled = array.element;
+                answer.settled = array.element;
             },
             else => {
                 const choice = try self.builder.implementationChoiceWithin(impl, trait, &.{key}, field.ty) orelse {
-                    try self.delegationError(impl, "the backing field does not implement `Index` for this key");
+                    if (reporting) try self.delegationError(impl, "the backing field does not implement `Index` for this key");
                     return null;
                 };
                 if (choice.supplier == .bound) {
-                    delegate.deferred_trait = trait;
-                    settled = try self.builder.settledAt(@intCast(trait.index()), &.{key}, field.ty, elem, "Elem");
+                    answer.deferred_trait = trait;
+                    answer.settled = try self.builder.settledAt(@intCast(trait.index()), &.{key}, field.ty, elem, "Elem");
                 } else {
                     const selected = choice.declaredImplementation() orelse {
-                        try self.delegationError(impl, "the backing field has no concrete indexing projection");
+                        if (reporting) try self.delegationError(impl, "the backing field has no concrete indexing projection");
                         return null;
                     };
                     const backing = self.implementations[selected.index()];
-                    delegate.backing = try self.expansionOf(backing.decl) orelse return null;
-                    settled = try self.builder.settledBy(backing, elem, choice.impl_args) orelse return null;
-                    delegate.backing_args = try self.gpa.dupe(TypeId, choice.impl_args);
+                    // Copied before `settledBy`, which may settle a member and
+                    // select this implementation again, replacing the slice.
+                    const args = try self.gpa.dupe(TypeId, choice.impl_args);
+                    answer.settled = try self.builder.settledBy(backing, elem, args) orelse {
+                        self.gpa.free(args);
+                        return null;
+                    };
+                    answer.backing = backing;
+                    answer.backing_args = args;
                 }
             },
         }
-        errdefer self.gpa.free(delegate.backing_args);
+        return answer;
+    }
+
+    /// Records the element a field delegation answers `Elem` with, when
+    /// `settleDeclaredAnswers` first needs it. Only a delegation reaching
+    /// itself through its own backing field is reported here;
+    /// `settleDelegation` reports everything else, and records the
+    /// projection, once every declared answer is settled.
+    fn delegatedElement(self: *Checker, impl: node.DeclId) std.mem.Allocator.Error!void {
+        const answer = try self.delegationAnswer(impl, false) orelse {
+            self.decl_returns.set(impl, .poison);
+            return;
+        };
+        self.gpa.free(answer.backing_args);
+        self.decl_returns.set(impl, answer.settled);
+    }
+
+    /// Settle a field delegate in its implementation's generic environment.
+    /// Each declaration is visited once; backing edges are followed recursively.
+    fn settleDelegation(self: *Checker, impl: node.DeclId) std.mem.Allocator.Error!?u32 {
+        if (self.expansion_of_impl.get(impl)) |row| return row;
+        const field_token = self.ast.declDelegation(impl);
+        if (field_token == .none) return null;
+        if (self.delegation_cycles.contains(impl)) return null;
+        if (self.delegation_state.get(impl)) |state| {
+            if (state == .in_progress) try self.delegationError(impl, "a delegated projection reaches itself");
+            return null;
+        }
+        try self.delegation_state.put(self.gpa, impl, .in_progress);
+        defer self.delegation_state.getPtr(impl).?.* = .done;
+        const elem = self.index_elem orelse return null;
+        const answer = try self.delegationAnswer(impl, true) orelse return null;
+        errdefer self.gpa.free(answer.backing_args);
+        // The element read while declared answers were settled is this one:
+        // both read the same final field. Poison where that reading stopped
+        // at [T-AnswerDepth].
+        std.debug.assert(self.decl_returns.get(impl) == .poison or self.decl_returns.get(impl) == answer.settled);
+        var delegate: types_mod.DelegatedProjection = .{
+            .field_name = self.ast.tokenName(field_token),
+            .field = answer.field,
+            .field_type = answer.field_type,
+            .key_type = answer.key,
+            .deferred_trait = answer.deferred_trait,
+            .backing_args = answer.backing_args,
+        };
+        const settled = answer.settled;
+        if (answer.backing) |backing| {
+            delegate.backing = try self.expansionOf(backing.decl) orelse {
+                self.gpa.free(answer.backing_args);
+                return null;
+            };
+        }
         self.decl_returns.set(impl, settled);
         _ = try self.reportUndischarged(self.ast.declName(elem), self.ast.declBounds(elem), .{
             .source = .{ .scope = .{ .module = self.program.moduleOf(elem), .owner = elem } },
@@ -27219,26 +27432,60 @@ const Checker = struct {
         return self.suppliedBy(impl).len == self.ast.declTypeParams(trait).len;
     }
 
-    /// What each implementation settled each declared type to, and whether the
-    /// bound its declaration carries admits that.
+    /// Every alias is read once with callable effects settled, whether or not
+    /// anything names it: a published alias nothing in this program writes
+    /// still answers for the bounds its own written type must meet. A
+    /// retained library's alias is answered from that library's typing, and
+    /// kept here too so tooling reads every alias from one table.
+    fn readAliases(self: *Checker) std.mem.Allocator.Error!void {
+        for (0..self.ast.declCount()) |i| {
+            const d = node.DeclId.at(@intCast(i));
+            if (self.ast.declTag(d) != .alias) continue;
+            try self.alias_types.put(self.gpa, d, try self.aliasedType(d));
+        }
+    }
+
+    /// Reads again the heads and trait arguments `unsettled_heads` lists, now
+    /// that what their defaults name can be settled.
+    fn settleDeferredHeads(self: *Checker, implementations: []types_mod.Implementation) std.mem.Allocator.Error!void {
+        for (self.unsettled_heads.items) |at| {
+            const implementation = &implementations[at];
+            const d = implementation.decl;
+            const args = try self.traitArgumentsOf(d);
+            self.gpa.free(implementation.args);
+            implementation.args = args;
+            implementation.ty = try self.typeOfRefOf(self.program.moduleOf(d), d, self.ast.declHead(d));
+        }
+    }
+
+    /// Every declared part, every type an implementation settles, every
+    /// field delegation's element and every alias, each read once, when it is
+    /// first needed.
     ///
-    /// Read once per pair and recorded where a declaration's written type is,
-    /// because that is the answer every `Self.Item` is read through: worked out
-    /// per settled reference instead, one question would have an answer per use
-    /// of it. The bound is asked here for the same reason -- a settling is
-    /// where a type stands against it, and asking again at each use would ask
-    /// the same question of the same type.
+    /// These answers are written in terms of one another in any direction: a
+    /// part reads a settled type, `v: Counter.Item`; a settled type selects
+    /// an implementation through what another type's parts own,
+    /// `Chooser[Tray].Out`; a delegated element is read from a field. No
+    /// fixed order of whole phases reads every program's dependencies before
+    /// the answers that need them. So each answer is read by one routine
+    /// that records it, and every read of an answer demands it first:
+    /// `readPart` for a part, `AnswerSettling.settle` for a member or a delegation,
+    /// `aliasedType` for an alias, and `AnswerSettling.owned` before a capability
+    /// or implementation is asked of a type, which reads the parts of
+    /// everything the type owns or is applied to. The builder reaches the
+    /// last two through `Builder.demand`. The walk below demands everything
+    /// once, in declaration order, and that order decides nothing.
     ///
-    /// After the pairing is complete, so a settled type written in terms of
-    /// another is read through the same record as any other settled reference.
+    /// A demand reaching an answer still being read is a cycle, reported
+    /// where it closes; see `settledReference`, `aliasedType`,
+    /// `delegationAnswer` and `readPart`. Every other diagnostic is made from
+    /// answers already final.
     ///
-    /// Representation filling and instance refilling precede this check so
-    /// effective capabilities include every owned part and logical storage
-    /// element. Unfilled fields cannot prove a capability bound.
-    ///
-    /// **Bound:** one written type per pair the walk above recorded, and one
-    /// index lookup per bound that pair's declaration wrote.
-    fn settleDeclaredTypes(self: *Checker) std.mem.Allocator.Error!void {
+    /// **Bound:** each part, member, delegation and alias is read once; each
+    /// demand is a table lookup; `AnswerSettling.owned` walks each type once,
+    /// except while it waits on a cycle being read. The work is linear in the
+    /// written types read and the selections they make.
+    fn settleDeclaredAnswers(self: *Checker) std.mem.Allocator.Error!void {
         // What an implementation settles a declared type to is read out of the
         // pool, so every instantiation in it must already hold what its
         // template holds. One minted earlier holds nothing, and a settling
@@ -27246,6 +27493,559 @@ const Checker = struct {
         // case can tell from a right one.
         std.debug.assert(self.builder.refilled);
 
+        var settling: AnswerSettling = .{ .checker = self };
+        defer settling.deinit(self.gpa);
+        for (self.program.modules, 0..) |_, mi| {
+            for (self.program.declsOf(ModuleId.from(mi))) |d| switch (self.ast.declTag(d)) {
+                .struct_, .enum_, .newtype => try settling.readable.put(self.gpa, d, {}),
+                else => {},
+            };
+        }
+        for (self.supplied.items) |pair| {
+            if (!settlesAType(self.ast, pair.member)) continue;
+            try settling.answers.put(self.gpa, pair.member, .unread);
+        }
+        for (self.implementations) |implementation| {
+            if (implementation.isAmbient() or self.ast.declDelegation(implementation.decl) == .none) continue;
+            try settling.answers.put(self.gpa, implementation.decl, .unread);
+        }
+        self.builder.demand = .{ .context = &settling, .settle = AnswerSettling.settleErased, .owned = AnswerSettling.ownedErased };
+        self.builder.capability_watch = &settling.watch;
+        self.settling = &settling;
+        defer {
+            self.builder.demand = null;
+            self.builder.capability_watch = null;
+            self.settling = null;
+        }
+
+        for (self.program.modules, 0..) |_, mi| {
+            for (self.program.declsOf(ModuleId.from(mi))) |d| {
+                if (!settling.readable.contains(d)) continue;
+                for (0..self.partCount(d)) |k| _ = try self.readPart(.{ .decl = d, .index = @intCast(k) });
+            }
+        }
+        for (self.supplied.items) |pair| try settling.settle(pair.member);
+        for (self.implementations) |implementation| {
+            if (implementation.isAmbient() or self.ast.declDelegation(implementation.decl) == .none) continue;
+            try settling.settle(implementation.decl);
+        }
+        try self.readAliases();
+    }
+
+    /// What `settleDeclaredAnswers` has read, and is reading.
+    const AnswerSettling = struct {
+        checker: *Checker,
+        /// Implementation members settling a type, and field delegations.
+        answers: std.AutoHashMapUnmanaged(node.DeclId, enum { unread, reading, settled }) = .empty,
+        /// The declarations whose parts this check reads; a retained
+        /// library's were read with that library.
+        readable: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty,
+        /// Each part read, or being read. An absent part is unread.
+        parts: std.AutoHashMapUnmanaged(DeclaredPart, enum { reading, read }) = .empty,
+        /// Types whose owned and applied declarations have every part read,
+        /// each with the height of the tallest chain its parts rest on.
+        complete: std.AutoHashMapUnmanaged(TypeId, u32) = .empty,
+        /// Types an `owned` walk has open, so a recursive type is walked once.
+        visiting: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
+        /// Types whose capabilities wait on a settled part being read.
+        watch: types_mod.Typing.CapabilityWatch = .{},
+        /// The member demanded while its own written type was being read,
+        /// since `settledReference` last looked.
+        closed: node.DeclId = .none,
+        /// How many members' written types are being read, one inside another.
+        depth: u32 = 0,
+        /// How many cycles among answers have been reported, so a question
+        /// asked in the consequence of one is not reported as another.
+        cycles: u32 = 0,
+        /// What is being read, innermost last, each with the tallest chain it
+        /// has read so far.
+        frames: std.ArrayList(Frame) = .empty,
+        /// The frames of the last cycle `definitionsFrom` found.
+        cycle_frames: std.ArrayList(Frame) = .empty,
+        /// How many of `frames` are links: settled references and aliases.
+        links_open: u32 = 0,
+        /// The height each answer, alias and part rests on, recorded once read.
+        heights: std.AutoHashMapUnmanaged(Read, u32) = .empty,
+        /// Whether [T-AnswerDepth] has been reported: every answer above a
+        /// chain too deep is too deep as well, and one report names it.
+        too_deep: bool = false,
+
+        /// What a frame or a recorded height belongs to.
+        const Read = union(enum) {
+            /// An implementation member settling a type, or a delegation.
+            answer: node.DeclId,
+            alias: node.DeclId,
+            part: DeclaredPart,
+            /// One written settled reference, `Celsius.Reading` or `B.Elem`,
+            /// read anew wherever it is written.
+            reference,
+        };
+        const Frame = struct { reading: Read, tallest: u32 = 0 };
+
+        /// How many settled references and aliases a chain of declared
+        /// answers may pass through.
+        const max_depth: u32 = 1000;
+
+        fn isLink(reading: Read) bool {
+            return reading == .reference or reading == .alias;
+        }
+
+        /// Opens a frame. False, with [T-AnswerDepth] reported, where a link
+        /// would sit deeper than `max_depth`: the caller reads poison and
+        /// nothing it depends on, so the walk never recurses further.
+        fn enter(self: *AnswerSettling, reading: Read) std.mem.Allocator.Error!bool {
+            if (isLink(reading) and self.links_open == max_depth) {
+                try self.reportTooDeep(self.start() orelse reading);
+                if (self.frames.items.len != 0) self.frames.items[self.frames.items.len - 1].tallest = max_depth + 1;
+                return false;
+            }
+            try self.frames.append(self.checker.gpa, .{ .reading = reading });
+            if (isLink(reading)) self.links_open += 1;
+            return true;
+        }
+
+        /// Closes the innermost frame, recording its height: a link adds one
+        /// to what it read, and anything else passes on what it read. A link
+        /// resting on more than `max_depth` links is [T-AnswerDepth].
+        fn leave(self: *AnswerSettling) std.mem.Allocator.Error!void {
+            const frame = self.frames.pop().?;
+            const height = if (isLink(frame.reading)) linked: {
+                self.links_open -= 1;
+                break :linked frame.tallest + 1;
+            } else frame.tallest;
+            if (frame.reading != .reference) try self.heights.put(self.checker.gpa, frame.reading, height);
+            if (height > max_depth) try self.reportTooDeep(self.start() orelse frame.reading);
+            self.raise(height);
+        }
+
+        /// Counts a recorded height in the frame reading it.
+        fn note(self: *AnswerSettling, reading: Read) void {
+            self.raise(self.heights.get(reading) orelse return);
+        }
+
+        fn raise(self: *AnswerSettling, height: u32) void {
+            if (self.frames.items.len == 0) return;
+            const top = &self.frames.items[self.frames.items.len - 1];
+            top.tallest = @max(top.tallest, height);
+        }
+
+        /// The outermost named answer, alias or part being read: where the
+        /// chain now being read starts.
+        fn start(self: *const AnswerSettling) ?Read {
+            for (self.frames.items) |frame| if (frame.reading != .reference) return frame.reading;
+            return null;
+        }
+
+        fn reportTooDeep(self: *AnswerSettling, at: Read) std.mem.Allocator.Error!void {
+            if (self.too_deep) return;
+            self.too_deep = true;
+            self.cycles += 1;
+            const c = self.checker;
+            const named: node.DeclId = switch (at) {
+                .answer, .alias => |d| d,
+                .part => |part| part.decl,
+                .reference => return,
+            };
+            const where = c.answerSpan(named);
+            try c.sink.addErrorFmt(
+                .t_answer_depth,
+                c.ast.fileOf(where.token),
+                where.span,
+                "write a type directly in one of the declarations along the chain",
+                "`{s}` starts a chain of declared answers longer than {d} links",
+                .{ try c.answerName(named), max_depth },
+            );
+        }
+
+        fn deinit(self: *AnswerSettling, gpa: std.mem.Allocator) void {
+            self.answers.deinit(gpa);
+            self.readable.deinit(gpa);
+            self.parts.deinit(gpa);
+            self.complete.deinit(gpa);
+            self.visiting.deinit(gpa);
+            self.watch.watched.deinit(gpa);
+            self.frames.deinit(gpa);
+            self.cycle_frames.deinit(gpa);
+            self.heights.deinit(gpa);
+        }
+
+        /// The associated type definitions being read from `member`'s frame
+        /// to the innermost, which a demand of `member` closes into a cycle.
+        /// Written into `cycle_frames`, which the next call reuses.
+        fn definitionsFrom(self: *AnswerSettling, member: node.DeclId) std.mem.Allocator.Error![]const Frame {
+            self.cycle_frames.clearRetainingCapacity();
+            var open = false;
+            for (self.frames.items) |frame| {
+                if (frame.reading != .answer) continue;
+                if (frame.reading.answer == member) open = true;
+                if (!open or self.checker.ast.declTag(frame.reading.answer) == .impl_) continue;
+                try self.cycle_frames.append(self.checker.gpa, frame);
+            }
+            return self.cycle_frames.items;
+        }
+
+        fn settleErased(context: *anyopaque, member: node.DeclId) std.mem.Allocator.Error!void {
+            const self: *AnswerSettling = @ptrCast(@alignCast(context));
+            try self.settle(member);
+        }
+
+        fn ownedErased(context: *anyopaque, ty: TypeId) std.mem.Allocator.Error!void {
+            const self: *AnswerSettling = @ptrCast(@alignCast(context));
+            try self.owned(ty);
+        }
+
+        /// Settles `member` unless it is settled already. A member demanded
+        /// while its own written type is being read still reads as poison,
+        /// and `closed` records it for `settledReference` to report.
+        fn settle(self: *AnswerSettling, member: node.DeclId) std.mem.Allocator.Error!void {
+            // Members of a retained library are settled with that library.
+            const state = self.answers.getPtr(member) orelse return;
+            switch (state.*) {
+                .settled => return self.note(.{ .answer = member }),
+                .reading => {
+                    // A delegation reaching itself through its backing chain
+                    // is reported by `settleDelegation`.
+                    if (self.checker.ast.declTag(member) != .impl_) self.closed = member;
+                    return;
+                },
+                .unread => {},
+            }
+            // No answer is added while the walk runs, so `state` stays valid
+            // across the read below.
+            const c = self.checker;
+            _ = try self.enter(.{ .answer = member });
+            state.* = .reading;
+            self.depth += 1;
+            defer self.depth -= 1;
+            // An implementation delegating `Index` to a field supplies `Elem`
+            // as itself.
+            if (c.ast.declTag(member) == .impl_)
+                try c.delegatedElement(member)
+            else
+                try c.settleMember(member);
+            state.* = .settled;
+            try self.leave();
+        }
+
+        /// One type an `owned` walk visits: its children, a range of the
+        /// walk's `edges`; the declaration it waits on, if any; and the
+        /// tallest chain its parts rest on.
+        const OwnedVisit = struct { ty: TypeId, first: u32, count: u32, next: u32 = 0, waits: ?node.DeclId = null, height: u32 = 0 };
+
+        /// Reads, before a capability or an implementation is asked of `root`,
+        /// every part of each declaration it owns or is applied to whose type
+        /// waited on a settled answer; every other part already holds its
+        /// type. A type whose capabilities depend on such a part while that
+        /// part is being read is watched, and a question asked of it is the
+        /// cycle `readPart` reports.
+        ///
+        /// A depth-first walk with an explicit stack, so nesting as deep as a
+        /// program writes costs no recursion. Each type is visited once over
+        /// the whole settling, except one that waited on a part then being
+        /// read, which is visited again once asked about again.
+        fn owned(self: *AnswerSettling, root: TypeId) std.mem.Allocator.Error!void {
+            const c = self.checker;
+            const gpa = c.gpa;
+            if (root == .poison or self.visiting.contains(root)) return;
+            if (self.complete.get(root)) |height| return self.raise(height);
+
+            var walk: OwnedWalk = .{};
+            defer walk.deinit(gpa);
+            defer for (walk.visits.items) |visit| {
+                _ = self.visiting.remove(visit.ty);
+            };
+
+            try self.beginVisit(&walk, root);
+            var root_height: u32 = 0;
+            while (walk.open.items.len != 0) {
+                const at = walk.open.items[walk.open.items.len - 1];
+                const visit = &walk.visits.items[at];
+                if (visit.next < visit.count) {
+                    const child: TypeId = @enumFromInt(walk.edges.items[visit.first + visit.next]);
+                    visit.next += 1;
+                    if (child == .poison) continue;
+                    if (walk.at_of.get(child)) |j| {
+                        // Finished below, or open above: a cycle back to an
+                        // open visit contributes nothing, which is the
+                        // recursion a capability assumes of itself.
+                        if (walk.done.contains(j)) absorb(visit, walk.visits.items[j]);
+                        continue;
+                    }
+                    if (self.complete.get(child)) |height| {
+                        visit.height = @max(visit.height, height);
+                        continue;
+                    }
+                    if (self.visiting.contains(child)) continue;
+                    try self.beginVisit(&walk, child);
+                    continue;
+                }
+                _ = walk.open.pop();
+                try walk.done.put(gpa, at, {});
+                const finished = walk.visits.items[at];
+                if (finished.waits) |waiting| {
+                    try self.watch.watched.put(gpa, finished.ty, waiting);
+                } else {
+                    _ = self.watch.watched.remove(finished.ty);
+                    try self.complete.put(gpa, finished.ty, finished.height);
+                }
+                if (walk.open.items.len != 0) {
+                    absorb(&walk.visits.items[walk.open.items[walk.open.items.len - 1]], finished);
+                } else root_height = finished.height;
+            }
+            self.raise(root_height);
+            for (walk.applied.items) |argument| try self.owned(argument);
+        }
+
+        /// What an `owned` walk holds while it runs.
+        const OwnedWalk = struct {
+            visits: std.ArrayList(OwnedVisit) = .empty,
+            edges: std.ArrayList(u32) = .empty,
+            at_of: std.AutoHashMapUnmanaged(TypeId, u32) = .empty,
+            done: std.AutoHashMapUnmanaged(u32, void) = .empty,
+            /// Visits not yet finished, innermost last.
+            open: std.ArrayList(u32) = .empty,
+            /// Type arguments of the instantiations visited.
+            applied: std.ArrayList(TypeId) = .empty,
+
+            fn deinit(self: *OwnedWalk, gpa: std.mem.Allocator) void {
+                self.visits.deinit(gpa);
+                self.edges.deinit(gpa);
+                self.at_of.deinit(gpa);
+                self.done.deinit(gpa);
+                self.open.deinit(gpa);
+                self.applied.deinit(gpa);
+            }
+        };
+
+        fn absorb(into: *OwnedVisit, child: OwnedVisit) void {
+            into.waits = into.waits orelse child.waits;
+            into.height = @max(into.height, child.height);
+        }
+
+        /// Opens a visit of `ty`: reads its declaration's unsettled parts,
+        /// then lists what it owns.
+        fn beginVisit(self: *AnswerSettling, walk: *OwnedWalk, ty: TypeId) std.mem.Allocator.Error!void {
+            const c = self.checker;
+            const gpa = c.gpa;
+            try self.visiting.put(gpa, ty, {});
+            var visit: OwnedVisit = .{ .ty = ty, .first = 0, .count = 0 };
+            if (c.builder.view().declOfType(ty)) |d| if (self.readable.contains(d)) {
+                for (0..c.partCount(d)) |k| {
+                    const part: DeclaredPart = .{ .decl = d, .index = @intCast(k) };
+                    if (!c.unsettled_parts.contains(part)) continue;
+                    // An unsettled part being read now is what this question
+                    // is being asked from: its type depends on the answer.
+                    if (try c.readPart(part) == .reading and visit.waits == null) visit.waits = d;
+                    if (self.heights.get(.{ .part = part })) |height| visit.height = @max(visit.height, height);
+                }
+                if (c.builder.instanceOf(ty) != null) try c.builder.refillInstance(ty);
+            };
+            // Listed after the parts are read: reading one may grow the tables
+            // the children sit in.
+            visit.first = @intCast(walk.edges.items.len);
+            switch (c.builder.get(ty)) {
+                .struct_ => for (0..c.builder.fieldCount(ty)) |k| try walk.edges.append(gpa, @intFromEnum(try c.builder.fieldType(ty, @intCast(k)))),
+                .enum_ => for (0..c.builder.variantCount(ty)) |v| {
+                    for (0..try c.builder.variantFieldCount(ty, @intCast(v))) |f|
+                        try walk.edges.append(gpa, @intFromEnum(try c.builder.variantFieldType(ty, @intCast(v), @intCast(f))));
+                },
+                .newtype => |newtype| try walk.edges.append(gpa, @intFromEnum(newtype.base)),
+                .array => |array| try walk.edges.append(gpa, @intFromEnum(array.element)),
+                else => {},
+            }
+            visit.count = @intCast(walk.edges.items.len - visit.first);
+            // An argument is asked about where a bound names it, which reads
+            // its own capabilities rather than `ty`'s.
+            if (c.builder.instanceOf(ty)) |instance| try walk.applied.appendSlice(gpa, c.builder.argsOf(instance));
+            const at: u32 = @intCast(walk.visits.items.len);
+            try walk.at_of.put(gpa, ty, at);
+            try walk.visits.append(gpa, visit);
+            try walk.open.append(gpa, at);
+        }
+
+        /// Stops watching the types that waited on `decl`'s parts.
+        fn unwatch(self: *AnswerSettling, gpa: std.mem.Allocator, decl: node.DeclId) std.mem.Allocator.Error!void {
+            var waited: std.ArrayList(TypeId) = .empty;
+            defer waited.deinit(gpa);
+            var entries = self.watch.watched.iterator();
+            while (entries.next()) |entry| {
+                if (entry.value_ptr.* == decl) try waited.append(gpa, entry.key_ptr.*);
+            }
+            for (waited.items) |ty| _ = self.watch.watched.remove(ty);
+        }
+    };
+
+    /// One written part of a declared type: a structure's field, a variant's
+    /// payload, counted across the variants in order, or a newtype's base.
+    const DeclaredPart = struct { decl: node.DeclId, index: u32 };
+
+    fn partCount(self: *const Checker, d: node.DeclId) usize {
+        return switch (self.ast.declTag(d)) {
+            .struct_ => self.ast.declFields(d).len,
+            .newtype => 1,
+            .enum_ => count: {
+                var count: usize = 0;
+                for (self.ast.declVariants(d)) |v| count += self.ast.variantFields(v).len;
+                break :count count;
+            },
+            else => 0,
+        };
+    }
+
+    /// Where an enum's payload sits: its variant, and its place among that
+    /// variant's payloads.
+    const PayloadPlace = struct { variant: u32, field: u32 };
+
+    /// Where an enum's payload `index`, counted across its variants, sits.
+    /// Each enum's places are listed once, on first need, so a part is found
+    /// in constant time and an enum of n payloads costs n to list.
+    fn payloadAt(self: *Checker, d: node.DeclId, index: u32) std.mem.Allocator.Error!PayloadPlace {
+        if (self.payload_places.get(d)) |places| return places[index];
+        var places: std.ArrayList(PayloadPlace) = .empty;
+        defer places.deinit(self.gpa);
+        for (self.ast.declVariants(d), 0..) |v, k| {
+            for (0..self.ast.variantFields(v).len) |f| try places.append(self.gpa, .{ .variant = @intCast(k), .field = @intCast(f) });
+        }
+        const listed = try places.toOwnedSlice(self.gpa);
+        errdefer self.gpa.free(listed);
+        try self.payload_places.put(self.gpa, d, listed);
+        return listed[index];
+    }
+
+    fn partRef(self: *Checker, part: DeclaredPart) std.mem.Allocator.Error!node.TypeRef {
+        return switch (self.ast.declTag(part.decl)) {
+            .struct_ => self.ast.declFields(part.decl)[part.index].written,
+            .newtype => self.ast.declReturnRef(part.decl),
+            .enum_ => at: {
+                const at = try self.payloadAt(part.decl, part.index);
+                break :at self.ast.variantFields(self.ast.declVariants(part.decl)[at.variant])[at.field].written;
+            },
+            else => unreachable,
+        };
+    }
+
+    fn setPart(self: *Checker, part: DeclaredPart, ty: TypeId) std.mem.Allocator.Error!void {
+        const t = self.type_of_decl.get(part.decl);
+        switch (self.ast.declTag(part.decl)) {
+            .struct_ => try self.builder.setFieldType(t, part.index, ty),
+            .newtype => try self.builder.setNewtypeBase(t, ty),
+            .enum_ => {
+                const at = try self.payloadAt(part.decl, part.index);
+                try self.builder.setVariantFieldType(t, at.variant, at.field, ty);
+            },
+            else => unreachable,
+        }
+    }
+
+    /// How a declared answer is named in a diagnostic: `Celsius.Reading` for
+    /// an implementation's member, `Board.Elem` for a field delegation, and
+    /// an alias by its own name.
+    fn answerName(self: *Checker, answer: node.DeclId) std.mem.Allocator.Error![]const u8 {
+        const name = self.ast.tokenText(self.ast.declName(answer));
+        return switch (self.ast.declTag(answer)) {
+            .struct_, .enum_, .newtype => name,
+            .impl_ => if (self.rowFor(answer)) |row|
+                try std.fmt.allocPrint(self.sink.arena, "{s}.Elem", .{try self.typeName(row.ty)})
+            else
+                "Elem",
+            .alias => name,
+            else => if (self.impl_of_decl[answer.index()] != impl_of_none)
+                try std.fmt.allocPrint(self.sink.arena, "{s}.{s}", .{ try self.typeName(self.implementations[self.impl_of_decl[answer.index()]].ty), name })
+            else
+                name,
+        };
+    }
+
+    /// Where a declared answer is written: an implementation member's or an
+    /// alias's type, or a field delegation's `via` field.
+    fn answerSpan(self: *const Checker, answer: node.DeclId) struct { token: TokenId, span: Span } {
+        switch (self.ast.declTag(answer)) {
+            .impl_ => {
+                const via = self.ast.declDelegation(answer);
+                return .{ .token = via, .span = self.ast.tokenSpan(via) };
+            },
+            .struct_, .enum_, .newtype => {
+                const name = self.ast.declName(answer);
+                return .{ .token = name, .span = self.ast.tokenSpan(name) };
+            },
+            else => {},
+        }
+        const written = self.ast.declReturnRef(answer);
+        return .{ .token = written.at, .span = self.ast.writtenSpan(written) };
+    }
+
+    const PartRead = enum { read, reading };
+
+    /// Reads one declared part with what settled references name, once.
+    /// `.reading` where the part is the one being read now, which the caller
+    /// is then part of a cycle through.
+    ///
+    /// A question asked, while the part is read, of a type whose capabilities
+    /// wait on an unsettled part still being read is the cycle [T-Bound]
+    /// names: the part depends on that type's capabilities, which depend on
+    /// the part. It is reported here, at the part the question was asked
+    /// from, and the part reads as poison.
+    fn readPart(self: *Checker, part: DeclaredPart) std.mem.Allocator.Error!PartRead {
+        const settling = self.settling.?;
+        if (!settling.readable.contains(part.decl)) return .read;
+        const entry = try settling.parts.getOrPut(self.gpa, part);
+        if (entry.found_existing) return switch (entry.value_ptr.*) {
+            .reading => .reading,
+            .read => read: {
+                settling.note(.{ .part = part });
+                break :read .read;
+            },
+        };
+        entry.value_ptr.* = .reading;
+        _ = try settling.enter(.{ .part = part });
+
+        const saved_module = self.current;
+        const saved_generic = self.generic;
+        defer {
+            self.current = saved_module;
+            self.generic = saved_generic;
+        }
+        // Its own parameters answer while its parts are read: `x: A` in a
+        // generic structure names the parameter, not a module-level type that
+        // happens to share the letter.
+        self.current = self.program.moduleOf(part.decl);
+        self.generic = part.decl;
+
+        const outer = settling.watch.hit;
+        settling.watch.hit = null;
+        const cycles = settling.cycles;
+        const written = try self.partRef(part);
+        var ty = try self.typeOfPart(written);
+        const hit = settling.watch.hit;
+        settling.watch.hit = outer;
+        if (hit) |question| if (settling.cycles == cycles) {
+            settling.cycles += 1;
+            const name = try self.typeName(question.ty);
+            const asked: []const u8 = switch (question.asked) {
+                .discard => try std.fmt.allocPrint(self.sink.arena, "whether `{s}` can be discarded", .{name}),
+                .copy => try std.fmt.allocPrint(self.sink.arena, "whether `{s}` can be copied", .{name}),
+                .capabilities => try std.fmt.allocPrint(self.sink.arena, "`{s}`'s own capabilities", .{name}),
+            };
+            try self.sink.addErrorFmt(
+                .t_bound,
+                self.ast.fileOf(written.at),
+                self.ast.writtenSpan(written),
+                "write the part's type here rather than a settled reference",
+                "`{s}`'s parts depend on {s}",
+                .{ name, asked },
+            );
+            ty = .poison;
+        };
+        try self.setPart(part, ty);
+        try settling.parts.put(self.gpa, part, .read);
+        try settling.leave();
+        if (self.unsettled_parts.contains(part)) try settling.unwatch(self.gpa, part.decl);
+        return .read;
+    }
+
+    /// Reads what one implementation member settles its declared type to,
+    /// in the member's own module and scope.
+    fn settleMember(self: *Checker, member: node.DeclId) std.mem.Allocator.Error!void {
         const outer_module = self.current;
         const outer_generic = self.generic;
         defer {
@@ -27253,164 +28053,62 @@ const Checker = struct {
             self.generic = outer_generic;
         }
 
-        // A definition may read another implementation's settled type, which
-        // is settled first whichever is written first: a definition that reads
-        // a member still waiting waits for it, and is settled again once that
-        // member is. What still waits when nothing more settles reaches itself.
-        //
-        // **Bound:** each pass settles at least one waiting definition or ends
-        // the walk, so a definition is read at most as many times as there are
-        // definitions on the chain of reads ahead of it.
-        var waiting: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty;
-        defer waiting.deinit(self.gpa);
-        var reads: std.AutoHashMapUnmanaged(node.DeclId, node.DeclId) = .empty;
-        defer reads.deinit(self.gpa);
+        const written = self.ast.declReturnRef(member);
+
+        // A definition reads what another implementation settled, never
+        // another definition of its own implementation: `type Item =
+        // Self.Other` is refused rather than read.
+        if (firstSelfSettledRef(self.ast, written)) |found| {
+            self.decl_returns.set(member, .poison);
+            if (self.refusedBefore(found.name)) return;
+            try self.noteRefused(found.name);
+            try self.sink.addErrorFmt(
+                .t_impl,
+                self.ast.fileOf(found.at),
+                self.ast.writtenSpan(found),
+                "write the type itself",
+                "a settled type is not written as a settled reference",
+                .{},
+            );
+            return;
+        }
+
+        self.current = self.program.moduleOf(member);
+        self.generic = member;
+        self.decl_returns.set(member, try self.typeOfRefOf(self.current, member, written));
+    }
+
+    /// Whether the bound each declared type carries admits what its
+    /// implementation settled it to.
+    ///
+    /// Asked once per settling, because a settling is where a type stands
+    /// against the bound, and asking again at each use would ask the same
+    /// question of the same type. At the arguments the declaration wrote, read
+    /// in the scope that wrote them: nothing open can stand there, so there is
+    /// nothing to substitute and the reading is the same one recorded on every
+    /// settled reference to this name.
+    ///
+    /// After representation filling and instance refilling, so effective
+    /// capabilities include every owned part and logical storage element.
+    /// Unfilled fields cannot prove a capability bound.
+    ///
+    /// **Bound:** one index lookup per bound each recorded pair's declaration
+    /// wrote.
+    fn dischargeSettledBounds(self: *Checker) std.mem.Allocator.Error!void {
         for (self.supplied.items) |pair| {
-            if (settlesAType(self.ast, pair.member)) try waiting.put(self.gpa, pair.member, {});
-        }
-        self.builder.unsettled_members = &waiting;
-        defer self.builder.unsettled_members = null;
-        var settled_any = true;
-        while (settled_any and waiting.count() != 0) {
-            settled_any = false;
-            for (self.supplied.items) |pair| {
-                if (!waiting.contains(pair.member)) continue;
-                self.builder.unsettled_read = .none;
-                const diagnostics_start = self.sink.items().len;
-                const errors_before = self.sink.error_count;
-                const warnings_before = self.sink.warning_count;
-                try self.settleDeclaredType(pair);
-                const read = self.builder.unsettled_read;
-                if (read != .none and read != pair.member) {
-                    // What it reported while reading a type that does not
-                    // exist yet, it says again when it is read once more.
-                    self.sink.list.shrinkRetainingCapacity(diagnostics_start);
-                    self.sink.error_count = errors_before;
-                    self.sink.warning_count = warnings_before;
-                    try reads.put(self.gpa, pair.member, read);
-                    continue;
-                }
-                _ = waiting.remove(pair.member);
-                _ = reads.remove(pair.member);
-                if (read == pair.member) {
-                    self.decl_returns.set(pair.member, .poison);
-                    try self.reportDefinitionCycle(pair.member, &reads);
-                }
-                settled_any = true;
-            }
-        }
-        // Every definition still waiting reads one that reaches itself; each
-        // cycle is reported once, at its first definition, and a definition
-        // that only reads into one is that report's consequence.
-        var reported: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty;
-        defer reported.deinit(self.gpa);
-        for (self.supplied.items) |pair| {
-            if (!waiting.contains(pair.member)) continue;
-            self.decl_returns.set(pair.member, .poison);
-            var at = pair.member;
-            var steps: usize = 0;
-            while (steps <= reads.count()) : (steps += 1) at = reads.get(at) orelse break;
-            if (reported.contains(at)) continue;
-            // Reported at the definition on the cycle written first.
-            var first = at;
-            var step = at;
-            while (true) {
-                try reported.put(self.gpa, step, {});
-                if (step.index() < first.index()) first = step;
-                step = reads.get(step) orelse break;
-                if (step == at) break;
-            }
-            try self.reportDefinitionCycle(first, &reads);
-        }
-    }
-
-    /// Reports the associated type definitions that read one another from
-    /// `first` back to it, each named as `Type.Name`, at `first`'s written
-    /// type.
-    fn reportDefinitionCycle(self: *Checker, first: node.DeclId, reads: *const std.AutoHashMapUnmanaged(node.DeclId, node.DeclId)) std.mem.Allocator.Error!void {
-        var chain: std.ArrayList(u8) = .empty;
-        defer chain.deinit(self.gpa);
-        var step = first;
-        var count: usize = 0;
-        while (true) : (count += 1) {
-            const next = reads.get(step) orelse first;
-            try chain.print(self.gpa, "{s}`{s}` is `{s}`", .{
-                if (count == 0) "" else ", ",
-                try self.definitionName(step),
-                try spellWrittenOwned(self.sink.arena, self.ast, self.ast.declReturnRef(step)),
-            });
-            step = next;
-            if (step == first or count > reads.count()) break;
-        }
-        const written = self.ast.declReturnRef(first);
-        try self.sink.addErrorFmt(
-            .t_impl,
-            self.ast.fileOf(written.at),
-            self.ast.wholeWrittenSpan(written),
-            "define it as a type that does not read back to itself",
-            "this associated type is defined through itself: {s}",
-            .{chain.items},
-        );
-    }
-
-    /// An implementation's associated type definition as a program reads
-    /// it, `Ping.Dual`: the implementation's type, then the name.
-    fn definitionName(self: *Checker, member: node.DeclId) std.mem.Allocator.Error![]const u8 {
-        const name = self.ast.tokenText(self.ast.declName(member));
-        const row = self.enclosingRow(member) orelse return name;
-        return std.fmt.allocPrint(self.sink.arena, "{s}.{s}", .{ try self.typeName(row.ty), name });
-    }
-
-    /// Settles one implementation's associated type definition, and checks
-    /// it against the bound its declaration carries.
-    fn settleDeclaredType(self: *Checker, pair: types_mod.Supplied) std.mem.Allocator.Error!void {
-        {
             const member = pair.member;
-            const written = self.ast.declReturnRef(member);
+            if (!settlesAType(self.ast, member)) continue;
+            const settled = self.decl_returns.get(member);
+            if (settled == .poison) continue;
 
-            // A settled reference is read through what an implementation
-            // settled, so one written here asks the question this line answers.
-            // Refused rather than resolved: settling them in some order would
-            // make what a type is depend on which of the trait's declarations
-            // came first, and a chain the order ran backwards would settle to
-            // nothing at all -- silently, because there is nothing left to
-            // report it against.
-            if (firstSelfSettledRef(self.ast, written)) |found| {
-                self.decl_returns.set(pair.member, .poison);
-                try self.sink.addErrorFmt(
-                    .t_impl,
-                    self.ast.fileOf(found.at),
-                    self.ast.writtenSpan(found),
-                    "write the type itself",
-                    "a settled type is not written as a settled reference",
-                    .{},
-                );
-                return;
-            }
-
-            self.current = self.program.moduleOf(member);
-            self.generic = member;
-            const settled = try self.typeOfRefOf(self.current, member, written);
-            if (self.builder.unsettled_read != .none) return;
-            self.decl_returns.set(pair.member, settled);
-            if (settled == .poison) return;
-
-            // The bound the declaration carries, discharged here because here
-            // is where a type stands against it: settling is what answers the
-            // trait, and every `Self.Item` below reads that answer rather than
-            // asking the question again per use.
-            //
-            // At the arguments the declaration wrote, read in the scope that
-            // wrote them. Nothing open can stand there, so there is nothing to
-            // substitute and the reading is the same one recorded on every
-            // settled reference to this name.
             const declared = pair.sig;
             const bounds = self.ast.declBounds(declared);
-            if (bounds.len == 0) return;
+            if (bounds.len == 0) continue;
 
             // What is underlined is the type as it was written. An array
             // writes no head, so what stands in for it there is the settling
             // declaration's own name -- the one token every settled type has.
+            const written = self.ast.declReturnRef(member);
             const wrote_a_head = written.name != TokenId.none;
             const at = if (wrote_a_head) written.name else self.ast.declName(member);
             const span = if (wrote_a_head)

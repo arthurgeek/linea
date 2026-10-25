@@ -1,0 +1,47 @@
+// `Tray.held` is a `Board.Elem`, the linear `Ticket`, so `Chooser[Tray]` does
+// not implement `Pick` whether or not a part reads `Mirror.Item`.
+trait Counter {
+    type Item
+}
+
+trait Pick {
+    type Out
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Tray {
+    held: Board.Elem,
+}
+
+struct Board {
+    values: [Ticket; 2],
+}
+
+impl Index[UInt64] for Board via values
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+struct Mirror {}
+
+impl Counter for Mirror {
+    type Item = Chooser[Tray].Out
+}
+
+struct Late {
+    x: Mirror.Item,
+}
+
+fn main() -> UInt8 {
+    let late = Late { x = 4 }
+    late.x
+}

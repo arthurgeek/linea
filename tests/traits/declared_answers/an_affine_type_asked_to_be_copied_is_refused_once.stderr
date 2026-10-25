@@ -1,0 +1,5 @@
+error[T-Impl]: `Chooser[Tray]` has no available associated type `Out`
+  --> tests/traits/declared_answers/an_affine_type_asked_to_be_copied_is_refused_once.lin:16:11
+   |
+16 |     held: Chooser[Tray].Out,
+   |           ^^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type

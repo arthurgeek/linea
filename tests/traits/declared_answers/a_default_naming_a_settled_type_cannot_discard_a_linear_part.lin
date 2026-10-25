@@ -1,0 +1,44 @@
+// `Holder`'s parameter defaults to `Chooser[Tray].Out`, which exists only if
+// `Tray` can be discarded, and `Tray` holds a `Holder`: `Tray`'s parts depend
+// on that answer, so the implementation is never applied and no `Ticket` is
+// discarded.
+trait Pick {
+    type Out
+
+    fn toss(sink self: Self) -> UInt8
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = Ticket
+
+    fn toss(sink _self: Self) -> UInt8 {
+        7
+    }
+}
+
+struct Holder[T = Chooser[Tray].Out] {
+    v: T,
+}
+
+struct Tray {
+    held: Holder,
+}
+
+fn toss_it[P: Pick](sink p: P) -> UInt8 {
+    p.toss()
+}
+
+fn main() -> UInt8 {
+    let tray = Tray { held = .{ v = .{ number = 9 } } }
+    let c: Chooser[Tray] = .{ t = tray }
+    toss_it(c)
+}

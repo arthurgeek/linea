@@ -1,0 +1,5 @@
+error[T-Bound]: `Tray`'s parts depend on whether `Tray` can be discarded
+  --> tests/traits/declared_answers/an_array_of_a_defaulted_holder_is_refused.lin:25:11
+   |
+25 |     held: [Holder; 2],
+   |           ^^^^^^^^^^^ write the part's type here rather than a settled reference

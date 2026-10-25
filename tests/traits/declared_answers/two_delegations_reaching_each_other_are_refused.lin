@@ -1,0 +1,19 @@
+// `A`'s element is `B`'s, and `B`'s is `A`'s, so neither is defined. The cycle
+// is reported once.
+struct A {
+    values: [B.Elem; 2],
+}
+
+impl Index[UInt64] for A via values
+
+struct B {
+    values: [A.Elem; 2],
+}
+
+impl Index[UInt64] for B via values
+
+fn main() -> UInt8 {
+    let board = B { values = [1, 2] }
+    let value: UInt8 = board[0]
+    value
+}

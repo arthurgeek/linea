@@ -1,0 +1,5 @@
+error[T-Refine]: 0..=300 reaches outside `UInt8`, which `Small` refines
+ --> tests/traits/declared_answers/a_newtype_refining_a_settled_type_is_held_to_it.lin:6:6
+  |
+6 | type Small = Desk.Item where it in 0..=300
+  |      ^^^^^ narrow the range to what the base can hold

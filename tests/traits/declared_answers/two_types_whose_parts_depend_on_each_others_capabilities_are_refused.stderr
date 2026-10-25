@@ -1,0 +1,5 @@
+error[T-Bound]: `Tray`'s parts depend on whether `Tray` can be discarded
+  --> tests/traits/declared_answers/two_types_whose_parts_depend_on_each_others_capabilities_are_refused.lin:20:11
+   |
+20 |     part: Chooser[Tray].Out,
+   |           ^^^^^^^^^^^^^^^^^ write the part's type here rather than a settled reference

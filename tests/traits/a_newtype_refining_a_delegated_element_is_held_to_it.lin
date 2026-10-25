@@ -1,0 +1,14 @@
+// `Board.Elem` is `UInt8`, so a clause reaching 300 lies outside it.
+type Wide = Board.Elem where it in 0..=300
+
+struct Board {
+    values: [UInt8; 2],
+}
+
+impl Index[UInt64] for Board via values
+
+fn main() -> UInt8 {
+    let board = Board { values = [7, 9] }
+    let Wide(n) = Wide(5)
+    board[1] + n
+}

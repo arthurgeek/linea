@@ -1,0 +1,5 @@
+error[T-Impl]: this associated type is defined through itself: `Mirror.Reading` is `Option[Degrees]`
+  --> tests/traits/declared_answers/a_settled_type_leading_back_through_an_alias_is_refused.lin:14:20
+   |
+14 |     type Reading = Option[Degrees]
+   |                    ^^^^^^^^^^^^^^^ define it as a type that does not read back to itself

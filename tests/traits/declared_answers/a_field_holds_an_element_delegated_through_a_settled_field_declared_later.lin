@@ -1,0 +1,38 @@
+// `Cell` reads `Board.Elem` first; `Board` delegates to `inner`, a
+// `Desk.Item`, which is `Inner`, which delegates to an array of `UInt16`.
+trait Counter {
+    type Item
+}
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = Inner
+}
+
+struct Cell {
+    value: Board.Elem,
+    tag: UInt8,
+}
+
+struct Board {
+    inner: Desk.Item,
+}
+
+struct Inner {
+    values: [UInt16; 2],
+}
+
+impl Index[UInt64] for Inner via values
+
+impl Index[UInt64] for Board via inner
+
+fn main() -> UInt8 {
+    let board = Board { inner = Inner { values = [7, 900] } }
+    let cell = Cell { value = board[1], tag = 3 }
+    if cell.value == 900 {
+        cell.tag
+    } else {
+        0
+    }
+}

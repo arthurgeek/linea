@@ -1,0 +1,22 @@
+// `Item` is written as `Self.Other`, which the implementation does not allow;
+// `Holder` reading `Desk.Item` adds no second report.
+trait Counter {
+    type Item
+    type Other
+}
+
+struct Holder {
+    v: Desk.Item,
+}
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = Self.Other
+    type Other = UInt8
+}
+
+fn main() -> UInt8 {
+    let holder = Holder { v = 1 }
+    holder.v
+}

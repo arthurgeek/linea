@@ -1,0 +1,38 @@
+// `Mirror.Reading` is the alias `Pair`, which reads `Celsius.Reading` from the
+// implementation declared below it, so `Sample.reading` is a
+// `Two[UInt16, UInt8]`.
+trait Sensor {
+    type Reading
+}
+
+struct Mirror {}
+
+struct Celsius {}
+
+impl Sensor for Mirror {
+    type Reading = Pair
+}
+
+alias Pair = Two[Celsius.Reading, UInt8]
+
+struct Two[A, B] {
+    a: A,
+    b: B,
+}
+
+impl Sensor for Celsius {
+    type Reading = UInt16
+}
+
+struct Sample {
+    reading: Mirror.Reading,
+}
+
+fn main() -> UInt8 {
+    let sample = Sample { reading = .{ a = 300, b = 4 } }
+    if sample.reading.a == 300 {
+        sample.reading.b
+    } else {
+        1
+    }
+}

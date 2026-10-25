@@ -1,0 +1,32 @@
+// `Board` delegates `Index` to `values`, an array of `Desk.Item`, so
+// `Board.Elem` is `UInt16` even though `Cell` is declared before `Board`.
+struct Cell {
+    value: Board.Elem,
+    tag: UInt8,
+}
+
+trait Counter {
+    type Item
+}
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = UInt16
+}
+
+struct Board {
+    values: [Desk.Item; 2],
+}
+
+impl Index[UInt64] for Board via values
+
+fn main() -> UInt8 {
+    let board = Board { values = [7, 900] }
+    let cell = Cell { value = board[1], tag = 3 }
+    if cell.value == 900 {
+        cell.tag
+    } else {
+        0
+    }
+}

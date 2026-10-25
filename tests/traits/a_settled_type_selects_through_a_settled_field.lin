@@ -1,0 +1,43 @@
+// `Tray.held` is a `Desk.Item`, the linear `Ticket`, so `Tray` cannot be
+// discarded and `Chooser[Tray]` does not implement `Pick`.
+trait Counter {
+    type Item
+}
+
+trait Pick {
+    type Out
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = Ticket
+}
+
+struct Tray {
+    held: Desk.Item,
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+struct Mirror {}
+
+impl Counter for Mirror {
+    type Item = Chooser[Tray].Out
+}
+
+fn main() -> UInt8 {
+    let item: Mirror.Item = 4
+    item
+}

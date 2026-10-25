@@ -1,0 +1,29 @@
+// `Tray` derives `Equatable`, so `Chooser[Tray]` implements `Pick` whatever
+// `Tray` holds, and `held` is a `UInt8`. The derive then requires `held` to be
+// `Equatable`, which a `UInt8` is.
+trait Pick {
+    type Out
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Equatable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+@derive(Equatable)
+struct Tray {
+    held: Chooser[Tray].Out,
+}
+
+fn main() -> UInt8 {
+    let a = Tray { held = 3 }
+    let b = Tray { held = 3 }
+    if a == b {
+        1
+    } else {
+        0
+    }
+}

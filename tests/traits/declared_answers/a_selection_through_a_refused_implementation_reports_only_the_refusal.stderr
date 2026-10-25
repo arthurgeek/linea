@@ -1,0 +1,5 @@
+error[T-Impl]: an implementation's head is the constructor applied to its own parameters
+  --> tests/traits/declared_answers/a_selection_through_a_refused_implementation_reports_only_the_refusal.lin:19:29
+   |
+19 | impl[T: Equatable] Pick for Picker[Wrap[T]] {
+   |                             ^^^^^^ receiver arguments are distinct bare parameters in declaration order

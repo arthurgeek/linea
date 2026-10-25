@@ -1,0 +1,5 @@
+error[T-Bound]: `Tray`'s parts depend on whether `Tray` can be discarded
+  --> tests/traits/declared_answers/a_default_naming_a_delegated_element_that_depends_on_its_holder_is_refused.lin:20:11
+   |
+20 |     held: Holder,
+   |           ^^^^^^ write the part's type here rather than a settled reference

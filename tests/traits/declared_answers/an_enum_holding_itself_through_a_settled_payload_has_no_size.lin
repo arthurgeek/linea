@@ -1,0 +1,20 @@
+// `Box.Iter` is `Tree`, so the `Node` variant holds two `Tree`s inline and a
+// `Tree` has no size.
+trait Seq {
+    type Iter
+}
+
+struct Box {}
+
+impl Seq for Box {
+    type Iter = Tree
+}
+
+enum Tree {
+    Leaf(UInt8),
+    Node(Box.Iter, Box.Iter),
+}
+
+fn main() -> UInt8 {
+    0
+}

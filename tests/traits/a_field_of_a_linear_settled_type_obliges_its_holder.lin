@@ -1,0 +1,25 @@
+// `Desk.Item` is the linear `Ticket`, so a `Tray` holding one must be settled
+// and cannot be discarded.
+trait Counter {
+    type Item
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = Ticket
+}
+
+struct Tray {
+    held: Desk.Item,
+}
+
+fn main() -> UInt8 {
+    let _tray = Tray { held = .{ number = 4 } }
+    0
+}

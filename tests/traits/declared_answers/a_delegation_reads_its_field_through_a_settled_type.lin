@@ -1,0 +1,29 @@
+// `Board` delegates to `inner`, a `Desk.Item`, which is `Inner`, which
+// delegates to an array of `UInt16`: `board[1]` is a `UInt16`, not the
+// `UInt8` `main` returns.
+trait Counter {
+    type Item
+}
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = Inner
+}
+
+struct Board {
+    inner: Desk.Item,
+}
+
+struct Inner {
+    values: [UInt16; 2],
+}
+
+impl Index[UInt64] for Inner via values
+
+impl Index[UInt64] for Board via inner
+
+fn main() -> UInt8 {
+    let board = Board { inner = Inner { values = [7, 3] } }
+    board[1]
+}

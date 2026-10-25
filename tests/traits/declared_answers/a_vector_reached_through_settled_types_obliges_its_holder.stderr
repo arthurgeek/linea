@@ -1,0 +1,9 @@
+error[O-Leak]: `top` (a linear `Top`) is still owned when this path leaves
+  --> tests/traits/declared_answers/a_vector_reached_through_settled_types_obliges_its_holder.lin:30:9
+   |
+30 |     let top = Top { h = Holder[A] { tag = 6, x = .None } }
+   |         ^^^ never settled on the path that reaches the end of this block
+32 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

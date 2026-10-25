@@ -1,0 +1,9 @@
+error[O-Leak]: `node` (a linear `Node`) is still owned when this path leaves
+  --> tests/traits/declared_answers/a_vector_of_a_settled_type_obliges_its_holder.lin:19:9
+   |
+19 |     let node = Node { value = 3, kids = Vec.new() }
+   |         ^^^^ never settled on the path that reaches the end of this block
+21 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

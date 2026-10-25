@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: Meters contains itself
+  --> tests/traits/declared_answers/a_newtype_over_its_own_settled_type_has_no_size.lin:13:6
+   |
+13 | type Meters = Box.Iter
+   |      ^^^^^^ a value of this type would have to hold one, so it has no size

@@ -1,0 +1,22 @@
+// `Board` delegates `Index` to its array, so `Board.Elem` is the array's
+// element, `UInt16`, and `Cell.value` holds one.
+struct Board {
+    values: [UInt16; 2],
+}
+
+impl Index[UInt64] for Board via values
+
+struct Cell {
+    value: Board.Elem,
+    tag: UInt8,
+}
+
+fn main() -> UInt8 {
+    let board = Board { values = [7, 900] }
+    let cell = Cell { value = board[1], tag = 3 }
+    if cell.value == 900 {
+        cell.tag
+    } else {
+        0
+    }
+}

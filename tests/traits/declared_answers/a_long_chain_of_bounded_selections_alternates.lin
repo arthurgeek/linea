@@ -1,0 +1,344 @@
+// Each `Holder[Tk+1].Item` is the linear `Ticket` only when `Tk+1` can be
+// discarded, down a chain of eighty types. `T80` can, so `T79` holds a
+// `Ticket`, so `Holder[T79]` has no `Item`, so `T78` holds poison and can be
+// discarded, and so on: every other link is refused, in either order.
+trait Counter {
+    type Item
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Holder[T] {
+    t: T,
+}
+
+impl[T: Discardable] Counter for Holder[T] {
+    type Item = Ticket
+}
+
+struct T1 {
+    f: Holder[T2].Item,
+}
+
+struct T2 {
+    f: Holder[T3].Item,
+}
+
+struct T3 {
+    f: Holder[T4].Item,
+}
+
+struct T4 {
+    f: Holder[T5].Item,
+}
+
+struct T5 {
+    f: Holder[T6].Item,
+}
+
+struct T6 {
+    f: Holder[T7].Item,
+}
+
+struct T7 {
+    f: Holder[T8].Item,
+}
+
+struct T8 {
+    f: Holder[T9].Item,
+}
+
+struct T9 {
+    f: Holder[T10].Item,
+}
+
+struct T10 {
+    f: Holder[T11].Item,
+}
+
+struct T11 {
+    f: Holder[T12].Item,
+}
+
+struct T12 {
+    f: Holder[T13].Item,
+}
+
+struct T13 {
+    f: Holder[T14].Item,
+}
+
+struct T14 {
+    f: Holder[T15].Item,
+}
+
+struct T15 {
+    f: Holder[T16].Item,
+}
+
+struct T16 {
+    f: Holder[T17].Item,
+}
+
+struct T17 {
+    f: Holder[T18].Item,
+}
+
+struct T18 {
+    f: Holder[T19].Item,
+}
+
+struct T19 {
+    f: Holder[T20].Item,
+}
+
+struct T20 {
+    f: Holder[T21].Item,
+}
+
+struct T21 {
+    f: Holder[T22].Item,
+}
+
+struct T22 {
+    f: Holder[T23].Item,
+}
+
+struct T23 {
+    f: Holder[T24].Item,
+}
+
+struct T24 {
+    f: Holder[T25].Item,
+}
+
+struct T25 {
+    f: Holder[T26].Item,
+}
+
+struct T26 {
+    f: Holder[T27].Item,
+}
+
+struct T27 {
+    f: Holder[T28].Item,
+}
+
+struct T28 {
+    f: Holder[T29].Item,
+}
+
+struct T29 {
+    f: Holder[T30].Item,
+}
+
+struct T30 {
+    f: Holder[T31].Item,
+}
+
+struct T31 {
+    f: Holder[T32].Item,
+}
+
+struct T32 {
+    f: Holder[T33].Item,
+}
+
+struct T33 {
+    f: Holder[T34].Item,
+}
+
+struct T34 {
+    f: Holder[T35].Item,
+}
+
+struct T35 {
+    f: Holder[T36].Item,
+}
+
+struct T36 {
+    f: Holder[T37].Item,
+}
+
+struct T37 {
+    f: Holder[T38].Item,
+}
+
+struct T38 {
+    f: Holder[T39].Item,
+}
+
+struct T39 {
+    f: Holder[T40].Item,
+}
+
+struct T40 {
+    f: Holder[T41].Item,
+}
+
+struct T41 {
+    f: Holder[T42].Item,
+}
+
+struct T42 {
+    f: Holder[T43].Item,
+}
+
+struct T43 {
+    f: Holder[T44].Item,
+}
+
+struct T44 {
+    f: Holder[T45].Item,
+}
+
+struct T45 {
+    f: Holder[T46].Item,
+}
+
+struct T46 {
+    f: Holder[T47].Item,
+}
+
+struct T47 {
+    f: Holder[T48].Item,
+}
+
+struct T48 {
+    f: Holder[T49].Item,
+}
+
+struct T49 {
+    f: Holder[T50].Item,
+}
+
+struct T50 {
+    f: Holder[T51].Item,
+}
+
+struct T51 {
+    f: Holder[T52].Item,
+}
+
+struct T52 {
+    f: Holder[T53].Item,
+}
+
+struct T53 {
+    f: Holder[T54].Item,
+}
+
+struct T54 {
+    f: Holder[T55].Item,
+}
+
+struct T55 {
+    f: Holder[T56].Item,
+}
+
+struct T56 {
+    f: Holder[T57].Item,
+}
+
+struct T57 {
+    f: Holder[T58].Item,
+}
+
+struct T58 {
+    f: Holder[T59].Item,
+}
+
+struct T59 {
+    f: Holder[T60].Item,
+}
+
+struct T60 {
+    f: Holder[T61].Item,
+}
+
+struct T61 {
+    f: Holder[T62].Item,
+}
+
+struct T62 {
+    f: Holder[T63].Item,
+}
+
+struct T63 {
+    f: Holder[T64].Item,
+}
+
+struct T64 {
+    f: Holder[T65].Item,
+}
+
+struct T65 {
+    f: Holder[T66].Item,
+}
+
+struct T66 {
+    f: Holder[T67].Item,
+}
+
+struct T67 {
+    f: Holder[T68].Item,
+}
+
+struct T68 {
+    f: Holder[T69].Item,
+}
+
+struct T69 {
+    f: Holder[T70].Item,
+}
+
+struct T70 {
+    f: Holder[T71].Item,
+}
+
+struct T71 {
+    f: Holder[T72].Item,
+}
+
+struct T72 {
+    f: Holder[T73].Item,
+}
+
+struct T73 {
+    f: Holder[T74].Item,
+}
+
+struct T74 {
+    f: Holder[T75].Item,
+}
+
+struct T75 {
+    f: Holder[T76].Item,
+}
+
+struct T76 {
+    f: Holder[T77].Item,
+}
+
+struct T77 {
+    f: Holder[T78].Item,
+}
+
+struct T78 {
+    f: Holder[T79].Item,
+}
+
+struct T79 {
+    f: Holder[T80].Item,
+}
+
+struct T80 {
+    f: UInt8,
+}
+
+fn main() -> UInt8 {
+    0
+}

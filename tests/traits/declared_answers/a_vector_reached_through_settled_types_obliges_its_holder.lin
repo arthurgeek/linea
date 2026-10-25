@@ -1,0 +1,32 @@
+// `A.Reading` is `Holder[A]`, which reaches itself only through a `Vec`, so it
+// has a size; the `Vec` must be released, so a `Top` holding one must be
+// settled before the block ends.
+trait Sensor {
+    type Reading
+}
+
+struct Holder[T: Sensor] {
+    tag: UInt8,
+    x: Option[Vec[T.Reading]],
+}
+
+struct A {}
+
+struct B {}
+
+impl Sensor for A {
+    type Reading = B.Reading
+}
+
+impl Sensor for B {
+    type Reading = Holder[A]
+}
+
+struct Top {
+    h: A.Reading,
+}
+
+fn main() -> UInt8 {
+    let top = Top { h = Holder[A] { tag = 6, x = .None } }
+    top.h.tag
+}

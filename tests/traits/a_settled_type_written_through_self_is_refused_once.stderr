@@ -1,0 +1,5 @@
+error[T-Impl]: a settled type is not written as a settled reference
+  --> tests/traits/a_settled_type_written_through_self_is_refused_once.lin:15:17
+   |
+15 |     type Item = Self.Other
+   |                 ^^^^^^^^^^ write the type itself

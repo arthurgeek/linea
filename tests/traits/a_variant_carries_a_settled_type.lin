@@ -1,0 +1,35 @@
+import std.io
+
+// `Measured` carries a `Meter.Count`, which the implementation of `Gauge` for
+// `Meter` settles to `UInt64`.
+trait Gauge {
+    type Count
+}
+
+struct Meter {}
+
+impl Gauge for Meter {
+    type Count = UInt64
+}
+
+enum Event {
+    Measured(Meter.Count),
+    Idle,
+}
+
+fn total(sink events: [Event; 3]) -> UInt64 {
+    var sum: UInt64 = 0
+    for event in events {
+        match event {
+            Measured(count) => sum = sum + count,
+            Idle => {},
+        }
+    }
+    sum
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let events: [Event; 3] = [.Measured(4000000000), .Idle, .Measured(7)]
+    io.println("total {total(events)}")?
+    return .Ok(0)
+}

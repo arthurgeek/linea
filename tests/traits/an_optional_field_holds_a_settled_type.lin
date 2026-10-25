@@ -1,0 +1,33 @@
+import std.io
+
+// `Option[Meter.Count]` is an `Option[UInt64]`, wide enough for a count no
+// byte could hold.
+trait Gauge {
+    type Count
+}
+
+struct Meter {}
+
+impl Gauge for Meter {
+    type Count = UInt64
+}
+
+struct Dial {
+    last: Option[Meter.Count],
+    station: UInt8,
+}
+
+fn shown(dial: Dial) -> UInt64 {
+    match read dial.last {
+        Some(count) => count,
+        None => 0,
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let taken = Dial { last = .Some(5000000000), station = 2 }
+    let blank = Dial { last = .None, station = 9 }
+    io.println("read {shown(taken)} at {taken.station}")?
+    io.println("blank {shown(blank)} at {blank.station}")?
+    return .Ok(0)
+}

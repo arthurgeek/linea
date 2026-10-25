@@ -1,0 +1,73 @@
+// Each `Mk.Item` is `Chooser[Tk+1].Out`, a linear `Ticket` only when `Tk+1`
+// can be discarded. `T4` can, so `T3` holds a `Ticket`, so `Chooser[T3]` has
+// no `Out`.
+trait Pick {
+    type Out
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = Ticket
+}
+
+trait Counter1 {
+    type Item
+}
+
+struct T1 {
+    f: M1.Item,
+}
+
+struct M1 {}
+
+impl Counter1 for M1 {
+    type Item = Chooser[T2].Out
+}
+
+trait Counter2 {
+    type Item
+}
+
+struct T2 {
+    f: M2.Item,
+}
+
+struct M2 {}
+
+impl Counter2 for M2 {
+    type Item = Chooser[T3].Out
+}
+
+trait Counter3 {
+    type Item
+}
+
+struct T3 {
+    f: M3.Item,
+}
+
+struct M3 {}
+
+impl Counter3 for M3 {
+    type Item = Chooser[T4].Out
+}
+
+struct T4 {
+    f: UInt8,
+}
+
+fn _hold(_t: T1) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

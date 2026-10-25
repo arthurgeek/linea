@@ -1,0 +1,32 @@
+// `Tray.held` is `Desk.Item`, which is `Chooser[Tray].Out`, which exists only
+// if `Tray` can be discarded.
+trait Pick {
+    type Out
+}
+
+trait Counter {
+    type Item
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = Chooser[Tray].Out
+}
+
+struct Tray {
+    held: Desk.Item,
+}
+
+fn main() -> UInt8 {
+    let tray = Tray { held = 4 }
+    tray.held
+}

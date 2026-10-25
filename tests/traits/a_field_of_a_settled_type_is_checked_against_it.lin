@@ -1,0 +1,19 @@
+// `Celsius.Reading` is `UInt8`, so a `Bool` cannot initialise the field.
+trait Sensor {
+    type Reading
+}
+
+struct Celsius {}
+
+impl Sensor for Celsius {
+    type Reading = UInt8
+}
+
+struct Sample {
+    reading: Celsius.Reading,
+}
+
+fn main() -> UInt8 {
+    let sample = Sample { reading = true }
+    sample.reading
+}

@@ -1,0 +1,33 @@
+// `Mirror.Reading` reads the aliases `Small` and `Wide`, which a part of
+// `Sample` also reads; an alias read twice is not one leading back to itself.
+trait Sensor {
+    type Reading
+}
+
+struct Sample {
+    reading: Mirror.Reading,
+    other: Wide,
+}
+
+alias Wide = Option[Small]
+
+struct Mirror {}
+
+impl Sensor for Mirror {
+    type Reading = Pair[Small, Wide]
+}
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+alias Small = UInt8
+
+fn main() -> UInt8 {
+    let sample = Sample { reading = .{ a = 3, b = .Some(4) }, other = .None }
+    match read sample.reading.b {
+        Some(value) => value + sample.reading.a,
+        None => 0,
+    }
+}

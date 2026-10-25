@@ -1,0 +1,25 @@
+// `Holder`'s default is `Wrapper[Tray].Elem`, which exists only if `Tray` can
+// be discarded, and `Tray` holds a `Holder`.
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Wrapper[T] {
+    t: T,
+    cells: [Ticket; 1],
+}
+
+impl[T: Discardable] Index[UInt64] for Wrapper[T] via cells
+
+struct Holder[E = Wrapper[Tray].Elem] {
+    e: E,
+}
+
+struct Tray {
+    held: Holder,
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,41 @@
+// `B.Elem` would be `Wrap[B.Elem]`, a type that contains itself without end.
+trait Counter {
+    type Item
+}
+
+trait Pick {
+    type Out
+}
+
+struct Wrap[T] {
+    t: T,
+}
+
+struct Flip[T] {
+    t: T,
+}
+
+impl[T] Pick for Flip[T] {
+    type Out = Wrap[T]
+}
+
+struct M {}
+
+impl Counter for M {
+    type Item = Flip[B.Elem].Out
+}
+
+struct B {
+    values: [M.Item; 2],
+}
+
+impl Index[UInt64] for B via values
+
+fn first(board: B) -> M.Item {
+    board[0]
+}
+
+fn main() -> UInt8 {
+    let _make = first
+    0
+}

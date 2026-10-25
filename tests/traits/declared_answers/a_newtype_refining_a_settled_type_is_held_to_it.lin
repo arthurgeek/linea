@@ -1,0 +1,17 @@
+// `Desk.Item` is `UInt8`, so a clause reaching 300 lies outside it.
+trait Counter {
+    type Item
+}
+
+type Small = Desk.Item where it in 0..=300
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = UInt8
+}
+
+fn main() -> UInt8 {
+    let Small(n) = Small(5)
+    n
+}

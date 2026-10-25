@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: S contains itself
+  --> tests/traits/declared_answers/a_derived_type_holding_itself_through_a_settled_field_has_no_size.lin:14:8
+   |
+14 | struct S {
+   |        ^ a value of this type would have to hold one, so it has no size

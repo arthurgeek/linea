@@ -1,0 +1,25 @@
+// `Desk.Item` is `Board.Elem`, a `UInt8`, so a clause reaching 300 lies
+// outside it.
+trait Counter {
+    type Item
+}
+
+type Wide = Desk.Item where it in 0..=300
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = Board.Elem
+}
+
+struct Board {
+    values: [UInt8; 2],
+}
+
+impl Index[UInt64] for Board via values
+
+fn main() -> UInt8 {
+    let board = Board { values = [7, 9] }
+    let Wide(n) = Wide(5)
+    board[1] + n
+}

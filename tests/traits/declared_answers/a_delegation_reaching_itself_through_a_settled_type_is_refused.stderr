@@ -1,0 +1,5 @@
+error[T-Projection]: a delegated projection reaches itself
+  --> tests/traits/declared_answers/a_delegation_reaching_itself_through_a_settled_type_is_refused.lin:16:30
+   |
+16 | impl Index[UInt64] for B via values
+   |                              ^^^^^^ delegate to a stored field with a valid indexing projection

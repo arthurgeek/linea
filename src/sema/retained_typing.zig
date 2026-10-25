@@ -70,6 +70,9 @@ fn attachField(comptime field: std.builtin.Type.StructField, gpa: Allocator, sav
         // attached program, so a symbol a later module repeats is grouped with
         // the library's declaration of it. Nothing reads a retained copy.
         result.extern_symbols = .empty;
+    } else if (comptime std.mem.eql(u8, name, "capability_watch")) {
+        // Lent only while declared answers are settled.
+        result.capability_watch = null;
     } else if (comptime std.mem.eql(u8, name, "open_types")) {
         // Lent only while a check runs; a retained typing holds no open integer.
         result.open_types = null;

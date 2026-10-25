@@ -1,0 +1,32 @@
+// `Desk.Item` is `Outer.Elem`, the element of `Outer`'s array of `Inner.Elem`,
+// which is a `UInt16`.
+trait Counter {
+    type Item
+}
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = Outer.Elem
+}
+
+struct Outer {
+    rows: [Inner.Elem; 2],
+}
+
+impl Index[UInt64] for Outer via rows
+
+struct Inner {
+    cells: [UInt16; 2],
+}
+
+impl Index[UInt64] for Inner via cells
+
+fn main() -> UInt8 {
+    let item: Desk.Item = 900
+    if item == 900 {
+        3
+    } else {
+        0
+    }
+}

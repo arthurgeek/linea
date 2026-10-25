@@ -1,0 +1,27 @@
+// `Mirror.Reading` is written as `Celsius.Reading`, which the implementation
+// below it settles to `UInt8`.
+trait Sensor {
+    type Reading
+}
+
+struct Mirror {}
+
+struct Celsius {}
+
+impl Sensor for Mirror {
+    type Reading = Celsius.Reading
+}
+
+impl Sensor for Celsius {
+    type Reading = UInt8
+}
+
+struct Sample {
+    reading: Mirror.Reading,
+}
+
+fn main() -> UInt8 {
+    let mirrored: Mirror.Reading = 30
+    let sample = Sample { reading = 12 }
+    mirrored + sample.reading
+}

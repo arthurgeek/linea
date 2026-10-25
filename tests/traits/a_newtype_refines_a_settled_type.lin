@@ -1,0 +1,18 @@
+// `Celsius.Reading` is `UInt8`, so `Degrees` refines a `UInt8` to the
+// readings from 0 to 50.
+trait Sensor {
+    type Reading
+}
+
+struct Celsius {}
+
+impl Sensor for Celsius {
+    type Reading = UInt8
+}
+
+type Degrees = Celsius.Reading where it in 0..=50
+
+fn main() -> UInt8 {
+    let Degrees(reading) = Degrees(21)
+    reading
+}

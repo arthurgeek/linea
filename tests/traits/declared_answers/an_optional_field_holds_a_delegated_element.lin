@@ -1,0 +1,21 @@
+// `Cell.value` is an `Option[Board.Elem]`, an `Option[UInt16]`, which can be
+// compared because `UInt16` can.
+struct Cell {
+    value: Option[Board.Elem],
+}
+
+struct Board {
+    values: [UInt16; 2],
+}
+
+impl Index[UInt64] for Board via values
+
+fn main() -> UInt8 {
+    let board = Board { values = [7, 900] }
+    let cell = Cell { value = .Some(board[1]) }
+    if cell.value == .Some(900) {
+        3
+    } else {
+        0
+    }
+}

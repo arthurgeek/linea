@@ -1,0 +1,5 @@
+error[T-Bound]: `Tray`'s parts depend on whether `Tray` can be discarded
+  --> tests/traits/declared_answers/a_part_whose_type_depends_on_its_own_capability_through_a_member_is_refused.lin:17:11
+   |
+17 |     held: Mirror.Item,
+   |           ^^^^^^^^^^^ write the part's type here rather than a settled reference

@@ -1,0 +1,37 @@
+// The head `Holder` takes its default `Chooser[Tray].Out`, which is a `Ticket`
+// because `Tray`, holding a byte, can be discarded. The implementations are
+// declared before what they read.
+fn main() -> UInt8 {
+    Holder.make()
+}
+
+struct Tray {
+    n: UInt8,
+}
+
+impl Holder {
+    fn make() -> UInt8 {
+        5
+    }
+}
+
+struct Holder[T = Chooser[Tray].Out] {
+    v: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = Ticket
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+trait Pick {
+    type Out
+}

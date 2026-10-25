@@ -1,0 +1,32 @@
+// `Picker[Wrap[Board.Elem]]` is `Picker[Wrap[UInt16]]`, which the concrete
+// implementation answers.
+trait Pick {
+    type Out
+}
+
+struct Early {
+    x: Picker[Wrap[Board.Elem]].Out,
+}
+
+struct Wrap[T] {
+    t: T,
+}
+
+struct Picker[T] {
+    t: T,
+}
+
+impl Pick for Picker[Wrap[UInt16]] {
+    type Out = UInt8
+}
+
+struct Board {
+    values: [UInt16; 2],
+}
+
+impl Index[UInt64] for Board via values
+
+fn main() -> UInt8 {
+    let early = Early { x = 4 }
+    early.x
+}

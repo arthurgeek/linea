@@ -298,6 +298,11 @@ pub const Code = enum {
     /// through an indirection is well formed, and this rule outlives the one
     /// that forbids the payload.
     t_infinite_layout,
+    /// Declared answers -- parts, settled types, delegated elements and
+    /// aliases -- depend on one another more than 1000 deep. A stated limit,
+    /// like the nesting limit, so that depth is reported rather than
+    /// overflowing the stack, at every optimisation level alike.
+    t_answer_depth,
     /// A type is wider than the offsets an implementation records can reach,
     /// so it has no offset to place its parts at. A stated limit rather than
     /// arithmetic nobody checked: unstated, it is met as a slot smaller than
@@ -496,6 +501,7 @@ pub const Code = enum {
             .t_unreachable => "T-Unreachable",
             .t_refutable => "T-Refutable",
             .t_infinite_layout => "T-InfiniteLayout",
+            .t_answer_depth => "T-AnswerDepth",
             .l_size => "L-Size",
             .t_unknown_field => "T-UnknownField",
             .t_unknown_operation => "T-UnknownOperation",

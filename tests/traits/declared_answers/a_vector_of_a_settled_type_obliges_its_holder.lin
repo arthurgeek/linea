@@ -1,0 +1,21 @@
+// `Box.Iter` is `Node`, so `Node.kids` is a `Vec[Node]`. A `Vec` must be
+// released, so a `Node` holding one must be settled before the block ends.
+trait Seq {
+    type Iter
+}
+
+struct Box {}
+
+impl Seq for Box {
+    type Iter = Node
+}
+
+struct Node {
+    value: UInt8,
+    kids: Vec[Box.Iter],
+}
+
+fn main() -> UInt8 {
+    let node = Node { value = 3, kids = Vec.new() }
+    node.value
+}

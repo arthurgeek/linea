@@ -1,0 +1,54 @@
+// `Wrap[Y].E` is `Option[Y]`, read in a field, inside another selection, as a
+// type argument, as a variant's payload and as a newtype's base.
+trait Shape {
+    type E
+}
+
+struct Wrap[Y] {
+    y: Y,
+}
+
+impl[Y] Shape for Wrap[Y] {
+    type E = Option[Y]
+}
+
+struct Record {
+    d: Wrap[Wrap[UInt8].E].E,
+    h: Holder[Wrap[UInt16].E],
+}
+
+struct Holder[T] {
+    t: T,
+}
+
+enum Choice {
+    Two(Wrap[UInt8].E),
+    None,
+}
+
+type Kept = Wrap[UInt8].E
+
+fn main() -> UInt8 {
+    let record = Record { d = .Some(.Some(5)), h = Holder[Option[UInt16]] { t = .None } }
+    let choice = Choice.Two(.Some(1))
+    let _kept = Kept(.Some(2))
+    let first = match read record.d {
+        Some(inner) => match read inner {
+            Some(value) => value,
+            None => 0,
+        },
+        None => 0,
+    }
+    let second = match read choice {
+        Two(held) => match read held {
+            Some(value) => value,
+            None => 0,
+        },
+        None => 0,
+    }
+    let third = match read record.h.t {
+        Some(_) => 1,
+        None => 0,
+    }
+    first + second + third
+}

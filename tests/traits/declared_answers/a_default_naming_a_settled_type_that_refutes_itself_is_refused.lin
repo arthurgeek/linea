@@ -1,0 +1,31 @@
+// `Tray.held` is a `Holder` whose default is `Chooser[Tray].Out`, a linear
+// `Ticket` only if `Tray` could be discarded: the default hides the same
+// question a written selection asks.
+trait Pick {
+    type Out
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = Ticket
+}
+
+struct Holder[T = Chooser[Tray].Out] {
+    v: T,
+}
+
+struct Tray {
+    held: Holder,
+}
+
+fn main() -> UInt8 {
+    0
+}

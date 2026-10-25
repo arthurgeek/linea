@@ -1,0 +1,31 @@
+// `Mirror.Reading` is `H[UInt8]`, minted before `Celsius`'s implementation is
+// read; `H`'s field `c` still holds the `UInt64` that implementation settles.
+trait Sensor {
+    type Reading
+}
+
+struct Mirror {}
+
+impl Sensor for Mirror {
+    type Reading = H[UInt8]
+}
+
+struct H[T] {
+    c: Celsius.Reading,
+    t: T,
+}
+
+struct Celsius {}
+
+impl Sensor for Celsius {
+    type Reading = UInt64
+}
+
+fn main() -> UInt8 {
+    let held: Mirror.Reading = .{ c = 5000000000, t = 3 }
+    if held.c == 5000000000 {
+        held.t
+    } else {
+        1
+    }
+}

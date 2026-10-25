@@ -1,0 +1,22 @@
+// `Outer` delegates to an array of `Inner.Elem`, which is `UInt16`, so
+// `o.rows[1]` is a `UInt16`.
+struct Outer {
+    rows: [Inner.Elem; 2],
+}
+
+impl Index[UInt64] for Outer via rows
+
+struct Inner {
+    cells: [UInt16; 2],
+}
+
+impl Index[UInt64] for Inner via cells
+
+fn main() -> UInt8 {
+    let outer = Outer { rows = [5, 900] }
+    if outer.rows[1] == 900 {
+        3
+    } else {
+        0
+    }
+}

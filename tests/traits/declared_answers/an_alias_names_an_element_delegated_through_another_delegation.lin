@@ -1,0 +1,24 @@
+// `Cell` names `Outer.Elem`, the element of `Outer`'s array of `Inner.Elem`,
+// which is the element of `Inner`'s array of `UInt16`.
+alias Cell = Outer.Elem
+
+struct Outer {
+    rows: [Inner.Elem; 2],
+}
+
+impl Index[UInt64] for Outer via rows
+
+struct Inner {
+    cells: [UInt16; 2],
+}
+
+impl Index[UInt64] for Inner via cells
+
+fn main() -> UInt8 {
+    let cell: Cell = 900
+    if cell == 900 {
+        3
+    } else {
+        0
+    }
+}
