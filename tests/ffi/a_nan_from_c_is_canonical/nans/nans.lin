@@ -1,0 +1,36 @@
+// C answers a NaN whose sign and payload are its own. Linea makes every
+// `Float64` that C hands over the positive quiet NaN where it is a NaN, so
+// the bits a program sees do not depend on what C built.
+extern fn nans_returned() -> Float64
+
+// `inout` passes the address of `out`, so C's `double *` writes into it.
+extern fn nans_written(inout out: Float64)
+
+// What the callback received, kept between C's call and the return.
+struct Received {
+    value: Float64,
+}
+
+// C calls `receive` with a NaN, handing back the `received` lent to it.
+extern fn nans_handed_over(receive: fn(inout received: Received, value: Float64) -> Int32, inout received: Received) -> Int32
+
+fn keep(inout received: Received, value: Float64) -> Int32 {
+    received.value = value
+    0
+}
+
+pub fn returned() -> Float64 {
+    nans_returned()
+}
+
+pub fn written() -> Float64 {
+    var out = 0.0
+    nans_written(&out)
+    out
+}
+
+pub fn handed_over() -> Float64 {
+    var received = Received { value = 0.0 }
+    let _status = nans_handed_over(keep, &received)
+    received.value
+}

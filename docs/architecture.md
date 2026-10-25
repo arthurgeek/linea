@@ -1932,8 +1932,11 @@ declarations, and lowering replaces each call with one `bit_cast`
 instruction, emitted as `arith.bitcast`. Emission writes every NaN-producing
 float result (`addf`, `subf`, `mulf`, `divf`, `extf`, `truncf`, math calls) as
 `%nr`, then defines the value with `canonicalNan`: a select of the positive
-quiet NaN where the result is unordered with itself (ADR 0249). Negation, loads,
-stores and bit casts keep every bit.
+quiet NaN where the result is unordered with itself (ADR 0249). A `Float64`
+from C passes through the same writer, `writeCanonicalNan`, where it crosses:
+an extern call's result, a value C left behind an `inout` argument, and each
+float parameter of an export or callback entry. Negation, loads, stores and
+bit casts keep every bit.
 
 Checked decimal input uses the same integer foreign interface. The private
 `std.mem` adapter passes a certified byte address and extent to

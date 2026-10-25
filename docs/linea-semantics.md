@@ -2393,7 +2393,9 @@ binary32 arithmetic, with no wider intermediate. `Float32` and `Float64` do
 not mix. Every NaN that arithmetic, a conversion between the float types or a
 math method produces is the positive quiet NaN, whatever NaN went in, on every
 target and at every optimisation level
-([ADR 0249](adr/0249-a-float-has-a-total-order-and-a-computed-nan-is-canonical.md)).
+([ADR 0249](adr/0249-a-float-has-a-total-order-and-a-computed-nan-is-canonical.md)),
+and so is every NaN C hands a program: an `extern`'s result, a parameter of a
+function C calls, and a value C writes through an `inout` parameter.
 Negation flips the sign bit and nothing else, and copies keep every bit, so a
 NaN's sign and payload are what the program made them. Integer `/` truncates toward
 zero, and `%` is the remainder of that division, `a - (a / b) * b`, so a nonzero
@@ -4308,7 +4310,9 @@ its base:
 every bit pattern of these is a value on both sides, so nothing C hands back
 is a value Linea does not define. Integer width and signedness define the
 integer's representation, and an 8- or 16-bit integer is extended to a full
-register by whichever side produces it. A `Float64` is a C `double`. A newtype
+register by whichever side produces it. A `Float64` is a C `double`; a NaN C
+hands over arrives as the positive quiet NaN, as every NaN arithmetic produces
+does. A newtype
 crosses whatever its ownership policy, because the parameter convention says
 what C does with the value: `read` and `inout` lend it for the call, and
 `sink` hands it to C, which consumes it. An `inout` parameter crosses as the

@@ -116,6 +116,59 @@ fn canonicalNanBits(bits: u8) u64 {
     };
 }
 
+/// The SSA names one canonicalisation writes: `result` is defined from `raw`,
+/// through `unordered` and `quiet`.
+const CanonicalNames = struct {
+    result: []const u8,
+    raw: []const u8,
+    unordered: []const u8,
+    quiet: []const u8,
+};
+
+/// Writes `%result` as `%raw` with every NaN made the positive quiet NaN,
+/// ending each line with the source location `here` gives, or with none.
+/// Every float a program holds passes through it once, where it is made:
+/// by arithmetic, a conversion or a math call, or by C. LLVM leaves which NaN
+/// an arithmetic operation produces to the target and to constant folding
+/// (x86's is negative, AArch64's positive), C may build any NaN, and a NaN's
+/// bits are observable through `to_bits`, so without it a program's result
+/// would depend on where and how it was built. A select is not arithmetic, so
+/// it keeps the bits it chooses, and folding it can only produce the
+/// canonical NaN.
+fn writeCanonicalNan(w: *std.Io.Writer, names: CanonicalNames, bits: u8, here: ?FunctionEmitter.Here) std.Io.Writer.Error!void {
+    const t = floatType(bits);
+    try w.print("    %{s} = arith.cmpf uno, %{s}, %{s} : {s}", .{ names.unordered, names.raw, names.raw, t });
+    try endLine(w, here);
+    try w.print("    %{s} = arith.constant 0x{X} : {s}", .{ names.quiet, canonicalNanBits(bits), t });
+    try endLine(w, here);
+    try w.print("    %{s} = arith.select %{s}, %{s}, %{s} : {s}", .{ names.result, names.unordered, names.quiet, names.raw, t });
+    try endLine(w, here);
+}
+
+fn endLine(w: *std.Io.Writer, here: ?FunctionEmitter.Here) std.Io.Writer.Error!void {
+    if (here) |at| try at.emitter.here(at.span) else try w.writeAll("\n");
+}
+
+/// Writes the float C left at `address` back canonicalised, where `ty` is a
+/// float: C wrote it through an `inout` parameter, or a C caller handed it to
+/// an entry by address. `tag` keeps the names apart.
+fn writeCanonicalNanAt(w: *std.Io.Writer, module: *const Module, ty: TypeId, address: []const u8, tag: []const u8, here: ?FunctionEmitter.Here) std.Io.Writer.Error!void {
+    const bits = floatBitsOf(module.representationOf(ty).computation) orelse return;
+    const t = floatType(bits);
+    var buffers: [4][32]u8 = undefined;
+    const names: CanonicalNames = .{
+        .raw = std.fmt.bufPrint(&buffers[0], "{s}l", .{tag}) catch unreachable,
+        .unordered = std.fmt.bufPrint(&buffers[1], "{s}u", .{tag}) catch unreachable,
+        .quiet = std.fmt.bufPrint(&buffers[2], "{s}q", .{tag}) catch unreachable,
+        .result = std.fmt.bufPrint(&buffers[3], "{s}c", .{tag}) catch unreachable,
+    };
+    try w.print("    %{s} = llvm.load {s} : !llvm.ptr -> {s}", .{ names.raw, address, t });
+    try endLine(w, here);
+    try writeCanonicalNan(w, names, bits, here);
+    try w.print("    llvm.store %{s}, {s} : {s}, !llvm.ptr", .{ names.result, address, t });
+    try endLine(w, here);
+}
+
 /// The width of a float computation, or null for any other.
 fn floatBitsOf(computation: mir_mod.ComputationRepresentation) ?u8 {
     return switch (computation) {
@@ -564,6 +617,27 @@ fn emitForeignEntry(
         });
     }
 
+    // A float C hands over is canonicalised where it arrives, by value or at
+    // the address of an `inout` parameter.
+    for (0..mir.param_count) |i| {
+        var tag_buffer: [32]u8 = undefined;
+        const tag = std.fmt.bufPrint(&tag_buffer, "c{d}", .{i}) catch unreachable;
+        if (module.arrivesByAddress(mir, i)) {
+            var address_buffer: [32]u8 = undefined;
+            const address = std.fmt.bufPrint(&address_buffer, "%p{d}", .{i}) catch unreachable;
+            try writeCanonicalNanAt(w, module, mir.locals[i], address, tag, null);
+            continue;
+        }
+        const bits = floatBitsOf(module.representationOf(mir.locals[i]).computation) orelse continue;
+        var buffers: [4][32]u8 = undefined;
+        try writeCanonicalNan(w, .{
+            .result = std.fmt.bufPrint(&buffers[0], "{s}c", .{tag}) catch unreachable,
+            .raw = std.fmt.bufPrint(&buffers[1], "p{d}", .{i}) catch unreachable,
+            .unordered = std.fmt.bufPrint(&buffers[2], "{s}u", .{tag}) catch unreachable,
+            .quiet = std.fmt.bufPrint(&buffers[3], "{s}q", .{tag}) catch unreachable,
+        }, bits, null);
+    }
+
     if (callee_answers != null) {
         try w.writeAll("    %answer = func.call @");
     } else {
@@ -573,8 +647,14 @@ fn emitForeignEntry(
     try w.writeAll("(");
     for (0..mir.param_count) |i| {
         if (i > 0) try w.writeAll(", ");
-        const widened = !module.arrivesByAddress(mir, i) and adaptsAtBoundary(module, mir.locals[i]);
-        try w.print("{s}{d}", .{ if (widened) "%w" else "%p", i });
+        const by_value = !module.arrivesByAddress(mir, i);
+        if (by_value and adaptsAtBoundary(module, mir.locals[i])) {
+            try w.print("%w{d}", .{i});
+        } else if (by_value and floatBitsOf(module.representationOf(mir.locals[i]).computation) != null) {
+            try w.print("%c{d}c", .{i});
+        } else {
+            try w.print("%p{d}", .{i});
+        }
     }
     try w.writeAll(") : (");
     for (0..mir.param_count) |i| {
@@ -1315,6 +1395,12 @@ const FunctionEmitter = struct {
         const ty = if (is_noreturn) TypeId.never else mir.typeOf(id);
 
         const widens = !is_noreturn and external and !indirect and ty != .unit and adaptsAtBoundary(module, ty);
+        // A float C answers is canonicalised where it arrives, as a computed
+        // one is where it is computed.
+        const from_c: ?u8 = if (!is_noreturn and external and !indirect and ty != .unit)
+            floatBitsOf(module.representationOf(ty).computation)
+        else
+            null;
 
         if (external) for (c.args, 0..) |a, i| {
             if (module.arrivesByAddress(callee, i)) continue;
@@ -1330,6 +1416,8 @@ const FunctionEmitter = struct {
             try w.writeAll("    func.call @");
         } else if (widens) {
             try w.print("    %vr{d} = func.call @", .{n});
+        } else if (from_c != null) {
+            try w.print("    %nr{d} = func.call @", .{n});
         } else {
             try w.print("    %v{d} = func.call @", .{n});
         }
@@ -1359,6 +1447,20 @@ const FunctionEmitter = struct {
 
         if (c.func == module.zeroed_allocator) try self.zeroedAllocation(id, c.args[0]);
 
+        // C may have written any float through an `inout` parameter.
+        if (external) for (c.args, 0..) |a, i| {
+            if (!module.arrivesByAddress(callee, i)) continue;
+            var address_buffer: [32]u8 = undefined;
+            var address: std.Io.Writer = .fixed(&address_buffer);
+            const saved = self.w;
+            self.w = &address;
+            try self.writeValue(a);
+            self.w = saved;
+            var tag_buffer: [32]u8 = undefined;
+            const tag = std.fmt.bufPrint(&tag_buffer, "fc{d}_{d}", .{ n, i }) catch unreachable;
+            try writeCanonicalNanAt(w, module, callee.locals[i], address.buffered(), tag, .{ .emitter = self, .span = span });
+        };
+
         if (is_noreturn) {
             try w.writeAll("    llvm.unreachable");
             try self.here(span);
@@ -1378,6 +1480,8 @@ const FunctionEmitter = struct {
                 n, widening(module, ty), n, foreignTypeOf(module, ty), computationType(module.representationOf(ty).computation),
             });
             try self.here(span);
+        } else if (from_c) |bits| {
+            try self.canonicalNan(id, bits, span);
         }
     }
 
@@ -1625,22 +1729,20 @@ const FunctionEmitter = struct {
     }
 
     /// Defines `%v{id}` from the float result `%nr{id}`, with every NaN made
-    /// the positive quiet NaN. LLVM leaves which NaN an arithmetic operation
-    /// produces to the target and to constant folding -- x86's is negative,
-    /// AArch64's positive -- and a NaN's bits are observable through
-    /// `to_bits`, so a program's result would depend on where and how it was
-    /// built. A select is not arithmetic, so it keeps the bits it chooses, and
-    /// folding it can only produce the canonical NaN.
+    /// the positive quiet NaN.
     fn canonicalNan(self: *FunctionEmitter, id: InstId, bits: u8, span: Span) std.Io.Writer.Error!void {
+        var buffers: [4][24]u8 = undefined;
         const n = id.index();
-        const t = floatType(bits);
-        try self.w.print("    %nu{d} = arith.cmpf uno, %nr{d}, %nr{d} : {s}", .{ n, n, n, t });
-        try self.here(span);
-        try self.w.print("    %nq{d} = arith.constant 0x{X} : {s}", .{ n, canonicalNanBits(bits), t });
-        try self.here(span);
-        try self.w.print("    %v{d} = arith.select %nu{d}, %nq{d}, %nr{d} : {s}", .{ n, n, n, n, t });
-        try self.here(span);
+        try writeCanonicalNan(self.w, .{
+            .result = std.fmt.bufPrint(&buffers[0], "v{d}", .{n}) catch unreachable,
+            .raw = std.fmt.bufPrint(&buffers[1], "nr{d}", .{n}) catch unreachable,
+            .unordered = std.fmt.bufPrint(&buffers[2], "nu{d}", .{n}) catch unreachable,
+            .quiet = std.fmt.bufPrint(&buffers[3], "nq{d}", .{n}) catch unreachable,
+        }, bits, .{ .emitter = self, .span = span });
     }
+
+    /// Where a line an emitter writes came from.
+    const Here = struct { emitter: *FunctionEmitter, span: Span };
 
     fn multiply(self: *FunctionEmitter, id: InstId) std.Io.Writer.Error!void {
         const storage = self.module.representationOf(self.mir.typeOf(id)).storage;

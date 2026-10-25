@@ -45,6 +45,15 @@ loads, stores, selects and bit casts, so a NaN's sign and payload are what the
 program made them. A select is exact, and folding it can produce only the
 canonical NaN, so the no-fast-math rule holds.
 
+**A float that crosses from C is canonicalised where it crosses**, by the same
+select: an `extern`'s `Float64` result, a `Float64` parameter of a callback or
+an `export` that C calls, and a `Float64` C leaves behind an `inout`
+parameter, which is loaded, canonicalised and stored back after the call and,
+for an entry C calls, before the body runs. C may build any NaN, and a granted
+module passes floats to it under ADR 0228; without this a program's bits would
+be whatever the C side chose. So every float a Linea program holds is either
+canonical or made by negation, `from_bits` or a copy of one that is.
+
 **`total_less` is `totalOrder`** for each float type, in Linea: a set sign bit
 maps the bits `b` to `max - b` and a clear one to `b + 2^(n-1)`, and the keys
 compare unsigned. Neither branch overflows. `<` stays the partial order, and

@@ -1,0 +1,1 @@
+{ "extern": ["nans"], "native": ["nans/nans.c"] }

@@ -1,0 +1,14 @@
+import std.io
+import nans
+
+fn main() -> Result[UInt8, io.IoError] {
+    let computed = 0.0 / 0.0
+    for value in [nans.returned(), nans.written(), nans.handed_over()] {
+        // Each NaN from C has the bits of the NaN the program computes, so
+        // the total order ties them and puts both after every number.
+        let ties = !value.total_less(computed) && !computed.total_less(value)
+        let last = Float64.total_less(1.0 / 0.0, value)
+        io.println("{value.to_bits()} {ties} {last}")?
+    }
+    .Ok(0)
+}
