@@ -2580,7 +2580,9 @@ called with a `Counter` returns the type defined as `Item` by `Counter`'s
 implementation. Fields use the same substitution: in
 `struct Holder[W: Measure] { v: W.Item }`, the field of `Holder[Counter]` uses
 `Counter`'s definition, and the field of `Holder[Flag]` uses `Flag`'s. These
-instantiations are distinct types.
+instantiations are distinct types. A field of a type with no parameters may
+name a concrete type's settled reference, `struct Sample { reading:
+Celsius.Reading }`, and holds the type that implementation defines.
 
 A settled reference retains the arguments of its declaring trait bound. A type
 may implement a parameterized trait at different arguments and define the
@@ -2603,8 +2605,42 @@ Source order never selects a bound.
 
 An associated type definition cannot use a settled reference: `type Item =
 Self.Other` would define one associated type through another in the same
-implementation. An implementation defines each associated type exactly once;
-duplicate definitions are [N-Duplicate].
+implementation. A definition may read another implementation's associated
+type, `type Reading = Celsius.Reading`, whichever of the two implementations is
+declared first. Definitions that lead back to themselves through such
+references name no type and are [T-Impl]. An implementation defines each
+associated type exactly once; duplicate definitions are [N-Duplicate].
+
+What a part, a settled type, a delegated element or an alias names never
+depends on the order declarations are written in: each is decided once, after
+everything it names is decided. A type's parts may not depend on the type's
+own capabilities. A capability question asked about a type -- whether it can
+be copied or discarded -- whose answer depends on one of its parts, or of the
+parts it owns, that names a settled type and is being decided because of
+that question, is [T-Bound]: `struct Tray { held: Chooser[Tray].Out }` with
+`impl[T: Discardable] Pick for Chooser[T]` asks whether `Tray` can be
+discarded in order to decide `Tray`'s part. The part may name the settled
+type in any way: written, through an alias, or through a parameter's default,
+`held: Holder` with `struct Holder[T = Chooser[Tray].Out]`. Writing the
+part's type removes the question. A question the type's declaration answers
+is not refused: a type not declared `copyable` is never copied, and one
+declared `linear` is never discarded. A recursive type whose parts name no
+settled type, such as `struct Node { log: Ledger[Node] }` with
+`Ledger[phantom T: Discardable]`, is answered from its written parts under the
+rule for recursive types.
+
+**[T-AnswerDepth]** A chain of declared answers passes through at most 1000
+links, where a link is a written settled reference (`S1.Reading`, `B.Elem`,
+`Chooser[S1].Out`) or an alias; parts, the members and delegations a
+reference reaches, and capability questions add none. The count is the most
+links any answer rests on, so it is the same in every declaration order. A
+chain of 1000 settled references, each implementation settling `Reading` to
+the next one's, is accepted, and one of 1001 is refused where the chain
+starts; so are delegations, aliases and parts selecting through one another's
+capabilities. A plain chain of 1001 aliases is refused as well. As with
+[S-Nesting], the limit makes acceptance independent of optimisation level and
+stack size, and reports the depth instead of overflowing. Writing a type
+directly anywhere along the chain shortens it.
 
 A definition may read another implementation's settled type, `type Dual =
 Pong.Dual`, and means what that definition means, whichever implementation is
@@ -4751,7 +4787,10 @@ once per use where the caller did not write it.
 An Index implementation written `via field` forms the same place path as
 `self.field[i]`. Its target must be a direct stored field of the implementing
 type, and that field must support the declared key type. Missing fields,
-unsupported backing keys and recursive delegation are [T-Projection]. After
+unsupported backing keys and recursive delegation are [T-Projection], including
+a field whose type reads the delegation's own element,
+`struct B { values: [B.Elem; 2] }` with `impl Index[UInt64] for B via values`,
+directly or through settled types and other delegations. After
 generic substitution, the backing indexing operation supplies `Elem` and the
 receiver access ceiling. Delegation cannot widen read-only access. The key is
 forwarded unchanged, with the same single evaluation, bounds checks, FromEnd

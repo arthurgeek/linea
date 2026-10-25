@@ -760,6 +760,26 @@ head read it. The declared-parts measures, which run before types are minted,
 treat an alias as a declaration whose written type is its one part. No alias
 type exists in the pool, and `Typing.aliased` records each alias's answer for
 tooling.
+Declared answers are settled on demand (ADR 0241).
+`readPartShapes` reads every part once for callable shapes before
+implementation heads exist. `settleDeclaredAnswers` then reads each part,
+settled type, field-delegation element and alias once, the first time
+something needs it. `readPart`, `AnswerSettling.settle` and `aliasedType` are
+the routines that read them, and `AnswerSettling.owned` reads everything a
+type owns before the builder asks a capability or an implementation of it.
+The builder reaches those last two through `Builder.demand`. A demand that
+reaches an answer still being read is a cycle, reported where it closes. A
+capability read of a type waiting on its own settled part is caught through
+`Typing.CapabilityWatch`. A part replacing one that gives its owner nothing
+in a table -- poison, or a type built from it such as `[poison; 2]` -- adds an
+edge to that table, and a callable shape gaining its effects changes nothing
+a table reads, so the capability and containment tables are not rebuilt as
+parts are read (`Builder.partChanged`). `readPartShapes` records in
+`unsettled_parts` the parts whose first reading passed over a settled
+reference; only those wait on settled answers, and `AnswerSettling.owned`, a
+walk with its own stack, reads only those. A chain of answers passes through
+at most 1000 links, settled references and aliases ([T-AnswerDepth]);
+`AnswerSettling.enter` and `leave` record each answer's height in links.
 `Typing.Builder.implementationRow` retains concrete implementation selections
 for instantiation and emission. A derived `Release` component that is discardable and not proven to implement
 `Release` under the derive's own constraints is recorded in the checker's
