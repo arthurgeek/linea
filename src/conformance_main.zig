@@ -4588,6 +4588,12 @@ const AnswerChain = enum {
     /// `struct H[T: Tr] { v: T.Item }`: writing `H[S1]` substitutes `S1` for
     /// `T`, which reads `S1.Item`.
     substituted_parameters,
+    /// `type Item = W[S1].Item`, where `impl[T: Tr] Tr for W[T]` settles
+    /// `Item` to `Option[T.Item]`: one generic member read at every link.
+    generic_members,
+    /// `type Item = H[S1]`, where `alias H[T: Tr] = T.Item`: one generic
+    /// alias read at every link.
+    generic_aliases,
 };
 
 /// Whether the declarations of a chain are written first link first, or
@@ -4614,6 +4620,15 @@ fn answerChainModule(gpa: std.mem.Allocator, shape: AnswerChain, links: u32, ord
         .substituted_parameters => try w.writeAll(
             "trait Tr {\n    type Item\n}\n\n" ++
                 "struct H[T: Tr] {\n    v: T.Item,\n}\n\n",
+        ),
+        .generic_members => try w.writeAll(
+            "trait Tr {\n    type Item\n}\n\n" ++
+                "struct W[T] {\n    t: T,\n}\n\n" ++
+                "impl[T: Tr] Tr for W[T] {\n    type Item = Option[T.Item]\n}\n\n",
+        ),
+        .generic_aliases => try w.writeAll(
+            "trait Tr {\n    type Item\n}\n\n" ++
+                "alias H[T: Tr] = T.Item\n\n",
         ),
     }
     // An alias chain's last alias is itself a link; every other chain ends at
@@ -4647,6 +4662,14 @@ fn answerChainModule(gpa: std.mem.Allocator, shape: AnswerChain, links: u32, ord
                 try w.print("struct S{d} {{\n    n: UInt8,\n}}\n\nimpl Tr for S{d} {{\n    type Item = UInt8\n}}\n\n", .{ i, i })
             else
                 try w.print("struct S{d} {{\n    n: UInt8,\n}}\n\nimpl Tr for S{d} {{\n    type Item = H[S{d}]\n}}\n\n", .{ i, i, i + 1 }),
+            .generic_members, .generic_aliases => if (last)
+                try w.print("struct S{d} {{\n    n: UInt8,\n}}\n\nimpl Tr for S{d} {{\n    type Item = UInt8\n}}\n\n", .{ i, i })
+            else
+                try w.print("struct S{d} {{\n    n: UInt8,\n}}\n\nimpl Tr for S{d} {{\n    type Item = {s}[S{d}]{s}\n}}\n\n", .{
+                    i,                                              i,
+                    if (shape == .generic_members) "W" else "H",    i + 1,
+                    if (shape == .generic_members) ".Item" else "",
+                }),
         }
     }
     try w.writeAll(switch (shape) {
@@ -4654,7 +4677,7 @@ fn answerChainModule(gpa: std.mem.Allocator, shape: AnswerChain, links: u32, ord
         .settled_references => "fn main() -> UInt8 {\n    let reading: S0.Reading = 3\n    reading\n}\n",
         .delegated_elements => "fn main() -> UInt8 {\n    let board = B0 { values = [7, 8] }\n    board[1]\n}\n",
         .selections_through_capabilities => "fn main() -> UInt8 {\n    let s = S0 { x = 3 }\n    s.x\n}\n",
-        .substituted_parameters => "fn main() -> UInt8 {\n    let s = S0 { n = 3 }\n    s.n\n}\n",
+        .substituted_parameters, .generic_members, .generic_aliases => "fn main() -> UInt8 {\n    let s = S0 { n = 3 }\n    s.n\n}\n",
     });
     return out.toOwnedSlice();
 }
@@ -4697,6 +4720,158 @@ test "a chain of thirty thousand delegations or substituted parameters is refuse
         const gpa = arena.allocator();
         try testing.expectEqualSlices(diagnostic.Code, &.{.t_answer_depth}, try refusalCodes(gpa, try answerChainModule(gpa, shape, 30_000, order)));
     };
+}
+
+/// What the capability-cycle shapes start with: `Chooser[T]` implements
+/// `Pick` only when `T` can be discarded, and `Pad[T]` always does.
+const pick_trait = "trait Pick {\n    type Out\n}\n\n";
+const chooser_impl = "struct Chooser[T] {\n    t: T,\n}\n\n" ++
+    "impl[T: Discardable] Pick for Chooser[T] {\n    type Out = UInt8\n}\n\n";
+const pad_impl = "struct Pad[T] {\n    t: T,\n}\n\n" ++
+    "impl[T] Pick for Pad[T] {\n    type Out = UInt8\n}\n\n";
+
+/// `preamble`, then `decls` in the order `order` lists them, then a `main`.
+fn permutedModule(gpa: std.mem.Allocator, preamble: []const u8, decls: []const []const u8, order: []const usize) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll(preamble);
+    for (order) |k| try w.print("{s}\n", .{decls[k]});
+    try w.writeAll("fn main() -> UInt8 {\n    0\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// Every order of `0..n` for a small `n`, and for a larger one the forward
+/// and reversed orders and `shuffles` orders drawn from a fixed seed.
+fn declarationOrders(gpa: std.mem.Allocator, n: usize, shuffles: usize) ![]const []const usize {
+    var orders: std.ArrayList([]const usize) = .empty;
+    const first = try gpa.alloc(usize, n);
+    for (first, 0..) |*k, i| k.* = i;
+    if (n <= 4) {
+        // Heap's algorithm, each order copied as it is reached.
+        var counts = try gpa.alloc(usize, n);
+        @memset(counts, 0);
+        try orders.append(gpa, try gpa.dupe(usize, first));
+        var i: usize = 1;
+        while (i < n) {
+            if (counts[i] < i) {
+                if (i % 2 == 0) std.mem.swap(usize, &first[0], &first[i]) else std.mem.swap(usize, &first[counts[i]], &first[i]);
+                try orders.append(gpa, try gpa.dupe(usize, first));
+                counts[i] += 1;
+                i = 1;
+            } else {
+                counts[i] = 0;
+                i += 1;
+            }
+        }
+        return orders.toOwnedSlice(gpa);
+    }
+    try orders.append(gpa, try gpa.dupe(usize, first));
+    const reversed = try gpa.dupe(usize, first);
+    std.mem.reverse(usize, reversed);
+    try orders.append(gpa, reversed);
+    var prng = std.Random.DefaultPrng.init(0x5eed);
+    for (0..shuffles) |_| {
+        const shuffled = try gpa.dupe(usize, first);
+        prng.random().shuffle(usize, shuffled);
+        try orders.append(gpa, shuffled);
+    }
+    return orders.toOwnedSlice(gpa);
+}
+
+/// Checks `decls` in every order `declarationOrders` gives, each against the
+/// codes the program is refused with, in any order.
+fn expectEveryOrder(preamble: []const u8, decls: []const []const u8, shuffles: usize, expected: []const diagnostic.Code) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const want = try gpa.dupe(diagnostic.Code, expected);
+    std.mem.sort(diagnostic.Code, want, {}, codeBefore);
+    for (try declarationOrders(gpa, decls.len, shuffles)) |order| {
+        const got = try gpa.dupe(diagnostic.Code, try refusalCodes(gpa, try permutedModule(gpa, preamble, decls, order)));
+        std.mem.sort(diagnostic.Code, got, {}, codeBefore);
+        testing.expectEqualSlices(diagnostic.Code, want, got) catch |err| {
+            std.debug.print("declaration order {any}\n", .{order});
+            return err;
+        };
+    }
+}
+
+fn codeBefore(_: void, a: diagnostic.Code, b: diagnostic.Code) bool {
+    return @intFromEnum(a) < @intFromEnum(b);
+}
+
+test "a part asking about a type that holds the part's own holder is refused in every declaration order" {
+    // Two types, with an earlier question about the holder.
+    try expectEveryOrder(pick_trait ++ chooser_impl ++ pad_impl, &.{
+        "struct _Zed {\n    z: Pad[Ay].Out,\n}\n",
+        "struct Ay {\n    x: Chooser[Bee].Out,\n}\n",
+        "struct Bee {\n    a: Ay,\n}\n",
+    }, 0, &.{.t_bound});
+    // Three types, `Zed` asking about the holder first.
+    try expectEveryOrder(pick_trait ++ chooser_impl, &.{
+        "struct _Zed {\n    z: Chooser[X].Out,\n}\n",
+        "struct X {\n    y: Y,\n}\n",
+        "struct Y {\n    p: Chooser[B].Out,\n}\n",
+        "struct B {\n    x: X,\n}\n",
+    }, 0, &.{.t_bound});
+    // Two parts asking about one type that holds both.
+    try expectEveryOrder(pick_trait ++ chooser_impl, &.{
+        "struct X {\n    y0: Y0,\n    y1: Y1,\n}\n",
+        "struct Y0 {\n    p: Chooser[B0].Out,\n}\n",
+        "struct Y1 {\n    p: Chooser[B0].Out,\n}\n",
+        "struct B0 {\n    b: X,\n}\n",
+    }, 0, &.{ .t_bound, .t_bound });
+    // Three parts, a chain of holders back to theirs, and an earlier question.
+    try expectEveryOrder(pick_trait ++ chooser_impl, &.{
+        "struct _Zed {\n    z: Chooser[X].Out,\n}\n",
+        "struct X {\n    y0: Y0,\n    y1: Y1,\n    y2: Y2,\n}\n",
+        "struct Y0 {\n    p: Chooser[B0].Out,\n}\n",
+        "struct Y1 {\n    p: Chooser[B0].Out,\n}\n",
+        "struct Y2 {\n    p: Chooser[B0].Out,\n}\n",
+        "struct B0 {\n    b: B1,\n}\n",
+        "struct B1 {\n    b: X,\n}\n",
+    }, 24, &.{ .t_bound, .t_bound, .t_bound });
+}
+
+test "parts asking an unbounded implementation about their holder are accepted in every declaration order" {
+    try expectEveryOrder(pick_trait ++ pad_impl, &.{
+        "struct _Zed {\n    z: Pad[X].Out,\n}\n",
+        "struct X {\n    y0: Y0,\n    y1: Y1,\n    y2: Y2,\n}\n",
+        "struct Y0 {\n    p: Pad[B0].Out,\n}\n",
+        "struct Y1 {\n    p: Pad[B0].Out,\n}\n",
+        "struct Y2 {\n    p: Pad[B0].Out,\n}\n",
+        "struct B0 {\n    b: B1,\n}\n",
+        "struct B1 {\n    b: B2,\n}\n",
+        "struct B2 {\n    b: X,\n}\n",
+    }, 24, &.{});
+}
+
+/// `n` structures, each holding a part that asks about the head of a chain
+/// of `n` holders leading back to the structure holding them all, and a
+/// structure asking about that one first. Every question is answered by an
+/// implementation with no bound, so the program is accepted.
+fn holdersAskedThroughAChainModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll(pick_trait ++ pad_impl);
+    try w.writeAll("struct Zed {\n    z: Pad[X].Out,\n}\n\nstruct X {\n");
+    for (0..n) |i| try w.print("    y{d}: Y{d},\n", .{ i, i });
+    try w.writeAll("}\n\n");
+    for (0..n) |i| try w.print("struct Y{d} {{\n    p: Pad[B0].Out,\n}}\n\n", .{i});
+    for (0..n) |j| {
+        if (j + 1 < n) try w.print("struct B{d} {{\n    b: B{d},\n}}\n\n", .{ j, j + 1 }) else try w.print("struct B{d} {{\n    b: X,\n}}\n\n", .{j});
+    }
+    try w.writeAll("fn main() -> UInt8 {\n    let zed = Zed { z = 4 }\n    zed.z\n}\n");
+    return out.toOwnedSlice();
+}
+
+test "holders asked about through a chain are accepted" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try holdersAskedThroughAChainModule(gpa, 6)));
 }
 
 test "a capability question reads through an owned type nested forty-five thousand deep" {
@@ -6562,6 +6737,7 @@ const sweep_dimensions = [_]Dimension{
     // ([T-AnswerDepth]), so both chains are held below that.
     .{ .name = "delegation chain", .n = 250, .grows = false, .cost = throughTheLoader(delegationChainModule) },
     .{ .name = "settled reference chain", .n = 250, .grows = false, .cost = throughTreeBatch(settledReferenceChainModule, .emit, 16) },
+    .{ .name = "holders asked about through a chain", .n = 400, .cost = throughTheTree(holdersAskedThroughAChainModule) },
     .{ .name = "fields in one type", .n = 16000, .cost = throughTheTree(fieldModule) },
     .{ .name = "reflected components", .n = 4000, .cost = throughTheTree(reflectionComponentsModule) },
     .{ .name = "construction product width", .n = 2000, .cost = throughTheTree(constructionProductModule) },

@@ -1,0 +1,34 @@
+// `X` holds a `Y0` and a `Y1`, whose parts each exist only if `B0` can be
+// discarded, and `B0` holds an `X`: both parts depend on that answer.
+trait Pick {
+    type Out
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+struct X {
+    y0: Y0,
+    y1: Y1,
+}
+
+struct Y0 {
+    p: Chooser[B0].Out,
+}
+
+struct Y1 {
+    p: Chooser[B0].Out,
+}
+
+struct B0 {
+    b: X,
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -77,3 +77,6 @@ traits/declared_answers/a_default_naming_a_settled_type_that_depends_on_its_hold
 traits/declared_answers/an_implementation_head_reads_a_defaulted_settled_type.lin
 # A holder's parts cycle refused whichever declaration asks about it first.
 traits/declared_answers/a_question_asked_first_about_a_holder_leaves_its_parts_cycle_refused.lin
+# Parts asking about a holder of their holder, and two parts asking about one holder.
+traits/declared_answers/a_part_asking_about_the_holder_of_its_holder_is_refused.lin
+traits/declared_answers/two_parts_asking_about_their_common_holder_are_refused.lin

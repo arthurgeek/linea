@@ -1,0 +1,28 @@
+// `Ay.Reading` is `W[Ay].Reading`, which is `Option[Ay.Reading]`: the
+// definition reads back to itself through a generic implementation.
+trait Sensor {
+    type Reading
+}
+
+struct W[T] {
+    t: T,
+}
+
+impl[T: Sensor] Sensor for W[T] {
+    type Reading = Option[T.Reading]
+}
+
+struct Ay {}
+
+impl Sensor for Ay {
+    type Reading = W[Ay].Reading
+}
+
+fn main() -> UInt8 {
+    let _w = W[Ay] { t = Ay {} }
+    let x: Ay.Reading = .None
+    match x {
+        Some(_) => 1,
+        None => 0,
+    }
+}

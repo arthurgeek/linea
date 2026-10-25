@@ -1,0 +1,36 @@
+// `Y`'s part is `Chooser[B].Out`, which exists only if `B` can be discarded,
+// and `B` holds an `X` holding a `Y`: `Y`'s part depends on that answer.
+// `Zed` asking about `X` first changes nothing.
+trait Pick {
+    type Out
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+struct Zed {
+    z: Chooser[X].Out,
+}
+
+struct X {
+    y: Y,
+}
+
+struct Y {
+    p: Chooser[B].Out,
+}
+
+struct B {
+    x: X,
+}
+
+fn main() -> UInt8 {
+    let b = B { x = X { y = Y { p = 1 } } }
+    let zed = Zed { z = 2 }
+    zed.z + b.x.y.p
+}
