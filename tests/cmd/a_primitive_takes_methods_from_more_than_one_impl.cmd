@@ -19,9 +19,9 @@ whether it sits beside the first or in another module.
   beside 1
   $ grep -A4 'N-Duplicate' beside.out
   error[N-Duplicate]: `floor` is already declared in this type
-     --> beside/scalar/float.lin:328:12
+     --> beside/scalar/float.lin:555:12
       |
-  328 |     pub fn floor(self: Self) -> Float64 {
+  555 |     pub fn floor(self: Self) -> Float64 {
       |            ^^^^^ a name is declared once
   $ cp -R "$LINEA_ROOT"/std across
   $ printf '\nimpl Float64 {\n    // Return the value unchanged.\n    pub fn floor(self: Self) -> Float64 {\n        self\n    }\n}\n' >> across/text/parse_float.lin
@@ -29,9 +29,9 @@ whether it sits beside the first or in another module.
   across 1
   $ grep -A4 'N-Duplicate' across.out
   error[N-Duplicate]: `floor` is already declared in this type
-     --> across/text/parse_float.lin:157:12
+     --> across/text/parse_float.lin:125:12
       |
-  157 |     pub fn floor(self: Self) -> Float64 {
+  125 |     pub fn floor(self: Self) -> Float64 {
       |            ^^^^^ a name is declared once
 
 The rule is the same for every primitive: two library modules may not both
@@ -44,7 +44,7 @@ give UInt8 a `halved`.
   integer 1
   $ grep -A4 'N-Duplicate' integer.out
   error[N-Duplicate]: `halved` is already declared in this type
-     --> integer/text/parse_float.lin:157:12
+     --> integer/text/parse_float.lin:125:12
       |
-  157 |     pub fn halved(self: Self) -> UInt8 {
+  125 |     pub fn halved(self: Self) -> UInt8 {
       |            ^^^^^^ a name is declared once

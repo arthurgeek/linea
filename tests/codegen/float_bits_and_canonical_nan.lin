@@ -1,0 +1,15 @@
+fn quotient(left: Float64, right: Float64) -> Float64 {
+    left / right
+}
+
+fn flipped(value: Float64) -> UInt64 {
+    (-value).to_bits()
+}
+
+fn main() -> UInt8 {
+    if flipped(quotient(0.0, 0.0)) > Float64.from_bits(0).to_bits() {
+        0
+    } else {
+        1
+    }
+}

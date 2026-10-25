@@ -59,6 +59,7 @@ pub fn witnessOf(tag: Inst.Tag) []const u8 {
         .float_to_int,
         .float_extend,
         .float_truncate,
+        .bit_cast,
         .float_math,
         => unreachable,
     };

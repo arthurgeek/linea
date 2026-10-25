@@ -79,7 +79,7 @@ test "a runtime symbol is refused and an ordinary name is not" {
 /// A scalar a runtime function's signature names, as C and Linea agree on it.
 /// `ptr` is an address the compiler passes as a pointer: no Linea declaration
 /// spells it, so only the symbols the compiler owns use it.
-pub const Scalar = enum { u8, i32, i64, u64, f64, ptr, unit };
+pub const Scalar = enum { u8, i32, u32, i64, u64, f32, f64, ptr, unit };
 
 /// How a runtime function takes a parameter: by value, or through a pointer
 /// the callee writes, which a Linea declaration spells `inout`.
@@ -92,7 +92,8 @@ pub const Provider = enum {
     /// The runtime library defines it; `runtime/` holds its C prototype.
     runtime,
     /// Lowering replaces the standard library's declaration of it with a
-    /// checked access, so no definition exists anywhere to link against.
+    /// checked access or a bit cast, so no definition exists anywhere to link
+    /// against.
     lowering,
     /// The emitted module defines it, because C's startup calls it.
     generated,
@@ -104,6 +105,9 @@ pub const Signature = struct {
     parameters: []const Parameter,
     result: Scalar,
     provider: Provider = .runtime,
+    /// For a symbol lowering replaces, the standard library operation a
+    /// program calls instead, which the refusal of its own declaration names.
+    reached_through: []const u8 = "",
     /// Control never returns from a call to it.
     noreturn: bool = false,
 };
@@ -227,10 +231,16 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_float32_parse", .parameters = &.{ p(.u64), p(.u64), written, written }, .result = .u64 },
     .{ .symbol = "linea_float32_debug", .parameters = &.{ p(.u64), written, written, written, written }, .result = .u64 },
     .{ .symbol = "linea_float32_shortest", .parameters = &.{ p(.u64), .{ .scalar = .i64, .passing = .inout } }, .result = .u64 },
-    .{ .symbol = "linea_raw_load", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .u64, .provider = .lowering },
-    .{ .symbol = "linea_raw_load8", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .u8, .provider = .lowering },
-    .{ .symbol = "linea_raw_store", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64) }, .result = .unit, .provider = .lowering },
-    .{ .symbol = "linea_raw_store8", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u8) }, .result = .unit, .provider = .lowering },
+    .{ .symbol = "linea_raw_load", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .u64, .provider = .lowering, .reached_through = "the standard library's checked storage operations" },
+    .{ .symbol = "linea_raw_load8", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .u8, .provider = .lowering, .reached_through = "the standard library's checked storage operations" },
+    .{ .symbol = "linea_raw_store", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64) }, .result = .unit, .provider = .lowering, .reached_through = "the standard library's checked storage operations" },
+    .{ .symbol = "linea_raw_store8", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u8) }, .result = .unit, .provider = .lowering, .reached_through = "the standard library's checked storage operations" },
+    // A float's IEEE 754 bits as the unsigned integer of its width, and back.
+    // Lowering replaces each with a bit-for-bit reinterpretation.
+    .{ .symbol = "linea_float64_to_bits", .parameters = &.{p(.f64)}, .result = .u64, .provider = .lowering, .reached_through = "`Float64.to_bits`" },
+    .{ .symbol = "linea_float64_from_bits", .parameters = &.{p(.u64)}, .result = .f64, .provider = .lowering, .reached_through = "`Float64.from_bits`" },
+    .{ .symbol = "linea_float32_to_bits", .parameters = &.{p(.f32)}, .result = .u32, .provider = .lowering, .reached_through = "`Float32.to_bits`" },
+    .{ .symbol = "linea_float32_from_bits", .parameters = &.{p(.u32)}, .result = .f32, .provider = .lowering, .reached_through = "`Float32.from_bits`" },
 };
 
 /// The prefix that marks a symbol as the runtime's.
@@ -256,5 +266,8 @@ test "a runtime function is found by its whole symbol" {
         try testing.expect(std.mem.startsWith(u8, signature.symbol, namespace));
         try testing.expect(!holds(signature.symbol));
         for (runtime_functions[i + 1 ..]) |other| try testing.expect(!std.mem.eql(u8, signature.symbol, other.symbol));
+        // A symbol lowering replaces names the operation to call instead, and
+        // only such a symbol has one.
+        try testing.expectEqual(signature.provider == .lowering, signature.reached_through.len > 0);
     }
 }

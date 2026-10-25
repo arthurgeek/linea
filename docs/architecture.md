@@ -1916,24 +1916,34 @@ tell the two apart; the I/O entries hand every extent to
 in both modes (ADR 0197).
 
 Floating-point Debug formatting uses the pinned Zig standard library's Ryu
-algorithm in `runtime/float.zig`. `std/fmt/float.lin` reconstructs the IEEE bits
-with exact powers of two and passes them through the integer foreign interface.
+algorithm in `runtime/float.zig`. `std/fmt/float.lin` reads the IEEE bits with
+`to_bits` and passes them through the integer foreign interface.
 A `Float32` crosses as the bits of the `Float64` holding the same value, which
 widening gives exactly; `linea_float32_debug` and `linea_float32_shortest`
-narrow it back and render it at binary32, so both widths share one
-reconstruction routine.
+narrow it back and render it at binary32, so both widths share one writer.
 The runtime returns at most 32 ASCII bytes packed numerically into four integers;
 the Linea adapter writes immutable character slices through the caller's Writer.
-No temporary runtime buffer becomes a Str. Reconstruction takes at most 1,023
-normalization steps for binary64, and both sides use bounded storage.
+No temporary runtime buffer becomes a Str, and both sides use bounded storage.
+
+`to_bits` and `from_bits` are methods over four `std.mem` externs
+(`linea_float64_to_bits` and its kin) whose provider is lowering: the checker
+holds them to the runtime table, `RawAccesses.float_bits` records the checked
+declarations, and lowering replaces each call with one `bit_cast`
+instruction, emitted as `arith.bitcast`. Emission writes every NaN-producing
+float result (`addf`, `subf`, `mulf`, `divf`, `extf`, `truncf`, math calls) as
+`%nr`, then defines the value with `canonicalNan`: a select of the positive
+quiet NaN where the result is unordered with itself (ADR 0249). A `Float64`
+from C passes through the same writer, `writeCanonicalNan`, where it crosses:
+an extern call's result, a value C left behind an `inout` argument, and each
+float parameter of an export or callback entry. Negation, loads, stores and
+bit casts keep every bit.
 
 Checked decimal input uses the same integer foreign interface. The private
 `std.mem` adapter passes a certified byte address and extent to
 `linea_float64_parse`; status, IEEE bits and syntax offset return as integers.
-`std.text.parse_float64` reconstructs the finite result using exact powers of two,
-with at most 1,074 steps. `linea_float32_parse` shares the scanner and rounds
-once to binary32 with the same provider; `std.text.parse_float32` reconstructs
-the binary64 encoding it returns and narrows it, exactly. The runtime validates the complete decimal token and
+`std.text.parse_float64` builds the result from those bits with `from_bits`. `linea_float32_parse` shares the scanner and rounds
+once to binary32 with the same provider; `std.text.parse_float32` builds the
+binary64 value it returns and narrows it, exactly. The runtime validates the complete decimal token and
 uses the pinned Zig toolchain's integer-only conversion provider, so rounding
 is nearest-even independently of the ambient floating mode. The build copies
 four unchanged provider files into a generated module and installs their MIT

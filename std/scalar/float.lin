@@ -1,3 +1,4 @@
+import std.mem
 import std.testing
 
 // The Float64 math methods `sqrt`, `floor`, `ceil`, `trunc`, `round`, `pow`,
@@ -259,9 +260,14 @@ impl Float64 {
     }
 
     // Negate negative values and return positive zero for either zero, so
-    // the result never carries a sign; NaN stays NaN.
+    // the result never carries a sign. A NaN stays a NaN with its payload,
+    // and its sign bit is cleared, as IEEE 754's `abs` and Rust's
+    // `f64::abs` clear it.
     pub fn abs(self: Self) -> Float64 {
-        if self < 0.0 {
+        if self.is_nan() {
+            let sign_bit: UInt64 = 9223372036854775808
+            Float64.from_bits(self.to_bits() % sign_bit)
+        } else if self < 0.0 {
             -self
         } else if self == 0.0 {
             0.0
@@ -279,7 +285,121 @@ impl Float64 {
 
         let nan = 0.0 / 0.0
         testing.assert(nan.abs().is_nan(), "the magnitude of a NaN is not a NaN")?
+        // A negative quiet NaN with a payload loses its sign and keeps the rest.
+        let negative_nan: UInt64 = 18444492273895866369
+        let positive_nan: UInt64 = 9221120237041090561
+        testing.assert_eq(Float64.from_bits(negative_nan).abs().to_bits(), positive_nan, "the magnitude of a NaN kept its sign")?
+        testing.assert_eq(Float64.from_bits(positive_nan).abs().to_bits(), positive_nan, "the magnitude of a positive NaN changed")?
 
+        .Ok(())
+    }
+
+    // Return the value's IEEE 754 bits: the sign in bit 63, the exponent
+    // biased by 1023 in bits 62 to 52, and the fraction below them. Every bit
+    // is kept, a NaN's sign and payload included.
+    pub fn to_bits(self: Self) -> UInt64 {
+        mem.float64_to_bits(self)
+    }
+
+    test fn float64_bits_are_its_ieee_encoding() {
+        testing.assert_eq(Float64.to_bits(1.0), UInt64(4607182418800017408), "one is not 0x3FF0000000000000")?
+        let sign_bit: UInt64 = 9223372036854775808
+        testing.assert_eq(Float64.to_bits(-0.0), sign_bit, "negative zero is not its sign bit")?
+        testing.assert_eq(Float64.to_bits(5e-324), UInt64(1), "the smallest subnormal is not 1")?
+        testing.assert_eq(Float64.to_bits(1.0 / 0.0), UInt64(9218868437227405312), "infinity changed")?
+        .Ok(())
+    }
+
+    // Return the Float64 whose IEEE 754 bits are `bits`, every bit kept: any
+    // NaN, sign and payload included, can be built this way.
+    pub fn from_bits(bits: UInt64) -> Float64 {
+        mem.float64_from_bits(bits)
+    }
+
+    test fn float64_from_bits_keeps_every_bit() {
+        testing.assert_eq(Float64.from_bits(4607182418800017408), 1.0, "0x3FF0000000000000 is not one")?
+        // A negative signalling NaN with a payload: exponent all ones, top
+        // fraction bit clear, lowest fraction bit set.
+        let signalling: UInt64 = 18442240474082181121
+        testing.assert(Float64.from_bits(signalling).is_nan(), "the pattern is not a NaN")?
+        testing.assert_eq(Float64.from_bits(signalling).to_bits(), signalling, "the NaN's payload changed")?
+        .Ok(())
+    }
+
+    // Return whether self comes before `other` in IEEE 754's total order:
+    // -NaN < -infinity < negative numbers < -0.0 < 0.0 < positive numbers <
+    // infinity < NaN, with NaNs of one sign ordered by payload. It is a strict
+    // total order on bit patterns, so `-0.0` comes before `0.0` and two values
+    // tie only when their bits are equal; it is Rust's `f64::total_cmp`.
+    // `values.sort_by(Float64.total_less)` sorts floats with every NaN the
+    // program computes last. `<` is unchanged: it stays IEEE's partial order.
+    pub fn total_less(self: Self, other: Self) -> Bool {
+        self.total_key() < other.total_key()
+    }
+
+    // Map the value's bits to an unsigned key that orders as `total_less` does.
+    // A set sign bit reverses the order of the negative patterns and puts them
+    // below every positive one; a clear one lifts the positive patterns above
+    // them. Neither branch can overflow.
+    fn total_key(self: Self) -> UInt64 {
+        let bits = self.to_bits()
+        let sign_bit: UInt64 = 9223372036854775808
+        if bits >= sign_bit {
+            18446744073709551615 - bits
+        } else {
+            bits + sign_bit
+        }
+    }
+
+    test fn float64_total_order_ranks_every_class() {
+        // Each value comes strictly before the next: -NaN with the largest
+        // payload, the negative quiet NaN, a negative signalling NaN, -infinity,
+        // -max, -1, -min normal, -max subnormal, -min subnormal, -0, +0, then the
+        // same magnitudes positive, then a positive signalling NaN, +qNaN and
+        // +NaN with the largest payload.
+        let ladder: [UInt64; _] = [
+            18446744073709551615,
+            18444492273895866368,
+            18442240474082181121,
+            18442240474082181120,
+            18442240474082181119,
+            13830554455654793216,
+            9227875636482146304,
+            9227875636482146303,
+            9223372036854775809,
+            9223372036854775808,
+            0,
+            1,
+            4503599627370495,
+            4503599627370496,
+            4607182418800017408,
+            9218868437227405311,
+            9218868437227405312,
+            9218868437227405313,
+            9221120237041090560,
+            9223372036854775807,
+        ]
+        for i in 0..ladder.length() {
+            let left = Float64.from_bits(ladder[i])
+            testing.assert(!left.total_less(left), "a value came before itself")?
+            for j in i + 1..ladder.length() {
+                let right = Float64.from_bits(ladder[j])
+                testing.assert(left.total_less(right) && !right.total_less(left), "the total order misplaced a pair")?
+            }
+        }
+        testing.assert(Float64.total_less(-0.0, 0.0) && -0.0 == 0.0, "signed zeros are equal yet not ordered")?
+        // Away from the signed zeros the total order is `<`: infinities, the
+        // largest finite values, normals, the smallest normals, subnormals and
+        // positive zero.
+        let infinity = 1.0 / 0.0
+        let numbers = [-infinity, -1.7976931348623157e308, -3.5, -1.0, -2.2250738585072014e-308, -5e-324, 0.0, 5e-324, 2.2250738585072014e-308, 0.5, 2.0, 1e300, 1.7976931348623157e308, infinity]
+        for i in 0..numbers.length() {
+            for j in 0..numbers.length() {
+                let left = numbers[i]
+                let right = numbers[j]
+                testing.assert_eq(left.total_less(right), left < right, "the total order disagrees with < on numbers")?
+            }
+        }
         .Ok(())
     }
 }
@@ -302,9 +422,14 @@ test fn a_float32_nan_is_equal_to_nothing_including_itself() {
 
 impl Float32 {
     // Negate negative values and return positive zero for either zero, so
-    // the result never carries a sign; NaN stays NaN.
+    // the result never carries a sign. A NaN stays a NaN with its payload,
+    // and its sign bit is cleared, as IEEE 754's `abs` and Rust's
+    // `f32::abs` clear it.
     pub fn abs(self: Self) -> Float32 {
-        if self < 0.0 {
+        if self.is_nan() {
+            let sign_bit: UInt32 = 2147483648
+            Float32.from_bits(self.to_bits() % sign_bit)
+        } else if self < 0.0 {
             -self
         } else if self == 0.0 {
             0.0
@@ -320,5 +445,107 @@ test fn a_float32_absolute_value_drops_the_sign_and_keeps_everything_else() {
     let zero: Float32 = 0.0
     testing.assert(1.0 / Float32.abs(-zero) > 0.0, "absolute value of negative zero keeps its sign")?
     testing.assert((zero / zero).abs().is_nan(), "the magnitude of a NaN is not a NaN")?
+    let negative_nan: UInt32 = 4290772993
+    let positive_nan: UInt32 = 2143289345
+    testing.assert_eq(Float32.from_bits(negative_nan).abs().to_bits(), positive_nan, "the magnitude of a NaN kept its sign")?
+    testing.assert_eq(Float32.from_bits(positive_nan).abs().to_bits(), positive_nan, "the magnitude of a positive NaN changed")?
     .Ok(())
+}
+
+impl Float32 {
+    // Return the value's IEEE 754 bits: the sign in bit 31, the exponent
+    // biased by 127 in bits 30 to 23, and the fraction below them. Every bit
+    // is kept, a NaN's sign and payload included.
+    pub fn to_bits(self: Self) -> UInt32 {
+        mem.float32_to_bits(self)
+    }
+
+    test fn float32_bits_are_its_ieee_encoding() {
+        testing.assert_eq(Float32.to_bits(1.0), UInt32(1065353216), "one is not 0x3F800000")?
+        testing.assert_eq(Float32.to_bits(-0.0), UInt32(2147483648), "negative zero is not its sign bit")?
+        testing.assert_eq(Float32.to_bits(1e-45), UInt32(1), "the smallest subnormal is not 1")?
+        .Ok(())
+    }
+
+    // Return the Float32 whose IEEE 754 bits are `bits`, every bit kept.
+    pub fn from_bits(bits: UInt32) -> Float32 {
+        mem.float32_from_bits(bits)
+    }
+
+    test fn float32_from_bits_keeps_every_bit() {
+        testing.assert_eq(Float32.from_bits(1065353216), 1.0, "0x3F800000 is not one")?
+        let signalling: UInt32 = 4286578689
+        testing.assert(Float32.from_bits(signalling).is_nan(), "the pattern is not a NaN")?
+        testing.assert_eq(Float32.from_bits(signalling).to_bits(), signalling, "the NaN's payload changed")?
+        .Ok(())
+    }
+
+    // Return whether self comes before `other` in IEEE 754's total order, as
+    // `Float64.total_less` orders a Float64; it is Rust's `f32::total_cmp`.
+    pub fn total_less(self: Self, other: Self) -> Bool {
+        self.total_key() < other.total_key()
+    }
+
+    // Map the value's bits to an unsigned key that orders as `total_less`
+    // does, as `Float64.total_key` does at 64 bits.
+    fn total_key(self: Self) -> UInt32 {
+        let bits = self.to_bits()
+        let sign_bit: UInt32 = 2147483648
+        if bits >= sign_bit {
+            4294967295 - bits
+        } else {
+            bits + sign_bit
+        }
+    }
+
+    test fn float32_total_order_ranks_every_class() {
+        // The Float32 forms of the Float64 ladder above, in the same order.
+        let ladder: [UInt32; _] = [
+            4294967295,
+            4290772992,
+            4286578689,
+            4286578688,
+            4286578687,
+            3212836864,
+            2155872256,
+            2155872255,
+            2147483649,
+            2147483648,
+            0,
+            1,
+            8388607,
+            8388608,
+            1065353216,
+            2139095039,
+            2139095040,
+            2139095041,
+            2143289344,
+            2147483647,
+        ]
+        for i in 0..ladder.length() {
+            let left = Float32.from_bits(ladder[i])
+            testing.assert(!left.total_less(left), "a value came before itself")?
+            for j in i + 1..ladder.length() {
+                let right = Float32.from_bits(ladder[j])
+                testing.assert(left.total_less(right) && !right.total_less(left), "the total order misplaced a pair")?
+            }
+        }
+        let nan_bits: UInt32 = 2143289345
+        let nan = Float32.from_bits(nan_bits)
+        let same_nan = Float32.from_bits(nan_bits)
+        testing.assert(!nan.total_less(same_nan) && !same_nan.total_less(nan), "two NaNs with equal bits did not tie")?
+        let zero: Float32 = 0.0
+        testing.assert(Float32.total_less(-0.0, 0.0) && -zero == zero, "signed zeros are equal yet not ordered")?
+        // Away from the signed zeros the total order is `<`, as for Float64.
+        let infinity = 1.0 / zero
+        let numbers: [Float32; _] = [-infinity, -3.4028235e38, -3.5, -1.0, -1.1754944e-38, -1e-45, 0.0, 1e-45, 1.1754944e-38, 0.5, 2.0, 3e38, 3.4028235e38, infinity]
+        for i in 0..numbers.length() {
+            for j in 0..numbers.length() {
+                let left = numbers[i]
+                let right = numbers[j]
+                testing.assert_eq(left.total_less(right), left < right, "the total order disagrees with < on numbers")?
+            }
+        }
+        .Ok(())
+    }
 }

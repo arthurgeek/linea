@@ -1254,6 +1254,12 @@ The library tests itself.
   ok    scalar.an_exponential_has_defined_limits
   ok    scalar.ceil_rounds_up_and_keeps_the_sign_of_a_negative_fraction
   ok    scalar.cosine_uses_radians_and_preserves_special_values
+  ok    scalar.float32_bits_are_its_ieee_encoding
+  ok    scalar.float32_from_bits_keeps_every_bit
+  ok    scalar.float32_total_order_ranks_every_class
+  ok    scalar.float64_bits_are_its_ieee_encoding
+  ok    scalar.float64_from_bits_keeps_every_bit
+  ok    scalar.float64_total_order_ranks_every_class
   ok    scalar.floor_rounds_down_and_keeps_zero_infinity_and_nan
   ok    scalar.powers_prioritize_identities_and_preserve_odd_signs
   ok    scalar.round_takes_halfway_values_to_even
@@ -1420,4 +1426,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1417 passed, 0 failed
+  1423 passed, 0 failed

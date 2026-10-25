@@ -158,7 +158,7 @@ fn writeInst(
             try w.print(" {s} %{d}", .{ @tagName(math.operation), math.lhs.index() });
             if (math.operation.arity() == 2) try w.print(", %{d}", .{math.rhs.index()});
         },
-        .neg, .int_to_float, .float_to_int, .float_extend, .float_truncate => try w.print(" %{d}", .{mir.unaryOf(id).index()}),
+        .neg, .int_to_float, .float_to_int, .float_extend, .float_truncate, .bit_cast => try w.print(" %{d}", .{mir.unaryOf(id).index()}),
         .check => {
             const c = mir.checkOf(id);
             try w.print(" %{d} ({s})", .{ c.value.index(), @tagName(c.kind) });

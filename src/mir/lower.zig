@@ -1540,6 +1540,7 @@ const Lowerer = struct {
             .float_to_int,
             .float_extend,
             .float_truncate,
+            .bit_cast,
             .float_math,
             .check,
             .function_addr,
@@ -5251,6 +5252,8 @@ const Lowerer = struct {
             return self.checkedAccess(.byte, args.items[0..3].*, args.items[3], span);
         if (d == self.library.raw.load8)
             return self.checkedAccess(.byte, args.items[0..3].*, null, span);
+        if (self.library.raw.floatBits(d))
+            return self.emit(.bit_cast, ty, span, .{ .unary = args.items[0] });
 
         // Which instantiation this call reaches. The checker recorded what it
         // settled the callee's parameters to; those arguments are themselves

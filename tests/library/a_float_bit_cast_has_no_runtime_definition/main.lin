@@ -1,0 +1,9 @@
+extern fn linea_float64_to_bits(value: Float64) -> UInt64
+
+extern fn linea_float32_from_bits(bits: UInt32) -> Float32
+
+export fn call_it(value: Int64) -> Int64 {
+    let bits = linea_float64_to_bits(Float64(value))
+    let narrow = linea_float32_from_bits(UInt32(bits % 4294967296))
+    Int64(narrow)
+}

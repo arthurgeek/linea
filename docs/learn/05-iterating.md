@@ -1015,8 +1015,8 @@ error[T-Bound]: `T` requires `Ordered`, and `Float64` does not implement it
 
 The library declares both `Float64` and `Ordered`, so a program cannot add
 that implementation. Wrapping each float in a type of your own that implements
-`Ordered` works, but it is simpler to sort floats with `sort_by` and a
-comparison that decides where NaN goes:
+`Ordered` works, but it is simpler to sort floats with `sort_by` and
+`Float64.total_less`, IEEE 754's total order, which puts every float somewhere:
 
 ```linea
 import std.io
@@ -1027,8 +1027,8 @@ fn main() -> Result[UInt8, io.IoError] {
         return .Ok(1)
     }
     defer var sorted = values
-    // NaN goes after every number, and two NaNs are equal for the sort.
-    &sorted.sort_by(|left, right| !left.is_nan() && (right.is_nan() || left < right))
+    // `Float64.total_less` names the comparison, as `Float64.abs` names a function.
+    &sorted.sort_by(Float64.total_less)
     io.println("{sorted.as_slice():?}")?
     .Ok(0)
 }
@@ -1037,6 +1037,36 @@ fn main() -> Result[UInt8, io.IoError] {
 ```
 [-1.0, 0.5, 2.5, NaN]
 ```
+
+`total_less` orders by a float's bits rather than its value: `-0.0` comes
+before `0.0`, which `<` calls equal, and a NaN the program computes, like
+`0.0 / 0.0`, comes after `inf`. A NaN carries a sign that only this order
+sees. Negating one flips it, and `-nan` comes before `-inf`:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let nan = 0.0 / 0.0
+    let readings = [Float64(0.0), nan, -nan, -0.0, 1.0 / 0.0]
+    let { values, iterator: _ } = readings.as_slice().map(|sink reading| *reading).collect().settled() else |_| {
+        return .Ok(1)
+    }
+    defer var sorted = values
+    &sorted.sort_by(Float64.total_less)
+    io.println("{sorted.as_slice():?}")?
+    .Ok(0)
+}
+```
+
+```
+[NaN, -0.0, 0.0, inf, NaN]
+```
+
+Every NaN prints as `NaN`, so the first and the last look alike, but
+`to_bits()` tells them apart: it returns a float's IEEE 754 bits as a
+`UInt64`. This is Rust's `values.sort_by(f64::total_cmp)`, and `Float32` has
+its own `total_less`.
 
 A comparison must be consistent. It is never true for a value against itself.
 It is transitive: if `a` comes before `b` and `b` before `c`, then `a` comes

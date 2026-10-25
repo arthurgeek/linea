@@ -1,0 +1,25 @@
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let zero = 0.0
+    let infinity = 1.0 / zero
+    let nan = zero / zero
+    // Negation flips a NaN's sign bit, so `-nan` is the negative quiet NaN.
+    let readings = [2.5, -nan, 0.0, infinity, -0.0, nan, -infinity, -1.0, 5e-324, nan, -0.0]
+    let { values, iterator: _ } = readings.as_slice().map(|sink reading| *reading).collect().settled() else |_| {
+        return .Ok(1)
+    }
+    defer var sorted = values
+    &sorted.sort_by(Float64.total_less)
+    for reading in sorted.as_slice() {
+        io.println("{reading} {reading.to_bits()}")?
+    }
+    let narrow: [Float32; _] = [1.5, -0.0, 0.0, -2.0]
+    let { values: narrow_values, iterator: _ } = narrow.as_slice().map(|sink reading| *reading).collect().settled() else |_| {
+        return .Ok(1)
+    }
+    defer var narrow_sorted = narrow_values
+    &narrow_sorted.sort_by(Float32.total_less)
+    io.println("{narrow_sorted.as_slice():?}")?
+    .Ok(0)
+}

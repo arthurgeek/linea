@@ -37,7 +37,10 @@ module {
   ^b0:
     %v0 = llvm.load %s0 : !llvm.ptr -> f64 loc("tests/codegen/a_float_division_is_not_guarded.lin":2:5)
     %v1 = llvm.load %s1 : !llvm.ptr -> f64 loc("tests/codegen/a_float_division_is_not_guarded.lin":2:9)
-    %v2 = arith.divf %v0, %v1 : f64 loc("tests/codegen/a_float_division_is_not_guarded.lin":2:5)
+    %nr2 = arith.divf %v0, %v1 : f64 loc("tests/codegen/a_float_division_is_not_guarded.lin":2:5)
+    %nu2 = arith.cmpf uno, %nr2, %nr2 : f64 loc("tests/codegen/a_float_division_is_not_guarded.lin":2:5)
+    %nq2 = arith.constant 0x7FF8000000000000 : f64 loc("tests/codegen/a_float_division_is_not_guarded.lin":2:5)
+    %v2 = arith.select %nu2, %nq2, %nr2 : f64 loc("tests/codegen/a_float_division_is_not_guarded.lin":2:5)
     func.return %v2 : f64 loc("tests/codegen/a_float_division_is_not_guarded.lin":2:5)
   }
   func.func @main(%argc: i32, %argv: !llvm.ptr) -> i32 {

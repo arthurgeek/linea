@@ -564,6 +564,7 @@ pub fn reachOfInst(tag: Inst.Tag) Reach {
 
         .int_to_float, .float_to_int => .generated,
         .float_extend, .float_truncate => .{ .impossible = "generated programs use no Float32" },
+        .bit_cast => .{ .impossible = "generated programs read no float bits" },
         .float_math => .{ .impossible = "generated programs declare no trusted scalar math primitives" },
 
         .function_addr, .call_indirect => .generated,

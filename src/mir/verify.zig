@@ -1051,6 +1051,20 @@ const Function = struct {
                             return false;
                         }
                     },
+                    .bit_cast => {
+                        const from = self.module.resultRepresentationOf(mir, operand);
+                        const to = self.module.resultRepresentationOf(mir, id);
+                        const ok = if (floatBits(from)) |bits|
+                            unsignedBits(self.module, mir.typeOf(id)) == bits and isInteger(to)
+                        else if (floatBits(to)) |bits|
+                            unsignedBits(self.module, mir.typeOf(operand)) == bits and isInteger(from)
+                        else
+                            false;
+                        if (!ok) {
+                            try self.report(span, "%{d} reinterprets something other than a float and the unsigned integer of its width", .{id.index()});
+                            return false;
+                        }
+                    },
                     .float_truncate => {
                         if (floatBits(self.module.resultRepresentationOf(mir, id)) != 32 or
                             floatBits(self.module.resultRepresentationOf(mir, operand)) != 64)
@@ -1340,6 +1354,7 @@ const Function = struct {
             .float_to_int,
             .float_extend,
             .float_truncate,
+            .bit_cast,
             .float_math,
             .check,
             .function_addr,
@@ -1667,6 +1682,13 @@ const Function = struct {
         return floatBits(representation) != null;
     }
 
+    fn unsignedBits(module: *const mir_mod.Module, ty: TypeId) ?u8 {
+        return switch (module.representationOf(ty).storage) {
+            .integer => |integer| if (integer.signedness == .unsigned) integer.bits else null,
+            else => null,
+        };
+    }
+
     fn floatBits(representation: mir_mod.ResultRepresentation) ?u8 {
         return switch (representation) {
             .computation => |computation| switch (computation) {
@@ -1903,6 +1925,7 @@ const Function = struct {
                 .float_to_int,
                 .float_extend,
                 .float_truncate,
+                .bit_cast,
                 .float_math,
                 .check,
                 .function_addr,

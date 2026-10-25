@@ -56,7 +56,7 @@ true of a different implementation.
 
 | # | Rule | Status |
 | --- | --- | --- |
-| [0013](0013-no-undefined-behaviour.md) | No operation has undefined behaviour | Accepted; extended by 0091 and 0228 |
+| [0013](0013-no-undefined-behaviour.md) | No operation has undefined behaviour | Accepted; extended by 0091, 0228 and 0249 |
 | [0014](0014-unused-declarations-are-errors.md) | An unused declaration is an error | Accepted |
 | [0189](0189-a-names-case-is-part-of-its-kind.md) | A name's case is part of its kind | Accepted; extended by 0190 |
 | [0194](0194-an-alias-names-a-type-that-exists.md) | An alias names a type that exists | Accepted; extended by 0206 and 0215; path clause for a generic alias superseded by 0211 |
@@ -98,8 +98,9 @@ true of a different implementation.
 | [0066](0066-a-blocks-state-is-its-dominators-plus-what-it-changed.md) | A block's state is its dominator's, plus what it changed | Accepted; refined by 0073 |
 | [0067](0067-a-place-is-updated-through-itself.md) | A compound assignment updates a place through itself | Accepted |
 | [0068](0068-a-declaration-may-name-a-symbol-the-runtime-provides.md) | A declaration may name a symbol the runtime provides | Accepted; extended by 0150 and 0156; `std/` clause superseded by 0171; integer-only, linear and callable clauses superseded by 0228 |
-| [0150](0150-float-math-crosses-a-checked-scalar-boundary.md) | Float math crosses a checked scalar boundary | Accepted; extends 0068; general-Float64 clause superseded by 0228 |
-| [0226](0226-float32-is-a-second-binary-floating-point-width.md) | Float32 is a second binary floating-point width | Accepted; extends 0018 and 0152 |
+| [0150](0150-float-math-crosses-a-checked-scalar-boundary.md) | Float math crosses a checked scalar boundary | Accepted; extends 0068; general-Float64 clause superseded by 0228; extended by 0249 |
+| [0226](0226-float32-is-a-second-binary-floating-point-width.md) | Float32 is a second binary floating-point width | Accepted; extends 0018 and 0152; extended by 0249 |
+| [0249](0249-a-float-has-a-total-order-and-a-computed-nan-is-canonical.md) | A float has a total order, and a computed NaN is canonical | Accepted; extends 0013, 0143, 0150 and 0226 |
 | [0156](0156-every-declaration-of-an-extern-symbol-is-one-function.md) | Every declaration of an extern symbol is one function | Accepted; extends 0068 |
 | [0228](0228-a-granted-module-calls-c.md) | A granted module calls C | Accepted; supersedes clauses of 0068, 0150 and 0171; extends 0013, 0101 and 0229; extended by 0246 |
 | [0151](0151-a-named-structure-literal-carries-a-written-type.md) | A named structure literal carries a written type | Accepted; refines 0041; extended by 0183 |
@@ -167,7 +168,7 @@ true of a different implementation.
 | [0222](0222-a-route-pattern-matches-its-own-path.md) | A route pattern matches its own path | Accepted; supersedes the subtree clause of 0154 |
 | [0232](0232-a-cookie-value-is-percent-encoded-text.md) | A cookie value is percent-encoded text: `set_cookie` takes any text and `Request.cookie` decodes it, reading a value that does not decode as absent | Accepted |
 | [0142](0142-construction-derives-expand-to-ordinary-source.md) | Construction derives expand to ordinary source | Accepted; partially supersedes 0081 and 0113; extends 0047 and 0087; attached-derive predicate clause superseded by 0165 |
-| [0143](0143-checked-decimal-conversion-uses-integer-rounding.md) | Checked decimal conversion uses bounded integer rounding | Accepted |
+| [0143](0143-checked-decimal-conversion-uses-integer-rounding.md) | Checked decimal conversion uses bounded integer rounding | Accepted; extended by 0249 |
 | [0146](0146-payload-free-variants-are-constant-expressions.md) | Payload-free variants are constant expressions | Accepted; extends 0020, 0059 and 0127; refines 0033 and 0077 |
 | [0157](0157-a-newtype-built-from-a-constant-is-a-constant-expression.md) | A newtype built from a constant is a constant expression | Accepted; extends 0020, 0127 and 0140 |
 | [0160](0160-a-postfix-call-reaches-the-types-own-operation-first.md) | A postfix call reaches the type's own operation before a trait's | Accepted; extended by 0186 and 0187 |

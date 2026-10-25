@@ -1,6 +1,8 @@
 # 142. Float math crosses a checked scalar boundary
 
-Status: Accepted — 2026-09-21. Extends 0068. "General Float64 foreign calls remain unsupported" is superseded by [0228](0228-a-granted-module-calls-c.md).
+Status: Accepted — 2026-09-21. Extends 0068. "General Float64 foreign calls remain unsupported" is superseded by [0228](0228-a-granted-module-calls-c.md). Extended by
+[0249](0249-a-float-has-a-total-order-and-a-computed-nan-is-canonical.md),
+which canonicalises a NaN a math operation returns.
 
 ## Context
 
