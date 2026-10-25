@@ -27991,14 +27991,52 @@ const Checker = struct {
         /// or waiting on the outermost part still being read that one of its
         /// types depends on. Returns the floor its holder takes from it.
         fn closeComponent(self: *AnswerSettling, root: TypeId, n: OwnedNode) std.mem.Allocator.Error!u32 {
+            const gpa = self.checker.gpa;
             const walk = &self.walk;
             const open = walk.openPartAt(n.floor);
-            while (walk.component.pop()) |member| {
-                const removed = walk.nodes.fetchRemove(member).?.value;
-                try self.waitOn(member, removed.height, if (open) |part| part.position else no_floor, true);
-                if (member == root) break;
+            const floor = if (open) |part| part.position else no_floor;
+            // Everything above `root` on the component stack was pushed after
+            // it. What `root`'s own search pushed reaches no lower than `root`;
+            // what a nested question's search left there, still open, may
+            // reach a type pushed before `root`, and belongs to that type's
+            // component: it stays, to be decided with it.
+            const bottom = std.mem.lastIndexOfScalar(TypeId, walk.component.items, root).?;
+            const members = walk.component.items[bottom..];
+            // A member's component is the one its lowlink chain ends in. A
+            // lowlink names a type pushed earlier and still on the stack, so
+            // following them in pushing order decides each in one step.
+            const ends = try gpa.alloc(u32, members.len);
+            defer gpa.free(ends);
+            for (members, 0..) |member, k| {
+                const low = walk.nodes.get(member).?.lowlink;
+                ends[k] = if (low < n.index) low else if (low == walk.nodes.get(member).?.index) low else ends[self.componentSlot(members, low).?];
             }
-            return if (open) |part| part.position else no_floor;
+            var kept: usize = bottom;
+            for (members, ends) |member, reach| {
+                if (reach < n.index) {
+                    walk.component.items[kept] = member;
+                    kept += 1;
+                    continue;
+                }
+                const removed = walk.nodes.fetchRemove(member).?.value;
+                try self.waitOn(member, removed.height, floor, true);
+            }
+            walk.component.shrinkRetainingCapacity(kept);
+            return floor;
+        }
+
+        /// Where the member pushed as node `index` sits among `members`,
+        /// which are in pushing order.
+        fn componentSlot(self: *const AnswerSettling, members: []const TypeId, index: u32) ?usize {
+            var lo: usize = 0;
+            var hi: usize = members.len;
+            while (lo < hi) {
+                const mid = lo + (hi - lo) / 2;
+                const at = self.walk.nodes.get(members[mid]).?.index;
+                if (at == index) return mid;
+                if (at < index) lo = mid + 1 else hi = mid;
+            }
+            return null;
         }
 
         /// Pushes `ty`: reads its declaration's unsettled parts, then lists
@@ -28190,12 +28228,13 @@ const Checker = struct {
 
         const outer = settling.watch.hit;
         settling.watch.hit = null;
-        const cycles = settling.cycles;
         const written = try self.partRef(part);
         var ty = try self.typeOfPart(written);
         const hit = settling.watch.hit;
         settling.watch.hit = outer;
-        if (hit) |question| if (settling.cycles == cycles) {
+        // Reported whatever a part read inside this one reported: each part
+        // a question was asked from is an edit of its own, writing its type.
+        if (hit) |question| {
             settling.cycles += 1;
             const name = try self.typeName(question.ty);
             const asked: []const u8 = switch (question.asked) {
@@ -28212,7 +28251,10 @@ const Checker = struct {
                 .{ name, asked },
             );
             ty = .poison;
-        };
+            // The answer the question was given is not one: a part reading
+            // the same selection later asks it again rather than reusing it.
+            self.builder.invalidateImplementationLookup();
+        }
         try self.setPart(part, ty);
         try settling.parts.put(self.gpa, part, .read);
         if (tracked) try settling.closePart(part);

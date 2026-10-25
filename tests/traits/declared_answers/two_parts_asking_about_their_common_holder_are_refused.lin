@@ -1,6 +1,6 @@
 // `X` holds a `Y0` and a `Y1`, whose parts each exist only if `B0` can be
-// discarded, and `B0` holds an `X`: both parts depend on that answer, and the
-// one cycle is reported once.
+// discarded, and `B0` holds an `X`: both parts depend on that answer, and each
+// is reported, since writing either one's type leaves the other's cycle.
 trait Pick {
     type Out
 }

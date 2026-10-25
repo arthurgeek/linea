@@ -80,3 +80,6 @@ traits/declared_answers/a_question_asked_first_about_a_holder_leaves_its_parts_c
 # Parts asking about a holder of their holder, and two parts asking about one holder.
 traits/declared_answers/a_part_asking_about_the_holder_of_its_holder_is_refused.lin
 traits/declared_answers/two_parts_asking_about_their_common_holder_are_refused.lin
+# A part asking about a holder of a linear part, reached through concrete and unbounded selections.
+traits/declared_answers/a_part_asking_about_a_holder_of_a_linear_part_is_refused.lin
+traits/declared_answers/a_part_asking_about_a_holder_reached_through_unbounded_selections_is_refused.lin

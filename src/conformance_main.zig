@@ -4797,6 +4797,24 @@ fn expectEveryOrder(preamble: []const u8, decls: []const []const u8, shuffles: u
     }
 }
 
+/// Checks that `decls` is refused in every order `declarationOrders`
+/// gives, each error under one of `allowed`.
+fn expectRefusedEveryOrder(preamble: []const u8, decls: []const []const u8, shuffles: usize, allowed: []const diagnostic.Code) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    for (try declarationOrders(gpa, decls.len, shuffles)) |order| {
+        const got = try refusalCodes(gpa, try permutedModule(gpa, preamble, decls, order));
+        const refused = got.len != 0 and for (got) |code| {
+            if (std.mem.indexOfScalar(diagnostic.Code, allowed, code) == null) break false;
+        } else true;
+        if (!refused) {
+            std.debug.print("declaration order {any} gave {any}\n", .{ order, got });
+            return error.TestExpectedRefusal;
+        }
+    }
+}
+
 fn codeBefore(_: void, a: diagnostic.Code, b: diagnostic.Code) bool {
     return @intFromEnum(a) < @intFromEnum(b);
 }
@@ -4815,14 +4833,22 @@ test "a part asking about a type that holds the part's own holder is refused in 
         "struct Y {\n    p: Chooser[B].Out,\n}\n",
         "struct B {\n    x: X,\n}\n",
     }, 0, &.{.t_bound});
-    // Two parts asking about one type that holds both: one cycle, reported
-    // once, whichever part is read first.
+    // Two parts asking about one type that holds both: writing either part's
+    // type leaves the other's cycle, so each is reported.
     try expectEveryOrder(pick_trait ++ chooser_impl, &.{
         "struct X {\n    y0: Y0,\n    y1: Y1,\n}\n",
         "struct Y0 {\n    p: Chooser[B0].Out,\n}\n",
         "struct Y1 {\n    p: Chooser[B0].Out,\n}\n",
         "struct B0 {\n    b: X,\n}\n",
-    }, 0, &.{.t_bound});
+    }, 0, &.{ .t_bound, .t_bound });
+    // Two parts asking about two holders of the type holding both.
+    try expectEveryOrder(pick_trait ++ chooser_impl, &.{
+        "struct X {\n    y0: Y0,\n    y1: Y1,\n}\n",
+        "struct Y0 {\n    p: Chooser[B0].Out,\n}\n",
+        "struct Y1 {\n    p: Chooser[B1].Out,\n}\n",
+        "struct B0 {\n    b: X,\n}\n",
+        "struct B1 {\n    b: X,\n}\n",
+    }, 0, &.{ .t_bound, .t_bound });
     // Three parts, a chain of holders back to theirs, and an earlier question.
     try expectEveryOrder(pick_trait ++ chooser_impl, &.{
         "struct _Zed {\n    z: Chooser[X].Out,\n}\n",
@@ -4832,7 +4858,34 @@ test "a part asking about a type that holds the part's own holder is refused in 
         "struct Y2 {\n    p: Chooser[B0].Out,\n}\n",
         "struct B0 {\n    b: B1,\n}\n",
         "struct B1 {\n    b: X,\n}\n",
-    }, 24, &.{.t_bound});
+    }, 24, &.{ .t_bound, .t_bound, .t_bound });
+}
+
+/// The holders of a linear part, reached through a concrete selection in
+/// `g1` and through unbounded ones in `g4`: `V.s` asks whether `R` can be
+/// discarded, `R` holds a `W` holding a `D`, and `D.p` is the linear `Lin`
+/// that `Y.Out` names, where `Y` holds the `V`.
+const linear_holder_decls = [_][]const u8{
+    "impl Pick for Y {\n    type Out = Lin\n}\n",
+    "struct D {\n    p: Y.Out,\n}\n",
+    "struct Y {\n    w: W,\n    x: X,\n    v: V,\n}\n",
+    "struct W {\n    d: D,\n}\n",
+    "struct R {\n    w: W,\n}\n",
+    "struct V {\n    s: Chooser[R].Out,\n}\n",
+};
+
+test "a part asking about a holder of a linear part is refused in every declaration order" {
+    const lin = "@linear\nstruct Lin {\n    v: UInt8,\n}\n\n";
+    try expectRefusedEveryOrder(pick_trait ++ lin ++ chooser_impl, &(linear_holder_decls ++ [_][]const u8{
+        "impl Pick for D {\n    type Out = UInt8\n}\n",
+        "impl Pick for R {\n    type Out = UInt8\n}\n",
+        "struct _Zed {\n    z: D.Out,\n}\n",
+        "struct X {\n    q: R.Out,\n}\n",
+    }), 48, &.{ .t_bound, .t_impl });
+    try expectRefusedEveryOrder(pick_trait ++ lin ++ chooser_impl ++ pad_impl, &(linear_holder_decls ++ [_][]const u8{
+        "struct _Zed {\n    z: Pad[D].Out,\n}\n",
+        "struct X {\n    q: Pad[R].Out,\n}\n",
+    }), 48, &.{ .t_bound, .t_impl });
 }
 
 test "parts asking an unbounded implementation about their holder are accepted in every declaration order" {
@@ -4866,6 +4919,41 @@ fn holdersAskedThroughAChainModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     }
     try w.writeAll("fn main() -> UInt8 {\n    let zed = Zed { z = 4 }\n    zed.z\n}\n");
     return out.toOwnedSlice();
+}
+
+/// `n` generic structures, each holding the next at its own parameter, the
+/// last holding `T.Item`, read through its parameter's bound.
+fn nestedTemplatesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("trait Tr {\n    type Item\n}\n\nstruct S {\n    n: UInt8,\n}\n\nimpl Tr for S {\n    type Item = UInt8\n}\n\n");
+    for (0..n) |k| try w.print("struct G{d}[T: Tr] {{\n    v: G{d}[T],\n}}\n\n", .{ k, k + 1 });
+    try w.print("struct G{d}[T: Tr] {{\n    v: T.Item,\n}}\n\n", .{n});
+    try w.writeAll("fn main() -> UInt8 {\n    let _g: Option[G0[S]] = .None\n    0\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// `n` generic structures, each holding what `Pad` selects for the next at
+/// its own parameter, the last holding `T.Item`.
+fn templatesSelectingTheNextModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("trait Tr {\n    type Item\n}\n\ntrait Pick {\n    type Out\n}\n\nstruct Pad[T] {\n    t: T,\n}\n\nimpl[T] Pick for Pad[T] {\n    type Out = T\n}\n\n");
+    try w.writeAll("struct S {\n    n: UInt8,\n}\n\nimpl Tr for S {\n    type Item = UInt8\n}\n\n");
+    for (0..n) |k| try w.print("struct G{d}[T: Tr] {{\n    v: Pad[G{d}[T]].Out,\n}}\n\n", .{ k, k + 1 });
+    try w.print("struct G{d}[T: Tr] {{\n    v: T.Item,\n}}\n\n", .{n});
+    try w.writeAll("fn main() -> UInt8 {\n    let _g: Option[G0[S]] = .None\n    0\n}\n");
+    return out.toOwnedSlice();
+}
+
+test "nested templates and templates selecting the next are accepted" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try nestedTemplatesModule(gpa, 6)));
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try templatesSelectingTheNextModule(gpa, 6)));
 }
 
 test "holders asked about through a chain are accepted" {
@@ -6739,6 +6827,9 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "delegation chain", .n = 250, .grows = false, .cost = throughTheLoader(delegationChainModule) },
     .{ .name = "settled reference chain", .n = 250, .grows = false, .cost = throughTreeBatch(settledReferenceChainModule, .emit, 16) },
     .{ .name = "holders asked about through a chain", .n = 400, .cost = throughTheTree(holdersAskedThroughAChainModule) },
+    .{ .name = "nested templates", .n = 1000, .cost = throughTheLoader(nestedTemplatesModule) },
+    // Each template's part is one link, so the chain is held below 1000.
+    .{ .name = "templates selecting the next", .n = 250, .grows = false, .cost = throughTheLoader(templatesSelectingTheNextModule) },
     .{ .name = "fields in one type", .n = 16000, .cost = throughTheTree(fieldModule) },
     .{ .name = "reflected components", .n = 4000, .cost = throughTheTree(reflectionComponentsModule) },
     .{ .name = "construction product width", .n = 2000, .cost = throughTheTree(constructionProductModule) },

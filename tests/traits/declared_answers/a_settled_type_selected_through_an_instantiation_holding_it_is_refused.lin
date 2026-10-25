@@ -1,0 +1,46 @@
+// `S.Item` is `Ch[W[S]].Out`, which exists only if `W[S]` can be discarded,
+// and `W[S]` holds an `S.Item`: what `S.Item` is depends on that answer.
+trait Tr {
+    type Item
+}
+
+trait Pick {
+    type Out
+}
+
+struct W[T: Tr] {
+    v: T.Item,
+}
+
+impl[T: Tr + Discardable] Pick for W[T] {
+    type Out = UInt8
+}
+
+struct Ch[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Ch[T] {
+    type Out = Lin
+}
+
+@linear
+struct Lin {
+    v: UInt8,
+}
+
+struct S {
+    n: UInt8,
+}
+
+impl Tr for S {
+    type Item = Ch[W[S]].Out
+}
+
+fn main() -> UInt8 {
+    let s = S { n = 3 }
+    let l: S.Item = Lin { v = 4 }
+    let Lin { v } = l
+    let _ = v
+    s.n
+}

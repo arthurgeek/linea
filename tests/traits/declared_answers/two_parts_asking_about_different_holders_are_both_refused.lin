@@ -1,0 +1,38 @@
+// `Y0.p` asks whether `B0` can be discarded and `Y1.p` whether `B1` can,
+// and each holds the `X` holding both parts: two cycles, each reported.
+trait Pick {
+    type Out
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+struct X {
+    y0: Y0,
+    y1: Y1,
+}
+
+struct Y0 {
+    p: Chooser[B0].Out,
+}
+
+struct Y1 {
+    p: Chooser[B1].Out,
+}
+
+struct B0 {
+    b: X,
+}
+
+struct B1 {
+    b: X,
+}
+
+fn main() -> UInt8 {
+    0
+}

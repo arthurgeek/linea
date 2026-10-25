@@ -1,0 +1,67 @@
+// `V.s` exists only if `R` can be discarded. `R` holds a `W` holding a `D`,
+// whose part is the linear `Lin`, so `R` cannot be, and `V.s` is refused.
+// Reading `D.p` reads `Y`, which holds the `V`, and the answer is the same
+// whichever declaration is read first.
+trait Pick {
+    type Out
+}
+
+@linear
+struct Lin {
+    v: UInt8,
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+impl Pick for D {
+    type Out = UInt8
+}
+
+impl Pick for Y {
+    type Out = Lin
+}
+
+impl Pick for R {
+    type Out = UInt8
+}
+
+struct Zed {
+    z: D.Out,
+}
+
+struct D {
+    p: Y.Out,
+}
+
+struct Y {
+    w: W,
+    x: X,
+    v: V,
+}
+
+struct W {
+    d: D,
+}
+
+struct X {
+    q: R.Out,
+}
+
+struct R {
+    w: W,
+}
+
+struct V {
+    s: Chooser[R].Out,
+}
+
+fn main() -> UInt8 {
+    let _z = Zed { z = 1 }
+    0
+}

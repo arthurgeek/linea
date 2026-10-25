@@ -1,0 +1,65 @@
+// The holders and parts of the program before, with `Zed`, which asks
+// about `D` through `Pad`, declared last: `V.s` is refused just the same.
+trait Pick {
+    type Out
+}
+
+@linear
+struct Lin {
+    v: UInt8,
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+impl Pick for Y {
+    type Out = Lin
+}
+
+struct Pad[T] {
+    t: T,
+}
+
+impl[T] Pick for Pad[T] {
+    type Out = UInt8
+}
+
+struct D {
+    p: Y.Out,
+}
+
+struct Y {
+    w: W,
+    x: X,
+    v: V,
+}
+
+struct W {
+    d: D,
+}
+
+struct X {
+    q: Pad[R].Out,
+}
+
+struct R {
+    w: W,
+}
+
+struct V {
+    s: Chooser[R].Out,
+}
+
+struct Zed {
+    z: Pad[D].Out,
+}
+
+fn main() -> UInt8 {
+    let _z = Zed { z = 1 }
+    0
+}
