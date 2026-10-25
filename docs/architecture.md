@@ -736,6 +736,22 @@ selection, the meaning of `Self`, and type layouts.
 declaration `Tuple2`..`Tuple8`, read as the `Option` and `Range` declarations
 are; a `.tuple` written type is an instantiation of the arity's entry, and
 `Builder.instantiate` and `writeTypeName` spell it `(A, B)`.
+An instantiation whose arguments hold a type parameter or an unsettled
+reference is minted with its parts unwritten (ADR 0248); `Instance.parts`
+records which, and `Builder.fillInstance` is the one routine that writes an
+instantiation's parts, for a ground one as it is minted, for an unwritten one
+on first read, and for every written one in `refillInstances`. Writing one
+writes the unwritten instantiations among its parts, so a written type holds
+only written types and a walk over parts never meets one without them. The
+builder's part accessors and its capability, dependency and writer queries
+write what they read; the three fact tables record a type's edges once its
+parts are written and leave an unwritten part for the builder to write before
+answering, except that the writer table records an unwritten instantiation by
+its arguments, which usually settle it. `fillMinted` writes every
+instantiation the checker minted before the pool is handed on, so a recorded
+type is written; the finished `Typing` refuses a read of an unwritten type's
+parts, layout or capability (`readsParts`), and lowering's layout table, the
+layout oracle and corpus coverage pass over one.
 `aliasedType` is the one place an alias becomes the type it names, read in the
 alias's module with its parameters in scope; `appliedAlias` answers every
 written name that reaches an alias and substitutes its arguments, and a path's
@@ -859,8 +875,8 @@ normalizes callable bounds and associated promises before capability
 validation and coherence. A second visit to declaration parts records those final
 callable types. Associated stand-ins receive the finalized promises; no
 shape-only environment is handed to ownership or lowering. Both visits are
-linear in the written parts, in addition to the existing instance refill
-work. Certified storage identities are installed before containment is queried.
+linear in the written parts, in addition to the instance refill, which
+rewrites only instantiations whose parts are already written. Certified storage identities are installed before containment is queried.
 
 The parser records contract roots and ordered field/dereference steps while
 preserving their written ranges. The checker normalizes these `borrows`,

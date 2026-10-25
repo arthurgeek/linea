@@ -88,7 +88,8 @@ true of a different implementation.
 | [0196](0196-a-selection-line-continues-the-line-above.md) | A newline ends a statement, unless the next line selects from it | Accepted; supersedes 0041 and the lowercase-selection clause of 0190; refined by 0202 |
 | [0202](0202-a-line-beginning-with-a-parenthesis-is-noted-only-as-an-empty-call.md) | A line beginning with `(` is noted only as an empty call | Accepted; refines 0043, 0190 and 0196 |
 | [0046](0046-the-universe-of-an-instantiation-is-computed.md) | The universe of an instantiation is computed | Accepted; refines 0034, refined by 0051 and 0123; classification superseded by 0124 |
-| [0047](0047-instantiation-is-a-backend-concern.md) | Instantiation is a backend concern | Accepted; extended by 0142 |
+| [0047](0047-instantiation-is-a-backend-concern.md) | Instantiation is a backend concern | Accepted; extended by 0142; ordinary-fields clause superseded by 0248 |
+| [0248](0248-an-instantiation-holding-a-parameter-is-written-when-read.md) | An instantiation holding a parameter is written when it is read | Accepted; supersedes the ordinary-fields clause of 0047 |
 | [0051](0051-a-part-obliges-when-no-argument-can-remove-it.md) | A part obliges when it is Linear for a reason no argument can remove | Accepted; refines 0046; superseded by 0124 |
 | [0053](0053-exclusivity-is-triggered-by-mutation.md) | Exclusivity is triggered by mutation, not by the marker | Accepted; supersedes the exclusivity clause of 0025 |
 | [0054](0054-the-bound-is-on-height-and-covers-written-types.md) | The nesting bound is on height, and a written type answers to it | Accepted; supersedes 0042 |

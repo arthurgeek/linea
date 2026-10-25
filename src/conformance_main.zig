@@ -3981,6 +3981,29 @@ fn instanceModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// `n` generic structures in a ring, each holding the next two through a
+/// container that stores none of them, and one built at a concrete argument.
+///
+/// Each structure's fields name the next two at its own parameter, and those
+/// name the two after them, round the ring. An instantiation holding a
+/// parameter has its parts written only when read, so the ring is written
+/// once, at the concrete argument, and the structures' own fields add a
+/// constant each.
+fn ringedGenericStructsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    std.debug.assert(n > 0);
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    try w.writeAll("struct Many[phantom T] {}\n\n");
+    for (0..n) |i| try w.print(
+        "struct Ring{d}[X] {{ x: X, next: Many[Ring{d}[X]], skip: Many[Ring{d}[X]] }}\n",
+        .{ i, (i + 1) % n, (i + 2) % n },
+    );
+    try w.writeAll("\nfn main() -> UInt8 {\n    let ring: Ring0[UInt8] = .{ x = 0, next = .{}, skip = .{} }\n    ring.x\n}\n");
+    return out.toOwnedSlice();
+}
+
 /// One structure of `n` fields, built by a literal that gives all of them.
 ///
 /// The dimension a walk over an aggregate's parts grows on, which is a
@@ -6369,6 +6392,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "views held in one struct and ended in turn", .n = 2000, .cost = throughTheTree(storage_mod.wideViewsProgram) },
     .{ .name = "views held in one struct and ended last first", .n = 4000, .cost = throughTheTree(storage_mod.wideViewsEndedLastFirstProgram) },
     .{ .name = "instantiations", .n = 8000, .cost = throughTheTree(instanceModule) },
+    .{ .name = "generic structures holding one another", .n = 2000, .cost = throughTheTree(ringedGenericStructsModule) },
     .{ .name = "newtype chain", .n = 16000, .cost = throughTheTree(newtypeChainModule) },
     .{ .name = "fields in one type", .n = 16000, .cost = throughTheTree(fieldModule) },
     .{ .name = "reflected components", .n = 4000, .cost = throughTheTree(reflectionComponentsModule) },

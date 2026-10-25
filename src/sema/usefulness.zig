@@ -99,7 +99,8 @@ pub const wild: Pattern = .wild;
 /// The usefulness check over one kind of type, `Context.Ty`.
 ///
 /// `Context` answers what a type is built by: `kind(ty) Kind`,
-/// `arity(ty, ctor) u32` and `part(ty, ctor, i) Ty`.
+/// `arity(ty, ctor) !u32` and `part(ty, ctor, i) !Ty`, the last two allowed
+/// to fail because answering may allocate.
 pub fn Coverage(comptime Context: type) type {
     return struct {
         const Self = @This();
@@ -375,11 +376,11 @@ pub fn Coverage(comptime Context: type) type {
                 switch (r.cells[0].pattern.*) {
                     .variant => |v| {
                         const at = std.sort.binarySearch(u32, named, v.index, orderIndex).?;
-                        const arity = self.context.arity(ty, .{ .variant = v.index });
+                        const arity = try self.context.arity(ty, .{ .variant = v.index });
                         try buckets[at].append(self.arena, (try self.specialise(r, .{ .variant = v.index }, arity)).?);
                     },
                     else => for (named, buckets) |k, *b| {
-                        const arity = self.context.arity(ty, .{ .variant = k });
+                        const arity = try self.context.arity(ty, .{ .variant = k });
                         try b.append(self.arena, (try self.specialise(r, .{ .variant = k }, arity)).?);
                     },
                 }
@@ -397,7 +398,7 @@ pub fn Coverage(comptime Context: type) type {
         /// replaced by the constructor's parts, and each row with a wildcard
         /// there, in their order.
         fn branch(self: *Self, rows: []const Ref, ty: Ty, c: Ctor) Error!Branch {
-            const arity = self.context.arity(ty, c);
+            const arity = try self.context.arity(ty, c);
             var kept: std.ArrayList(Ref) = .empty;
             for (rows) |r| {
                 if (try self.specialise(r, c, arity)) |s| try kept.append(self.arena, s);
@@ -505,7 +506,7 @@ pub fn Coverage(comptime Context: type) type {
             for (0..arity) |i| {
                 out[i] = .{
                     .pattern = if (parts.len == arity) parts[i] else &wild,
-                    .ty = self.context.part(head.ty, c, @intCast(i)),
+                    .ty = try self.context.part(head.ty, c, @intCast(i)),
                 };
             }
             @memcpy(out[arity..], r.cells[1..]);
@@ -571,7 +572,7 @@ pub fn Coverage(comptime Context: type) type {
             switch (step.choice) {
                 .absent => |choices| return choices,
                 .ctor => |c| {
-                    const arity = self.context.arity(step.ty, c);
+                    const arity = try self.context.arity(step.ty, c);
                     var combos: std.ArrayList([]Witness) = .empty;
                     try combos.append(self.arena, try self.arena.alloc(Witness, arity));
                     for (0..arity) |i| {
@@ -599,10 +600,10 @@ pub fn Coverage(comptime Context: type) type {
         /// The witness for constructor `c` of `ty`, its parts given or each
         /// a wildcard.
         fn applied(self: *Self, ty: Ty, c: Ctor, parts: ?[]const Witness) Error!Witness {
-            const arity = self.context.arity(ty, c);
+            const arity = try self.context.arity(ty, c);
             const args = try self.arena.alloc(Witness, arity);
             for (0..arity) |i| {
-                args[i] = if (parts) |p| p[i] else .{ .ty = self.context.part(ty, c, @intCast(i)), .shape = .wild };
+                args[i] = if (parts) |p| p[i] else .{ .ty = (try self.context.part(ty, c, @intCast(i))), .shape = .wild };
             }
             return .{ .ty = ty, .shape = switch (c) {
                 .variant => |k| .{ .variant = .{ .index = k, .args = args } },
@@ -633,7 +634,7 @@ const TestTypes = struct {
         };
     }
 
-    pub fn arity(_: TestTypes, ty: Ty, c: Ctor) u32 {
+    pub fn arity(_: TestTypes, ty: Ty, c: Ctor) error{}!u32 {
         return switch (ty) {
             .opt, .nest, .hollow => switch (c) {
                 .variant => |k| if (k == 0) 1 else 0,
@@ -644,7 +645,7 @@ const TestTypes = struct {
         };
     }
 
-    pub fn part(_: TestTypes, ty: Ty, _: Ctor, _: u32) Ty {
+    pub fn part(_: TestTypes, ty: Ty, _: Ctor, _: u32) error{}!Ty {
         return switch (ty) {
             .opt => .byte,
             .nest => .opt,

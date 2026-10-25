@@ -372,7 +372,10 @@ pub fn lower(
     const layouts = try gpa.alloc(Layout, mono.pool.pool.items.len);
     errdefer gpa.free(layouts);
     for (0..mono.pool.pool.items.len) |i| {
-        layouts[i] = mono.pool.layoutOf(@enumFromInt(@as(u32, @intCast(i))));
+        const ty: TypeId = @enumFromInt(@as(u32, @intCast(i)));
+        // An instantiation whose parts were never written holds a type
+        // parameter, so no lowered value has its type; it is laid out empty.
+        layouts[i] = if (mono.pool.isShell(ty)) .{ .size = 0, .alignment = 1 } else mono.pool.layoutOf(ty);
     }
 
     const type_view = mono.pool.view();

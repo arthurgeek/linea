@@ -274,6 +274,7 @@ fn instantiationOf(typing: *const Typing, t: TypeId) ?[]const TypeId {
 fn noteNestings(typing: *const Typing, seen: *Seen) void {
     for (0..typing.pool.len) |i| {
         const t: TypeId = @enumFromInt(@as(u32, @intCast(i)));
+        if (typing.isShell(t)) continue;
         switch (typing.get(t)) {
             .struct_ => {
                 var only_scalars = true;

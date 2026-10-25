@@ -419,7 +419,7 @@ pub fn of(
 
     for (0..typing.pool.len) |i| {
         const t: TypeId = @enumFromInt(i);
-        if (!isAggregate(typing, t)) continue;
+        if (!isAggregate(typing, t) or typing.isShell(t)) continue;
         try e.emit(t);
     }
 
