@@ -8974,22 +8974,32 @@ pub const Typing = struct {
                     try self.dependency_facts.noteFilled(self.gpa, inst.ty);
                     try self.writer_facts.noteFilled(self.gpa, inst.ty);
                 }
-                try self.queueShellParts(&pending, inst.ty);
+                try self.queueShellParts(&pending, inst.ty, .through_wrappers);
             }
         }
 
+        /// How far `queueShell` follows a part. `through_wrappers` follows
+        /// elements, environments and referents to the type they hold, which
+        /// writing one instantiation needs, since nothing else visits those
+        /// wrappers then; `direct` takes the part as it is, which a walk over
+        /// every pool type needs, since it visits each wrapper itself.
+        const Reach = enum { direct, through_wrappers };
+
         /// Queues each unwritten instantiation among `t`'s parts.
-        fn queueShellParts(self: *Builder, pending: *std.ArrayList(u32), t: TypeId) std.mem.Allocator.Error!void {
+        fn queueShellParts(self: *Builder, pending: *std.ArrayList(u32), t: TypeId, reach: Reach) std.mem.Allocator.Error!void {
             switch (self.pool.items[@intFromEnum(t)]) {
                 .struct_ => |x| for (x.first_field..x.first_field + x.field_count) |k| {
-                    try self.queueShell(pending, self.fields.items(.ty)[k]);
+                    try self.queueShell(pending, self.fields.items(.ty)[k], reach);
                 },
                 .enum_ => |e| for (e.first_variant..e.first_variant + e.variant_count) |v| {
                     const first_field = self.variants.items(.first_field)[v];
                     const field_count = self.variants.items(.field_count)[v];
-                    for (first_field..first_field + field_count) |k| try self.queueShell(pending, self.fields.items(.ty)[k]);
+                    for (first_field..first_field + field_count) |k| try self.queueShell(pending, self.fields.items(.ty)[k], reach);
                 },
-                .array, .newtype, .closure, .borrow => try self.queueShell(pending, t),
+                .array => |a| try self.queueShell(pending, a.element, reach),
+                .newtype => |n| try self.queueShell(pending, n.base, reach),
+                .closure => |c| try self.queueShell(pending, c.environment, reach),
+                .borrow => |b| try self.queueShell(pending, b.referent, reach),
                 else => {},
             }
         }
@@ -8999,8 +9009,10 @@ pub const Typing = struct {
         /// width -- meets none. A declared type is written from source and
         /// may hold an instantiation nothing has read yet.
         ///
-        /// **Bound:** one visit per type in the pool, and one write per
-        /// instantiation it holds that was unwritten.
+        /// **Bound:** one visit per type in the pool, each reading only that
+        /// type's own parts, and one write per instantiation it holds that
+        /// was unwritten. A wrapper is visited as a pool type of its own, so
+        /// a chain of them costs its length, not its length squared.
         pub fn writeHeldParts(self: *Builder) std.mem.Allocator.Error!void {
             var pending: std.ArrayList(u32) = .empty;
             defer pending.deinit(self.gpa);
@@ -9008,21 +9020,25 @@ pub const Typing = struct {
             while (i < self.pool.items.len) : (i += 1) {
                 const t: TypeId = @enumFromInt(@as(u32, @intCast(i)));
                 if (self.isShell(t)) continue;
-                try self.queueShellParts(&pending, t);
+                try self.queueShellParts(&pending, t, .direct);
                 while (pending.pop()) |at| {
                     if (self.instances.items[at].parts == .unwritten) try self.fillInstance(at);
                 }
             }
         }
 
-        /// Queues `part` where it is an unwritten instantiation, or where it
-        /// reaches one as an element, a base, an environment or a referent:
-        /// the steps a place or a pattern takes into a value.
-        fn queueShell(self: *Builder, pending: *std.ArrayList(u32), part: TypeId) std.mem.Allocator.Error!void {
+        /// Queues `part` where it is an unwritten instantiation, or, with
+        /// `through_wrappers`, where it reaches one as an element, an
+        /// environment or a referent: the steps a place or a pattern takes
+        /// into a value. A newtype is a declared type whose base is written
+        /// from source, so it is not followed; `writeHeldParts` and the
+        /// builder's accessors answer for its base.
+        ///
+        /// **Bound:** the nesting height of `part`'s elements and referents.
+        fn queueShell(self: *Builder, pending: *std.ArrayList(u32), part: TypeId, reach: Reach) std.mem.Allocator.Error!void {
             var held = part;
-            while (true) switch (self.pool.items[@intFromEnum(held)]) {
+            if (reach == .through_wrappers) while (true) switch (self.pool.items[@intFromEnum(held)]) {
                 .array => |a| held = a.element,
-                .newtype => |n| held = n.base,
                 .closure => |c| held = c.environment,
                 .borrow => |b| held = b.referent,
                 else => break,

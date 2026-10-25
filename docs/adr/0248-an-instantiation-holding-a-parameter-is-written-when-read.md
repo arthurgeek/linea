@@ -41,12 +41,14 @@ minted, as before, because lowering lays out every one it reaches.
   every written one when `refillInstances` copies the completed templates
   again. An unwritten one is not refilled; it copies its template when read.
 - Writing an instantiation writes every unwritten one among its parts —
-  fields, payloads, array elements, newtype bases, closure environments and
-  observed referents — so a written type holds only written types. A layout, a
-  cycle walk or a copyability check follows parts and never arguments, so it
-  meets no unwritten type. A declared type's parts come from source, so the
-  cycle and width walks first write every unwritten instantiation a written
-  type holds (`writeHeldParts`). While an instantiation is being written it is
+  fields, payloads, array elements, closure environments and observed
+  referents — so a written type holds only written types. A layout, a cycle
+  walk or a copyability check follows parts and never arguments, so it meets
+  no unwritten type. A declared type's parts, a newtype's base among them,
+  come from source, so the cycle and width walks first write every unwritten
+  instantiation a written type holds (`writeHeldParts`). That walk reads each
+  pool type's own parts once and does not follow a chain of wrappers, which
+  it visits one by one, so it costs the pool's size. While an instantiation is being written it is
   `writing`: a type the write reaches through itself reads what is written so
   far, and no fact table records it until the write is done.
 - The builder's part accessors (`fieldType`, `lookupField`,
