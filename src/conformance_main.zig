@@ -4584,6 +4584,10 @@ const AnswerChain = enum {
     /// `Pick` only when `T` can be discarded, so each part asks whether the
     /// next structure can be discarded.
     selections_through_capabilities,
+    /// `type Item = H[S1]` in `S0`'s implementation of `Tr`, where
+    /// `struct H[T: Tr] { v: T.Item }`: writing `H[S1]` substitutes `S1` for
+    /// `T`, which reads `S1.Item`.
+    substituted_parameters,
 };
 
 /// Whether the declarations of a chain are written first link first, or
@@ -4606,6 +4610,10 @@ fn answerChainModule(gpa: std.mem.Allocator, shape: AnswerChain, links: u32, ord
             "trait Pick {\n    type Out\n}\n\n" ++
                 "struct Chooser[T] {\n    t: T,\n}\n\n" ++
                 "impl[T: Discardable] Pick for Chooser[T] {\n    type Out = UInt8\n}\n\n",
+        ),
+        .substituted_parameters => try w.writeAll(
+            "trait Tr {\n    type Item\n}\n\n" ++
+                "struct H[T: Tr] {\n    v: T.Item,\n}\n\n",
         ),
     }
     // An alias chain's last alias is itself a link; every other chain ends at
@@ -4635,6 +4643,10 @@ fn answerChainModule(gpa: std.mem.Allocator, shape: AnswerChain, links: u32, ord
                 try w.print("struct S{d} {{\n    x: UInt8,\n}}\n\n", .{i})
             else
                 try w.print("struct S{d} {{\n    x: Chooser[S{d}].Out,\n}}\n\n", .{ i, i + 1 }),
+            .substituted_parameters => if (last)
+                try w.print("struct S{d} {{\n    n: UInt8,\n}}\n\nimpl Tr for S{d} {{\n    type Item = UInt8\n}}\n\n", .{ i, i })
+            else
+                try w.print("struct S{d} {{\n    n: UInt8,\n}}\n\nimpl Tr for S{d} {{\n    type Item = H[S{d}]\n}}\n\n", .{ i, i, i + 1 }),
         }
     }
     try w.writeAll(switch (shape) {
@@ -4642,6 +4654,7 @@ fn answerChainModule(gpa: std.mem.Allocator, shape: AnswerChain, links: u32, ord
         .settled_references => "fn main() -> UInt8 {\n    let reading: S0.Reading = 3\n    reading\n}\n",
         .delegated_elements => "fn main() -> UInt8 {\n    let board = B0 { values = [7, 8] }\n    board[1]\n}\n",
         .selections_through_capabilities => "fn main() -> UInt8 {\n    let s = S0 { x = 3 }\n    s.x\n}\n",
+        .substituted_parameters => "fn main() -> UInt8 {\n    let s = S0 { n = 3 }\n    s.n\n}\n",
     });
     return out.toOwnedSlice();
 }
@@ -4677,11 +4690,13 @@ test "a chain of a thousand declared answers is accepted and one of a thousand a
     };
 }
 
-test "a chain of thirty thousand delegations is refused once" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const gpa = arena.allocator();
-    try testing.expectEqualSlices(diagnostic.Code, &.{.t_answer_depth}, try refusalCodes(gpa, try answerChainModule(gpa, .delegated_elements, 30_000, .forward)));
+test "a chain of thirty thousand delegations or substituted parameters is refused once, in either order" {
+    for ([_]AnswerChain{ .delegated_elements, .substituted_parameters }) |shape| for (std.enums.values(ChainOrder)) |order| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        try testing.expectEqualSlices(diagnostic.Code, &.{.t_answer_depth}, try refusalCodes(gpa, try answerChainModule(gpa, shape, 30_000, order)));
+    };
 }
 
 test "a capability question reads through an owned type nested forty-five thousand deep" {

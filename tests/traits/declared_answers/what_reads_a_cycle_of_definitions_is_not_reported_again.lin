@@ -1,0 +1,31 @@
+// `Ay.Reading` and `Bee.Reading` are defined through each other and name no
+// type. The cycle is reported once, and what reads either is not reported
+// again.
+trait Sensor {
+    type Reading
+}
+
+struct Sample {
+    reading: Bee.Reading,
+    other: Option[Ay.Reading],
+}
+
+struct Ay {}
+
+impl Sensor for Ay {
+    type Reading = Option[Bee.Reading]
+}
+
+struct Bee {}
+
+impl Sensor for Bee {
+    type Reading = [Ay.Reading; 2]
+}
+
+alias Al = Bee.Reading
+
+fn main() -> UInt8 {
+    let _s: Al = 3
+    let _t = Sample { reading = 1, other = .None }
+    0
+}

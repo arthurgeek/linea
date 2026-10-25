@@ -75,3 +75,5 @@ traits/declared_answers/two_types_whose_parts_depend_on_each_others_capabilities
 # A capability question asked through a parameter's default, and an implementation head reading one.
 traits/declared_answers/a_default_naming_a_settled_type_that_depends_on_its_holder_is_refused.lin
 traits/declared_answers/an_implementation_head_reads_a_defaulted_settled_type.lin
+# A holder's parts cycle refused whichever declaration asks about it first.
+traits/declared_answers/a_question_asked_first_about_a_holder_leaves_its_parts_cycle_refused.lin
