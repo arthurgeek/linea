@@ -8183,6 +8183,9 @@ pub const Typing = struct {
         /// member demanded while an instantiation's parts are written is read
         /// for a part, not for a definition.
         filling: u32 = 0,
+        /// The instantiation whose parts the innermost `fillInstance` is
+        /// writing.
+        filling_type: ?TypeId = null,
         /// How many instantiations have had their parts written for the
         /// first time, so a caller can tell whether settling wrote any.
         parts_written: usize = 0,
@@ -9117,6 +9120,9 @@ pub const Typing = struct {
                 if (!was_filled) self.instances.items[at].parts = .writing;
                 const args = try self.gpa.dupe(TypeId, self.argsOf(inst));
                 defer self.gpa.free(args);
+                const outer_type = self.filling_type;
+                self.filling_type = inst.ty;
+                defer self.filling_type = outer_type;
                 try self.writeParts(inst.template, inst.ty, inst.decl.index(), args, was_filled);
                 if (!was_filled) {
                     self.instances.items[at].parts = .written;

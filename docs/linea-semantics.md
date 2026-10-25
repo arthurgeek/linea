@@ -2619,7 +2619,12 @@ that question, is [T-Bound]: `struct Tray { held: Chooser[Tray].Out }` with
 discarded in order to decide `Tray`'s part. The part may name the settled
 type in any way: written, through an alias, or through a parameter's default,
 `held: Holder` with `struct Holder[T = Chooser[Tray].Out]`. Writing the
-part's type removes the question. A question the type's declaration answers
+part's type removes the question. The cycle may close through an
+instantiation: `type Item = Ch[W[S]].Out` with `struct W[T: Tr] { v: T.Item }`
+asks whether `W[S]`, which holds `S.Item`, can be discarded, and is refused at
+the settled type. Each part is refused whose cycle remains once the parts
+already refused read as nothing: two parts asking about one holder of both
+are two errors, and two types whose parts ask about each other are one. A question the type's declaration answers
 is not refused: a type not declared `copyable` is never copied, and one
 declared `linear` is never discarded. A recursive type whose parts name no
 settled type, such as `struct Node { log: Ledger[Node] }` with

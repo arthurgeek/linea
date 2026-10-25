@@ -1,0 +1,5 @@
+error[T-Bound]: `W[S]`'s parts depend on whether `W[S]` can be discarded
+  --> tests/traits/declared_answers/a_settled_type_selected_through_an_instantiation_holding_it_is_refused.lin:37:17
+   |
+37 |     type Item = Ch[W[S]].Out
+   |                 ^^^^^^^^^^^^ write the settled type here rather than a settled reference

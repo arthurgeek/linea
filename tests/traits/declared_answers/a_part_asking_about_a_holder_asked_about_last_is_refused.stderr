@@ -1,0 +1,5 @@
+error[T-Bound]: `R`'s parts depend on whether `R` can be discarded
+  --> tests/traits/declared_answers/a_part_asking_about_a_holder_asked_about_last_is_refused.lin:55:8
+   |
+55 |     s: Chooser[R].Out,
+   |        ^^^^^^^^^^^^^^ write the part's type here rather than a settled reference

@@ -8737,8 +8737,11 @@ const Checker = struct {
     /// arguments, leads back to that member and names no type. The cycle is
     /// reported once, at the definition on it written first, naming what each
     /// definition on it is written as. A member reached only while an
-    /// instantiation's parts are written is not reported: that is a cycle
-    /// through a type's parts, which the layout check answers.
+    /// instantiation's parts are written closes no cycle of definitions: the
+    /// instantiation holds what the member is still deciding, and a question
+    /// about it while the member is read is the [T-Bound] cycle `settle`
+    /// reports; otherwise it holds the member once settled, and a type that
+    /// holds itself is the layout check's.
     fn settledReference(
         self: *Checker,
         run: Run,
@@ -27561,6 +27564,14 @@ const Checker = struct {
         watch: types_mod.Typing.CapabilityWatch = .{},
         /// The walk `owned` makes over what types own; see `OwnedWalk`.
         walk: OwnedWalk = .{},
+        /// How many parts and members have been refused as [T-Bound].
+        refused_parts: u32 = 0,
+        /// Each implementation member being read, at its position in
+        /// `frames`.
+        answer_positions: std.AutoHashMapUnmanaged(node.DeclId, u32) = .empty,
+        /// Each instantiation whose parts read a member while it was still
+        /// being read, with that member.
+        instance_waits: std.AutoHashMapUnmanaged(TypeId, node.DeclId) = .empty,
         /// The member demanded while its own written type was being read,
         /// since `settledReference` last looked.
         closed: node.DeclId = .none,
@@ -27683,6 +27694,8 @@ const Checker = struct {
             self.complete.deinit(gpa);
             self.watch.watched.deinit(gpa);
             self.walk.deinit(gpa);
+            self.answer_positions.deinit(gpa);
+            self.instance_waits.deinit(gpa);
             self.frames.deinit(gpa);
             self.cycle_frames.deinit(gpa);
             self.cyclic.deinit(gpa);
@@ -27746,7 +27759,16 @@ const Checker = struct {
                 .reading => {
                     // A delegation reaching itself through its backing chain
                     // is reported by `settleDelegation`.
-                    if (self.checker.ast.declTag(member) != .impl_ and self.checker.builder.filling == 0) self.closed = member;
+                    if (self.checker.ast.declTag(member) == .impl_) return;
+                    // Read for an instantiation's part, the instantiation
+                    // holds what is still being decided: a question about
+                    // it waits on this member, as one about a type whose
+                    // part is being read waits on that part.
+                    if (self.checker.builder.filling_type) |filled| if (self.checker.builder.filling != 0) {
+                        try self.instance_waits.put(self.checker.gpa, filled, member);
+                        return;
+                    };
+                    self.closed = member;
                     return;
                 },
                 .unread => {},
@@ -27754,8 +27776,16 @@ const Checker = struct {
             // No answer is added while the walk runs, so `state` stays valid
             // across the read below.
             const c = self.checker;
+            const position: u32 = @intCast(self.frames.items.len);
             _ = try self.enter(.{ .answer = member });
             state.* = .reading;
+            const is_member = c.ast.declTag(member) != .impl_;
+            if (is_member) {
+                try self.walk.openAnswer(c.gpa, member, position);
+                try self.answer_positions.put(c.gpa, member, position);
+            }
+            const outer_hit = self.watch.hit;
+            self.watch.hit = null;
             self.depth += 1;
             defer self.depth -= 1;
             // An implementation delegating `Index` to a field supplies `Elem`
@@ -27771,7 +27801,21 @@ const Checker = struct {
                 self.closed = .none;
                 try c.reportCycleThrough(reached);
             }
+            const hit = self.watch.hit;
+            self.watch.hit = outer_hit;
+            // A question about an instantiation that waits on this member is
+            // refused here; any other is the part's that is being read.
+            if (hit) |question| {
+                if (is_member and self.watch.watched.get(question.ty) == member) {
+                    try c.reportCapabilityCycle(question, c.ast.declReturnRef(member), "write the settled type here rather than a settled reference");
+                    c.decl_returns.set(member, .poison);
+                } else if (self.watch.hit == null) self.watch.hit = hit;
+            }
             if (self.cyclic.contains(member)) c.decl_returns.set(member, .poison);
+            if (is_member) {
+                _ = self.answer_positions.remove(member);
+                try self.closeAnswer();
+            }
             state.* = .settled;
             try self.leave();
         }
@@ -27824,6 +27868,9 @@ const Checker = struct {
             floors: std.ArrayList(u32) = .empty,
             component: std.ArrayList(TypeId) = .empty,
             path: std.ArrayList(PathFrame) = .empty,
+            /// The types being pushed, whose parts are being read, innermost
+            /// last.
+            pushing: std.ArrayList(TypeId) = .empty,
             edges: std.ArrayList(TypeId) = .empty,
             /// Type arguments of the instantiations pushed, asked about once
             /// the walk that pushed them returns.
@@ -27841,6 +27888,7 @@ const Checker = struct {
                 self.floors.deinit(gpa);
                 self.component.deinit(gpa);
                 self.path.deinit(gpa);
+                self.pushing.deinit(gpa);
                 self.edges.deinit(gpa);
                 self.applied.deinit(gpa);
                 self.parts.deinit(gpa);
@@ -27871,20 +27919,32 @@ const Checker = struct {
             }
 
             fn openPart(self: *OwnedWalk, gpa: std.mem.Allocator, part: DeclaredPart, position: u32) std.mem.Allocator.Error!void {
-                try self.parts.append(gpa, .{ .position = position, .serial = self.serial, .decl = part.decl });
-                self.serial += 1;
+                try self.openAnswer(gpa, part.decl, position);
                 try self.part_positions.put(gpa, part, position);
+            }
+
+            /// Records an unsettled part, or an implementation member, as
+            /// being read from `position` in `frames` on.
+            fn openAnswer(self: *OwnedWalk, gpa: std.mem.Allocator, decl: node.DeclId, position: u32) std.mem.Allocator.Error!void {
+                try self.parts.append(gpa, .{ .position = position, .serial = self.serial, .decl = decl });
+                self.serial += 1;
             }
         };
 
-        /// Records that `part`, read since `openPart`, is read: every type
-        /// that waited on it stops being watched, and one whose component
-        /// closed is complete.
+        /// Records that `part`, read since `openPart`, is read; see
+        /// `closeAnswer`.
         fn closePart(self: *AnswerSettling, part: DeclaredPart) std.mem.Allocator.Error!void {
+            _ = self.walk.part_positions.remove(part);
+            try self.closeAnswer();
+        }
+
+        /// Records that the innermost part or member being read is read:
+        /// every type that waited on it stops being watched, and one whose
+        /// component closed is complete.
+        fn closeAnswer(self: *AnswerSettling) std.mem.Allocator.Error!void {
             const gpa = self.checker.gpa;
             const walk = &self.walk;
             const open = walk.parts.pop().?;
-            _ = walk.part_positions.remove(part);
             var list = (walk.waiting_on.fetchRemove(open.serial) orelse return).value;
             defer list.deinit(gpa);
             for (list.items) |ty| {
@@ -27925,11 +27985,15 @@ const Checker = struct {
             const walk = &self.walk;
             if (root == .poison) return;
             if (self.complete.get(root)) |height| return self.raise(height);
-            if (walk.waiting.get(root)) |waiting| if (waiting.closed) return self.raise(waiting.height);
+            if (walk.waiting.get(root)) |waiting| if (waiting.closed) {
+                self.dependOn(no_floor, waiting.position);
+                return self.raise(waiting.height);
+            };
             if (walk.nodes.get(root)) |n| {
                 // Its component is still open: the question depends on what
                 // the walk that has it open is reading.
                 try self.waitOn(root, n.height, walk.floorOf(n), false);
+                self.dependOn(if (n.open) n.index else n.lowlink, walk.floorOf(n));
                 return self.raise(n.height);
             }
 
@@ -27979,6 +28043,9 @@ const Checker = struct {
                     parent.height = @max(parent.height, done.height);
                 }
             }
+            if (walk.nodes.get(root)) |n| {
+                self.dependOn(n.lowlink, walk.floorOf(n));
+            } else if (walk.waiting.get(root)) |waiting| self.dependOn(no_floor, waiting.position);
             self.raise(if (self.complete.get(root)) |height| height else if (walk.waiting.get(root)) |waiting| waiting.height else if (walk.nodes.get(root)) |n| n.height else 0);
 
             const arguments = try gpa.dupe(TypeId, walk.applied.items[applied_base..]);
@@ -27991,52 +28058,28 @@ const Checker = struct {
         /// or waiting on the outermost part still being read that one of its
         /// types depends on. Returns the floor its holder takes from it.
         fn closeComponent(self: *AnswerSettling, root: TypeId, n: OwnedNode) std.mem.Allocator.Error!u32 {
-            const gpa = self.checker.gpa;
             const walk = &self.walk;
             const open = walk.openPartAt(n.floor);
             const floor = if (open) |part| part.position else no_floor;
-            // Everything above `root` on the component stack was pushed after
-            // it. What `root`'s own search pushed reaches no lower than `root`;
-            // what a nested question's search left there, still open, may
-            // reach a type pushed before `root`, and belongs to that type's
-            // component: it stays, to be decided with it.
-            const bottom = std.mem.lastIndexOfScalar(TypeId, walk.component.items, root).?;
-            const members = walk.component.items[bottom..];
-            // A member's component is the one its lowlink chain ends in. A
-            // lowlink names a type pushed earlier and still on the stack, so
-            // following them in pushing order decides each in one step.
-            const ends = try gpa.alloc(u32, members.len);
-            defer gpa.free(ends);
-            for (members, 0..) |member, k| {
-                const low = walk.nodes.get(member).?.lowlink;
-                ends[k] = if (low < n.index) low else if (low == walk.nodes.get(member).?.index) low else ends[self.componentSlot(members, low).?];
-            }
-            var kept: usize = bottom;
-            for (members, ends) |member, reach| {
-                if (reach < n.index) {
-                    walk.component.items[kept] = member;
-                    kept += 1;
-                    continue;
-                }
+            while (walk.component.pop()) |member| {
                 const removed = walk.nodes.fetchRemove(member).?.value;
                 try self.waitOn(member, removed.height, floor, true);
+                if (member == root) break;
             }
-            walk.component.shrinkRetainingCapacity(kept);
             return floor;
         }
 
-        /// Where the member pushed as node `index` sits among `members`,
-        /// which are in pushing order.
-        fn componentSlot(self: *const AnswerSettling, members: []const TypeId, index: u32) ?usize {
-            var lo: usize = 0;
-            var hi: usize = members.len;
-            while (lo < hi) {
-                const mid = lo + (hi - lo) / 2;
-                const at = self.walk.nodes.get(members[mid]).?.index;
-                if (at == index) return mid;
-                if (at < index) lo = mid + 1 else hi = mid;
-            }
-            return null;
+        /// Counts what a question asked while `pushing`'s parts are read
+        /// found in `asked`'s node: the part's type depends on the answer, so
+        /// `pushing` is decided no sooner than `asked`'s component. A
+        /// question's own search is no edge of `pushing`'s, but this is,
+        /// which keeps what it left open inside the component it belongs to.
+        fn dependOn(self: *AnswerSettling, low: u32, floor: u32) void {
+            const walk = &self.walk;
+            const pushing = walk.pushing.getLastOrNull() orelse return;
+            const n = walk.nodes.getPtr(pushing).?;
+            n.lowlink = @min(n.lowlink, low);
+            n.floor = @min(n.floor, floor);
         }
 
         /// Pushes `ty`: reads its declaration's unsettled parts, then lists
@@ -28051,18 +28094,35 @@ const Checker = struct {
             try walk.component.append(gpa, ty);
             var floor: u32 = no_floor;
             var height: u32 = 0;
+            try walk.pushing.append(gpa, ty);
             if (c.builder.view().declOfType(ty)) |d| if (self.readable.contains(d)) {
                 for (0..c.partCount(d)) |k| {
                     const part: DeclaredPart = .{ .decl = d, .index = @intCast(k) };
                     if (!c.unsettled_parts.contains(part)) continue;
+                    // What a question asked from the part found is what the
+                    // part depends on, unless the part was refused for it:
+                    // then it reads as poison and waits on no part being
+                    // read. It stays in the component the question reached,
+                    // which is decided no sooner for it.
+                    const before = walk.nodes.get(ty).?;
+                    const refused_before = self.refused_parts;
                     // An unsettled part being read now is what this question
                     // is being asked from: its type depends on the answer.
                     if (try c.readPart(part) == .reading) {
                         if (walk.part_positions.get(part)) |position| floor = @min(floor, position);
                     }
+                    if (self.refused_parts != refused_before) {
+                        walk.nodes.getPtr(ty).?.floor = before.floor;
+                    }
                     if (self.heights.get(.{ .part = part })) |part_height| height = @max(height, part_height);
                 }
                 if (c.builder.instanceOf(ty) != null) try c.builder.refillInstance(ty);
+            };
+            _ = walk.pushing.pop();
+            // An instantiation whose part read a member still being read
+            // waits on that member.
+            if (self.instance_waits.get(ty)) |member| if (self.answer_positions.get(member)) |position| {
+                floor = @min(floor, position);
             };
             // Reading a part may push and decide other types, and grow the
             // tables the children sit in, so they are listed after.
@@ -28235,31 +28295,38 @@ const Checker = struct {
         // Reported whatever a part read inside this one reported: each part
         // a question was asked from is an edit of its own, writing its type.
         if (hit) |question| {
-            settling.cycles += 1;
-            const name = try self.typeName(question.ty);
-            const asked: []const u8 = switch (question.asked) {
-                .discard => try std.fmt.allocPrint(self.sink.arena, "whether `{s}` can be discarded", .{name}),
-                .copy => try std.fmt.allocPrint(self.sink.arena, "whether `{s}` can be copied", .{name}),
-                .capabilities => try std.fmt.allocPrint(self.sink.arena, "`{s}`'s own capabilities", .{name}),
-            };
-            try self.sink.addErrorFmt(
-                .t_bound,
-                self.ast.fileOf(written.at),
-                self.ast.writtenSpan(written),
-                "write the part's type here rather than a settled reference",
-                "`{s}`'s parts depend on {s}",
-                .{ name, asked },
-            );
+            try self.reportCapabilityCycle(question, written, "write the part's type here rather than a settled reference");
             ty = .poison;
-            // The answer the question was given is not one: a part reading
-            // the same selection later asks it again rather than reusing it.
-            self.builder.invalidateImplementationLookup();
         }
         try self.setPart(part, ty);
         try settling.parts.put(self.gpa, part, .read);
         if (tracked) try settling.closePart(part);
         try settling.leave();
         return .read;
+    }
+
+    /// Reports [T-Bound] at `written`, the part or settled type a question
+    /// about a type whose parts depend on it was asked from.
+    fn reportCapabilityCycle(self: *Checker, question: types_mod.Typing.CapabilityWatch.Question, written: node.TypeRef, help: []const u8) std.mem.Allocator.Error!void {
+        self.settling.?.cycles += 1;
+        self.settling.?.refused_parts += 1;
+        const name = try self.typeName(question.ty);
+        const asked: []const u8 = switch (question.asked) {
+            .discard => try std.fmt.allocPrint(self.sink.arena, "whether `{s}` can be discarded", .{name}),
+            .copy => try std.fmt.allocPrint(self.sink.arena, "whether `{s}` can be copied", .{name}),
+            .capabilities => try std.fmt.allocPrint(self.sink.arena, "`{s}`'s own capabilities", .{name}),
+        };
+        try self.sink.addErrorFmt(
+            .t_bound,
+            self.ast.fileOf(written.at),
+            self.ast.writtenSpan(written),
+            help,
+            "`{s}`'s parts depend on {s}",
+            .{ name, asked },
+        );
+        // The answer the question was given is not one: a part reading the
+        // same selection later asks it again rather than reusing it.
+        self.builder.invalidateImplementationLookup();
     }
 
     /// Reads what one implementation member settles its declared type to,

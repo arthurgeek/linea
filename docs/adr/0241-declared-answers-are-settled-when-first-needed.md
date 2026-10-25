@@ -248,6 +248,25 @@ refused, and so are the member form and the form that reaches the settled
 type through a parameter's default, `struct Holder[T = Chooser[Tray].Out]`
 with `struct Tray { held: Holder }`.
 
+The same cycle closes through an instantiation's parts: `type Item =
+Ch[W[S]].Out`, with `impl[T: Discardable] Pick for Ch[T]` and
+`struct W[T: Tr] { v: T.Item }`, asks whether `W[S]` can be discarded, and
+`W[S]` holds `S.Item`, the settled type being read. An instantiation whose
+parts are written while a member they read is still being read waits on that
+member, and the question is refused at the member's written type.
+
+**Each part whose own cycle remains is reported.** A part refused while
+another part is read reads as poison, and what its question found is no
+longer something the other depends on; the other is then refused only if
+its own question still closes a cycle. So two parts asking about one holder
+that holds both, `Y0.p` and `Y1.p` with `p: Chooser[B0].Out` and `B0`
+holding an `X` that holds `Y0` and `Y1`, are two reports: writing either
+part's type leaves the other's cycle, so each is an edit the reader must
+make. Two types whose parts ask about each other, `Tray.held` asking about
+`Pan` and `Pan.part` about `Tray`, are one report: writing either part's
+type removes both cycles. A selection answered while a refused question
+was open is asked again, not reused.
+
 A question its type's declaration already answers is no cycle: a type not
 declared `copyable` is never copied, and one declared `linear` is never
 discarded, whatever its parts hold. A trait question is no cycle either:
@@ -278,6 +297,10 @@ in Tarjan's algorithm (`AnswerSettling.OwnedWalk`):
 - a type reached again while its component is open is a back edge, which
   joins its component; reached from a nested walk, it is also a dependency
   on every part the outer walk is still reading below it;
+- a question asked while a type's parts are read makes that type depend on
+  whatever the question's search reached: on the component the asked type
+  belongs to, if that is still open, so the type is decided with that
+  component rather than ahead of it, and on the part it waits on;
 - a component is decided when its root is popped: complete, or, where it
   depends on a part still being read further out, watched until that part
   is read and complete then.
