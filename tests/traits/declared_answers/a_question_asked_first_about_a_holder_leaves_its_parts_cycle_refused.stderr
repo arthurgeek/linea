@@ -1,0 +1,5 @@
+error[T-Bound]: `Bee`'s parts depend on whether `Bee` can be discarded
+  --> tests/traits/declared_answers/a_question_asked_first_about_a_holder_leaves_its_parts_cycle_refused.lin:34:8
+   |
+34 |     x: Chooser[Bee].Out,
+   |        ^^^^^^^^^^^^^^^^ write the part's type here rather than a settled reference

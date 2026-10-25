@@ -1,0 +1,5 @@
+error[T-Impl]: this associated type is defined through itself: `Ay.Reading` is `Option[Bee.Reading]`, `Bee.Reading` is `[Ay.Reading; 2]`
+  --> tests/traits/declared_answers/what_reads_a_cycle_of_definitions_is_not_reported_again.lin:16:20
+   |
+16 |     type Reading = Option[Bee.Reading]
+   |                    ^^^^^^^^^^^^^^^^^^^ define it as a type that does not read back to itself

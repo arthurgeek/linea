@@ -2605,11 +2605,8 @@ Source order never selects a bound.
 
 An associated type definition cannot use a settled reference: `type Item =
 Self.Other` would define one associated type through another in the same
-implementation. A definition may read another implementation's associated
-type, `type Reading = Celsius.Reading`, whichever of the two implementations is
-declared first. Definitions that lead back to themselves through such
-references name no type and are [T-Impl]. An implementation defines each
-associated type exactly once; duplicate definitions are [N-Duplicate].
+implementation; reading another implementation's is described below. An
+implementation defines each associated type exactly once; duplicate definitions are [N-Duplicate].
 
 What a part, a settled type, a delegated element or an alias names never
 depends on the order declarations are written in: each is decided once, after
@@ -2630,9 +2627,12 @@ settled type, such as `struct Node { log: Ledger[Node] }` with
 rule for recursive types.
 
 **[T-AnswerDepth]** A chain of declared answers passes through at most 1000
-links, where a link is a written settled reference (`S1.Reading`, `B.Elem`,
-`Chooser[S1].Out`) or an alias; parts, the members and delegations a
-reference reaches, and capability questions add none. The count is the most
+links, where a link is a settled reference (`S1.Reading`, `B.Elem`,
+`Chooser[S1].Out`) or an alias. A settled reference counts where it is
+written and also where a template's is read at an argument: `type Item =
+H[S1]` with `struct H[T: Tr] { v: T.Item }` reads `S1.Item`. Parts, the
+members and delegations a reference reaches, and capability questions add
+none. The count is the most
 links any answer rests on, so it is the same in every declaration order. A
 chain of 1000 settled references, each implementation settling `Reading` to
 the next one's, is accepted, and one of 1001 is refused where the chain

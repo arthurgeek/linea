@@ -579,7 +579,7 @@ fn typecheckInternal(
         }
         c.expansions.deinit(gpa);
     }
-    defer c.delegation_state.deinit(gpa);
+    defer c.delegations_settled.deinit(gpa);
     defer c.delegation_cycles.deinit(gpa);
     defer c.unsettled_parts.deinit(gpa);
     defer c.unsettled_heads.deinit(gpa);
@@ -6103,7 +6103,8 @@ const Checker = struct {
     /// Each `extern` declaration repeating an earlier one's symbol, and that
     /// earlier declaration.
     extern_symbols: std.AutoHashMapUnmanaged(node.DeclId, node.DeclId) = .empty,
-    delegation_state: std.AutoHashMapUnmanaged(node.DeclId, Visit) = .empty,
+    /// Field delegations `settleDelegation` has visited.
+    delegations_settled: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty,
     traversal_positions: std.AutoHashMapUnmanaged(node.DeclId, types_mod.TraversalPositions) = .empty,
     /// Every bracket that routes, in the order they were checked, and the same
     /// answer keyed for this pass's own readers: a write asks it after the
@@ -8756,7 +8757,9 @@ const Checker = struct {
         if (reached != .none and settled.ty == .poison) {
             settling.cycles += 1;
             try self.noteRefused(run.last);
-            try self.reportDefinitionCycle(try settling.definitionsFrom(reached));
+            const cycle = try settling.definitionsFrom(reached);
+            for (cycle) |frame| try settling.cyclic.put(self.gpa, frame.reading.answer, {});
+            try self.reportDefinitionCycle(cycle);
         }
         return settled;
     }
@@ -26664,19 +26667,20 @@ const Checker = struct {
         const field_token = self.ast.declDelegation(impl);
         if (field_token == .none) return null;
         if (self.delegation_cycles.contains(impl)) return null;
-        if (self.delegation_state.get(impl)) |state| {
-            if (state == .in_progress) try self.delegationError(impl, "a delegated projection reaches itself");
-            return null;
-        }
-        try self.delegation_state.put(self.gpa, impl, .in_progress);
-        defer self.delegation_state.getPtr(impl).?.* = .done;
+        // Visited once. A backing chain that leads back to an implementation
+        // still being settled here would be a type holding itself, which the
+        // layout check broke before this runs, and one met while declared
+        // answers were read is in `delegation_cycles`.
+        if ((try self.delegations_settled.getOrPut(self.gpa, impl)).found_existing) return null;
         const elem = self.index_elem orelse return null;
         const answer = try self.delegationAnswer(impl, true) orelse return null;
         errdefer self.gpa.free(answer.backing_args);
         // The element read while declared answers were settled is this one:
-        // both read the same final field. Poison where that reading stopped
-        // at [T-AnswerDepth].
-        std.debug.assert(self.decl_returns.get(impl) == .poison or self.decl_returns.get(impl) == answer.settled);
+        // both read the same final field, so a difference is this compiler
+        // being wrong. Poison where that reading stopped at [T-AnswerDepth].
+        const settled_before = self.decl_returns.get(impl);
+        if (settled_before != .poison and settled_before != answer.settled)
+            @panic("compiler defect: a delegation's element changed after declared answers were settled");
         var delegate: types_mod.DelegatedProjection = .{
             .field_name = self.ast.tokenName(field_token),
             .field = answer.field,
@@ -27562,6 +27566,9 @@ const Checker = struct {
         frames: std.ArrayList(Frame) = .empty,
         /// The frames of the last cycle `definitionsFrom` found.
         cycle_frames: std.ArrayList(Frame) = .empty,
+        /// Definitions on a reported cycle, which name no type: each reads as
+        /// poison once its reading finishes, whatever it was written around.
+        cyclic: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty,
         /// How many of `frames` are links: settled references and aliases.
         links_open: u32 = 0,
         /// The height each answer, alias and part rests on, recorded once read.
@@ -27666,6 +27673,7 @@ const Checker = struct {
             self.watch.watched.deinit(gpa);
             self.frames.deinit(gpa);
             self.cycle_frames.deinit(gpa);
+            self.cyclic.deinit(gpa);
             self.heights.deinit(gpa);
         }
 
@@ -27684,9 +27692,26 @@ const Checker = struct {
             return self.cycle_frames.items;
         }
 
+        /// Settles `member` for the builder. A demand made while a written
+        /// settled reference is read is that reference's link; any other,
+        /// such as one met substituting `S1` for `T` in `T.Item` while
+        /// `H[S1]` is written, is a link of its own, so a chain of them is
+        /// held to the same bound.
         fn settleErased(context: *anyopaque, member: node.DeclId) std.mem.Allocator.Error!void {
             const self: *AnswerSettling = @ptrCast(@alignCast(context));
+            const top = if (self.frames.items.len == 0) null else self.frames.items[self.frames.items.len - 1].reading;
+            if (top != null and top.? == .reference) return self.settle(member);
+            if (!try self.enter(.reference)) {
+                // Past the bound, which is reported: the member reads as
+                // poison and nothing it depends on is read.
+                if (self.answers.getPtr(member)) |state| if (state.* == .unread) {
+                    state.* = .settled;
+                    self.checker.decl_returns.set(member, .poison);
+                };
+                return;
+            }
             try self.settle(member);
+            try self.leave();
         }
 
         fn ownedErased(context: *anyopaque, ty: TypeId) std.mem.Allocator.Error!void {
@@ -27723,14 +27748,16 @@ const Checker = struct {
                 try c.delegatedElement(member)
             else
                 try c.settleMember(member);
+            if (self.cyclic.contains(member)) c.decl_returns.set(member, .poison);
             state.* = .settled;
             try self.leave();
         }
 
         /// One type an `owned` walk visits: its children, a range of the
-        /// walk's `edges`; the declaration it waits on, if any; and the
-        /// tallest chain its parts rest on.
-        const OwnedVisit = struct { ty: TypeId, first: u32, count: u32, next: u32 = 0, waits: ?node.DeclId = null, height: u32 = 0 };
+        /// walk's `edges`; the declaration it waits on, if any; the tallest
+        /// chain its parts rest on; and whether it holds a type another walk
+        /// still has open, whose answer is not known yet.
+        const OwnedVisit = struct { ty: TypeId, first: u32, count: u32, next: u32 = 0, waits: ?node.DeclId = null, height: u32 = 0, partial: bool = false };
 
         /// Reads, before a capability or an implementation is asked of `root`,
         /// every part of each declaration it owns or is applied to whose type
@@ -27765,17 +27792,28 @@ const Checker = struct {
                     visit.next += 1;
                     if (child == .poison) continue;
                     if (walk.at_of.get(child)) |j| {
-                        // Finished below, or open above: a cycle back to an
-                        // open visit contributes nothing, which is the
-                        // recursion a capability assumes of itself.
-                        if (walk.done.contains(j)) absorb(visit, walk.visits.items[j]);
+                        // Finished below, or open above. A cycle back to an
+                        // open visit adds no height, which is the recursion
+                        // a capability assumes of itself, but what that
+                        // visit waits on is waited on here too.
+                        if (walk.done.contains(j)) {
+                            absorb(visit, walk.visits.items[j]);
+                        } else visit.waits = visit.waits orelse walk.visits.items[j].waits;
                         continue;
                     }
                     if (self.complete.get(child)) |height| {
                         visit.height = @max(visit.height, height);
                         continue;
                     }
-                    if (self.visiting.contains(child)) continue;
+                    if (self.visiting.contains(child)) {
+                        // Open in an outer walk, which reads one of its
+                        // parts or reads what it holds: this type waits on
+                        // that part, or on what the outer walk finds.
+                        if (try self.readingDeclOf(child)) |waiting| {
+                            visit.waits = visit.waits orelse waiting;
+                        } else visit.partial = true;
+                        continue;
+                    }
                     try self.beginVisit(&walk, child);
                     continue;
                 }
@@ -27786,7 +27824,7 @@ const Checker = struct {
                     try self.watch.watched.put(gpa, finished.ty, waiting);
                 } else {
                     _ = self.watch.watched.remove(finished.ty);
-                    try self.complete.put(gpa, finished.ty, finished.height);
+                    if (!finished.partial) try self.complete.put(gpa, finished.ty, finished.height);
                 }
                 if (walk.open.items.len != 0) {
                     absorb(&walk.visits.items[walk.open.items[walk.open.items.len - 1]], finished);
@@ -27820,6 +27858,17 @@ const Checker = struct {
         fn absorb(into: *OwnedVisit, child: OwnedVisit) void {
             into.waits = into.waits orelse child.waits;
             into.height = @max(into.height, child.height);
+            into.partial = into.partial or child.partial;
+        }
+
+        /// The declaration of `ty` if one of its parts is being read.
+        fn readingDeclOf(self: *AnswerSettling, ty: TypeId) std.mem.Allocator.Error!?node.DeclId {
+            const c = self.checker;
+            const d = c.builder.view().declOfType(ty) orelse return null;
+            for (0..c.partCount(d)) |k| {
+                if (self.parts.get(.{ .decl = d, .index = @intCast(k) }) == .reading) return d;
+            }
+            return null;
         }
 
         /// Opens a visit of `ty`: reads its declaration's unsettled parts,

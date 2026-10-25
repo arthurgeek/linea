@@ -155,12 +155,16 @@ bound, for the same reason, as [S-Nesting]. Acceptance must not depend on the
 stack an optimisation level happens to leave.
 
 A link is a written settled reference (`Celsius.Reading`, `B.Elem`,
-`Chooser[S1].Out`) or an alias. A settled reference is read anew wherever it
-is written, and every recursion from one declared answer into another passes
-through one: a member reaches another member, a delegation another
-delegation, and a part another type's parts only through a settled reference
-or an alias. Parts, members, delegations and capability questions add no
-link. A structure nested inside another 45,000 times adds none, because
+`Chooser[S1].Out`), an alias, or a member the builder demands while it
+substitutes into a settled reference written in a template: `type Item =
+H[S1]` with `struct H[T: Tr] { v: T.Item }` writes `H[S1]`, which reads
+`S1.Item` without that reference being written anywhere. Every recursion
+from one declared answer into another passes through one of these: a member
+reaches another member, a delegation another delegation, and a part another
+type's parts only through a settled reference, written or substituted, or an
+alias. A demand made while a written reference is read is that reference's
+link, not a second one. Parts, members, delegations and capability questions
+add no link. A structure nested inside another 45,000 times adds none, because
 reading what it owns is a walk with its own stack (`AnswerSettling.owned`),
 not a recursion. Counting links therefore bounds the recursion, and nothing
 else needs bounding.
@@ -335,6 +339,7 @@ it keeps the N × program cost.
   back to itself, is reported rather than crashing lowering.
 - The rule for a type whose parts depend on its own capabilities is
   [T-Bound] in `docs/linea-semantics.md`.
-- **Where a cycle is reported depends on order; whether it is reported does
-  not.** A cycle is reported once, at the reference where the walk closes it.
-  Which member of the cycle that is follows the order the walk reached them.
+- **Whether a cycle is reported does not depend on order.** A cycle of
+  definitions is reported once, at the definition on it written first; a
+  delegation or part cycle is reported where the walk closes it, which
+  follows the order the walk reached its members.

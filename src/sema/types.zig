@@ -9389,7 +9389,7 @@ pub const Typing = struct {
         /// own dependency seed is compared. Rebuilding a table on each of
         /// them would make reading parts between capability questions cost a
         /// rebuild per question.
-        /// Any other replacement rebuilds, as before. `raw_storage_part`
+        /// Any other replacement rebuilds the table. `raw_storage_part`
         /// marks the part certified storage's raw containment skips.
         fn partChanged(self: *Builder, owner: TypeId, old: TypeId, new: TypeId, raw_storage_part: bool) !void {
             if (old == new) return;
