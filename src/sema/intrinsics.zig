@@ -218,7 +218,8 @@ pub const RawAccesses = struct {
 
     /// The standard library's declarations of the float bit casts, by name
     /// before their signatures are checked, so the checker can hold each to
-    /// the runtime table instead of to the foreign ABI floats do not cross.
+    /// the runtime table instead of to the foreign ABI, since no call to one
+    /// reaches C.
     pub fn floatBitsCandidate(program: *const ExpandedProgram, ast: *const Ast, d: DeclId) bool {
         if (d == DeclId.none or !ast.declIsExtern(d)) return false;
         for (float_bits_symbols) |symbol| {

@@ -19173,8 +19173,8 @@ const Checker = struct {
             return self.sink.addError(.t_extern, self.ast.fileOf(self.ast.declName(d)), self.ast.tokenSpan(self.ast.declName(d)), "a scalar math primitive must have its compiler-defined signature", "restore the private scalar declaration with read Float64 parameters and result");
         }
         // A float bit cast is held to the runtime table above, which gives it
-        // a float parameter or result; floats cross no foreign boundary, and
-        // lowering replaces the call, so the foreign ABI does not apply.
+        // a float parameter or result. Lowering replaces the call, so it
+        // reaches no C function and the foreign ABI does not apply.
         if (library and RawAccesses.floatBitsCandidate(self.program, self.ast, d)) return;
         if (library and self.raw_accesses.typed(d)) {
             const saved = self.generic;

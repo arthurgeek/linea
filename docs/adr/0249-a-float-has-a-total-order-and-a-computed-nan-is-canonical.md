@@ -33,8 +33,8 @@ width and back**, keeping every bit: `Float64` with `UInt64`, `Float32` with
 `UInt32`. They are public methods over four trusted `std.mem` declarations
 that lowering replaces with one `bit_cast` MIR instruction, emitted as
 `arith.bitcast`. The checker holds the declarations to the runtime symbol
-table and admits their float parameter or result there; floats still cross no
-foreign boundary.
+table and admits their float parameter or result there; no call to one reaches
+C, so the foreign ABI of ADR 0228 does not apply.
 
 **Every NaN that arithmetic, a conversion between the float types or a math
 method produces is the positive quiet NaN**: `0x7FF8000000000000` and
