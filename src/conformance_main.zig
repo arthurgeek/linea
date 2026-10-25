@@ -4557,6 +4557,155 @@ fn newtypeChainModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// `n` field delegations, each to an array of the next one's element, the
+/// last to an array of bytes. Each is written before the one it reads, so
+/// every element is settled when the delegation before it first needs it.
+fn delegationChainModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    std.debug.assert(n > 0);
+    return answerChainModule(gpa, .delegated_elements, n - 1, .forward);
+}
+
+/// `n` implementations, each settling `Reading` to the next one's, the last
+/// to a byte, each written before the one it reads.
+fn settledReferenceChainModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    std.debug.assert(n > 0);
+    return answerChainModule(gpa, .settled_references, n - 1, .forward);
+}
+
+/// How each link of an `answerChainModule` names the next declaration.
+const AnswerChain = enum {
+    /// `alias A0 = A1`, the last alias naming a byte.
+    aliases,
+    /// `type Reading = S1.Reading` in `S0`'s implementation of `Sensor`.
+    settled_references,
+    /// `struct B0 { values: [B1.Elem; 2] }`, delegated through `values`.
+    delegated_elements,
+    /// `struct S0 { x: Chooser[S1].Out }`, where `Chooser[T]` implements
+    /// `Pick` only when `T` can be discarded, so each part asks whether the
+    /// next structure can be discarded.
+    selections_through_capabilities,
+};
+
+/// Whether the declarations of a chain are written first link first, or
+/// last link first.
+const ChainOrder = enum { forward, reversed };
+
+/// A chain of declared answers passing through `links` links, the
+/// references and aliases [T-AnswerDepth] counts, and a `main` reading the
+/// answer at its start.
+fn answerChainModule(gpa: std.mem.Allocator, shape: AnswerChain, links: u32, order: ChainOrder) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    switch (shape) {
+        .aliases => {},
+        .settled_references => try w.writeAll("trait Sensor {\n    type Reading\n}\n\n"),
+        .delegated_elements => {},
+        .selections_through_capabilities => try w.writeAll(
+            "trait Pick {\n    type Out\n}\n\n" ++
+                "struct Chooser[T] {\n    t: T,\n}\n\n" ++
+                "impl[T: Discardable] Pick for Chooser[T] {\n    type Out = UInt8\n}\n\n",
+        ),
+    }
+    // An alias chain's last alias is itself a link; every other chain ends at
+    // a declaration that writes a byte.
+    const declarations = if (shape == .aliases) links else links + 1;
+    std.debug.assert(declarations > 0);
+    for (0..declarations) |k| {
+        const i = switch (order) {
+            .forward => k,
+            .reversed => declarations - 1 - k,
+        };
+        const last = i + 1 == declarations;
+        switch (shape) {
+            .aliases => if (last)
+                try w.print("alias A{d} = UInt8\n", .{i})
+            else
+                try w.print("alias A{d} = A{d}\n", .{ i, i + 1 }),
+            .settled_references => if (last)
+                try w.print("struct S{d} {{}}\n\nimpl Sensor for S{d} {{\n    type Reading = UInt8\n}}\n\n", .{ i, i })
+            else
+                try w.print("struct S{d} {{}}\n\nimpl Sensor for S{d} {{\n    type Reading = S{d}.Reading\n}}\n\n", .{ i, i, i + 1 }),
+            .delegated_elements => if (last)
+                try w.print("struct B{d} {{\n    values: [UInt8; 2],\n}}\n\nimpl Index[UInt64] for B{d} via values\n\n", .{ i, i })
+            else
+                try w.print("struct B{d} {{\n    values: [B{d}.Elem; 2],\n}}\n\nimpl Index[UInt64] for B{d} via values\n\n", .{ i, i + 1, i }),
+            .selections_through_capabilities => if (last)
+                try w.print("struct S{d} {{\n    x: UInt8,\n}}\n\n", .{i})
+            else
+                try w.print("struct S{d} {{\n    x: Chooser[S{d}].Out,\n}}\n\n", .{ i, i + 1 }),
+        }
+    }
+    try w.writeAll(switch (shape) {
+        .aliases => "\nfn main() -> UInt8 {\n    let reading: A0 = 3\n    reading\n}\n",
+        .settled_references => "fn main() -> UInt8 {\n    let reading: S0.Reading = 3\n    reading\n}\n",
+        .delegated_elements => "fn main() -> UInt8 {\n    let board = B0 { values = [7, 8] }\n    board[1]\n}\n",
+        .selections_through_capabilities => "fn main() -> UInt8 {\n    let s = S0 { x = 3 }\n    s.x\n}\n",
+    });
+    return out.toOwnedSlice();
+}
+
+/// Checks `text` on the stack the compiler's passes run on, and returns the
+/// codes of the errors it was refused with.
+fn refusalCodes(gpa: std.mem.Allocator, text: []const u8) ![]const diagnostic.Code {
+    return compiler_stack.run(refusalCodesHere, .{ gpa, text });
+}
+
+fn refusalCodesHere(gpa: std.mem.Allocator, text: []const u8) ![]const diagnostic.Code {
+    const files = [_]loader.InMemoryFile{
+        .{ .path = "p/linea.json", .text = "{}\n" },
+        .{ .path = "p/main.lin", .text = text },
+    };
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    var table: FileTable = .empty;
+    var program = try loadFromMemory(gpa, &table, &sink, &interner, "p/main.lin", &files, .program, true, .borrow);
+    if (!sink.hasErrors()) _ = try checkProgram(gpa, gpa, &program, &interner, &sink, .program);
+    var codes: std.ArrayList(diagnostic.Code) = .empty;
+    for (sink.items()) |d| if (d.severity == .err) try codes.append(gpa, d.code orelse return error.UncodedDiagnostic);
+    return codes.toOwnedSlice(gpa);
+}
+
+test "a chain of a thousand declared answers is accepted and one of a thousand and one is refused once, in either order" {
+    for (std.enums.values(AnswerChain)) |shape| for (std.enums.values(ChainOrder)) |order| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try answerChainModule(gpa, shape, 1000, order)));
+        try testing.expectEqualSlices(diagnostic.Code, &.{.t_answer_depth}, try refusalCodes(gpa, try answerChainModule(gpa, shape, 1001, order)));
+    };
+}
+
+test "a chain of thirty thousand delegations is refused once" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    try testing.expectEqualSlices(diagnostic.Code, &.{.t_answer_depth}, try refusalCodes(gpa, try answerChainModule(gpa, .delegated_elements, 30_000, .forward)));
+}
+
+test "a capability question reads through an owned type nested forty-five thousand deep" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    const w = &out.writer;
+    const depth = 45_000;
+    // `M.Reading` asks whether `N0` can be discarded, and the answer is read
+    // through every structure `N0` holds.
+    try w.writeAll(
+        "trait Pick {\n    type Out\n}\n\n" ++
+            "struct Chooser[T] {\n    t: T,\n}\n\n" ++
+            "impl[T: Discardable] Pick for Chooser[T] {\n    type Out = UInt8\n}\n\n" ++
+            "trait Sensor {\n    type Reading\n}\n\n" ++
+            "struct M {}\n\nimpl Sensor for M {\n    type Reading = Chooser[N0].Out\n}\n\n",
+    );
+    for (0..depth - 1) |i| try w.print("struct N{d} {{\n    x: N{d},\n}}\n\n", .{ i, i + 1 });
+    try w.print("struct N{d} {{\n    x: UInt8,\n}}\n\n", .{depth - 1});
+    try w.writeAll("fn main() -> UInt8 {\n    let reading: M.Reading = 3\n    reading\n}\n");
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, out.written()));
+}
+
 /// A borrowed carrier with `n` field paths, moved through `n` bindings.
 /// The literal, type and binding chain each contain O(n) source text.
 fn carrierFieldBindingsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
@@ -6394,6 +6543,10 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "instantiations", .n = 8000, .cost = throughTheTree(instanceModule) },
     .{ .name = "generic structures holding one another", .n = 2000, .cost = throughTheTree(ringedGenericStructsModule) },
     .{ .name = "newtype chain", .n = 16000, .cost = throughTheTree(newtypeChainModule) },
+    // A chain of declared answers passes through at most 1000 links
+    // ([T-AnswerDepth]), so both chains are held below that.
+    .{ .name = "delegation chain", .n = 250, .grows = false, .cost = throughTheLoader(delegationChainModule) },
+    .{ .name = "settled reference chain", .n = 250, .grows = false, .cost = throughTreeBatch(settledReferenceChainModule, .emit, 16) },
     .{ .name = "fields in one type", .n = 16000, .cost = throughTheTree(fieldModule) },
     .{ .name = "reflected components", .n = 4000, .cost = throughTheTree(reflectionComponentsModule) },
     .{ .name = "construction product width", .n = 2000, .cost = throughTheTree(constructionProductModule) },
