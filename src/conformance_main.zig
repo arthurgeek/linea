@@ -4961,6 +4961,41 @@ fn nestedCrossBoundTemplatesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// The ways `templateChainUnderFunctionsModule` has each function promise
+/// more of its parameter than the chain's templates promise of theirs.
+const ChainPromise = enum {
+    /// `where S.Item: Owned`, on the member the last template holds.
+    read_member,
+    /// `where S.Other: Owned`, on a member no template holds.
+    unread_member,
+    /// `[S: Source + Discardable]`, on the parameter itself.
+    discardable,
+};
+
+/// `n` generic structures, each holding the next at its own parameter, the
+/// last holding `S.Item`, and `n` functions each taking and returning the
+/// first at a parameter of its own that promises more than the templates'
+/// parameters do, all in the same way.
+fn templateChainUnderFunctionsModule(comptime promise: ChainPromise) fn (std.mem.Allocator, u32) anyerror![]u8 {
+    return struct {
+        fn make(gpa: std.mem.Allocator, n: u32) anyerror![]u8 {
+            var out: std.Io.Writer.Allocating = .init(gpa);
+            errdefer out.deinit();
+            const w = &out.writer;
+            try w.writeAll("trait Source {\n    type Item\n    type Other\n}\n\n");
+            for (0..n) |k| try w.print("struct G{d}[S: Source] {{\n    v: G{d}[S],\n}}\n\n", .{ k, k + 1 });
+            try w.print("struct G{d}[S: Source] {{\n    item: S.Item,\n}}\n\n", .{n});
+            for (0..n) |i| switch (promise) {
+                .read_member => try w.print("fn _f{d}[S: Source](sink g: G0[S]) -> G0[S]\nwhere S.Item: Owned {{\n    g\n}}\n\n", .{i}),
+                .unread_member => try w.print("fn _f{d}[S: Source](sink g: G0[S]) -> G0[S]\nwhere S.Other: Owned {{\n    g\n}}\n\n", .{i}),
+                .discardable => try w.print("fn _f{d}[S: Source + Discardable](sink g: G0[S]) -> G0[S] {{\n    g\n}}\n\n", .{i}),
+            };
+            try w.writeAll("fn main() -> UInt8 {\n    0\n}\n");
+            return out.toOwnedSlice();
+        }
+    }.make;
+}
+
 test "nested templates and templates selecting the next are accepted" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -4968,6 +5003,9 @@ test "nested templates and templates selecting the next are accepted" {
     try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try nestedTemplatesModule(gpa, 6)));
     try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try templatesSelectingTheNextModule(gpa, 6)));
     try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try nestedCrossBoundTemplatesModule(gpa, 6)));
+    inline for (.{ ChainPromise.read_member, .unread_member, .discardable }) |promise| {
+        try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try templateChainUnderFunctionsModule(promise)(gpa, 6)));
+    }
 }
 
 test "holders asked about through a chain are accepted" {
@@ -6843,6 +6881,9 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "holders asked about through a chain", .n = 400, .cost = throughTheTree(holdersAskedThroughAChainModule) },
     .{ .name = "nested templates", .n = 1000, .cost = throughTheLoader(nestedTemplatesModule) },
     .{ .name = "nested templates bounded by one another's parameters", .n = 500, .cost = throughTheLoader(nestedCrossBoundTemplatesModule) },
+    .{ .name = "a template chain under functions promising a member it reads", .n = 500, .cost = throughTheLoader(templateChainUnderFunctionsModule(.read_member)) },
+    .{ .name = "a template chain under functions promising a member it never reads", .n = 500, .cost = throughTheLoader(templateChainUnderFunctionsModule(.unread_member)) },
+    .{ .name = "a template chain under functions bounding their parameter Discardable", .n = 500, .cost = throughTheLoader(templateChainUnderFunctionsModule(.discardable)) },
     // Each template's part is one link, so the chain is held below 1000.
     .{ .name = "templates selecting the next", .n = 250, .grows = false, .cost = throughTheLoader(templatesSelectingTheNextModule) },
     .{ .name = "fields in one type", .n = 16000, .cost = throughTheTree(fieldModule) },
