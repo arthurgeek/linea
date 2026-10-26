@@ -65,27 +65,43 @@ template when:
 - the arguments are pairwise distinct; and
 - each `Ai` promises exactly what `D`'s parameter at position `i` promises:
   the same capability requirement, the same `Integer` and `Owned` promises,
-  the same traits at the same arguments, compared by identity, and the same
-  callable signatures.
+  and the same traits and callable signatures once `D`'s parameters are read
+  as the arguments at their positions, so `T: Tr2[U]` in
+  `struct G[T: Tr2[U], U]` and `T: Tr2[V]` at the argument promise alike in
+  `G[T, V]`; and
+- no settled reference read through `Ai` or through `D`'s parameter carries
+  a promise of its own: `where S.Item: Owned` promises something of every
+  instantiation at `S` that the template's own `S.Item` never promised.
 
 `Desk[L]` with `fn pass[L: Ledger]` and `struct Desk[L: Ledger]` is alike.
 `Crate[T]` with `fn ship[T: Discardable]` and `struct Crate[T]` is not: its
 argument promises more, and its parts, once written, may answer differently.
 `Pair[T, T]` is not: an implementation for `Pair[X, X]` applies to it and
-not to its template. A bound whose arguments name its own parameter,
-`T: Into[T]`, never compares equal, so such an instantiation is written as
-before. Certified storage is never alike: its containment reads its element
-argument, not its parts.
+not to its template. `Held[S]` under `where S.Item: Owned` is not: its
+part `S.Item` carries nothing and the template's may. A comparison the
+renaming does not take apart -- a callable signature, say -- is equal only
+for the same type, which at worst writes an instantiation that could have
+been answered from its template. Certified storage is never alike: its
+containment reads its element argument, not its parts.
 
 Promises are completed after instantiations are minted: a bound's traits and
 callable signatures are read in a later sweep, and a `where` clause adds
-`Owned`. So the decision is not taken once. `Builder.watchAlike` decides it
+`Owned` to a parameter or to a settled reference read through one (and so
+does an `Integer` clause, since every `Integer` is `Owned`). So the decision
+is not taken once. `Builder.watchAlike` decides it
 at mint, keeping whether each position promises alike and how many do not,
 and lists each position under the two parameters it compares;
 `setBoundTraits`, `setCallableBounds` and `promiseOwned` compare each listed
-position again (`decideAlikeAgain`), and a decision that changes rebuilds
-the capability and dependency tables. `Instance.alike` holds the
-current decision, so the finished pool reads the same one.
+position again (`decideAlikeAgain`); `promiseOwned` on a settled reference
+marks the parameter it is read through (`promised_through`) and decides
+that parameter's positions again. A decision that changes rebuilds the
+capability and dependency tables. `Instance.alike` holds the current
+decision, so the finished pool reads the same one, and `Builder.reopen`
+rebuilds the candidates and marks from the pool it reopens, so a pool
+reopened to check further declarations decides them as the first did.
+Only `Owned` is promised of a settled reference outside a scope: a trait,
+callable or capability clause on one is a contextual constraint, read in
+its scope's lookups and scoped capabilities, and writes no part.
 
 ### What is answered from the template, and where
 
@@ -127,8 +143,8 @@ drop a desk that may be dropped.
 So **within a scope that caps any capability, every alike-template
 instantiation a question reaches is written before the scoped answer is
 prepared** (`Builder.prepareScopedCapability`), and the scoped answer is read
-from its own parts. A scope that caps nothing answers every type as the
-unscoped table does, so there the template's answer stands. A bound written
+from its own parts. A scope has scoped capabilities at all only where one of
+its constraints caps a capability. A bound written
 on the parameter itself, `[T: Discardable]`, is part of the parameter's
 promise, and an instantiation at it is not alike in the first place.
 
@@ -167,7 +183,7 @@ types own pushes it once, with one edge. `n` templates each holding the next
 cost `n` instantiations recorded through their templates and, at hand-off,
 `n` written, each minting the one part it holds: linear. The sweep reads
 n^0.25 for "nested templates" (1000 to 4000) and n^0.15 for "templates
-selecting the next" (250 to 1000), both under the program's fixed cost,, where they read n^2.12 and n^2.63.
+selecting the next" (250 to 1000), both under the program's fixed cost, where they read n^2.12 and n^2.63.
 
 What makes the bound hold is that the alike decision is a local test, the
 length of an instantiation's arguments at mint, and that no walk follows an
@@ -176,7 +192,9 @@ per position listed under a parameter whose promise changed, and each
 parameter's promises change a fixed number of times, so a template of `n`
 parameters instantiated at another declaration's `n` costs `n` comparisons
 to decide and `n` more for each sweep that completes their promises, not
-`n` per parameter. Within a scope that
+`n` per parameter. Comparing a position under the renaming walks the
+bounds' arguments, so it costs their nesting height, which the program
+wrote. Within a scope that
 caps a capability, the instantiations written are those the scope's
 questions reach, which preparing the scoped answer visits anyway, and the
 scope remembers what it prepared.
@@ -213,6 +231,14 @@ settled after its instantiations are minted
 shared run's recorded edges would go stale; and a write to the shared run,
 breaking a cycle or writing the instantiation's own parts, would write the
 template.
+
+**Compare a bound's arguments by identity.** `[I: Iterator[T], T]` is a
+common shape, and its template's `Iterator[T]` names the template's own `T`,
+so no instantiation at another declaration's parameters would ever be
+alike: templates holding one another at such parameters kept the quadratic
+cascade, n^2.0 for `struct Gi[T: Tr2[U], U] { v: Gi+1[T, U], u: U }`.
+Reading the template's parameters as the arguments is the renaming the
+instantiation's parts would undergo.
 
 **Decide alikeness once, at mint.** Bounds' traits, callable signatures and
 `Owned` promises are completed after instantiations are minted, so the

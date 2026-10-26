@@ -6331,6 +6331,16 @@ const Checker = struct {
                 const context: BoundInterning = .{ .module = self.program.moduleOf(d), .owner = d };
                 const traits = try self.traitsBounding(context, requirements);
                 errdefer types_mod.freeBoundTraits(self.gpa, traits);
+                // Every `Integer` is `Owned`, so an `Integer` clause on an
+                // associated type read through one of the declaration's own
+                // parameters promises what an `Owned` clause would. A
+                // parameter's own bounds already say so through `integer`.
+                if (constraint.subject == .written and self.builder.standinOf(resolved) != null and
+                    !promised.contains(resolved) and integerDemandedBy(self.ast, self.res, requirements, traits) and
+                    self.ownsSubject(d, resolved))
+                {
+                    try self.builder.promiseOwned(resolved);
+                }
                 const callables = try self.callablesBounding(context, requirements, traits);
                 errdefer if (callables.len > 0) self.gpa.free(callables);
                 try contextual.append(self.gpa, .{
@@ -6404,8 +6414,9 @@ const Checker = struct {
                 items[item].subject = settled;
                 changed = true;
                 // A promise holds for what the subject now reads as.
-                if (ownedBound(self.ast, self.res, self.constraints.requirementsOf(constraint)) != null and self.ownsSubject(d, settled))
-                    self.builder.promiseOwned(settled);
+                const demand = items[item].demand;
+                if ((demand.owned or demand.integer) and self.ownsSubject(d, settled))
+                    try self.builder.promiseOwned(settled);
             }
         }
         if (changed) self.builder.setContextualConstraints(self.contextual_constraints);
@@ -11229,7 +11240,8 @@ const Checker = struct {
     /// base. The label is the edit `editForOwned` finds, with dropping the
     /// bound offered only where the program wrote it.
     fn reportNotOwned(self: *Checker, subject: []const u8, held: TypeId, bound: TokenId, at: TokenId, span: Span) std.mem.Allocator.Error!void {
-        const witness = (try self.builder.dependencyWitness(self.gpa, held)) orelse unreachable;
+        const witness = (try self.builder.dependencyWitness(self.gpa, held)) orelse
+            @panic("compiler defect: a type refused for `Owned` has no part that carries a dependency");
         defer witness.deinit(self.gpa);
         if (self.refused_owned_subjects.contains(.{ .decl = self.generic, .subject = witness.seed })) return;
         const held_name = try self.typeName(held);
@@ -30844,7 +30856,7 @@ const Checker = struct {
                 "`{s}` is bounded `Owned` twice",
                 .{self.ast.writtenText(written)},
             );
-            return self.builder.promiseOwned(subject);
+            return try self.builder.promiseOwned(subject);
         }
         // The signature's contract would be inferred as if the promise held
         // for some instantiations and not others; the refusal is the mistake,

@@ -745,7 +745,9 @@ alike-template instantiation (ADR 0250) -- its arguments distinct parameters,
 each promising what the template's parameter at its position promises, which
 `Builder.watchAlike` decides at mint and `decideAlikeAgain` position by
 position whenever one of those parameters gains a promise, into
-`Instance.alike` -- is answered from its
+`Instance.alike`; a position compares the two parameters' bounds with the
+template's parameters read as the arguments, and fails where a settled
+reference read through either was promised `Owned` (`promised_through`) -- is answered from its
 template while its parts are unwritten: `Typing.partsSource` is the one
 routine every walk over what a type owns steps through, the capability and
 dependency tables record it as one edge to its template, the cycle walk and

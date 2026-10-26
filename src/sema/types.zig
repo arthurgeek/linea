@@ -1156,9 +1156,6 @@ const ScopedCapabilityFacts = struct {
     values: ScopedCapabilityMap = .empty,
     ceilings: ScopedCapabilityMap = .empty,
     scopes: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
-    /// The prepared scopes that cap some type's capability, for which an
-    /// alike-template instantiation is not answered from its template.
-    capping: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     nodes: std.AutoHashMapUnmanaged(ScopedCapabilityKey, Node) = .empty,
     edges: std.ArrayList(Edge) = .empty,
     pending: std.ArrayList(ScopedCapabilityKey) = .empty,
@@ -1168,7 +1165,6 @@ const ScopedCapabilityFacts = struct {
         self.values.deinit(gpa);
         self.ceilings.deinit(gpa);
         self.scopes.deinit(gpa);
-        self.capping.deinit(gpa);
         self.nodes.deinit(gpa);
         self.edges.deinit(gpa);
         self.pending.deinit(gpa);
@@ -1183,7 +1179,6 @@ const ScopedCapabilityFacts = struct {
             for (constraints.run(owner)) |constraint| {
                 const ceiling = assumedCapability(constraint.demand.requirement);
                 if (ceiling == .linear) continue;
-                try self.capping.put(builder.gpa, scope, {});
                 const entry = try self.ceilings.getOrPut(builder.gpa, .{ .scope = scope, .ty = constraint.subject });
                 entry.value_ptr.* = if (entry.found_existing)
                     @enumFromInt(@min(@intFromEnum(entry.value_ptr.*), @intFromEnum(ceiling)))
@@ -8233,6 +8228,11 @@ pub const Typing = struct {
         /// Whether each listed position promises what the template's
         /// parameter there promises.
         alike_matched: std.ArrayList(bool) = .empty,
+        /// The parameters a settled reference read through them carries a
+        /// promise for that its declaration does not make: `S` once
+        /// `where S.Item: Owned` is read. An instantiation at one is never
+        /// alike its template.
+        promised_through: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
         /// The interpolations substitution minted, and the pieces each holds.
         /// Grown as they are minted rather than sized with the pool, which is
         /// what keeps them the size of the literals a program substitutes into.
@@ -9168,7 +9168,7 @@ pub const Typing = struct {
             var mismatches: u32 = 0;
             for (args, 0..) |arg, i| {
                 const own = self.internedParameter(instance.decl.index(), @intCast(i)).?;
-                const matched = samePromise(self.get(arg).parameter, self.get(own).parameter);
+                const matched = self.promisesAlike(instance, arg, own);
                 try self.alike_matched.append(self.gpa, matched);
                 if (!matched) mismatches += 1;
                 for ([_]TypeId{ arg, own }) |compared| {
@@ -9181,14 +9181,68 @@ pub const Typing = struct {
             self.instances.items[at].alike = mismatches == 0;
         }
 
-        fn samePromise(a: anytype, b: @TypeOf(a)) bool {
+        /// Whether `arg`, at one position of `instance`, promises what the
+        /// template's parameter `own` there promises: the same capability,
+        /// `Integer` and `Owned` promises, and the same traits and callable
+        /// signatures once the template's parameters are read as the
+        /// instantiation's arguments -- `T: Tr2[U]` in the template and
+        /// `T: Tr2[V]` at the argument promise alike where `U` is given `V`.
+        /// Neither may promise anything through a settled reference read
+        /// through it, `where S.Item: Owned`, which no other parameter
+        /// promises.
+        fn promisesAlike(self: *const Builder, instance: Instance, arg: TypeId, own: TypeId) bool {
+            if (self.promised_through.contains(arg) or self.promised_through.contains(own)) return false;
+            const a = self.get(arg).parameter;
+            const b = self.get(own).parameter;
             if (a.requirement != b.requirement or a.integer != b.integer or a.owned != b.owned) return false;
-            if (!std.mem.eql(TypeId, a.callables, b.callables)) return false;
-            if (a.traits.len != b.traits.len) return false;
+            if (a.callables.len != b.callables.len or a.traits.len != b.traits.len) return false;
+            for (a.callables, b.callables) |x, y| if (!self.sameRenamed(x, y, instance)) return false;
             for (a.traits, b.traits) |x, y| {
-                if (x.trait != y.trait or !std.mem.eql(TypeId, x.args, y.args)) return false;
+                if (x.trait != y.trait or x.args.len != y.args.len) return false;
+                for (x.args, y.args) |p, q| if (!self.sameRenamed(p, q, instance)) return false;
             }
             return true;
+        }
+
+        /// Whether `given` is `written` with each of `instance`'s template's
+        /// parameters read as the argument at its position. Anything the
+        /// comparison does not take apart is equal only when it is the same
+        /// type, so an answer of false only keeps an instantiation written.
+        ///
+        /// **Bound:** the nesting height of `written`.
+        fn sameRenamed(self: *const Builder, given: TypeId, written: TypeId, instance: Instance) bool {
+            const args = self.argsOf(instance);
+            if (self.standinOf(written) == null) switch (self.get(written)) {
+                .parameter => |p| if (p.owner == instance.decl.index() and p.index < args.len) return given == args[p.index],
+                else => {},
+            };
+            if (given == written) return true;
+            if (self.standinOf(given)) |x| {
+                const y = self.standinOf(written) orelse return false;
+                if (x.trait != y.trait or x.member != y.member or x.arg_count != y.arg_count) return false;
+                if (!self.sameRenamed(x.held, y.held, instance)) return false;
+                const xs = self.standin_args.items[x.first_arg..][0..x.arg_count];
+                const ys = self.standin_args.items[y.first_arg..][0..y.arg_count];
+                for (xs, ys) |p, q| if (!self.sameRenamed(p, q, instance)) return false;
+                return true;
+            }
+            if (self.instanceOf(given)) |x| {
+                const y = self.instanceOf(written) orelse return false;
+                if (x.decl != y.decl or x.arg_count != y.arg_count) return false;
+                for (self.argsOf(x), self.argsOf(y)) |p, q| if (!self.sameRenamed(p, q, instance)) return false;
+                return true;
+            }
+            return switch (self.get(given)) {
+                .array => |x| switch (self.get(written)) {
+                    .array => |y| x.count == y.count and self.sameRenamed(x.element, y.element, instance),
+                    else => false,
+                },
+                .borrow => |x| switch (self.get(written)) {
+                    .borrow => |y| self.sameRenamed(x.referent, y.referent, instance),
+                    else => false,
+                },
+                else => false,
+            };
         }
 
         /// Decides again each position compared against `parameter`, once a
@@ -9210,7 +9264,7 @@ pub const Typing = struct {
                 const candidate = self.alike_candidates.getPtr(watched.at).?;
                 const arg = self.argsOf(instance)[watched.position];
                 const own = self.internedParameter(instance.decl.index(), watched.position).?;
-                const matched = samePromise(self.get(arg).parameter, self.get(own).parameter);
+                const matched = self.promisesAlike(instance, arg, own);
                 const slot = &self.alike_matched.items[candidate.first + watched.position];
                 if (matched == slot.*) continue;
                 slot.* = matched;
@@ -9234,6 +9288,49 @@ pub const Typing = struct {
             self.alike_candidates = .empty;
             self.alike_matched.deinit(self.gpa);
             self.alike_matched = .empty;
+            self.promised_through.deinit(self.gpa);
+            self.promised_through = .empty;
+        }
+
+        test "a reopened pool decides alikeness again when a promise is added" {
+            const gpa = testing.allocator;
+            var builder = try Builder.init(gpa);
+            defer builder.deinit();
+            const holder_decl = DeclId.at(1);
+            const own = try builder.addParameter("T", @intCast(holder_decl.index()), 0, .unrestricted, &.{});
+            const holder = try builder.addStruct("Holder", .affine, &.{.{ .name = "held", .ty = own }});
+            try builder.noteTemplate(holder_decl, 0, holder);
+            const given = try builder.addParameter("U", 2, 0, .unrestricted, &.{});
+            const alike = try builder.instantiate(holder, holder_decl, &.{given});
+            var typing = try builder.finish(.empty);
+            defer typing.deinit(gpa);
+            try testing.expectEqual(@as(?TypeId, holder), typing.alikeTemplate(alike));
+
+            var reopened = try Builder.reopen(gpa, &typing);
+            defer reopened.deinit();
+            try testing.expectEqual(@as(?TypeId, holder), reopened.alikeTemplate(alike));
+            try reopened.promiseOwned(given);
+            try testing.expectEqual(@as(?TypeId, null), reopened.alikeTemplate(alike));
+        }
+
+        test "a template's bound naming its own parameter is compared at the instantiation's arguments" {
+            const gpa = testing.allocator;
+            var builder = try Builder.init(gpa);
+            defer builder.deinit();
+            const pair_decl = DeclId.at(1);
+            const trait: u32 = 9;
+            const second = try builder.addParameter("U", @intCast(pair_decl.index()), 1, .unrestricted, &.{});
+            const first = try builder.addParameter("T", @intCast(pair_decl.index()), 0, .unrestricted, &.{});
+            try builder.setBoundTraits(first, try gpa.dupe(BoundTrait, &.{.{ .trait = trait, .args = try gpa.dupe(TypeId, &.{second}) }}));
+            const pair = try builder.addStruct("Pair", .affine, &.{ .{ .name = "t", .ty = first }, .{ .name = "u", .ty = second } });
+            try builder.noteTemplate(pair_decl, 0, pair);
+            const v = try builder.addParameter("V", 2, 1, .unrestricted, &.{});
+            const t = try builder.addParameter("T", 2, 0, .unrestricted, &.{});
+            try builder.setBoundTraits(t, try gpa.dupe(BoundTrait, &.{.{ .trait = trait, .args = try gpa.dupe(TypeId, &.{v}) }}));
+            // `Pair[T, V]` with `T: Tr2[V]` promises what `Pair[T, U]` with
+            // `T: Tr2[U]` does; `Pair[V, T]` does not.
+            try testing.expectEqual(@as(?TypeId, pair), builder.alikeTemplate(try builder.instantiate(pair, pair_decl, &.{ t, v })));
+            try testing.expectEqual(@as(?TypeId, null), builder.alikeTemplate(try builder.instantiate(pair, pair_decl, &.{ v, t })));
         }
 
         test "an alike-template instantiation is answered from its template until its parts are read" {
@@ -9273,7 +9370,7 @@ pub const Typing = struct {
             const later = try builder.addParameter("W", 4, 0, .unrestricted, &.{});
             const once_alike = try builder.instantiate(holder, holder_decl, &.{later});
             try testing.expectEqual(@as(?TypeId, holder), builder.alikeTemplate(once_alike));
-            builder.promiseOwned(later);
+            try builder.promiseOwned(later);
             try testing.expectEqual(@as(?TypeId, null), builder.alikeTemplate(once_alike));
             try testing.expect(!try builder.mayCarryDependencies(once_alike));
             try testing.expect(!builder.isShell(once_alike));
@@ -9986,10 +10083,20 @@ pub const Typing = struct {
         /// Records that `t`, a type parameter or the stand-in for an
         /// associated type read through one, admits only `Owned` types, so it
         /// seeds no dependency. Answers already computed are dropped.
-        pub fn promiseOwned(self: *Builder, t: TypeId) void {
+        ///
+        /// A promise on a stand-in, `S.Item`, is one the parameter it is read
+        /// through, `S`, makes for its instantiations: the template an
+        /// instantiation at `S` is answered from reads its own parameter's
+        /// `Item`, which never made it. So the parameter is recorded as
+        /// promising through its settled references, and every
+        /// instantiation compared against it is decided again.
+        pub fn promiseOwned(self: *Builder, t: TypeId) std.mem.Allocator.Error!void {
             self.pool.items[@intFromEnum(t)].parameter.owned = true;
             self.dependency_facts.invalidate(t);
-            self.decideAlikeAgain(t);
+            var root = t;
+            while (self.standinOf(root)) |standin| root = standin.held;
+            if (root != t and self.get(root) == .parameter) try self.promised_through.put(self.gpa, root, {});
+            self.decideAlikeAgain(root);
         }
 
         /// Why a value of `t` may carry a dependency: the parts walked from
@@ -11388,41 +11495,36 @@ pub const Typing = struct {
             if (scope != .none) try self.prepareScopedCapability(scope, t);
         }
 
-        /// Prepares `t`'s capability within `scope`.
+        /// Prepares `t`'s capability within `scope`, a scope whose
+        /// constraints cap a capability: `where L.Entry: Discardable`.
         ///
-        /// A scope that caps a capability -- `where L.Entry: Discardable` --
-        /// caps it on types named at its own parameters, and an
+        /// A cap is on types named at the scope's own parameters, and an
         /// alike-template instantiation answered from its template would read
         /// the template's parameters instead, which the scope does not name.
-        /// So within such a scope every alike-template instantiation `t`
-        /// owns is written first, and the scoped answer is read from its own
-        /// parts. A scope that caps nothing answers as the unscoped table
-        /// does, from the template.
+        /// So every alike-template instantiation `t` owns is written first,
+        /// and the scoped answer is read from its own parts.
         ///
         /// **Bound:** one visit per type `t` owns that the scope has not
         /// prepared yet, and one write per alike-template instantiation among
         /// them: what preparing those types already visits.
         fn prepareScopedCapability(self: *Builder, scope: DeclId, t: TypeId) !void {
-            try self.scoped_capability_facts.prepareScope(self, scope);
-            if (self.scoped_capability_facts.capping.contains(scope)) {
-                var pending: std.ArrayList(TypeId) = .empty;
-                defer pending.deinit(self.gpa);
-                var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
-                defer seen.deinit(self.gpa);
-                try pending.append(self.gpa, t);
-                while (pending.pop()) |ty| {
-                    if (self.scoped_capability_facts.values.contains(.{ .scope = scope, .ty = ty })) continue;
-                    if ((try seen.getOrPut(self.gpa, ty)).found_existing) continue;
-                    if (self.alikeTemplate(ty) != null) {
-                        try self.ensureFilled(ty);
-                        try self.settleCapabilities();
-                    }
-                    const facts = &self.capability_facts;
-                    if (!facts.isRecorded(ty)) continue;
-                    const first = facts.first_parts.items[ty.index()];
-                    const count = facts.part_counts.items[ty.index()];
-                    for (facts.edges.items[first..][0..count]) |part| try pending.append(self.gpa, part.child);
+            var pending: std.ArrayList(TypeId) = .empty;
+            defer pending.deinit(self.gpa);
+            var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+            defer seen.deinit(self.gpa);
+            try pending.append(self.gpa, t);
+            while (pending.pop()) |ty| {
+                if (self.scoped_capability_facts.values.contains(.{ .scope = scope, .ty = ty })) continue;
+                if ((try seen.getOrPut(self.gpa, ty)).found_existing) continue;
+                if (self.alikeTemplate(ty) != null) {
+                    try self.ensureFilled(ty);
+                    try self.settleCapabilities();
                 }
+                const facts = &self.capability_facts;
+                if (!facts.isRecorded(ty)) continue;
+                const first = facts.first_parts.items[ty.index()];
+                const count = facts.part_counts.items[ty.index()];
+                for (facts.edges.items[first..][0..count]) |part| try pending.append(self.gpa, part.child);
             }
             try self.scoped_capability_facts.prepare(self, scope, t);
         }
@@ -12287,6 +12389,20 @@ pub const Typing = struct {
             for (t.standins, 0..) |s, at| {
                 const args = t.standin_args[s.first_arg..][0..s.arg_count];
                 try b.awaiting.note(gpa, standinKey(s.trait, args, s.held, s.member.index()), @intCast(at));
+            }
+            // The alike decisions are the builder's own bookkeeping too, and a
+            // reopened pool may check further declarations, whose promises
+            // decide them again. A settled reference promised `Owned` marks
+            // the parameter it is read through, as `promiseOwned` would have.
+            for (t.standins) |s| {
+                if (!b.get(s.ty).parameter.owned) continue;
+                var root = s.held;
+                while (b.standinOf(root)) |held| root = held.held;
+                if (b.get(root) == .parameter) try b.promised_through.put(gpa, root, {});
+            }
+            for (b.instances.items, 0..) |i, at| {
+                b.instances.items[at].alike = false;
+                if (i.parts == .unwritten) try b.watchAlike(@intCast(at));
             }
             return b;
         }

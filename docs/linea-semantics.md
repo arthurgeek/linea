@@ -3303,7 +3303,9 @@ declaration's own parameters: `where I.Item: Owned` under `[I: Iterator]`, or
 parameter of an enclosing declaration, such as an implementation's `T` written
 in a method's `where`, in a trait's bound list or on an associated type's
 declaration it is [T-Bound]: the promise would hold in declarations that never
-made it.
+made it. Since every `Integer` is `Owned`, `where I.Item: Integer` under
+`[I: Iterator]` promises what `where I.Item: Owned` does, and a type holding an
+`I.Item` there carries nothing.
 
 `Copyable`, `Discardable`, `Linear`, `Integer` and `Owned` are decided by the
 compiler, and an implementation of one, such as `impl Owned for Label`, is
