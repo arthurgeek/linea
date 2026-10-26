@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/carried/a_read_place_is_not_written_while_the_holder_lives.lin:28:5
+   |
+28 |     limits[0] = 9
+   |     ^^^^^^^^^ keep this place available until the last use of its observation
+29 |     UInt8(redeem(ticket) + limits[0])
+   |                  ------ the observation is still used here

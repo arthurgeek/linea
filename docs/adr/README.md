@@ -153,7 +153,8 @@ true of a different implementation.
 | [0123](0123-observations-carry-owner-dependencies-through-callable-contracts.md) | Observations carry owner dependencies through callable contracts | Accepted; supersedes 0069 and parts of 0025 and 0121; refines 0046; refined by 0124 and 0175; projection syntax superseded by 0126; extended by 0128, 0131, 0137, 0178, 0193 and 0221; source-clause spelling superseded by 0132; mandatory backing-buffer shape superseded by 0133 |
 | [0124](0124-copyability-and-settlement-are-independent-capabilities.md) | Copyability and settlement are independent capabilities | Accepted; supersedes classification in 0034, 0046, and 0051; extends 0103; refines 0123; extended by 0125, 0131, 0193 and 0221 |
 | [0125](0125-scalar-value-positions-take-snapshots.md) | Scalar value positions take snapshots | Accepted; supersedes universal explicit-copy clause of 0034; extends 0124 |
-| [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) | `Owned` admits a type that can carry no borrow | Accepted; extends 0123 and 0124 |
+| [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) | `Owned` admits a type that can carry no borrow | Accepted; extends 0123 and 0124; extended by 0250 |
+| [0250](0250-tasks-are-structured-through-linear-sessions.md) | Tasks are structured through linear sessions | Accepted; extends 0099, 0193 and 0221; only `mem.Carried` is built, and the rest lands in the stages it lists |
 | [0126](0126-observations-project-referent-places-transparently.md) | Observations project referent places transparently | Accepted; supersedes projection syntax of 0123; extends 0088 |
 | [0127](0127-constants-retain-distinct-values-and-infer-their-types.md) | Constants infer initializer types and retain distinct integer, boolean and text values | Accepted; extends 0020 and 0059, supersedes the representation decision in 0078; extended by 0140, 0146 and 0157 |
 | [0140](0140-aggregate-constants-retain-checked-construction-plans.md) | Aggregate constants retain shared data and checked construction plans | Accepted; extends 0020, 0059 and 0127; extended by 0157, 0183 and 0227; materialization clause superseded by 0178; unit-expression clause superseded by 0188 |
@@ -263,7 +264,7 @@ ones most likely to be superseded as the compiler grows.
 | [0213](0213-a-trait-may-be-implemented-for-a-callable-type.md) | A trait may be implemented for a callable type, keyed by its shape | Accepted; extends 0081, 0093 and 0148 |
 | [0214](0214-a-route-takes-a-function-whose-parameters-name-its-inputs.md) | A route is a function whose parameters name its inputs | Accepted; refines 0185; extends 0180; `where carries(request)` clause superseded by 0216 |
 | [0216](0216-a-carrier-type-supplies-its-signatures-default-contract.md) | A carrier type supplies its signatures' default contract | Accepted; supersedes the `where carries(request)` clause of 0214 |
-| [0099](0099-a-phantom-parameter-carries-its-bound.md) | A phantom parameter carries its bound | Accepted; supersedes the bound clause of 0065 |
+| [0099](0099-a-phantom-parameter-carries-its-bound.md) | A phantom parameter carries its bound | Accepted; supersedes the bound clause of 0065; extended by 0250 |
 | [0102](0102-computation-and-storage-representations-are-separate.md) | Computation and storage representations are separate | Accepted; extends 0028; partially supersedes 0031 and 0052 |
 | [0104](0104-release-is-optional-and-never-scheduled.md) | Release is optional and never scheduled | Accepted; supersedes 0097, extends 0063; extended by 0103, 0158, 0184 and 0208 |
 | [0184](0184-a-failure-holding-an-owned-value-settles-to-its-reason.md) | A failure holding an owned value settles to its reason | Accepted; extends 0104 and 0162; `http.Error` settling clause superseded by 0218 |
@@ -273,7 +274,7 @@ ones most likely to be superseded as the compiler grows.
 | [0147](0147-a-borrowed-let-pattern-reads-a-stable-place.md) | A borrowed let pattern reads a stable place | Accepted; extends 0129; extended by 0178, 0201 and 0224 |
 | [0130](0130-explicit-captures-use-inline-environments.md) | Explicit captures use inline environments | Accepted; supersedes the capture exclusion in 0105; read-only restriction superseded by 0131; extended by 0173 and 0193 |
 | [0131](0131-closure-invocation-and-capture-ownership-are-independent.md) | Closure invocation and capture ownership are independent | Accepted; supersedes the read-only restriction in 0130; extends 0123 and 0124; extended by 0132, 0158 and 0173; stored inout capture clause superseded by 0193 |
-| [0193](0193-a-closure-may-hold-a-place-lent-inout.md) | A closure may hold a place lent `inout` | Accepted; supersedes the stored inout capture clause of 0131; extends 0123, 0124, 0130 and 0173 |
+| [0193](0193-a-closure-may-hold-a-place-lent-inout.md) | A closure may hold a place lent `inout` | Accepted; supersedes the stored inout capture clause of 0131; extends 0123, 0124, 0130 and 0173; extended by 0250 |
 | [0132](0132-callable-results-separate-types-from-dependencies.md) | Callable results separate types from dependencies | Accepted; supersedes source-clause spelling in 0123; extends 0131; extended by 0144, 0164 and 0173 |
 | [0158](0158-a-function-value-implements-release.md) | A function value implements Release | Accepted; extends 0104 and 0131; extended by 0173 |
 | [0173](0173-a-capturing-closure-is-erased-into-allocator-owned-storage.md) | A capturing closure is erased into allocator-owned storage | Accepted; extends 0098, 0105, 0130, 0131, 0132 and 0158; extended by 0176, 0180 and 0193 |
@@ -386,18 +387,13 @@ everything the compiler emits except one function. What settles it is whether
 the wrapper ever varies — a program with no `main`, which the test runner needs,
 is the first thing that would make it.
 
-How **one process serves requests concurrently**, and how ownership governs
-what concurrent tasks share and send. `http.listen_and_serve` answers one
-connection at a time ([0154](0154-sockets-and-http-follow-go.md)), so today
-concurrency comes from processes: `http.serve_cgi` runs once per request under
-a web server, or several server processes share the load. Threads, asynchronous
-I/O and a pre-forked pool of worker processes are the candidates. A worker pool
-needs no new rule, since processes share nothing; threads and asynchronous
-tasks need one. What settles it is how ownership extends across tasks: whether
-a value sent to another task must be owned and moved whole, never an
-observation of the sender's storage; what tasks may share read-only; and
-whether the state `http.with_state` lends to every request is shared under a
-rule or partitioned per task.
+How **one process serves requests concurrently** is decided by
+[0250](0250-tasks-are-structured-through-linear-sessions.md): a task is created
+with its session, its handle carries its body's captures, and `close` joins it.
+What remains open is what that record builds in stages: until its runtime stage
+lands, `http.listen_and_serve` answers one connection at a time
+([0154](0154-sockets-and-http-follow-go.md)), and concurrency comes from
+processes.
 
 Whether **a contract may be gated on a type**, so that `iter.extend` drops
 its retention for an instantiation whose `Item` is `Owned`; recorded in

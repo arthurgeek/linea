@@ -460,6 +460,7 @@ fn typecheckInternal(
     c.builder.certified_storage = c.raw_accesses.storage;
     c.builder.certified_buffer = c.raw_accesses.buffer;
     c.builder.certified_slice = c.raw_accesses.slice;
+    c.builder.certified_carried = c.raw_accesses.carried;
     c.builder.certified_foreign_views = c.raw_accesses.foreign_views;
     c.builder.certified_closure_entry = c.raw_accesses.closure_entry_type;
     // The resolver settled which declarations tuple syntax names; the pool

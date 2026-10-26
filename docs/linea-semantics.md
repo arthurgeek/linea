@@ -4298,7 +4298,8 @@ parameters carry ordinary bounds, checked on their arguments
 ([ADR 0099](adr/0099-a-phantom-parameter-carries-its-bound.md)). Functions,
 including trait function signatures, cannot declare phantom parameters. A phantom
 argument does not contribute to the instantiation's ownership because no stored
-part contains it. An instantiated aggregate derives ownership from its
+part contains it, and it carries none of its argument's dependencies; a type
+that should carry them holds a `mem.Carried` field instead (§5.3). An instantiated aggregate derives ownership from its
 substituted fields and payloads. A type argument occurring only behind `borrow`
 is observed, so its referent contributes no ownership obligation to the
 aggregate.
@@ -5339,6 +5340,43 @@ must still be declared ([O-Escapes]). A dependency never comes from an Owned
 type, so substituting any admitted argument keeps a body checked with the
 parameter unseeded correct.
 
+**Carried dependencies.** `mem.Carried[H]` is a zero-sized field type that
+carries every dependency a value of `H` may carry, read observations and
+exclusive `inout` lends alike, without holding or owning an `H`
+([ADR 0250](adr/0250-tasks-are-structured-through-linear-sessions.md)). A value
+holding one, at any depth (a field of a nested structure, an enum payload, a
+tuple, a type argument such as `Option[T]`, or a closure capture), may carry
+whatever `H` may, and may hold a writer exactly where `H` may, so a lend it
+carries stays exclusive where `H` is a closure. `Carried[H]` is Owned exactly
+when `H` is. The holder gets the dependencies through its constructor's
+contract:
+
+```linea
+import std.mem
+
+struct Ticket[F] {
+    number: UInt64,
+    held: mem.Carried[F],
+}
+
+fn issue[F: sink fn()](sink body: F) -> Ticket[F] where carries(body) {
+    body()
+    .{ number = 1, held = .{} }
+}
+```
+
+A ticket issued for `sink [inout seen] || { seen += 1 }` keeps `seen` lent
+until the ticket's last use, so a read or write of `seen` before then is
+[O-Borrow], and the ticket cannot leave the function that lends `seen`
+([O-Escapes]). A dependency is held by the parts that can carry it, so reading
+the ticket's `number` does not use the lend; passing, matching or settling the
+whole ticket does. `Carried[H]` has no fields, so it adds nothing to a layout
+and nothing to settle, and it is Copyable and Discardable whatever `H` is: it
+owns no `H`, and the holder's own declaration decides whether the holder may be
+copied or dropped. Each copy of a copyable holder carries the same facts. A
+holder whose `H` keeps running after the holder is gone must be linear, so that
+its settlement comes after that `H` has finished.
+
 Dependencies form conservative sets. A collection can retain views from several
 independent owners. Removing an element transfers its contained observations
 without borrowing the container's own storage; its dependency set may
@@ -5625,8 +5663,9 @@ place lent `inout` to a closure cannot be used at all, read included, while a
 value holding that lend is live: no read, write, move, `&`, observation or second
 `inout` capture may overlap it before the lend's last use. A value holds the lend
 when it carries the closure's dependencies, through any `carries` contract and in
-a type that can hold the writer, such as an adapter or a closure; in any other
-value the lend is a read observation. A `let read` binder observes the part its
+a type that can hold the writer, such as an adapter, a closure, or a type with a
+`mem.Carried[F]` field for such an `F`; in any other value the lend is a read
+observation. A `let read` binder observes the part its
 pattern selected in the same way, whatever that part's type, until the binder's
 last use. Copies and stored observations preserve the restriction. Disjoint
 record fields remain independent; an observation of a container element protects

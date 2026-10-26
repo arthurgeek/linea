@@ -1,0 +1,9 @@
+error[O-Escapes]: a value holding a place lent `inout` cannot leave the function that lends it
+  --> tests/carried/a_holder_carrying_a_lend_cannot_leave_the_function_that_lends.lin:27:9
+   |
+24 |         let body = sink [inout seen] || {
+   |                                ---- lent `inout` here
+27 |         issue(body)
+   |         ^^^^^^^^^^^ this value holds the lend
+   |
+   = help: finish with the value inside this function, or give the closure its own state with a `sink` capture

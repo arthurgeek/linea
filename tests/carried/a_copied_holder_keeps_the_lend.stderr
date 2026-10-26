@@ -1,0 +1,11 @@
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+  --> tests/carried/a_copied_holder_keeps_the_lend.lin:29:5
+   |
+23 |         sink [inout seen] || {
+   |                     ---- lent `inout` here
+29 |     seen = 5
+   |     ^^^^ this uses the place while it is lent
+30 |     UInt8(number_of(second) + early + seen)
+   |                     ------ a value holding the lend is still used here
+   |
+   = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure

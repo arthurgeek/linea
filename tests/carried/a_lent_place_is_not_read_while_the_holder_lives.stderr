@@ -1,0 +1,11 @@
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+  --> tests/carried/a_lent_place_is_not_read_while_the_holder_lives.lin:28:17
+   |
+24 |         sink [inout seen] || {
+   |                     ---- lent `inout` here
+28 |     let early = seen
+   |                 ^^^^ this uses the place while it is lent
+29 |     UInt8(redeem(ticket) + early)
+   |                  ------ a value holding the lend is still used here
+   |
+   = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure
