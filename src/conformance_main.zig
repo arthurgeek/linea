@@ -4948,12 +4948,26 @@ fn templatesSelectingTheNextModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// `n` generic structures, each holding the next at its own parameters,
+/// where the first parameter's bound names the second: `[T: Tr2[U], U]`.
+fn nestedCrossBoundTemplatesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("trait Tr2[phantom X] {}\n\n");
+    for (0..n) |k| try w.print("struct G{d}[T: Tr2[U], U] {{\n    v: G{d}[T, U],\n    u: U,\n}}\n\n", .{ k, k + 1 });
+    try w.print("struct G{d}[T: Tr2[U], U] {{\n    v: T,\n    u: U,\n}}\n\n", .{n});
+    try w.writeAll("fn _f[T: Tr2[U], U](sink g: G0[T, U]) -> G0[T, U] {\n    g\n}\n\nfn main() -> UInt8 {\n    0\n}\n");
+    return out.toOwnedSlice();
+}
+
 test "nested templates and templates selecting the next are accepted" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
     try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try nestedTemplatesModule(gpa, 6)));
     try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try templatesSelectingTheNextModule(gpa, 6)));
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try nestedCrossBoundTemplatesModule(gpa, 6)));
 }
 
 test "holders asked about through a chain are accepted" {
@@ -6828,6 +6842,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "settled reference chain", .n = 250, .grows = false, .cost = throughTreeBatch(settledReferenceChainModule, .emit, 16) },
     .{ .name = "holders asked about through a chain", .n = 400, .cost = throughTheTree(holdersAskedThroughAChainModule) },
     .{ .name = "nested templates", .n = 1000, .cost = throughTheLoader(nestedTemplatesModule) },
+    .{ .name = "nested templates bounded by one another's parameters", .n = 500, .cost = throughTheLoader(nestedCrossBoundTemplatesModule) },
     // Each template's part is one link, so the chain is held below 1000.
     .{ .name = "templates selecting the next", .n = 250, .grows = false, .cost = throughTheLoader(templatesSelectingTheNextModule) },
     .{ .name = "fields in one type", .n = 16000, .cost = throughTheTree(fieldModule) },
