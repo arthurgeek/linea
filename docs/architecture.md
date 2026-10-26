@@ -743,8 +743,9 @@ instantiation's parts, for a ground one as it is minted, for an unwritten one
 on first read, and for every written one in `refillInstances`. An
 alike-template instantiation (ADR 0250) -- its arguments distinct parameters,
 each promising what the template's parameter at its position promises, which
-`Builder.decideAlike` decides at mint and again whenever one of those
-parameters gains a promise, into `Instance.alike` -- is answered from its
+`Builder.watchAlike` decides at mint and `decideAlikeAgain` position by
+position whenever one of those parameters gains a promise, into
+`Instance.alike` -- is answered from its
 template while its parts are unwritten: `Typing.partsSource` is the one
 routine every walk over what a type owns steps through, the capability and
 dependency tables record it as one edge to its template, the cycle walk and

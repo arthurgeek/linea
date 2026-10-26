@@ -80,10 +80,11 @@ argument, not its parts.
 Promises are completed after instantiations are minted: a bound's traits and
 callable signatures are read in a later sweep, and a `where` clause adds
 `Owned`. So the decision is not taken once. `Builder.watchAlike` decides it
-at mint and lists the instantiation under every parameter it compares;
-`setBoundTraits`, `setCallableBounds` and `promiseOwned` decide each listed
-instantiation again (`decideAlikeAgain`), and a decision that changes
-rebuilds the capability and dependency tables. `Instance.alike` holds the
+at mint, keeping whether each position promises alike and how many do not,
+and lists each position under the two parameters it compares;
+`setBoundTraits`, `setCallableBounds` and `promiseOwned` compare each listed
+position again (`decideAlikeAgain`), and a decision that changes rebuilds
+the capability and dependency tables. `Instance.alike` holds the
 current decision, so the finished pool reads the same one.
 
 ### What is answered from the template, and where
@@ -169,10 +170,13 @@ n^0.24 for "nested templates" (1000 to 4000) and n^0.13 for "templates
 selecting the next" (250 to 1000), where they read n^2.12 and n^2.63.
 
 What makes the bound hold is that the alike decision is a local test, the
-length of an instantiation's arguments, and that no walk follows an
-alike-template part into its own parts. Deciding again costs one decision per
-instantiation listed under a parameter whose promise changed, and each
-parameter's promises change a fixed number of times. Within a scope that
+length of an instantiation's arguments at mint, and that no walk follows an
+alike-template part into its own parts. Deciding again compares one position
+per position listed under a parameter whose promise changed, and each
+parameter's promises change a fixed number of times, so a template of `n`
+parameters instantiated at another declaration's `n` costs `n` comparisons
+to decide and `n` more for each sweep that completes their promises, not
+`n` per parameter. Within a scope that
 caps a capability, the instantiations written are those the scope's
 questions reach, which preparing the scoped answer visits anyway, and the
 scope remembers what it prepared.

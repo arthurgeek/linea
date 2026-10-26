@@ -5322,6 +5322,12 @@ pub const Template = struct {
     ty: TypeId,
 };
 
+/// A position of an instantiation whose alikeness compares a parameter.
+const AlikePosition = struct { at: u32, position: u32 };
+
+/// An instantiation whose arguments are distinct type parameters.
+const AlikeCandidate = struct { first: u32, mismatches: u32 };
+
 /// One instantiation, and what it was instantiated from.
 pub const Instance = struct {
     decl: DeclId,
@@ -5343,7 +5349,8 @@ pub const Instance = struct {
     /// parameter at its position promises. Its parts would be the template's
     /// with one parameter renamed to another, so while they are unwritten
     /// every question about what it owns is answered from the template
-    /// (`Typing.partsSource`). Kept current by `Builder.decideAlike`.
+    /// (`Typing.partsSource`). Kept current by `Builder.watchAlike` and
+    /// `Builder.decideAlikeAgain`.
     alike: bool = false,
 
     pub const Parts = enum {
@@ -8211,14 +8218,21 @@ pub const Typing = struct {
         /// Which entries of `instances` carry each `(decl, args)` pair the pool
         /// interns on.
         minted: Chain(.newest_first) = .empty,
-        /// The instantiations whose arguments are distinct type parameters,
-        /// by each parameter their alikeness compares: every argument, and
-        /// the template's parameter at its position. A promise added to one of
-        /// those parameters decides each listed instantiation again
-        /// (`decideAlikeAgain`), so a decision costs one visit per change to
-        /// a parameter it compares rather than a walk over every
+        /// The positions of instantiations whose arguments are distinct type
+        /// parameters, by each parameter a position compares: its argument,
+        /// and the template's parameter there. A promise added to one of
+        /// those parameters decides each listed position again
+        /// (`decideAlikeAgain`), so a decision costs one comparison per
+        /// change to a parameter it compares rather than a walk over every
         /// instantiation.
-        alike_watch: std.AutoHashMapUnmanaged(TypeId, std.ArrayList(u32)) = .empty,
+        alike_watch: std.AutoHashMapUnmanaged(TypeId, std.ArrayList(AlikePosition)) = .empty,
+        /// Each instantiation `alike_watch` lists: where its positions sit in
+        /// `alike_matched`, and how many of them promise otherwise than the
+        /// template's parameter there.
+        alike_candidates: std.AutoHashMapUnmanaged(u32, AlikeCandidate) = .empty,
+        /// Whether each listed position promises what the template's
+        /// parameter there promises.
+        alike_matched: std.ArrayList(bool) = .empty,
         /// The interpolations substitution minted, and the pieces each holds.
         /// Grown as they are minted rather than sized with the pool, which is
         /// what keeps them the size of the literals a program substitutes into.
@@ -9117,32 +9131,54 @@ pub const Typing = struct {
             return self.alikeTemplate(t) orelse t;
         }
 
-        /// Whether `instance` is alike its template: its arguments are
-        /// distinct type parameters, none of them a settled reference, and
-        /// each promises exactly what the template's parameter at its position
-        /// promises -- the same capability, the same `Integer` and `Owned`
-        /// promises, the same traits at the same arguments and the same
-        /// callable signatures. Certified storage is never alike: its
-        /// containment reads its element argument rather than its parts.
+        /// Decides whether the instantiation at `at`, just minted, is alike
+        /// its template: its arguments are distinct type parameters, none of
+        /// them a settled reference, and each promises exactly what the
+        /// template's parameter at its position promises -- the same
+        /// capability, the same `Integer` and `Owned` promises, the same
+        /// traits at the same arguments and the same callable signatures.
+        /// Certified storage is never alike: its containment reads its
+        /// element argument rather than its parts.
         ///
-        /// Promises compared by identity, so a bound whose arguments name the
-        /// parameter itself, `T: Into[T]`, is never alike; such an
+        /// Promises are compared by identity, so a bound whose arguments name
+        /// the parameter itself, `T: Into[T]`, is never alike; such an
         /// instantiation is written as any other is.
-        fn decideAlike(self: *const Builder, instance: Instance) bool {
-            if (self.certified_storage != .none and instance.decl == self.certified_storage) return false;
+        ///
+        /// What the arguments are never changes, but what they promise does,
+        /// so an instantiation whose arguments are distinct parameters is
+        /// kept as a candidate: whether each position promises alike, how
+        /// many do not, and each position listed under the two parameters it
+        /// compares, so a promise added to one decides that position again.
+        ///
+        /// **Bound:** the length of the arguments, with a set of them to see
+        /// they are distinct.
+        fn watchAlike(self: *Builder, at: u32) std.mem.Allocator.Error!void {
+            const instance = self.instances.items[at];
+            if (self.certified_storage != .none and instance.decl == self.certified_storage) return;
             const args = self.argsOf(instance);
-            if (args.len == 0) return false;
+            if (args.len == 0) return;
+            var distinct: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+            defer distinct.deinit(self.gpa);
             for (args, 0..) |arg, i| {
-                if (self.standinOf(arg) != null) return false;
-                const given = switch (self.get(arg)) {
-                    .parameter => |parameter| parameter,
-                    else => return false,
-                };
-                for (args[0..i]) |earlier| if (earlier == arg) return false;
-                const own = self.internedParameter(instance.decl.index(), @intCast(i)) orelse return false;
-                if (!samePromise(given, self.get(own).parameter)) return false;
+                if (self.standinOf(arg) != null or self.get(arg) != .parameter) return;
+                if (self.internedParameter(instance.decl.index(), @intCast(i)) == null) return;
+                if ((try distinct.getOrPut(self.gpa, arg)).found_existing) return;
             }
-            return true;
+            const first: u32 = @intCast(self.alike_matched.items.len);
+            var mismatches: u32 = 0;
+            for (args, 0..) |arg, i| {
+                const own = self.internedParameter(instance.decl.index(), @intCast(i)).?;
+                const matched = samePromise(self.get(arg).parameter, self.get(own).parameter);
+                try self.alike_matched.append(self.gpa, matched);
+                if (!matched) mismatches += 1;
+                for ([_]TypeId{ arg, own }) |compared| {
+                    const list = try self.alike_watch.getOrPut(self.gpa, compared);
+                    if (!list.found_existing) list.value_ptr.* = .empty;
+                    try list.value_ptr.append(self.gpa, .{ .at = at, .position = @intCast(i) });
+                }
+            }
+            try self.alike_candidates.put(self.gpa, at, .{ .first = first, .mismatches = mismatches });
+            self.instances.items[at].alike = mismatches == 0;
         }
 
         fn samePromise(a: anytype, b: @TypeOf(a)) bool {
@@ -9155,43 +9191,33 @@ pub const Typing = struct {
             return true;
         }
 
-        /// Decides whether the instantiation at `at`, just minted, is alike
-        /// its template, and lists it under each parameter the decision
-        /// compares, so a promise later added to one decides it again.
-        fn watchAlike(self: *Builder, at: u32) std.mem.Allocator.Error!void {
-            const instance = self.instances.items[at];
-            const args = self.argsOf(instance);
-            for (args, 0..) |arg, i| {
-                if (self.standinOf(arg) != null or self.get(arg) != .parameter) return;
-                const own = self.internedParameter(instance.decl.index(), @intCast(i)) orelse return;
-                for ([_]TypeId{ arg, own }) |compared| {
-                    const list = try self.alike_watch.getOrPut(self.gpa, compared);
-                    if (!list.found_existing) list.value_ptr.* = .empty;
-                    try list.value_ptr.append(self.gpa, at);
-                }
-            }
-            self.instances.items[at].alike = self.decideAlike(instance);
-        }
-
-        /// Decides again whether each instantiation compared against
-        /// `parameter` is alike its template, once a promise of `parameter`
-        /// has changed. A decision that changes leaves what the fact tables
-        /// recorded of that instantiation untrue -- they read it through its
-        /// template, or passed it over to be written -- so they are rebuilt;
-        /// an instantiation that stops being alike is written by whichever
-        /// reader next needs its parts, as any other is.
+        /// Decides again each position compared against `parameter`, once a
+        /// promise of `parameter` has changed, and with it whether that
+        /// instantiation is alike its template. A decision that changes
+        /// leaves what the fact tables recorded of that instantiation untrue
+        /// -- they read it through its template, or passed it over to be
+        /// written -- so they are rebuilt; an instantiation that stops being
+        /// alike is written by whichever reader next needs its parts, as any
+        /// other is.
         ///
-        /// **Bound:** one decision per instantiation listed under `parameter`,
-        /// each the length of its arguments.
+        /// **Bound:** one comparison per position listed under `parameter`.
         fn decideAlikeAgain(self: *Builder, parameter: TypeId) void {
             const list = self.alike_watch.get(parameter) orelse return;
             var changed = false;
-            for (list.items) |at| {
-                const instance = self.instances.items[at];
+            for (list.items) |watched| {
+                const instance = self.instances.items[watched.at];
                 if (instance.parts != .unwritten) continue;
-                const alike = self.decideAlike(instance);
+                const candidate = self.alike_candidates.getPtr(watched.at).?;
+                const arg = self.argsOf(instance)[watched.position];
+                const own = self.internedParameter(instance.decl.index(), watched.position).?;
+                const matched = samePromise(self.get(arg).parameter, self.get(own).parameter);
+                const slot = &self.alike_matched.items[candidate.first + watched.position];
+                if (matched == slot.*) continue;
+                slot.* = matched;
+                if (matched) candidate.mismatches -= 1 else candidate.mismatches += 1;
+                const alike = candidate.mismatches == 0;
                 if (alike == instance.alike) continue;
-                self.instances.items[at].alike = alike;
+                self.instances.items[watched.at].alike = alike;
                 changed = true;
             }
             if (!changed) return;
@@ -9204,6 +9230,10 @@ pub const Typing = struct {
             while (lists.next()) |list| list.deinit(self.gpa);
             self.alike_watch.deinit(self.gpa);
             self.alike_watch = .empty;
+            self.alike_candidates.deinit(self.gpa);
+            self.alike_candidates = .empty;
+            self.alike_matched.deinit(self.gpa);
+            self.alike_matched = .empty;
         }
 
         test "an alike-template instantiation is answered from its template until its parts are read" {
