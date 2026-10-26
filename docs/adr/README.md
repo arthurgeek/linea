@@ -89,8 +89,8 @@ true of a different implementation.
 | [0202](0202-a-line-beginning-with-a-parenthesis-is-noted-only-as-an-empty-call.md) | A line beginning with `(` is noted only as an empty call | Accepted; refines 0043, 0190 and 0196 |
 | [0046](0046-the-universe-of-an-instantiation-is-computed.md) | The universe of an instantiation is computed | Accepted; refines 0034, refined by 0051 and 0123; classification superseded by 0124 |
 | [0047](0047-instantiation-is-a-backend-concern.md) | Instantiation is a backend concern | Accepted; extended by 0142; ordinary-fields clause superseded by 0248 |
-| [0248](0248-an-instantiation-holding-a-parameter-is-written-when-read.md) | An instantiation holding a parameter is written when it is read | Accepted; supersedes the ordinary-fields clause of 0047; written-parts clause superseded by 0250 |
-| [0250](0250-an-alike-instantiation-is-answered-from-one-representative.md) | An alike instantiation is answered from one representative | Accepted; supersedes the written-parts clause of 0248; extends 0241 |
+| [0248](0248-an-instantiation-holding-a-parameter-is-written-when-read.md) | An instantiation holding a parameter is written when it is read | Accepted; supersedes the ordinary-fields clause of 0047; written-parts clause superseded by 0251 |
+| [0251](0251-an-alike-instantiation-is-answered-from-one-representative.md) | An alike instantiation is answered from one representative | Accepted; supersedes the written-parts clause of 0248; extends 0241 |
 | [0051](0051-a-part-obliges-when-no-argument-can-remove-it.md) | A part obliges when it is Linear for a reason no argument can remove | Accepted; refines 0046; superseded by 0124 |
 | [0053](0053-exclusivity-is-triggered-by-mutation.md) | Exclusivity is triggered by mutation, not by the marker | Accepted; supersedes the exclusivity clause of 0025 |
 | [0054](0054-the-bound-is-on-height-and-covers-written-types.md) | The nesting bound is on height, and a written type answers to it | Accepted; supersedes 0042 |
@@ -134,7 +134,7 @@ true of a different implementation.
 | [0171](0171-the-standard-library-is-an-ordinary-library.md) | The standard library is an ordinary library, known by its manifest | Accepted; supersedes clauses of 0068, 0075, 0085 and 0111; extends 0096; extended by 0229; boolean grant superseded by 0228 |
 | [0179](0179-the-prelude-holds-the-core-vocabulary-and-yields-to-a-module.md) | The prelude holds the core vocabulary, and yields to a module's own names | Accepted; supersedes the minimal-prelude and no-shadowing clauses of 0085 |
 | [0087](0087-an-associated-type-is-a-function-of-the-coherence-key.md) | An associated type is a function of the coherence key | Accepted; extends 0081; extended by 0088, 0142 and 0241 |
-| [0241](0241-declared-answers-are-settled-when-first-needed.md) | Declared answers are settled when first needed | Accepted; extends 0087 and 0165; extended by 0250 |
+| [0241](0241-declared-answers-are-settled-when-first-needed.md) | Declared answers are settled when first needed | Accepted; extends 0087 and 0165; extended by 0251 |
 | [0088](0088-a-projecting-member-is-a-place-not-a-function.md) | A projecting member is a place, not a function | Accepted; extends 0087; extended by 0089, 0121 and 0126; partially superseded by 0135 |
 | [0135](0135-field-delegation-uses-checked-projection-plans.md) | Field delegation and bound indexing share checked projection plans; traversal is explicit | Accepted; partially supersedes 0088; extends 0122 |
 | [0089](0089-a-from-end-index-is-a-value-the-container-interprets.md) | A from-end index is a value the container interprets | Accepted; extends 0088 |

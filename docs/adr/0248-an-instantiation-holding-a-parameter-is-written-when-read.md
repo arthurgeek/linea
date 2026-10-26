@@ -4,7 +4,7 @@ Status: Accepted — 2026-10-24. Supersedes the ordinary-fields clause of
 [0047](0047-instantiation-is-a-backend-concern.md). The clause that writing
 an instantiation writes every unwritten one among its parts, so that a
 written type holds only written types, superseded by
-[0250](0250-an-alike-instantiation-is-answered-from-one-representative.md):
+[0251](0251-an-alike-instantiation-is-answered-from-one-representative.md):
 an alike instantiation is answered from one representative and is not
 written for its holder.
 

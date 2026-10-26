@@ -1,4 +1,4 @@
-# 250. An alike instantiation is answered from one representative
+# 251. An alike instantiation is answered from one representative
 
 Status: Accepted — 2026-10-26. Partially supersedes
 [0248](0248-an-instantiation-holding-a-parameter-is-written-when-read.md):

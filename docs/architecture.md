@@ -741,7 +741,7 @@ reference is minted with its parts unwritten (ADR 0248); `Instance.parts`
 records which, and `Builder.fillInstance` is the one routine that writes an
 instantiation's parts, for a ground one as it is minted, for an unwritten one
 on first read, and for every written one in `refillInstances`. An
-alike instantiation (ADR 0250) -- one whose arguments are distinct
+alike instantiation (ADR 0251) -- one whose arguments are distinct
 parameters promising, position for position and once each candidate's
 arguments are written as their positions, what another candidate of its
 declaration promises -- is answered from its class's representative while

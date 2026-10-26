@@ -3,7 +3,7 @@
 Status: Accepted — 2026-10-18. Extends
 [0087](0087-an-associated-type-is-a-function-of-the-coherence-key.md) and
 [0165](0165-an-attached-derive-requires-each-field-type.md). Extended by
-[0250](0250-an-alike-instantiation-is-answered-from-one-representative.md),
+[0251](0251-an-alike-instantiation-is-answered-from-one-representative.md),
 under which the walk over what types own steps from an alike instantiation
 to its representative.
 
@@ -141,7 +141,7 @@ Writing copies what settling produced, so a question about a type demands in
 one order, in one routine (`Builder.settleFactsOf`): the declared parts the
 type depends on are settled first (`AnswerSettling.owned`), then the type is
 written if it is unwritten and not answered from a representative
-([0250](0250-an-alike-instantiation-is-answered-from-one-representative.md)),
+([0251](0251-an-alike-instantiation-is-answered-from-one-representative.md)),
 then the capability facts are brought up to the pool. An instantiation written before its template's parts were settled is
 written again from the template once they are, through the same
 `fillInstance`: by `Builder.refillInstance` when a question walks it, and by
