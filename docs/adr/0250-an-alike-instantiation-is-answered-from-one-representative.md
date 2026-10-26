@@ -179,8 +179,12 @@ instantiation a candidate, making its template one first, and lists each
 position under the parameter there. `setBoundTraits`, `setCallableBounds` and
 `promiseOwned` decide again each position listed under the parameter whose
 promise changed (`decideAlikeAgain`); `promiseOwned` on a settled reference
-lists it under the parameter it is read through (`promised_through`) and
-decides that parameter's positions. A candidate whose shape changed leaves
+lists it under the parameter it is read through (`promised_through`), and
+under that parameter and the member it reads first there
+(`promised_members`), and decides that parameter's positions. A
+declaration's `where` clauses are read under one hold
+(`holdAlikeDecisions`), so its promises decide each parameter they name once,
+when the hold is released, rather than once per clause. A candidate whose shape changed leaves
 its class, and only once every such candidate has left does any join the
 class its shapes now name, so no class is joined by comparing against a
 member about to leave it. Where the representative leaves, the template, or
@@ -188,7 +192,7 @@ else another member, takes its place. Where what an unwritten instantiation
 is answered from changes, the capability and dependency tables are rebuilt.
 `templatesComplete`, called once every template is complete and every
 settled type known, decides again every position whose argument has a
-settled reference promised `Owned`, now that `templateReads` may answer that
+settled reference promised `Owned`, now that `membersRead` may answer that
 its member is not read.
 
 `Builder.reopen` makes every instantiation of the pool it reopens a
@@ -285,9 +289,18 @@ Both are linear. Measured by the sweep, from n to 4n:
 | nested templates (1000 to 4000) | n^0.25 | n^2.12 |
 | templates selecting the next (250 to 1000) | n^0.15 | n^2.63 |
 | nested templates bounded by one another's parameters (500 to 2000) | n^0.20 | n^2.01 |
-| a template chain under functions promising a member it reads | TBD | n^1.90 |
-| a template chain under functions promising a member it never reads | TBD | n^1.62 |
-| a template chain under functions bounding their parameter Discardable | TBD | n^1.71 |
+| a template chain under functions promising a member it reads (16000 to 64000) | n^1.11 | n^1.90 |
+| a template chain under functions promising a member it never reads (16000 to 64000) | n^0.99 | n^1.62 |
+| a template chain under functions bounding their parameter Discardable (16000 to 64000) | n^0.99 | n^1.71 |
+| members promised through templates each reading one (16000 to 64000) | n^1.00 | n^2.23 |
+| members promised through one template reading them all (32000 to 128000) | n^0.96 | n^2.14 |
+| members promised by a template's own where clause (32000 to 128000) | n^1.00 | n^2.41 |
+
+The last three were measured "before" from 1000, 4000 and 4000, while each
+promise was decided over every earlier one and each member read was its own
+search. Sized as shown, they also need the checker to ask whether a trait
+declares a member in one lookup (`DeclIndex.ownsNamed`) rather than a walk
+over every member the trait declares, which read n^1.7 with no template.
 
 What makes the bound hold:
 
@@ -296,26 +309,64 @@ What makes the bound hold:
   only against a class with the same declaration and key, which, two keys
   aside that happen to collide, is a class the candidate joins.
 - Deciding again computes one shape per position listed under the parameter
-  whose promise changed, and moves only candidates whose shape changed. Each
-  parameter's promises change a fixed number of times, so a template of `n`
+  whose promise changed, and moves only candidates whose shape changed. A
+  parameter's promises are written by the declaration that owns it, and
+  are decided a fixed number of times: once for each of the two sweeps that
+  set its bound traits, once for its callable bounds, once when its
+  declaration's `where` clauses are all read (they are read under one hold,
+  `holdAlikeDecisions`, so `n` clauses decide once and not `n` times, each
+  over every earlier promise), once when the templates are complete, and
+  once more where a subject is read again. So a template of `n`
   parameters instantiated at another declaration's `n` costs `n` shapes to
-  decide and `n` more for each sweep that completes their promises; a
-  comparison of all `n` shapes happens only where the key matches a class,
-  which is where the candidate joins it. A representative leaving its class
+  decide and `n` more for each of those; a comparison of all `n` shapes
+  happens only where the key matches a class, which is where the candidate
+  joins it.
+- A shape walks whichever is shorter: the settled references promised
+  through its argument, asking whether the template reads each one's
+  member, or the members the template reads at the position, finding each
+  one's promises by parameter and member (`promised_members`). So `n`
+  templates each reading one member, under a function promising all `n`,
+  cost one lookup per shape, not `n`. The promises a shape keeps are sorted,
+  which is the size of the shape it interns. A representative leaving its class
   hands its place to another member in constant time, since what each member
   is answered from is read through its class, not written into it.
-- `templateReads` searches the templates a template's parts hold at a
-  parameter, each visited once, and remembers the answer for every template
-  the search visited where it found no read, and for each template on the
-  path where it found one. One question is asked per promise on a settled
-  reference per candidate position, so a chain of `n` templates costs one
-  search of `n` per member promised, not per function.
+- `membersRead` answers, for a template and position, every member its
+  parts read there in one search over the templates they hold at the
+  parameter, each visited once, finding the groups of templates that hold
+  one another in a cycle and answering each group from its own parts and
+  the answers it reaches. Every position the search visits is remembered,
+  and a template reading nothing of its own that reaches one answer shares
+  it, so a chain of `n` templates reading one member costs one search of
+  `n` and one run, whatever the number of functions or promises. The runs
+  written are at most the positions answered times the members their trait
+  declares: a chain whose every template reads a member of its own writes a
+  run per template, each as long as what the chain reads below it.
 - No walk follows an alike part into its own parts, so the written
   instantiations are the representatives, each written once.
 - Within a scope that caps a capability, the instantiations written are
   those the scope's questions reach, which preparing the scoped answer
   visits anyway, and the scope remembers what it prepared. A scope whose
   constraints cap nothing prepares nothing.
+
+Two shapes stay quadratic, as they were before this decision:
+
+- `n` functions each writing `where S.Item: Discardable` over a chain of
+  `n` templates. Each function is a scope that caps a capability, and its
+  scoped answer is read from parts written at its own parameter, so each
+  writes its own chain: `n` scopes of `n` instantiations, n^1.76. The
+  answers are not distinct -- each is the template's under the renaming of
+  one scope's parameter to the template's -- so this is avoidable, by
+  keying a scoped answer by the class and the renamed cap rather than by
+  the scope; it is not done here.
+- `n` functions each promising a different member, over a chain whose
+  template `k` reads member `k` and holds template `k + 1`. Function `i`'s
+  promise is read by templates `0` to `i`, so each of those instantiations
+  at its parameter promises what its template does not and is apart, and
+  the ones past `i` stay alike: `n(n + 1)/2` representatives, each written
+  once, which is what the equivalence by promises makes distinct. Making
+  them alike would need an equivalence by answer -- a promise that changes
+  no answer, since the members the other templates read stay unpromised --
+  and deciding that is the work the representative saves.
 
 ## Consequences
 
