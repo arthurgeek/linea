@@ -6946,9 +6946,9 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "a template chain under functions promising a member it reads", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.read_member)) },
     .{ .name = "a template chain under functions promising a member it never reads", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.unread_member)) },
     .{ .name = "a template chain under functions bounding their parameter Discardable", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.discardable)) },
-    .{ .name = "members promised through templates each reading one", .n = 8000, .cost = throughTheLoader(promisedMembersModule(.one_per_template)) },
-    .{ .name = "members promised through one template reading them all", .n = 16000, .cost = throughTheLoader(promisedMembersModule(.one_template)) },
-    .{ .name = "members promised by a template's own where clause", .n = 16000, .cost = throughTheLoader(promisedMembersModule(.template_where)) },
+    .{ .name = "members promised through templates each reading one", .n = 16000, .cost = throughTheLoader(promisedMembersModule(.one_per_template)) },
+    .{ .name = "members promised through one template reading them all", .n = 32000, .cost = throughTheLoader(promisedMembersModule(.one_template)) },
+    .{ .name = "members promised by a template's own where clause", .n = 32000, .cost = throughTheLoader(promisedMembersModule(.template_where)) },
     // Each template's part is one link, so the chain is held below 1000.
     .{ .name = "templates selecting the next", .n = 250, .grows = false, .cost = throughTheLoader(templatesSelectingTheNextModule) },
     .{ .name = "fields in one type", .n = 16000, .cost = throughTheTree(fieldModule) },

@@ -11644,14 +11644,10 @@ const Checker = struct {
             return self.checker.gpa;
         }
 
-        /// **Bound:** the members that trait declares, through the index this
-        /// pass already holds them by.
+        /// **Bound:** one lookup in the index this pass already holds members
+        /// by.
         pub fn declaresMember(self: BoundsRead, trait: node.DeclId, name: StringId) bool {
-            const ast = self.checker.ast;
-            for (self.checker.decls.ownedBy(ast.declName(trait))) |m| {
-                if (ast.tokenName(ast.declName(m)) == name) return true;
-            }
-            return false;
+            return self.checker.decls.ownsNamed(self.checker.ast.declName(trait), name);
         }
     };
 
