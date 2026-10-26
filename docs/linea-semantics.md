@@ -3305,7 +3305,10 @@ in a method's `where`, in a trait's bound list or on an associated type's
 declaration it is [T-Bound]: the promise would hold in declarations that never
 made it. Since every `Integer` is `Owned`, `where I.Item: Integer` under
 `[I: Iterator]` promises what `where I.Item: Owned` does, and a type holding an
-`I.Item` there carries nothing.
+`I.Item` there carries nothing. For the same reason `Integer` on an associated
+type read through an enclosing declaration's parameter, such as an
+implementation's `S` in a method's `where S.Item: Integer`, is [T-Bound], and
+the help is to write it where `S` is declared.
 
 `Copyable`, `Discardable`, `Linear`, `Integer` and `Owned` are decided by the
 compiler, and an implementation of one, such as `impl Owned for Label`, is

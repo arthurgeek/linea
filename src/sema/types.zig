@@ -9140,9 +9140,10 @@ pub const Typing = struct {
         /// Certified storage is never alike: its containment reads its
         /// element argument rather than its parts.
         ///
-        /// Promises are compared by identity, so a bound whose arguments name
-        /// the parameter itself, `T: Into[T]`, is never alike; such an
-        /// instantiation is written as any other is.
+        /// A bound's arguments are compared with the template's parameters
+        /// read as the instantiation's arguments (`promisesAlike`), so
+        /// `T: Into[T]` in the template and `V: Into[V]` at the argument
+        /// promise alike.
         ///
         /// What the arguments are never changes, but what they promise does,
         /// so an instantiation whose arguments are distinct parameters is

@@ -1,0 +1,12 @@
+error[T-Bound]: every `Integer` is `Owned`, which bounds only a type parameter of the declaration that writes it, and `S.Item` is not one of `record`'s
+  --> tests/generics/an_integer_member_of_an_implementation_parameter_is_bounded_by_the_implementation.lin:21:120
+   |
+21 |     fn record[A: mem.Allocator](_self: Recorder[S], inout entries: Vec[Held[S], A], sink value: Held[S]) where S.Item: I ...
+   |                                                                                                                        ^ add `where S.Item: Integer` to the implementation
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/generics/an_integer_member_of_an_implementation_parameter_is_bounded_by_the_implementation.lin:22:15
+   |
+22 |         match &entries.push(value) {
+   |               ^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `entries` keeps a value that comes from `value`; write `where retains(entries: value)` to say so (the clause goes beside the type predicates this `where` already states)

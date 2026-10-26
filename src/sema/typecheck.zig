@@ -6324,7 +6324,7 @@ const Checker = struct {
                     .written => |written| for (requirements) |requirement| {
                         if (requirement.kind != .named) continue;
                         if (resolve_mod.boundNames(self.ast, requirement.named.name, traitAt(self.ast, self.res, requirement.named.name)) != .owned) continue;
-                        try self.promiseWrittenOwned(d, written, resolved, requirement.named.name, &promised);
+                        try self.promiseWrittenOwned(d, written, resolved, requirement.named.name, &promised, .owned);
                     },
                     .parameter => {},
                 }
@@ -6332,14 +6332,23 @@ const Checker = struct {
                 const traits = try self.traitsBounding(context, requirements);
                 errdefer types_mod.freeBoundTraits(self.gpa, traits);
                 // Every `Integer` is `Owned`, so an `Integer` clause on an
-                // associated type read through one of the declaration's own
-                // parameters promises what an `Owned` clause would. A
-                // parameter's own bounds already say so through `integer`.
-                if (constraint.subject == .written and self.builder.standinOf(resolved) != null and
-                    !promised.contains(resolved) and integerDemandedBy(self.ast, self.res, requirements, traits) and
-                    self.ownsSubject(d, resolved))
-                {
-                    try self.builder.promiseOwned(resolved);
+                // associated type promises what an `Owned` clause would, and
+                // is refused where that one is. A parameter's own bounds
+                // already say so through `integer`.
+                switch (constraint.subject) {
+                    .written => |written| if (self.builder.standinOf(resolved) != null and
+                        integerDemandedBy(self.ast, self.res, requirements, traits))
+                    {
+                        // The `Integer` written, or the trait that requires it.
+                        const bound = for (requirements) |requirement| {
+                            if (requirement.kind == .named and resolve_mod.boundNames(self.ast, requirement.named.name, traitAt(self.ast, self.res, requirement.named.name)) == .integer)
+                                break requirement.named.name;
+                        } else for (requirements) |requirement| {
+                            if (requirement.kind == .named) break requirement.named.name;
+                        } else self.ast.declName(d);
+                        try self.promiseWrittenOwned(d, written, resolved, bound, &promised, .integer);
+                    },
+                    .parameter => {},
                 }
                 const callables = try self.callablesBounding(context, requirements, traits);
                 errdefer if (callables.len > 0) self.gpa.free(callables);
@@ -30846,8 +30855,15 @@ const Checker = struct {
         bound: TokenId,
         /// The subjects `d`'s clauses have promised so far.
         promised: *std.AutoHashMapUnmanaged(TypeId, void),
+        /// The bound written: `Owned`, or `Integer`, which promises `Owned`
+        /// and may be written beside it.
+        written_as: enum { owned, integer },
     ) std.mem.Allocator.Error!void {
         if (self.ownsSubject(d, subject)) {
+            if (written_as == .integer) {
+                if (!promised.contains(subject)) try self.builder.promiseOwned(subject);
+                return;
+            }
             if ((try promised.getOrPut(self.gpa, subject)).found_existing) return self.sink.addErrorFmt(
                 .t_bound,
                 self.ast.fileOf(bound),
@@ -30865,17 +30881,28 @@ const Checker = struct {
         try self.refused_owned_subjects.put(self.gpa, .{ .decl = d, .subject = subject }, {});
         // An implementation's parameter is promised in the implementation's
         // own clause, which every member then relies on.
+        const name = switch (written_as) {
+            .owned => "Owned",
+            .integer => "Integer",
+        };
         const help = if (self.implementationOwning(subject) != null)
-            (try self.boundsEdit("Owned", subject)).edit
+            (try self.boundsEdit(name, subject)).edit
         else
-            "write `Owned` where the type parameter is declared";
+            try std.fmt.allocPrint(self.sink.arena, "write `{s}` where the type parameter is declared", .{name});
         try self.sink.addErrorFmt(
             .t_bound,
             self.ast.fileOf(bound),
             self.ast.tokenSpan(bound),
             help,
-            "`Owned` bounds a type parameter of the declaration that writes it, and `{s}` is not one of `{s}`'s",
-            .{ self.ast.writtenText(written), self.ast.tokenText(self.ast.declName(d)) },
+            "{s} a type parameter of the declaration that writes it, and `{s}` is not one of `{s}`'s",
+            .{
+                switch (written_as) {
+                    .owned => "`Owned` bounds",
+                    .integer => "every `Integer` is `Owned`, which bounds only",
+                },
+                self.ast.writtenText(written),
+                self.ast.tokenText(self.ast.declName(d)),
+            },
         );
     }
 
