@@ -4996,6 +4996,65 @@ fn templateChainUnderFunctionsModule(comptime promise: ChainPromise) fn (std.mem
     }.make;
 }
 
+/// The ways `promisedMembersModule` spreads `n` members of one trait, each
+/// promised `Owned`, over what reads them.
+const MemberPromise = enum {
+    /// `n` templates each holding one member, and one function taking every
+    /// template at its parameter and promising every member.
+    one_per_template,
+    /// One template holding every member, and one function taking it and
+    /// promising every member.
+    one_template,
+    /// One template whose own `where` clause promises every member, holding
+    /// another template that reads the first.
+    template_where,
+};
+
+/// A trait of `n` members, each promised `Owned` by a `where` clause, read
+/// through templates as `promise` says.
+fn promisedMembersModule(comptime promise: MemberPromise) fn (std.mem.Allocator, u32) anyerror![]u8 {
+    return struct {
+        fn make(gpa: std.mem.Allocator, n: u32) anyerror![]u8 {
+            var out: std.Io.Writer.Allocating = .init(gpa);
+            errdefer out.deinit();
+            const w = &out.writer;
+            try w.writeAll("trait Source {\n");
+            for (0..n) |k| try w.print("    type M{d}\n", .{k});
+            try w.writeAll("}\n\n");
+            switch (promise) {
+                .one_per_template => {
+                    for (0..n) |k| try w.print("struct H{d}[S: Source] {{\n    item: S.M{d},\n}}\n\n", .{ k, k });
+                    try w.writeAll("fn _f[S: Source](");
+                    for (0..n) |k| try w.print("{s}_h{d}: H{d}[S]", .{ if (k == 0) "" else ", ", k, k });
+                    try w.writeAll(") -> UInt8\n");
+                },
+                .one_template => {
+                    try w.writeAll("struct G[S: Source] {\n");
+                    for (0..n) |k| try w.print("    m{d}: S.M{d},\n", .{ k, k });
+                    try w.writeAll("}\n\nfn _f[S: Source](sink g: G[S]) -> G[S]\n");
+                },
+                .template_where => {
+                    try w.writeAll("struct H[S: Source] {\n    m0: S.M0,\n}\n\nstruct G[S: Source]\n");
+                    try writeOwnedMembers(w, n);
+                    try w.writeAll(" {\n    h: H[S],\n}\n\nfn _f[S: Source](sink g: G[S]) -> G[S]\n");
+                },
+            }
+            try writeOwnedMembers(w, n);
+            try w.writeAll(switch (promise) {
+                .one_per_template => " {\n    0\n}\n\n",
+                .one_template, .template_where => " {\n    g\n}\n\n",
+            });
+            try w.writeAll("fn main() -> UInt8 {\n    0\n}\n");
+            return out.toOwnedSlice();
+        }
+
+        fn writeOwnedMembers(w: *std.Io.Writer, n: u32) !void {
+            try w.writeAll("where ");
+            for (0..n) |k| try w.print("{s}S.M{d}: Owned", .{ if (k == 0) "" else ", ", k });
+        }
+    }.make;
+}
+
 test "nested templates and templates selecting the next are accepted" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -5005,6 +5064,9 @@ test "nested templates and templates selecting the next are accepted" {
     try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try nestedCrossBoundTemplatesModule(gpa, 6)));
     inline for (.{ ChainPromise.read_member, .unread_member, .discardable }) |promise| {
         try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try templateChainUnderFunctionsModule(promise)(gpa, 6)));
+    }
+    inline for (.{ MemberPromise.one_per_template, .one_template, .template_where }) |promise| {
+        try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try promisedMembersModule(promise)(gpa, 6)));
     }
 }
 
@@ -6884,6 +6946,9 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "a template chain under functions promising a member it reads", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.read_member)) },
     .{ .name = "a template chain under functions promising a member it never reads", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.unread_member)) },
     .{ .name = "a template chain under functions bounding their parameter Discardable", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.discardable)) },
+    .{ .name = "members promised through templates each reading one", .n = 1000, .cost = throughTheLoader(promisedMembersModule(.one_per_template)) },
+    .{ .name = "members promised through one template reading them all", .n = 4000, .cost = throughTheLoader(promisedMembersModule(.one_template)) },
+    .{ .name = "members promised by a template's own where clause", .n = 4000, .cost = throughTheLoader(promisedMembersModule(.template_where)) },
     // Each template's part is one link, so the chain is held below 1000.
     .{ .name = "templates selecting the next", .n = 250, .grows = false, .cost = throughTheLoader(templatesSelectingTheNextModule) },
     .{ .name = "fields in one type", .n = 16000, .cost = throughTheTree(fieldModule) },
