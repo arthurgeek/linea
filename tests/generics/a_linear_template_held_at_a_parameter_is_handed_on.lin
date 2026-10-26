@@ -1,0 +1,34 @@
+// A claim is linear, so a desk holding one is linear too, whatever the
+// ledger it is kept for. `pass` never reads a desk's parts: it knows a
+// `Desk[L]` must be handed on only from what `Desk` and `Claim` declare.
+trait Ledger {
+    type Entry
+}
+
+struct Shop {
+    till: UInt8,
+}
+
+impl Ledger for Shop {
+    type Entry = UInt8
+}
+
+@linear
+struct Claim[L: Ledger] {
+    entry: L.Entry,
+}
+
+struct Desk[L: Ledger] {
+    claim: Claim[L],
+}
+
+fn pass[L: Ledger](sink desk: Desk[L]) -> Desk[L] {
+    desk
+}
+
+fn main() -> UInt8 {
+    let desk: Desk[Shop] = pass(Desk[Shop] { claim = Claim[Shop] { entry = 7 } })
+    let Desk { claim } = desk
+    let Claim { entry } = claim
+    entry
+}
