@@ -183,7 +183,9 @@ types own pushes it once, with one edge. `n` templates each holding the next
 cost `n` instantiations recorded through their templates and, at hand-off,
 `n` written, each minting the one part it holds: linear. The sweep reads
 n^0.25 for "nested templates" (1000 to 4000) and n^0.15 for "templates
-selecting the next" (250 to 1000), both under the program's fixed cost, where they read n^2.12 and n^2.63.
+selecting the next" (250 to 1000), both under the program's fixed cost, where they read n^2.12 and n^2.63;
+"nested templates bounded by one another's parameters" reads n^0.20 (500
+to 2000), where comparing bounds by identity read n^2.01.
 
 What makes the bound hold is that the alike decision is a local test, the
 length of an instantiation's arguments at mint, and that no walk follows an
