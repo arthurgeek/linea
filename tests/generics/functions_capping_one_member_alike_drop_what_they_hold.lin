@@ -1,0 +1,49 @@
+// A claim on an entry that may need settling must be settled, so a desk
+// holding a drawer holding one is dropped only where its ledger's entries
+// can be discarded. `tally` and `close` both say so in a `where` clause,
+// which is what lets each drop a desk it never reads the parts of.
+import std.io
+
+trait Ledger {
+    type Entry
+}
+
+struct Shop {
+    till: UInt8,
+}
+
+impl Ledger for Shop {
+    type Entry = UInt8
+}
+
+struct Claim[L: Ledger] {
+    entry: L.Entry,
+}
+
+struct Drawer[L: Ledger] {
+    claim: Claim[L],
+}
+
+struct Desk[L: Ledger] {
+    drawer: Drawer[L],
+}
+
+fn tally[L: Ledger](sink _desk: Desk[L], count: UInt8) -> UInt8
+where L.Entry: Discardable {
+    count + 1
+}
+
+fn close[K: Ledger](sink _desk: Desk[K], count: UInt8) -> UInt8
+where K.Entry: Discardable {
+    count + 2
+}
+
+fn desk(entry: UInt8) -> Desk[Shop] {
+    Desk[Shop] { drawer = Drawer[Shop] { claim = Claim[Shop] { entry = entry } } }
+}
+
+fn main() -> UInt8 {
+    let total = close(desk(8), tally(desk(7), 0))
+    let _printed = io.println("desks dropped: {total}")
+    total
+}

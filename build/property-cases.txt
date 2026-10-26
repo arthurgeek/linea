@@ -83,3 +83,8 @@ traits/declared_answers/two_parts_asking_about_their_common_holder_are_refused.l
 # A part asking about a holder of a linear part, reached through concrete and unbounded selections.
 traits/declared_answers/a_part_asking_about_a_holder_of_a_linear_part_is_refused.lin
 traits/declared_answers/a_part_asking_about_a_holder_reached_through_unbounded_selections_is_refused.lin
+# Functions whose parameters promise alike, or apart, over one template chain:
+# reversed, the other function's instantiation is the one answered first.
+generics/a_discardable_and_an_owned_parameter_over_one_template_answer_apart.lin
+generics/a_promise_on_a_member_no_part_holds_keeps_what_a_push_observes.lin
+generics/functions_promising_an_owned_item_alike_keep_nothing_of_what_they_push.lin

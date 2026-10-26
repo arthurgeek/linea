@@ -1,0 +1,9 @@
+error[O-Leak]: `_crate` (a linear `Crate[U]`) is still owned when this path leaves
+  --> tests/generics/a_discardable_and_an_owned_parameter_over_one_template_answer_apart.lin:18:25
+   |
+18 | fn hoard[U: Owned](sink _crate: Crate[U]) -> UInt8 {
+   |                         ^^^^^^ never settled on the path that reaches the end of this block
+20 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it
