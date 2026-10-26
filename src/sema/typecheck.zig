@@ -12547,7 +12547,8 @@ const Checker = struct {
     /// edge broken there and report the cycle a second time. An array is
     /// interned, so its element type is shared by every other use of it and
     /// its edge is never the one. A cycle of instantiations alone breaks at
-    /// the last of them.
+    /// the last of them. The walk steps from an alike-template instantiation
+    /// to its template, so a part holding one reaches the template it names.
     fn breakCycle(self: *Checker, cycle: Cycle) std.mem.Allocator.Error!void {
         var edge: ?usize = null;
         var at = cycle.path.len;
@@ -12565,19 +12566,19 @@ const Checker = struct {
 
         switch (self.builder.get(last)) {
             .newtype => {
-                if (self.builder.baseOf(last) == back) try self.builder.setNewtypeBase(last, .poison);
+                if (self.builder.partsSource(self.builder.baseOf(last)) == back) try self.builder.setNewtypeBase(last, .poison);
                 return;
             },
             else => {},
         }
 
         for (0..self.builder.fieldCount(last)) |i| {
-            if (self.builder.view().fieldType(last, @intCast(i)) != back) continue;
+            if (self.builder.partsSource(self.builder.view().fieldType(last, @intCast(i))) != back) continue;
             try self.builder.setFieldType(last, @intCast(i), .poison);
         }
         for (0..self.builder.variantCount(last)) |i| {
             for (0..self.builder.view().variantFieldCount(last, @intCast(i))) |f| {
-                if (self.builder.view().variantFieldType(last, @intCast(i), @intCast(f)) != back) continue;
+                if (self.builder.partsSource(self.builder.view().variantFieldType(last, @intCast(i), @intCast(f))) != back) continue;
                 try self.builder.setVariantFieldType(last, @intCast(i), @intCast(f), .poison);
             }
         }
@@ -28130,7 +28131,10 @@ const Checker = struct {
             n.floor = @min(n.floor, floor);
             n.height = @max(n.height, height);
             const first: u32 = @intCast(walk.edges.items.len);
-            switch (c.builder.get(ty)) {
+            // An alike-template instantiation owns what its template owns,
+            // renamed, so the template is its one edge and its parts are not
+            // written for the walk.
+            if (c.builder.alikeTemplate(ty)) |template| try walk.edges.append(gpa, template) else switch (c.builder.get(ty)) {
                 .struct_ => for (0..c.builder.fieldCount(ty)) |k| try walk.edges.append(gpa, try c.builder.fieldType(ty, @intCast(k))),
                 .enum_ => for (0..c.builder.variantCount(ty)) |v| {
                     for (0..try c.builder.variantFieldCount(ty, @intCast(v))) |f|

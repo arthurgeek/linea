@@ -1942,8 +1942,7 @@ const Analysis = struct {
         defer combined.deinit(self.gpa);
         for (signature.contracts) |contract| {
             if (contract.kind == .retains) continue;
-            const target_type = self.typing.contractTargetType(signature.result, contract.target);
-            const carried = try self.sourceFacts(state, call, contract.source, contract.kind == .borrows, self.typing.get(target_type) == .borrow);
+            const carried = try self.sourceFacts(state, call, contract.source, contract.kind == .borrows, self.typing.contractTargetIsObservation(signature.result, contract.target));
             const selected = try self.store.prefixed(carried, try self.resultPath(contract.target));
             try combined.appendSlice(self.gpa, self.store.facts(selected));
         }
@@ -2879,7 +2878,11 @@ const Analysis = struct {
         return null;
     }
 
-    fn childType(self: *const Analysis, ty: types.TypeId, head: u96) ?types.TypeId {
+    /// The part `head` selects in `held`. An alike-template instantiation's
+    /// part is read from its template: the paths, capabilities and coverage
+    /// asked of the part are the same for the template's renamed part.
+    fn childType(self: *const Analysis, held: types.TypeId, head: u96) ?types.TypeId {
+        const ty = self.typing.partsSource(held);
         const shape = self.typing.get(ty);
         if (head == observed) return if (shape == .borrow) shape.borrow.referent else null;
         if (isElement(head)) return if (shape == .array) shape.array.element else null;
