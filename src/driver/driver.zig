@@ -868,6 +868,7 @@ pub fn run(process: std.process.Init) !u8 {
                                     target,
                                     res.tests,
                                     std.Thread.getCpuCount() catch 1,
+                                    file_path,
                                     stdout_w,
                                 );
                                 try stdout.flush();

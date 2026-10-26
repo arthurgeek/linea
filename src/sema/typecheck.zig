@@ -460,6 +460,7 @@ fn typecheckInternal(
     c.builder.certified_storage = c.raw_accesses.storage;
     c.builder.certified_buffer = c.raw_accesses.buffer;
     c.builder.certified_slice = c.raw_accesses.slice;
+    c.builder.certified_carried = c.raw_accesses.carried;
     c.builder.certified_foreign_views = c.raw_accesses.foreign_views;
     c.builder.certified_closure_entry = c.raw_accesses.closure_entry_type;
     // The resolver settled which declarations tuple syntax names; the pool
@@ -11109,6 +11110,31 @@ const Checker = struct {
             "a view of storage it does not own"
         else
             "raw storage another value owns";
+
+        // A `mem.Carried` part holds nothing; it carries what its argument
+        // may carry, which is the next part the path would select.
+        if (truncated and witness.steps[visible] == .argument) {
+            const carrier = if (visible == 0) held else witness.parts[visible - 1];
+            if (self.raw_accesses.carried != .none and self.builder.view().declOfType(carrier) == self.raw_accesses.carried) {
+                const argument = try self.typeName(witness.parts[visible]);
+                if (visible == 0) return self.sink.addErrorFmt(
+                    .t_bound,
+                    file,
+                    span,
+                    label,
+                    "`{s}` requires `Owned`, and `{s}` can carry a borrow: it carries what `{s}` may carry",
+                    .{ subject, held_name, argument },
+                );
+                return self.sink.addErrorFmt(
+                    .t_bound,
+                    file,
+                    span,
+                    label,
+                    "`{s}` requires `Owned`, and `{s}` can carry a borrow: `{s}` is {s} `{s}`, which carries what `{s}` may carry",
+                    .{ subject, held_name, path, article.before(part_name), part_name, argument },
+                );
+            }
+        }
 
         if (truncated) {
             if (visible == 0) return self.sink.addErrorFmt(

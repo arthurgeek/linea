@@ -787,6 +787,82 @@ the variable, or give the closure a counter of its own, `[sink seen = 0]`, as
 the ticket counter in [Calling
 things](02-calling-things.md#a-closure-that-changes-what-it-owns) does.
 
+### Keeping what a callback lent: `mem.Carried`
+
+Sometimes a value should keep a callback's borrows without keeping the
+callback. A weighing pass below runs once, inside `weigh`, and changes the
+caller's `heavy` counter. The receipt it answers stores no closure, but the
+caller should not touch `heavy` while the receipt is still out. A field of type
+`mem.Carried[F]` says exactly that: it takes no space and owns nothing, and the
+value holding it carries everything an `F` borrowed. The contract `where
+carries(pass)` on `weigh` hands the pass's borrows to the receipt:
+
+```linea
+import std.io
+import std.mem
+
+// A Receipt says how many parcels a weighing pass looked at. The pass has
+// already run. Its `mem.Carried[F]` field keeps everything the pass borrowed,
+// so the counter it changed stays lent until the receipt is filed.
+struct Receipt[F] {
+    parcels: UInt64,
+    pass: mem.Carried[F],
+}
+
+fn weigh[F: sink fn()](parcels: UInt64, sink pass: F) -> Receipt[F] where carries(pass) {
+    pass()
+    .{ parcels, pass = .{} }
+}
+
+fn file[F](sink receipt: Receipt[F]) -> UInt64 {
+    let Receipt { parcels, pass: _ } = receipt
+    parcels
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var heavy = 0
+    let receipt = weigh(3, sink [inout heavy] || {
+        heavy += 2
+    })
+    let parcels = file(receipt)
+    io.println("{heavy} of {parcels} parcels were heavy")?
+    .Ok(0)
+}
+```
+
+```
+2 of 3 parcels were heavy
+```
+
+Read `heavy` before the receipt is filed and the program is refused, as it
+would be if the receipt held the closure itself:
+
+<!-- guide: edit 27-28 let parcels = file(receipt) … io.println("{heavy} of {parcels} parcels were heavy")? -->
+```linea
+    io.println("{heavy} parcels were heavy so far")?
+    io.println("{file(receipt)} parcels weighed")?
+```
+
+```
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+  --> receipt_early.lin:27:18
+   |
+24 |     let receipt = weigh(3, sink [inout heavy] || {
+   |                                        ----- lent `inout` here
+27 |     io.println("{heavy} parcels were heavy so far")?
+   |                  ^^^^^ this uses the place while it is lent
+28 |     io.println("{file(receipt)} parcels weighed")?
+   |                       ------- a value holding the lend is still used here
+   |
+   = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure
+```
+
+Declared `struct Receipt[phantom F]` with no `pass` field, the receipt would
+carry nothing and the early read would be accepted. `mem.Carried` is a tool for
+library authors: a type that hands a callback to something else to run, and
+must keep the caller's borrowed variables reserved until that type is settled,
+holds one.
+
 ## One arena per HTTP request
 
 A web server is the classic case for arenas. Everything a request needs — its
@@ -976,6 +1052,8 @@ lets a program do that and asks a library to say it.
   it is released or rewound; nothing built in it may be used afterwards.
 - `mem.Closure` keeps any closure behind one type, settled like the memory it
   lives in.
+- A `mem.Carried[F]` field keeps what a callback borrowed reserved until its
+  holder is settled, without keeping the callback.
 - An HTTP server serves each request from one arena and rewinds it, so
   handlers release nothing.
 

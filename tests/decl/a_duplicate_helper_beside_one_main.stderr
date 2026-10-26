@@ -1,0 +1,5 @@
+error[N-Duplicate]: `total` is already declared
+ --> tests/decl/a_duplicate_helper_beside_one_main/sums.lin:2:4
+  |
+2 | fn total() -> UInt8 {
+  |    ^^^^^ a name is declared once

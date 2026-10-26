@@ -3906,6 +3906,11 @@ fn checkProgramInternal(
     var res = resolved.resolution;
     errdefer res.deinit(gpa);
     try expanded.collapseGeneratedDiagnostics(sink);
+    // The one [S-Entry] resolution reported for several `main`s is the whole
+    // report: what the later passes would say depends on which `main` and
+    // which duplicate each name reached.
+    var unread = Sink.init(sink.arena);
+    const passes_sink = if (res.several_entry_points) &unread else sink;
 
     const z_typecheck = tracy.beginZone(@src(), "typecheck");
     const relocation_mod = @import("../syntax/relocation.zig");
@@ -3915,13 +3920,13 @@ fn checkProgramInternal(
     } else null;
     var type_arena: ?std.heap.ArenaAllocator = null;
     var typing = if (retained) |prefix| blk: {
-        const continued = try @import("../sema/typecheck.zig").typecheckWithPrefix(gpa, &expanded, &res, sink, &prefix.checked, relocation.?, prepare_completions);
+        const continued = try @import("../sema/typecheck.zig").typecheckWithPrefix(gpa, &expanded, &res, passes_sink, &prefix.checked, relocation.?, prepare_completions);
         type_arena = continued.arena;
         break :blk continued.typing;
     } else if (prepare_completions)
-        try @import("../sema/typecheck.zig").typecheckForEditor(gpa, &expanded, &res, sink)
+        try @import("../sema/typecheck.zig").typecheckForEditor(gpa, &expanded, &res, passes_sink)
     else
-        try typecheck(gpa, &expanded, &res, sink);
+        try typecheck(gpa, &expanded, &res, passes_sink);
     z_typecheck.end();
     errdefer if (type_arena) |*arena| arena.deinit() else typing.deinit(gpa);
     try expanded.collapseGeneratedDiagnostics(sink);
@@ -3938,13 +3943,13 @@ fn checkProgramInternal(
             }
             const expressions = try temp.alloc(node.ExprId, prefix.resolved.result.expanded.ast.exprCount());
             for (expressions, 0..) |*expression, i| expression.* = relocation.?.id(node.ExprId, node.ExprId.at(@intCast(i)));
-            break :blk try @import("../ownership/check.zig").checkWithRetained(gpa, temp, &expanded, &res, &typing, sink, .{
+            break :blk try @import("../ownership/check.zig").checkWithRetained(gpa, temp, &expanded, &res, &typing, passes_sink, .{
                 .declarations = &declarations,
                 .disposals = &prefix.disposals,
                 .expressions = expressions,
             });
         }
-        break :blk try checkOwnership(gpa, temporary.allocator(), &expanded, &res, &typing, sink);
+        break :blk try checkOwnership(gpa, temporary.allocator(), &expanded, &res, &typing, passes_sink);
     };
     z_ownership.end();
     errdefer disposals.deinit(gpa);
@@ -4094,9 +4099,10 @@ test "one `main` across the module is enough, and two is too many" {
         .{ .path = "app/a.lin", .text = "fn main() -> UInt8 { 1 }" },
         .{ .path = "app/b.lin", .text = "fn main() -> UInt8 { 2 }" },
     });
-    // Two `main`s in one module are also two declarations of one name, so the
-    // entry-point rule and the duplicate rule both fire.
-    try testing.expect(two.errors >= 1);
+    // Two `main`s in one module are two programs in one directory: one
+    // [S-Entry], and no [N-Duplicate] for the name they share.
+    try testing.expectEqual(@as(u32, 1), two.errors);
+    try testing.expectEqual(Code.s_entry, two.first_code);
 }
 
 test "a diagnostic in the second file names the second file" {

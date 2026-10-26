@@ -1011,6 +1011,8 @@ The library tests itself.
   ok    mem.a_buffer_byte_view_covers_the_requested_extent
   ok    mem.a_buffer_disposes_through_its_stored_allocator
   ok    mem.a_byte_store_reaches_one_byte
+  ok    mem.a_carried_field_keeps_a_lend_until_its_holders_last_use
+  ok    mem.a_carried_type_that_can_carry_nothing_is_owned
   ok    mem.a_closure_calls_what_it_captured
   ok    mem.a_closure_keeps_its_captures_in_an_arena
   ok    mem.a_closure_opened_in_the_system_allocator_calls_what_it_captured
@@ -1426,4 +1428,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1423 passed, 0 failed
+  1425 passed, 0 failed

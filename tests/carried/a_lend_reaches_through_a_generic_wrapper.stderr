@@ -1,0 +1,11 @@
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+  --> tests/carried/a_lend_reaches_through_a_generic_wrapper.lin:39:5
+   |
+34 |             sink [inout seen] || {
+   |                         ---- lent `inout` here
+39 |     seen = 5
+   |     ^^^^ this uses the place while it is lent
+40 |     let Boxed { value } = boxed
+   |                           ----- a value holding the lend is still used here
+   |
+   = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure

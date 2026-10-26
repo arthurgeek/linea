@@ -965,6 +965,7 @@ test "example roots: a source that leaves its root, and a manifest that is not J
 test "example roots: the tests a run reported are read from its closing line" {
     try testing.expectEqual(@as(?usize, 3), source.testsReported("ok    a\n\n3 passed, 0 failed\n"));
     try testing.expectEqual(@as(?usize, 0), source.testsReported("0 passed, 0 failed\n"));
+    try testing.expectEqual(@as(?usize, 0), source.testsReported("no tests found in examples/hello.lin\n"));
     try testing.expectEqual(@as(?usize, 5), source.testsReported("x\n4 passed, 1 failed"));
     try testing.expectEqual(@as(?usize, null), source.testsReported("error[N-Undefined]: no such name\n"));
     try testing.expectEqual(@as(?usize, null), source.testsReported(""));

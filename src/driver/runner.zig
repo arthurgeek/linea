@@ -149,17 +149,21 @@ pub fn run(
     binary: []const u8,
     tests: []const Test,
     jobs: usize,
+    root: []const u8,
     w: *std.Io.Writer,
 ) !bool {
+    // Nothing failed, so the run succeeds, as `go test` does for a package
+    // with no tests; the line says why nothing ran.
+    if (tests.len == 0) {
+        try w.print("no tests found in {s}\n", .{root});
+        try w.flush();
+        return true;
+    }
     const out = try gpa.alloc(Outcome, tests.len);
     defer gpa.free(out);
     for (out, tests) |*o, t| o.* = .{ .qualified_name = t.qualified_name, .passed = false, .detail = "" };
     var script = try Transcript.init(gpa, out, w, io);
     defer script.deinit(gpa);
-    if (tests.len == 0) {
-        try script.finish();
-        return true;
-    }
 
     // Named the way every other spawn names a built program, because a bare
     // name is a PATH search and `test std` builds one.

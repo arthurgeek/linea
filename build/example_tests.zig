@@ -44,14 +44,14 @@ const Walk = struct {
             const command = try std.fmt.allocPrint(gpa, "linea test {s}", .{path});
             return .{ .failure = try pool.timeoutMessage(gpa, command, root_timeout_seconds, finished.output) };
         }
-        // The count is the closing line `Transcript.finish` prints in
+        // The count is the closing line `runner.run` prints in
         // `src/driver/runner.zig`, which build/ cannot import; a change to that
         // line fails every root here with the message below.
         const tests = source.testsReported(finished.output);
         const failure: ?[]const u8 = if (!finished.succeeded)
             finished.output
         else if (tests == null)
-            "the run ended without a `N passed, M failed` line\n"
+            "the run ended without a `N passed, M failed` or `no tests found in` line\n"
         else
             null;
         return .{ .failure = failure, .output = finished.output, .tests = tests orelse 0 };

@@ -1,0 +1,31 @@
+import std.mem
+
+// A Stub is copyable, and each copy carries the callback's lend, so `seen`
+// stays lent until the last copy's last use.
+@copyable
+struct Stub[F] {
+    number: UInt64,
+    held: mem.Carried[F],
+}
+
+fn stub[F: sink fn()](sink body: F) -> Stub[F] where carries(body) {
+    body()
+    .{ number = 1, held = .{} }
+}
+
+fn number_of[F](stub: Stub[F]) -> UInt64 {
+    stub.number
+}
+
+fn main() -> UInt8 {
+    var seen = UInt64(0)
+    let first = stub(
+        sink [inout seen] || {
+            seen += 1
+        },
+    )
+    let second = copy(first)
+    let early = number_of(first)
+    seen = 5
+    UInt8(number_of(second) + early + seen)
+}

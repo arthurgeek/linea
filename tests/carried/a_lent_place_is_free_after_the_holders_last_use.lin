@@ -1,0 +1,44 @@
+import std.mem
+
+// A Ticket keeps the dependencies of the callback it was issued for. The
+// callback runs once when the ticket is issued; the `mem.Carried[F]` field
+// keeps every place it lent or read reserved until the ticket's last use.
+struct Ticket[F] {
+    number: UInt64,
+    held: mem.Carried[F],
+}
+
+fn issue[F: sink fn()](sink body: F) -> Ticket[F] where carries(body) {
+    body()
+    .{ number = 1, held = .{} }
+}
+
+fn redeem[F](sink ticket: Ticket[F]) -> UInt64 {
+    let Ticket { number, held: _ } = ticket
+    number
+}
+
+fn touch(inout n: UInt64) {
+    n += 1
+}
+
+// After `redeem` takes the ticket, `seen` is the caller's again, and `limits`,
+// which the second callback only read, was readable all along.
+fn main() -> UInt8 {
+    var seen = UInt64(0)
+    let ticket = issue(
+        sink [inout seen] || {
+            seen += 1
+        },
+    )
+    let number = redeem(ticket)
+    touch(&seen)
+    let limits = [UInt64(1), 2, 3]
+    let reader = issue(
+        sink [read limits] || {
+            let _first = limits[0]
+        },
+    )
+    let first = limits[0]
+    UInt8(number + seen + first + redeem(reader))
+}

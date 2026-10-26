@@ -154,6 +154,7 @@ true of a different implementation.
 | [0124](0124-copyability-and-settlement-are-independent-capabilities.md) | Copyability and settlement are independent capabilities | Accepted; supersedes classification in 0034, 0046, and 0051; extends 0103; refines 0123; extended by 0125, 0131, 0193 and 0221 |
 | [0125](0125-scalar-value-positions-take-snapshots.md) | Scalar value positions take snapshots | Accepted; supersedes universal explicit-copy clause of 0034; extends 0124 |
 | [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) | `Owned` admits a type that can carry no borrow | Accepted; extends 0123 and 0124 |
+| [0250](0250-tasks-are-structured-through-linear-sessions.md) | Tasks are structured through linear sessions | Proposed; only `mem.Carried` is built, and the rest lands in the stages it lists |
 | [0126](0126-observations-project-referent-places-transparently.md) | Observations project referent places transparently | Accepted; supersedes projection syntax of 0123; extends 0088 |
 | [0127](0127-constants-retain-distinct-values-and-infer-their-types.md) | Constants infer initializer types and retain distinct integer, boolean and text values | Accepted; extends 0020 and 0059, supersedes the representation decision in 0078; extended by 0140, 0146 and 0157 |
 | [0140](0140-aggregate-constants-retain-checked-construction-plans.md) | Aggregate constants retain shared data and checked construction plans | Accepted; extends 0020, 0059 and 0127; extended by 0157, 0183 and 0227; materialization clause superseded by 0178; unit-expression clause superseded by 0188 |
@@ -386,18 +387,13 @@ everything the compiler emits except one function. What settles it is whether
 the wrapper ever varies — a program with no `main`, which the test runner needs,
 is the first thing that would make it.
 
-How **one process serves requests concurrently**, and how ownership governs
-what concurrent tasks share and send. `http.listen_and_serve` answers one
-connection at a time ([0154](0154-sockets-and-http-follow-go.md)), so today
-concurrency comes from processes: `http.serve_cgi` runs once per request under
-a web server, or several server processes share the load. Threads, asynchronous
-I/O and a pre-forked pool of worker processes are the candidates. A worker pool
-needs no new rule, since processes share nothing; threads and asynchronous
-tasks need one. What settles it is how ownership extends across tasks: whether
-a value sent to another task must be owned and moved whole, never an
-observation of the sender's storage; what tasks may share read-only; and
-whether the state `http.with_state` lends to every request is shared under a
-rule or partitioned per task.
+How **one process serves requests concurrently** is decided by
+[0250](0250-tasks-are-structured-through-linear-sessions.md): a task is created
+with its session, its handle carries its body's captures, and `close` joins it.
+What remains open is what that record builds in stages: until its runtime stage
+lands, `http.listen_and_serve` answers one connection at a time
+([0154](0154-sockets-and-http-follow-go.md)), and concurrency comes from
+processes.
 
 Whether **a contract may be gated on a type**, so that `iter.extend` drops
 its retention for an instantiation whose `Item` is `Owned`; recorded in
