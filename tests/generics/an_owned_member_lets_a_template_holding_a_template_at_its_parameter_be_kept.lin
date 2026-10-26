@@ -1,0 +1,43 @@
+// `where S.Item: Owned` promises that a held item carries nothing, so an
+// `Outer[S]`, which holds a `Held[S]`, carries nothing either, and pushing
+// one into `entries` keeps no observation of `value`.
+import std.mem
+
+use mem.Lender
+
+trait Source {
+    type Item
+}
+
+struct Held[S: Source] {
+    item: S.Item,
+}
+
+struct Outer[S: Source] {
+    held: Held[S],
+}
+
+fn record[S: Source, A: mem.Allocator](inout entries: Vec[Outer[S], A], sink value: Outer[S])
+where S.Item: Owned {
+    match &entries.push(value) {
+        Ok(_) => {},
+        Err(_) => panic("full"),
+    }
+}
+
+struct Numbers {
+    n: UInt8,
+}
+
+impl Source for Numbers {
+    type Item = UInt8
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 256)
+    var entries: Vec[Outer[Numbers], mem.Handle] = Vec.new_in(arena.handle())
+    record(&entries, Outer[Numbers] { held = Held[Numbers] { item = 3 } })
+    let length = entries.length()
+    arena.release()
+    UInt8(length)
+}

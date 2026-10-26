@@ -1,0 +1,39 @@
+// Every `Integer` is `Owned`, so `where S.Item: Integer` promises that a
+// held item carries nothing, and pushing a `Held[S]` into `entries` keeps no
+// observation of `value`.
+import std.mem
+
+use mem.Lender
+
+trait Source {
+    type Item
+}
+
+struct Held[S: Source] {
+    item: S.Item,
+}
+
+fn record[S: Source, A: mem.Allocator](inout entries: Vec[Held[S], A], sink value: Held[S])
+where S.Item: Integer {
+    match &entries.push(value) {
+        Ok(_) => {},
+        Err(_) => panic("full"),
+    }
+}
+
+struct Numbers {
+    n: UInt8,
+}
+
+impl Source for Numbers {
+    type Item = UInt8
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 256)
+    var entries: Vec[Held[Numbers], mem.Handle] = Vec.new_in(arena.handle())
+    record(&entries, Held[Numbers] { item = 3 })
+    let length = entries.length()
+    arena.release()
+    UInt8(length)
+}
