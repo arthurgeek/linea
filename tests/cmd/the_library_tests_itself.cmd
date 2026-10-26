@@ -1268,6 +1268,8 @@ The library tests itself.
   ok    scalar.sine_uses_radians_and_preserves_special_values
   ok    scalar.square_roots_preserve_zero_and_infinite_limits
   ok    scalar.trunc_rounds_toward_zero_and_keeps_the_sign
+  ok    session.the_dual_of_a_protocol_is_what_its_peer_does
+  ok    session.the_dual_of_the_dual_is_the_protocol
   ok    testing.a_failure_displays_the_callers_message
   ok    testing.a_new_recorder_holds_nothing
   ok    testing.a_recorder_keeps_what_was_rendered_into_it
@@ -1428,4 +1430,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1425 passed, 0 failed
+  1427 passed, 0 failed

@@ -297,6 +297,9 @@ pub const Type = union(enum) {
         /// filled so questions asked per expression do not rescan the enum.
         payload_field_count: u32 = 0,
         ownership_policy: OwnershipPolicy = .affine,
+        /// Whether its declaration is marked `unshareable`: a value of it writes
+        /// through a `read`, so it is not `Shareable`.
+        unshareable: bool = false,
     },
     /// A type a declaration is generic over, standing for whatever an
     /// instantiation supplies.
@@ -317,6 +320,10 @@ pub const Type = union(enum) {
         /// Whether its bounds promise `Owned`: every admitted argument carries
         /// no dependency, so the parameter seeds none.
         owned: bool = false,
+        /// Whether its bounds promise `Shareable`: every admitted argument may
+        /// be read by two tasks at once, so the parameter seeds no unshareable
+        /// part.
+        shareable: bool = false,
         /// The traits its bounds name, by declaration, and the arguments each
         /// was written with.
         ///
@@ -362,6 +369,8 @@ pub const Type = union(enum) {
         first_field: u32,
         field_count: u32,
         ownership_policy: OwnershipPolicy = .affine,
+        /// Whether its declaration is marked `unshareable`.
+        unshareable: bool = false,
     },
     /// A distinct nominal type over one base: same representation, a
     /// different contract. Layout, width and every other question about how
@@ -379,6 +388,8 @@ pub const Type = union(enum) {
         /// newtype admits every value its base does.
         refined: bool = false,
         ownership_policy: OwnershipPolicy = .affine,
+        /// Whether its declaration is marked `unshareable`.
+        unshareable: bool = false,
     },
 };
 
@@ -1201,7 +1212,12 @@ const BorrowContainment = struct {
     /// or a type parameter an instantiation could make one. It follows fields,
     /// observed referents and every type argument, phantom ones included, so
     /// a container that erases what it stores is still counted.
-    const Mode = enum { raw_carriers, writers };
+    /// `unshareable` answers whether a value of the type may not be read by two
+    /// tasks at once, which is what `Shareable` refuses: whether it reaches,
+    /// over the edges `writers` follows, a type declared `unshareable`, a
+    /// callable or open type that could be one, or a type parameter not
+    /// bounded `Shareable`.
+    const Mode = enum { raw_carriers, writers, unshareable };
     const none = std.math.maxInt(u32);
     const Edge = struct { owner: TypeId, next: u32 };
     values: std.ArrayList(bool) = .empty,
@@ -1296,7 +1312,7 @@ const BorrowContainment = struct {
         if (carriedArgument(builder, ty)) |carried| {
             if (mode == .raw_carriers or view.instanceOf(ty) == null) try visit.child(.argument, carried);
         }
-        if (mode == .writers) {
+        if (mode != .raw_carriers) {
             if (view.instanceOf(ty)) |instance| for (view.argsOf(instance)) |argument| try visit.child(.argument, argument);
         } else if (builder.certified_storage != .none and view.declOfType(ty) == builder.certified_storage) {
             if (view.instanceOf(ty)) |instance| {
@@ -1329,7 +1345,7 @@ const BorrowContainment = struct {
             view.declOfType(ty) == builder.certified_storage and view.instanceOf(ty) != null;
         switch (builder.get(ty)) {
             .closure => |closure| try visit.child(.environment, closure.environment),
-            .borrow => |observation| if (mode == .writers) try visit.child(.element, observation.referent),
+            .borrow => |observation| if (mode != .raw_carriers) try visit.child(.element, observation.referent),
             .parameter => {},
             .array => |array| if (array.count != 0) {
                 try visit.child(.element, array.element);
@@ -1341,7 +1357,7 @@ const BorrowContainment = struct {
                     // Certified storage's optional backing owner erases its
                     // elements. Its logical T and separate allocator field
                     // describe their dependencies without that raw erasure.
-                    if (typed_storage and index == 0 and mode != .writers) continue;
+                    if (typed_storage and index == 0 and mode == .raw_carriers) continue;
                     try visit.child(.{ .field = name }, field);
                 }
             },
@@ -1423,7 +1439,7 @@ const BorrowContainment = struct {
         const gpa = builder.gpa;
         const at = @intFromEnum(ty);
         if (builder.isShell(ty)) {
-            if (mode != .writers or self.recorded.items[at] != .nothing) return;
+            if (mode == .raw_carriers or self.recorded.items[at] != .nothing) return;
             self.recorded.items[at] = .arguments;
             const edges: Edges = .{ .containment = self, .builder = builder, .owner = ty, .mode = mode };
             const instance = builder.instanceOf(ty).?;
@@ -1447,7 +1463,8 @@ const BorrowContainment = struct {
                 .closure, .callable, .parameter, .open_type => try self.mark(gpa, ty),
                 else => {},
             },
-            else => if (view.directDependencySeed(ty)) try self.mark(gpa, ty),
+            .unshareable => if (view.unshareableSeed(ty)) try self.mark(gpa, ty),
+            .raw_carriers => if (view.directDependencySeed(ty)) try self.mark(gpa, ty),
         }
     }
 };
@@ -2776,6 +2793,8 @@ pub const Demand = struct {
     integer: bool = false,
     /// Whether the argument must carry no dependency.
     owned: bool = false,
+    /// Whether the argument must be `Shareable`.
+    shareable: bool = false,
 };
 
 /// A demand a bound refusal reported unmet: what `ty` was told it lacks.
@@ -4497,6 +4516,7 @@ pub const ImplIndex = struct {
             !decided.grants(.{ .ty = given, .lacks = .{ .capability = demand.requirement } })) return false;
         if (demand.integer and !pool.isIntegerWithin(within, given)) return false;
         if (demand.owned and try pool.mayCarryDependencies(given)) return false;
+        if (demand.shareable and !try pool.isShareable(given)) return false;
         for (demand.traits) |required| {
             const args = try decided.gpa.alloc(TypeId, required.args.len);
             defer decided.gpa.free(args);
@@ -7073,6 +7093,22 @@ pub const Typing = struct {
         return self.directDependencySeed(t);
     }
 
+    /// Whether `t` itself keeps a value of it from being read by two tasks at
+    /// once: a type declared `unshareable`; a callable or open type, which may
+    /// stand for a closure holding anything; or a type parameter whose bounds
+    /// promise neither `Shareable` nor the integer family, all of which is
+    /// shareable.
+    fn unshareableSeed(self: *const Typing, t: TypeId) bool {
+        return switch (self.get(t)) {
+            .parameter => |p| !(p.shareable or p.integer),
+            .callable, .open_type => true,
+            .struct_ => |record| record.unshareable,
+            .enum_ => |sum| sum.unshareable,
+            .newtype => |nominal| nominal.unshareable,
+            else => false,
+        };
+    }
+
     fn directDependencySeed(self: *const Typing, t: TypeId) bool {
         switch (self.get(t)) {
             .borrow => return true,
@@ -7947,6 +7983,7 @@ pub const Typing = struct {
         prepared_implementations: PreparedImplementations = .{},
         dependency_facts: BorrowContainment = .{},
         writer_facts: BorrowContainment = .{},
+        unshareable_facts: BorrowContainment = .{},
         certified_storage: DeclId = .none,
         certified_buffer: DeclId = .none,
         certified_slice: DeclId = .none,
@@ -8822,7 +8859,9 @@ pub const Typing = struct {
                     for (0..x.field_count) |k| {
                         run[k] = .{ .name = field_names[x.first_field + k], .ty = .poison };
                     }
-                    break :blk try self.addStruct(name, x.ownership_policy, run);
+                    const made = try self.addStruct(name, x.ownership_policy, run);
+                    if (x.unshareable) self.markUnshareable(made);
+                    break :blk made;
                 },
                 .enum_ => |e| blk: {
                     const run = try self.gpa.alloc(Variant, e.variant_count);
@@ -8831,7 +8870,9 @@ pub const Typing = struct {
                     for (0..e.variant_count) |k| {
                         run[k] = .{ .name = variant_names[e.first_variant + k] };
                     }
-                    break :blk try self.addEnum(name, e.ownership_policy, run);
+                    const made = try self.addEnum(name, e.ownership_policy, run);
+                    if (e.unshareable) self.markUnshareable(made);
+                    break :blk made;
                 },
                 else => return template,
             };
@@ -8996,6 +9037,7 @@ pub const Typing = struct {
                     try self.capability_facts.noteFilled(self.gpa, inst.ty);
                     try self.dependency_facts.noteFilled(self.gpa, inst.ty);
                     try self.writer_facts.noteFilled(self.gpa, inst.ty);
+                    try self.unshareable_facts.noteFilled(self.gpa, inst.ty);
                 }
                 try self.queueShellParts(&pending, inst.ty, .through_wrappers);
             }
@@ -9185,6 +9227,7 @@ pub const Typing = struct {
             self.capability_facts.invalidate(t);
             self.dependency_facts.invalidate(t);
             self.writer_facts.invalidate(t);
+            self.unshareable_facts.invalidate(t);
 
             const e = &self.pool.items[@intFromEnum(t)].enum_;
             const variant_at = e.first_variant + i;
@@ -9255,6 +9298,7 @@ pub const Typing = struct {
             self.capability_facts.invalidate(t);
             self.dependency_facts.invalidate(t);
             self.writer_facts.invalidate(t);
+            self.unshareable_facts.invalidate(t);
 
             self.fields.items(.ty)[first_field + f] = ty;
             self.forgetLayouts();
@@ -9355,6 +9399,7 @@ pub const Typing = struct {
             self.capability_facts.invalidate(t);
             self.dependency_facts.invalidate(t);
             self.writer_facts.invalidate(t);
+            self.unshareable_facts.invalidate(t);
 
             const x = self.pool.items[@intFromEnum(t)].struct_;
             self.fields.items(.ty)[x.first_field + i] = ty;
@@ -9394,6 +9439,7 @@ pub const Typing = struct {
             self.capability_facts.invalidate(t);
             self.dependency_facts.invalidate(t);
             self.writer_facts.invalidate(t);
+            self.unshareable_facts.invalidate(t);
 
             self.pool.items[@intFromEnum(t)].newtype.base = base;
             self.forgetLayouts();
@@ -9479,6 +9525,7 @@ pub const Typing = struct {
             self.prepared_implementations.deinit(self.gpa);
             self.dependency_facts.deinit(self.gpa);
             self.writer_facts.deinit(self.gpa);
+            self.unshareable_facts.deinit(self.gpa);
 
             self.borrowed_types.deinit(self.gpa);
             self.borrowed_types = .empty;
@@ -9534,6 +9581,32 @@ pub const Typing = struct {
             self.dependency_facts.invalidate(t);
         }
 
+        /// Whether `t` is `Shareable`, over the `unshareable` containment table.
+        pub fn isShareable(self: *Builder, t: TypeId) !bool {
+            try self.ensureFilled(t);
+            try self.settleContainment(&self.unshareable_facts, .unshareable);
+            return !self.unshareable_facts.values.items[@intFromEnum(t)];
+        }
+
+        /// Records that `t`, a type parameter or the stand-in for an
+        /// associated type read through one, admits only `Shareable` types.
+        /// Answers already computed are dropped.
+        pub fn promiseShareable(self: *Builder, t: TypeId) void {
+            self.pool.items[@intFromEnum(t)].parameter.shareable = true;
+            self.unshareable_facts.invalidate(t);
+        }
+
+        /// Records that the declared type `t` is marked `unshareable`.
+        pub fn markUnshareable(self: *Builder, t: TypeId) void {
+            switch (self.pool.items[@intFromEnum(t)]) {
+                .struct_ => |*record| record.unshareable = true,
+                .enum_ => |*sum| sum.unshareable = true,
+                .newtype => |*nominal| nominal.unshareable = true,
+                else => return,
+            }
+            self.unshareable_facts.invalidate(t);
+        }
+
         /// Why a value of `t` may carry a dependency: the parts walked from
         /// `t` to a type that holds one directly, over the edges the
         /// containment table is built from. Null where `t` carries nothing.
@@ -9542,7 +9615,22 @@ pub const Typing = struct {
         /// **Bound:** each type reachable from `t` is entered once.
         pub fn dependencyWitness(self: *Builder, gpa: std.mem.Allocator, t: TypeId) !?DependencyWitness {
             if (!try self.mayCarryDependencies(t)) return null;
-            var search: WitnessSearch = .{ .builder = self, .gpa = gpa };
+            return self.witness(gpa, t, .raw_carriers);
+        }
+
+        /// Why `t` is not `Shareable`: the parts walked from `t` to a type
+        /// declared `unshareable`, a callable or open type, or a type parameter
+        /// not bounded `Shareable`, over the edges the `unshareable` table is
+        /// built from. Null where `t` is shareable. Owned by the caller.
+        ///
+        /// **Bound:** each type reachable from `t` is entered once.
+        pub fn unshareableWitness(self: *Builder, gpa: std.mem.Allocator, t: TypeId) !?DependencyWitness {
+            if (try self.isShareable(t)) return null;
+            return self.witness(gpa, t, .unshareable);
+        }
+
+        fn witness(self: *Builder, gpa: std.mem.Allocator, t: TypeId, mode: BorrowContainment.Mode) !?DependencyWitness {
+            var search: WitnessSearch = .{ .builder = self, .gpa = gpa, .mode = mode };
             defer search.visited.deinit(gpa);
             defer search.steps.deinit(gpa);
             defer search.parts.deinit(gpa);
@@ -9555,6 +9643,8 @@ pub const Typing = struct {
         const WitnessSearch = struct {
             builder: *Builder,
             gpa: std.mem.Allocator,
+            /// `raw_carriers` or `unshareable`: the table whose answer is explained.
+            mode: BorrowContainment.Mode,
             visited: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
             steps: std.ArrayList(ContainmentStep) = .empty,
             parts: std.ArrayList(TypeId) = .empty,
@@ -9563,14 +9653,16 @@ pub const Typing = struct {
             /// The seed reached from `ty`, with `steps` holding the path to it.
             fn from(search: *WitnessSearch, ty: TypeId) std.mem.Allocator.Error!?TypeId {
                 if ((try search.visited.getOrPut(search.gpa, ty)).found_existing) return null;
-                if (search.builder.view().directDependencySeed(ty)) return ty;
-                try BorrowContainment.eachChild(search.builder, ty, .raw_carriers, search);
+                const typing = search.builder.view();
+                if (if (search.mode == .unshareable) typing.unshareableSeed(ty) else typing.directDependencySeed(ty)) return ty;
+                try BorrowContainment.eachChild(search.builder, ty, search.mode, search);
                 return search.found;
             }
 
             fn child(search: *WitnessSearch, step: ContainmentStep, part: TypeId) std.mem.Allocator.Error!void {
                 if (search.found != null) return;
-                if (!search.builder.dependency_facts.values.items[@intFromEnum(part)]) return;
+                const facts = if (search.mode == .unshareable) &search.builder.unshareable_facts else &search.builder.dependency_facts;
+                if (!facts.values.items[@intFromEnum(part)]) return;
                 try search.steps.append(search.gpa, step);
                 try search.parts.append(search.gpa, part);
                 if (try search.from(part)) |seed| {
@@ -11514,6 +11606,7 @@ pub const Typing = struct {
             const writer_containment = try self.writer_facts.values.toOwnedSlice(self.gpa);
             self.writer_facts.deinit(self.gpa);
             errdefer self.gpa.free(writer_containment);
+            self.unshareable_facts.deinit(self.gpa);
 
             const owned_contracts = try self.owned_contracts.toOwnedSlice(self.gpa);
             errdefer {

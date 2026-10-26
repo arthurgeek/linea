@@ -17,3 +17,6 @@ pub type Count = UInt64
 @carrier
 // ^ keyword.storage.modifier
 struct Session { user: Str }
+@unshareable
+// ^ keyword.storage.modifier
+struct Cursor { at: UInt64 }

@@ -25,8 +25,10 @@ let log_word_bytes: UInt64 = 8
 // Record every acquisition a computation makes, refuse a chosen one, and check
 // afterwards that each allocation was disposed exactly once. Tests use it to
 // walk every allocation-failure path: run once to count the attempts, then
-// refuse each attempt in turn.
-@(opaque, linear)
+// refuse each attempt in turn. Its allocator writes the log's counts through a
+// `read` of the log, so a log is `@unshareable`, and so is every allocator that
+// borrows it.
+@(opaque, linear, unshareable)
 struct AllocationLog[H: Allocator] {
     buffer: Buffer[H],
     backing: H,

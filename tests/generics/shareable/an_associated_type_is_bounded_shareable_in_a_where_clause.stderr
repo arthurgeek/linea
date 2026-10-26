@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Shareable`, and `S.Item` may stand for a type that is not `Shareable`
+  --> tests/generics/shareable/an_associated_type_is_bounded_shareable_in_a_where_clause.lin:27:5
+   |
+27 |     share(&source.take())
+   |     ^^^^^ add `where S.Item: Shareable`, or drop the bound

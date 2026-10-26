@@ -1,0 +1,79 @@
+import std.testing
+
+// A Protocol names, as a type, what one end of a session does next. `Step` is
+// the protocol's next step, which for each combinator below is the protocol
+// itself; a named recursive protocol answers its unfolding. `Dual` is what the
+// other end does at the same moment: one end's send is the other's receive,
+// and one end's choice is the other's offer.
+pub trait Protocol {
+    type Dual: Protocol
+    type Step: Protocol
+}
+
+// End is a finished session: neither end does anything more.
+pub struct End {}
+
+// Send[T, N] sends a `T`, then continues as `N`.
+pub struct Send[phantom T, phantom N: Protocol] {}
+
+// Recv[T, N] receives a `T`, then continues as `N`.
+pub struct Recv[phantom T, phantom N: Protocol] {}
+
+// Choose[L, R] picks one of two continuations and tells the other end which.
+pub struct Choose[phantom L: Protocol, phantom R: Protocol] {}
+
+// Offer[L, R] continues as whichever of two protocols the other end picks.
+pub struct Offer[phantom L: Protocol, phantom R: Protocol] {}
+
+impl Protocol for End {
+    type Dual = End
+    type Step = End
+}
+
+impl[T, N: Protocol] Protocol for Send[T, N] {
+    type Dual = Recv[T, N.Dual]
+    type Step = Send[T, N]
+}
+
+impl[T, N: Protocol] Protocol for Recv[T, N] {
+    type Dual = Send[T, N.Dual]
+    type Step = Recv[T, N]
+}
+
+impl[L: Protocol, R: Protocol] Protocol for Choose[L, R] {
+    type Dual = Offer[L.Dual, R.Dual]
+    type Step = Choose[L, R]
+}
+
+impl[L: Protocol, R: Protocol] Protocol for Offer[L, R] {
+    type Dual = Choose[L.Dual, R.Dual]
+    type Step = Offer[L, R]
+}
+
+// A request protocol: send a number, then receive a number or stop.
+alias SessionTestAsk = Send[UInt64, Offer[Recv[UInt64, End], End]]
+
+// What the server of `SessionTestAsk` does at the same moment.
+alias SessionTestAnswer = Recv[UInt64, Choose[Send[UInt64, End], End]]
+
+// Accept only the server's side of the request protocol.
+fn session_test_serves(_side: SessionTestAnswer) -> Bool {
+    true
+}
+
+test fn the_dual_of_a_protocol_is_what_its_peer_does() {
+    let side: SessionTestAsk.Dual = .{}
+    testing.assert(session_test_serves(side), "the dual of a send was not a receive")?
+    .Ok(())
+}
+
+// Accept only a protocol whose dual's dual is `SessionTestAsk`.
+fn session_test_asks(_side: SessionTestAsk) -> Bool {
+    true
+}
+
+test fn the_dual_of_the_dual_is_the_protocol() {
+    let side: SessionTestAsk.Dual.Dual = .{}
+    testing.assert(session_test_asks(side), "the dual of the dual was not the protocol")?
+    .Ok(())
+}

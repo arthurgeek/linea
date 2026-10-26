@@ -2727,6 +2727,9 @@ pub const Bound = union(enum) {
     /// representation by the same containment answer every ownership check
     /// reads.
     owned,
+    /// The types two tasks may read one value of at once, decided from their
+    /// representation by the `unshareable` containment answer.
+    shareable,
     /// A trait the program declares.
     trait: DeclId,
     /// Neither. A capability that does not exist is not something a program can
@@ -2756,6 +2759,7 @@ pub fn boundNames(ast: *const Ast, tok: TokenId, declared: ?DeclId) Bound {
     if (std.mem.eql(u8, text, "Discardable")) return .{ .capability = .discardable };
     if (std.mem.eql(u8, text, "Linear")) return .{ .capability = .unrestricted };
     if (std.mem.eql(u8, text, "Owned")) return .owned;
+    if (std.mem.eql(u8, text, "Shareable")) return .shareable;
     return .unknown;
 }
 
@@ -9437,7 +9441,7 @@ const Resolver = struct {
                         self.bindings.items[named.index()].used = true;
                         self.reached(bound.named.name, named);
                     },
-                    .capability, .integer, .owned => invalid_shape = true,
+                    .capability, .integer, .owned, .shareable => invalid_shape = true,
                     .unknown => _ = try self.implTraitToken(bound.named.name),
                 }
 
@@ -11398,7 +11402,7 @@ const Resolver = struct {
                 continue;
             }
             switch (boundNames(self.ast, b.named.name, self.traitBound(b.named.name))) {
-                .capability, .owned => if (b.named.args.len() != 0) try self.sink.addErrorFmt(
+                .capability, .owned, .shareable => if (b.named.args.len() != 0) try self.sink.addErrorFmt(
                     .t_bound,
                     self.ast.fileOf(b.named.name),
                     self.ast.tokenSpan(b.named.name),
@@ -12249,7 +12253,7 @@ const Resolver = struct {
                 null;
             return switch (boundNames(self.res.ast, tok, declared)) {
                 .trait => |d| d,
-                .capability, .integer, .owned, .unknown => null,
+                .capability, .integer, .owned, .shareable, .unknown => null,
             };
         }
 

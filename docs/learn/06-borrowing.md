@@ -1081,6 +1081,201 @@ is `'static`, because a string literal lives in the program. A Linea `Str` is
 never `Owned`, even one made from a literal, because the type is a view
 whatever it points at. Owned text is a `String`.
 
+## `Shareable` — a value many readers may read at once
+
+Reading a value usually changes nothing, so any number of readers may look at
+one value together. `T: Shareable` says that `T` is such a type:
+
+```linea
+import std.io
+
+// Print `notice` once for each reader. Every reader looks at the same notice,
+// and `Shareable` promises that reading it changes nothing.
+fn announce[T: Shareable + Display](notice: T, readers: UInt64) -> Result[(), io.IoError] {
+    for reader in UInt64(1)..=readers {
+        io.println("reader {reader}: {notice}")?
+    }
+    .Ok(())
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    announce("the hall is closed today", 2)?
+    .Ok(0)
+}
+```
+
+```
+reader 1: the hall is closed today
+reader 2: the hall is closed today
+```
+
+A `Str` is `Shareable`: it is a view, but reading the text it views writes
+nothing. A generic function that calls one bounded `Shareable` needs the bound
+itself:
+
+<!-- guide: edit fn main -->
+```linea
+// Announce `notice` to a crowd of three.
+fn shout[U: Display](notice: U) -> Result[(), io.IoError] {
+    announce(notice, 3)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    shout("doors open at nine")?
+    .Ok(0)
+}
+```
+
+```
+error[T-Bound]: `T` requires `Shareable`, and `U` may stand for a type that is not `Shareable`
+  --> notices_unbounded.lin:14:5
+   |
+14 |     announce(notice, 3)
+   |     ^^^^^^^^ add `Shareable` to `U`'s bounds, or drop the bound
+```
+
+A few types are not `Shareable`, because reading them writes. An arena handle
+is one. `handle.acquire(64)` takes the handle by `read`, yet it moves the
+arena's cursor forward, so two readers acquiring through one handle at the same
+moment would both write that cursor. Being `Copyable` does not help: a handle is
+copyable, and every copy moves the same cursor.
+
+```linea
+import std.io
+import std.mem
+
+use mem.Lender
+
+// Count the entries of a board that several readers look at together.
+fn board_size[T: Shareable](entries: mem.Slice[T]) -> UInt64 {
+    entries.length()
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let arena = mem.Arena.open(mem.system(), 256)
+    let handle = arena.handle()
+    // A handle is copyable: both entries allocate from the one arena.
+    let desks = [copy(handle), handle]
+    io.println("{board_size(desks.as_slice())} desks")?
+    .Ok(0)
+}
+```
+
+```
+error[T-Bound]: `T` requires `Shareable`, and `mem.Handle[mem.SystemAllocator]` is unshareable
+  --> desks.lin:16:18
+   |
+16 |     io.println("{board_size(desks.as_slice())} desks")?
+   |                  ^^^^^^^^^^ `mem.Handle[mem.SystemAllocator]` is not `Shareable`; pass a value that reading never changes, or drop the bound
+```
+
+The compiler decides whether a type is `Shareable` by looking at everything it
+holds, private fields included, and everything it observes: a type is not
+`Shareable` when any part of it, or anything a `borrow` in it points at, is
+unshareable. So a struct with a `mem.Handle` field, a `Vec[UInt8, mem.Handle]`
+and a `borrow` of an arena are not `Shareable` either. You never write
+`impl Shareable for` a type; the compiler refuses that, as it does for `Owned`.
+
+`Shareable` and `Owned` answer different questions. `Owned` asks whether a
+value points at anything; `Shareable` asks whether reading it writes anything:
+
+| Type | `Owned` | `Shareable` |
+| --- | --- | --- |
+| `UInt64`, `String`, `Vec[UInt8]` | yes | yes |
+| `Str`, `borrow UInt64` | no: each is a view | yes: reading a view writes nothing |
+| `mem.Arena` | yes: it owns its memory and points at nothing | no: acquiring writes its cursor |
+| `mem.Handle`, `Vec[UInt8, mem.Handle]` | no: each borrows its arena | no: each reaches the arena's cursor |
+
+### `@unshareable` — a type whose reads write
+
+`mem.Arena`, `mem.Handle` and `mem.AllocationLog` are declared `@unshareable`,
+and that attribute is what the compiler starts from. Only code trusted with C can write memory while
+it is only reading a value, so only a module its root's manifest grants
+`extern` may declare one. Anywhere else the attribute is refused:
+
+```linea
+// A cursor moves forward each time it is read.
+@unshareable
+struct Cursor {
+    at: UInt64,
+}
+
+fn main() -> UInt8 {
+    let cursor = Cursor { at = 1 }
+    UInt8(cursor.at)
+}
+```
+
+```
+error[M-Extern]: an `@unshareable` type is declared only in a module its root's manifest grants, and linea.json does not list "."
+ --> cursor.lin:2:2
+  |
+2 | @unshareable
+  |  ^^^^^^^^^^^ list this module under "extern" in linea.json to trust it with C, or drop `@unshareable`
+```
+
+In a granted module the attribute is accepted, and every type that holds the
+marked type is unshareable with it:
+
+`pages/linea.json`:
+
+```json
+{ "kind": "program", "extern": ["."] }
+```
+
+`pages/main.lin`:
+
+```linea
+import std.io
+import std.mem
+
+// A cursor moves forward each time it is read, so two readers of one cursor
+// would both move it.
+@(copyable, unshareable)
+struct Cursor {
+    at: UInt64,
+}
+
+// A page holds a cursor, so it is unshareable too.
+struct Page {
+    title: Str,
+    cursor: Cursor,
+}
+
+// Count the entries of a board that several readers look at together.
+fn board_size[T: Shareable](entries: mem.Slice[T]) -> UInt64 {
+    entries.length()
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let pages = [Page { title = "intro", cursor = Cursor { at = 3 } }]
+    io.println("{board_size(pages.as_slice())} pages")?
+    .Ok(0)
+}
+```
+
+```sh
+linea check pages
+```
+
+```
+error[T-Bound]: `T` requires `Shareable`, and `Page` is not `Shareable`: `cursor` is a `Cursor`, which is unshareable
+  --> pages/main.lin:24:18
+   |
+24 |     io.println("{board_size(pages.as_slice())} pages")?
+   |                  ^^^^^^^^^^ `Page` is not `Shareable`; pass a value that reading never changes, or drop the bound
+```
+
+`@unshareable` restricts only reading by many at once. An unshareable value
+still moves, copies and is released as its declaration says, and a value moved
+whole into another owner is read by that owner alone.
+
+If you know Rust, `T: Shareable` is close to `T: Sync`, a type whose shared
+references may be read from several threads at once, and `@unshareable` is
+close to a type that is `Send` but not `Sync`, such as one built on `Cell`: it
+may move to another owner whole, but not be read by two at once. Linea does not
+run tasks yet; when it does, everything a task reads must be `Shareable`.
+
 ## Saying that only part of the result points at it
 
 Look again at `first_field`:
@@ -1302,6 +1497,7 @@ what you write. Each one has been answered in a chapter of this guide:
 | Does my result point into an input? | name it with `borrows`, `carries` or `retains` | this chapter |
 | Into the input, or where the input pointed? | `borrows(x)` for the input, `carries(x)` for where it pointed | this chapter |
 | Can it point at anything? | not if it is `Owned`; a generic function asks with `T: Owned` | this chapter |
+| Can two readers read it at once? | yes if it is `Shareable`; a generic function asks with `T: Shareable` | this chapter |
 | Who chooses the memory? | the caller, by passing an allocator | [Memory](07-memory.md) |
 
 ## What you have seen

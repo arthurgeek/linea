@@ -1,0 +1,33 @@
+import std.mem
+import std.text
+
+fn share[T: Shareable](_value: T) -> UInt64 {
+    1
+}
+
+// A Shareable parameter, or an Integer one, meets the bound itself.
+fn pass[T: Shareable](value: T) -> UInt64 {
+    share(value)
+}
+
+fn count[N: Integer](value: N) -> UInt64 {
+    share(value)
+}
+
+// A label borrows its text, and a borrow of a shareable place is shareable.
+struct Label {
+    text: Str,
+    width: UInt64,
+}
+
+fn main() -> UInt8 {
+    let number = UInt64(7)
+    let owned = text.String.new()
+    let values: Vec[UInt8] = Vec.new()
+    let label = Label { text = "bench", width = 5 }
+    let held: mem.Carried[UInt64] = .{}
+    let total = share(number) + share("door") + share(owned) + share(values) + share(label) + share(borrow number) + share(held) + pass(number) + count(UInt8(2))
+    owned.release()
+    values.release()
+    UInt8(total)
+}
