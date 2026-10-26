@@ -769,9 +769,11 @@ unwritten part that is not alike for the builder to write before answering,
 except that the writer table records an unwritten instantiation by its
 arguments, which usually settle it. Within a scope whose constraints cap a
 capability beyond what their subjects promise (`capsBeyondPromise`),
-`prepareScopedCapability` writes every alike instantiation a question
-reaches first, since the caps name the scope's own parameters and not the
-representative's arguments. `fillMinted` writes every instantiation the
+`prepareScopedCapability` writes the type a question names where it is
+alike, and steps from every alike instantiation past it to its
+representative with the scope's caps renamed onto the representative's
+arguments, sharing the answer with every scope whose caps rename alike.
+`fillMinted` writes every instantiation the
 checker minted before the pool is handed on, following only parts that are
 not alike, so the type of every recorded expression, binding and signature
 is written and an alike instantiation stays unwritten only as a part. The

@@ -221,6 +221,8 @@ writing parts:
   `A contains B contains A`;
 - [0241](0241-declared-answers-are-settled-when-first-needed.md)'s walk over
   what types own lists its representative as its one edge;
+- a scoped capability steps to the representative with the scope's caps
+  renamed onto its arguments (see *Scoped capabilities*);
 - the finished pool's walks over parts -- whether a type holds storage or a
   view, whether taking a value apart discharges what it owes, which part a
   dependency path or a contract's target selects, and which paths cover a
@@ -241,15 +243,59 @@ A declaration's contextual constraints may cap a capability:
 `fn tally[L: Ledger](sink desk: Desk[L], count: UInt8) -> UInt8 where
 L.Entry: Discardable` caps `L.Entry` at discardable inside `tally`. The cap
 is keyed by the subject it names, at `tally`'s own parameter. `Desk[L]`
-answered from its representative would reach the representative's arguments
+answered from its representative reaches the representative's arguments
 instead -- `L.Entry` at the template's `L`, or at another function's -- which
-`tally`'s clause does not name, and refuse to drop a desk that may be
-dropped.
+`tally`'s clause does not name, so the cap as written would reach nothing
+and refuse to drop a desk that may be dropped.
 
-So **within a scope that caps a capability, every alike instantiation a
-question reaches is written before the scoped answer is prepared**
-(`Builder.prepareScopedCapability`), and the scoped answer is read from its
-own parts. A scope caps a capability only where one of its constraints puts
+So **within a scope that caps a capability, a step to a representative
+renames the scope's caps with it**, and the scoped answer past the step is
+shared by every scope whose caps rename alike
+(`Builder.prepareScopedCapability`).
+
+A *context* is a set of ceilings, each a subject type and the capability it
+is capped at. A scope's own context holds, for each subject its
+constraints and its parent's name, the lowest ceiling they put on it. The
+scoped answer of a type `X` in a context `C` is the least capability, no
+weaker than `X`'s seed and than the answer of each part `X` owns in `C`,
+that `C`'s ceiling on `X` allows -- what the pool answers, with each
+ceiling applied where its subject is reached. An alike instantiation
+`X = D[A1, ..., An]` with its parts unwritten owns one part in `C`: its
+representative `R = D[B1, ..., Bn]` in the context `C'` that renames each
+`Ai` to `Bi` in every subject of `C` and keeps only
+
+- the ceilings whose subject holds no type parameter but `A1` to `An`, and
+- of those on a settled reference read through some `Ai`, the ones whose
+  member `D`'s parts read through position `i` (`membersRead`, as for a
+  shape).
+
+`C'` is interned by its ceilings. Two questions share an answer exactly
+when they reach one representative in one renamed context: the same alike
+class, and caps that rename to the same ceilings on the same subjects. A
+scope that caps `L.Entry` at copyable and one that caps it at discardable
+rename to different ceilings; one that caps `L.Note`, which no part reads,
+renames to no ceiling where the other keeps one; and a scope whose `L`
+promises more is in another class, with another representative.
+
+Why `X`'s answer in `C` is `R`'s in `C'`: `X`'s parts, written, would be
+`R`'s with each `Bi` renamed `Ai`, and so would every type they own, down
+through every representative, with each seed the same, since alike
+arguments promise alike. Every such type holds no parameter but `A1` to
+`An`, so a ceiling on a type holding another applies to none of them, and
+a settled reference whose member no part reads is none of them. The
+renaming is one to one, since the `Ai` are distinct and so are the `Bi`, and
+a type is interned by its structure, so the renamed ceiling on `Y` is the
+ceiling `C` puts on `Y`'s renamed form and on nothing else. The equations
+the two answers solve are then the same, one renamed into the other, and so
+is their least solution.
+
+The type a question is asked about is still written where it is alike, and
+its own parts reached in the scope's own context. A later pass taking a
+value of that type apart asks what each part owes within the scope, and the
+finished pool answers that by scope and type, from what was prepared; what
+lies past a part is never asked of the finished pool.
+
+A scope caps a capability only where one of its constraints puts
 a ceiling below what its subject is seeded with (`capsBeyondPromise`). A
 bound written on the parameter, `[T: Discardable]`, is a constraint whose
 subject's seed is already its requirement, so it caps nothing: such a scope
@@ -282,7 +328,11 @@ alike more than the templates do, the first function's `G0[S]` is written
 when it is first asked about, and with it the chain at its `S`, `n`
 instantiations; every other function's `G0[S]` is one edge to it, and at
 hand-off one write minting one `G1[S]`, itself one edge to the first chain's.
-Both are linear. Measured by the sweep, from n to 4n:
+Under `n` functions each capping `S.Item` in a `where` clause, each
+function's `G0[S]` is written, minting one `G1[S]`, whose step renames the
+one cap onto `G1`'s parameter: the same renamed context for every function,
+so the chain past it is prepared once. All three are linear. Measured by the
+sweep, from n to 4n:
 
 | dimension | exponent | before |
 | --- | --- | --- |
@@ -343,21 +393,19 @@ What makes the bound hold:
   run per template, each as long as what the chain reads below it.
 - No walk follows an alike part into its own parts, so the written
   instantiations are the representatives, each written once.
-- Within a scope that caps a capability, the instantiations written are
-  those the scope's questions reach, which preparing the scoped answer
-  visits anyway, and the scope remembers what it prepared. A scope whose
-  constraints cap nothing prepares nothing.
+- Within a scope that caps a capability, each type a question is asked
+  about is prepared once, and written once where it is alike. The scope's
+  own context visits what that type owns up to the first alike
+  instantiation on each path, which a question asked there reaches anyway.
+  Past a step, each type is visited once per renamed context, however many
+  scopes rename into it, and a step renames each of its context's ceilings
+  once, in the size of the subject, with one `membersRead` for each on a
+  settled reference. A renamed context holds no more ceilings than the
+  context it was renamed from, so a scope's steps cost its own constraints
+  each time. A scope whose constraints cap nothing prepares nothing.
 
-Two shapes stay quadratic, as they were before this decision:
+One shape stays quadratic, as it was before this decision:
 
-- `n` functions each writing `where S.Item: Discardable` over a chain of
-  `n` templates. Each function is a scope that caps a capability, and its
-  scoped answer is read from parts written at its own parameter, so each
-  writes its own chain: `n` scopes of `n` instantiations, n^1.76. The
-  answers are not distinct -- each is the template's under the renaming of
-  one scope's parameter to the template's -- so this is avoidable, by
-  keying a scoped answer by the class and the renamed cap rather than by
-  the scope; it is not done here.
 - `n` functions each promising a different member, over a chain whose
   template `k` reads member `k` and holds template `k + 1`. Function `i`'s
   promise is read by templates `0` to `i`, so each of those instantiations
@@ -366,7 +414,11 @@ Two shapes stay quadratic, as they were before this decision:
   once, which is what the equivalence by promises makes distinct. Making
   them alike would need an equivalence by answer -- a promise that changes
   no answer, since the members the other templates read stay unpromised --
-  and deciding that is the work the representative saves.
+  and deciding that is the work the representative saves. Capping a
+  different member in each function, in place of promising it, is the
+  same shape for scoped capabilities: function `i`'s cap is kept by the
+  steps through templates `0` to `i`, which read its member, so its renamed
+  contexts are its own until then, and `n(n + 1)/2` nodes are visited.
 
 ## Consequences
 
@@ -454,11 +506,26 @@ parts would undergo.
 `Owned` promises are completed after instantiations are minted, so the
 decision would be read stale.
 
-**In a capping scope, rename the scope's caps onto the representative's
-arguments.** A cap's subject is any type at the scope's parameters,
-`L.Entry` or `Vec[L]`, so renaming it is the substitution every scoped reader
-would carry. Writing the instantiations a capping scope reaches costs what the
-scope asks about.
+**In a capping scope, write every alike instantiation a question reaches.**
+The scoped answer is then read from parts at the scope's own parameters,
+which its caps name as written, and no cap is renamed. But each scope writes
+everything it reaches at its own parameters: `n` functions capping
+`S.Item` over a chain of `n` templates wrote `n` chains, n^2.19, though
+every one answers as the template's chain does under one renaming. Renaming
+costs a substitution per cap at each step, and only the preparation renames:
+readers ask by scope and type as before.
+
+**Key a scoped answer by the representative and the scope's caps as
+written.** A cap names the scope's own parameter, so no two scopes would
+share a key; the renaming onto the representative's arguments is what
+makes `S.Item` in one function and `K.Item` in another one ceiling.
+
+**Rename every cap on a type held at the arguments.** A cap on a member no
+part reads, `where S.Note: Discardable` over a chain reading `S.Item`,
+changes no answer, yet kept it makes each function's renamed context its
+own, and the chain is visited once per function again. Settled references
+are pruned by the members the template reads, as shapes are, and for the
+same reason.
 
 **Count every constraint with a capability requirement as a cap.** A bound
 written on a parameter is a constraint too, and every function bounding its

@@ -1146,98 +1146,168 @@ const CapabilityFacts = struct {
 const ScopedCapabilityKey = struct { scope: DeclId, ty: TypeId };
 const ScopedCapabilityMap = std.AutoHashMapUnmanaged(ScopedCapabilityKey, Capability);
 
-/// A sparse product of lexical capability contexts and the canonical owned-part
-/// graph. Each reached pair strengthens at most twice. Cycles begin at their
-/// policy seeds, never at an unscoped result containing self-supported debt.
+/// A sparse product of capability contexts and the canonical owned-part
+/// graph. A context is a set of ceilings on types. Each scope that caps a
+/// capability has a context of its own, the ceilings its constraints put on
+/// their subjects. Stepping from an alike instantiation to its
+/// representative renames the context's ceilings onto the representative's
+/// arguments (`Builder.prepareScopedCapability`), and the renamed context is
+/// interned, so every scope whose ceilings rename alike shares the answers
+/// past the step. Each reached pair strengthens at most twice. Cycles begin
+/// at their policy seeds, never at an unscoped result containing
+/// self-supported debt.
 const ScopedCapabilityFacts = struct {
     const none = std.math.maxInt(u32);
-    const Node = struct { ceiling: Capability, head: u32 = none };
-    const Edge = struct { owner: ScopedCapabilityKey, next: u32 };
+    const Ceiling = struct { subject: TypeId, ceiling: Capability };
+    /// A type within a context.
+    const Node = struct { context: u32, ty: TypeId };
+    const State = struct { ceiling: Capability, head: u32 = none };
+    const Edge = struct { owner: Node, next: u32 };
+    /// A context's ceilings, sorted by subject where the context is
+    /// interned, and the scope whose own context it is, or none.
+    const Context = struct { first: u32, len: u32, scope: DeclId };
+
+    /// Each answer prepared in a scope's own context, by scope and type: what
+    /// `Typing.capabilityAskedWithin` reads.
     values: ScopedCapabilityMap = .empty,
-    ceilings: ScopedCapabilityMap = .empty,
-    scopes: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
-    nodes: std.AutoHashMapUnmanaged(ScopedCapabilityKey, Node) = .empty,
+    /// The types a question within a scope was asked about and prepared.
+    roots: std.AutoHashMapUnmanaged(ScopedCapabilityKey, void) = .empty,
+    scope_contexts: std.AutoHashMapUnmanaged(DeclId, u32) = .empty,
+    contexts: std.ArrayList(Context) = .empty,
+    context_ceilings: std.ArrayList(Ceiling) = .empty,
+    /// Renamed contexts by their sorted ceilings, so equal ones are one.
+    interned: std.StringHashMapUnmanaged(u32) = .empty,
+    /// The ceiling each context puts on a subject.
+    ceilings: std.AutoHashMapUnmanaged(Node, Capability) = .empty,
+    answers: std.AutoHashMapUnmanaged(Node, Capability) = .empty,
+    states: std.AutoHashMapUnmanaged(Node, State) = .empty,
     edges: std.ArrayList(Edge) = .empty,
-    pending: std.ArrayList(ScopedCapabilityKey) = .empty,
-    queue: std.ArrayList(ScopedCapabilityKey) = .empty,
+    pending: std.ArrayList(Node) = .empty,
+    queue: std.ArrayList(Node) = .empty,
+    /// Counts the times these facts were dropped, so a preparation that
+    /// minted types, which may drop them, can tell that it must start again.
+    generation: u32 = 0,
 
     fn deinit(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator) void {
         self.values.deinit(gpa);
+        self.roots.deinit(gpa);
+        self.scope_contexts.deinit(gpa);
+        self.contexts.deinit(gpa);
+        self.context_ceilings.deinit(gpa);
+        var keys = self.interned.keyIterator();
+        while (keys.next()) |key| gpa.free(key.*);
+        self.interned.deinit(gpa);
         self.ceilings.deinit(gpa);
-        self.scopes.deinit(gpa);
-        self.nodes.deinit(gpa);
+        self.answers.deinit(gpa);
+        self.states.deinit(gpa);
         self.edges.deinit(gpa);
         self.pending.deinit(gpa);
         self.queue.deinit(gpa);
-        self.* = .{};
+        self.* = .{ .generation = self.generation +% 1 };
     }
 
-    fn prepareScope(self: *ScopedCapabilityFacts, builder: *Typing.Builder, scope: DeclId) !void {
-        if (self.scopes.contains(scope)) return;
+    /// `scope`'s own context: the lowest ceiling its constraints and its
+    /// parent's put on each subject.
+    fn contextOf(self: *ScopedCapabilityFacts, builder: *Typing.Builder, scope: DeclId) !u32 {
+        if (self.scope_contexts.get(scope)) |context| return context;
+        const gpa = builder.gpa;
+        const context: u32 = @intCast(self.contexts.items.len);
+        const first: u32 = @intCast(self.context_ceilings.items.len);
         const constraints = builder.contextual_constraints;
         for ([_]DeclId{ scope, constraints.parentOf(scope) }) |owner| {
             for (constraints.run(owner)) |constraint| {
                 const ceiling = assumedCapability(constraint.demand.requirement);
                 if (ceiling == .linear) continue;
-                const entry = try self.ceilings.getOrPut(builder.gpa, .{ .scope = scope, .ty = constraint.subject });
-                entry.value_ptr.* = if (entry.found_existing)
-                    @enumFromInt(@min(@intFromEnum(entry.value_ptr.*), @intFromEnum(ceiling)))
-                else
-                    ceiling;
+                const entry = try self.ceilings.getOrPut(gpa, .{ .context = context, .ty = constraint.subject });
+                if (entry.found_existing) {
+                    entry.value_ptr.* = @enumFromInt(@min(@intFromEnum(entry.value_ptr.*), @intFromEnum(ceiling)));
+                } else {
+                    entry.value_ptr.* = ceiling;
+                    try self.context_ceilings.append(gpa, .{ .subject = constraint.subject, .ceiling = ceiling });
+                }
             }
         }
-        try self.scopes.put(builder.gpa, scope, {});
+        for (self.context_ceilings.items[first..]) |*held| held.ceiling = self.ceilings.get(.{ .context = context, .ty = held.subject }).?;
+        try self.contexts.append(gpa, .{ .first = first, .len = @intCast(self.context_ceilings.items.len - first), .scope = scope });
+        try self.scope_contexts.put(gpa, scope, context);
+        return context;
     }
 
-    fn ensure(self: *ScopedCapabilityFacts, builder: *Typing.Builder, key: ScopedCapabilityKey) !void {
-        if (self.values.contains(key)) return;
-        const ceiling = self.ceilings.get(key) orelse .linear;
+    /// The context interned for `ceilings`, sorted by subject.
+    fn internContext(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator, ceilings: []const Ceiling) !u32 {
+        const words = try gpa.alloc(u32, 2 * ceilings.len);
+        defer gpa.free(words);
+        for (ceilings, 0..) |held, i| {
+            words[2 * i] = @intFromEnum(held.subject);
+            words[2 * i + 1] = @intFromEnum(held.ceiling);
+        }
+        const bytes = std.mem.sliceAsBytes(words);
+        if (self.interned.get(bytes)) |context| return context;
+        const context: u32 = @intCast(self.contexts.items.len);
+        const first: u32 = @intCast(self.context_ceilings.items.len);
+        try self.context_ceilings.appendSlice(gpa, ceilings);
+        for (ceilings) |held| try self.ceilings.put(gpa, .{ .context = context, .ty = held.subject }, held.ceiling);
+        try self.contexts.append(gpa, .{ .first = first, .len = @intCast(ceilings.len), .scope = .none });
+        const owned = try gpa.dupe(u8, bytes);
+        errdefer gpa.free(owned);
+        try self.interned.put(gpa, owned, context);
+        return context;
+    }
+
+    fn ensure(self: *ScopedCapabilityFacts, builder: *Typing.Builder, key: Node) !void {
+        if (self.answers.contains(key)) return;
+        const gpa = builder.gpa;
+        // A builder reopened over a finished pool keeps that pool's answers
+        // by scope and type; they supply a value without a mutable reverse
+        // edge, since frozen rows cannot change while types only append.
+        const scope = self.contexts.items[key.context].scope;
+        if (scope != .none) if (self.values.get(.{ .scope = scope, .ty = key.ty })) |frozen| {
+            try self.answers.put(gpa, key, frozen);
+            return;
+        };
+        const ceiling = self.ceilings.get(.{ .context = key.context, .ty = key.ty }) orelse .linear;
         const seed: Capability = @enumFromInt(@min(@intFromEnum(ceiling), @intFromEnum(builder.capability_facts.seeds.items[key.ty.index()])));
-        try self.pending.append(builder.gpa, key);
-        try self.nodes.put(builder.gpa, key, .{ .ceiling = ceiling });
-        try self.values.put(builder.gpa, key, seed);
-        try self.queue.append(builder.gpa, key);
+        try self.pending.append(gpa, key);
+        try self.states.put(gpa, key, .{ .ceiling = ceiling });
+        try self.answers.put(gpa, key, seed);
+        try self.queue.append(gpa, key);
     }
 
-    fn strengthen(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator, key: ScopedCapabilityKey, incoming: Capability) !void {
-        const ceiling = self.nodes.get(key).?.ceiling;
+    fn strengthen(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator, key: Node, incoming: Capability) !void {
+        const ceiling = self.states.get(key).?.ceiling;
         const next: Capability = @enumFromInt(@min(@intFromEnum(ceiling), @intFromEnum(incoming)));
-        const value = self.values.getPtr(key).?;
+        const value = self.answers.getPtr(key).?;
         if (@intFromEnum(value.*) >= @intFromEnum(next)) return;
         try self.queue.append(gpa, key);
         value.* = next;
     }
 
-    fn prepare(self: *ScopedCapabilityFacts, builder: *Typing.Builder, scope: DeclId, ty: TypeId) !void {
-        try self.prepareScope(builder, scope);
-        try self.ensure(builder, .{ .scope = scope, .ty = ty });
-        var at: usize = 0;
-        while (at < self.pending.items.len) : (at += 1) {
-            const owner = self.pending.items[at];
-            const first = builder.capability_facts.first_parts.items[owner.ty.index()];
-            const count = builder.capability_facts.part_counts.items[owner.ty.index()];
-            for (builder.capability_facts.edges.items[first..][0..count]) |part| {
-                const child: ScopedCapabilityKey = .{ .scope = scope, .ty = part.child };
-                try self.ensure(builder, child);
-                // Reopened frozen rows cannot change while types only append.
-                // They supply a value without needing a mutable reverse edge.
-                if (self.nodes.get(child)) |found_node| {
-                    const index: u32 = @intCast(self.edges.items.len);
-                    try self.edges.append(builder.gpa, .{ .owner = owner, .next = found_node.head });
-                    self.nodes.getPtr(child).?.head = index;
-                }
-                try self.strengthen(builder.gpa, owner, self.values.get(child).?);
-            }
+    /// Links `owner` to `child` and strengthens it by what `child` answers.
+    fn link(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator, owner: Node, child: Node) !void {
+        if (self.states.getPtr(child)) |state| {
+            const index: u32 = @intCast(self.edges.items.len);
+            try self.edges.append(gpa, .{ .owner = owner, .next = state.head });
+            state.head = index;
         }
-        at = 0;
+        try self.strengthen(gpa, owner, self.answers.get(child).?);
+    }
+
+    /// Strengthens every node this preparation reached until none changes,
+    /// and records the answers in a scope's own context by scope and type.
+    fn solve(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator) !void {
+        var at: usize = 0;
         while (at < self.queue.items.len) : (at += 1) {
             const child = self.queue.items[at];
-            var edge = self.nodes.get(child).?.head;
+            var edge = self.states.get(child).?.head;
             while (edge != none) {
                 const dependent = self.edges.items[edge];
-                try self.strengthen(builder.gpa, dependent.owner, self.values.get(child).?);
+                try self.strengthen(gpa, dependent.owner, self.answers.get(child).?);
                 edge = dependent.next;
             }
+        }
+        for (self.pending.items) |reached| {
+            const scope = self.contexts.items[reached.context].scope;
+            if (scope != .none) try self.values.put(gpa, .{ .scope = scope, .ty = reached.ty }, self.answers.get(reached).?);
         }
         self.pending.clearRetainingCapacity();
         self.queue.clearRetainingCapacity();
@@ -8855,6 +8925,10 @@ pub const Typing = struct {
             };
         }
 
+        /// The declaration a renaming substitutes for, which owns no
+        /// parameter, so its by-position replacement touches none.
+        const no_owner: u32 = std.math.maxInt(u32);
+
         /// Memoized only for this immutable replacement key. Pool growth may
         /// intern answers, but a later query sees its own declaration state.
         const TypeSubstitution = struct {
@@ -8865,12 +8939,22 @@ pub const Typing = struct {
             /// The declaration whose `where` clauses a projected member is
             /// selected under, or none.
             within: DeclId = .none,
+            /// Parameters to replace, each by what it maps to, in place of
+            /// `decl`'s by position; `decl` is then `no_owner`.
+            renaming: ?*const std.AutoHashMapUnmanaged(TypeId, TypeId) = null,
+            /// Whether `renaming` met a parameter it does not name.
+            foreign: bool = false,
             memo: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty,
 
             fn apply(self: *TypeSubstitution, builder: *Builder, ty: TypeId) std.mem.Allocator.Error!TypeId {
                 if (self.open) |table| switch (builder.get(ty)) {
                     .open_integer, .open_float, .open_type => |v| return table.resolved(v),
                     else => if (!try builder.mentionsOpen(ty)) return ty,
+                };
+                if (self.renaming) |renaming| if (builder.get(ty) == .parameter and builder.standinOf(ty) == null) {
+                    if (renaming.get(ty)) |to| return to;
+                    self.foreign = true;
+                    return ty;
                 };
                 if (builder.substitutionLeaf(ty, self.decl, self.args)) |answer| return answer;
                 if (self.memo.get(ty)) |answer| return answer;
@@ -12281,38 +12365,147 @@ pub const Typing = struct {
         /// constraints cap a capability: `where L.Entry: Discardable`.
         ///
         /// A cap is on types named at the scope's own parameters, and an
-        /// alike instantiation answered from its representative would read
-        /// the representative's arguments instead -- the template's
-        /// parameters, or another declaration's -- which the scope does not
-        /// name. So every alike instantiation `t` owns is written first, and
-        /// the scoped answer is read from its own parts. A scope whose
-        /// constraints cap nothing beyond what their subjects promise has no
-        /// scoped capabilities (`capsBeyondPromise`) and comes nowhere near
-        /// this.
+        /// alike instantiation answered from its representative owns the
+        /// representative's parts renamed. So the walk steps from an alike
+        /// instantiation to its representative with the scope's ceilings
+        /// renamed the same way, from the instantiation's arguments to the
+        /// representative's, keeping only ceilings on types held at those
+        /// arguments: the only ones its parts can hold. The renamed ceilings
+        /// are interned, so scopes whose caps rename alike -- `n` functions
+        /// each writing `where S.Item: Discardable` over one `G0[S]` -- share
+        /// one answer for the representative and everything past it.
         ///
-        /// **Bound:** one visit per type `t` owns that the scope has not
-        /// prepared yet, and one write per alike instantiation among them:
-        /// what preparing those types already visits.
+        /// `t` itself is written where it is alike, and its own parts are
+        /// prepared in the scope: a later pass takes a value of `t` apart
+        /// and asks what each part owes within the scope, and the finished
+        /// pool answers that by scope and part. A scope whose constraints
+        /// cap nothing beyond what their subjects promise has no scoped
+        /// capabilities (`capsBeyondPromise`) and comes nowhere near this.
+        ///
+        /// **Bound:** once per (scope, `t`): one write of `t` where it is
+        /// alike, one visit per type `t` owns in the scope's own context up
+        /// to the first alike instantiation on each path, and one visit per
+        /// type past it in each renamed context not reached before. A step
+        /// renames each of the context's ceilings once, in the size of its
+        /// subject, and asks `membersRead` once for each on a settled
+        /// reference. Renaming may mint the renamed subject, and minting may
+        /// drop these facts or leave the capability facts to rebuild, in
+        /// which case the walk starts again over the types now minted,
+        /// which mints nothing more.
         fn prepareScopedCapability(self: *Builder, scope: DeclId, t: TypeId) !void {
-            var pending: std.ArrayList(TypeId) = .empty;
-            defer pending.deinit(self.gpa);
-            var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
-            defer seen.deinit(self.gpa);
-            try pending.append(self.gpa, t);
-            while (pending.pop()) |ty| {
-                if (self.scoped_capability_facts.values.contains(.{ .scope = scope, .ty = ty })) continue;
-                if ((try seen.getOrPut(self.gpa, ty)).found_existing) continue;
-                if (self.alikeSource(ty) != null) {
-                    try self.ensureFilled(ty);
-                    try self.settleCapabilities();
-                }
-                const facts = &self.capability_facts;
-                if (!facts.isRecorded(ty)) continue;
-                const first = facts.first_parts.items[ty.index()];
-                const count = facts.part_counts.items[ty.index()];
-                for (facts.edges.items[first..][0..count]) |part| try pending.append(self.gpa, part.child);
+            if (self.scoped_capability_facts.roots.contains(.{ .scope = scope, .ty = t })) return;
+            if (self.alikeSource(t) != null) try self.ensureFilled(t);
+            // Bringing the capability facts up to the pool may drop these
+            // facts, so it is done before the walk, and again, with the walk,
+            // wherever renaming left the capability facts to be rebuilt.
+            while (true) {
+                try self.settleCapabilities();
+                if (try self.reachScopedCapability(scope, t) and
+                    !self.capability_facts.dirty and self.capability_facts.pending.items.len == 0) break;
             }
-            try self.scoped_capability_facts.prepare(self, scope, t);
+            const facts = &self.scoped_capability_facts;
+            try facts.solve(self.gpa);
+            try facts.roots.put(self.gpa, .{ .scope = scope, .ty = t }, {});
+        }
+
+        /// Reaches every node `t` owns within `scope`'s context, linking each
+        /// to what it owns. False where the facts were dropped on the way.
+        fn reachScopedCapability(self: *Builder, scope: DeclId, t: TypeId) !bool {
+            const facts = &self.scoped_capability_facts;
+            const generation = facts.generation;
+            const context = try facts.contextOf(self, scope);
+            try facts.ensure(self, .{ .context = context, .ty = t });
+            if (self.alikeSource(t) == null and self.capability_facts.isRecorded(t)) {
+                const first = self.capability_facts.first_parts.items[t.index()];
+                const count = self.capability_facts.part_counts.items[t.index()];
+                for (self.capability_facts.edges.items[first..][0..count]) |part|
+                    try facts.ensure(self, .{ .context = context, .ty = part.child });
+            }
+            var at: usize = 0;
+            while (at < facts.pending.items.len) : (at += 1) {
+                const owner = facts.pending.items[at];
+                if (self.alikeSource(owner.ty)) |source| {
+                    const step = try self.scopedStep(owner, source) orelse return false;
+                    try facts.ensure(self, step);
+                    try facts.link(self.gpa, owner, step);
+                    continue;
+                }
+                if (!self.capability_facts.isRecorded(owner.ty)) continue;
+                const first = self.capability_facts.first_parts.items[owner.ty.index()];
+                const count = self.capability_facts.part_counts.items[owner.ty.index()];
+                for (self.capability_facts.edges.items[first..][0..count]) |part| {
+                    const child: ScopedCapabilityFacts.Node = .{ .context = owner.context, .ty = part.child };
+                    try facts.ensure(self, child);
+                    try facts.link(self.gpa, owner, child);
+                }
+            }
+            return facts.generation == generation;
+        }
+
+        /// The node an alike instantiation's node steps to: its
+        /// representative `source`, within the context renamed from the
+        /// instantiation's arguments to the representative's. A ceiling no
+        /// part can hold is left out: one on a type holding a parameter that
+        /// is not among the instantiation's arguments, and one on a settled
+        /// reference read through an argument whose member the template's
+        /// parts do not read there (`membersRead`). Null where renaming
+        /// dropped the facts.
+        fn scopedStep(self: *Builder, owner: ScopedCapabilityFacts.Node, source: TypeId) !?ScopedCapabilityFacts.Node {
+            const facts = &self.scoped_capability_facts;
+            const generation = facts.generation;
+            if (!self.capability_facts.isRecorded(source)) {
+                try self.settleFactsOf(source);
+                if (facts.generation != generation) return null;
+            }
+            const instance = self.instanceOf(owner.ty).?;
+            var renaming: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty;
+            defer renaming.deinit(self.gpa);
+            var positions: std.AutoHashMapUnmanaged(TypeId, u32) = .empty;
+            defer positions.deinit(self.gpa);
+            const into = self.instanceOf(source);
+            for (self.argsOf(instance), 0..) |from, i| {
+                const to = if (into) |represented| self.argsOf(represented)[i] else self.internedParameter(instance.decl.index(), @intCast(i)).?;
+                try renaming.put(self.gpa, from, to);
+                try positions.put(self.gpa, from, @intCast(i));
+            }
+            const context = facts.contexts.items[owner.context];
+            const held = try self.gpa.dupe(ScopedCapabilityFacts.Ceiling, facts.context_ceilings.items[context.first..][0..context.len]);
+            defer self.gpa.free(held);
+            var renamed: std.ArrayList(ScopedCapabilityFacts.Ceiling) = .empty;
+            defer renamed.deinit(self.gpa);
+            for (held) |ceiling| {
+                // A settled reference read through an argument names a type
+                // the parts hold only where they read its member there.
+                if (self.standinOf(ceiling.subject) != null) {
+                    var root = ceiling.subject;
+                    while (self.standinOf(root)) |read| root = read.held;
+                    if (positions.get(root)) |position| {
+                        const reads = try self.membersRead(instance.decl.index(), instance.template, position);
+                        if (facts.generation != generation) return null;
+                        const members = self.read_members.items[reads.first..][0..reads.len];
+                        if (!reads.every and !sortedHolds(members, self.memberReadThrough(ceiling.subject, root))) continue;
+                    }
+                }
+                const subject = try self.renamedSubject(ceiling.subject, &renaming);
+                if (facts.generation != generation) return null;
+                if (subject) |kept| try renamed.append(self.gpa, .{ .subject = kept, .ceiling = ceiling.ceiling });
+            }
+            std.mem.sort(ScopedCapabilityFacts.Ceiling, renamed.items, {}, struct {
+                fn less(_: void, a: ScopedCapabilityFacts.Ceiling, b: ScopedCapabilityFacts.Ceiling) bool {
+                    return @intFromEnum(a.subject) < @intFromEnum(b.subject);
+                }
+            }.less);
+            return .{ .context = try facts.internContext(self.gpa, renamed.items), .ty = source };
+        }
+
+        /// `subject` with each parameter `renaming` names replaced by what it
+        /// maps to, or null where `subject` holds a parameter it does not
+        /// name.
+        fn renamedSubject(self: *Builder, subject: TypeId, renaming: *const std.AutoHashMapUnmanaged(TypeId, TypeId)) std.mem.Allocator.Error!?TypeId {
+            var substitution: TypeSubstitution = .{ .decl = no_owner, .args = &.{}, .renaming = renaming };
+            defer substitution.memo.deinit(self.gpa);
+            const renamed = try substitution.apply(self, subject);
+            return if (substitution.foreign) null else renamed;
         }
 
         pub fn prepareTraitLookupWithin(self: *Builder, owner: DeclId, trait: DeclId, t: TypeId) !void {
