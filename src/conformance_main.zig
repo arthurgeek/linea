@@ -4962,7 +4962,8 @@ fn nestedCrossBoundTemplatesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
 }
 
 /// The ways `templateChainUnderFunctionsModule` has each function promise
-/// more of its parameter than the chain's templates promise of theirs.
+/// more of its parameter than the chain's templates promise of theirs, or
+/// cap what it holds.
 const ChainPromise = enum {
     /// `where S.Item: Owned`, on the member the last template holds.
     read_member,
@@ -4970,6 +4971,9 @@ const ChainPromise = enum {
     unread_member,
     /// `[S: Source + Discardable]`, on the parameter itself.
     discardable,
+    /// `where S.Item: Discardable`, a cap on the member the last template
+    /// holds, so each function is a scope with capabilities of its own.
+    capping,
 };
 
 /// `n` generic structures, each holding the next at its own parameter, the
@@ -4989,6 +4993,7 @@ fn templateChainUnderFunctionsModule(comptime promise: ChainPromise) fn (std.mem
                 .read_member => try w.print("fn _f{d}[S: Source](sink g: G0[S]) -> G0[S]\nwhere S.Item: Owned {{\n    g\n}}\n\n", .{i}),
                 .unread_member => try w.print("fn _f{d}[S: Source](sink g: G0[S]) -> G0[S]\nwhere S.Other: Owned {{\n    g\n}}\n\n", .{i}),
                 .discardable => try w.print("fn _f{d}[S: Source + Discardable](sink g: G0[S]) -> G0[S] {{\n    g\n}}\n\n", .{i}),
+                .capping => try w.print("fn _f{d}[S: Source](sink _g: G0[S]) -> UInt8\nwhere S.Item: Discardable {{\n    0\n}}\n\n", .{i}),
             };
             try w.writeAll("fn main() -> UInt8 {\n    0\n}\n");
             return out.toOwnedSlice();
@@ -6946,6 +6951,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "a template chain under functions promising a member it reads", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.read_member)) },
     .{ .name = "a template chain under functions promising a member it never reads", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.unread_member)) },
     .{ .name = "a template chain under functions bounding their parameter Discardable", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.discardable)) },
+    .{ .name = "a template chain under functions capping the member it reads Discardable", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.capping)) },
     .{ .name = "members promised through templates each reading one", .n = 16000, .cost = throughTheLoader(promisedMembersModule(.one_per_template)) },
     .{ .name = "members promised through one template reading them all", .n = 32000, .cost = throughTheLoader(promisedMembersModule(.one_template)) },
     .{ .name = "members promised by a template's own where clause", .n = 32000, .cost = throughTheLoader(promisedMembersModule(.template_where)) },
