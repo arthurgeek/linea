@@ -2878,9 +2878,9 @@ const Analysis = struct {
         return null;
     }
 
-    /// The part `head` selects in `held`. An alike-template instantiation's
-    /// part is read from its template: the paths, capabilities and coverage
-    /// asked of the part are the same for the template's renamed part.
+    /// The part `head` selects in `held`. An alike instantiation's part is
+    /// read from its representative: the paths, capabilities and coverage
+    /// asked of the part are the same for the representative's renamed part.
     fn childType(self: *const Analysis, held: types.TypeId, head: u96) ?types.TypeId {
         const ty = self.typing.partsSource(held);
         const shape = self.typing.get(ty);

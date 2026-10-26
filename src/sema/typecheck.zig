@@ -282,6 +282,9 @@ fn typecheckInternal(
 
         var builder = if (retained) |prefix| try Typing.Builder.reopen(gpa, &prefix.typing) else try Typing.Builder.init(gpa);
         builder.implementations_settled = false;
+        // The declarations checked next declare templates of their own, whose
+        // parts are not complete until `templatesComplete`.
+        builder.templates_complete = false;
         errdefer builder.deinit();
 
         var folds = try @import("../support/table.zig").Table(ExprId, Fold).of(gpa, ast.exprCount(), .not_constant);
@@ -1183,6 +1186,7 @@ fn typecheckInternal(
     // settled reference through a parameter stands for whatever an
     // implementation settles the name to, and an instantiation minted while
     // that member was still being read took poison for it.
+    try c.builder.templatesComplete();
     try c.builder.refillInstances();
     try c.checkRefinements();
     try c.checkStorageCertificates(type_of_decl);
@@ -6367,7 +6371,7 @@ const Checker = struct {
         starts[self.ast.declCount()] = @intCast(contextual.items.len);
         for (capability_scopes, 0..) |*scope, index| {
             for (contextual.items[starts[index]..starts[index + 1]]) |constraint| {
-                if (constraint.demand.requirement == .unrestricted) continue;
+                if (!self.builder.capsBeyondPromise(constraint.subject, constraint.demand.requirement)) continue;
                 scope.* = node.DeclId.at(@intCast(index));
                 break;
             }
@@ -12568,8 +12572,8 @@ const Checker = struct {
     /// edge broken there and report the cycle a second time. An array is
     /// interned, so its element type is shared by every other use of it and
     /// its edge is never the one. A cycle of instantiations alone breaks at
-    /// the last of them. The walk steps from an alike-template instantiation
-    /// to its template, so a part holding one reaches the template it names.
+    /// the last of them. The walk steps from an alike instantiation to its
+    /// representative, so a part holding one reaches what answers for it.
     fn breakCycle(self: *Checker, cycle: Cycle) std.mem.Allocator.Error!void {
         var edge: ?usize = null;
         var at = cycle.path.len;
@@ -28152,10 +28156,10 @@ const Checker = struct {
             n.floor = @min(n.floor, floor);
             n.height = @max(n.height, height);
             const first: u32 = @intCast(walk.edges.items.len);
-            // An alike-template instantiation owns what its template owns,
-            // renamed, so the template is its one edge and its parts are not
-            // written for the walk.
-            if (c.builder.alikeTemplate(ty)) |template| try walk.edges.append(gpa, template) else switch (c.builder.get(ty)) {
+            // An alike instantiation owns what its representative owns,
+            // renamed, so the representative is its one edge and its parts
+            // are not written for the walk.
+            if (c.builder.alikeSource(ty)) |source| try walk.edges.append(gpa, source) else switch (c.builder.get(ty)) {
                 .struct_ => for (0..c.builder.fieldCount(ty)) |k| try walk.edges.append(gpa, try c.builder.fieldType(ty, @intCast(k))),
                 .enum_ => for (0..c.builder.variantCount(ty)) |v| {
                     for (0..try c.builder.variantFieldCount(ty, @intCast(v))) |f|

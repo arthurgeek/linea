@@ -694,8 +694,8 @@ const Checker = struct {
     /// of a body stands for every instantiation, which is why the pessimistic
     /// answer is the sound one.
     ///
-    /// An alike-template instantiation is taken apart as its template is:
-    /// its parts are the template's renamed, and so is what each owes.
+    /// An alike instantiation is taken apart as its representative is: its
+    /// parts are the representative's renamed, and so is what each owes.
     fn takingItApartDischarges(self: *const Checker, held: TypeId) bool {
         const t = self.typing.partsSource(held);
         if (self.typing.get(t) == .parameter) return false;

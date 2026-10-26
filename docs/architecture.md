@@ -741,35 +741,43 @@ reference is minted with its parts unwritten (ADR 0248); `Instance.parts`
 records which, and `Builder.fillInstance` is the one routine that writes an
 instantiation's parts, for a ground one as it is minted, for an unwritten one
 on first read, and for every written one in `refillInstances`. An
-alike-template instantiation (ADR 0250) -- its arguments distinct parameters,
-each promising what the template's parameter at its position promises, which
-`Builder.watchAlike` decides at mint and `decideAlikeAgain` position by
-position whenever one of those parameters gains a promise, into
-`Instance.alike`; a position compares the two parameters' bounds with the
-template's parameters read as the arguments, and fails where a settled
-reference read through either was promised `Owned` (`promised_through`) -- is answered from its
-template while its parts are unwritten: `Typing.partsSource` is the one
-routine every walk over what a type owns steps through, the capability and
-dependency tables record it as one edge to its template, the cycle walk and
-the walk over what types own step to the template, and writing a type does
-not write such a part. Every other unwritten part is written with its
-holder, so a walk over parts meets no unwritten type but an alike-template
-one. The builder's part accessors write what they read, and its capability,
-dependency and writer queries write what they cannot answer from a template;
-the three fact tables record a type's edges once its parts are written and
-leave an unwritten part that is not alike for the builder to write before
-answering, except that the writer table records an unwritten instantiation
-by its arguments, which usually settle it. Within a scope whose constraints
-cap a capability, `prepareScopedCapability` writes every alike-template
-instantiation a question reaches first, since the caps name the scope's own
-parameters and not the template's. `fillMinted` writes every instantiation
-the checker minted before the pool is handed on, following only parts that
-are not alike, so the type of every recorded expression, binding and
-signature is written and an alike-template instantiation stays unwritten
-only as a part. The finished `Typing` answers what such a part owns through
-its tables and `partsSource` (`readsFacts`) and refuses a read of any
-unwritten type's parts or layout (`readsParts`); lowering's layout table, the
-layout oracle and corpus coverage pass over one.
+alike instantiation (ADR 0250) -- one whose arguments are distinct
+parameters promising, position for position and once each candidate's
+arguments are written as their positions, what another candidate of its
+declaration promises -- is answered from its class's representative while
+its parts are unwritten, the template wherever the template is alike it.
+`Builder.watchAlike` makes each minted instantiation and its template
+candidates; `shapeOf` interns what the argument at each position promises,
+its requirement, `Integer` and `Owned`, renamed bounds, and the settled
+references read through it promised `Owned` whose member the template's
+parts read (`templateReads`, which reads every member until
+`templatesComplete`); `decideAlikeAgain` recomputes the positions listed
+under a parameter whose promise changed and moves each candidate whose
+shape changed to the class its shapes name, and `Instance.class` with
+`Typing.alike_sources` is the decision both the builder and the finished
+pool read. `Typing.partsSource` is the one routine every walk over what a
+type owns steps through: the capability and dependency tables record an
+alike instantiation as one edge to its representative, the cycle walk and
+the walk over what types own step to it, and writing a type does not write
+such a part. Every other unwritten part is written with its holder, so a
+walk over parts meets no unwritten type but an alike one. The builder's part
+accessors write what they read, and its capability, dependency and writer
+queries write what they cannot answer from a representative; the three fact
+tables record a type's edges once its parts are written and leave an
+unwritten part that is not alike for the builder to write before answering,
+except that the writer table records an unwritten instantiation by its
+arguments, which usually settle it. Within a scope whose constraints cap a
+capability beyond what their subjects promise (`capsBeyondPromise`),
+`prepareScopedCapability` writes every alike instantiation a question
+reaches first, since the caps name the scope's own parameters and not the
+representative's arguments. `fillMinted` writes every instantiation the
+checker minted before the pool is handed on, following only parts that are
+not alike, so the type of every recorded expression, binding and signature
+is written and an alike instantiation stays unwritten only as a part. The
+finished `Typing` answers what such a part owns through its tables and
+`partsSource` (`readsFacts`) and refuses a read of any unwritten type's
+parts or layout (`readsParts`); lowering's layout table, the layout oracle
+and corpus coverage pass over one.
 `aliasedType` is the one place an alias becomes the type it names, read in the
 alias's module with its parameters in scope; `appliedAlias` answers every
 written name that reaches an alias and substitutes its arguments, and a path's

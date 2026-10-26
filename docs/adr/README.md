@@ -90,7 +90,7 @@ true of a different implementation.
 | [0046](0046-the-universe-of-an-instantiation-is-computed.md) | The universe of an instantiation is computed | Accepted; refines 0034, refined by 0051 and 0123; classification superseded by 0124 |
 | [0047](0047-instantiation-is-a-backend-concern.md) | Instantiation is a backend concern | Accepted; extended by 0142; ordinary-fields clause superseded by 0248 |
 | [0248](0248-an-instantiation-holding-a-parameter-is-written-when-read.md) | An instantiation holding a parameter is written when it is read | Accepted; supersedes the ordinary-fields clause of 0047; written-parts clause superseded by 0250 |
-| [0250](0250-an-alike-template-instantiation-is-answered-from-its-template.md) | An alike-template instantiation is answered from its template | Accepted; supersedes the written-parts clause of 0248; extends 0241 |
+| [0250](0250-an-alike-instantiation-is-answered-from-one-representative.md) | An alike instantiation is answered from one representative | Accepted; supersedes the written-parts clause of 0248; extends 0241 |
 | [0051](0051-a-part-obliges-when-no-argument-can-remove-it.md) | A part obliges when it is Linear for a reason no argument can remove | Accepted; refines 0046; superseded by 0124 |
 | [0053](0053-exclusivity-is-triggered-by-mutation.md) | Exclusivity is triggered by mutation, not by the marker | Accepted; supersedes the exclusivity clause of 0025 |
 | [0054](0054-the-bound-is-on-height-and-covers-written-types.md) | The nesting bound is on height, and a written type answers to it | Accepted; supersedes 0042 |
