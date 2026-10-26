@@ -1,0 +1,9 @@
+error[O-Leak]: `_pair` (a linear `Pair[K, J]`) is still owned when this path leaves
+  --> tests/generics/a_cap_follows_its_argument_through_a_template_that_swaps_its_parameters.lin:30:38
+   |
+30 | fn _close[K: Ledger, J: Ledger](sink _pair: Pair[K, J]) -> UInt8
+   |                                      ^^^^^ never settled on the path that reaches the end of this block
+33 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it
