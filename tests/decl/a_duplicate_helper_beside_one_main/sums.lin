@@ -1,0 +1,4 @@
+// A second `total` in the same module as the first.
+fn total() -> UInt8 {
+    3
+}

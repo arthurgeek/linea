@@ -700,6 +700,10 @@ pub const Resolution = struct {
     /// not declare exactly one. Decided once, where the rule that there is
     /// exactly one is enforced.
     entry: DeclId = DeclId.none,
+    /// Whether the root module declares more than one `main`. That is the one
+    /// diagnostic reported about it, so the passes after resolution check it
+    /// without reporting.
+    several_entry_points: bool = false,
     /// Every `test fn` the program itself declares, in the order the walk
     /// reached them.
     ///
@@ -3778,11 +3782,18 @@ fn resolveInternal(
     gpa: std.mem.Allocator,
     program: *const Program,
     source_interner: *const Interner,
-    sink: *Sink,
+    reported: *Sink,
     purpose: Purpose,
     captured_seed: ?*?Seed,
     resumed: ?*const Resumed,
 ) !ResolveResult {
+    // A module declaring several `main`s is several programs in one
+    // directory. Every duplicate name and every later refusal there depends on
+    // which of two declarations a name reached, so the one [S-Entry] is the
+    // whole report, and the walk below reports into a sink nobody reads.
+    const several_entry_points = try refuseSeveralEntryPoints(program, reported);
+    var unread = Sink.init(reported.arena);
+    const sink = if (several_entry_points) &unread else reported;
     var expanded: ExpandedProgram = if (resumed) |input| input.expanded else undefined;
     var expanded_ready = resumed != null;
     errdefer if (expanded_ready) expanded.deinit(gpa);
@@ -4742,6 +4753,7 @@ fn resolveInternal(
         .referenced = finished_referenced,
         .binding_of_stmt = by_stmt,
         .entry = r.entry,
+        .several_entry_points = several_entry_points,
         .tests = tests,
         .param_starts = param_starts,
         .params_of = params_of,
@@ -5160,6 +5172,55 @@ fn appendMembers(
 /// three times with a different subset of the tests each time -- the exemption
 /// from [N-Unused] asked only for the name, so a `struct main` or a `main`
 /// inside an `impl` was exempted from a rule it was never entitled to escape.
+/// [S-Entry] for a program whose root module declares more than one `main`,
+/// reported once at the first, and whether it was. A directory is one module,
+/// so two programs kept side by side in one directory are this mistake, and
+/// naming one file is the way to build one of them. A library's `main`s are
+/// refused by `refuseLibraryEntryPoints` instead.
+pub fn refuseSeveralEntryPoints(program: *const Program, sink: *Sink) !bool {
+    if (program.kind == .library) return false;
+    const ast = &program.ast;
+    const root = program.root();
+    var count: usize = 0;
+    var first: DeclId = DeclId.none;
+    for (root.decls.start..root.decls.end) |i| {
+        const d = DeclId.at(@intCast(i));
+        if (!namesTheEntryPoint(ast, d)) continue;
+        if (first == DeclId.none) first = d;
+        count += 1;
+    }
+    if (count < 2) return false;
+    const file = ast.fileOfDecl(first);
+    const path = for (ast.parts) |part| {
+        if (part.file == file) break part.path;
+    } else "";
+    const labels = try sink.arena.alloc(Label, 1);
+    labels[0] = .{ .file = file, .span = ast.declNameSpan(first), .message = try std.fmt.allocPrint(sink.arena, "the first of {d}", .{count}), .style = .primary };
+    if (root.files.len < 2) {
+        try sink.add(.{
+            .severity = .err,
+            .code = .s_entry,
+            .message = try std.fmt.allocPrint(sink.arena, "a module has one `main`, and `{s}` declares {d}", .{ path, count }),
+            .labels = labels,
+        });
+        return true;
+    }
+    const dir = std.fs.path.dirnamePosix(path) orelse ".";
+    const remarks = try sink.arena.alloc([]const u8, 1);
+    remarks[0] = try std.fmt.allocPrint(sink.arena, "a directory is one module: every `.lin` file in `{s}/` is part of it", .{dir});
+    const notes = try sink.arena.alloc([]const u8, 1);
+    notes[0] = try std.fmt.allocPrint(sink.arena, "test one program with `linea test {s}`", .{path});
+    try sink.add(.{
+        .severity = .err,
+        .code = .s_entry,
+        .message = try std.fmt.allocPrint(sink.arena, "a module has one `main`, and `{s}/` declares {d}", .{ dir, count }),
+        .labels = labels,
+        .remarks = remarks,
+        .notes = notes,
+    });
+    return true;
+}
+
 pub fn namesTheEntryPoint(ast: *const Ast, d: DeclId) bool {
     if (ast.declTag(d) != .function) return false;
     // A test is called by the test runner and nothing else, whatever it is
@@ -7426,8 +7487,6 @@ const Resolver = struct {
         const root = self.program.root();
         var found: u32 = 0;
         var entry: DeclId = DeclId.at(0);
-        var first_main: DeclId = DeclId.none;
-        var second_main: DeclId = DeclId.none;
         // A test named `main`, which a reader may have meant as the entry
         // point. Kept only to say why it is not one.
         var test_main: DeclId = DeclId.none;
@@ -7442,7 +7501,6 @@ const Resolver = struct {
             }
             found += 1;
             entry = d;
-            if (first_main == DeclId.none) first_main = d else if (second_main == DeclId.none) second_main = d;
         }
         // Recorded whatever the count, so lowering reads the selection rather
         // than making it: a program with no entry point or with two is
@@ -7475,20 +7533,9 @@ const Resolver = struct {
 
         const label = try std.fmt.allocPrint(self.sink.arena, "found {d}", .{found});
 
-        // At the second `main`, which is the one to remove or rename, with the
-        // first beside it: the count alone says nothing about which two.
-        if (second_main != DeclId.none) {
-            const labels = try self.sink.arena.alloc(Label, 2);
-            labels[0] = .{ .file = self.ast.fileOfDecl(second_main), .span = self.ast.declNameSpan(second_main), .message = label, .style = .primary };
-            labels[1] = .{ .file = self.ast.fileOfDecl(first_main), .span = self.ast.declNameSpan(first_main), .message = "the first is declared here", .style = .secondary };
-            try self.sink.add(.{
-                .severity = .err,
-                .code = .s_entry,
-                .message = "a program declares exactly one `main`",
-                .labels = labels,
-            });
-            return;
-        }
+        // Several are refused once, before the walk, by
+        // `refuseSeveralEntryPoints`.
+        if (found > 1) return;
 
         if (test_main != DeclId.none) {
             try self.sink.addError(
@@ -17151,7 +17198,8 @@ test "a program declares exactly one main" {
         \\fn main() -> UInt8 { 1 }
         \\fn main() -> UInt8 { 2 }
     );
-    try testing.expect(two.errors > 0);
+    // One [S-Entry], and no [N-Duplicate] beside it at the same span.
+    try testing.expectEqual(@as(u32, 1), two.errors);
 }
 
 test "a variant resolves through its enum" {

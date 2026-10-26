@@ -2950,10 +2950,13 @@ pub fn exampleRoots(gpa: std.mem.Allocator, entries: []const ExampleEntry) []con
 }
 
 /// How many tests a `linea test` run reported, from its closing
-/// `N passed, M failed` line; null when the output ends otherwise.
+/// `N passed, M failed` line, or none from `no tests found in PATH`, which
+/// it prints instead where the root declares no test; null when the output
+/// ends otherwise.
 pub fn testsReported(output: []const u8) ?usize {
     const trimmed = std.mem.trimEnd(u8, output, "\n");
-    const line = trimmed[(std.mem.lastIndexOfScalar(u8, trimmed, '\n') orelse 0)..];
+    const line = std.mem.trimStart(u8, trimmed[(std.mem.lastIndexOfScalar(u8, trimmed, '\n') orelse 0)..], "\n");
+    if (std.mem.startsWith(u8, line, "no tests found in ")) return 0;
     var words = std.mem.tokenizeAny(u8, line, " ,\n");
     const passed = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
     if (!std.mem.eql(u8, words.next() orelse return null, "passed")) return null;

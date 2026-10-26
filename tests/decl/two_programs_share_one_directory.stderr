@@ -1,0 +1,8 @@
+error[S-Entry]: a module has one `main`, and `tests/decl/two_programs_share_one_directory/` declares 2
+ --> tests/decl/two_programs_share_one_directory/farewell.lin:9:4
+  |
+9 | fn main() -> Result[UInt8, io.IoError] {
+  |    ^^^^ the first of 2
+  |
+  = note: a directory is one module: every `.lin` file in `tests/decl/two_programs_share_one_directory/` is part of it
+  = help: test one program with `linea test tests/decl/two_programs_share_one_directory/farewell.lin`

@@ -322,7 +322,15 @@ without parentheses.
 exit status, and the runtime calls it
 ([ADR 0024](adr/0024-a-program-is-a-list-of-declarations.md)). A test is never
 the entry point, whatever it is named, so a program whose only `main` is a test
-declares none. A second `main` is refused where it is declared.
+declares none. A root module declaring several `main`s is refused once, at the
+first: the report reads "a module has one `main`, and `app/` declares 2". A
+directory is one module, so two programs kept side by side in one directory
+are this mistake, and the report notes it and names one file to build or test
+on its own. Every name such a module declares twice, and everything a later
+pass would say about it, depends on which of two declarations a name reached,
+so the [S-Entry] is the whole report: no [N-Duplicate] and no later diagnostic
+is reported for that module. In a module with one `main`, a name declared twice
+is an ordinary [N-Duplicate].
 
 A root built to run tests may omit the entry point; the compiler generates the
 test binary's entry point, so a module containing only tests can be tested,

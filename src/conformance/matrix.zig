@@ -635,8 +635,9 @@ test "the matrix holds every applicable cell of the three axes" {
     // itself meets each consuming operation in one call. A field and an array
     // meet the ten observations a slice offers, less `defer` for an array's
     // assignments and the lent walk in one call, and the three bare walks. A
-    // walked owner's two operations meet everything a vector's do. A handle's three operations meet the text
-    // C answers from it, and its close meets the handle lent itself.
+    // walked owner's two operations meet everything a vector's do. A handle's
+    // three operations meet the text C answers from it, and its close meets
+    // the handle lent itself.
     const vec = 10 * 12 * 8 - 3 * 12 * 2 - 2 * 10 - 12 * 1 - 10 * 1 + 7 * 3 + 3;
     const map = 6 * 3 * 8 - 2 * 3 * 2 - 6 * 1 + 4 * 1 + 2;
     const scalar = 2 * 3 * 8 - 2 * 3 - 2 * 2;
@@ -812,6 +813,10 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
             \\    .{ number = body(), held = .{} }
             \\}
             \\
+            \\
+        );
+        // A call lends the ticket itself and reads nothing through it.
+        if (cell.meeting != .one_call) try w.raw(
             \\fn redeem[F](ticket: Ticket[F]) -> UInt64 {
             \\    ticket.number
             \\}

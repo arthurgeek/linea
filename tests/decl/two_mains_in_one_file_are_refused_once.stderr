@@ -1,0 +1,5 @@
+error[S-Entry]: a module has one `main`, and `tests/decl/two_mains_in_one_file_are_refused_once.lin` declares 2
+ --> tests/decl/two_mains_in_one_file_are_refused_once.lin:5:4
+  |
+5 | fn main() -> UInt8 {
+  |    ^^^^ the first of 2
