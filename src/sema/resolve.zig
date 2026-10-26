@@ -5209,7 +5209,7 @@ pub fn refuseSeveralEntryPoints(program: *const Program, sink: *Sink) !bool {
     const remarks = try sink.arena.alloc([]const u8, 1);
     remarks[0] = try std.fmt.allocPrint(sink.arena, "a directory is one module: every `.lin` file in `{s}/` is part of it", .{dir});
     const notes = try sink.arena.alloc([]const u8, 1);
-    notes[0] = try std.fmt.allocPrint(sink.arena, "test one program with `linea test {s}`", .{path});
+    notes[0] = try std.fmt.allocPrint(sink.arena, "to build one of its programs, name its file: `{s}`", .{path});
     try sink.add(.{
         .severity = .err,
         .code = .s_entry,
