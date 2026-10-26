@@ -53,7 +53,7 @@ for the code in brackets to reach the rule itself.
 | `T-ExternHandle` | error | Calling C: [Text and bytes: `std.ffi`](11-calling-c.md#text-and-bytes-stdffi) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternHandle]` |
 | `T-For` | error | Iterating: [Four ways to walk](05-iterating.md#four-ways-to-walk) | [§4 Types](../linea-semantics.md#4-types), at `[T-For]` |
 | `T-Format` | error | Text: [Format specs: laying a value out](08-text.md#format-specs-laying-a-value-out) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[T-Format]` |
-| `T-Impl` | error | Text: [Reading text as a value](08-text.md#reading-text-as-a-value) | [§4 Types](../linea-semantics.md#4-types), at `[T-Impl]` |
+| `T-Impl` | error | Iterating: [A field whose type a trait names](05-iterating.md#a-field-whose-type-a-trait-names) | [§4 Types](../linea-semantics.md#4-types), at `[T-Impl]` |
 | `T-Index` | error | Linea in an hour: [Arrays, views and collections](01-linea-in-an-hour.md#arrays-views-and-collections) | [§4 Types](../linea-semantics.md#4-types), at `[T-Index]` |
 | `T-Infer` | error | Calling things: [Naming a type argument](02-calling-things.md#naming-a-type-argument) | [§4 Types](../linea-semantics.md#4-types), at `[T-Infer]` |
 | `T-LetElse` | error | Errors: [`let … else`: bind the value, or handle the failure right there](03-errors.md#let--else-bind-the-value-or-handle-the-failure-right-there) | [§4 Types](../linea-semantics.md#4-types), at `[T-LetElse]` |

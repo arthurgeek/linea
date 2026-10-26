@@ -1070,6 +1070,47 @@ passing its own `U` is refused with the help ``add `Owned` to `U`'s bounds``,
 just as it would be for `Copyable`. An associated type can be bounded too, in the
 function's own `where` clause: `where I.Item: Owned` under `[I: Iterator]`.
 
+An `Integer` bound says more than `Owned` does: the type is one of the
+integer types, and every integer points at nothing, so `where I.Item:
+Integer` makes `I.Item` `Owned` as well. Here `iter.extend_owned`, which
+needs its items `Owned`, keeps the readings a walk hands out:
+
+```linea
+import std.io
+import std.iter
+import std.mem
+
+use mem.Lender
+
+// Keep every item a walk hands out. `where I.Item: Integer` says the items
+// are whole numbers, and a number points at nothing, so `extend_owned`, which
+// needs its items `Owned`, may keep them.
+fn keep_all[I: Iterator, A: Allocator](inout kept: Vec[I.Item, A], inout walk: I) -> Result[(), mem.Oom]
+where I.Item: Integer {
+    match iter.extend_owned(&kept, &walk) {
+        Ok(_) => .Ok(()),
+        Err(failure) => .Err(failure.reason),
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let arena = mem.Arena.open(mem.system(), 256)
+    var log: Vec[UInt16, mem.Handle] = Vec.new_in(arena.handle())
+    var readings = [UInt16(410), 415, 420]
+    var walk = readings.as_slice().map(|sink reading| *reading)
+    if keep_all(&log, &walk).is_err() {
+        return .Ok(1)
+    }
+    readings[0] = 0
+    io.println("kept {log.length()} readings, the first {log[0]}")?
+    .Ok(0)
+}
+```
+
+```
+kept 3 readings, the first 410
+```
+
 The standard library does this for you. `Vec.append_slice` copies an `Owned`
 slice into a vector, reserving room for all of it first, and `iter.extend_owned`
 appends the items of an iterator whose items are `Owned`; neither keeps
