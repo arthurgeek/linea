@@ -1,0 +1,40 @@
+// `Zed`'s part asks whether `A0` can be discarded. `A0` holds a `G[A1]`, and
+// `G`'s part selects through `T: Discardable`, so the answer asks the same of
+// `A1`, and that of `A2`. Each question is about a different type, so none
+// is a cycle, and inside `G` the bound is what lets `Chooser[T]` select.
+trait Pick {
+    type Out
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+struct G[T: Discardable] {
+    r: Chooser[T].Out,
+}
+
+struct Zed {
+    z: Chooser[A0].Out,
+}
+
+struct A0 {
+    g: G[A1],
+}
+
+struct A1 {
+    g: G[A2],
+}
+
+struct A2 {
+    n: UInt8,
+}
+
+fn main() -> UInt8 {
+    let zed = Zed { z = 4 }
+    zed.z
+}
