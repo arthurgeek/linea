@@ -6314,6 +6314,8 @@ const Checker = struct {
                 self.traitDeclaring(d) orelse node.DeclId.none;
 
             const range = self.constraints.rangeOfDeclaration(d);
+            // The declaration's promises are decided once they are all read.
+            self.builder.holdAlikeDecisions();
             for (range.start..range.end) |at| {
                 const resolved = self.constraint_subjects[at];
                 if (resolved == .poison) continue;
@@ -6367,6 +6369,7 @@ const Checker = struct {
                     },
                 });
             }
+            try self.builder.releaseAlikeDecisions();
         }
         starts[self.ast.declCount()] = @intCast(contextual.items.len);
         for (capability_scopes, 0..) |*scope, index| {
@@ -6410,6 +6413,7 @@ const Checker = struct {
             var item: usize = if (i < self.contextual_constraints.starts.len) self.contextual_constraints.starts[i] else continue;
             self.self_at_call = if (self.ast.declIsSignature(d)) try self.signatureSelfType(d) else null;
             defer self.self_at_call = null;
+            self.builder.holdAlikeDecisions();
             for (range.start..range.end) |at| {
                 const resolved = self.constraint_subjects[at];
                 const constraint = self.constraints.records[at];
@@ -6431,6 +6435,7 @@ const Checker = struct {
                 if ((demand.owned or demand.integer) and self.ownsSubject(d, settled))
                     try self.builder.promiseOwned(settled);
             }
+            try self.builder.releaseAlikeDecisions();
         }
         if (changed) self.builder.setContextualConstraints(self.contextual_constraints);
     }

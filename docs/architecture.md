@@ -750,9 +750,10 @@ its parts are unwritten, the template wherever the template is alike it.
 candidates; `shapeOf` interns what the argument at each position promises,
 its requirement, `Integer` and `Owned`, renamed bounds, and the settled
 references read through it promised `Owned` whose member the template's
-parts read (`templateReads`, which reads every member until
+parts read (`membersRead`, which reads every member until
 `templatesComplete`); `decideAlikeAgain` recomputes the positions listed
-under a parameter whose promise changed and moves each candidate whose
+under a parameter whose promise changed, once per declaration whose clauses
+changed it and moves each candidate whose
 shape changed to the class its shapes name, and `Instance.class` with
 `Typing.alike_sources` is the decision both the builder and the finished
 pool read. `Typing.partsSource` is the one routine every walk over what a

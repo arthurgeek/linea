@@ -1,0 +1,72 @@
+// `where S.Item: Owned` promises that an item carries nothing, so a
+// `Shelf[S]`, which holds a `Box[S]` holding a `Held[S]` and a function
+// that makes another shelf, carries nothing either, and `stock` keeps no
+// observation of the shelf it pushes.
+// `restock` promises `Owned` only of `T.Other`, which no shelf holds, so a
+// shelf may still carry what its item observes, and pushing one keeps it.
+import std.io
+import std.mem
+
+use mem.Lender
+
+trait Source {
+    type Item
+    type Other
+}
+
+struct Held[S: Source] {
+    item: S.Item,
+}
+
+struct Box[S: Source] {
+    held: Held[S],
+    spare: fn() -> Shelf[S],
+}
+
+struct Shelf[S: Source] {
+    box: Box[S],
+}
+
+fn stock[S: Source, A: mem.Allocator](inout shelves: Vec[Shelf[S], A], sink shelf: Shelf[S])
+where S.Item: Owned {
+    match &shelves.push(shelf) {
+        Ok(_) => {},
+        Err(_) => panic("full"),
+    }
+}
+
+fn restock[T: Source, B: mem.Allocator](inout shelves: Vec[Shelf[T], B], sink shelf: Shelf[T])
+where T.Other: Owned {
+    match &shelves.push(shelf) {
+        Ok(_) => {},
+        Err(_) => panic("full"),
+    }
+}
+
+struct Numbers {
+    n: UInt8,
+}
+
+impl Source for Numbers {
+    type Item = UInt8
+    type Other = UInt8
+}
+
+fn shelf_of(item: UInt8) -> Shelf[Numbers] {
+    Shelf[Numbers] { box = Box[Numbers] { held = Held[Numbers] { item = item }, spare = no_shelf } }
+}
+
+fn no_shelf() -> Shelf[Numbers] {
+    panic("no spare shelf")
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 256)
+    var shelves: Vec[Shelf[Numbers], mem.Handle] = Vec.new_in(arena.handle())
+    stock(&shelves, shelf_of(3))
+    restock(&shelves, shelf_of(4))
+    let length = UInt8(shelves.length())
+    arena.release()
+    let _printed = io.println("shelves stocked: {length}")
+    length
+}

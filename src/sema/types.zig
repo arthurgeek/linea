@@ -5327,7 +5327,7 @@ const AlikePosition = struct { candidate: u32, position: u32 };
 const AlikeCandidate = struct {
     /// The instantiation, or the template.
     ty: TypeId,
-    /// The template, whose parts `Builder.templateReads` reads.
+    /// The template, whose parts `Builder.membersRead` reads.
     template: TypeId,
     decl: u32,
     is_template: bool,
@@ -5352,8 +5352,6 @@ const AlikeCandidate = struct {
 /// position. Its representative is the template where the template is a
 /// member, and otherwise any member.
 const AlikeClass = struct {
-    decl: u32,
-    key: u64,
     representative: u32,
     template: u32 = AlikeCandidate.none,
     head: u32,
@@ -5364,8 +5362,25 @@ const AlikeClass = struct {
 
 const AlikeClassKey = struct { decl: u32, key: u64 };
 
-/// One question `Builder.templateReads` answers.
-const MemberRead = struct { decl: u32, position: u32, member: u32 };
+/// A template's position, by declaration: what `Builder.membersRead`
+/// answers for.
+const ReadKey = struct { decl: u32, position: u32 };
+
+/// The members a template's parts read through the parameter at one position
+/// (`Builder.membersRead`): a sorted run of member indices in
+/// `Builder.read_members`, or every member.
+const MembersRead = struct {
+    every: bool,
+    first: u32 = 0,
+    len: u32 = 0,
+
+    const all: MembersRead = .{ .every = true };
+    const none: MembersRead = .{ .every = false };
+};
+
+/// A parameter, and a member of it read first by a settled reference
+/// promised `Owned` (`Builder.promised_members`).
+const PromisedMember = struct { parameter: TypeId, member: u32 };
 
 /// One instantiation, and what it was instantiated from.
 pub const Instance = struct {
@@ -8299,7 +8314,7 @@ pub const Typing = struct {
         alike_shape_ids: std.StringHashMapUnmanaged(u32) = .empty,
         /// Each template's candidate, by declaration, made when the first
         /// instantiation of it is watched.
-        alike_templates: std.AutoHashMapUnmanaged(u32, u32) = .empty,
+        alike_templates: std.AutoHashMapUnmanaged(u32, void) = .empty,
         /// The classes of alike candidates, and the first live class for each
         /// declaration and key, the rest chained through `next_same`.
         alike_classes: std.ArrayList(AlikeClass) = .empty,
@@ -8313,14 +8328,26 @@ pub const Typing = struct {
         /// The settled references promised `Owned` that are read through each
         /// parameter: `S.Item` under `S` once `where S.Item: Owned` is read.
         /// Each is part of the parameter's shape at a position whose
-        /// template's parts read its member (`templateReads`).
+        /// template's parts read its member (`membersRead`).
         promised_through: std.AutoHashMapUnmanaged(TypeId, std.ArrayList(TypeId)) = .empty,
-        /// Whether a template's parts, followed through every template they
-        /// instantiate at its parameter, read a member through that parameter
-        /// (`templateReads`), by template, position and member.
-        member_reads: std.AutoHashMapUnmanaged(MemberRead, bool) = .empty,
+        /// The same settled references, by parameter and the member each
+        /// reads first through it, so a shape whose template reads few
+        /// members finds their promises without a walk over the rest.
+        promised_members: std.AutoHashMapUnmanaged(PromisedMember, std.ArrayList(TypeId)) = .empty,
+        /// Every settled reference listed in `promised_through`.
+        promised_standins: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
+        /// The members a template's parts, followed through every template
+        /// they instantiate at its parameter, read through that parameter
+        /// (`membersRead`), by template and position.
+        member_reads: std.AutoHashMapUnmanaged(ReadKey, MembersRead) = .empty,
+        /// The runs `member_reads` names.
+        read_members: std.ArrayList(u32) = .empty,
+        /// How many holds `holdAlikeDecisions` has open, and the parameters
+        /// whose decisions wait for the last to be released.
+        alike_holds: u32 = 0,
+        alike_pending: std.AutoArrayHashMapUnmanaged(TypeId, void) = .empty,
         /// Whether every template's parts are complete (`templatesComplete`),
-        /// so `templateReads` may answer that a member is not read. Before,
+        /// so `membersRead` may answer that a member is not read. Before,
         /// every member is read.
         templates_complete: bool = false,
         /// The interpolations substitution minted, and the pieces each holds.
@@ -9252,8 +9279,8 @@ pub const Typing = struct {
                 const own = try self.gpa.alloc(TypeId, args.len);
                 defer self.gpa.free(own);
                 for (own, 0..) |*parameter, i| parameter.* = self.internedParameter(decl, @intCast(i)).?;
-                const template = try self.addCandidate(instance.template, instance.template, decl, true, own);
-                try self.alike_templates.put(self.gpa, decl, template);
+                _ = try self.addCandidate(instance.template, instance.template, decl, true, own);
+                try self.alike_templates.put(self.gpa, decl, {});
             }
             _ = try self.addCandidate(instance.ty, instance.template, decl, false, self.argsOf(instance));
             self.settleAlikeChange();
@@ -9315,11 +9342,12 @@ pub const Typing = struct {
         /// arguments, its callable bounds, and the settled references read
         /// through it that a `where` clause promised `Owned`, where the
         /// candidate's template's parts read their member
-        /// (`templateReads`).
+        /// (`membersRead`).
         ///
-        /// **Bound:** the size of the argument's bounds and promises, and a
-        /// `templateReads` question for each promise on a settled reference
-        /// read through it.
+        /// **Bound:** the size of the argument's bounds and promises, the
+        /// members the template reads at `position` or the settled references
+        /// promised through the argument, whichever is fewer, and a sort of
+        /// the promises the shape keeps (`encodePromisedThrough`).
         fn shapeOf(self: *Builder, c: u32, position: u32) std.mem.Allocator.Error!u32 {
             const candidate = self.alike_candidates.items[c];
             const args = self.alike_args.items[candidate.first_arg..][0..candidate.arg_count];
@@ -9385,6 +9413,12 @@ pub const Typing = struct {
         /// promised `Owned` and whose member the template's parts read at
         /// `position`, each renamed, in an order that does not depend on the
         /// order the promises were read in.
+        ///
+        /// Walks whichever side is shorter: every promise through `arg`,
+        /// asking whether the template reads its member, or every member the
+        /// template reads, finding its promises through `promised_members`.
+        /// A template reading one member of a parameter promising many costs
+        /// one lookup, and so does one promise on a template reading many.
         fn encodePromisedThrough(
             self: *Builder,
             words: *std.ArrayList(u32),
@@ -9394,15 +9428,26 @@ pub const Typing = struct {
             args: []const TypeId,
         ) std.mem.Allocator.Error!void {
             const promised = self.promised_through.get(arg) orelse return words.append(self.gpa, 0);
+            const reads = try self.membersRead(candidate.decl, candidate.template, position);
+            const members = self.read_members.items[reads.first..][0..reads.len];
             var pieces: std.ArrayList(u32) = .empty;
             defer pieces.deinit(self.gpa);
             var bounds: std.ArrayList([2]u32) = .empty;
             defer bounds.deinit(self.gpa);
-            for (promised.items) |standin| {
-                if (!try self.templateReads(candidate.decl, candidate.template, position, self.memberReadThrough(standin, arg))) continue;
-                const start: u32 = @intCast(pieces.items.len);
-                try self.encodeRenamed(&pieces, standin, args);
-                try bounds.append(self.gpa, .{ start, @intCast(pieces.items.len) });
+            if (reads.every or promised.items.len <= members.len) {
+                for (promised.items) |standin| {
+                    if (!reads.every and !sortedHolds(members, self.memberReadThrough(standin, arg))) continue;
+                    const start: u32 = @intCast(pieces.items.len);
+                    try self.encodeRenamed(&pieces, standin, args);
+                    try bounds.append(self.gpa, .{ start, @intCast(pieces.items.len) });
+                }
+            } else for (members) |member| {
+                const listed = self.promised_members.get(.{ .parameter = arg, .member = member }) orelse continue;
+                for (listed.items) |standin| {
+                    const start: u32 = @intCast(pieces.items.len);
+                    try self.encodeRenamed(&pieces, standin, args);
+                    try bounds.append(self.gpa, .{ start, @intCast(pieces.items.len) });
+                }
             }
             const Order = struct {
                 fn less(all: []const u32, a: [2]u32, b: [2]u32) bool {
@@ -9415,6 +9460,18 @@ pub const Typing = struct {
                 try words.append(self.gpa, piece[1] - piece[0]);
                 try words.appendSlice(self.gpa, pieces.items[piece[0]..piece[1]]);
             }
+        }
+
+        /// Whether the sorted `members` holds `member`.
+        fn sortedHolds(members: []const u32, member: u32) bool {
+            var low: usize = 0;
+            var high: usize = members.len;
+            while (low < high) {
+                const middle = low + (high - low) / 2;
+                if (members[middle] == member) return true;
+                if (members[middle] < member) low = middle + 1 else high = middle;
+            }
+            return false;
         }
 
         /// The member a settled reference reads first through `root`, the
@@ -9469,8 +9526,6 @@ pub const Typing = struct {
             const id: u32 = @intCast(self.alike_classes.items.len);
             try self.alike_sources.append(self.gpa, candidate.ty);
             try self.alike_classes.append(self.gpa, .{
-                .decl = candidate.decl,
-                .key = candidate.key,
                 .representative = c,
                 .template = if (candidate.is_template) c else AlikeCandidate.none,
                 .head = c,
@@ -9560,11 +9615,21 @@ pub const Typing = struct {
         /// never joined by comparing against a member that is about to leave
         /// it. An instantiation whose representative changes is answered from
         /// the new one, and one left in a class of its own is written by
-        /// whichever reader next needs its parts, as any other is.
+        /// whichever reader next needs its parts, as any other is. While a
+        /// hold is open (`holdAlikeDecisions`) the parameter is only noted,
+        /// and decided once when the hold is released.
         ///
         /// **Bound:** one shape per position listed under `parameter`, and
-        /// one class lookup per candidate whose shape changed.
+        /// one class lookup per candidate whose shape changed. A
+        /// declaration's clauses are read under one hold, so the positions
+        /// at a parameter are decided once per declaration that promises
+        /// something of it, not once per promise: a function writing `n`
+        /// clauses on members of `S` decides each position at `S` once, and
+        /// a parameter's promises are all written by the declaration that
+        /// owns it, plus once when the templates are complete and once for
+        /// each subject read again (`resettleConstraintSubjects`).
         fn decideAlikeAgain(self: *Builder, parameter: TypeId) std.mem.Allocator.Error!void {
+            if (self.alike_holds > 0) return self.alike_pending.put(self.gpa, parameter, {});
             const list = self.alike_watch.get(parameter) orelse return;
             var touched: std.ArrayList(u32) = .empty;
             defer touched.deinit(self.gpa);
@@ -9591,15 +9656,35 @@ pub const Typing = struct {
             self.settleAlikeChange();
         }
 
+        /// Holds the decisions promises would ask of `decideAlikeAgain` until
+        /// the matching `releaseAlikeDecisions`, which decides each parameter
+        /// they named once. Held while one declaration's clauses are read,
+        /// so `n` clauses on members of one parameter decide its positions
+        /// once rather than `n` times, each over every earlier promise. No
+        /// question about what a type owns is asked while clauses are read.
+        pub fn holdAlikeDecisions(self: *Builder) void {
+            self.alike_holds += 1;
+        }
+
+        pub fn releaseAlikeDecisions(self: *Builder) std.mem.Allocator.Error!void {
+            self.alike_holds -= 1;
+            if (self.alike_holds > 0 or self.alike_pending.count() == 0) return;
+            const pending = try self.gpa.dupe(TypeId, self.alike_pending.keys());
+            defer self.gpa.free(pending);
+            self.alike_pending.clearRetainingCapacity();
+            for (pending) |parameter| try self.decideAlikeAgain(parameter);
+        }
+
         /// Records that every template's parts are complete, so a promise on
         /// a member no template's parts read may be left out of a shape, and
         /// decides again every position whose argument has such a promise.
-        /// Before this, `templateReads` answers that every member is read: a
+        /// Before this, `membersRead` answers that every member is read: a
         /// template's part may still be a type an implementation settles to
         /// one that reads it.
         pub fn templatesComplete(self: *Builder) std.mem.Allocator.Error!void {
             self.templates_complete = true;
             self.member_reads.clearRetainingCapacity();
+            self.read_members.clearRetainingCapacity();
             const roots = try self.gpa.alloc(TypeId, self.promised_through.count());
             defer self.gpa.free(roots);
             var keys = self.promised_through.keyIterator();
@@ -9608,77 +9693,168 @@ pub const Typing = struct {
             for (roots) |root| try self.decideAlikeAgain(root);
         }
 
-        const ReadNode = struct { read: MemberRead, template: TypeId };
+        /// Lists `standin`, a settled reference promised `Owned`, under the
+        /// parameter `root` it is read through, and under the member it reads
+        /// first there. A reference listed already is left as it is.
+        fn notePromisedThrough(self: *Builder, root: TypeId, standin: TypeId) std.mem.Allocator.Error!void {
+            if ((try self.promised_standins.getOrPut(self.gpa, standin)).found_existing) return;
+            const all = try self.promised_through.getOrPut(self.gpa, root);
+            if (!all.found_existing) all.value_ptr.* = .empty;
+            try all.value_ptr.append(self.gpa, standin);
+            const by_member = try self.promised_members.getOrPut(self.gpa, .{ .parameter = root, .member = self.memberReadThrough(standin, root) });
+            if (!by_member.found_existing) by_member.value_ptr.* = .empty;
+            try by_member.value_ptr.append(self.gpa, standin);
+        }
 
-        /// Whether `template`'s parts read `member` through its parameter at
-        /// `position`: whether a part is that parameter's `member`, or a
-        /// settled reference read through it, or an instantiation holding the
-        /// parameter whose template's parts read it in turn. A part that
-        /// holds the parameter in a form this does not take apart -- a
-        /// settled reference read through an instantiation holding it, say,
+        const ReadNode = struct { key: ReadKey, template: TypeId };
+
+        /// The members `template`'s parts read through its parameter at
+        /// `position`: each member a part reads through that parameter as a
+        /// settled reference, with those of every template a part holds at
+        /// the parameter, at its position there. A part that holds the
+        /// parameter in a form this does not take apart -- a settled
+        /// reference read through an instantiation holding it, say,
         /// `Pad[S].Out`, which an implementation may settle to `S.Item` --
         /// reads every member. Until every template is complete
         /// (`templatesComplete`), every member is read.
         ///
-        /// A search from one template over the templates its parts hold at
-        /// the parameter. One that finds no read answers for every template
-        /// it visited, and one that finds a read answers for each template on
-        /// the path to it, so each is remembered.
+        /// One search from the template over the templates its parts hold at
+        /// the parameter, which may hold one another in a cycle: the members
+        /// each strongly connected group of positions reads are its own
+        /// parts' and those of the groups it reaches, so the search finds the
+        /// groups (Tarjan's algorithm) and answers each once, from the
+        /// answers already given for what it reaches. Every position the
+        /// search visits is remembered. A position whose parts read nothing
+        /// and that reaches one answer shares that answer's run.
         ///
-        /// **Bound:** each template the search reaches is visited once, each
-        /// visit reading that template's own parts, and a remembered answer
-        /// stops a later search where it reaches it.
-        fn templateReads(self: *Builder, decl: u32, template: TypeId, position: u32, member: u32) std.mem.Allocator.Error!bool {
-            if (!self.templates_complete) return true;
-            const root: ReadNode = .{ .read = .{ .decl = decl, .position = position, .member = member }, .template = template };
-            if (self.member_reads.get(root.read)) |known| return known;
-            const Frame = struct { read: MemberRead, next: usize, end: usize, start: usize };
-            var visited: std.AutoHashMapUnmanaged(MemberRead, void) = .empty;
+        /// **Bound:** each position the search reaches is visited once, each
+        /// visit reading that template's own parts (`ownReads`), and a
+        /// remembered answer stops a later search where it reaches it. A
+        /// group's answer is written in the sum of the members its parts
+        /// read and of the answers it reaches, sorted, so the runs written
+        /// are at most the positions answered times the members their
+        /// parameter's trait declares; a chain of templates reading nothing
+        /// shares one run, and a chain whose every template reads a member of
+        /// its own writes a run per template, as long as the members read
+        /// below it.
+        fn membersRead(self: *Builder, decl: u32, template: TypeId, position: u32) std.mem.Allocator.Error!MembersRead {
+            if (!self.templates_complete) return .all;
+            const root: ReadNode = .{ .key = .{ .decl = decl, .position = position }, .template = template };
+            if (self.member_reads.get(root.key)) |known| return known;
+            // A position visited in this search, by the order it was visited
+            // in. `low` is the earliest visit reachable from it through
+            // positions not yet answered, and its own members and the
+            // answers it reaches start at `own_start` and `reached_start`.
+            const Visit = struct { key: ReadKey, low: u32, open: bool, every: bool, own_start: u32, reached_start: u32 };
+            const Frame = struct { visit: u32, edges_start: u32, next: u32 };
+            var visits: std.ArrayList(Visit) = .empty;
+            defer visits.deinit(self.gpa);
+            var visited: std.AutoHashMapUnmanaged(ReadKey, u32) = .empty;
             defer visited.deinit(self.gpa);
+            var open: std.ArrayList(u32) = .empty;
+            defer open.deinit(self.gpa);
             var frames: std.ArrayList(Frame) = .empty;
             defer frames.deinit(self.gpa);
             var edges: std.ArrayList(ReadNode) = .empty;
             defer edges.deinit(self.gpa);
-            try visited.put(self.gpa, root.read, {});
-            const found: ?MemberRead = found: {
-                if (try self.expandRead(root, &edges)) break :found null;
-                try frames.append(self.gpa, .{ .read = root.read, .start = 0, .next = 0, .end = edges.items.len });
-                while (frames.items.len > 0) {
-                    const top = &frames.items[frames.items.len - 1];
-                    if (top.next == top.end) {
-                        edges.shrinkRetainingCapacity(top.start);
-                        _ = frames.pop();
-                        continue;
-                    }
+            var owns: std.ArrayList(u32) = .empty;
+            defer owns.deinit(self.gpa);
+            var reached: std.ArrayList(MembersRead) = .empty;
+            defer reached.deinit(self.gpa);
+
+            var enter: ?ReadNode = root;
+            while (true) {
+                if (enter) |entered| {
+                    enter = null;
+                    const id: u32 = @intCast(visits.items.len);
+                    try visited.put(self.gpa, entered.key, id);
+                    const own_start: u32 = @intCast(owns.items.len);
+                    const edges_start: u32 = @intCast(edges.items.len);
+                    const every = try self.ownReads(entered, &edges, &owns);
+                    try visits.append(self.gpa, .{
+                        .key = entered.key,
+                        .low = id,
+                        .open = true,
+                        .every = every,
+                        .own_start = own_start,
+                        .reached_start = @intCast(reached.items.len),
+                    });
+                    try open.append(self.gpa, id);
+                    try frames.append(self.gpa, .{ .visit = id, .edges_start = edges_start, .next = edges_start });
+                }
+                const top = &frames.items[frames.items.len - 1];
+                if (top.next < edges.items.len) {
                     const child = edges.items[top.next];
                     top.next += 1;
-                    if (self.member_reads.get(child.read)) |known| {
-                        if (known) break :found child.read;
-                        continue;
-                    }
-                    if ((try visited.getOrPut(self.gpa, child.read)).found_existing) continue;
-                    const start = edges.items.len;
-                    if (try self.expandRead(child, &edges)) break :found child.read;
-                    try frames.append(self.gpa, .{ .read = child.read, .start = start, .next = start, .end = edges.items.len });
+                    if (self.member_reads.get(child.key)) |known| {
+                        try reached.append(self.gpa, known);
+                    } else if (visited.get(child.key)) |at| {
+                        // Unanswered and visited, so open: in this group.
+                        visits.items[top.visit].low = @min(visits.items[top.visit].low, at);
+                    } else enter = child;
+                    continue;
                 }
-                var reads = visited.keyIterator();
-                while (reads.next()) |read| try self.member_reads.put(self.gpa, read.*, false);
-                return false;
-            };
-            for (frames.items) |frame| try self.member_reads.put(self.gpa, frame.read, true);
-            try self.member_reads.put(self.gpa, root.read, true);
-            if (found) |read| try self.member_reads.put(self.gpa, read, true);
-            return true;
+                const done = frames.pop().?;
+                edges.shrinkRetainingCapacity(done.edges_start);
+                const visit = visits.items[done.visit];
+                if (visit.low != done.visit) {
+                    const parent = &visits.items[frames.items[frames.items.len - 1].visit];
+                    parent.low = @min(parent.low, visit.low);
+                    continue;
+                }
+                // `done.visit` heads a group: every open position from it on.
+                const group_start = std.mem.lastIndexOfScalar(u32, open.items, done.visit).?;
+                var every = false;
+                for (open.items[group_start..]) |member| every = every or visits.items[member].every;
+                const answer = try self.mergeReads(every, owns.items[visit.own_start..], reached.items[visit.reached_start..]);
+                for (open.items[group_start..]) |member| {
+                    visits.items[member].open = false;
+                    try self.member_reads.put(self.gpa, visits.items[member].key, answer);
+                }
+                open.shrinkRetainingCapacity(group_start);
+                owns.shrinkRetainingCapacity(visit.own_start);
+                reached.shrinkRetainingCapacity(visit.reached_start);
+                if (frames.items.len == 0) return answer;
+                try reached.append(self.gpa, answer);
+            }
         }
 
-        /// Whether one of `from`'s template's own parts reads the member
-        /// through the parameter, and, in `edges`, each template a part holds
-        /// at the parameter, at its position there.
+        /// The answer for a group of positions whose parts read `owns`, or
+        /// every member where `every`, and that reach the answers `reached`.
+        fn mergeReads(self: *Builder, every: bool, owns: []const u32, reached: []const MembersRead) std.mem.Allocator.Error!MembersRead {
+            if (every) return .all;
+            var shared: ?MembersRead = null;
+            var alone = owns.len == 0;
+            for (reached) |answer| {
+                if (answer.every) return .all;
+                if (answer.len == 0) continue;
+                if (shared) |one| {
+                    if (one.first != answer.first or one.len != answer.len) alone = false;
+                } else shared = answer;
+            }
+            if (alone) return shared orelse .none;
+            var members: std.ArrayList(u32) = .empty;
+            defer members.deinit(self.gpa);
+            try members.appendSlice(self.gpa, owns);
+            for (reached) |answer| try members.appendSlice(self.gpa, self.read_members.items[answer.first..][0..answer.len]);
+            std.mem.sort(u32, members.items, {}, std.sort.asc(u32));
+            const first: u32 = @intCast(self.read_members.items.len);
+            for (members.items, 0..) |member, k| {
+                if (k > 0 and members.items[k - 1] == member) continue;
+                try self.read_members.append(self.gpa, member);
+            }
+            return .{ .every = false, .first = first, .len = @as(u32, @intCast(self.read_members.items.len)) - first };
+        }
+
+        /// Whether one of `from`'s template's own parts reads every member
+        /// through the parameter; otherwise, in `owns`, each member a part
+        /// reads through it, and in `edges` each template a part holds at the
+        /// parameter, at its position there.
         ///
         /// **Bound:** one visit per distinct type among the template's parts
         /// and what they hold.
-        fn expandRead(self: *Builder, from: ReadNode, edges: *std.ArrayList(ReadNode)) std.mem.Allocator.Error!bool {
-            const held = self.internedParameter(from.read.decl, from.read.position) orelse return true;
+        fn ownReads(self: *Builder, from: ReadNode, edges: *std.ArrayList(ReadNode), owns: *std.ArrayList(u32)) std.mem.Allocator.Error!bool {
+            const held = self.internedParameter(from.key.decl, from.key.position) orelse return true;
             var pending: std.ArrayList(TypeId) = .empty;
             defer pending.deinit(self.gpa);
             var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
@@ -9698,7 +9874,11 @@ pub const Typing = struct {
                 if (ty == held) continue;
                 if ((try seen.getOrPut(self.gpa, ty)).found_existing) continue;
                 if (self.standinOf(ty) != null) {
-                    if (try self.standinReads(ty, held, from.read.member)) return true;
+                    switch (try self.standinRead(ty, held)) {
+                        .none => {},
+                        .every => return true,
+                        .member => |member| try owns.append(self.gpa, member),
+                    }
                     continue;
                 }
                 switch (self.get(ty)) {
@@ -9734,7 +9914,7 @@ pub const Typing = struct {
                             try pending.append(self.gpa, arg);
                         } else if (arg == held) {
                             try edges.append(self.gpa, .{
-                                .read = .{ .decl = instance.decl.index(), .position = @intCast(j), .member = from.read.member },
+                                .key = .{ .decl = instance.decl.index(), .position = @intCast(j) },
                                 .template = instance.template,
                             });
                         } else if (self.get(arg) != .parameter and !try self.isGroundMemo(arg)) return true;
@@ -9747,24 +9927,24 @@ pub const Typing = struct {
             return false;
         }
 
-        /// Whether the settled reference `ty` reads `member` through `held`,
-        /// or may: it is read through `held` and its first member there is
-        /// `member`, or it is read through a type holding a parameter that is
-        /// not a parameter itself, or its trait's arguments hold one.
-        fn standinReads(self: *Builder, ty: TypeId, held: TypeId, member: u32) std.mem.Allocator.Error!bool {
+        /// What the settled reference `ty` reads through `held`: the first
+        /// member it reads there, every member where it may read any -- it is
+        /// read through a type holding a parameter that is not a parameter
+        /// itself, or its trait's arguments hold one -- or nothing.
+        fn standinRead(self: *Builder, ty: TypeId, held: TypeId) std.mem.Allocator.Error!union(enum) { none, every, member: u32 } {
             var at = ty;
             while (self.standinOf(at)) |read| {
                 for (self.standin_args.items[read.first_arg..][0..read.arg_count]) |arg| {
-                    if (!try self.isGroundMemo(arg)) return true;
+                    if (!try self.isGroundMemo(arg)) return .every;
                 }
-                if (read.held == held) return read.member.index() == member;
+                if (read.held == held) return .{ .member = read.member.index() };
                 if (self.standinOf(read.held) == null) {
-                    if (self.get(read.held) == .parameter) return false;
-                    return !try self.isGroundMemo(read.held);
+                    if (self.get(read.held) == .parameter) return .none;
+                    return if (try self.isGroundMemo(read.held)) .none else .every;
                 }
                 at = read.held;
             }
-            return false;
+            return .none;
         }
 
         fn deinitAlikeWatch(self: *Builder) void {
@@ -9792,8 +9972,18 @@ pub const Typing = struct {
             while (promised.next()) |list| list.deinit(self.gpa);
             self.promised_through.deinit(self.gpa);
             self.promised_through = .empty;
+            var by_member = self.promised_members.valueIterator();
+            while (by_member.next()) |list| list.deinit(self.gpa);
+            self.promised_members.deinit(self.gpa);
+            self.promised_members = .empty;
+            self.promised_standins.deinit(self.gpa);
+            self.promised_standins = .empty;
             self.member_reads.deinit(self.gpa);
             self.member_reads = .empty;
+            self.read_members.deinit(self.gpa);
+            self.read_members = .empty;
+            self.alike_pending.deinit(self.gpa);
+            self.alike_pending = .empty;
         }
 
         test "a reopened pool decides alikeness again when a promise is added" {
@@ -10669,11 +10859,7 @@ pub const Typing = struct {
             self.dependency_facts.invalidate(t);
             var root = t;
             while (self.standinOf(root)) |standin| root = standin.held;
-            if (root != t and self.get(root) == .parameter) {
-                const promised = try self.promised_through.getOrPut(self.gpa, root);
-                if (!promised.found_existing) promised.value_ptr.* = .empty;
-                if (std.mem.indexOfScalar(TypeId, promised.value_ptr.items, t) == null) try promised.value_ptr.append(self.gpa, t);
-            }
+            if (root != t and self.get(root) == .parameter) try self.notePromisedThrough(root, t);
             try self.decideAlikeAgain(root);
         }
 
@@ -13007,9 +13193,7 @@ pub const Typing = struct {
                 var root = s.held;
                 while (b.standinOf(root)) |held| root = held.held;
                 if (b.get(root) != .parameter) continue;
-                const promised = try b.promised_through.getOrPut(gpa, root);
-                if (!promised.found_existing) promised.value_ptr.* = .empty;
-                try promised.value_ptr.append(gpa, s.ty);
+                try b.notePromisedThrough(root, s.ty);
             }
             b.templates_complete = t.templates_complete;
             for (b.instances.items) |*i| i.class = Instance.no_class;
