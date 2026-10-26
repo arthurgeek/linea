@@ -1,9 +1,12 @@
 # 250. Tasks are structured through linear sessions
 
-Status: Accepted — 2026-10-26. Extends
-[0099](0099-a-phantom-parameter-carries-its-bound.md),
-[0193](0193-a-closure-may-hold-a-place-lent-inout.md) and
-[0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md).
+Status: Proposed — 2026-10-26. Once built, it would extend
+[0099](0099-a-phantom-parameter-carries-its-bound.md) (a type's dependencies
+come from its fields, and a `mem.Carried` field carries its argument's),
+[0193](0193-a-closure-may-hold-a-place-lent-inout.md) (a lend reaches a value
+whose type can hold the writer, a `Carried` field for a closure type included)
+and [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) (`Carried[H]` is
+`Owned` exactly when `H` is).
 
 **What is built.** Of this record, only `mem.Carried[H]` (§12) exists. It is the
 precondition every other clause rests on, and it lands first. Nothing else
