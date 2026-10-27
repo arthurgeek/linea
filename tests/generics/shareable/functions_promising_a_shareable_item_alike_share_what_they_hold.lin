@@ -1,0 +1,46 @@
+// `where S.Item: Shareable` promises that an item may be read by two tasks
+// at once, and `S: Shareable` promises the same of a source, so a
+// `Shelf[S]`, which holds a `Box[S]` holding a `Held[S]`, is shareable too.
+// `count` and `recount` make the same promises, so both may share a shelf.
+trait Source {
+    type Item
+}
+
+struct Held[S: Source] {
+    item: S.Item,
+}
+
+struct Box[S: Source] {
+    held: Held[S],
+}
+
+struct Shelf[S: Source] {
+    box: Box[S],
+}
+
+fn share[T: Shareable](_value: T) -> UInt8 {
+    1
+}
+
+fn count[S: Source + Shareable](shelf: Shelf[S]) -> UInt8
+where S.Item: Shareable {
+    share(shelf)
+}
+
+fn recount[T: Source + Shareable](shelf: Shelf[T]) -> UInt8
+where T.Item: Shareable {
+    share(shelf) + 1
+}
+
+struct Numbers {
+    n: UInt8,
+}
+
+impl Source for Numbers {
+    type Item = UInt8
+}
+
+fn main() -> UInt8 {
+    let shelf = Shelf[Numbers] { box = Box[Numbers] { held = Held[Numbers] { item = 3 } } }
+    count(shelf) + recount(shelf)
+}

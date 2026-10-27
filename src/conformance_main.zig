@@ -4975,6 +4975,10 @@ const ChainPromise = enum {
     /// `where S.Item: Discardable`, a cap on the member the last template
     /// holds, so each function is a scope with capabilities of its own.
     capping,
+    /// `[S: Source + Shareable]` with `where S.Item: Shareable`, and the
+    /// first template passed where `Shareable` is required, so each function
+    /// asks whether the chain at its parameter is shareable.
+    shareable,
 };
 
 /// `n` generic structures, each holding the next at its own parameter, the
@@ -4990,11 +4994,13 @@ fn templateChainUnderFunctionsModule(comptime promise: ChainPromise) fn (std.mem
             try w.writeAll("trait Source {\n    type Item\n    type Other\n}\n\n");
             for (0..n) |k| try w.print("struct G{d}[S: Source] {{\n    v: G{d}[S],\n}}\n\n", .{ k, k + 1 });
             try w.print("struct G{d}[S: Source] {{\n    item: S.Item,\n}}\n\n", .{n});
+            if (promise == .shareable) try w.writeAll("fn share[T: Shareable](_value: T) -> UInt8 {\n    0\n}\n\n");
             for (0..n) |i| switch (promise) {
                 .read_member => try w.print("fn _f{d}[S: Source](sink g: G0[S]) -> G0[S]\nwhere S.Item: Owned {{\n    g\n}}\n\n", .{i}),
                 .unread_member => try w.print("fn _f{d}[S: Source](sink g: G0[S]) -> G0[S]\nwhere S.Other: Owned {{\n    g\n}}\n\n", .{i}),
                 .discardable => try w.print("fn _f{d}[S: Source + Discardable](sink g: G0[S]) -> G0[S] {{\n    g\n}}\n\n", .{i}),
                 .capping => try w.print("fn _f{d}[S: Source](sink _g: G0[S]) -> UInt8\nwhere S.Item: Discardable {{\n    0\n}}\n\n", .{i}),
+                .shareable => try w.print("fn _f{d}[S: Source + Shareable](g: G0[S]) -> UInt8\nwhere S.Item: Shareable {{\n    share(g)\n}}\n\n", .{i}),
             };
             try w.writeAll("fn main() -> UInt8 {\n    0\n}\n");
             return out.toOwnedSlice();
@@ -5068,7 +5074,7 @@ test "nested templates and templates selecting the next are accepted" {
     try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try nestedTemplatesModule(gpa, 6)));
     try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try templatesSelectingTheNextModule(gpa, 6)));
     try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try nestedCrossBoundTemplatesModule(gpa, 6)));
-    inline for (.{ ChainPromise.read_member, .unread_member, .discardable }) |promise| {
+    inline for (.{ ChainPromise.read_member, .unread_member, .discardable, .shareable }) |promise| {
         try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try templateChainUnderFunctionsModule(promise)(gpa, 6)));
     }
     inline for (.{ MemberPromise.one_per_template, .one_template, .template_where }) |promise| {
@@ -6978,6 +6984,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "a template chain under functions promising a member it never reads", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.unread_member)) },
     .{ .name = "a template chain under functions bounding their parameter Discardable", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.discardable)) },
     .{ .name = "a template chain under functions capping the member it reads Discardable", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.capping)) },
+    .{ .name = "a template chain under functions sharing it", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.shareable)) },
     .{ .name = "members promised through templates each reading one", .n = 16000, .cost = throughTheLoader(promisedMembersModule(.one_per_template)) },
     .{ .name = "members promised through one template reading them all", .n = 32000, .cost = throughTheLoader(promisedMembersModule(.one_template)) },
     .{ .name = "members promised by a template's own where clause", .n = 32000, .cost = throughTheLoader(promisedMembersModule(.template_where)) },
