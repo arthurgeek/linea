@@ -8,13 +8,16 @@ whose type can hold the writer, a `Carried` field for a closure type included)
 and [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) (`Carried[H]` is
 `Owned` exactly when `H` is).
 
-**What is built.** Of this record, stages 0 and 1 of §16 exist:
+**What is built.** Of this record, stages 0 to 3 of §16 exist:
 `mem.Carried[H]` (§12), which every other clause rests on; the `Protocol`
-trait with its combinators in `std.session` (§4); and the `Shareable` bound with
+trait with its combinators in `std.session` (§4); the `Shareable` bound with
 the `@unshareable` leaf policy on `mem.Arena`, `mem.Handle` and
-`mem.AllocationLog` (§5). Nothing else described here is available: there is
-no `std.task`, no session endpoint, no [O-Cross], no `Owned` payload bound, no
-mailbox, no [T-Dual] and no runtime thread. [O-Cross] is decided here and is
+`mem.AllocationLog` (§5); [T-Dual] (§4); and the implementation heads postfix
+session operations need (§15), recorded in
+[0252](0252-a-types-own-implementation-may-write-a-parameter-inside-an-argument.md).
+Nothing else described here is available: there is no `std.task`, no session
+endpoint in `std`, no [O-Cross], no `Owned` payload bound, no mailbox and no
+runtime thread. [O-Cross] is decided here and is
 checked from stage 4, where it is tested against the real `start`. Each
 remaining clause is delivered by a stage of §16, and a stage's change states
 the clauses it builds.
@@ -605,6 +608,11 @@ rule: `impl[H] Chan[End, H]` is admitted today, and an inherent `close` lets
 This lands as its own change, before the first stage that ships session
 operations. Its record supersedes the head clause of 0182.
 
+**Built** by
+[0252](0252-a-types-own-implementation-may-write-a-parameter-inside-an-argument.md),
+which states the head rule, the match and the report for a call on the wrong
+state.
+
 ### 16. Delivery
 
 Each stage lands as its own change, ends green, and states which clauses of this
@@ -636,7 +644,13 @@ run; stages 5 to 7 extend it.
    this stage adds the corpus cases that hold both to sessions. A type
    parameter whose one callable bound takes the endpoint settles `P` as a
    lambda's written parameter types do.
-3. **Postfix session operations** (§15), with their own record.
+3. **Postfix session operations** (§15), with their own record. **Built**
+   by [0252](0252-a-types-own-implementation-may-write-a-parameter-inside-an-argument.md):
+   a type's own implementation writes each parameter once at any depth, a
+   receiver selects the block whose head it matches, and a call on a state
+   whose head refuses it is [T-UnknownOperation] naming the head. There is no
+   `Chan` in `std` until stage 4, so the corpus and the guide write their
+   own endpoint type over `std.session`.
 4. **The smallest runtime** (§1–§3, §8, §10, §11): one child, `prepare`,
    `start`, `cancel`, a rendezvous channel, join on `close` with its four steps,
    thread-safe archives, the checked archive's lock, stack probes and an
