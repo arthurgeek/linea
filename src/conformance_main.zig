@@ -2710,10 +2710,11 @@ fn wideEnumModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
 
 /// A pattern n variants deep, over n enums each carrying the one before it,
 /// so resolving, checking, coverage and ownership each walk a pattern of
-/// depth n. Checked rather than emitted: every tag test reads at an offset
-/// into the outermost value, and the MIR verifier finds which part an access
-/// lands on by descending the type from there, which is the type's depth per
-/// access whatever wrote it.
+/// depth n. [S-Nesting] bounds a pattern's depth, so the largest size, four
+/// times n, stays inside the limit and n does not grow. Checked rather than
+/// emitted: every tag test reads at an offset into the outermost value, and
+/// the MIR verifier finds which part an access lands on by descending the
+/// type from there, which is the type's depth per access whatever wrote it.
 fn patternDepthModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(gpa);
     errdefer out.deinit();
@@ -5104,6 +5105,31 @@ test "a capability question reads through an owned type nested forty-five thousa
     try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, out.written()));
 }
 
+test "a capability question reads through types held only as arguments, two hundred thousand deep" {
+    // `N0` holds `N1` only as the argument of `Marker[N1]`, which has no part
+    // of that type, so `N1` is asked about after the walk through `N0` ends,
+    // and so on down the chain. Two hundred thousand is past what a frame per
+    // argument would fit on the compiler's stack in a Debug build.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    const w = &out.writer;
+    const depth = 200_000;
+    try w.writeAll(
+        "trait Pick {\n    type Out\n}\n\n" ++
+            "struct Chooser[T] {\n    t: T,\n}\n\n" ++
+            "impl[T: Discardable] Pick for Chooser[T] {\n    type Out = UInt8\n}\n\n" ++
+            "trait Sensor {\n    type Reading\n}\n\n" ++
+            "struct M {}\n\nimpl Sensor for M {\n    type Reading = Chooser[N0].Out\n}\n\n" ++
+            "struct Marker[phantom X] {}\n\n",
+    );
+    for (0..depth - 1) |i| try w.print("struct N{d} {{\n    x: Marker[N{d}],\n}}\n\n", .{ i, i + 1 });
+    try w.print("struct N{d} {{\n    x: UInt8,\n}}\n\n", .{depth - 1});
+    try w.writeAll("fn main() -> UInt8 {\n    let reading: M.Reading = 3\n    reading\n}\n");
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, out.written()));
+}
+
 /// A borrowed carrier with `n` field paths, moved through `n` bindings.
 /// The literal, type and binding chain each contain O(n) source text.
 fn carrierFieldBindingsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
@@ -6914,7 +6940,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "variants in one enum", .n = 1000, .cost = throughTheTree(wideEnumModule) },
     .{ .name = "arms that each bind", .n = 2000, .cost = throughTheTree(bindingArmsModule) },
     .{ .name = "two wide columns", .n = 1000, .cost = throughTheTree(twoWideColumnsModule) },
-    .{ .name = "pattern depth", .n = 400, .cost = throughTreeBatch(patternDepthModule, .check, 1) },
+    .{ .name = "pattern depth", .n = 240, .grows = false, .cost = throughTreeBatch(patternDepthModule, .check, 32) },
     .{ .name = "function values settled in one function", .n = 4000, .cost = throughTheTree(openFunctionValuesModule) },
     .{ .name = "function values settled across functions", .n = 4000, .cost = throughTheTree(functionValueBodiesModule) },
     .{ .name = "constructor payload fields", .n = 2000, .cost = throughTheTree(constructorPayloadFieldsModule) },

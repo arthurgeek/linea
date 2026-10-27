@@ -813,17 +813,21 @@ let chosen = if ready { a }
 else { b }                   // the `if`'s `else`
 ```
 
-**[S-Nesting]** An expression, or a written type, nests at most 1000 levels
-deep. The limit makes acceptance independent of optimisation level, debug
-settings and sanitiser use, and reports excessive depth instead of overflowing
-the stack.
+**[S-Nesting]** An expression, a pattern, or a written type nests at most
+1000 levels deep. The limit makes acceptance independent of optimisation
+level, debug settings and sanitiser use, and reports excessive depth instead of
+overflowing the stack.
 
 The limit measures syntax-tree height, not parser recursion depth. A chain such
 as `a + b + c + …` is parsed in a loop but produces a tree as tall as the
-chain, and chains of `.` selections behave the same way. Written types share
-the limit. Depth is counted from the type's source position: a type nested
-five levels inside another construct has five fewer levels available, and
-terms earlier in a chain add no depth above a type they do not enclose.
+chain, and chains of `.` selections behave the same way. Patterns and written
+types share the limit. A pattern is one level below the construct that holds
+it, a `match` for an arm's pattern or the statement for a `let`'s, and each
+part of a pattern is one below the pattern it is a part of, so the binder `x`
+in an arm `Some(Some(x))` stands three levels below the `match`. Depth is
+counted from the type's source position: a type nested five levels inside
+another construct has five fewer levels available, and terms earlier in a
+chain add no depth above a type they do not enclose.
 
 **[S-Paren]** A parenthesised expression or type, and a tuple, is closed.
 

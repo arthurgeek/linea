@@ -428,8 +428,8 @@ never re-read the spec. A trailing
 declaration data: formatting and tools need its subject and requirements in
 their source shape even though type checking later normalises their meaning.
 
-Nesting is bounded at `node.max_tree_height` (1000) levels of expression or
-written type ([S-Nesting]). The bound is on tree height, not parser recursion:
+Nesting is bounded at `node.max_tree_height` (1000) levels of expression,
+pattern or written type ([S-Nesting]). The bound is on tree height, not parser recursion:
 a left-leaning chain such as `a + b + c + ...` or a run of `.` selections parses
 in a loop but yields a tree as tall as the chain, and every later pass recurses
 over it. Acceptance is the same in every build because the passes run on a

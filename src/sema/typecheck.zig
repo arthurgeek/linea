@@ -28048,8 +28048,28 @@ const Checker = struct {
         /// type. A type whose capabilities depend on such a part while that
         /// part is being read is watched, and a question asked of it is the
         /// cycle `readPart` reports. See `OwnedWalk`.
+        ///
+        /// An argument a walk reaches is walked after it, from a stack of
+        /// its own rather than a frame per argument: a declared type can hold
+        /// the next one only as an argument (`Marker[N1]`, with no part of
+        /// type `N1`), and a chain of those is as long as the program.
         fn owned(self: *AnswerSettling, root: TypeId) std.mem.Allocator.Error!void {
-            const gpa = self.checker.gpa;
+            const walk = &self.walk;
+            const applied_base = walk.applied.items.len;
+            try self.ownedFrom(root, applied_base);
+            // The arguments a walk listed sit above `applied_base`, the first
+            // on top, and each is walked, with the arguments it lists, before
+            // the next: the order a walk per argument would take.
+            while (walk.applied.items.len > applied_base) {
+                const argument = walk.applied.pop().?;
+                try self.ownedFrom(argument, walk.applied.items.len);
+            }
+        }
+
+        /// One walk of `owned`, from `root`, leaving the arguments it reached
+        /// above `applied_base` on `walk.applied` in reverse, so the first is
+        /// popped first.
+        fn ownedFrom(self: *AnswerSettling, root: TypeId, applied_base: usize) std.mem.Allocator.Error!void {
             const walk = &self.walk;
             if (root == .poison) return;
             if (self.complete.get(root)) |height| return self.raise(height);
@@ -28066,7 +28086,6 @@ const Checker = struct {
             }
 
             const base = walk.path.items.len;
-            const applied_base = walk.applied.items.len;
             try self.push(root);
             while (walk.path.items.len > base) {
                 const top = &walk.path.items[walk.path.items.len - 1];
@@ -28116,10 +28135,7 @@ const Checker = struct {
             } else if (walk.waiting.get(root)) |waiting| self.dependOn(no_floor, waiting.position);
             self.raise(if (self.complete.get(root)) |height| height else if (walk.waiting.get(root)) |waiting| waiting.height else if (walk.nodes.get(root)) |n| n.height else 0);
 
-            const arguments = try gpa.dupe(TypeId, walk.applied.items[applied_base..]);
-            defer gpa.free(arguments);
-            walk.applied.shrinkRetainingCapacity(applied_base);
-            for (arguments) |argument| try self.owned(argument);
+            std.mem.reverse(TypeId, walk.applied.items[applied_base..]);
         }
 
         /// Decides the component whose root `root` is, popping it: complete,

@@ -172,9 +172,11 @@ link, not a second one, and a reference read through a parameter's bounds,
 link. A generic member or alias is read once, at its parameters, so its own
 height is that of what it reads there; what it reads at each argument is
 counted where the argument's reference is. Parts, members, delegations and
-capability questions add no link. A structure nested inside another 45,000 times adds none, because
-reading what it owns is a walk with its own stack (`AnswerSettling.owned`),
-not a recursion. Counting links therefore bounds the recursion, and nothing
+capability questions add no link. A structure nested inside another 45,000 times adds none, and
+neither does a chain of 200,000 types each held only as an argument of the
+one before (`struct N0 { x: Marker[N1] }`), because reading what a type owns,
+and then the arguments it is applied to, is a walk with its own stack
+(`AnswerSettling.owned`), not a recursion. Counting links therefore bounds the recursion, and nothing
 else needs bounding.
 
 The depth is a height, not the nesting of the walk at the moment it is

@@ -3688,7 +3688,7 @@ const Parser = struct {
             var recovered = false;
             if (self.cursor.at(.l_paren)) {
                 if (delimiter == .pipes) {
-                    pattern = try self.parseTuplePattern();
+                    pattern = try self.descendIntoPattern(parseTuplePattern);
                     argument = try self.builder.addLiteral(.param_argument, pname_at, self.rangeFrom(pname_at));
                 } else {
                     // A declaration parameter's name is the label a call
@@ -4148,6 +4148,25 @@ const Parser = struct {
         return startsArmPattern(self.cursor.peek());
     }
 
+    /// Reads a pattern one level below the construct that holds it, which is
+    /// a level of the tree [S-Nesting] bounds as an expression's is: every
+    /// pass after the parser walks a pattern a frame per level. Past the limit
+    /// the pattern is refused, stepped over, and stands as an error node.
+    fn descendIntoPattern(
+        self: *Parser,
+        comptime readPattern: fn (*Parser) std.mem.Allocator.Error!ExprId,
+    ) std.mem.Allocator.Error!ExprId {
+        const at = self.cursor.current();
+        if (self.depth == max_nesting) {
+            try self.refuseToDescend(at, "this pattern nests too deeply");
+            return self.builder.addLiteral(.err, at, self.rangeFrom(at));
+        }
+        self.depth += 1;
+        self.deepest = @max(self.deepest, self.depth);
+        defer self.depth -= 1;
+        return readPattern(self);
+    }
+
     /// A pattern where a binder may stand: in a variant's or newtype's
     /// payload, in a tuple's component, or after a struct field's `:`.
     ///
@@ -4162,6 +4181,10 @@ const Parser = struct {
     /// the enclosing list, whose separator or closer it may be. `()` is the
     /// exception: it is one mistake, so both of its tokens go with the report.
     fn parseSubPattern(self: *Parser) std.mem.Allocator.Error!ExprId {
+        return self.descendIntoPattern(subPattern);
+    }
+
+    fn subPattern(self: *Parser) std.mem.Allocator.Error!ExprId {
         const at = self.cursor.current();
         if (self.cursor.at(.l_brace)) return self.parseStructPattern();
         // A keyword written where a binder belongs is a name that cannot be
@@ -4389,6 +4412,14 @@ const Parser = struct {
         _ = self.cursor.advance();
         const bare = try self.builder.addLiteral(.name_ref, at, self.rangeFrom(at));
         return self.parsePayloadPattern(at, bare);
+    }
+
+    /// The pattern a destructuring `let` takes its value apart with: a tuple,
+    /// a struct, or a newtype's base.
+    fn parseDestructuringPattern(self: *Parser) std.mem.Allocator.Error!ExprId {
+        if (self.cursor.at(.l_paren)) return self.parseTuplePattern();
+        if (self.cursor.at(.l_brace) or self.cursor.peekAt(1) == .l_brace) return self.parseStructPattern();
+        return self.parseNewtypePattern();
     }
 
     /// `(a, b, …)`: a tuple taken apart by position, each component a
@@ -4985,12 +5016,7 @@ const Parser = struct {
                     "a destructuring binding is introduced by `let`",
                 );
             }
-            const pattern = if (self.cursor.at(.l_paren))
-                try self.parseTuplePattern()
-            else if (self.cursor.at(.l_brace) or self.cursor.peekAt(1) == .l_brace)
-                try self.parseStructPattern()
-            else
-                try self.parseNewtypePattern();
+            const pattern = try self.descendIntoPattern(parseDestructuringPattern);
             if (self.cursor.eat(.equal) == null) {
                 try self.reportAt(.s_equals, self.cursor.current(), "expected `=`", "a destructuring `let` names what it takes apart");
             }
@@ -5886,7 +5912,7 @@ const Parser = struct {
 
         const at = self.cursor.current();
         const binder = if (self.cursor.at(.l_paren)) blk: {
-            if (self.cursor.peekAt(1) != .r_paren) break :blk try self.parseTuplePattern();
+            if (self.cursor.peekAt(1) != .r_paren) break :blk try self.descendIntoPattern(parseTuplePattern);
             try self.reportNoPattern(at);
             _ = self.cursor.advance();
             _ = self.cursor.advance();
@@ -6321,7 +6347,7 @@ const Parser = struct {
                 }
                 continue;
             }
-            try items.append(self.gpa, try self.parseArmPattern());
+            try items.append(self.gpa, try self.descendIntoPattern(parseArmPattern));
 
             if (self.cursor.eat(.fat_arrow) == null) {
                 try self.reportAt(.s_match, self.cursor.current(), "expected `=>`", "an arm separates its pattern from its body");
@@ -7010,6 +7036,59 @@ test "an expression past the nesting limit is reported once, not crashed" {
     for ([_]usize{ max_nesting, 50_000 }) |n| {
         const codes = try codesOf(gpa, try nested(gpa, n, "(", ")"));
         try testing.expectEqualSlices(?Code, &.{.s_nesting}, codes);
+    }
+}
+
+/// A match arm whose pattern is `n` levels opened by `open` around the binder
+/// `x`, each closed by `close`: `Held(Held(x))` or `S { f: S { f: x } }`.
+fn nestedArmPattern(gpa: std.mem.Allocator, n: usize, open: []const u8, close: []const u8) ![]const u8 {
+    var text: std.ArrayList(u8) = .empty;
+    try text.appendSlice(gpa, "fn main() -> Int64 {\n    match v {\n        ");
+    for (0..n) |_| try text.appendSlice(gpa, open);
+    try text.appendSlice(gpa, "x");
+    for (0..n) |_| try text.appendSlice(gpa, close);
+    try text.appendSlice(gpa, " => 1,\n        _ => 0,\n    }\n}\n");
+    return text.toOwnedSlice(gpa);
+}
+
+/// A destructuring `let` whose tuple pattern nests `n` tuples deep.
+fn nestedLetPattern(gpa: std.mem.Allocator, n: usize) ![]const u8 {
+    var text: std.ArrayList(u8) = .empty;
+    try text.appendSlice(gpa, "fn main() -> Int64 {\n    let ");
+    for (0..n) |_| try text.appendSlice(gpa, "(a, ");
+    try text.appendSlice(gpa, "x");
+    for (0..n) |_| try text.appendSlice(gpa, ")");
+    try text.appendSlice(gpa, " = v\n    1\n}\n");
+    return text.toOwnedSlice(gpa);
+}
+
+test "a pattern nests to the limit an expression does, and one past it is reported once" {
+    // Every pass after the parser walks a pattern a frame per level, so a
+    // pattern is a level of the tree the bound measures. An arm's pattern is
+    // one level below its `match`, which is one below the body, and each
+    // part is one below the pattern holding it: the binder inside `n` levels
+    // stands `n + 2` deep.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const forms = [_]struct { open: []const u8, close: []const u8 }{
+        .{ .open = "Held(", .close = ")" },
+        .{ .open = "(a, ", .close = ")" },
+        .{ .open = "S { f: ", .close = " }" },
+    };
+    for (forms) |form| {
+        try testing.expectEqual(@as(usize, 0), (try codesOf(gpa, try nestedArmPattern(gpa, max_nesting - 2, form.open, form.close))).len);
+        for ([_]usize{ max_nesting - 1, 50_000 }) |n| {
+            try testing.expectEqualSlices(?Code, &.{.s_nesting}, try codesOf(gpa, try nestedArmPattern(gpa, n, form.open, form.close)));
+        }
+    }
+
+    // A `let`'s pattern is one level below the body, as an expression
+    // statement is.
+    try testing.expectEqual(@as(usize, 0), (try codesOf(gpa, try nestedLetPattern(gpa, max_nesting - 1))).len);
+    for ([_]usize{ max_nesting, 50_000 }) |n| {
+        try testing.expectEqualSlices(?Code, &.{.s_nesting}, try codesOf(gpa, try nestedLetPattern(gpa, n)));
     }
 }
 
