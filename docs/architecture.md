@@ -753,7 +753,7 @@ references read through it promised `Owned` whose member the template's
 parts read (`membersRead`, which reads every member until
 `templatesComplete`); `decideAlikeAgain` recomputes the positions listed
 under a parameter whose promise changed, once per declaration whose clauses
-changed it and moves each candidate whose
+changed it, and moves each candidate whose
 shape changed to the class its shapes name, and `Instance.class` with
 `Typing.alike_sources` is the decision both the builder and the finished
 pool read. `Typing.partsSource` is the one routine every walk over what a
@@ -773,6 +773,10 @@ capability beyond what their subjects promise (`capsBeyondPromise`),
 alike, and steps from every alike instantiation past it to its
 representative with the scope's caps renamed onto the representative's
 arguments, sharing the answer with every scope whose caps rename alike.
+Rebuilding the capability facts drops every scoped answer and lists each
+question prepared so far as lost (`ScopedCapabilityFacts.drop`), and
+`finish` prepares each again (`restoreScopedCapabilities`), so the finished
+pool answers every scoped question the checker prepared.
 `fillMinted` writes every instantiation the
 checker minted before the pool is handed on, following only parts that are
 not alike, so the type of every recorded expression, binding and signature

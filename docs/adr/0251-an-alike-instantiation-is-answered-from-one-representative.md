@@ -182,9 +182,10 @@ promise changed (`decideAlikeAgain`); `promiseOwned` on a settled reference
 lists it under the parameter it is read through (`promised_through`), and
 under that parameter and the member it reads first there
 (`promised_members`), and decides that parameter's positions. A
-declaration's `where` clauses are read under one hold
-(`holdAlikeDecisions`), so its promises decide each parameter they name once,
-when the hold is released, rather than once per clause. A candidate whose shape changed leaves
+declaration's promises are recorded once all its `where` clauses are read,
+under one hold (`holdAlikeDecisions`), so they decide each parameter they
+name once, when the hold is released, rather than once per clause, and no
+type question is asked while a decision waits. A candidate whose shape changed leaves
 its class, and only once every such candidate has left does any join the
 class its shapes now name, so no class is joined by comparing against a
 member about to leave it. Where the representative leaves, the template, or
@@ -269,13 +270,17 @@ representative `R = D[B1, ..., Bn]` in the context `C'` that renames each
   member `D`'s parts read through position `i` (`membersRead`, as for a
   shape).
 
-`C'` is interned by its ceilings. Two questions share an answer exactly
-when they reach one representative in one renamed context: the same alike
-class, and caps that rename to the same ceilings on the same subjects. A
-scope that caps `L.Entry` at copyable and one that caps it at discardable
-rename to different ceilings; one that caps `L.Note`, which no part reads,
-renames to no ceiling where the other keeps one; and a scope whose `L`
-promises more is in another class, with another representative.
+`C'` is interned by its ceilings. Two questions share the answer past a
+step when they reach one representative in one renamed context: the same
+alike class, and caps that rename to the same ceilings on the same
+subjects. A scope that caps `L.Entry` at copyable and one that caps it at
+discardable rename to different ceilings; one that caps `L.Note`, which no
+part reads, renames to no ceiling where the other keeps one; and a scope
+whose `L` promises more is in another class, with another representative.
+The converse does not hold: the filter above keeps a ceiling on any subject
+holding no parameter but the instantiation's arguments, whether or not a
+part holds that subject, so two contexts that differ only in such a ceiling
+answer alike and are still prepared apart (see Cost).
 
 Why `X`'s answer in `C` is `R`'s in `C'`: `X`'s parts, written, would be
 `R`'s with each `Bi` renamed `Ai`, and so would every type they own, down
@@ -294,6 +299,15 @@ its own parts reached in the scope's own context. A later pass taking a
 value of that type apart asks what each part owes within the scope, and the
 finished pool answers that by scope and type, from what was prepared; what
 lies past a part is never asked of the finished pool.
+
+Rebuilding the capability facts, which a replaced part or a changed
+decision forces, drops every scoped answer, since each was solved over the
+facts being replaced. The questions prepared before are listed as lost, not
+forgotten, and the builder prepares each again before it hands the pool on
+(`restoreScopedCapabilities`), so a question prepared once is answered by
+the finished pool however late the rebuild came. A builder reopened over a
+finished pool keeps that pool's scoped answers across a rebuild: they were
+final when it was finished, and types only append.
 
 A scope caps a capability only where one of its constraints puts
 a ceiling below what its subject is seeded with (`capsBeyondPromise`). A
@@ -366,9 +380,9 @@ What makes the bound hold:
   parameter's promises are written by the declaration that owns it, and
   are decided a fixed number of times: once for each of the two sweeps that
   set its bound traits, once for its callable bounds, once when its
-  declaration's `where` clauses are all read (they are read under one hold,
-  `holdAlikeDecisions`, so `n` clauses decide once and not `n` times, each
-  over every earlier promise), once when the templates are complete, and
+  declaration's `where` clauses are all read (their promises are recorded
+  under one hold, `holdAlikeDecisions`, so `n` clauses decide once and not
+  `n` times, each over every earlier promise), once when the templates are complete, and
   once more where a subject is read again. So a template of `n`
   parameters instantiated at another declaration's `n` costs `n` shapes to
   decide and `n` more for each of those; a comparison of all `n` shapes
@@ -407,7 +421,7 @@ What makes the bound hold:
   context it was renamed from, so a scope's steps cost its own constraints
   each time. A scope whose constraints cap nothing prepares nothing.
 
-One shape stays quadratic, as it was before this decision:
+These shapes stay quadratic, as they were before this decision:
 
 - `n` functions each promising a different member, over a chain whose
   template `k` reads member `k` and holds template `k + 1`. Function `i`'s
@@ -422,6 +436,17 @@ One shape stays quadratic, as it was before this decision:
   same shape for scoped capabilities: function `i`'s cap is kept by the
   steps through templates `0` to `i`, which read its member, so its renamed
   contexts are its own until then, and `n(n + 1)/2` nodes are visited.
+- `n` functions each capping a type that merely holds the parameter,
+  `where W_i[S]: Discardable` with a distinct `W_i` in each function, over
+  one chain. The renamed `W_i[...]` holds no parameter but the step's
+  arguments, so every step keeps the ceiling although no part of the chain
+  holds `W_i`, and each function's renamed context stays its own along the
+  whole chain: `n` contexts of `n` nodes each. It measures about n^1.9,
+  96.9 s at n = 2000, where the code before this decision takes 129.8 s. A
+  ground subject, a cap on a type holding no parameter at all, is kept by
+  every step in the same way and is quadratic too. Dropping a ceiling that
+  no part holds needs to know what the representative owns past the step,
+  which is the walk the renaming saves. Both are tracked in #35.
 
 ## Consequences
 
