@@ -4490,7 +4490,9 @@ const Parser = struct {
             try binders.append(self.gpa, component);
             if (!keyword and self.builder.exprTag(component) == .err) {
                 refused = true;
-                if (!self.skipToNextPart(close)) break;
+                // A part refused for nesting too deeply was stepped over
+                // already, and leaves the cursor at what follows it.
+                if (!self.cursor.at(.comma) and !self.cursor.at(.r_paren) and !self.skipToNextPart(close)) break;
             } else if (!self.cursor.at(.comma) and !self.cursor.at(.r_paren) and close != null) {
                 try self.reportAt(.s_tuple, self.cursor.current(), "expected `,` or `)`", "a tuple pattern separates its binders with commas");
                 if (self.atKeywordName() or self.atArmPattern() or self.cursor.at(.l_brace)) continue;
