@@ -1170,10 +1170,9 @@ const ScopedCapabilityFacts = struct {
     /// Each answer prepared in a scope's own context, by scope and type: what
     /// `Typing.capabilityAskedWithin` reads.
     values: ScopedCapabilityMap = .empty,
-    /// The answers of the finished pool a builder was reopened over. Its
-    /// rows cannot change while types only append, so `drop` keeps them.
-    frozen: ScopedCapabilityMap = .empty,
-    /// The types a question within a scope was asked about and prepared.
+    /// The types a question within a scope was asked about and prepared,
+    /// and in a builder reopened over a finished pool, every type that
+    /// pool answers by scope.
     roots: std.AutoHashMapUnmanaged(ScopedCapabilityKey, void) = .empty,
     /// The roots whose answers `drop` discarded, which
     /// `Builder.restoreScopedCapabilities` prepares again before the pool is
@@ -1201,11 +1200,9 @@ const ScopedCapabilityFacts = struct {
     /// still decide.
     fn deinit(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator) void {
         self.values.deinit(gpa);
-        self.frozen.deinit(gpa);
         self.roots.deinit(gpa);
         self.lost.deinit(gpa);
         self.values = .empty;
-        self.frozen = .empty;
         self.roots = .empty;
         self.lost = .empty;
         self.clearDerived(gpa);
@@ -1214,14 +1211,13 @@ const ScopedCapabilityFacts = struct {
     /// Discards the answers derived from the capability facts, once those
     /// are rebuilt, and lists every root prepared so far in `lost`: the
     /// contextual constraints still decide the questions, and the facts now
-    /// answer them differently. The finished pool's answers are kept.
+    /// answer them differently. A reopened pool's answers are among the
+    /// roots, since a part replaced after reopening changes them too.
     fn drop(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator) !void {
         var roots = self.roots.keyIterator();
         while (roots.next()) |root| try self.lost.put(gpa, root.*, {});
         self.roots.clearRetainingCapacity();
         self.values.clearRetainingCapacity();
-        var frozen = self.frozen.iterator();
-        while (frozen.next()) |entry| try self.values.put(gpa, entry.key_ptr.*, entry.value_ptr.*);
         self.clearDerived(gpa);
     }
 
@@ -13364,7 +13360,10 @@ pub const Typing = struct {
             // goes on to mint.
             b.borrowTables(t);
             b.scoped_capability_facts.values = try t.scoped_capabilities.clone(gpa);
-            b.scoped_capability_facts.frozen = try t.scoped_capabilities.clone(gpa);
+            // Each answer is listed as prepared, so a rebuild that drops it
+            // lists it as lost and the hand-off prepares it again.
+            var answered = t.scoped_capabilities.keyIterator();
+            while (answered.next()) |key| try b.scoped_capability_facts.roots.put(gpa, key.*, {});
             b.prepared_implementations = try t.prepared_implementations.clone(gpa);
             b.certified_storage = t.raw_accesses.storage;
             b.certified_buffer = t.raw_accesses.buffer;

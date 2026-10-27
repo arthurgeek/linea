@@ -306,8 +306,8 @@ facts being replaced. The questions prepared before are listed as lost, not
 forgotten, and the builder prepares each again before it hands the pool on
 (`restoreScopedCapabilities`), so a question prepared once is answered by
 the finished pool however late the rebuild came. A builder reopened over a
-finished pool keeps that pool's scoped answers across a rebuild: they were
-final when it was finished, and types only append.
+finished pool lists each of that pool's scoped answers as prepared, so a
+part replaced after reopening drops and prepares them again too.
 
 A scope caps a capability only where one of its constraints puts
 a ceiling below what its subject is seeded with (`capsBeyondPromise`). A
