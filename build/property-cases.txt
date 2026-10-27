@@ -60,6 +60,35 @@ traits/callable_heads/a_callable_type_heads_a_trait_implementation.lin
 patterns/a_tuple_of_options_is_covered_arm_by_arm.lin
 patterns/a_variant_inside_a_variant_is_matched.lin
 patterns/a_tag_is_tested_before_its_payload_is_read.lin
+# A settled type read through another implementation, and a field naming one, in either declaration order.
+traits/a_settled_type_names_another_implementations_settled_type.lin
+# Declared answers read in either declaration order: generic selections, delegations through settled fields, and capabilities through both.
+traits/a_settled_type_reads_a_generic_implementation_declared_below.lin
+traits/a_field_holds_an_element_delegated_through_a_settled_field.lin
+traits/a_settled_type_a_part_reads_first_selects_through_complete_parts.lin
+traits/a_settled_type_selects_through_a_delegated_field.lin
+traits/a_field_holds_an_element_delegated_through_another_delegation.lin
+traits/declared_answers/a_field_holds_an_element_delegated_through_a_settled_field_declared_later.lin
+traits/declared_answers/a_settled_type_names_an_element_delegated_through_another.lin
+traits/declared_answers/a_delegation_reaching_itself_through_a_settled_type_is_refused.lin
+traits/declared_answers/two_types_whose_parts_depend_on_each_others_capabilities_are_refused.lin
+# A capability question asked through a parameter's default, and an implementation head reading one.
+traits/declared_answers/a_default_naming_a_settled_type_that_depends_on_its_holder_is_refused.lin
+traits/declared_answers/an_implementation_head_reads_a_defaulted_settled_type.lin
+# A holder's parts cycle refused whichever declaration asks about it first.
+traits/declared_answers/a_question_asked_first_about_a_holder_leaves_its_parts_cycle_refused.lin
+# Parts asking about a holder of their holder, and two parts asking about one holder.
+traits/declared_answers/a_part_asking_about_the_holder_of_its_holder_is_refused.lin
+traits/declared_answers/two_parts_asking_about_their_common_holder_are_refused.lin
+# A part asking about a holder of a linear part, reached through concrete and unbounded selections.
+traits/declared_answers/a_part_asking_about_a_holder_of_a_linear_part_is_refused.lin
+traits/declared_answers/a_part_asking_about_a_holder_reached_through_unbounded_selections_is_refused.lin
+# Functions whose parameters promise alike, or apart, over one template chain:
+# reversed, the other function's instantiation is the one answered first.
+generics/a_discardable_and_an_owned_parameter_over_one_template_answer_apart.lin
+generics/a_promise_on_a_member_no_part_holds_keeps_what_a_push_observes.lin
+generics/a_promise_on_a_member_read_through_templates_holding_one_another_keeps_what_a_push_observes.lin
+generics/functions_promising_an_owned_item_alike_keep_nothing_of_what_they_push.lin
 # A `mem.Carried` field keeps a callback's lend through holders, payloads, tuples, wrappers, copies and captures.
 carried/a_lent_place_is_not_written_while_the_holder_lives.lin
 carried/a_lent_place_is_not_read_while_the_holder_lives.lin

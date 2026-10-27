@@ -1,0 +1,37 @@
+// A pair of ledgers holds a claim on an entry of its first ledger twice: once
+// directly, and once through a flip, which takes its parameters the other
+// way round and claims an entry of its second; its first only marks the
+// flip, as a phantom parameter. So a pair is dropped only
+// where its first ledger's entries can be discarded. `settle` says so of
+// its first ledger and may drop its pair; `close` says it of the second,
+// so the pair `close` is given must still be handed on.
+trait Ledger {
+    type Entry
+}
+
+struct Claim[L: Ledger] {
+    entry: L.Entry,
+}
+
+struct Flip[phantom X: Ledger, Y: Ledger] {
+    claim: Claim[Y],
+}
+
+struct Pair[A: Ledger, B: Ledger] {
+    claim: Claim[A],
+    flip: Flip[B, A],
+}
+
+fn _settle[L: Ledger, M: Ledger](sink _pair: Pair[L, M]) -> UInt8
+where L.Entry: Discardable {
+    1
+}
+
+fn _close[K: Ledger, J: Ledger](sink _pair: Pair[K, J]) -> UInt8
+where J.Entry: Discardable {
+    2
+}
+
+fn main() -> UInt8 {
+    0
+}

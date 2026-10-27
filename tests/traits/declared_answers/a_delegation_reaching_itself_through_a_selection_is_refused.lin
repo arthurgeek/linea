@@ -1,0 +1,35 @@
+// `B.values` holds `M.Item`, which selects through `B.Elem`, the element of
+// `B.values`: the element is defined through itself.
+trait Counter {
+    type Item
+}
+
+trait Pick {
+    type Out
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl Pick for Chooser[UInt16] {
+    type Out = UInt8
+}
+
+struct M {}
+
+impl Counter for M {
+    type Item = Chooser[B.Elem].Out
+}
+
+struct B {
+    values: [M.Item; 2],
+}
+
+impl Index[UInt64] for B via values
+
+fn main() -> UInt8 {
+    let board = B { values = [1, 2] }
+    let item: M.Item = board[0]
+    item
+}

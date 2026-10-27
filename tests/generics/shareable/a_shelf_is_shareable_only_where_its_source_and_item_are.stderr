@@ -1,0 +1,15 @@
+error[T-Bound]: `T` requires `Shareable`, and `Shelf[S]` is not `Shareable`: `box.held` is a `Held[S]`, which holds `S`, which may stand for a type that is not `Shareable`
+  --> tests/generics/shareable/a_shelf_is_shareable_only_where_its_source_and_item_are.lin:33:5
+   |
+33 |     share(shelf)
+   |     ^^^^^ add `Shareable` to `S`'s bounds, or drop the bound
+error[T-Bound]: `T` requires `Shareable`, and `Shelf[S]` is not `Shareable`: `box.held.item` is `S.Item`, which may stand for a type that is not `Shareable`
+  --> tests/generics/shareable/a_shelf_is_shareable_only_where_its_source_and_item_are.lin:37:5
+   |
+37 |     share(shelf)
+   |     ^^^^^ add `where S.Item: Shareable`, or drop the bound
+error[T-Bound]: `T` requires `Shareable`, and `Shelf[S]` is not `Shareable`: `box.held.item` is `S.Item`, which may stand for a type that is not `Shareable`
+  --> tests/generics/shareable/a_shelf_is_shareable_only_where_its_source_and_item_are.lin:42:5
+   |
+42 |     share(shelf)
+   |     ^^^^^ add `S.Item: Shareable` to the `where` clause, or drop the bound

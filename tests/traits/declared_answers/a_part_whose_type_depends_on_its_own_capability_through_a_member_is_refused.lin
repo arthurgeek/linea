@@ -1,0 +1,36 @@
+// `Tray.held` is `Mirror.Item`, which is `Chooser[Tray].Out`, which exists
+// only if `Tray` can be discarded: `Tray`'s parts depend on that answer.
+trait Counter {
+    type Item
+}
+
+trait Pick {
+    type Out
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Tray {
+    held: Mirror.Item,
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = Ticket
+}
+
+struct Mirror {}
+
+impl Counter for Mirror {
+    type Item = Chooser[Tray].Out
+}
+
+fn main() -> UInt8 {
+    0
+}

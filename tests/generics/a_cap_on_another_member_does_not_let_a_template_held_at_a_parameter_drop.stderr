@@ -1,0 +1,9 @@
+error[O-Leak]: `_desk` (a linear `Desk[K]`) is still owned when this path leaves
+  --> tests/generics/a_cap_on_another_member_does_not_let_a_template_held_at_a_parameter_drop.lin:27:27
+   |
+27 | fn _close[K: Ledger](sink _desk: Desk[K]) -> UInt8
+   |                           ^^^^^ never settled on the path that reaches the end of this block
+30 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

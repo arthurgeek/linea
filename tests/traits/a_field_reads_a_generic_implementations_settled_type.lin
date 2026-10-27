@@ -1,0 +1,25 @@
+// `Wrap[UInt8].Held` is `Option[UInt8]`, which the implementation for every
+// `Wrap[Y]` settles, so `Record.held` holds an `Option[UInt8]`.
+trait Shape {
+    type Held
+}
+
+struct Wrap[Y] {
+    y: Y,
+}
+
+impl[Y] Shape for Wrap[Y] {
+    type Held = Option[Y]
+}
+
+struct Record {
+    held: Wrap[UInt8].Held,
+}
+
+fn main() -> UInt8 {
+    let record = Record { held = .Some(4) }
+    match read record.held {
+        Some(value) => value,
+        None => 0,
+    }
+}

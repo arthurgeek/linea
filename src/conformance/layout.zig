@@ -55,6 +55,9 @@ pub const Oracle = struct {
 /// transcription is most tempting: a member's size looked up in `layouts` would
 /// make `cc` confirm a number this property handed it.
 fn isZeroWidth(typing: *const Typing, t: TypeId) bool {
+    // An instantiation with its parts unwritten holds a parameter, and has
+    // no parts to read: it is no width the oracle can state.
+    if (typing.isShell(t)) return false;
     return switch (typing.get(t)) {
         .unit, .never => true,
         .newtype => |n| isZeroWidth(typing, n.base),
@@ -212,6 +215,9 @@ const Emitter = struct {
     }
 
     fn partExpressible(self: *Emitter, t: TypeId) bool {
+        // An instantiation with its parts unwritten holds a parameter, which
+        // has no C form.
+        if (self.typing.isShell(t)) return false;
         if (isZeroWidth(self.typing, t)) return true;
         return switch (self.typing.get(t)) {
             .integer => |i| i.bits == 8 or i.bits == 16 or i.bits == 32 or i.bits == 64,

@@ -1,0 +1,54 @@
+// A copyable desk holds a copyable drawer holding a copyable claim on an
+// entry, so a desk can be copied only where its ledger's entries can.
+// `count_twice` and `file_twice` both say so in a `where` clause, so each
+// may copy the desk it is given and keep both copies.
+import std.io
+
+trait Ledger {
+    type Entry
+}
+
+struct Shop {
+    till: UInt8,
+}
+
+impl Ledger for Shop {
+    type Entry = UInt8
+}
+
+@copyable
+struct Claim[L: Ledger] {
+    entry: L.Entry,
+}
+
+@copyable
+struct Drawer[L: Ledger] {
+    claim: Claim[L],
+}
+
+@copyable
+struct Desk[L: Ledger] {
+    drawer: Drawer[L],
+}
+
+fn count_twice[L: Ledger](desk: Desk[L], count: UInt8) -> UInt8
+where L.Entry: Copyable {
+    let _kept = copy(desk)
+    count + 1
+}
+
+fn file_twice[K: Ledger](desk: Desk[K], count: UInt8) -> UInt8
+where K.Entry: Copyable {
+    let _kept = copy(desk)
+    count + 2
+}
+
+fn desk(entry: UInt8) -> Desk[Shop] {
+    Desk[Shop] { drawer = Drawer[Shop] { claim = Claim[Shop] { entry = entry } } }
+}
+
+fn main() -> UInt8 {
+    let total = file_twice(desk(8), count_twice(desk(7), 0))
+    let _printed = io.println("desks copied: {total}")
+    total
+}

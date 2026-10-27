@@ -1,0 +1,17 @@
+// `Node` names itself in `Ledger[Node]`, which requires `Node` to be
+// discardable. None of `Node`'s parts is a settled type, so they are all known
+// while the bound is asked, and `Node`, holding a byte and a ledger that holds
+// only a count, can be discarded.
+struct Ledger[phantom T: Discardable] {
+    count: UInt8,
+}
+
+struct Node {
+    value: UInt8,
+    log: Ledger[Node],
+}
+
+fn main() -> UInt8 {
+    let node = Node { value = 5, log = .{ count = 2 } }
+    node.value + node.log.count
+}

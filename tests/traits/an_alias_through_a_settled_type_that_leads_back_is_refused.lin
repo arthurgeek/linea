@@ -1,0 +1,27 @@
+// `Degrees` names `Mirror.Reading`, which is written in terms of `Degrees`
+// twice, so neither names a type. The cycle is reported once.
+trait Sensor {
+    type Reading
+}
+
+struct Mirror {}
+
+alias Degrees = Mirror.Reading
+
+impl Sensor for Mirror {
+    type Reading = Pair[Option[Degrees], Option[Degrees]]
+}
+
+struct Pair[A, B] {
+    first: A,
+    second: B,
+}
+
+struct Sample {
+    reading: Degrees,
+}
+
+fn main() -> UInt8 {
+    let _sample = Sample { reading = .{ first = .None, second = .None } }
+    0
+}

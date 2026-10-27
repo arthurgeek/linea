@@ -1,0 +1,27 @@
+import std.text
+
+// `text.Split.Item` is the type the library's implementation settles, a
+// `Str`, whether a field names it directly or through another settled type.
+trait Sensor {
+    type Reading
+}
+
+struct Local {}
+
+impl Sensor for Local {
+    type Reading = text.Split.Item
+}
+
+struct Note {
+    word: text.Split.Item,
+    other: Local.Reading,
+}
+
+fn main() -> UInt8 {
+    let note = Note { word = "hi", other = "abc" }
+    if note.word.length() + note.other.length() == 5 {
+        5
+    } else {
+        1
+    }
+}

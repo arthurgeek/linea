@@ -1,0 +1,200 @@
+error[N-Unused]: `T1` is never used
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:336:8
+    |
+336 | struct T1 {
+    |        ^^ name it in an annotation, or remove it
+error[T-Impl]: `Holder[T79]` has no available associated type `Item`
+  --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:29:8
+   |
+29 |     f: Holder[T79].Item,
+   |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T77]` has no available associated type `Item`
+  --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:37:8
+   |
+37 |     f: Holder[T77].Item,
+   |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T75]` has no available associated type `Item`
+  --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:45:8
+   |
+45 |     f: Holder[T75].Item,
+   |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T73]` has no available associated type `Item`
+  --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:53:8
+   |
+53 |     f: Holder[T73].Item,
+   |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T71]` has no available associated type `Item`
+  --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:61:8
+   |
+61 |     f: Holder[T71].Item,
+   |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T69]` has no available associated type `Item`
+  --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:69:8
+   |
+69 |     f: Holder[T69].Item,
+   |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T67]` has no available associated type `Item`
+  --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:77:8
+   |
+77 |     f: Holder[T67].Item,
+   |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T65]` has no available associated type `Item`
+  --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:85:8
+   |
+85 |     f: Holder[T65].Item,
+   |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T63]` has no available associated type `Item`
+  --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:93:8
+   |
+93 |     f: Holder[T63].Item,
+   |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T61]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:101:8
+    |
+101 |     f: Holder[T61].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T59]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:109:8
+    |
+109 |     f: Holder[T59].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T57]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:117:8
+    |
+117 |     f: Holder[T57].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T55]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:125:8
+    |
+125 |     f: Holder[T55].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T53]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:133:8
+    |
+133 |     f: Holder[T53].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T51]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:141:8
+    |
+141 |     f: Holder[T51].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T49]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:149:8
+    |
+149 |     f: Holder[T49].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T47]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:157:8
+    |
+157 |     f: Holder[T47].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T45]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:165:8
+    |
+165 |     f: Holder[T45].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T43]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:173:8
+    |
+173 |     f: Holder[T43].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T41]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:181:8
+    |
+181 |     f: Holder[T41].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T39]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:189:8
+    |
+189 |     f: Holder[T39].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T37]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:197:8
+    |
+197 |     f: Holder[T37].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T35]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:205:8
+    |
+205 |     f: Holder[T35].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T33]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:213:8
+    |
+213 |     f: Holder[T33].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T31]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:221:8
+    |
+221 |     f: Holder[T31].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T29]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:229:8
+    |
+229 |     f: Holder[T29].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T27]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:237:8
+    |
+237 |     f: Holder[T27].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T25]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:245:8
+    |
+245 |     f: Holder[T25].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T23]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:253:8
+    |
+253 |     f: Holder[T23].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T21]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:261:8
+    |
+261 |     f: Holder[T21].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T19]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:269:8
+    |
+269 |     f: Holder[T19].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T17]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:277:8
+    |
+277 |     f: Holder[T17].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T15]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:285:8
+    |
+285 |     f: Holder[T15].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T13]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:293:8
+    |
+293 |     f: Holder[T13].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T11]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:301:8
+    |
+301 |     f: Holder[T11].Item,
+    |        ^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T9]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:309:8
+    |
+309 |     f: Holder[T9].Item,
+    |        ^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T7]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:317:8
+    |
+317 |     f: Holder[T7].Item,
+    |        ^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T5]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:325:8
+    |
+325 |     f: Holder[T5].Item,
+    |        ^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Impl]: `Holder[T3]` has no available associated type `Item`
+   --> tests/traits/declared_answers/a_long_chain_of_bounded_selections_declared_last_first_alternates.lin:333:8
+    |
+333 |     f: Holder[T3].Item,
+    |        ^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type

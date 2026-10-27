@@ -1,0 +1,20 @@
+// `Box.Iter` is `S`, so an `S` would hold an `S`. Deriving `Equatable` and
+// `Debug` does not change that it has no size.
+trait Seq {
+    type Iter
+}
+
+struct Box {}
+
+impl Seq for Box {
+    type Iter = S
+}
+
+@derive(Equatable, Debug)
+struct S {
+    b: Box.Iter,
+}
+
+fn main() -> UInt8 {
+    0
+}

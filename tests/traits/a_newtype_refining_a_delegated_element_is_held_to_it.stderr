@@ -1,0 +1,5 @@
+error[T-Refine]: 0..=300 reaches outside `UInt8`, which `Wide` refines
+ --> tests/traits/a_newtype_refining_a_delegated_element_is_held_to_it.lin:2:6
+  |
+2 | type Wide = Board.Elem where it in 0..=300
+  |      ^^^^ narrow the range to what the base can hold

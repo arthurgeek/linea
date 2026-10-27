@@ -1,0 +1,51 @@
+// `Tray.held` is the linear `Ticket`, so `Chooser[Tray]` does not implement
+// `Pick`: neither `Pick.Out` nor `drop_it` is available for it.
+trait Counter {
+    type Item
+}
+
+trait Pick {
+    type Out
+
+    fn drop_it(sink self: Self) -> UInt8
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = Ticket
+}
+
+struct Tray {
+    held: Desk.Item,
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = UInt8
+
+    fn drop_it(sink self: Self) -> UInt8 {
+        let _gone = self
+        1
+    }
+}
+
+struct Mirror {}
+
+impl Counter for Mirror {
+    type Item = Chooser[Tray].Out
+}
+
+fn main() -> UInt8 {
+    let item: Mirror.Item = 4
+    let chooser = Chooser[Tray] { t = Tray { held = .{ number = 9 } } }
+    item + chooser.drop_it()
+}

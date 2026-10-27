@@ -1,0 +1,26 @@
+// `Tray.held` would be the linear `Ticket` only if `Tray` could be discarded,
+// and holding a `Ticket` would make `Tray` linear.
+trait Pick {
+    type Out
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = Ticket
+}
+
+struct Tray {
+    held: Chooser[Tray].Out,
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,7 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/generics/a_promise_on_a_member_no_part_holds_keeps_what_a_push_observes.lin:38:11
+   |
+38 |     match &shelves.push(shelf) {
+   |           ^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `shelves` keeps a value that comes from `shelf`; write `where retains(shelves: shelf)` to say so (the clause goes beside the type predicates this `where` already states)

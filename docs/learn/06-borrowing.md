@@ -1070,10 +1070,59 @@ passing its own `U` is refused with the help ``add `Owned` to `U`'s bounds``,
 just as it would be for `Copyable`. An associated type can be bounded too, in the
 function's own `where` clause: `where I.Item: Owned` under `[I: Iterator]`.
 
-The standard library does this for you. `Vec.append_slice` copies an `Owned`
-slice into a vector, reserving room for all of it first, and `iter.extend_owned`
-appends the items of an iterator whose items are `Owned`; neither keeps
-anything of its source.
+You rarely need to write a loop like `copy_all` yourself, because the standard
+library has them. `Vec.append_slice` copies an `Owned` slice into a vector,
+reserving room for all of it first, and `iter.extend_owned` appends the items
+of an iterator whose items are `Owned`; neither keeps anything of its source.
+
+An `Integer` bound says more than `Owned` does: the type is one of the
+integer types, and every integer points at nothing, so `where I.Item:
+Integer` makes `I.Item` `Owned` as well. Here `keep_all` hands its walk to
+`iter.extend_owned`, and the `Integer` bound is enough to meet that
+function's `Owned` bound:
+
+```linea
+import std.io
+import std.iter
+import std.mem
+
+use mem.Lender
+
+// Keep every item a walk hands out. `where I.Item: Integer` says the items
+// are whole numbers, and a number points at nothing, so `extend_owned`, which
+// needs its items `Owned`, may keep them.
+fn keep_all[I: Iterator, A: Allocator](inout kept: Vec[I.Item, A], inout walk: I) -> Result[(), mem.Oom]
+where I.Item: Integer {
+    match iter.extend_owned(&kept, &walk) {
+        Ok(_) => .Ok(()),
+        Err(failure) => .Err(failure.reason),
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let arena = mem.Arena.open(mem.system(), 256)
+    var log: Vec[UInt16, mem.Handle] = Vec.new_in(arena.handle())
+    var readings = [UInt16(410), 415, 420]
+    var walk = readings.as_slice().map(|sink reading| *reading)
+    if keep_all(&log, &walk).is_err() {
+        return .Ok(1)
+    }
+    readings[0] = 0
+    io.println("kept {log.length()} readings, the first {log[0]}")?
+    .Ok(0)
+}
+```
+
+```
+kept 3 readings, the first 410
+```
+
+The walk hands out `*reading`, a copy of each number, so `log` keeps numbers
+of its own and nothing of `readings`. That is what `readings[0] = 0` shows:
+changing the array after the walk is allowed, and the log still starts at
+`410`. `use mem.Lender` is there for `arena.handle()`, which gives the vector
+its allocator: `handle` is an operation of the `Lender` trait, and a trait's
+operation can be called only where the trait is in use.
 
 If you know Rust, `T: Owned` is close to `T: 'static`: a type that holds no
 borrow of anything shorter-lived. The difference is text. Rust's `&'static str`

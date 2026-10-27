@@ -1,0 +1,50 @@
+// A desk holds a drawer holding a claim on an entry, so it is dropped only
+// where its ledger's entries can be discarded. `tally` says so, takes its
+// desk apart and drops the drawer it finds; `close` says so too and drops
+// the whole desk.
+import std.io
+
+trait Ledger {
+    type Entry
+}
+
+struct Shop {
+    till: UInt8,
+}
+
+impl Ledger for Shop {
+    type Entry = UInt8
+}
+
+struct Claim[L: Ledger] {
+    entry: L.Entry,
+}
+
+struct Drawer[L: Ledger] {
+    claim: Claim[L],
+}
+
+struct Desk[L: Ledger] {
+    drawer: Drawer[L],
+}
+
+fn tally[L: Ledger](sink desk: Desk[L], count: UInt8) -> UInt8
+where L.Entry: Discardable {
+    let Desk { drawer: _drawer } = desk
+    count + 1
+}
+
+fn close[K: Ledger](sink _desk: Desk[K], count: UInt8) -> UInt8
+where K.Entry: Discardable {
+    count + 2
+}
+
+fn desk(entry: UInt8) -> Desk[Shop] {
+    Desk[Shop] { drawer = Drawer[Shop] { claim = Claim[Shop] { entry = entry } } }
+}
+
+fn main() -> UInt8 {
+    let total = close(desk(8), tally(desk(7), 0))
+    let _printed = io.println("desks dropped: {total}")
+    total
+}

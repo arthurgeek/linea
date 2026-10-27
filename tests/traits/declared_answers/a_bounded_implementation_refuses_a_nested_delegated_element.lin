@@ -1,0 +1,38 @@
+// `Picker[Wrap[B1.Elem]]` is `Picker[Wrap[UInt16]]`, and `Wrap[UInt16]` is not
+// `Equatable`, so `Picker` does not implement `Pick` for it.
+trait Pick {
+    type Out
+}
+
+struct Early {
+    x: Picker[Wrap[B1.Elem]].Out,
+}
+
+struct Wrap[T] {
+    t: T,
+}
+
+struct Picker[T] {
+    t: T,
+}
+
+impl[T: Equatable] Pick for Picker[T] {
+    type Out = UInt8
+}
+
+struct B1 {
+    values: [B2.Elem; 2],
+}
+
+impl Index[UInt64] for B1 via values
+
+struct B2 {
+    values: [UInt16; 2],
+}
+
+impl Index[UInt64] for B2 via values
+
+fn main() -> UInt8 {
+    let early = Early { x = 4 }
+    early.x
+}

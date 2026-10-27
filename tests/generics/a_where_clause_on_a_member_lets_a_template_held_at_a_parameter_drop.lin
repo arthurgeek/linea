@@ -1,0 +1,36 @@
+// A claim on an entry that may need settling must be settled, so a desk
+// holding one is dropped only where its ledger's entries can be discarded.
+// `tally` says so in its `where` clause, which is what lets it drop a desk
+// it never reads the parts of.
+import std.io
+
+trait Ledger {
+    type Entry
+}
+
+struct Shop {
+    till: UInt8,
+}
+
+impl Ledger for Shop {
+    type Entry = UInt8
+}
+
+struct Claim[L: Ledger] {
+    entry: L.Entry,
+}
+
+struct Desk[L: Ledger] {
+    claim: Claim[L],
+}
+
+fn tally[L: Ledger](sink _desk: Desk[L], count: UInt8) -> UInt8
+where L.Entry: Discardable {
+    count + 1
+}
+
+fn main() -> UInt8 {
+    let first = tally(Desk[Shop] { claim = Claim[Shop] { entry = 7 } }, 0)
+    let _printed = io.println("desks dropped: {first}")
+    first
+}

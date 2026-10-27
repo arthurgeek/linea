@@ -1,0 +1,22 @@
+// `Mirror.Reading` is `Option[Degrees]`, and `Degrees` is `Mirror.Reading`,
+// so neither names a type. A part reading it first does not change that.
+trait Sensor {
+    type Reading
+}
+
+struct Sample {
+    reading: Mirror.Reading,
+}
+
+struct Mirror {}
+
+impl Sensor for Mirror {
+    type Reading = Option[Degrees]
+}
+
+alias Degrees = Mirror.Reading
+
+fn main() -> UInt8 {
+    let _sample = Sample { reading = .None }
+    0
+}

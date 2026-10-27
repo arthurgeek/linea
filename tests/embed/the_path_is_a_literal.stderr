@@ -38,8 +38,3 @@ error[S-Paren]: expected `(`
    |
 13 |     let bare = embed_bytes "page.txt"
    |                            ^^^^^^^^^^ the file is named in parentheses
-error[N-Unused]: `name` is never used
- --> tests/embed/the_path_is_a_literal.lin:1:5
-  |
-1 | let name = "page.txt"
-  |     ^^^^ bind it as `_` if the value is not wanted

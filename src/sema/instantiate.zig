@@ -828,7 +828,7 @@ pub fn instantiate(
     // reported at their call sites during instance discovery.
     try reportOversizedTypes(sink, program, &out.pool, @intCast(typing.pool.len));
 
-    out.pool.seal();
+    try out.pool.seal();
     return out;
 }
 

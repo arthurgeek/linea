@@ -1,0 +1,21 @@
+// `Mirror.Reading` is written as `Celsius.Reading`, which is written in terms
+// of `Mirror.Reading` again, so neither names a type.
+trait Sensor {
+    type Reading
+}
+
+struct Mirror {}
+
+struct Celsius {}
+
+impl Sensor for Mirror {
+    type Reading = Celsius.Reading
+}
+
+impl Sensor for Celsius {
+    type Reading = Option[Mirror.Reading]
+}
+
+fn main() -> UInt8 {
+    0
+}

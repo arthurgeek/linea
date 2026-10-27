@@ -1,0 +1,5 @@
+error[T-Impl]: `Chooser[Tray]` has no available associated type `Out`
+  --> tests/traits/a_settled_type_selects_through_a_delegated_field.lin:37:17
+   |
+37 |     type Item = Chooser[Tray].Out
+   |                 ^^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type

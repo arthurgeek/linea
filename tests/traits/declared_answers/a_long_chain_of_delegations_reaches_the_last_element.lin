@@ -1,0 +1,1211 @@
+// Two hundred delegations, each to an array of the next one's element. Each
+// element is read once, when the one before it is first needed.
+struct B1 {
+    values: [B2.Elem; 2],
+}
+
+impl Index[UInt64] for B1 via values
+
+struct B2 {
+    values: [B3.Elem; 2],
+}
+
+impl Index[UInt64] for B2 via values
+
+struct B3 {
+    values: [B4.Elem; 2],
+}
+
+impl Index[UInt64] for B3 via values
+
+struct B4 {
+    values: [B5.Elem; 2],
+}
+
+impl Index[UInt64] for B4 via values
+
+struct B5 {
+    values: [B6.Elem; 2],
+}
+
+impl Index[UInt64] for B5 via values
+
+struct B6 {
+    values: [B7.Elem; 2],
+}
+
+impl Index[UInt64] for B6 via values
+
+struct B7 {
+    values: [B8.Elem; 2],
+}
+
+impl Index[UInt64] for B7 via values
+
+struct B8 {
+    values: [B9.Elem; 2],
+}
+
+impl Index[UInt64] for B8 via values
+
+struct B9 {
+    values: [B10.Elem; 2],
+}
+
+impl Index[UInt64] for B9 via values
+
+struct B10 {
+    values: [B11.Elem; 2],
+}
+
+impl Index[UInt64] for B10 via values
+
+struct B11 {
+    values: [B12.Elem; 2],
+}
+
+impl Index[UInt64] for B11 via values
+
+struct B12 {
+    values: [B13.Elem; 2],
+}
+
+impl Index[UInt64] for B12 via values
+
+struct B13 {
+    values: [B14.Elem; 2],
+}
+
+impl Index[UInt64] for B13 via values
+
+struct B14 {
+    values: [B15.Elem; 2],
+}
+
+impl Index[UInt64] for B14 via values
+
+struct B15 {
+    values: [B16.Elem; 2],
+}
+
+impl Index[UInt64] for B15 via values
+
+struct B16 {
+    values: [B17.Elem; 2],
+}
+
+impl Index[UInt64] for B16 via values
+
+struct B17 {
+    values: [B18.Elem; 2],
+}
+
+impl Index[UInt64] for B17 via values
+
+struct B18 {
+    values: [B19.Elem; 2],
+}
+
+impl Index[UInt64] for B18 via values
+
+struct B19 {
+    values: [B20.Elem; 2],
+}
+
+impl Index[UInt64] for B19 via values
+
+struct B20 {
+    values: [B21.Elem; 2],
+}
+
+impl Index[UInt64] for B20 via values
+
+struct B21 {
+    values: [B22.Elem; 2],
+}
+
+impl Index[UInt64] for B21 via values
+
+struct B22 {
+    values: [B23.Elem; 2],
+}
+
+impl Index[UInt64] for B22 via values
+
+struct B23 {
+    values: [B24.Elem; 2],
+}
+
+impl Index[UInt64] for B23 via values
+
+struct B24 {
+    values: [B25.Elem; 2],
+}
+
+impl Index[UInt64] for B24 via values
+
+struct B25 {
+    values: [B26.Elem; 2],
+}
+
+impl Index[UInt64] for B25 via values
+
+struct B26 {
+    values: [B27.Elem; 2],
+}
+
+impl Index[UInt64] for B26 via values
+
+struct B27 {
+    values: [B28.Elem; 2],
+}
+
+impl Index[UInt64] for B27 via values
+
+struct B28 {
+    values: [B29.Elem; 2],
+}
+
+impl Index[UInt64] for B28 via values
+
+struct B29 {
+    values: [B30.Elem; 2],
+}
+
+impl Index[UInt64] for B29 via values
+
+struct B30 {
+    values: [B31.Elem; 2],
+}
+
+impl Index[UInt64] for B30 via values
+
+struct B31 {
+    values: [B32.Elem; 2],
+}
+
+impl Index[UInt64] for B31 via values
+
+struct B32 {
+    values: [B33.Elem; 2],
+}
+
+impl Index[UInt64] for B32 via values
+
+struct B33 {
+    values: [B34.Elem; 2],
+}
+
+impl Index[UInt64] for B33 via values
+
+struct B34 {
+    values: [B35.Elem; 2],
+}
+
+impl Index[UInt64] for B34 via values
+
+struct B35 {
+    values: [B36.Elem; 2],
+}
+
+impl Index[UInt64] for B35 via values
+
+struct B36 {
+    values: [B37.Elem; 2],
+}
+
+impl Index[UInt64] for B36 via values
+
+struct B37 {
+    values: [B38.Elem; 2],
+}
+
+impl Index[UInt64] for B37 via values
+
+struct B38 {
+    values: [B39.Elem; 2],
+}
+
+impl Index[UInt64] for B38 via values
+
+struct B39 {
+    values: [B40.Elem; 2],
+}
+
+impl Index[UInt64] for B39 via values
+
+struct B40 {
+    values: [B41.Elem; 2],
+}
+
+impl Index[UInt64] for B40 via values
+
+struct B41 {
+    values: [B42.Elem; 2],
+}
+
+impl Index[UInt64] for B41 via values
+
+struct B42 {
+    values: [B43.Elem; 2],
+}
+
+impl Index[UInt64] for B42 via values
+
+struct B43 {
+    values: [B44.Elem; 2],
+}
+
+impl Index[UInt64] for B43 via values
+
+struct B44 {
+    values: [B45.Elem; 2],
+}
+
+impl Index[UInt64] for B44 via values
+
+struct B45 {
+    values: [B46.Elem; 2],
+}
+
+impl Index[UInt64] for B45 via values
+
+struct B46 {
+    values: [B47.Elem; 2],
+}
+
+impl Index[UInt64] for B46 via values
+
+struct B47 {
+    values: [B48.Elem; 2],
+}
+
+impl Index[UInt64] for B47 via values
+
+struct B48 {
+    values: [B49.Elem; 2],
+}
+
+impl Index[UInt64] for B48 via values
+
+struct B49 {
+    values: [B50.Elem; 2],
+}
+
+impl Index[UInt64] for B49 via values
+
+struct B50 {
+    values: [B51.Elem; 2],
+}
+
+impl Index[UInt64] for B50 via values
+
+struct B51 {
+    values: [B52.Elem; 2],
+}
+
+impl Index[UInt64] for B51 via values
+
+struct B52 {
+    values: [B53.Elem; 2],
+}
+
+impl Index[UInt64] for B52 via values
+
+struct B53 {
+    values: [B54.Elem; 2],
+}
+
+impl Index[UInt64] for B53 via values
+
+struct B54 {
+    values: [B55.Elem; 2],
+}
+
+impl Index[UInt64] for B54 via values
+
+struct B55 {
+    values: [B56.Elem; 2],
+}
+
+impl Index[UInt64] for B55 via values
+
+struct B56 {
+    values: [B57.Elem; 2],
+}
+
+impl Index[UInt64] for B56 via values
+
+struct B57 {
+    values: [B58.Elem; 2],
+}
+
+impl Index[UInt64] for B57 via values
+
+struct B58 {
+    values: [B59.Elem; 2],
+}
+
+impl Index[UInt64] for B58 via values
+
+struct B59 {
+    values: [B60.Elem; 2],
+}
+
+impl Index[UInt64] for B59 via values
+
+struct B60 {
+    values: [B61.Elem; 2],
+}
+
+impl Index[UInt64] for B60 via values
+
+struct B61 {
+    values: [B62.Elem; 2],
+}
+
+impl Index[UInt64] for B61 via values
+
+struct B62 {
+    values: [B63.Elem; 2],
+}
+
+impl Index[UInt64] for B62 via values
+
+struct B63 {
+    values: [B64.Elem; 2],
+}
+
+impl Index[UInt64] for B63 via values
+
+struct B64 {
+    values: [B65.Elem; 2],
+}
+
+impl Index[UInt64] for B64 via values
+
+struct B65 {
+    values: [B66.Elem; 2],
+}
+
+impl Index[UInt64] for B65 via values
+
+struct B66 {
+    values: [B67.Elem; 2],
+}
+
+impl Index[UInt64] for B66 via values
+
+struct B67 {
+    values: [B68.Elem; 2],
+}
+
+impl Index[UInt64] for B67 via values
+
+struct B68 {
+    values: [B69.Elem; 2],
+}
+
+impl Index[UInt64] for B68 via values
+
+struct B69 {
+    values: [B70.Elem; 2],
+}
+
+impl Index[UInt64] for B69 via values
+
+struct B70 {
+    values: [B71.Elem; 2],
+}
+
+impl Index[UInt64] for B70 via values
+
+struct B71 {
+    values: [B72.Elem; 2],
+}
+
+impl Index[UInt64] for B71 via values
+
+struct B72 {
+    values: [B73.Elem; 2],
+}
+
+impl Index[UInt64] for B72 via values
+
+struct B73 {
+    values: [B74.Elem; 2],
+}
+
+impl Index[UInt64] for B73 via values
+
+struct B74 {
+    values: [B75.Elem; 2],
+}
+
+impl Index[UInt64] for B74 via values
+
+struct B75 {
+    values: [B76.Elem; 2],
+}
+
+impl Index[UInt64] for B75 via values
+
+struct B76 {
+    values: [B77.Elem; 2],
+}
+
+impl Index[UInt64] for B76 via values
+
+struct B77 {
+    values: [B78.Elem; 2],
+}
+
+impl Index[UInt64] for B77 via values
+
+struct B78 {
+    values: [B79.Elem; 2],
+}
+
+impl Index[UInt64] for B78 via values
+
+struct B79 {
+    values: [B80.Elem; 2],
+}
+
+impl Index[UInt64] for B79 via values
+
+struct B80 {
+    values: [B81.Elem; 2],
+}
+
+impl Index[UInt64] for B80 via values
+
+struct B81 {
+    values: [B82.Elem; 2],
+}
+
+impl Index[UInt64] for B81 via values
+
+struct B82 {
+    values: [B83.Elem; 2],
+}
+
+impl Index[UInt64] for B82 via values
+
+struct B83 {
+    values: [B84.Elem; 2],
+}
+
+impl Index[UInt64] for B83 via values
+
+struct B84 {
+    values: [B85.Elem; 2],
+}
+
+impl Index[UInt64] for B84 via values
+
+struct B85 {
+    values: [B86.Elem; 2],
+}
+
+impl Index[UInt64] for B85 via values
+
+struct B86 {
+    values: [B87.Elem; 2],
+}
+
+impl Index[UInt64] for B86 via values
+
+struct B87 {
+    values: [B88.Elem; 2],
+}
+
+impl Index[UInt64] for B87 via values
+
+struct B88 {
+    values: [B89.Elem; 2],
+}
+
+impl Index[UInt64] for B88 via values
+
+struct B89 {
+    values: [B90.Elem; 2],
+}
+
+impl Index[UInt64] for B89 via values
+
+struct B90 {
+    values: [B91.Elem; 2],
+}
+
+impl Index[UInt64] for B90 via values
+
+struct B91 {
+    values: [B92.Elem; 2],
+}
+
+impl Index[UInt64] for B91 via values
+
+struct B92 {
+    values: [B93.Elem; 2],
+}
+
+impl Index[UInt64] for B92 via values
+
+struct B93 {
+    values: [B94.Elem; 2],
+}
+
+impl Index[UInt64] for B93 via values
+
+struct B94 {
+    values: [B95.Elem; 2],
+}
+
+impl Index[UInt64] for B94 via values
+
+struct B95 {
+    values: [B96.Elem; 2],
+}
+
+impl Index[UInt64] for B95 via values
+
+struct B96 {
+    values: [B97.Elem; 2],
+}
+
+impl Index[UInt64] for B96 via values
+
+struct B97 {
+    values: [B98.Elem; 2],
+}
+
+impl Index[UInt64] for B97 via values
+
+struct B98 {
+    values: [B99.Elem; 2],
+}
+
+impl Index[UInt64] for B98 via values
+
+struct B99 {
+    values: [B100.Elem; 2],
+}
+
+impl Index[UInt64] for B99 via values
+
+struct B100 {
+    values: [B101.Elem; 2],
+}
+
+impl Index[UInt64] for B100 via values
+
+struct B101 {
+    values: [B102.Elem; 2],
+}
+
+impl Index[UInt64] for B101 via values
+
+struct B102 {
+    values: [B103.Elem; 2],
+}
+
+impl Index[UInt64] for B102 via values
+
+struct B103 {
+    values: [B104.Elem; 2],
+}
+
+impl Index[UInt64] for B103 via values
+
+struct B104 {
+    values: [B105.Elem; 2],
+}
+
+impl Index[UInt64] for B104 via values
+
+struct B105 {
+    values: [B106.Elem; 2],
+}
+
+impl Index[UInt64] for B105 via values
+
+struct B106 {
+    values: [B107.Elem; 2],
+}
+
+impl Index[UInt64] for B106 via values
+
+struct B107 {
+    values: [B108.Elem; 2],
+}
+
+impl Index[UInt64] for B107 via values
+
+struct B108 {
+    values: [B109.Elem; 2],
+}
+
+impl Index[UInt64] for B108 via values
+
+struct B109 {
+    values: [B110.Elem; 2],
+}
+
+impl Index[UInt64] for B109 via values
+
+struct B110 {
+    values: [B111.Elem; 2],
+}
+
+impl Index[UInt64] for B110 via values
+
+struct B111 {
+    values: [B112.Elem; 2],
+}
+
+impl Index[UInt64] for B111 via values
+
+struct B112 {
+    values: [B113.Elem; 2],
+}
+
+impl Index[UInt64] for B112 via values
+
+struct B113 {
+    values: [B114.Elem; 2],
+}
+
+impl Index[UInt64] for B113 via values
+
+struct B114 {
+    values: [B115.Elem; 2],
+}
+
+impl Index[UInt64] for B114 via values
+
+struct B115 {
+    values: [B116.Elem; 2],
+}
+
+impl Index[UInt64] for B115 via values
+
+struct B116 {
+    values: [B117.Elem; 2],
+}
+
+impl Index[UInt64] for B116 via values
+
+struct B117 {
+    values: [B118.Elem; 2],
+}
+
+impl Index[UInt64] for B117 via values
+
+struct B118 {
+    values: [B119.Elem; 2],
+}
+
+impl Index[UInt64] for B118 via values
+
+struct B119 {
+    values: [B120.Elem; 2],
+}
+
+impl Index[UInt64] for B119 via values
+
+struct B120 {
+    values: [B121.Elem; 2],
+}
+
+impl Index[UInt64] for B120 via values
+
+struct B121 {
+    values: [B122.Elem; 2],
+}
+
+impl Index[UInt64] for B121 via values
+
+struct B122 {
+    values: [B123.Elem; 2],
+}
+
+impl Index[UInt64] for B122 via values
+
+struct B123 {
+    values: [B124.Elem; 2],
+}
+
+impl Index[UInt64] for B123 via values
+
+struct B124 {
+    values: [B125.Elem; 2],
+}
+
+impl Index[UInt64] for B124 via values
+
+struct B125 {
+    values: [B126.Elem; 2],
+}
+
+impl Index[UInt64] for B125 via values
+
+struct B126 {
+    values: [B127.Elem; 2],
+}
+
+impl Index[UInt64] for B126 via values
+
+struct B127 {
+    values: [B128.Elem; 2],
+}
+
+impl Index[UInt64] for B127 via values
+
+struct B128 {
+    values: [B129.Elem; 2],
+}
+
+impl Index[UInt64] for B128 via values
+
+struct B129 {
+    values: [B130.Elem; 2],
+}
+
+impl Index[UInt64] for B129 via values
+
+struct B130 {
+    values: [B131.Elem; 2],
+}
+
+impl Index[UInt64] for B130 via values
+
+struct B131 {
+    values: [B132.Elem; 2],
+}
+
+impl Index[UInt64] for B131 via values
+
+struct B132 {
+    values: [B133.Elem; 2],
+}
+
+impl Index[UInt64] for B132 via values
+
+struct B133 {
+    values: [B134.Elem; 2],
+}
+
+impl Index[UInt64] for B133 via values
+
+struct B134 {
+    values: [B135.Elem; 2],
+}
+
+impl Index[UInt64] for B134 via values
+
+struct B135 {
+    values: [B136.Elem; 2],
+}
+
+impl Index[UInt64] for B135 via values
+
+struct B136 {
+    values: [B137.Elem; 2],
+}
+
+impl Index[UInt64] for B136 via values
+
+struct B137 {
+    values: [B138.Elem; 2],
+}
+
+impl Index[UInt64] for B137 via values
+
+struct B138 {
+    values: [B139.Elem; 2],
+}
+
+impl Index[UInt64] for B138 via values
+
+struct B139 {
+    values: [B140.Elem; 2],
+}
+
+impl Index[UInt64] for B139 via values
+
+struct B140 {
+    values: [B141.Elem; 2],
+}
+
+impl Index[UInt64] for B140 via values
+
+struct B141 {
+    values: [B142.Elem; 2],
+}
+
+impl Index[UInt64] for B141 via values
+
+struct B142 {
+    values: [B143.Elem; 2],
+}
+
+impl Index[UInt64] for B142 via values
+
+struct B143 {
+    values: [B144.Elem; 2],
+}
+
+impl Index[UInt64] for B143 via values
+
+struct B144 {
+    values: [B145.Elem; 2],
+}
+
+impl Index[UInt64] for B144 via values
+
+struct B145 {
+    values: [B146.Elem; 2],
+}
+
+impl Index[UInt64] for B145 via values
+
+struct B146 {
+    values: [B147.Elem; 2],
+}
+
+impl Index[UInt64] for B146 via values
+
+struct B147 {
+    values: [B148.Elem; 2],
+}
+
+impl Index[UInt64] for B147 via values
+
+struct B148 {
+    values: [B149.Elem; 2],
+}
+
+impl Index[UInt64] for B148 via values
+
+struct B149 {
+    values: [B150.Elem; 2],
+}
+
+impl Index[UInt64] for B149 via values
+
+struct B150 {
+    values: [B151.Elem; 2],
+}
+
+impl Index[UInt64] for B150 via values
+
+struct B151 {
+    values: [B152.Elem; 2],
+}
+
+impl Index[UInt64] for B151 via values
+
+struct B152 {
+    values: [B153.Elem; 2],
+}
+
+impl Index[UInt64] for B152 via values
+
+struct B153 {
+    values: [B154.Elem; 2],
+}
+
+impl Index[UInt64] for B153 via values
+
+struct B154 {
+    values: [B155.Elem; 2],
+}
+
+impl Index[UInt64] for B154 via values
+
+struct B155 {
+    values: [B156.Elem; 2],
+}
+
+impl Index[UInt64] for B155 via values
+
+struct B156 {
+    values: [B157.Elem; 2],
+}
+
+impl Index[UInt64] for B156 via values
+
+struct B157 {
+    values: [B158.Elem; 2],
+}
+
+impl Index[UInt64] for B157 via values
+
+struct B158 {
+    values: [B159.Elem; 2],
+}
+
+impl Index[UInt64] for B158 via values
+
+struct B159 {
+    values: [B160.Elem; 2],
+}
+
+impl Index[UInt64] for B159 via values
+
+struct B160 {
+    values: [B161.Elem; 2],
+}
+
+impl Index[UInt64] for B160 via values
+
+struct B161 {
+    values: [B162.Elem; 2],
+}
+
+impl Index[UInt64] for B161 via values
+
+struct B162 {
+    values: [B163.Elem; 2],
+}
+
+impl Index[UInt64] for B162 via values
+
+struct B163 {
+    values: [B164.Elem; 2],
+}
+
+impl Index[UInt64] for B163 via values
+
+struct B164 {
+    values: [B165.Elem; 2],
+}
+
+impl Index[UInt64] for B164 via values
+
+struct B165 {
+    values: [B166.Elem; 2],
+}
+
+impl Index[UInt64] for B165 via values
+
+struct B166 {
+    values: [B167.Elem; 2],
+}
+
+impl Index[UInt64] for B166 via values
+
+struct B167 {
+    values: [B168.Elem; 2],
+}
+
+impl Index[UInt64] for B167 via values
+
+struct B168 {
+    values: [B169.Elem; 2],
+}
+
+impl Index[UInt64] for B168 via values
+
+struct B169 {
+    values: [B170.Elem; 2],
+}
+
+impl Index[UInt64] for B169 via values
+
+struct B170 {
+    values: [B171.Elem; 2],
+}
+
+impl Index[UInt64] for B170 via values
+
+struct B171 {
+    values: [B172.Elem; 2],
+}
+
+impl Index[UInt64] for B171 via values
+
+struct B172 {
+    values: [B173.Elem; 2],
+}
+
+impl Index[UInt64] for B172 via values
+
+struct B173 {
+    values: [B174.Elem; 2],
+}
+
+impl Index[UInt64] for B173 via values
+
+struct B174 {
+    values: [B175.Elem; 2],
+}
+
+impl Index[UInt64] for B174 via values
+
+struct B175 {
+    values: [B176.Elem; 2],
+}
+
+impl Index[UInt64] for B175 via values
+
+struct B176 {
+    values: [B177.Elem; 2],
+}
+
+impl Index[UInt64] for B176 via values
+
+struct B177 {
+    values: [B178.Elem; 2],
+}
+
+impl Index[UInt64] for B177 via values
+
+struct B178 {
+    values: [B179.Elem; 2],
+}
+
+impl Index[UInt64] for B178 via values
+
+struct B179 {
+    values: [B180.Elem; 2],
+}
+
+impl Index[UInt64] for B179 via values
+
+struct B180 {
+    values: [B181.Elem; 2],
+}
+
+impl Index[UInt64] for B180 via values
+
+struct B181 {
+    values: [B182.Elem; 2],
+}
+
+impl Index[UInt64] for B181 via values
+
+struct B182 {
+    values: [B183.Elem; 2],
+}
+
+impl Index[UInt64] for B182 via values
+
+struct B183 {
+    values: [B184.Elem; 2],
+}
+
+impl Index[UInt64] for B183 via values
+
+struct B184 {
+    values: [B185.Elem; 2],
+}
+
+impl Index[UInt64] for B184 via values
+
+struct B185 {
+    values: [B186.Elem; 2],
+}
+
+impl Index[UInt64] for B185 via values
+
+struct B186 {
+    values: [B187.Elem; 2],
+}
+
+impl Index[UInt64] for B186 via values
+
+struct B187 {
+    values: [B188.Elem; 2],
+}
+
+impl Index[UInt64] for B187 via values
+
+struct B188 {
+    values: [B189.Elem; 2],
+}
+
+impl Index[UInt64] for B188 via values
+
+struct B189 {
+    values: [B190.Elem; 2],
+}
+
+impl Index[UInt64] for B189 via values
+
+struct B190 {
+    values: [B191.Elem; 2],
+}
+
+impl Index[UInt64] for B190 via values
+
+struct B191 {
+    values: [B192.Elem; 2],
+}
+
+impl Index[UInt64] for B191 via values
+
+struct B192 {
+    values: [B193.Elem; 2],
+}
+
+impl Index[UInt64] for B192 via values
+
+struct B193 {
+    values: [B194.Elem; 2],
+}
+
+impl Index[UInt64] for B193 via values
+
+struct B194 {
+    values: [B195.Elem; 2],
+}
+
+impl Index[UInt64] for B194 via values
+
+struct B195 {
+    values: [B196.Elem; 2],
+}
+
+impl Index[UInt64] for B195 via values
+
+struct B196 {
+    values: [B197.Elem; 2],
+}
+
+impl Index[UInt64] for B196 via values
+
+struct B197 {
+    values: [B198.Elem; 2],
+}
+
+impl Index[UInt64] for B197 via values
+
+struct B198 {
+    values: [B199.Elem; 2],
+}
+
+impl Index[UInt64] for B198 via values
+
+struct B199 {
+    values: [B200.Elem; 2],
+}
+
+impl Index[UInt64] for B199 via values
+
+struct B200 {
+    values: [UInt16; 2],
+}
+
+impl Index[UInt64] for B200 via values
+
+fn main() -> UInt8 {
+    let b = B1 { values = [7, 8] }
+    let v: UInt16 = b[1]
+    if v == 8 {
+        3
+    } else {
+        0
+    }
+}

@@ -89,7 +89,8 @@ true of a different implementation.
 | [0202](0202-a-line-beginning-with-a-parenthesis-is-noted-only-as-an-empty-call.md) | A line beginning with `(` is noted only as an empty call | Accepted; refines 0043, 0190 and 0196 |
 | [0046](0046-the-universe-of-an-instantiation-is-computed.md) | The universe of an instantiation is computed | Accepted; refines 0034, refined by 0051 and 0123; classification superseded by 0124 |
 | [0047](0047-instantiation-is-a-backend-concern.md) | Instantiation is a backend concern | Accepted; extended by 0142; ordinary-fields clause superseded by 0248 |
-| [0248](0248-an-instantiation-holding-a-parameter-is-written-when-read.md) | An instantiation holding a parameter is written when it is read | Accepted; supersedes the ordinary-fields clause of 0047 |
+| [0248](0248-an-instantiation-holding-a-parameter-is-written-when-read.md) | An instantiation holding a parameter is written when it is read | Accepted; supersedes the ordinary-fields clause of 0047; written-parts clause superseded by 0251 |
+| [0251](0251-an-alike-instantiation-is-answered-from-one-representative.md) | An alike instantiation is answered from one representative | Accepted; supersedes the written-parts clause of 0248; extends 0241 |
 | [0051](0051-a-part-obliges-when-no-argument-can-remove-it.md) | A part obliges when it is Linear for a reason no argument can remove | Accepted; refines 0046; superseded by 0124 |
 | [0053](0053-exclusivity-is-triggered-by-mutation.md) | Exclusivity is triggered by mutation, not by the marker | Accepted; supersedes the exclusivity clause of 0025 |
 | [0054](0054-the-bound-is-on-height-and-covers-written-types.md) | The nesting bound is on height, and a written type answers to it | Accepted; supersedes 0042 |
@@ -133,7 +134,8 @@ true of a different implementation.
 | [0085](0085-the-library-is-imported.md) | The library is imported, and the prelude is what the syntax obliges | Accepted; reserved-root clause superseded by 0171; minimal-prelude and no-shadowing clauses superseded by 0179 |
 | [0171](0171-the-standard-library-is-an-ordinary-library.md) | The standard library is an ordinary library, known by its manifest | Accepted; supersedes clauses of 0068, 0075, 0085 and 0111; extends 0096; extended by 0229; boolean grant superseded by 0228 |
 | [0179](0179-the-prelude-holds-the-core-vocabulary-and-yields-to-a-module.md) | The prelude holds the core vocabulary, and yields to a module's own names | Accepted; supersedes the minimal-prelude and no-shadowing clauses of 0085 |
-| [0087](0087-an-associated-type-is-a-function-of-the-coherence-key.md) | An associated type is a function of the coherence key | Accepted; extends 0081; extended by 0088 and 0142 |
+| [0087](0087-an-associated-type-is-a-function-of-the-coherence-key.md) | An associated type is a function of the coherence key | Accepted; extends 0081; extended by 0088, 0142 and 0241 |
+| [0241](0241-declared-answers-are-settled-when-first-needed.md) | Declared answers are settled when first needed | Accepted; extends 0087 and 0165; extended by 0251 |
 | [0088](0088-a-projecting-member-is-a-place-not-a-function.md) | A projecting member is a place, not a function | Accepted; extends 0087; extended by 0089, 0121 and 0126; partially superseded by 0135 |
 | [0135](0135-field-delegation-uses-checked-projection-plans.md) | Field delegation and bound indexing share checked projection plans; traversal is explicit | Accepted; partially supersedes 0088; extends 0122 |
 | [0089](0089-a-from-end-index-is-a-value-the-container-interprets.md) | A from-end index is a value the container interprets | Accepted; extends 0088 |
@@ -149,7 +151,7 @@ true of a different implementation.
 | [0112](0112-comparable-carries-equality-compatible-order.md) | Comparable carries an equality-compatible order | Accepted; extends 0082 |
 | [0113](0113-structural-derivation-is-library-defined-source.md) | Structural derivation is library-defined source | Accepted; extends 0035, 0045, 0049 and 0093; extended by 0138, 0145 and 0209; partially superseded by 0142 |
 | [0145](0145-closed-attributes-attach-ordinary-derive-requests.md) | Closed attributes attach ordinary derive requests | Accepted; extends 0056 and 0113; extended by 0209; generic constraint clause superseded by 0165 |
-| [0165](0165-an-attached-derive-requires-each-field-type.md) | An attached derive requires each field type | Accepted; partially supersedes 0142, 0145 and 0148 |
+| [0165](0165-an-attached-derive-requires-each-field-type.md) | An attached derive requires each field type | Accepted; partially supersedes 0142, 0145 and 0148; extended by 0241 |
 | [0122](0122-a-traversal-may-read-its-receiver.md) | A traversal may read its receiver | Accepted; extended by 0135 |
 | [0123](0123-observations-carry-owner-dependencies-through-callable-contracts.md) | Observations carry owner dependencies through callable contracts | Accepted; supersedes 0069 and parts of 0025 and 0121; refines 0046; refined by 0124 and 0175; projection syntax superseded by 0126; extended by 0128, 0131, 0137, 0178, 0193 and 0221; source-clause spelling superseded by 0132; mandatory backing-buffer shape superseded by 0133 |
 | [0124](0124-copyability-and-settlement-are-independent-capabilities.md) | Copyability and settlement are independent capabilities | Accepted; supersedes classification in 0034, 0046, and 0051; extends 0103; refines 0123; extended by 0125, 0131, 0193 and 0221 |

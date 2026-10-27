@@ -1,0 +1,26 @@
+// `Tray.held` exists only if `Pan` can be discarded, and `Pan.part` only if
+// `Tray` can: each type's parts depend on the other's.
+trait Pick {
+    type Out
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+struct Tray {
+    held: Chooser[Pan].Out,
+}
+
+struct Pan {
+    part: Chooser[Tray].Out,
+}
+
+fn main() -> UInt8 {
+    let tray = Tray { held = 4 }
+    tray.held
+}

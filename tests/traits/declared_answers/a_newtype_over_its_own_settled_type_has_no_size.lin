@@ -1,0 +1,17 @@
+// `Box.Iter` is `Meters`, and `Meters` is a newtype over `Box.Iter`: a
+// `Meters` would hold a `Meters`.
+trait Seq {
+    type Iter
+}
+
+struct Box {}
+
+impl Seq for Box {
+    type Iter = Meters
+}
+
+type Meters = Box.Iter
+
+fn main() -> UInt8 {
+    0
+}

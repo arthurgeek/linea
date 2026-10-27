@@ -1,0 +1,31 @@
+import std.io
+
+// `Journal.Entries` is a `Vec[UInt64]`, so a `Ledger` owns that storage and
+// releasing the ledger releases the entries.
+trait Book {
+    type Entries
+}
+
+struct Journal {}
+
+impl Book for Journal {
+    type Entries = Vec[UInt64]
+}
+
+@derive(Release)
+struct Ledger {
+    entries: Journal.Entries,
+    owner: UInt8,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var entries: Vec[UInt64] = Vec.new()
+    &entries.push(40).unwrap()
+    &entries.push(2).unwrap()
+    let ledger = Ledger { entries, owner = 7 }
+    let count = ledger.entries.length()
+    let owner = ledger.owner
+    ledger.release()
+    io.println("{count} entries for {owner}")?
+    return .Ok(0)
+}

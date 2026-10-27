@@ -1,0 +1,36 @@
+// `Tagged[UInt8]` is `Pair[UInt8, Desk.Item]`, and `Desk.Item` reads
+// `Other.Item` from the implementation declared below it.
+trait Counter {
+    type Item
+}
+
+struct Sample {
+    x: Tagged[UInt8],
+}
+
+alias Tagged[T] = Pair[T, Desk.Item]
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = Option[Other.Item]
+}
+
+struct Other {}
+
+impl Counter for Other {
+    type Item = UInt8
+}
+
+fn main() -> UInt8 {
+    let sample = Sample { x = .{ a = 2, b = .Some(3) } }
+    match read sample.x.b {
+        Some(value) => value + sample.x.a,
+        None => 0,
+    }
+}

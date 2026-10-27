@@ -428,8 +428,8 @@ never re-read the spec. A trailing
 declaration data: formatting and tools need its subject and requirements in
 their source shape even though type checking later normalises their meaning.
 
-Nesting is bounded at `node.max_tree_height` (1000) levels of expression or
-written type ([S-Nesting]). The bound is on tree height, not parser recursion:
+Nesting is bounded at `node.max_tree_height` (1000) levels of expression,
+pattern or written type ([S-Nesting]). The bound is on tree height, not parser recursion:
 a left-leaning chain such as `a + b + c + ...` or a run of `.` selections parses
 in a loop but yields a tree as tall as the chain, and every later pass recurses
 over it. Acceptance is the same in every build because the passes run on a
@@ -740,18 +740,52 @@ An instantiation whose arguments hold a type parameter or an unsettled
 reference is minted with its parts unwritten (ADR 0248); `Instance.parts`
 records which, and `Builder.fillInstance` is the one routine that writes an
 instantiation's parts, for a ground one as it is minted, for an unwritten one
-on first read, and for every written one in `refillInstances`. Writing one
-writes the unwritten instantiations among its parts, so a written type holds
-only written types and a walk over parts never meets one without them. The
-builder's part accessors and its capability, dependency and writer queries
-write what they read; the three fact tables record a type's edges once its
-parts are written and leave an unwritten part for the builder to write before
-answering, except that the writer table records an unwritten instantiation by
-its arguments, which usually settle it. `fillMinted` writes every
-instantiation the checker minted before the pool is handed on, so a recorded
-type is written; the finished `Typing` refuses a read of an unwritten type's
-parts, layout or capability (`readsParts`), and lowering's layout table, the
-layout oracle and corpus coverage pass over one.
+on first read, and for every written one in `refillInstances`. An
+alike instantiation (ADR 0251) -- one whose arguments are distinct
+parameters promising, position for position and once each candidate's
+arguments are written as their positions, what another candidate of its
+declaration promises -- is answered from its class's representative while
+its parts are unwritten, the template wherever the template is alike it.
+`Builder.watchAlike` makes each minted instantiation and its template
+candidates; `shapeOf` interns what the argument at each position promises,
+its requirement, `Integer` and `Owned`, renamed bounds, and the settled
+references read through it promised `Owned` whose member the template's
+parts read (`membersRead`, which reads every member until
+`templatesComplete`); `decideAlikeAgain` recomputes the positions listed
+under a parameter whose promise changed, once per declaration whose clauses
+changed it, and moves each candidate whose
+shape changed to the class its shapes name, and `Instance.class` with
+`Typing.alike_sources` is the decision both the builder and the finished
+pool read. `Typing.partsSource` is the one routine every walk over what a
+type owns steps through: the capability, dependency and `unshareable`
+tables record an alike instantiation as one edge to its representative, the cycle walk and
+the walk over what types own step to it, and writing a type does not write
+such a part. Every other unwritten part is written with its holder, so a
+walk over parts meets no unwritten type but an alike one. The builder's part
+accessors write what they read, and its capability, dependency, writer and
+`Shareable` queries write what they cannot answer from a representative; the
+four fact tables record a type's edges once its parts are written and leave
+an unwritten part that is not alike for the builder to write before
+answering, except that the writer and `unshareable` tables record an
+unwritten instantiation that is not alike by its arguments, which usually
+settle it. Within a scope whose constraints cap a
+capability beyond what their subjects promise (`capsBeyondPromise`),
+`prepareScopedCapability` writes the type a question names where it is
+alike, and steps from every alike instantiation past it to its
+representative with the scope's caps renamed onto the representative's
+arguments, sharing the answer with every scope whose caps rename alike.
+Rebuilding the capability facts drops every scoped answer and lists each
+question prepared so far as lost (`ScopedCapabilityFacts.drop`), and
+`finish` prepares each again (`restoreScopedCapabilities`), so the finished
+pool answers every scoped question the checker prepared.
+`fillMinted` writes every instantiation the
+checker minted before the pool is handed on, following only parts that are
+not alike, so the type of every recorded expression, binding and signature
+is written and an alike instantiation stays unwritten only as a part. The
+finished `Typing` answers what such a part owns through its tables and
+`partsSource` (`readsFacts`) and refuses a read of any unwritten type's
+parts or layout (`readsParts`); lowering's layout table, the layout oracle
+and corpus coverage pass over one.
 `aliasedType` is the one place an alias becomes the type it names, read in the
 alias's module with its parameters in scope; `appliedAlias` answers every
 written name that reaches an alias and substitutes its arguments, and a path's
@@ -760,6 +794,28 @@ head read it. The declared-parts measures, which run before types are minted,
 treat an alias as a declaration whose written type is its one part. No alias
 type exists in the pool, and `Typing.aliased` records each alias's answer for
 tooling.
+Declared answers are settled on demand (ADR 0241).
+`readPartShapes` reads every part once for callable shapes before
+implementation heads exist. `settleDeclaredAnswers` then reads each part,
+settled type, field-delegation element and alias once, the first time
+something needs it. `readPart`, `AnswerSettling.settle` and `aliasedType` are
+the routines that read them, and `AnswerSettling.owned` reads everything a
+type owns before the builder asks a capability or an implementation of it.
+The builder reaches those last two through `Builder.demand`. A demand that
+reaches an answer still being read is a cycle, reported where it closes. A
+capability read of a type waiting on its own settled part is caught through
+`Typing.CapabilityWatch`. A part replacing one that gives its owner nothing
+in a table -- poison, or a type built from it such as `[poison; 2]` -- adds an
+edge to that table, and a callable shape gaining its effects changes nothing
+a table reads, so the capability and containment tables are not rebuilt as
+parts are read (`Builder.partChanged`). `readPartShapes` records in
+`unsettled_parts` the parts whose first reading passed over a settled
+reference; only those wait on settled answers, and `AnswerSettling.owned`
+reads only those, in one depth-first search over owned parts shared by every
+nested question (`OwnedWalk`), whose strongly connected components are each
+decided once. A chain of answers passes through at most 1000 links, settled
+references that read another answer and aliases ([T-AnswerDepth]);
+`AnswerSettling.enter` and `leave` record each answer's height in links.
 `Typing.Builder.implementationRow` retains concrete implementation selections
 for instantiation and emission. A derived `Release` component that is discardable and not proven to implement
 `Release` under the derive's own constraints is recorded in the checker's
@@ -1006,7 +1062,10 @@ same walk in `unshareable` mode, which follows the edges the writer table
 follows: fields, observed referents and every type argument. Its seeds are a
 declared type whose record says it is marked `@unshareable`, a callable or open
 type, and a type parameter whose record says neither `Shareable` nor `Integer`.
-The checker refuses a `Shareable` argument by asking `isShareable`, and
+A `Shareable` promise on a parameter or on a settled reference read through
+one is part of an alike instantiation's shape, as an `Owned` one is, and an
+`Integer` promise on a settled reference makes both. The checker refuses a
+`Shareable` argument by asking `isShareable`, and
 `unshareableWitness` finds the path the refusal names over those edges. The
 mark is copied from a template to each instance, so an instantiation of an
 `@unshareable` declaration is unshareable whatever its arguments. No pass after
@@ -1568,7 +1627,9 @@ release reaches the closure-release body the supplier above plans. Lowering
 builds both from those keys and the pool's `ClosureEntry` signature, and a call
 through a `mem.Closure` is an ordinary indirect call through its entry.
 Its completed type builder remains sealed and owns the names and layouts it
-created. Emission consumes that builder and finishes it once into the module;
+created. Sealing settles the pool as finishing does, so a scoped capability a
+rebuild dropped during discovery is prepared again before anything reads the
+sealed pool. Emission consumes that builder and finishes it once into the module;
 it neither reopens the pool nor rebuilds its indexes or layout caches.
 
 Reachability walks the expanded active declarations and may therefore select a

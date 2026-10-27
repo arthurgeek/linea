@@ -1,0 +1,11 @@
+// `B` delegates to an array of `B.Elem`, which is refused as reaching itself;
+// the field it names is still found, and its uses with it.
+struct B {
+    values: [B.Elem; 2],
+}
+
+impl Index[UInt64] for B via values
+
+fn main() -> UInt8 {
+    0
+}

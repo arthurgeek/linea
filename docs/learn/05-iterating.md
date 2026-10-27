@@ -218,6 +218,91 @@ liftoff
 countdown `inout`, because each call moves it on. The loop calls `next` until
 it answers `.None`.
 
+### A field whose type a trait names
+
+`Iterator` declares a type of its own, `Item`, and each implementation says
+what it is. A trait of yours can declare one the same way, and a generic
+struct can use it as the type of a field:
+
+```linea
+import std.io
+
+// A sensor takes readings of a type it names itself, `Reading`, and
+// `measure` takes one.
+trait Sensor {
+    type Reading
+
+    fn measure(self: Self) -> Self.Reading
+}
+
+// A thermometer reads whole degrees.
+struct Thermometer {
+    celsius: Int64,
+}
+
+impl Sensor for Thermometer {
+    type Reading = Int64
+
+    fn measure(self: Self) -> Int64 {
+        self.celsius
+    }
+}
+
+// A log entry keeps a sensor and one reading it took. The reading's type is
+// whatever the sensor's `Reading` is, so a thermometer's entry holds an
+// `Int64`.
+struct Entry[S: Sensor] {
+    sensor: S,
+    reading: S.Reading,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let hall = Thermometer { celsius = 21 }
+    let entry = Entry[Thermometer] { reading = hall.measure(), sensor = hall }
+    io.println("The hall read {entry.reading} degrees.")?
+    .Ok(0)
+}
+```
+
+```
+The hall read 21 degrees.
+```
+
+`type Reading` in the trait declares the type, and `type Reading = Int64` in
+the implementation settles it for thermometers. The literal writes `reading`
+first because fields are evaluated in the order they are written, so
+`hall.measure()` reads the hall before `sensor = hall` moves it into the entry. In `Entry`, `S.Reading` is
+whatever `S`'s implementation settles it to, so an `Entry[Thermometer]` holds
+an `Int64`. Rust writes the same field as `reading: S::Reading`.
+
+The implementation has to settle the type to something that does not lead
+back to itself. A hall whose reading is an optional hall reading never names
+a type, and is refused:
+
+```linea
+trait Sensor {
+    type Reading
+}
+
+struct Hall {}
+
+impl Sensor for Hall {
+    type Reading = Option[Hall.Reading]
+}
+
+fn main() -> UInt8 {
+    0
+}
+```
+
+```
+error[T-Impl]: this associated type is defined through itself: `Hall.Reading` is `Option[Hall.Reading]`
+ --> mirror.lin:8:20
+  |
+8 |     type Reading = Option[Hall.Reading]
+  |                    ^^^^^^^^^^^^^^^^^^^^ define it as a type that does not read back to itself
+```
+
 An array is not a sequence. A `for` walks an array directly, element by
 element, and `as_slice()` lends an array out as a slice, which is a sequence:
 that is how the chains below start from one.
@@ -1486,6 +1571,7 @@ operation they offer, and not a protocol the language asks of every type.
 | to walk a `Vec` | `for read` or `for inout`; `v.as_slice()` for a view; `v.drain()` to take its elements |
 | to change each element in place | `for inout x in xs` |
 | a type a `for` can walk | `impl Iterator for T`, with `type Item` and `next` |
+| a field whose type a trait names | `struct Entry[S: Sensor] { reading: S.Reading }` |
 | to turn each item into another | `xs.map(\|sink x\| …)` |
 | to keep some items | `xs.filter(\|x\| …)`, for items that may be dropped |
 | to keep some items and deal with the rest | `xs.filter_map(\|sink x\| …)`, answering `.Some` or `.None` |

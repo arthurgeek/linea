@@ -1,0 +1,37 @@
+// `Mirror.Pair` is `Wrap[UInt16].Pair`, which the implementation for `Wrap[Y]`
+// below settles to a `Two[UInt16, UInt16]`, reading `Wrap[UInt16].Tag` on the
+// way.
+trait Shape {
+    type Pair
+    type Tag
+}
+
+struct Mirror {}
+
+impl Shape for Mirror {
+    type Pair = Wrap[UInt16].Pair
+    type Tag = UInt8
+}
+
+struct Wrap[Y] {
+    y: Y,
+}
+
+struct Two[A, B] {
+    a: A,
+    b: B,
+}
+
+impl[Y] Shape for Wrap[Y] {
+    type Pair = Two[Y, Wrap[UInt16].Tag]
+    type Tag = Y
+}
+
+fn main() -> UInt8 {
+    let pair: Mirror.Pair = .{ a = 300, b = 4 }
+    if pair.a == 300 && pair.b == 4 {
+        7
+    } else {
+        0
+    }
+}

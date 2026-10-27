@@ -1,0 +1,26 @@
+// `Outer` delegates to an array of `Inner.Elem`, and `Inner` delegates to an
+// array of `UInt16`, so `Outer.Elem` is `UInt16`.
+struct Cell {
+    value: Outer.Elem,
+}
+
+struct Outer {
+    rows: [Inner.Elem; 2],
+}
+
+impl Index[UInt64] for Outer via rows
+
+struct Inner {
+    cells: [UInt16; 2],
+}
+
+impl Index[UInt64] for Inner via cells
+
+fn main() -> UInt8 {
+    let cell = Cell { value = 900 }
+    if cell.value == 900 {
+        3
+    } else {
+        0
+    }
+}

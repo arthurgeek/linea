@@ -1,0 +1,13 @@
+// `B` delegates to an array of `B.Elem`, so its element is defined through
+// itself.
+struct B {
+    values: [B.Elem; 2],
+}
+
+impl Index[UInt64] for B via values
+
+fn main() -> UInt8 {
+    let board = B { values = [1, 2] }
+    let value: UInt8 = board[0]
+    value
+}

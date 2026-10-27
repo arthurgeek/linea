@@ -1,0 +1,22 @@
+// `Degrees` names `Celsius.Reading`, which the implementation of `Sensor` for
+// `Celsius` settles to `UInt8`, so `Sample.reading` holds a `UInt8`.
+trait Sensor {
+    type Reading
+}
+
+struct Celsius {}
+
+impl Sensor for Celsius {
+    type Reading = UInt8
+}
+
+alias Degrees = Celsius.Reading
+
+struct Sample {
+    reading: Degrees,
+}
+
+fn main() -> UInt8 {
+    let sample = Sample { reading = 21 }
+    sample.reading
+}

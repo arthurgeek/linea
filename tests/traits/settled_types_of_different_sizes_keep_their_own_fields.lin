@@ -1,0 +1,40 @@
+import std.io
+
+// Each implementation settles `Reading` to its own type, so a structure
+// holding both lays out a byte and a word, and `Probe[T]` lays out whichever
+// `T.Reading` its argument settles.
+trait Sensor {
+    type Reading
+}
+
+struct Thermometer {}
+
+struct Odometer {}
+
+impl Sensor for Thermometer {
+    type Reading = UInt8
+}
+
+impl Sensor for Odometer {
+    type Reading = UInt64
+}
+
+struct Dashboard {
+    temperature: Thermometer.Reading,
+    distance: Odometer.Reading,
+    lamp: Thermometer.Reading,
+}
+
+struct Probe[T: Sensor] {
+    reading: T.Reading,
+    tag: UInt8,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let board = Dashboard { temperature = 19, distance = 6000000000, lamp = 1 }
+    io.println("{board.temperature} {board.distance} {board.lamp}")?
+    let warm: Probe[Thermometer] = .{ reading = 250, tag = 1 }
+    let far: Probe[Odometer] = .{ reading = 9000000000, tag = 2 }
+    io.println("{warm.reading} {warm.tag} {far.reading} {far.tag}")?
+    return .Ok(0)
+}

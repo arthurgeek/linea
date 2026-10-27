@@ -1,0 +1,21 @@
+// `Tray` is affine as declared, so `Chooser[Tray]` is never `Copyable` and has
+// no `Out`, whatever `Tray` holds. That one refusal is all there is.
+trait Pick {
+    type Out
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Copyable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+struct Tray {
+    held: Chooser[Tray].Out,
+}
+
+fn main() -> UInt8 {
+    0
+}

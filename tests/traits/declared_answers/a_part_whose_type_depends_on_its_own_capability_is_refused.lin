@@ -1,0 +1,23 @@
+// `Tray.held` is `Chooser[Tray].Out`, which exists only if `Tray` can be
+// discarded: `Tray`'s parts depend on that answer, even though the answer
+// here would be consistent.
+trait Pick {
+    type Out
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+struct Tray {
+    held: Chooser[Tray].Out,
+}
+
+fn main() -> UInt8 {
+    let tray = Tray { held = 4 }
+    tray.held
+}

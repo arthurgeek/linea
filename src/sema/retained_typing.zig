@@ -70,6 +70,9 @@ fn attachField(comptime field: std.builtin.Type.StructField, gpa: Allocator, sav
         // attached program, so a symbol a later module repeats is grouped with
         // the library's declaration of it. Nothing reads a retained copy.
         result.extern_symbols = .empty;
+    } else if (comptime std.mem.eql(u8, name, "capability_watch")) {
+        // Lent only while declared answers are settled.
+        result.capability_watch = null;
     } else if (comptime std.mem.eql(u8, name, "open_types")) {
         // Lent only while a check runs; a retained typing holds no open integer.
         result.open_types = null;
@@ -82,7 +85,7 @@ fn attachField(comptime field: std.builtin.Type.StructField, gpa: Allocator, sav
         "capabilities",   "dependency_containment", "writer_containment",    "constant_texts",        "constant_pool",    "constant_materializations", "variants",     "fields",
         "interpolations", "interpolation_pieces",   "interpolation_formats", "interpolation_borrows", "interpolation_of", "callable_params",           "closure_args", "template_of",
         "module_paths",   "instance_args",          "instance_of",           "owned_names",           "owned_contracts",  "owned_callable_bounds",     "from_end",     "binding_types",
-        "generation",     "standin_args",           "standin_of",            "broken_types",
+        "generation",     "standin_args",           "standin_of",            "broken_types",          "alike_sources",    "templates_complete",
     })) {
         // Type, binding, closure, string and compact semantic-run IDs stay fixed.
     } else @compileError("classify retained Typing field: " ++ name);

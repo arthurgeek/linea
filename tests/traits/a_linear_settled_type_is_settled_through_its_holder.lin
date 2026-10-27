@@ -1,0 +1,31 @@
+// `Desk.Item` is the linear `Ticket`; taking the `Tray` apart hands the ticket
+// to `redeem`, which settles it.
+trait Counter {
+    type Item
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = Ticket
+}
+
+struct Tray {
+    held: Desk.Item,
+}
+
+fn redeem(sink ticket: Ticket) -> UInt8 {
+    let Ticket { number } = ticket
+    number
+}
+
+fn main() -> UInt8 {
+    let tray = Tray { held = .{ number = 4 } }
+    let Tray { held } = tray
+    redeem(held)
+}

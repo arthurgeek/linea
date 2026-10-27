@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `UInt16`
+  --> tests/traits/declared_answers/a_delegation_reads_its_field_through_a_settled_type.lin:28:5
+   |
+26 | fn main() -> UInt8 {
+   |              ----- expected because of this return type
+28 |     board[1]
+   |     ^^^^^^^^ expected `UInt8`, found `UInt16`

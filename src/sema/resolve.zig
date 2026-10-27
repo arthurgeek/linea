@@ -14402,9 +14402,75 @@ const Resolver = struct {
                 var parts = self.ast.patternParts(pattern);
                 while (parts.next()) |part| try self.bindPart(part.node, false, mutable);
             },
-            // A bare name at the head binds nothing; what the parser could not
-            // read, or no pattern admits, declares nothing either.
-            .name, .malformed, .other => {},
+            // A part the parser refused and stepped over may hold binders the
+            // rest of the construct uses.
+            .malformed => try self.bindSteppedOver(pattern, mutable),
+            // A bare name at the head binds nothing, and neither does a form
+            // no pattern admits.
+            .name, .other => {},
+        }
+    }
+
+    /// The names written inside a region the parser gave up on, such as an
+    /// expression [S-Nesting] refused and stepped over.
+    ///
+    /// The parser keeps no node inside such a region, so a binding its names
+    /// reach is marked used: the program uses it there, and [N-Unused] for it
+    /// would be a consequence of the error already reported. Nothing inside
+    /// is resolved or reported, since that would report the same text a
+    /// second time. Each token of the region is read once.
+    fn useSteppedOver(self: *Resolver, id: ExprId) void {
+        const range = self.ast.exprTokens(id);
+        for (range.start.index()..range.end.index()) |i| {
+            const tok = TokenId.at(@intCast(i));
+            if (self.ast.tokenTag(tok) != .identifier) continue;
+            const found = self.lookupName(self.ast.tokenName(tok)) orelse continue;
+            switch (found) {
+                .binding => |b| self.bindings.items[b.index()].used = true,
+                .type_parameter, .unresolved_use => {},
+            }
+        }
+    }
+
+    /// The binders written inside a pattern part the parser gave up on, such
+    /// as one [S-Nesting] refused and stepped over.
+    ///
+    /// The parser keeps no node inside such a part, so each name in it that
+    /// could be a binder is bound as one: exempt from [N-Unused], and of no
+    /// known type, so a use of it reports nothing the error did not already
+    /// explain. A capitalised name is a variant or a type, a name before `:`
+    /// is a field, and a name beside `.` is part of a path, so none of those
+    /// binds. Each token of the part is read once.
+    fn bindSteppedOver(self: *Resolver, pattern: ExprId, mutable: bool) std.mem.Allocator.Error!void {
+        const range = self.ast.exprTokens(pattern);
+        const start = range.start.index();
+        const end = range.end.index();
+        for (start..end) |i| {
+            const tok = TokenId.at(@intCast(i));
+            if (self.ast.tokenTag(tok) != .identifier) continue;
+            const text = self.ast.tokenText(tok);
+            if (std.mem.eql(u8, text, "_") or name_case.of(text) == .capital) continue;
+            if (i + 1 < end and (self.ast.tokenTag(TokenId.at(@intCast(i + 1))) == .colon or
+                self.ast.tokenTag(TokenId.at(@intCast(i + 1))) == .dot)) continue;
+            if (i > start and self.ast.tokenTag(TokenId.at(@intCast(i - 1))) == .dot) continue;
+
+            const spelled = self.ast.tokenName(tok);
+            if (self.pattern_names.get(spelled) != null) continue;
+            try self.pattern_names.put(self.gpa, spelled, tok);
+            const b = BindingId.at(@intCast(self.bindings.items.len));
+            try self.pushLocal(b, spelled);
+            try self.bindings.append(self.gpa, .{
+                .name = spelled,
+                .kind = .binder,
+                .stmt = StmtId.none,
+                .decl = DeclId.none,
+                .param_index = 0,
+                .at = tok,
+                .used = false,
+                .mutable = mutable,
+                .exempt = true,
+                .names_a_field = false,
+            });
         }
     }
 
@@ -14476,7 +14542,7 @@ const Resolver = struct {
         switch (self.ast.exprTag(id)) {
             // Already diagnosed; anything inside it would report the same
             // mistake a second time.
-            .err => {},
+            .err => self.useSteppedOver(id),
 
             .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal => {},
 

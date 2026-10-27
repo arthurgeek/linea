@@ -2710,10 +2710,11 @@ fn wideEnumModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
 
 /// A pattern n variants deep, over n enums each carrying the one before it,
 /// so resolving, checking, coverage and ownership each walk a pattern of
-/// depth n. Checked rather than emitted: every tag test reads at an offset
-/// into the outermost value, and the MIR verifier finds which part an access
-/// lands on by descending the type from there, which is the type's depth per
-/// access whatever wrote it.
+/// depth n. [S-Nesting] bounds a pattern's depth, so the largest size, four
+/// times n, stays inside the limit and n does not grow. Checked rather than
+/// emitted: every tag test reads at an offset into the outermost value, and
+/// the MIR verifier finds which part an access lands on by descending the
+/// type from there, which is the type's depth per access whatever wrote it.
 fn patternDepthModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(gpa);
     errdefer out.deinit();
@@ -4557,6 +4558,584 @@ fn newtypeChainModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// `n` field delegations, each to an array of the next one's element, the
+/// last to an array of bytes. Each is written before the one it reads, so
+/// every element is settled when the delegation before it first needs it.
+fn delegationChainModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    std.debug.assert(n > 0);
+    return answerChainModule(gpa, .delegated_elements, n - 1, .forward);
+}
+
+/// `n` implementations, each settling `Reading` to the next one's, the last
+/// to a byte, each written before the one it reads.
+fn settledReferenceChainModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    std.debug.assert(n > 0);
+    return answerChainModule(gpa, .settled_references, n - 1, .forward);
+}
+
+/// How each link of an `answerChainModule` names the next declaration.
+const AnswerChain = enum {
+    /// `alias A0 = A1`, the last alias naming a byte.
+    aliases,
+    /// `type Reading = S1.Reading` in `S0`'s implementation of `Sensor`.
+    settled_references,
+    /// `struct B0 { values: [B1.Elem; 2] }`, delegated through `values`.
+    delegated_elements,
+    /// `struct S0 { x: Chooser[S1].Out }`, where `Chooser[T]` implements
+    /// `Pick` only when `T` can be discarded, so each part asks whether the
+    /// next structure can be discarded.
+    selections_through_capabilities,
+    /// `type Item = H[S1]` in `S0`'s implementation of `Tr`, where
+    /// `struct H[T: Tr] { v: T.Item }`: writing `H[S1]` substitutes `S1` for
+    /// `T`, which reads `S1.Item`.
+    substituted_parameters,
+    /// `type Item = W[S1].Item`, where `impl[T: Tr] Tr for W[T]` settles
+    /// `Item` to `Option[T.Item]`: one generic member read at every link.
+    generic_members,
+    /// `type Item = H[S1]`, where `alias H[T: Tr] = T.Item`: one generic
+    /// alias read at every link.
+    generic_aliases,
+};
+
+/// Whether the declarations of a chain are written first link first, or
+/// last link first.
+const ChainOrder = enum { forward, reversed };
+
+/// A chain of declared answers passing through `links` links, the
+/// references and aliases [T-AnswerDepth] counts, and a `main` reading the
+/// answer at its start.
+fn answerChainModule(gpa: std.mem.Allocator, shape: AnswerChain, links: u32, order: ChainOrder) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    switch (shape) {
+        .aliases => {},
+        .settled_references => try w.writeAll("trait Sensor {\n    type Reading\n}\n\n"),
+        .delegated_elements => {},
+        .selections_through_capabilities => try w.writeAll(
+            "trait Pick {\n    type Out\n}\n\n" ++
+                "struct Chooser[T] {\n    t: T,\n}\n\n" ++
+                "impl[T: Discardable] Pick for Chooser[T] {\n    type Out = UInt8\n}\n\n",
+        ),
+        .substituted_parameters => try w.writeAll(
+            "trait Tr {\n    type Item\n}\n\n" ++
+                "struct H[T: Tr] {\n    v: T.Item,\n}\n\n",
+        ),
+        .generic_members => try w.writeAll(
+            "trait Tr {\n    type Item\n}\n\n" ++
+                "struct W[T] {\n    t: T,\n}\n\n" ++
+                "impl[T: Tr] Tr for W[T] {\n    type Item = Option[T.Item]\n}\n\n",
+        ),
+        .generic_aliases => try w.writeAll(
+            "trait Tr {\n    type Item\n}\n\n" ++
+                "alias H[T: Tr] = T.Item\n\n",
+        ),
+    }
+    // An alias chain's last alias is itself a link; every other chain ends at
+    // a declaration that writes a byte.
+    const declarations = if (shape == .aliases) links else links + 1;
+    std.debug.assert(declarations > 0);
+    for (0..declarations) |k| {
+        const i = switch (order) {
+            .forward => k,
+            .reversed => declarations - 1 - k,
+        };
+        const last = i + 1 == declarations;
+        switch (shape) {
+            .aliases => if (last)
+                try w.print("alias A{d} = UInt8\n", .{i})
+            else
+                try w.print("alias A{d} = A{d}\n", .{ i, i + 1 }),
+            .settled_references => if (last)
+                try w.print("struct S{d} {{}}\n\nimpl Sensor for S{d} {{\n    type Reading = UInt8\n}}\n\n", .{ i, i })
+            else
+                try w.print("struct S{d} {{}}\n\nimpl Sensor for S{d} {{\n    type Reading = S{d}.Reading\n}}\n\n", .{ i, i, i + 1 }),
+            .delegated_elements => if (last)
+                try w.print("struct B{d} {{\n    values: [UInt8; 2],\n}}\n\nimpl Index[UInt64] for B{d} via values\n\n", .{ i, i })
+            else
+                try w.print("struct B{d} {{\n    values: [B{d}.Elem; 2],\n}}\n\nimpl Index[UInt64] for B{d} via values\n\n", .{ i, i + 1, i }),
+            .selections_through_capabilities => if (last)
+                try w.print("struct S{d} {{\n    x: UInt8,\n}}\n\n", .{i})
+            else
+                try w.print("struct S{d} {{\n    x: Chooser[S{d}].Out,\n}}\n\n", .{ i, i + 1 }),
+            .substituted_parameters => if (last)
+                try w.print("struct S{d} {{\n    n: UInt8,\n}}\n\nimpl Tr for S{d} {{\n    type Item = UInt8\n}}\n\n", .{ i, i })
+            else
+                try w.print("struct S{d} {{\n    n: UInt8,\n}}\n\nimpl Tr for S{d} {{\n    type Item = H[S{d}]\n}}\n\n", .{ i, i, i + 1 }),
+            .generic_members, .generic_aliases => if (last)
+                try w.print("struct S{d} {{\n    n: UInt8,\n}}\n\nimpl Tr for S{d} {{\n    type Item = UInt8\n}}\n\n", .{ i, i })
+            else
+                try w.print("struct S{d} {{\n    n: UInt8,\n}}\n\nimpl Tr for S{d} {{\n    type Item = {s}[S{d}]{s}\n}}\n\n", .{
+                    i,                                              i,
+                    if (shape == .generic_members) "W" else "H",    i + 1,
+                    if (shape == .generic_members) ".Item" else "",
+                }),
+        }
+    }
+    try w.writeAll(switch (shape) {
+        .aliases => "\nfn main() -> UInt8 {\n    let reading: A0 = 3\n    reading\n}\n",
+        .settled_references => "fn main() -> UInt8 {\n    let reading: S0.Reading = 3\n    reading\n}\n",
+        .delegated_elements => "fn main() -> UInt8 {\n    let board = B0 { values = [7, 8] }\n    board[1]\n}\n",
+        .selections_through_capabilities => "fn main() -> UInt8 {\n    let s = S0 { x = 3 }\n    s.x\n}\n",
+        .substituted_parameters, .generic_members, .generic_aliases => "fn main() -> UInt8 {\n    let s = S0 { n = 3 }\n    s.n\n}\n",
+    });
+    return out.toOwnedSlice();
+}
+
+/// Checks `text` on the stack the compiler's passes run on, and returns the
+/// codes of the errors it was refused with.
+fn refusalCodes(gpa: std.mem.Allocator, text: []const u8) ![]const diagnostic.Code {
+    return compiler_stack.run(refusalCodesHere, .{ gpa, text });
+}
+
+fn refusalCodesHere(gpa: std.mem.Allocator, text: []const u8) ![]const diagnostic.Code {
+    const files = [_]loader.InMemoryFile{
+        .{ .path = "p/linea.json", .text = "{}\n" },
+        .{ .path = "p/main.lin", .text = text },
+    };
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    var table: FileTable = .empty;
+    var program = try loadFromMemory(gpa, &table, &sink, &interner, "p/main.lin", &files, .program, true, .borrow);
+    if (!sink.hasErrors()) _ = try checkProgram(gpa, gpa, &program, &interner, &sink, .program);
+    var codes: std.ArrayList(diagnostic.Code) = .empty;
+    for (sink.items()) |d| if (d.severity == .err) try codes.append(gpa, d.code orelse return error.UncodedDiagnostic);
+    return codes.toOwnedSlice(gpa);
+}
+
+test "a chain of a thousand declared answers is accepted and one of a thousand and one is refused once, in either order" {
+    for (std.enums.values(AnswerChain)) |shape| for (std.enums.values(ChainOrder)) |order| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try answerChainModule(gpa, shape, 1000, order)));
+        try testing.expectEqualSlices(diagnostic.Code, &.{.t_answer_depth}, try refusalCodes(gpa, try answerChainModule(gpa, shape, 1001, order)));
+    };
+}
+
+test "a chain of thirty thousand delegations or substituted parameters is refused once, in either order" {
+    for ([_]AnswerChain{ .delegated_elements, .substituted_parameters }) |shape| for (std.enums.values(ChainOrder)) |order| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        try testing.expectEqualSlices(diagnostic.Code, &.{.t_answer_depth}, try refusalCodes(gpa, try answerChainModule(gpa, shape, 30_000, order)));
+    };
+}
+
+/// What the capability-cycle shapes start with: `Chooser[T]` implements
+/// `Pick` only when `T` can be discarded, and `Pad[T]` always does.
+const pick_trait = "trait Pick {\n    type Out\n}\n\n";
+const chooser_impl = "struct Chooser[T] {\n    t: T,\n}\n\n" ++
+    "impl[T: Discardable] Pick for Chooser[T] {\n    type Out = UInt8\n}\n\n";
+const pad_impl = "struct Pad[T] {\n    t: T,\n}\n\n" ++
+    "impl[T] Pick for Pad[T] {\n    type Out = UInt8\n}\n\n";
+
+/// `preamble`, then `decls` in the order `order` lists them, then a `main`.
+fn permutedModule(gpa: std.mem.Allocator, preamble: []const u8, decls: []const []const u8, order: []const usize) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll(preamble);
+    for (order) |k| try w.print("{s}\n", .{decls[k]});
+    try w.writeAll("fn main() -> UInt8 {\n    0\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// Every order of `0..n` for a small `n`, and for a larger one the forward
+/// and reversed orders and `shuffles` orders drawn from a fixed seed.
+fn declarationOrders(gpa: std.mem.Allocator, n: usize, shuffles: usize) ![]const []const usize {
+    var orders: std.ArrayList([]const usize) = .empty;
+    const first = try gpa.alloc(usize, n);
+    for (first, 0..) |*k, i| k.* = i;
+    if (n <= 4) {
+        // Heap's algorithm, each order copied as it is reached.
+        var counts = try gpa.alloc(usize, n);
+        @memset(counts, 0);
+        try orders.append(gpa, try gpa.dupe(usize, first));
+        var i: usize = 1;
+        while (i < n) {
+            if (counts[i] < i) {
+                if (i % 2 == 0) std.mem.swap(usize, &first[0], &first[i]) else std.mem.swap(usize, &first[counts[i]], &first[i]);
+                try orders.append(gpa, try gpa.dupe(usize, first));
+                counts[i] += 1;
+                i = 1;
+            } else {
+                counts[i] = 0;
+                i += 1;
+            }
+        }
+        return orders.toOwnedSlice(gpa);
+    }
+    try orders.append(gpa, try gpa.dupe(usize, first));
+    const reversed = try gpa.dupe(usize, first);
+    std.mem.reverse(usize, reversed);
+    try orders.append(gpa, reversed);
+    var prng = std.Random.DefaultPrng.init(0x5eed);
+    for (0..shuffles) |_| {
+        const shuffled = try gpa.dupe(usize, first);
+        prng.random().shuffle(usize, shuffled);
+        try orders.append(gpa, shuffled);
+    }
+    return orders.toOwnedSlice(gpa);
+}
+
+/// Checks `decls` in every order `declarationOrders` gives, each against the
+/// codes the program is refused with, in any order.
+fn expectEveryOrder(preamble: []const u8, decls: []const []const u8, shuffles: usize, expected: []const diagnostic.Code) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const want = try gpa.dupe(diagnostic.Code, expected);
+    std.mem.sort(diagnostic.Code, want, {}, codeBefore);
+    for (try declarationOrders(gpa, decls.len, shuffles)) |order| {
+        const got = try gpa.dupe(diagnostic.Code, try refusalCodes(gpa, try permutedModule(gpa, preamble, decls, order)));
+        std.mem.sort(diagnostic.Code, got, {}, codeBefore);
+        testing.expectEqualSlices(diagnostic.Code, want, got) catch |err| {
+            std.debug.print("declaration order {any}\n", .{order});
+            return err;
+        };
+    }
+}
+
+/// Checks that `decls` is refused in every order `declarationOrders`
+/// gives, each error under one of `allowed`.
+fn expectRefusedEveryOrder(preamble: []const u8, decls: []const []const u8, shuffles: usize, allowed: []const diagnostic.Code) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    for (try declarationOrders(gpa, decls.len, shuffles)) |order| {
+        const got = try refusalCodes(gpa, try permutedModule(gpa, preamble, decls, order));
+        const refused = got.len != 0 and for (got) |code| {
+            if (std.mem.indexOfScalar(diagnostic.Code, allowed, code) == null) break false;
+        } else true;
+        if (!refused) {
+            std.debug.print("declaration order {any} gave {any}\n", .{ order, got });
+            return error.TestExpectedRefusal;
+        }
+    }
+}
+
+fn codeBefore(_: void, a: diagnostic.Code, b: diagnostic.Code) bool {
+    return @intFromEnum(a) < @intFromEnum(b);
+}
+
+test "a part asking about a type that holds the part's own holder is refused in every declaration order" {
+    // Two types, with an earlier question about the holder.
+    try expectEveryOrder(pick_trait ++ chooser_impl ++ pad_impl, &.{
+        "struct _Zed {\n    z: Pad[Ay].Out,\n}\n",
+        "struct Ay {\n    x: Chooser[Bee].Out,\n}\n",
+        "struct Bee {\n    a: Ay,\n}\n",
+    }, 0, &.{.t_bound});
+    // Three types, `Zed` asking about the holder first.
+    try expectEveryOrder(pick_trait ++ chooser_impl, &.{
+        "struct _Zed {\n    z: Chooser[X].Out,\n}\n",
+        "struct X {\n    y: Y,\n}\n",
+        "struct Y {\n    p: Chooser[B].Out,\n}\n",
+        "struct B {\n    x: X,\n}\n",
+    }, 0, &.{.t_bound});
+    // Two parts asking about one type that holds both: writing either part's
+    // type leaves the other's cycle, so each is reported.
+    try expectEveryOrder(pick_trait ++ chooser_impl, &.{
+        "struct X {\n    y0: Y0,\n    y1: Y1,\n}\n",
+        "struct Y0 {\n    p: Chooser[B0].Out,\n}\n",
+        "struct Y1 {\n    p: Chooser[B0].Out,\n}\n",
+        "struct B0 {\n    b: X,\n}\n",
+    }, 0, &.{ .t_bound, .t_bound });
+    // Two parts asking about two holders of the type holding both.
+    try expectEveryOrder(pick_trait ++ chooser_impl, &.{
+        "struct X {\n    y0: Y0,\n    y1: Y1,\n}\n",
+        "struct Y0 {\n    p: Chooser[B0].Out,\n}\n",
+        "struct Y1 {\n    p: Chooser[B1].Out,\n}\n",
+        "struct B0 {\n    b: X,\n}\n",
+        "struct B1 {\n    b: X,\n}\n",
+    }, 0, &.{ .t_bound, .t_bound });
+    // Three parts, a chain of holders back to theirs, and an earlier question.
+    try expectEveryOrder(pick_trait ++ chooser_impl, &.{
+        "struct _Zed {\n    z: Chooser[X].Out,\n}\n",
+        "struct X {\n    y0: Y0,\n    y1: Y1,\n    y2: Y2,\n}\n",
+        "struct Y0 {\n    p: Chooser[B0].Out,\n}\n",
+        "struct Y1 {\n    p: Chooser[B0].Out,\n}\n",
+        "struct Y2 {\n    p: Chooser[B0].Out,\n}\n",
+        "struct B0 {\n    b: B1,\n}\n",
+        "struct B1 {\n    b: X,\n}\n",
+    }, 24, &.{ .t_bound, .t_bound, .t_bound });
+}
+
+/// The holders of a linear part, reached through a concrete selection in
+/// `g1` and through unbounded ones in `g4`: `V.s` asks whether `R` can be
+/// discarded, `R` holds a `W` holding a `D`, and `D.p` is the linear `Lin`
+/// that `Y.Out` names, where `Y` holds the `V`.
+const linear_holder_decls = [_][]const u8{
+    "impl Pick for Y {\n    type Out = Lin\n}\n",
+    "struct D {\n    p: Y.Out,\n}\n",
+    "struct Y {\n    w: W,\n    x: X,\n    v: V,\n}\n",
+    "struct W {\n    d: D,\n}\n",
+    "struct R {\n    w: W,\n}\n",
+    "struct V {\n    s: Chooser[R].Out,\n}\n",
+};
+
+test "a part asking about a holder of a linear part is refused in every declaration order" {
+    const lin = "@linear\nstruct Lin {\n    v: UInt8,\n}\n\n";
+    try expectRefusedEveryOrder(pick_trait ++ lin ++ chooser_impl, &(linear_holder_decls ++ [_][]const u8{
+        "impl Pick for D {\n    type Out = UInt8\n}\n",
+        "impl Pick for R {\n    type Out = UInt8\n}\n",
+        "struct _Zed {\n    z: D.Out,\n}\n",
+        "struct X {\n    q: R.Out,\n}\n",
+    }), 48, &.{ .t_bound, .t_impl });
+    try expectRefusedEveryOrder(pick_trait ++ lin ++ chooser_impl ++ pad_impl, &(linear_holder_decls ++ [_][]const u8{
+        "struct _Zed {\n    z: Pad[D].Out,\n}\n",
+        "struct X {\n    q: Pad[R].Out,\n}\n",
+    }), 48, &.{ .t_bound, .t_impl });
+}
+
+test "parts asking an unbounded implementation about their holder are accepted in every declaration order" {
+    try expectEveryOrder(pick_trait ++ pad_impl, &.{
+        "struct _Zed {\n    z: Pad[X].Out,\n}\n",
+        "struct X {\n    y0: Y0,\n    y1: Y1,\n    y2: Y2,\n}\n",
+        "struct Y0 {\n    p: Pad[B0].Out,\n}\n",
+        "struct Y1 {\n    p: Pad[B0].Out,\n}\n",
+        "struct Y2 {\n    p: Pad[B0].Out,\n}\n",
+        "struct B0 {\n    b: B1,\n}\n",
+        "struct B1 {\n    b: B2,\n}\n",
+        "struct B2 {\n    b: X,\n}\n",
+    }, 24, &.{});
+}
+
+/// `n` structures, each holding a part that asks about the head of a chain
+/// of `n` holders leading back to the structure holding them all, and a
+/// structure asking about that one first. Every question is answered by an
+/// implementation with no bound, so the program is accepted.
+fn holdersAskedThroughAChainModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll(pick_trait ++ pad_impl);
+    try w.writeAll("struct Zed {\n    z: Pad[X].Out,\n}\n\nstruct X {\n");
+    for (0..n) |i| try w.print("    y{d}: Y{d},\n", .{ i, i });
+    try w.writeAll("}\n\n");
+    for (0..n) |i| try w.print("struct Y{d} {{\n    p: Pad[B0].Out,\n}}\n\n", .{i});
+    for (0..n) |j| {
+        if (j + 1 < n) try w.print("struct B{d} {{\n    b: B{d},\n}}\n\n", .{ j, j + 1 }) else try w.print("struct B{d} {{\n    b: X,\n}}\n\n", .{j});
+    }
+    try w.writeAll("fn main() -> UInt8 {\n    let zed = Zed { z = 4 }\n    zed.z\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// `n` generic structures, each holding the next at its own parameter, the
+/// last holding `T.Item`, read through its parameter's bound.
+fn nestedTemplatesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("trait Tr {\n    type Item\n}\n\nstruct S {\n    n: UInt8,\n}\n\nimpl Tr for S {\n    type Item = UInt8\n}\n\n");
+    for (0..n) |k| try w.print("struct G{d}[T: Tr] {{\n    v: G{d}[T],\n}}\n\n", .{ k, k + 1 });
+    try w.print("struct G{d}[T: Tr] {{\n    v: T.Item,\n}}\n\n", .{n});
+    try w.writeAll("fn main() -> UInt8 {\n    let _g: Option[G0[S]] = .None\n    0\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// `n` generic structures, each holding what `Pad` selects for the next at
+/// its own parameter, the last holding `T.Item`.
+fn templatesSelectingTheNextModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("trait Tr {\n    type Item\n}\n\ntrait Pick {\n    type Out\n}\n\nstruct Pad[T] {\n    t: T,\n}\n\nimpl[T] Pick for Pad[T] {\n    type Out = T\n}\n\n");
+    try w.writeAll("struct S {\n    n: UInt8,\n}\n\nimpl Tr for S {\n    type Item = UInt8\n}\n\n");
+    for (0..n) |k| try w.print("struct G{d}[T: Tr] {{\n    v: Pad[G{d}[T]].Out,\n}}\n\n", .{ k, k + 1 });
+    try w.print("struct G{d}[T: Tr] {{\n    v: T.Item,\n}}\n\n", .{n});
+    try w.writeAll("fn main() -> UInt8 {\n    let _g: Option[G0[S]] = .None\n    0\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// `n` generic structures, each holding the next at its own parameters,
+/// where the first parameter's bound names the second: `[T: Tr2[U], U]`.
+fn nestedCrossBoundTemplatesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("trait Tr2[phantom X] {}\n\n");
+    for (0..n) |k| try w.print("struct G{d}[T: Tr2[U], U] {{\n    v: G{d}[T, U],\n    u: U,\n}}\n\n", .{ k, k + 1 });
+    try w.print("struct G{d}[T: Tr2[U], U] {{\n    v: T,\n    u: U,\n}}\n\n", .{n});
+    try w.writeAll("fn _f[T: Tr2[U], U](sink g: G0[T, U]) -> G0[T, U] {\n    g\n}\n\nfn main() -> UInt8 {\n    0\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// The ways `templateChainUnderFunctionsModule` has each function promise
+/// more of its parameter than the chain's templates promise of theirs, or
+/// cap what it holds.
+const ChainPromise = enum {
+    /// `where S.Item: Owned`, on the member the last template holds.
+    read_member,
+    /// `where S.Other: Owned`, on a member no template holds.
+    unread_member,
+    /// `[S: Source + Discardable]`, on the parameter itself.
+    discardable,
+    /// `where S.Item: Discardable`, a cap on the member the last template
+    /// holds, so each function is a scope with capabilities of its own.
+    capping,
+    /// `[S: Source + Shareable]` with `where S.Item: Shareable`, and the
+    /// first template passed where `Shareable` is required, so each function
+    /// asks whether the chain at its parameter is shareable.
+    shareable,
+};
+
+/// `n` generic structures, each holding the next at its own parameter, the
+/// last holding `S.Item`, and `n` functions each taking and returning the
+/// first at a parameter of its own that promises more than the templates'
+/// parameters do, all in the same way.
+fn templateChainUnderFunctionsModule(comptime promise: ChainPromise) fn (std.mem.Allocator, u32) anyerror![]u8 {
+    return struct {
+        fn make(gpa: std.mem.Allocator, n: u32) anyerror![]u8 {
+            var out: std.Io.Writer.Allocating = .init(gpa);
+            errdefer out.deinit();
+            const w = &out.writer;
+            try w.writeAll("trait Source {\n    type Item\n    type Other\n}\n\n");
+            for (0..n) |k| try w.print("struct G{d}[S: Source] {{\n    v: G{d}[S],\n}}\n\n", .{ k, k + 1 });
+            try w.print("struct G{d}[S: Source] {{\n    item: S.Item,\n}}\n\n", .{n});
+            if (promise == .shareable) try w.writeAll("fn share[T: Shareable](_value: T) -> UInt8 {\n    0\n}\n\n");
+            for (0..n) |i| switch (promise) {
+                .read_member => try w.print("fn _f{d}[S: Source](sink g: G0[S]) -> G0[S]\nwhere S.Item: Owned {{\n    g\n}}\n\n", .{i}),
+                .unread_member => try w.print("fn _f{d}[S: Source](sink g: G0[S]) -> G0[S]\nwhere S.Other: Owned {{\n    g\n}}\n\n", .{i}),
+                .discardable => try w.print("fn _f{d}[S: Source + Discardable](sink g: G0[S]) -> G0[S] {{\n    g\n}}\n\n", .{i}),
+                .capping => try w.print("fn _f{d}[S: Source](sink _g: G0[S]) -> UInt8\nwhere S.Item: Discardable {{\n    0\n}}\n\n", .{i}),
+                .shareable => try w.print("fn _f{d}[S: Source + Shareable](g: G0[S]) -> UInt8\nwhere S.Item: Shareable {{\n    share(g)\n}}\n\n", .{i}),
+            };
+            try w.writeAll("fn main() -> UInt8 {\n    0\n}\n");
+            return out.toOwnedSlice();
+        }
+    }.make;
+}
+
+/// The ways `promisedMembersModule` spreads `n` members of one trait, each
+/// promised `Owned`, over what reads them.
+const MemberPromise = enum {
+    /// `n` templates each holding one member, and one function taking every
+    /// template at its parameter and promising every member.
+    one_per_template,
+    /// One template holding every member, and one function taking it and
+    /// promising every member.
+    one_template,
+    /// One template whose own `where` clause promises every member, holding
+    /// another template that reads the first.
+    template_where,
+};
+
+/// A trait of `n` members, each promised `Owned` by a `where` clause, read
+/// through templates as `promise` says.
+fn promisedMembersModule(comptime promise: MemberPromise) fn (std.mem.Allocator, u32) anyerror![]u8 {
+    return struct {
+        fn make(gpa: std.mem.Allocator, n: u32) anyerror![]u8 {
+            var out: std.Io.Writer.Allocating = .init(gpa);
+            errdefer out.deinit();
+            const w = &out.writer;
+            try w.writeAll("trait Source {\n");
+            for (0..n) |k| try w.print("    type M{d}\n", .{k});
+            try w.writeAll("}\n\n");
+            switch (promise) {
+                .one_per_template => {
+                    for (0..n) |k| try w.print("struct H{d}[S: Source] {{\n    item: S.M{d},\n}}\n\n", .{ k, k });
+                    try w.writeAll("fn _f[S: Source](");
+                    for (0..n) |k| try w.print("{s}_h{d}: H{d}[S]", .{ if (k == 0) "" else ", ", k, k });
+                    try w.writeAll(") -> UInt8\n");
+                },
+                .one_template => {
+                    try w.writeAll("struct G[S: Source] {\n");
+                    for (0..n) |k| try w.print("    m{d}: S.M{d},\n", .{ k, k });
+                    try w.writeAll("}\n\nfn _f[S: Source](sink g: G[S]) -> G[S]\n");
+                },
+                .template_where => {
+                    try w.writeAll("struct H[S: Source] {\n    m0: S.M0,\n}\n\nstruct G[S: Source]\n");
+                    try writeOwnedMembers(w, n);
+                    try w.writeAll(" {\n    h: H[S],\n}\n\nfn _f[S: Source](sink g: G[S]) -> G[S]\n");
+                },
+            }
+            try writeOwnedMembers(w, n);
+            try w.writeAll(switch (promise) {
+                .one_per_template => " {\n    0\n}\n\n",
+                .one_template, .template_where => " {\n    g\n}\n\n",
+            });
+            try w.writeAll("fn main() -> UInt8 {\n    0\n}\n");
+            return out.toOwnedSlice();
+        }
+
+        fn writeOwnedMembers(w: *std.Io.Writer, n: u32) !void {
+            try w.writeAll("where ");
+            for (0..n) |k| try w.print("{s}S.M{d}: Owned", .{ if (k == 0) "" else ", ", k });
+        }
+    }.make;
+}
+
+test "nested templates and templates selecting the next are accepted" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try nestedTemplatesModule(gpa, 6)));
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try templatesSelectingTheNextModule(gpa, 6)));
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try nestedCrossBoundTemplatesModule(gpa, 6)));
+    inline for (.{ ChainPromise.read_member, .unread_member, .discardable, .shareable }) |promise| {
+        try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try templateChainUnderFunctionsModule(promise)(gpa, 6)));
+    }
+    inline for (.{ MemberPromise.one_per_template, .one_template, .template_where }) |promise| {
+        try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try promisedMembersModule(promise)(gpa, 6)));
+    }
+}
+
+test "holders asked about through a chain are accepted" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, try holdersAskedThroughAChainModule(gpa, 6)));
+}
+
+test "a capability question reads through an owned type nested forty-five thousand deep" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    const w = &out.writer;
+    const depth = 45_000;
+    // `M.Reading` asks whether `N0` can be discarded, and the answer is read
+    // through every structure `N0` holds.
+    try w.writeAll(
+        "trait Pick {\n    type Out\n}\n\n" ++
+            "struct Chooser[T] {\n    t: T,\n}\n\n" ++
+            "impl[T: Discardable] Pick for Chooser[T] {\n    type Out = UInt8\n}\n\n" ++
+            "trait Sensor {\n    type Reading\n}\n\n" ++
+            "struct M {}\n\nimpl Sensor for M {\n    type Reading = Chooser[N0].Out\n}\n\n",
+    );
+    for (0..depth - 1) |i| try w.print("struct N{d} {{\n    x: N{d},\n}}\n\n", .{ i, i + 1 });
+    try w.print("struct N{d} {{\n    x: UInt8,\n}}\n\n", .{depth - 1});
+    try w.writeAll("fn main() -> UInt8 {\n    let reading: M.Reading = 3\n    reading\n}\n");
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, out.written()));
+}
+
+test "a capability question reads through types held only as arguments, two hundred thousand deep" {
+    // `N0` holds `N1` only as the argument of `Marker[N1]`, which has no part
+    // of that type, so `N1` is asked about after the walk through `N0` ends,
+    // and so on down the chain. Two hundred thousand is past what a frame per
+    // argument would fit on the compiler's stack in a Debug build.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    const w = &out.writer;
+    const depth = 200_000;
+    try w.writeAll(
+        "trait Pick {\n    type Out\n}\n\n" ++
+            "struct Chooser[T] {\n    t: T,\n}\n\n" ++
+            "impl[T: Discardable] Pick for Chooser[T] {\n    type Out = UInt8\n}\n\n" ++
+            "trait Sensor {\n    type Reading\n}\n\n" ++
+            "struct M {}\n\nimpl Sensor for M {\n    type Reading = Chooser[N0].Out\n}\n\n" ++
+            "struct Marker[phantom X] {}\n\n",
+    );
+    for (0..depth - 1) |i| try w.print("struct N{d} {{\n    x: Marker[N{d}],\n}}\n\n", .{ i, i + 1 });
+    try w.print("struct N{d} {{\n    x: UInt8,\n}}\n\n", .{depth - 1});
+    try w.writeAll("fn main() -> UInt8 {\n    let reading: M.Reading = 3\n    reading\n}\n");
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, out.written()));
+}
+
 /// A borrowed carrier with `n` field paths, moved through `n` bindings.
 /// The literal, type and binding chain each contain O(n) source text.
 fn carrierFieldBindingsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
@@ -6367,7 +6946,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "variants in one enum", .n = 1000, .cost = throughTheTree(wideEnumModule) },
     .{ .name = "arms that each bind", .n = 2000, .cost = throughTheTree(bindingArmsModule) },
     .{ .name = "two wide columns", .n = 1000, .cost = throughTheTree(twoWideColumnsModule) },
-    .{ .name = "pattern depth", .n = 400, .cost = throughTreeBatch(patternDepthModule, .check, 1) },
+    .{ .name = "pattern depth", .n = 240, .grows = false, .cost = throughTreeBatch(patternDepthModule, .check, 32) },
     .{ .name = "function values settled in one function", .n = 4000, .cost = throughTheTree(openFunctionValuesModule) },
     .{ .name = "function values settled across functions", .n = 4000, .cost = throughTheTree(functionValueBodiesModule) },
     .{ .name = "constructor payload fields", .n = 2000, .cost = throughTheTree(constructorPayloadFieldsModule) },
@@ -6394,6 +6973,23 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "instantiations", .n = 8000, .cost = throughTheTree(instanceModule) },
     .{ .name = "generic structures holding one another", .n = 2000, .cost = throughTheTree(ringedGenericStructsModule) },
     .{ .name = "newtype chain", .n = 16000, .cost = throughTheTree(newtypeChainModule) },
+    // A chain of declared answers passes through at most 1000 links
+    // ([T-AnswerDepth]), so both chains are held below that.
+    .{ .name = "delegation chain", .n = 250, .grows = false, .cost = throughTheLoader(delegationChainModule) },
+    .{ .name = "settled reference chain", .n = 250, .grows = false, .cost = throughTreeBatch(settledReferenceChainModule, .emit, 16) },
+    .{ .name = "holders asked about through a chain", .n = 400, .cost = throughTheTree(holdersAskedThroughAChainModule) },
+    .{ .name = "nested templates", .n = 8000, .cost = throughTheLoader(nestedTemplatesModule) },
+    .{ .name = "nested templates bounded by one another's parameters", .n = 4000, .cost = throughTheLoader(nestedCrossBoundTemplatesModule) },
+    .{ .name = "a template chain under functions promising a member it reads", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.read_member)) },
+    .{ .name = "a template chain under functions promising a member it never reads", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.unread_member)) },
+    .{ .name = "a template chain under functions bounding their parameter Discardable", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.discardable)) },
+    .{ .name = "a template chain under functions capping the member it reads Discardable", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.capping)) },
+    .{ .name = "a template chain under functions sharing it", .n = 16000, .cost = throughTheLoader(templateChainUnderFunctionsModule(.shareable)) },
+    .{ .name = "members promised through templates each reading one", .n = 16000, .cost = throughTheLoader(promisedMembersModule(.one_per_template)) },
+    .{ .name = "members promised through one template reading them all", .n = 32000, .cost = throughTheLoader(promisedMembersModule(.one_template)) },
+    .{ .name = "members promised by a template's own where clause", .n = 32000, .cost = throughTheLoader(promisedMembersModule(.template_where)) },
+    // Each template's part is one link, so the chain is held below 1000.
+    .{ .name = "templates selecting the next", .n = 250, .grows = false, .cost = throughTheLoader(templatesSelectingTheNextModule) },
     .{ .name = "fields in one type", .n = 16000, .cost = throughTheTree(fieldModule) },
     .{ .name = "reflected components", .n = 4000, .cost = throughTheTree(reflectionComponentsModule) },
     .{ .name = "construction product width", .n = 2000, .cost = throughTheTree(constructionProductModule) },

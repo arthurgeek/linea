@@ -1,0 +1,5 @@
+error[T-Bound]: `Tray`'s parts depend on whether `Tray` can be discarded
+  --> tests/traits/declared_answers/a_newtype_reading_a_settled_type_names_the_type_asked_about.lin:20:10
+   |
+20 | type W = Chooser[Tray].Out
+   |          ^^^^^^^^^^^^^^^^^ write the part's type here rather than a settled reference

@@ -2799,6 +2799,10 @@ pub const DeclIndex = struct {
     /// the name after `impl` and for a signature is the trait's own name.
     owner_starts: []u32,
     by_owner: []DeclId,
+    /// The name of each declaration a token owns, by the owner, so asking
+    /// whether a trait declares a member is one lookup rather than a walk
+    /// over every member it declares.
+    owned_names: std.AutoHashMapUnmanaged(OwnedName, void),
     /// Declarations by the token they start at. Sorted rather than searched
     /// over `DeclId`, because a container's members are built before it is.
     by_start: []DeclId,
@@ -2826,6 +2830,9 @@ pub const DeclIndex = struct {
         defer gpa.free(cursor);
         @memcpy(cursor, owner_starts[0..tokens]);
 
+        var owned_names: std.AutoHashMapUnmanaged(OwnedName, void) = .empty;
+        errdefer owned_names.deinit(gpa);
+        try owned_names.ensureTotalCapacity(gpa, total);
         // In declaration order, so each run keeps it: what these walks report
         // first should not change.
         for (0..ast.declCount()) |i| {
@@ -2834,6 +2841,7 @@ pub const DeclIndex = struct {
             if (of == TokenId.none or of.index() >= tokens) continue;
             by_owner[cursor[of.index()]] = d;
             cursor[of.index()] += 1;
+            owned_names.putAssumeCapacity(.{ .owner = of, .name = ast.tokenName(ast.declName(d)) }, {});
         }
 
         const by_start = try gpa.alloc(DeclId, ast.declCount());
@@ -2844,6 +2852,7 @@ pub const DeclIndex = struct {
         return .{
             .owner_starts = owner_starts,
             .by_owner = by_owner,
+            .owned_names = owned_names,
             .by_start = by_start,
             .ast = ast,
         };
@@ -2858,6 +2867,7 @@ pub const DeclIndex = struct {
     pub fn deinit(self: *DeclIndex, gpa: std.mem.Allocator) void {
         gpa.free(self.owner_starts);
         gpa.free(self.by_owner);
+        self.owned_names.deinit(gpa);
         gpa.free(self.by_start);
     }
 
@@ -2866,6 +2876,13 @@ pub const DeclIndex = struct {
         if (of == TokenId.none or of.index() + 1 >= self.owner_starts.len) return &.{};
         return self.by_owner[self.owner_starts[of.index()]..self.owner_starts[of.index() + 1]];
     }
+
+    /// Whether a declaration `of` owns is named `name`.
+    pub fn ownsNamed(self: *const DeclIndex, of: TokenId, name: StringId) bool {
+        return self.owned_names.contains(.{ .owner = of, .name = name });
+    }
+
+    const OwnedName = struct { owner: TokenId, name: StringId };
 
     /// The declarations starting inside a token range, in source order.
     pub fn within(self: *const DeclIndex, extent: TokenRange) []const DeclId {

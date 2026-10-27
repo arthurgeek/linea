@@ -1,0 +1,5 @@
+error[T-Bound]: `Tray`'s parts depend on whether `Tray` can be discarded
+  --> tests/traits/declared_answers/a_default_naming_a_settled_type_cannot_discard_a_linear_part.lin:33:11
+   |
+33 |     held: Holder,
+   |           ^^^^^^ write the part's type here rather than a settled reference

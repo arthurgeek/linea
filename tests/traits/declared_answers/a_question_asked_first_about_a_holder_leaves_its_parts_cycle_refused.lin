@@ -1,0 +1,44 @@
+// `Ay`'s part is `Chooser[Bee].Out`, which exists only if `Bee` can be
+// discarded, and `Bee` holds an `Ay`: `Bee`'s parts depend on that answer.
+// `Zed` asking about `Ay` first changes nothing.
+trait Pick {
+    type Out
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = Ticket
+}
+
+struct Pad[T] {
+    t: T,
+}
+
+impl[T] Pick for Pad[T] {
+    type Out = UInt8
+}
+
+struct Zed {
+    z: Pad[Ay].Out,
+}
+
+struct Ay {
+    x: Chooser[Bee].Out,
+}
+
+struct Bee {
+    a: Ay,
+}
+
+fn main() -> UInt8 {
+    let zed = Zed { z = 1 }
+    zed.z
+}

@@ -1,0 +1,5 @@
+error[T-Impl]: `Chooser[Tray]` has no available associated type `Out`
+  --> tests/traits/a_settled_type_a_part_reads_first_selects_through_complete_parts.lin:42:17
+   |
+42 |     type Item = Chooser[Tray].Out
+   |                 ^^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type

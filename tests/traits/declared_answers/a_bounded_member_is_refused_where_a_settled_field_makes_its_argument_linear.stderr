@@ -1,0 +1,12 @@
+error[T-Impl]: `Chooser[Tray]` has no available associated type `Out`
+  --> tests/traits/declared_answers/a_bounded_member_is_refused_where_a_settled_field_makes_its_argument_linear.lin:44:17
+   |
+44 |     type Item = Chooser[Tray].Out
+   |                 ^^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[T-Bound]: `drop_it` comes from `Pick`, and `Chooser[Tray]` does not implement it
+  --> tests/traits/declared_answers/a_bounded_member_is_refused_where_a_settled_field_makes_its_argument_linear.lin:50:12
+   |
+50 |     item + chooser.drop_it()
+   |            ^^^^^^^^^^^^^^^ its implementation's bounds are not met by this type's arguments
+   |
+   = help: `Chooser[T]` implements `Pick` when `T` is `Discardable`, and `Tray` is not

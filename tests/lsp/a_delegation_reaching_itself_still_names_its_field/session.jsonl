@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// `B` delegates to an array of `B.Elem`, which is refused as reaching itself;\n// the field it names is still found, and its uses with it.\nstruct B {\n    values: [B.Elem; 2],\n}\n\nimpl Index[UInt64] for B via values\n\nfn main() -> UInt8 {\n    0\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":6,"character":30}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"position":{"line":6,"character":30},"context":{"includeDeclaration":true}}}
+{"jsonrpc":"2.0","id":4,"method":"shutdown"}

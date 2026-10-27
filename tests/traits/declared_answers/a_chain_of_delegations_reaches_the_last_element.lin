@@ -1,0 +1,41 @@
+// `B1.Elem` is the element of `B2`, through five delegations, ending in
+// `UInt16`.
+struct B1 {
+    values: [B2.Elem; 2],
+}
+
+impl Index[UInt64] for B1 via values
+
+struct B2 {
+    values: [B3.Elem; 2],
+}
+
+impl Index[UInt64] for B2 via values
+
+struct B3 {
+    values: [B4.Elem; 2],
+}
+
+impl Index[UInt64] for B3 via values
+
+struct B4 {
+    values: [B5.Elem; 2],
+}
+
+impl Index[UInt64] for B4 via values
+
+struct B5 {
+    values: [UInt16; 2],
+}
+
+impl Index[UInt64] for B5 via values
+
+fn main() -> UInt8 {
+    let b = B1 { values = [7, 8] }
+    let v: UInt16 = b[1]
+    if v == 8 {
+        3
+    } else {
+        0
+    }
+}

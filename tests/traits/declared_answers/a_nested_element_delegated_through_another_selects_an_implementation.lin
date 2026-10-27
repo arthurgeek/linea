@@ -1,0 +1,44 @@
+// `B1.Elem` is `B2.Elem`, which is `UInt16`, so `Picker[Wrap[B1.Elem]]` is
+// `Picker[Wrap[UInt16]]`, which the concrete implementation answers. The
+// declarations are written in the order they are read in.
+trait Pick {
+    type Out
+}
+
+struct Early {
+    x: Picker[Wrap[B1.Elem]].Out,
+}
+
+struct Wrap[T] {
+    t: T,
+}
+
+struct Picker[T] {
+    t: T,
+}
+
+impl Pick for Picker[Wrap[UInt16]] {
+    type Out = UInt8
+}
+
+struct B1 {
+    values: [B2.Elem; 2],
+}
+
+impl Index[UInt64] for B1 via values
+
+struct B2 {
+    values: [UInt16; 2],
+}
+
+impl Index[UInt64] for B2 via values
+
+fn main() -> UInt8 {
+    let early = Early { x = 4 }
+    let board = B1 { values = [1, 2] }
+    if board[1] == 2 {
+        early.x
+    } else {
+        0
+    }
+}

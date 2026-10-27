@@ -1,0 +1,26 @@
+// `Probe.Reading` is `Board.Elem`, the element of the array `Board` delegates
+// `Index` to: a `UInt16`.
+trait Sensor {
+    type Reading
+}
+
+struct Board {
+    values: [UInt16; 2],
+}
+
+impl Index[UInt64] for Board via values
+
+struct Probe {}
+
+impl Sensor for Probe {
+    type Reading = Board.Elem
+}
+
+fn main() -> UInt8 {
+    let reading: Probe.Reading = 300
+    if reading == 300 {
+        5
+    } else {
+        1
+    }
+}

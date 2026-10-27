@@ -1,0 +1,5 @@
+error[T-Impl]: `Picker[Wrap[UInt16]]` has no available associated type `Out`
+ --> tests/traits/declared_answers/a_bounded_implementation_refuses_a_nested_delegated_element.lin:8:8
+  |
+8 |     x: Picker[Wrap[B1.Elem]].Out,
+  |        ^^^^^^^^^^^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type

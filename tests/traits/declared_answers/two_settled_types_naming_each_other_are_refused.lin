@@ -1,0 +1,26 @@
+// `Ay.Item` is `Bee.Item` and `Bee.Item` is `Ay.Item`, so neither names a
+// type, and the field reading one is not reported again.
+trait Counter {
+    type Item
+}
+
+struct Holder {
+    v: Ay.Item,
+}
+
+struct Ay {}
+
+impl Counter for Ay {
+    type Item = Bee.Item
+}
+
+struct Bee {}
+
+impl Counter for Bee {
+    type Item = Ay.Item
+}
+
+fn main() -> UInt8 {
+    let _holder = Holder { v = 1 }
+    0
+}

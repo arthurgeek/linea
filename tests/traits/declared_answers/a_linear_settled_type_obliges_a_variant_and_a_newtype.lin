@@ -1,0 +1,29 @@
+// `Desk.Item` is the linear `Ticket`, so a `Slot` holding one and a `Wrapped`
+// over one must each be settled before the block ends.
+trait Counter {
+    type Item
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Desk {}
+
+impl Counter for Desk {
+    type Item = Ticket
+}
+
+enum Slot {
+    Empty,
+    Held(Desk.Item),
+}
+
+type Wrapped = Desk.Item
+
+fn main() -> UInt8 {
+    let _slot = Slot.Held(.{ number = 4 })
+    let _wrapped = Wrapped(.{ number = 5 })
+    0
+}

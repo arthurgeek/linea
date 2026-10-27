@@ -1,0 +1,28 @@
+// `Board` delegates to its `Inner`, which delegates to an array of `UInt16`,
+// so `Board.Elem` is `UInt16` though `Cell` is declared first.
+struct Cell {
+    value: Board.Elem,
+    tag: UInt8,
+}
+
+struct Board {
+    inner: Inner,
+}
+
+struct Inner {
+    values: [UInt16; 2],
+}
+
+impl Index[UInt64] for Inner via values
+
+impl Index[UInt64] for Board via inner
+
+fn main() -> UInt8 {
+    let board = Board { inner = Inner { values = [7, 900] } }
+    let cell = Cell { value = board[1], tag = 3 }
+    if cell.value == 900 {
+        cell.tag
+    } else {
+        0
+    }
+}

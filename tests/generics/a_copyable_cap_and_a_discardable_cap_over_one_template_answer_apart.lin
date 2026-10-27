@@ -1,0 +1,45 @@
+// A copyable desk holds a copyable drawer holding a copyable claim on an
+// entry, so a desk can be copied only where its ledger's entries can.
+// `count_twice` and `file_twice` say the entries are copyable, so each may
+// copy its desk. `drop_one` says only that they can be discarded, which lets
+// it drop a desk but not copy one.
+trait Ledger {
+    type Entry
+}
+
+@copyable
+struct Claim[L: Ledger] {
+    entry: L.Entry,
+}
+
+@copyable
+struct Drawer[L: Ledger] {
+    claim: Claim[L],
+}
+
+@copyable
+struct Desk[L: Ledger] {
+    drawer: Drawer[L],
+}
+
+fn _count_twice[L: Ledger](desk: Desk[L]) -> UInt8
+where L.Entry: Copyable {
+    let _kept = copy(desk)
+    1
+}
+
+fn _drop_one[M: Ledger](desk: Desk[M]) -> UInt8
+where M.Entry: Discardable {
+    let _kept = copy(desk)
+    2
+}
+
+fn _file_twice[K: Ledger](desk: Desk[K]) -> UInt8
+where K.Entry: Copyable {
+    let _kept = copy(desk)
+    3
+}
+
+fn main() -> UInt8 {
+    0
+}

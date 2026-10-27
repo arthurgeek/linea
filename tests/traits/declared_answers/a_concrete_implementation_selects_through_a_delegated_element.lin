@@ -1,0 +1,28 @@
+// `Board.Elem` is `UInt16`, so `Picker[Board.Elem]` is `Picker[UInt16]`, which
+// the concrete implementation answers.
+trait Pick {
+    type Out
+}
+
+struct Early {
+    x: Picker[Board.Elem].Out,
+}
+
+struct Picker[T] {
+    t: T,
+}
+
+impl Pick for Picker[UInt16] {
+    type Out = UInt8
+}
+
+struct Board {
+    values: [UInt16; 2],
+}
+
+impl Index[UInt64] for Board via values
+
+fn main() -> UInt8 {
+    let early = Early { x = 4 }
+    early.x
+}

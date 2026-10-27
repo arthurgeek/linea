@@ -1,0 +1,28 @@
+// `Tray.held` is a `W`, whose base `Chooser[Tray].Out` asks whether `Tray`
+// can be discarded: `Tray`'s parts depend on that answer.
+trait Pick {
+    type Out
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = Ticket
+}
+
+type W = Chooser[Tray].Out
+
+struct Tray {
+    held: W,
+}
+
+fn main() -> UInt8 {
+    0
+}

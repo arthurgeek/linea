@@ -1,0 +1,33 @@
+trait Source {
+    type Item
+
+    fn take(inout self: Self) -> Self.Item
+}
+
+struct Counter {
+    next: UInt8,
+}
+
+impl Source for Counter {
+    type Item = UInt8
+
+    fn take(inout self: Self) -> UInt8 {
+        self.next += 1
+        self.next
+    }
+}
+
+fn share[T: Shareable](sink value: T) -> T {
+    value
+}
+
+// Every `Integer` is `Shareable`, so `where S.Item: Integer` promises that
+// an item may be read by two tasks at once.
+fn drain[S: Source](inout source: S) -> S.Item where S.Item: Integer {
+    share(&source.take())
+}
+
+fn main() -> UInt8 {
+    var counter = Counter { next = 1 }
+    drain(&counter)
+}

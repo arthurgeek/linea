@@ -1,0 +1,35 @@
+// `Handler.run` takes a `Wrap[UInt8].E`, an `Option[UInt8]`, and returns a
+// `Desk.E`, a `UInt8`.
+trait Shape {
+    type E
+}
+
+struct Wrap[Y] {
+    y: Y,
+}
+
+impl[Y] Shape for Wrap[Y] {
+    type E = Option[Y]
+}
+
+struct Desk {}
+
+impl Shape for Desk {
+    type E = UInt8
+}
+
+struct Handler {
+    run: fn(value: Wrap[UInt8].E) -> Desk.E,
+}
+
+fn pick(value: Option[UInt8]) -> UInt8 {
+    match read value {
+        Some(inner) => inner,
+        None => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let handler = Handler { run = pick }
+    (handler.run)(.Some(9))
+}

@@ -1,0 +1,56 @@
+// A `Shelf[S]` holds a `Box[S]` holding a `Held[S]`, which holds an
+// `S.Item`. It is shareable where `S` and `S.Item` both are: `count` promises
+// both, `count_loose` promises only the item, and `count_open` only the
+// source. `count_owned` promises that an item carries no borrow, which does
+// not make it shareable.
+trait Source {
+    type Item
+}
+
+struct Held[S: Source] {
+    item: S.Item,
+}
+
+struct Box[S: Source] {
+    held: Held[S],
+}
+
+struct Shelf[S: Source] {
+    box: Box[S],
+}
+
+fn share[T: Shareable](_value: T) -> UInt8 {
+    1
+}
+
+fn count[S: Source + Shareable](shelf: Shelf[S]) -> UInt8
+where S.Item: Shareable {
+    share(shelf)
+}
+
+fn count_loose[S: Source](shelf: Shelf[S]) -> UInt8
+where S.Item: Shareable {
+    share(shelf)
+}
+
+fn count_open[S: Source + Shareable](shelf: Shelf[S]) -> UInt8 {
+    share(shelf)
+}
+
+fn count_owned[S: Source + Shareable](shelf: Shelf[S]) -> UInt8
+where S.Item: Owned {
+    share(shelf)
+}
+
+struct Numbers {
+    n: UInt8,
+}
+
+impl Source for Numbers {
+    type Item = UInt8
+}
+
+fn main() -> UInt8 {
+    let shelf = Shelf[Numbers] { box = Box[Numbers] { held = Held[Numbers] { item = 3 } } }
+    count(shelf) + count_loose(shelf) + count_open(shelf) + count_owned(shelf)
+}

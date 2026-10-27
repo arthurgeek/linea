@@ -1,0 +1,25 @@
+// `First` is `Option[Second]`, `Second` is `Mirror.Reading`, and
+// `Mirror.Reading` is `Option[First]`: none of them names a type.
+trait Sensor {
+    type Reading
+}
+
+struct Mirror {}
+
+alias First = Option[Second]
+
+impl Sensor for Mirror {
+    type Reading = Option[First]
+}
+
+alias Second = Mirror.Reading
+
+struct Sample {
+    a: First,
+    b: Second,
+}
+
+fn main() -> UInt8 {
+    let _sample = Sample { a = .None, b = .None }
+    0
+}

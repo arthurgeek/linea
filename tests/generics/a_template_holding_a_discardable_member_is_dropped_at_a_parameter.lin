@@ -1,0 +1,36 @@
+// A ledger's entries can always be discarded, so a desk holding a claim on
+// one can be dropped, whatever the ledger. `tally` never reads a desk's
+// parts: it knows a `Desk[L]` can be dropped from what `Desk`, `Claim` and
+// `Ledger` declare.
+import std.io
+
+trait Ledger {
+    type Entry: Discardable
+}
+
+struct Shop {
+    till: UInt8,
+}
+
+impl Ledger for Shop {
+    type Entry = UInt8
+}
+
+struct Claim[L: Ledger] {
+    entry: L.Entry,
+}
+
+struct Desk[L: Ledger] {
+    claim: Claim[L],
+}
+
+fn tally[L: Ledger](sink _desk: Desk[L], count: UInt8) -> UInt8 {
+    count + 1
+}
+
+fn main() -> UInt8 {
+    let first = tally(Desk[Shop] { claim = Claim[Shop] { entry = 7 } }, 0)
+    let second = tally(Desk[Shop] { claim = Claim[Shop] { entry = 9 } }, first)
+    let _printed = io.println("desks dropped: {second}")
+    second
+}

@@ -1,0 +1,5 @@
+error[T-AnswerDepth]: `A0` starts a chain of declared answers longer than 1000 links
+ --> tests/traits/declared_answers/a_chain_of_a_thousand_and_one_aliases_is_refused.lin:3:12
+  |
+3 | alias A0 = A1
+  |            ^^ write a type directly in one of the declarations along the chain

@@ -1,0 +1,45 @@
+// Every `Integer` is `Owned`, so `where S.Item: Integer` promises `Owned` of
+// `S.Item`. `S` belongs to the implementation, whose other members would
+// rely on that promise, so the implementation writes the bound.
+import std.mem
+
+use mem.Lender
+
+trait Source {
+    type Item
+}
+
+struct Held[S: Source] {
+    item: S.Item,
+}
+
+struct Recorder[phantom S: Source] {
+    n: UInt8,
+}
+
+impl[S: Source] Recorder[S] {
+    fn record[A: mem.Allocator](_self: Recorder[S], inout entries: Vec[Held[S], A], sink value: Held[S]) where S.Item: Integer {
+        match &entries.push(value) {
+            Ok(_) => {},
+            Err(_) => panic("full"),
+        }
+    }
+}
+
+struct Numbers {
+    n: UInt8,
+}
+
+impl Source for Numbers {
+    type Item = UInt8
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 256)
+    var entries: Vec[Held[Numbers], mem.Handle] = Vec.new_in(arena.handle())
+    let r = Recorder[Numbers] { n = 0 }
+    r.record(&entries, Held[Numbers] { item = 3 })
+    let length = entries.length()
+    arena.release()
+    UInt8(length)
+}

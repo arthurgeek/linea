@@ -1,0 +1,5 @@
+error[T-Impl]: this associated type is defined through itself: `Mirror.Reading` is `Celsius.Reading`, `Celsius.Reading` is `Option[Mirror.Reading]`
+  --> tests/traits/a_settled_type_that_leads_back_to_itself_is_refused.lin:12:20
+   |
+12 |     type Reading = Celsius.Reading
+   |                    ^^^^^^^^^^^^^^^ define it as a type that does not read back to itself

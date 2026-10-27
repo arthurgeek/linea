@@ -813,17 +813,28 @@ let chosen = if ready { a }
 else { b }                   // the `if`'s `else`
 ```
 
-**[S-Nesting]** An expression, or a written type, nests at most 1000 levels
-deep. The limit makes acceptance independent of optimisation level, debug
-settings and sanitiser use, and reports excessive depth instead of overflowing
-the stack.
+**[S-Nesting]** An expression, a pattern, or a written type nests at most
+1000 levels deep. The limit makes acceptance independent of optimisation
+level, debug settings and sanitiser use, and reports excessive depth instead of
+overflowing the stack.
 
 The limit measures syntax-tree height, not parser recursion depth. A chain such
 as `a + b + c + …` is parsed in a loop but produces a tree as tall as the
-chain, and chains of `.` selections behave the same way. Written types share
-the limit. Depth is counted from the type's source position: a type nested
-five levels inside another construct has five fewer levels available, and
-terms earlier in a chain add no depth above a type they do not enclose.
+chain, and chains of `.` selections behave the same way. Patterns and written
+types share the limit. A pattern is one level below the construct that holds
+it, a `match` for an arm's pattern or the statement for a `let`'s, and each
+part of a pattern is one below the pattern it is a part of, so the binder `x`
+in an arm `Some(Some(x))` stands three levels below the `match`. Depth is
+counted from the type's source position: a type nested five levels inside
+another construct has five fewer levels available, and terms earlier in a
+chain add no depth above a type they do not enclose.
+
+The limit is reported once per file. What stands past it is stepped over, up to
+the end of the pattern, or of the expression's enclosing group or block, and
+nothing inside it is reported again: a binder written there is bound, with no
+known type, so a use of it is not [N-Undefined], and a name used there counts
+as used, so it is not [N-Unused]. A control header stops at the brace that
+opens its body, so the body is still read.
 
 **[S-Paren]** A parenthesised expression or type, and a tuple, is closed.
 
@@ -2608,7 +2619,9 @@ called with a `Counter` returns the type defined as `Item` by `Counter`'s
 implementation. Fields use the same substitution: in
 `struct Holder[W: Measure] { v: W.Item }`, the field of `Holder[Counter]` uses
 `Counter`'s definition, and the field of `Holder[Flag]` uses `Flag`'s. These
-instantiations are distinct types.
+instantiations are distinct types. A field of a type with no parameters may
+name a concrete type's settled reference, `struct Sample { reading:
+Celsius.Reading }`, and holds the type that implementation defines.
 
 A settled reference retains the arguments of its declaring trait bound. A type
 may implement a parameterized trait at different arguments and define the
@@ -2631,8 +2644,49 @@ Source order never selects a bound.
 
 An associated type definition cannot use a settled reference: `type Item =
 Self.Other` would define one associated type through another in the same
-implementation. An implementation defines each associated type exactly once;
-duplicate definitions are [N-Duplicate].
+implementation; reading another implementation's is described below. An
+implementation defines each associated type exactly once; duplicate definitions are [N-Duplicate].
+
+What a part, a settled type, a delegated element or an alias names never
+depends on the order declarations are written in: each is decided once, after
+everything it names is decided. A type's parts may not depend on the type's
+own capabilities. A capability question asked about a type -- whether it can
+be copied or discarded -- whose answer depends on one of its parts, or of the
+parts it owns, that names a settled type and is being decided because of
+that question, is [T-Bound]: `struct Tray { held: Chooser[Tray].Out }` with
+`impl[T: Discardable] Pick for Chooser[T]` asks whether `Tray` can be
+discarded in order to decide `Tray`'s part. The part may name the settled
+type in any way: written, through an alias, or through a parameter's default,
+`held: Holder` with `struct Holder[T = Chooser[Tray].Out]`. Writing the
+part's type removes the question. The cycle may close through an
+instantiation: `type Item = Ch[W[S]].Out` with `struct W[T: Tr] { v: T.Item }`
+asks whether `W[S]`, which holds `S.Item`, can be discarded, and is refused at
+the settled type. Each part is refused whose cycle remains once the parts
+already refused read as nothing: two parts asking about one holder of both
+are two errors, and two types whose parts ask about each other are one. A question the type's declaration answers
+is not refused: a type not declared `copyable` is never copied, and one
+declared `linear` is never discarded. A recursive type whose parts name no
+settled type, such as `struct Node { log: Ledger[Node] }` with
+`Ledger[phantom T: Discardable]`, is answered from its written parts under the
+rule for recursive types.
+
+**[T-AnswerDepth]** A chain of declared answers passes through at most 1000
+links, where a link is a settled reference (`S1.Reading`, `B.Elem`,
+`Chooser[S1].Out`) or an alias. A settled reference counts where it is
+written and also where a template's is read at an argument: `type Item =
+H[S1]` with `struct H[T: Tr] { v: T.Item }` reads `S1.Item`. A reference read
+through a parameter's bounds, `T.Item` itself, reads no other answer and is
+no link. Parts, the
+members and delegations a reference reaches, and capability questions add
+none. The count is the most
+links any answer rests on, so it is the same in every declaration order. A
+chain of 1000 settled references, each implementation settling `Reading` to
+the next one's, is accepted, and one of 1001 is refused where the chain
+starts; so are delegations, aliases and parts selecting through one another's
+capabilities. A plain chain of 1001 aliases is refused as well. As with
+[S-Nesting], the limit makes acceptance independent of optimisation level and
+stack size, and reports the depth instead of overflowing. Writing a type
+directly anywhere along the chain shortens it.
 
 A definition may read another implementation's settled type, `type Dual =
 Pong.Dual`, and means what that definition means, whichever implementation is
@@ -3352,7 +3406,12 @@ declaration's own parameters: `where I.Item: Owned` under `[I: Iterator]`, or
 parameter of an enclosing declaration, such as an implementation's `T` written
 in a method's `where`, in a trait's bound list or on an associated type's
 declaration it is [T-Bound]: the promise would hold in declarations that never
-made it.
+made it. Since every `Integer` is `Owned`, `where I.Item: Integer` under
+`[I: Iterator]` promises what `where I.Item: Owned` does, and a type holding an
+`I.Item` there carries nothing. For the same reason `Integer` on an associated
+type read through an enclosing declaration's parameter, such as an
+implementation's `S` in a method's `where S.Item: Integer`, is [T-Bound], and
+the help is to write it where `S` is declared.
 
 `Copyable`, `Discardable`, `Linear`, `Integer`, `Owned` and `Shareable` are
 decided by the compiler, and an implementation of one, such as
@@ -4845,7 +4904,10 @@ once per use where the caller did not write it.
 An Index implementation written `via field` forms the same place path as
 `self.field[i]`. Its target must be a direct stored field of the implementing
 type, and that field must support the declared key type. Missing fields,
-unsupported backing keys and recursive delegation are [T-Projection]. After
+unsupported backing keys and recursive delegation are [T-Projection], including
+a field whose type reads the delegation's own element,
+`struct B { values: [B.Elem; 2] }` with `impl Index[UInt64] for B via values`,
+directly or through settled types and other delegations. After
 generic substitution, the backing indexing operation supplies `Elem` and the
 receiver access ceiling. Delegation cannot widen read-only access. The key is
 forwarded unchanged, with the same single evaluation, bounds checks, FromEnd

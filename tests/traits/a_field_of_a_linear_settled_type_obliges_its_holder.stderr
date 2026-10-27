@@ -1,0 +1,9 @@
+error[O-Leak]: `_tray` (a linear `Tray`) is still owned when this path leaves
+  --> tests/traits/a_field_of_a_linear_settled_type_obliges_its_holder.lin:23:9
+   |
+23 |     let _tray = Tray { held = .{ number = 4 } }
+   |         ^^^^^ never settled on the path that reaches the end of this block
+25 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

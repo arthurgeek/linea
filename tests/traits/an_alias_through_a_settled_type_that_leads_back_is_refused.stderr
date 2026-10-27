@@ -1,0 +1,5 @@
+error[T-Impl]: `Degrees` leads back to itself through a settled type
+ --> tests/traits/an_alias_through_a_settled_type_that_leads_back_is_refused.lin:9:17
+  |
+9 | alias Degrees = Mirror.Reading
+  |                 ^^^^^^^^^^^^^^ write a type here that does not lead back to it

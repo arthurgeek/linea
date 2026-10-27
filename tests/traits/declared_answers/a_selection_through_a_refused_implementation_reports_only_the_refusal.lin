@@ -1,0 +1,32 @@
+// The implementation's head applies `Wrap` to its own parameter, which is
+// refused; the selection that would have reached it reports nothing more.
+trait Pick {
+    type Out
+}
+
+struct Early {
+    x: Picker[Wrap[Board.Elem]].Out,
+}
+
+struct Wrap[T] {
+    t: T,
+}
+
+struct Picker[T] {
+    t: T,
+}
+
+impl[T: Equatable] Pick for Picker[Wrap[T]] {
+    type Out = UInt8
+}
+
+struct Board {
+    values: [UInt16; 2],
+}
+
+impl Index[UInt64] for Board via values
+
+fn main() -> UInt8 {
+    let early = Early { x = 4 }
+    early.x
+}

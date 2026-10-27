@@ -1,0 +1,28 @@
+// A crate holds a tray holding whatever it is packed with, so it can be
+// dropped only where its contents can. `ship` and `scrap` both bound their
+// parameter `Discardable`, which is what lets each drop the crate it is
+// given without reading its parts.
+import std.io
+
+struct Tray[T] {
+    contents: T,
+}
+
+struct Crate[T] {
+    tray: Tray[T],
+}
+
+fn ship[T: Discardable](sink _crate: Crate[T], shipped: UInt8) -> UInt8 {
+    shipped + 1
+}
+
+fn scrap[U: Discardable](sink _crate: Crate[U], shipped: UInt8) -> UInt8 {
+    shipped + 2
+}
+
+fn main() -> UInt8 {
+    let shipped = ship(Crate[UInt8] { tray = Tray[UInt8] { contents = 3 } }, 0)
+    let total = scrap(Crate[Bool] { tray = Tray[Bool] { contents = true } }, shipped)
+    let _printed = io.println("crates handled: {total}")
+    total
+}

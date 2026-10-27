@@ -1,0 +1,29 @@
+// `Holder`'s parameter defaults to `Wrap[UInt8].E`, which the implementation
+// for every `Wrap[Y]` settles to `Option[UInt8]`.
+trait Shape {
+    type E
+}
+
+struct Wrap[Y] {
+    y: Y,
+}
+
+impl[Y] Shape for Wrap[Y] {
+    type E = Option[Y]
+}
+
+struct Holder[T = Wrap[UInt8].E] {
+    t: T,
+}
+
+struct Record {
+    h: Holder,
+}
+
+fn main() -> UInt8 {
+    let record = Record { h = .{ t = .Some(6) } }
+    match read record.h.t {
+        Some(value) => value,
+        None => 0,
+    }
+}

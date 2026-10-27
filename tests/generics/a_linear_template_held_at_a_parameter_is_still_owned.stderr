@@ -1,0 +1,9 @@
+error[O-Leak]: `_desk` (a linear `Desk[L]`) is still owned when this path leaves
+  --> tests/generics/a_linear_template_held_at_a_parameter_is_still_owned.lin:25:30
+   |
+25 | fn drop_desk[L: Ledger](sink _desk: Desk[L]) -> UInt8 {
+   |                              ^^^^^ never settled on the path that reaches the end of this block
+27 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

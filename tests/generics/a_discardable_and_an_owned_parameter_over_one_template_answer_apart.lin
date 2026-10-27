@@ -1,0 +1,24 @@
+// A crate holds a tray holding whatever it is packed with, so it can be
+// dropped only where its contents can. `ship` bounds its parameter
+// `Discardable`, so it may drop the crate it is given. `hoard` bounds its
+// own `Owned`, which says nothing of whether it may be discarded, so the
+// crate `hoard` is given must be handed on.
+struct Tray[T] {
+    contents: T,
+}
+
+struct Crate[T] {
+    tray: Tray[T],
+}
+
+fn ship[T: Discardable](sink _crate: Crate[T]) -> UInt8 {
+    1
+}
+
+fn hoard[U: Owned](sink _crate: Crate[U]) -> UInt8 {
+    2
+}
+
+fn main() -> UInt8 {
+    ship(Crate[UInt8] { tray = Tray[UInt8] { contents = 3 } }) + hoard(Crate[UInt8] { tray = Tray[UInt8] { contents = 4 } })
+}

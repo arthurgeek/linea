@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: Tree contains itself
+  --> tests/traits/declared_answers/an_enum_holding_itself_through_a_settled_payload_has_no_size.lin:13:6
+   |
+13 | enum Tree {
+   |      ^^^^ a value of this type would have to hold one, so it has no size

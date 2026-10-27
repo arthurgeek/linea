@@ -1,0 +1,30 @@
+// `Tray.held` is an array of `Holder`, whose default asks whether `Tray` can be
+// discarded: `Tray`'s parts depend on that answer.
+trait Pick {
+    type Out
+}
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = Ticket
+}
+
+struct Holder[T = Chooser[Tray].Out] {
+    v: T,
+}
+
+struct Tray {
+    held: [Holder; 2],
+}
+
+fn main() -> UInt8 {
+    0
+}

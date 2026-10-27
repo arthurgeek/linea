@@ -1,0 +1,61 @@
+// `Zed`'s part asks whether `A0` can be discarded. `A0` holds a `G[A1]`,
+// whose phantom `Req[T]` demands `T: Discardable`, so the answer asks the
+// same of `A1`, and that of `A2`. Each question is about a different type,
+// so none is a cycle.
+trait Tr {
+    type Item
+}
+
+trait Pick {
+    type Out
+}
+
+struct Chooser[T] {
+    t: T,
+}
+
+impl[T: Discardable] Pick for Chooser[T] {
+    type Out = UInt8
+}
+
+struct Req[phantom T: Discardable] {
+    n: UInt8,
+}
+
+struct G[T: Tr + Discardable] {
+    v: T.Item,
+    r: Req[T],
+}
+
+struct Zed {
+    z: Chooser[A0].Out,
+}
+
+struct A0 {
+    g: G[A1],
+}
+
+impl Tr for A0 {
+    type Item = UInt8
+}
+
+struct A1 {
+    g: G[A2],
+}
+
+impl Tr for A1 {
+    type Item = UInt8
+}
+
+struct A2 {
+    n: UInt8,
+}
+
+impl Tr for A2 {
+    type Item = UInt8
+}
+
+fn main() -> UInt8 {
+    let zed = Zed { z = 4 }
+    zed.z
+}

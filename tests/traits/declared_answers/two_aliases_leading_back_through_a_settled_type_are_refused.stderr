@@ -1,0 +1,5 @@
+error[T-Impl]: `First` leads back to itself through a settled type
+ --> tests/traits/declared_answers/two_aliases_leading_back_through_a_settled_type_are_refused.lin:9:15
+  |
+9 | alias First = Option[Second]
+  |               ^^^^^^ write a type here that does not lead back to it

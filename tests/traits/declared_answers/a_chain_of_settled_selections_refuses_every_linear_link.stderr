@@ -1,0 +1,5 @@
+error[T-Impl]: `Chooser[T3]` has no available associated type `Out`
+  --> tests/traits/declared_answers/a_chain_of_settled_selections_refuses_every_linear_link.lin:46:17
+   |
+46 |     type Item = Chooser[T3].Out
+   |                 ^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type

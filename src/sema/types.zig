@@ -792,51 +792,39 @@ pub const Cycle = struct {
 /// twice a cycle. What makes one is being reached again *from within its own
 /// traversal*, so the mark says which of the two a type is: on the path being
 /// walked now, or finished and known acyclic.
-fn firstCycleIn(
-    gpa: std.mem.Allocator,
-    pool: []const Type,
-    fields: FieldColumns,
-    variants: VariantColumns,
-) !?Cycle {
-    const Mark = enum { unseen, on_path, done };
-    const marks = try gpa.alloc(Mark, pool.len);
+///
+/// A part that is an alike instantiation is walked as its representative
+/// (`Typing.partsSource`): its parts would be the representative's renamed,
+/// so it holds itself exactly where the representative does, and where that
+/// is the template the path names the declarations a reader edits.
+fn firstCycleIn(gpa: std.mem.Allocator, typing: *const Typing) !?Cycle {
+    const marks = try gpa.alloc(CycleMark, typing.pool.len);
     defer gpa.free(marks);
     @memset(marks, .unseen);
 
     var path: std.ArrayList(TypeId) = .empty;
     defer path.deinit(gpa);
 
-    const field_types = fields.items(.ty);
-    const variant_first_fields = variants.items(.first_field);
-    const variant_field_counts = variants.items(.field_count);
-
-    for (0..pool.len) |i| {
-        if (try walkFrom(
-            gpa,
-            pool,
-            field_types,
-            variant_first_fields,
-            variant_field_counts,
-            @enumFromInt(@as(u32, @intCast(i))),
-            marks,
-            &path,
-        )) {
+    for (0..typing.pool.len) |i| {
+        const t: TypeId = @enumFromInt(@as(u32, @intCast(i)));
+        if (typing.alikeSource(t) != null) continue;
+        if (try walkFrom(gpa, typing, t, marks, &path)) {
             return .{ .path = try gpa.dupe(TypeId, path.items) };
         }
     }
     return null;
 }
 
+const CycleMark = enum { unseen, on_path, done };
+
 fn walkFrom(
     gpa: std.mem.Allocator,
-    pool: []const Type,
-    field_types: []const TypeId,
-    variant_first_fields: []const u32,
-    variant_field_counts: []const u32,
-    t: TypeId,
-    marks: anytype,
+    typing: *const Typing,
+    held: TypeId,
+    marks: []CycleMark,
     path: *std.ArrayList(TypeId),
 ) !bool {
+    const t = typing.partsSource(held);
     const i = @intFromEnum(t);
     switch (marks[i]) {
         .done => return false,
@@ -853,18 +841,21 @@ fn walkFrom(
     marks[i] = .on_path;
     try path.append(gpa, t);
 
+    const field_types = typing.fields.items(.ty);
+    const variant_first_fields = typing.variants.items(.first_field);
+    const variant_field_counts = typing.variants.items(.field_count);
     var reported = false;
-    switch (pool[i]) {
+    switch (typing.pool[i]) {
         .borrow => {},
         // An array reaches its element, so a type holding an array of itself
         // is as infinite as one holding itself, and is found the same way.
         .array => |a| {
-            if (try walkFrom(gpa, pool, field_types, variant_first_fields, variant_field_counts, a.element, marks, path)) {
+            if (try walkFrom(gpa, typing, a.element, marks, path)) {
                 reported = true;
             }
         },
         .struct_ => |x| for (field_types[x.first_field..][0..x.field_count]) |field_type| {
-            if (try walkFrom(gpa, pool, field_types, variant_first_fields, variant_field_counts, field_type, marks, path)) {
+            if (try walkFrom(gpa, typing, field_type, marks, path)) {
                 reported = true;
                 break;
             }
@@ -873,7 +864,7 @@ fn walkFrom(
             const first_field = variant_first_fields[variant_at];
             const field_count = variant_field_counts[variant_at];
             for (field_types[first_field..][0..field_count]) |field_type| {
-                if (try walkFrom(gpa, pool, field_types, variant_first_fields, variant_field_counts, field_type, marks, path)) {
+                if (try walkFrom(gpa, typing, field_type, marks, path)) {
                     reported = true;
                     break :outer;
                 }
@@ -883,7 +874,7 @@ fn walkFrom(
         // element: a type declared over itself is as infinite as one holding
         // itself, and layout would recurse forever without this.
         .newtype => |n| {
-            if (try walkFrom(gpa, pool, field_types, variant_first_fields, variant_field_counts, n.base, marks, path)) {
+            if (try walkFrom(gpa, typing, n.base, marks, path)) {
                 reported = true;
             }
         },
@@ -892,7 +883,7 @@ fn walkFrom(
         // is what this walk is. Left as a fall-through, a new kind would be
         // acyclic by default and laid out by whoever asked for its size
         // first.
-        .closure => |closure| reported = try walkFrom(gpa, pool, field_types, variant_first_fields, variant_field_counts, closure.environment, marks, path),
+        .closure => |closure| reported = try walkFrom(gpa, typing, closure.environment, marks, path),
         .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .parameter, .callable => {},
     }
     if (reported) return true;
@@ -916,6 +907,9 @@ pub const CallableDefault = union(enum) {
     }
 };
 
+/// An owned part added to a type a fact table already scanned.
+const PendingEdge = struct { owner: TypeId, child: TypeId };
+
 /// Incremental reverse edges propagate capabilities once per owned-part edge.
 /// Field replacement invalidates the graph before the next query.
 const CapabilityFacts = struct {
@@ -929,26 +923,55 @@ const CapabilityFacts = struct {
     heads: std.ArrayList(u32) = .empty,
     edges: std.ArrayList(Edge) = .empty,
     queue: std.ArrayList(TypeId) = .empty,
+    /// Owned-part edges added to types already recorded, applied by the
+    /// next `update` without rebuilding the graph.
+    pending: std.ArrayList(PendingEdge) = .empty,
     /// How far the walk over the pool has reached.
     scanned: usize = 0,
-    /// Which types have their parts recorded as edges. An instantiation
-    /// whose parts are unwritten is passed over until they are.
-    recorded: std.ArrayList(bool) = .empty,
+    /// What each type has recorded as edges: nothing, the one edge to its
+    /// representative (an alike instantiation with its parts unwritten),
+    /// or its parts. Any other unwritten instantiation is passed over until
+    /// its parts are written.
+    recorded: std.ArrayList(Recorded) = .empty,
     /// Types passed over unwritten whose parts have since been written.
     late: std.ArrayList(TypeId) = .empty,
     /// Unwritten instantiations a recorded type holds, which the builder
-    /// writes before the facts are read.
+    /// writes before the facts are read. An alike one is read through its
+    /// representative instead, and never listed.
     unwritten: std.ArrayList(TypeId) = .empty,
     dirty: bool = false,
 
+    const Recorded = enum(u8) { nothing, representative, parts };
+
     fn invalidate(self: *CapabilityFacts, owner: TypeId) void {
-        if (owner.index() < self.recorded.items.len and self.recorded.items[owner.index()]) self.dirty = true;
+        if (self.isRecorded(owner)) self.dirty = true;
     }
 
-    /// `t`'s parts were written for the first time. Nothing recorded them,
-    /// so nothing is invalidated: the walk records them when it next runs.
+    fn isRecorded(self: *const CapabilityFacts, t: TypeId) bool {
+        return t.index() < self.recorded.items.len and self.recorded.items[t.index()] != .nothing;
+    }
+
+    /// `t`'s parts were written for the first time. What was recorded of it
+    /// is still true -- nothing, or its template, whose answer is the one its
+    /// parts give -- so nothing is invalidated: the walk records the parts
+    /// when it next runs, which a scoped answer reads.
     fn noteFilled(self: *CapabilityFacts, gpa: std.mem.Allocator, t: TypeId) !void {
         if (t.index() < self.scanned) try self.late.append(gpa, t);
+    }
+
+    /// Reflects `owner`'s part changing from `old` to `new`; see
+    /// `Builder.partChanged`. A table that has not scanned `owner`, or will
+    /// rebuild, reads the new part when it does. Capabilities only strengthen
+    /// along an edge, so replacing a part that gives its owner nothing --
+    /// poison, or a copyable type built from it, `[poison; 2]` -- is one more
+    /// edge rather than a rebuild.
+    fn replaced(self: *CapabilityFacts, gpa: std.mem.Allocator, owner: TypeId, old: TypeId, new: TypeId, same_callable: bool) !void {
+        if (!self.isRecorded(owner) or self.dirty or same_callable) return;
+        const gives_nothing = self.isRecorded(old) and
+            self.values.items[old.index()] == .copyable and !self.known_noncopyable.items[old.index()];
+        if (gives_nothing) {
+            try self.pending.append(gpa, .{ .owner = owner, .child = new });
+        } else self.dirty = true;
     }
 
     fn deinit(self: *CapabilityFacts, gpa: std.mem.Allocator) void {
@@ -960,6 +983,7 @@ const CapabilityFacts = struct {
         self.heads.deinit(gpa);
         self.edges.deinit(gpa);
         self.queue.deinit(gpa);
+        self.pending.deinit(gpa);
         self.recorded.deinit(gpa);
         self.late.deinit(gpa);
         self.unwritten.deinit(gpa);
@@ -978,7 +1002,7 @@ const CapabilityFacts = struct {
     }
 
     fn edge(self: *CapabilityFacts, gpa: std.mem.Allocator, builder: *const Typing.Builder, owner: TypeId, child: TypeId) !void {
-        if (builder.isShell(child)) try self.unwritten.append(gpa, child);
+        if (builder.isShell(child) and builder.alikeSource(child) == null) try self.unwritten.append(gpa, child);
         const at: u32 = @intCast(self.edges.items.len);
         try self.edges.append(gpa, .{ .owner = owner, .child = child, .next = self.heads.items[child.index()] });
         self.heads.items[child.index()] = at;
@@ -1003,14 +1027,16 @@ const CapabilityFacts = struct {
     /// Each type strengthens at most twice and becomes known noncopyable
     /// once: O(types + parts) between representation replacements.
     ///
-    /// An instantiation whose parts are unwritten has no edges to record and
-    /// is passed over; it is recorded once they are written, and a recorded
+    /// An instantiation whose parts are unwritten has no edges to record. An
+    /// alike one is recorded with its representative as its one part;
+    /// any other is passed over until its parts are written, and a recorded
     /// type holding one leaves it in `unwritten` for the builder to write.
     fn update(self: *CapabilityFacts, builder: *Typing.Builder) !void {
-        if (!self.dirty and self.scanned == builder.pool.items.len and self.queue.items.len == 0 and self.late.items.len == 0) return;
+        if (!self.dirty and self.scanned == builder.pool.items.len and self.queue.items.len == 0 and self.late.items.len == 0 and self.pending.items.len == 0) return;
         const gpa = builder.gpa;
         if (self.dirty) {
-            builder.scoped_capability_facts.deinit(gpa);
+            self.pending.clearRetainingCapacity();
+            try builder.scoped_capability_facts.drop(gpa);
             builder.prepared_implementations.clear();
             self.seeds.clearRetainingCapacity();
             self.first_parts.clearRetainingCapacity();
@@ -1033,14 +1059,22 @@ const CapabilityFacts = struct {
         try self.part_counts.appendNTimes(gpa, 0, count - self.part_counts.items.len);
         try self.known_noncopyable.appendNTimes(gpa, false, count - self.known_noncopyable.items.len);
         try self.heads.appendNTimes(gpa, none, count - self.heads.items.len);
-        try self.recorded.appendNTimes(gpa, false, count - self.recorded.items.len);
+        try self.recorded.appendNTimes(gpa, .nothing, count - self.recorded.items.len);
         while (self.scanned < count) : (self.scanned += 1) {
             const ty: TypeId = @enumFromInt(@as(u32, @intCast(self.scanned)));
-            if (!builder.isShell(ty)) try self.recordParts(builder, ty);
+            if (!builder.isShell(ty)) {
+                try self.recordParts(builder, ty);
+            } else if (builder.alikeSource(ty)) |source| try self.recordRepresentative(builder, ty, source);
         }
         while (self.late.pop()) |ty| {
-            if (!self.recorded.items[ty.index()] and !builder.isShell(ty)) try self.recordParts(builder, ty);
+            if (self.recorded.items[ty.index()] != .parts and !builder.isShell(ty)) try self.recordParts(builder, ty);
         }
+        // An added part is not counted in its owner's `part_counts`, which
+        // scoped facts read; a scoped answer is prepared from the owner's
+        // parts again only once those facts are rebuilt.
+        if (self.pending.items.len != 0) try builder.scoped_capability_facts.drop(gpa);
+        for (self.pending.items) |added| try self.edge(gpa, builder, added.owner, added.child);
+        self.pending.clearRetainingCapacity();
         var next: usize = 0;
         while (next < self.queue.items.len) : (next += 1) {
             const child = self.queue.items[next];
@@ -1055,11 +1089,30 @@ const CapabilityFacts = struct {
         self.queue.clearRetainingCapacity();
     }
 
+    /// Seeds `ty`, an alike instantiation, from its policy and records its
+    /// representative as the one part it owns: what `ty` would own, written,
+    /// is the representative's parts renamed, and every capability those give
+    /// is the representative's.
+    fn recordRepresentative(self: *CapabilityFacts, builder: *Typing.Builder, ty: TypeId, representative: TypeId) !void {
+        const gpa = builder.gpa;
+        self.recorded.items[ty.index()] = .representative;
+        self.first_parts.items[ty.index()] = @intCast(self.edges.items.len);
+        const policy = switch (builder.get(ty)) {
+            .struct_ => |record_type| record_type.ownership_policy,
+            .enum_ => |sum| sum.ownership_policy,
+            else => unreachable,
+        };
+        try self.seed(gpa, ty, policyCapability(policy));
+        if (policy != .copyable) try self.markNoncopyable(gpa, ty);
+        try self.edge(gpa, builder, ty, representative);
+        self.part_counts.items[ty.index()] = 1;
+    }
+
     /// Seeds `ty` from its policy and records each part it owns as an edge.
     fn recordParts(self: *CapabilityFacts, builder: *Typing.Builder, ty: TypeId) !void {
         const gpa = builder.gpa;
         const view = builder.view();
-        self.recorded.items[ty.index()] = true;
+        self.recorded.items[ty.index()] = .parts;
         self.first_parts.items[ty.index()] = @intCast(self.edges.items.len);
         switch (builder.get(ty)) {
             .parameter => |parameter| try self.seed(gpa, ty, assumedCapability(parameter.requirement)),
@@ -1104,98 +1157,209 @@ const CapabilityFacts = struct {
 const ScopedCapabilityKey = struct { scope: DeclId, ty: TypeId };
 const ScopedCapabilityMap = std.AutoHashMapUnmanaged(ScopedCapabilityKey, Capability);
 
-/// A sparse product of lexical capability contexts and the canonical owned-part
-/// graph. Each reached pair strengthens at most twice. Cycles begin at their
-/// policy seeds, never at an unscoped result containing self-supported debt.
+/// A sparse product of capability contexts and the canonical owned-part
+/// graph. A context is a set of ceilings on types. Each scope that caps a
+/// capability has a context of its own, the ceilings its constraints put on
+/// their subjects. Stepping from an alike instantiation to its
+/// representative renames the context's ceilings onto the representative's
+/// arguments (`Builder.prepareScopedCapability`), and the renamed context is
+/// interned, so every scope whose ceilings rename alike shares the answers
+/// past the step. Each reached pair strengthens at most twice. Cycles begin
+/// at their policy seeds, never at an unscoped result containing
+/// self-supported debt.
 const ScopedCapabilityFacts = struct {
     const none = std.math.maxInt(u32);
-    const Node = struct { ceiling: Capability, head: u32 = none };
-    const Edge = struct { owner: ScopedCapabilityKey, next: u32 };
-    values: ScopedCapabilityMap = .empty,
-    ceilings: ScopedCapabilityMap = .empty,
-    scopes: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
-    nodes: std.AutoHashMapUnmanaged(ScopedCapabilityKey, Node) = .empty,
-    edges: std.ArrayList(Edge) = .empty,
-    pending: std.ArrayList(ScopedCapabilityKey) = .empty,
-    queue: std.ArrayList(ScopedCapabilityKey) = .empty,
+    const Ceiling = struct { subject: TypeId, ceiling: Capability };
+    /// A type within a context.
+    const Node = struct { context: u32, ty: TypeId };
+    const State = struct { ceiling: Capability, head: u32 = none };
+    const Edge = struct { owner: Node, next: u32 };
+    /// A context's ceilings, sorted by subject where the context is
+    /// interned, and the scope whose own context it is, or none.
+    const Context = struct { first: u32, len: u32, scope: DeclId };
 
+    /// Each answer prepared in a scope's own context, by scope and type: what
+    /// `Typing.capabilityAskedWithin` reads.
+    values: ScopedCapabilityMap = .empty,
+    /// The types a question within a scope was asked about and prepared,
+    /// and in a builder reopened over a finished pool, every type that
+    /// pool answers by scope.
+    roots: std.AutoHashMapUnmanaged(ScopedCapabilityKey, void) = .empty,
+    /// The roots whose answers `drop` discarded, which
+    /// `Builder.restoreScopedCapabilities` prepares again before the pool is
+    /// handed on, so every question prepared once is answered by the
+    /// finished pool.
+    lost: std.AutoArrayHashMapUnmanaged(ScopedCapabilityKey, void) = .empty,
+    scope_contexts: std.AutoHashMapUnmanaged(DeclId, u32) = .empty,
+    contexts: std.ArrayList(Context) = .empty,
+    context_ceilings: std.ArrayList(Ceiling) = .empty,
+    /// Renamed contexts by their sorted ceilings, so equal ones are one.
+    interned: std.StringHashMapUnmanaged(u32) = .empty,
+    /// The ceiling each context puts on a subject.
+    ceilings: std.AutoHashMapUnmanaged(Node, Capability) = .empty,
+    answers: std.AutoHashMapUnmanaged(Node, Capability) = .empty,
+    states: std.AutoHashMapUnmanaged(Node, State) = .empty,
+    edges: std.ArrayList(Edge) = .empty,
+    pending: std.ArrayList(Node) = .empty,
+    queue: std.ArrayList(Node) = .empty,
+    /// Counts the times these facts were dropped, so a preparation that
+    /// minted types, which may drop them, can tell that it must start again.
+    generation: u32 = 0,
+
+    /// Discards every answer, and every root prepared under the contextual
+    /// constraints set now; see `drop` for the answers those constraints
+    /// still decide.
     fn deinit(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator) void {
         self.values.deinit(gpa);
+        self.roots.deinit(gpa);
+        self.lost.deinit(gpa);
+        self.values = .empty;
+        self.roots = .empty;
+        self.lost = .empty;
+        self.clearDerived(gpa);
+    }
+
+    /// Discards the answers derived from the capability facts, once those
+    /// are rebuilt, and lists every root prepared so far in `lost`: the
+    /// contextual constraints still decide the questions, and the facts now
+    /// answer them differently. A reopened pool's answers are among the
+    /// roots, since a part replaced after reopening changes them too.
+    fn drop(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator) !void {
+        var roots = self.roots.keyIterator();
+        while (roots.next()) |root| try self.lost.put(gpa, root.*, {});
+        self.roots.clearRetainingCapacity();
+        self.values.clearRetainingCapacity();
+        self.clearDerived(gpa);
+    }
+
+    fn clearDerived(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator) void {
+        self.scope_contexts.deinit(gpa);
+        self.contexts.deinit(gpa);
+        self.context_ceilings.deinit(gpa);
+        var keys = self.interned.keyIterator();
+        while (keys.next()) |key| gpa.free(key.*);
+        self.interned.deinit(gpa);
         self.ceilings.deinit(gpa);
-        self.scopes.deinit(gpa);
-        self.nodes.deinit(gpa);
+        self.answers.deinit(gpa);
+        self.states.deinit(gpa);
         self.edges.deinit(gpa);
         self.pending.deinit(gpa);
         self.queue.deinit(gpa);
-        self.* = .{};
+        self.scope_contexts = .empty;
+        self.contexts = .empty;
+        self.context_ceilings = .empty;
+        self.interned = .empty;
+        self.ceilings = .empty;
+        self.answers = .empty;
+        self.states = .empty;
+        self.edges = .empty;
+        self.pending = .empty;
+        self.queue = .empty;
+        self.generation +%= 1;
     }
 
-    fn prepareScope(self: *ScopedCapabilityFacts, builder: *Typing.Builder, scope: DeclId) !void {
-        if (self.scopes.contains(scope)) return;
+    /// `scope`'s own context: the lowest ceiling its constraints and its
+    /// parent's put on each subject.
+    fn contextOf(self: *ScopedCapabilityFacts, builder: *Typing.Builder, scope: DeclId) !u32 {
+        if (self.scope_contexts.get(scope)) |context| return context;
+        const gpa = builder.gpa;
+        const context: u32 = @intCast(self.contexts.items.len);
+        const first: u32 = @intCast(self.context_ceilings.items.len);
         const constraints = builder.contextual_constraints;
         for ([_]DeclId{ scope, constraints.parentOf(scope) }) |owner| {
             for (constraints.run(owner)) |constraint| {
                 const ceiling = assumedCapability(constraint.demand.requirement);
                 if (ceiling == .linear) continue;
-                const entry = try self.ceilings.getOrPut(builder.gpa, .{ .scope = scope, .ty = constraint.subject });
-                entry.value_ptr.* = if (entry.found_existing)
-                    @enumFromInt(@min(@intFromEnum(entry.value_ptr.*), @intFromEnum(ceiling)))
-                else
-                    ceiling;
+                const entry = try self.ceilings.getOrPut(gpa, .{ .context = context, .ty = constraint.subject });
+                if (entry.found_existing) {
+                    entry.value_ptr.* = @enumFromInt(@min(@intFromEnum(entry.value_ptr.*), @intFromEnum(ceiling)));
+                } else {
+                    entry.value_ptr.* = ceiling;
+                    try self.context_ceilings.append(gpa, .{ .subject = constraint.subject, .ceiling = ceiling });
+                }
             }
         }
-        try self.scopes.put(builder.gpa, scope, {});
+        for (self.context_ceilings.items[first..]) |*held| held.ceiling = self.ceilings.get(.{ .context = context, .ty = held.subject }).?;
+        try self.contexts.append(gpa, .{ .first = first, .len = @intCast(self.context_ceilings.items.len - first), .scope = scope });
+        try self.scope_contexts.put(gpa, scope, context);
+        return context;
     }
 
-    fn ensure(self: *ScopedCapabilityFacts, builder: *Typing.Builder, key: ScopedCapabilityKey) !void {
-        if (self.values.contains(key)) return;
-        const ceiling = self.ceilings.get(key) orelse .linear;
+    /// The context interned for `ceilings`, sorted by subject.
+    fn internContext(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator, ceilings: []const Ceiling) !u32 {
+        const words = try gpa.alloc(u32, 2 * ceilings.len);
+        defer gpa.free(words);
+        for (ceilings, 0..) |held, i| {
+            words[2 * i] = @intFromEnum(held.subject);
+            words[2 * i + 1] = @intFromEnum(held.ceiling);
+        }
+        const bytes = std.mem.sliceAsBytes(words);
+        if (self.interned.get(bytes)) |context| return context;
+        const context: u32 = @intCast(self.contexts.items.len);
+        const first: u32 = @intCast(self.context_ceilings.items.len);
+        try self.context_ceilings.appendSlice(gpa, ceilings);
+        for (ceilings) |held| try self.ceilings.put(gpa, .{ .context = context, .ty = held.subject }, held.ceiling);
+        try self.contexts.append(gpa, .{ .first = first, .len = @intCast(ceilings.len), .scope = .none });
+        const owned = try gpa.dupe(u8, bytes);
+        errdefer gpa.free(owned);
+        try self.interned.put(gpa, owned, context);
+        return context;
+    }
+
+    fn ensure(self: *ScopedCapabilityFacts, builder: *Typing.Builder, key: Node) !void {
+        if (self.answers.contains(key)) return;
+        const gpa = builder.gpa;
+        // A builder reopened over a finished pool keeps that pool's answers
+        // by scope and type; they supply a value without a mutable reverse
+        // edge, since frozen rows cannot change while types only append.
+        const scope = self.contexts.items[key.context].scope;
+        if (scope != .none) if (self.values.get(.{ .scope = scope, .ty = key.ty })) |frozen| {
+            try self.answers.put(gpa, key, frozen);
+            return;
+        };
+        const ceiling = self.ceilings.get(.{ .context = key.context, .ty = key.ty }) orelse .linear;
         const seed: Capability = @enumFromInt(@min(@intFromEnum(ceiling), @intFromEnum(builder.capability_facts.seeds.items[key.ty.index()])));
-        try self.pending.append(builder.gpa, key);
-        try self.nodes.put(builder.gpa, key, .{ .ceiling = ceiling });
-        try self.values.put(builder.gpa, key, seed);
-        try self.queue.append(builder.gpa, key);
+        try self.pending.append(gpa, key);
+        try self.states.put(gpa, key, .{ .ceiling = ceiling });
+        try self.answers.put(gpa, key, seed);
+        try self.queue.append(gpa, key);
     }
 
-    fn strengthen(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator, key: ScopedCapabilityKey, incoming: Capability) !void {
-        const ceiling = self.nodes.get(key).?.ceiling;
+    fn strengthen(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator, key: Node, incoming: Capability) !void {
+        const ceiling = self.states.get(key).?.ceiling;
         const next: Capability = @enumFromInt(@min(@intFromEnum(ceiling), @intFromEnum(incoming)));
-        const value = self.values.getPtr(key).?;
+        const value = self.answers.getPtr(key).?;
         if (@intFromEnum(value.*) >= @intFromEnum(next)) return;
         try self.queue.append(gpa, key);
         value.* = next;
     }
 
-    fn prepare(self: *ScopedCapabilityFacts, builder: *Typing.Builder, scope: DeclId, ty: TypeId) !void {
-        try self.prepareScope(builder, scope);
-        try self.ensure(builder, .{ .scope = scope, .ty = ty });
-        var at: usize = 0;
-        while (at < self.pending.items.len) : (at += 1) {
-            const owner = self.pending.items[at];
-            const first = builder.capability_facts.first_parts.items[owner.ty.index()];
-            const count = builder.capability_facts.part_counts.items[owner.ty.index()];
-            for (builder.capability_facts.edges.items[first..][0..count]) |part| {
-                const child: ScopedCapabilityKey = .{ .scope = scope, .ty = part.child };
-                try self.ensure(builder, child);
-                // Reopened frozen rows cannot change while types only append.
-                // They supply a value without needing a mutable reverse edge.
-                if (self.nodes.get(child)) |found_node| {
-                    const index: u32 = @intCast(self.edges.items.len);
-                    try self.edges.append(builder.gpa, .{ .owner = owner, .next = found_node.head });
-                    self.nodes.getPtr(child).?.head = index;
-                }
-                try self.strengthen(builder.gpa, owner, self.values.get(child).?);
-            }
+    /// Links `owner` to `child` and strengthens it by what `child` answers.
+    fn link(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator, owner: Node, child: Node) !void {
+        if (self.states.getPtr(child)) |state| {
+            const index: u32 = @intCast(self.edges.items.len);
+            try self.edges.append(gpa, .{ .owner = owner, .next = state.head });
+            state.head = index;
         }
-        at = 0;
+        try self.strengthen(gpa, owner, self.answers.get(child).?);
+    }
+
+    /// Strengthens every node this preparation reached until none changes,
+    /// and records the answers in a scope's own context by scope and type.
+    fn solve(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator) !void {
+        var at: usize = 0;
         while (at < self.queue.items.len) : (at += 1) {
             const child = self.queue.items[at];
-            var edge = self.nodes.get(child).?.head;
+            var edge = self.states.get(child).?.head;
             while (edge != none) {
                 const dependent = self.edges.items[edge];
-                try self.strengthen(builder.gpa, dependent.owner, self.values.get(child).?);
+                try self.strengthen(gpa, dependent.owner, self.answers.get(child).?);
                 edge = dependent.next;
             }
+        }
+        for (self.pending.items) |reached| {
+            const scope = self.contexts.items[reached.context].scope;
+            if (scope != .none) try self.values.put(gpa, .{ .scope = scope, .ty = reached.ty }, self.answers.get(reached).?);
         }
         self.pending.clearRetainingCapacity();
         self.queue.clearRetainingCapacity();
@@ -1224,10 +1388,14 @@ const BorrowContainment = struct {
     heads: std.ArrayList(u32) = .empty,
     edges: std.ArrayList(Edge) = .empty,
     queue: std.ArrayList(TypeId) = .empty,
+    /// Edges added to types already recorded; see `CapabilityFacts.pending`.
+    pending: std.ArrayList(PendingEdge) = .empty,
     /// How far the walk over the pool has reached.
     scanned: usize = 0,
     /// What each type has recorded as edges: nothing, its arguments alone
-    /// (an unwritten instantiation, in `writers` mode), or every part.
+    /// (an unwritten instantiation, in `writers` mode), the one edge to its
+    /// representative (an alike instantiation with its parts unwritten, in
+    /// `raw_carriers` mode), or every part.
     recorded: std.ArrayList(Recorded) = .empty,
     /// Types whose parts were written after the walk passed them.
     late: std.ArrayList(TypeId) = .empty,
@@ -1239,13 +1407,19 @@ const BorrowContainment = struct {
     dirty: bool = false,
     coverage: DependencyCoverage = .{},
 
-    const Recorded = enum(u8) { nothing, arguments, parts };
+    const Recorded = enum(u8) { nothing, arguments, representative, parts };
 
     fn invalidate(self: *BorrowContainment, owner: TypeId) void {
         if (owner.index() < self.recorded.items.len and self.recorded.items[owner.index()] != .nothing) {
             if (!self.dirty) self.coverage.capable_children.clearRetainingCapacity();
             self.dirty = true;
         }
+    }
+
+    /// Drops every answer, as `invalidate` drops those an owner reaches.
+    fn invalidateAll(self: *BorrowContainment) void {
+        if (!self.dirty) self.coverage.capable_children.clearRetainingCapacity();
+        self.dirty = true;
     }
 
     /// `t`'s parts were written for the first time. What was recorded of it
@@ -1257,11 +1431,26 @@ const BorrowContainment = struct {
         try self.late.append(gpa, t);
     }
 
+    /// Reflects `owner`'s part changing from `old` to `new`; see
+    /// `CapabilityFacts.replaced`. Containment is only ever marked along an
+    /// edge, so replacing a part that marks nothing is one more edge. A type
+    /// whose parts are not recorded reads the new part when they are.
+    /// `skipped` is a part this table's walk does not follow.
+    fn replaced(self: *BorrowContainment, gpa: std.mem.Allocator, owner: TypeId, old: TypeId, new: TypeId, same_callable: bool, skipped: bool) !void {
+        if (owner.index() >= self.recorded.items.len or self.recorded.items[owner.index()] != .parts) return;
+        if (self.dirty or same_callable or skipped) return;
+        if (old.index() < self.recorded.items.len and self.recorded.items[old.index()] == .parts and !self.values.items[@intFromEnum(old)]) {
+            self.coverage.capable_children.clearRetainingCapacity();
+            try self.pending.append(gpa, .{ .owner = owner, .child = new });
+        } else self.invalidate(owner);
+    }
+
     fn deinit(self: *BorrowContainment, gpa: std.mem.Allocator) void {
         self.values.deinit(gpa);
         self.heads.deinit(gpa);
         self.edges.deinit(gpa);
         self.queue.deinit(gpa);
+        self.pending.deinit(gpa);
         self.recorded.deinit(gpa);
         self.late.deinit(gpa);
         self.unwritten.deinit(gpa);
@@ -1351,14 +1540,18 @@ const BorrowContainment = struct {
                 try visit.child(.element, array.element);
             },
             .newtype => |newtype| try visit.child(.base, newtype.base),
+            // Each part is read from the columns as it is visited rather than
+            // through a slice taken first: a witness search writes the parts
+            // of an alike instantiation it steps into, which grows
+            // the columns under any slice of them.
             .struct_ => |record| {
-                const names = builder.fields.items(.name)[record.first_field..][0..record.field_count];
-                for (builder.fields.items(.ty)[record.first_field..][0..record.field_count], names, 0..) |field, name, index| {
+                for (0..record.field_count) |index| {
                     // Certified storage's optional backing owner erases its
                     // elements. Its logical T and separate allocator field
                     // describe their dependencies without that raw erasure.
                     if (typed_storage and index == 0 and mode == .raw_carriers) continue;
-                    try visit.child(.{ .field = name }, field);
+                    const at = record.first_field + index;
+                    try visit.child(.{ .field = builder.fields.items(.name)[at] }, builder.fields.items(.ty)[at]);
                 }
             },
             .enum_ => |sum| {
@@ -1366,7 +1559,7 @@ const BorrowContainment = struct {
                     const first = builder.variants.items(.first_field)[variant];
                     const len = builder.variants.items(.field_count)[variant];
                     const name = builder.variants.items(.name)[variant];
-                    for (builder.fields.items(.ty)[first..][0..len]) |field| try visit.child(.{ .variant = name }, field);
+                    for (first..first + len) |at| try visit.child(.{ .variant = name }, builder.fields.items(.ty)[at]);
                 }
             },
             else => {},
@@ -1385,24 +1578,28 @@ const BorrowContainment = struct {
         /// which usually settle it without its parts being written.
         fn child(edges: Edges, _: Step, part: TypeId) std.mem.Allocator.Error!void {
             const gpa = edges.builder.gpa;
-            if (edges.mode == .raw_carriers and edges.builder.isShell(part)) try edges.containment.unwritten.append(gpa, part);
+            if (edges.mode == .raw_carriers and edges.builder.isShell(part) and edges.builder.alikeSource(part) == null)
+                try edges.containment.unwritten.append(gpa, part);
             try edges.containment.edge(gpa, edges.owner, part);
         }
     };
 
     /// An unwritten instantiation has no parts to record. In `writers` mode
     /// its arguments are recorded, since every argument is a part there, and
-    /// an argument holding a type parameter settles the answer; one they do
-    /// not settle is left in `unwritten`, as is any unwritten part a recorded
-    /// type holds, for the builder to write and the next walk to record.
+    /// an argument holding a type parameter settles the answer; in
+    /// `raw_carriers` mode an alike one records its representative. One
+    /// neither settles is left in `unwritten`, as is any unwritten part a
+    /// recorded type holds that is not answered from another, for the builder
+    /// to write and the next walk to record.
     fn update(self: *BorrowContainment, builder: *Typing.Builder, mode: Mode) !void {
-        if (!self.dirty and self.scanned == builder.pool.items.len and self.late.items.len == 0) return;
+        if (!self.dirty and self.scanned == builder.pool.items.len and self.late.items.len == 0 and self.pending.items.len == 0) return;
         const gpa = builder.gpa;
         if (self.dirty) {
             self.values.clearRetainingCapacity();
             self.heads.clearRetainingCapacity();
             self.edges.clearRetainingCapacity();
             self.queue.clearRetainingCapacity();
+            self.pending.clearRetainingCapacity();
             self.recorded.clearRetainingCapacity();
             self.late.clearRetainingCapacity();
             self.unwritten.clearRetainingCapacity();
@@ -1418,6 +1615,11 @@ const BorrowContainment = struct {
             try self.recordParts(builder, @enumFromInt(@as(u32, @intCast(self.scanned))), mode);
         }
         while (self.late.pop()) |ty| try self.recordParts(builder, ty, mode);
+        for (self.pending.items) |added| {
+            const edges: Edges = .{ .containment = self, .builder = builder, .owner = added.owner, .mode = mode };
+            try edges.child(.element, added.child);
+        }
+        self.pending.clearRetainingCapacity();
         var next: usize = 0;
         while (next < self.queue.items.len) : (next += 1) {
             var at = self.heads.items[@intFromEnum(self.queue.items[next])];
@@ -1439,9 +1641,22 @@ const BorrowContainment = struct {
         const gpa = builder.gpa;
         const at = @intFromEnum(ty);
         if (builder.isShell(ty)) {
-            if (mode == .raw_carriers or self.recorded.items[at] != .nothing) return;
-            self.recorded.items[at] = .arguments;
+            if (self.recorded.items[at] != .nothing) return;
             const edges: Edges = .{ .containment = self, .builder = builder, .owner = ty, .mode = mode };
+            if (mode != .writers) {
+                // What an alike instantiation may carry, or whether it is
+                // shareable, is what its representative's parts and
+                // arguments say: the one edge is to it. A representative
+                // that is an instantiation is written as any other unwritten
+                // part is, so it is recorded too.
+                if (builder.alikeSource(ty)) |representative| {
+                    self.recorded.items[at] = .representative;
+                    try edges.child(.argument, representative);
+                    return;
+                }
+                if (mode == .raw_carriers) return;
+            }
+            self.recorded.items[at] = .arguments;
             const instance = builder.instanceOf(ty).?;
             for (builder.argsOf(instance)) |argument| try edges.child(.argument, argument);
             try self.by_arguments.append(gpa, ty);
@@ -1994,7 +2209,10 @@ pub const DependencyCoverage = struct {
         return count;
     }
 
-    pub fn covers(self: *DependencyCoverage, comptime Path: type, gpa: std.mem.Allocator, pool: *const Typing, ty: TypeId, paths: []const Path, context: anytype) std.mem.Allocator.Error!bool {
+    /// An alike instantiation is covered as its representative is: its
+    /// parts are the representative's renamed.
+    pub fn covers(self: *DependencyCoverage, comptime Path: type, gpa: std.mem.Allocator, pool: *const Typing, held: TypeId, paths: []const Path, context: anytype) std.mem.Allocator.Error!bool {
+        const ty = pool.partsSource(held);
         for (paths) |path| if (context.isRoot(path)) return true;
         if (!pool.mayCarryDependencies(ty)) return true;
         if (pool.hasDirectDependencies(ty) or paths.len == 0) return false;
@@ -2780,6 +2998,21 @@ pub fn freeBoundTraits(gpa: std.mem.Allocator, traits: []const BoundTrait) void 
 
 /// What an implementation's parameter demands of whatever binds it.
 ///
+/// The two built-in bounds decided by a containment table rather than by an
+/// implementation: `Owned`, over the dependency table, and `Shareable`, over
+/// the `unshareable` one.
+pub const Containment = enum {
+    owned,
+    shareable,
+
+    pub fn spelled(self: Containment) []const u8 {
+        return switch (self) {
+            .owned => "Owned",
+            .shareable => "Shareable",
+        };
+    }
+};
+
 /// The bounds written on it, read once where the declarations are: a trait is
 /// its declaration rather than its spelling, and the capability is what the same
 /// routine every other bound list is read through says it is.
@@ -5260,6 +5493,71 @@ pub const Template = struct {
     ty: TypeId,
 };
 
+/// A position of an alike candidate, listed under the parameter there.
+const AlikePosition = struct { candidate: u32, position: u32 };
+
+/// A template, or an instantiation whose arguments are distinct type
+/// parameters, with the shape of what each argument promises
+/// (`Builder.shapeOf`). Candidates of one declaration whose shapes are equal
+/// position for position are alike, and share one class.
+const AlikeCandidate = struct {
+    /// The instantiation, or the template.
+    ty: TypeId,
+    /// The template, whose parts `Builder.membersRead` reads.
+    template: TypeId,
+    decl: u32,
+    is_template: bool,
+    /// The arguments, as a run in `alike_args`; a template's are its own
+    /// parameters.
+    first_arg: u32,
+    arg_count: u32,
+    /// The shape at each position, as a run in `alike_shapes`.
+    first_shape: u32,
+    /// The sum of each position's shape mixed with its position: equal for
+    /// equal shapes, and updated in place when one position's shape changes.
+    key: u64 = 0,
+    class: u32 = Instance.no_class,
+    /// The neighbours in the class's list of members.
+    prev: u32 = none,
+    next: u32 = none,
+
+    const none = std.math.maxInt(u32);
+};
+
+/// Candidates of one declaration whose shapes are equal position for
+/// position. Its representative is the template where the template is a
+/// member, and otherwise any member.
+const AlikeClass = struct {
+    representative: u32,
+    template: u32 = AlikeCandidate.none,
+    head: u32,
+    members: u32 = 1,
+    /// The next class with the same declaration and key.
+    next_same: u32 = AlikeCandidate.none,
+};
+
+const AlikeClassKey = struct { decl: u32, key: u64 };
+
+/// A template's position, by declaration: what `Builder.membersRead`
+/// answers for.
+const ReadKey = struct { decl: u32, position: u32 };
+
+/// The members a template's parts read through the parameter at one position
+/// (`Builder.membersRead`): a sorted run of member indices in
+/// `Builder.read_members`, or every member.
+const MembersRead = struct {
+    every: bool,
+    first: u32 = 0,
+    len: u32 = 0,
+
+    const all: MembersRead = .{ .every = true };
+    const none: MembersRead = .{ .every = false };
+};
+
+/// A parameter, and a member of it read first by a settled reference
+/// promised `Owned` (`Builder.promised_members`).
+const PromisedMember = struct { parameter: TypeId, member: u32 };
+
 /// One instantiation, and what it was instantiated from.
 pub const Instance = struct {
     decl: DeclId,
@@ -5276,6 +5574,14 @@ pub const Instance = struct {
     /// through their fields made that copy grow with the square of their
     /// number.
     parts: Parts = .written,
+    /// The class of alike instantiations this one belongs to, or `no_class`
+    /// where its arguments are not distinct type parameters. While its parts
+    /// are unwritten every question about what it owns is answered from its
+    /// class's representative (`Typing.partsSource`). Kept current by
+    /// `Builder.watchAlike` and `Builder.decideAlikeAgain`.
+    class: u32 = no_class,
+
+    pub const no_class = std.math.maxInt(u32);
 
     pub const Parts = enum {
         unwritten,
@@ -5718,6 +6024,9 @@ pub const PiecePosition = enum {
 /// those is types.
 pub const Typing = struct {
     capabilities: []const Capability = &.{},
+    /// The builder's watch, in a view taken while declared answers are being
+    /// settled; null in every other view and in the finished typing.
+    capability_watch: ?*CapabilityWatch = null,
     scoped_capabilities: ScopedCapabilityMap = .empty,
     prepared_implementations: PreparedImplementations = .{},
     field_name_spellings: std.AutoHashMapUnmanaged(StringId, []const u8) = .empty,
@@ -5937,6 +6246,14 @@ pub const Typing = struct {
     /// last instantiation are: a type past the end is one no instantiation
     /// named, which is the same answer the table gives.
     instance_of: []const u32 = &.{},
+    /// The representative of each class of alike instantiations
+    /// (`Instance.class`), by class: the template where the template is a
+    /// member, and otherwise one of the instantiations. See `alikeSource`.
+    alike_sources: []const TypeId = &.{},
+    /// Whether every template's parts were complete when the alike classes
+    /// were last decided, so a promise on a member no template's parts read
+    /// was left out of them. A reopened pool decides them the same way.
+    templates_complete: bool = false,
     /// The spellings minted for instantiations, which this pool frees. A pool
     /// reopened from another shares its entries and owns none of its names.
     owned_names: []const []const u8 = &.{},
@@ -6271,6 +6588,7 @@ pub const Typing = struct {
         gpa.free(self.instances);
         gpa.free(self.instance_args);
         gpa.free(self.instance_of);
+        gpa.free(self.alike_sources);
         for (self.owned_names) |n| gpa.free(n);
         gpa.free(self.owned_names);
         for (self.owned_contracts) |contracts| freeContracts(gpa, contracts);
@@ -6330,14 +6648,20 @@ pub const Typing = struct {
         };
     }
 
-    /// Follow checked containment selectors in the actual instantiated result.
-    pub fn contractTargetType(self: *const Typing, result: TypeId, target: []const ResultSelector) TypeId {
+    /// Whether the part a contract's checked containment selectors name in
+    /// `result` is an observation. An alike instantiation on the way is
+    /// followed through its representative, whose part at each selector is
+    /// the same kind of type.
+    pub fn contractTargetIsObservation(self: *const Typing, result: TypeId, target: []const ResultSelector) bool {
         var ty = result;
-        for (target) |selector| switch (selector) {
-            .field => |field| ty = self.fieldType(ty, field.index),
-            .payload => |payload| ty = self.variantFieldType(ty, @intFromEnum(payload.variant), payload.index),
-        };
-        return ty;
+        for (target) |selector| {
+            const held = self.partsSource(ty);
+            ty = switch (selector) {
+                .field => |field| self.fieldType(held, field.index),
+                .payload => |payload| self.variantFieldType(held, @intFromEnum(payload.variant), payload.index),
+            };
+        }
+        return self.get(ty) == .borrow;
     }
 
     pub fn callableParams(self: *const Typing, signature: CallableSignature) []const CallableParam {
@@ -6861,11 +7185,50 @@ pub const Typing = struct {
     /// Whether `t` is an instantiation whose parts are not written yet.
     ///
     /// The checker writes them on first need and writes every one a later
-    /// pass can reach before it hands the pool on, so a finished pool holds
-    /// such a type only as an argument nothing reads the parts of.
+    /// pass can reach before it hands the pool on, except an alike
+    /// instantiation, which `partsSource` answers for; a finished pool holds
+    /// any other only as an argument nothing reads the parts of.
     pub fn isShell(self: *const Typing, t: TypeId) bool {
         const instance = lookupInstance(self.instance_of, self.instances, t) orelse return false;
         return instance.parts != .written;
+    }
+
+    /// The representative `t` is answered from, where `t` is an
+    /// instantiation with its parts unwritten that is alike another type of
+    /// its declaration, and null otherwise. See `partsSource`.
+    pub fn alikeSource(self: *const Typing, t: TypeId) ?TypeId {
+        const instance = lookupInstance(self.instance_of, self.instances, t) orelse return null;
+        return sourceOf(instance, self.alike_sources, t);
+    }
+
+    /// `alikeSource`, given `t`'s instance record and the sources by class.
+    /// Shared by the finished pool and the builder, so the two read one
+    /// answer.
+    fn sourceOf(instance: Instance, sources: []const TypeId, t: TypeId) ?TypeId {
+        if (instance.parts != .unwritten or instance.class == Instance.no_class) return null;
+        const source = sources[instance.class];
+        return if (source == t) null else source;
+    }
+
+    /// The type whose parts answer what `t` owns: its class's
+    /// representative, where `t` is an alike instantiation with its parts
+    /// unwritten, and `t` itself otherwise.
+    ///
+    /// Alike instantiations of one declaration have distinct parameters as
+    /// arguments, and the arguments at each position promise alike once the
+    /// arguments are renamed position for position. So the parts of each,
+    /// once written, would be the representative's with each of its
+    /// arguments renamed to the one at the same position. Every answer that
+    /// depends on what a type owns and not on which parameter it names --
+    /// whether it can be copied or discarded, whether it may carry a
+    /// dependency or a view, whether it holds itself -- is the
+    /// representative's. The template is the representative of the class
+    /// whose promises are its own. This is the one place that says so:
+    /// every walk over parts steps from such a type to its representative
+    /// here instead of writing its parts, so `G1[T]` held by `G0[T]` costs
+    /// one step and not a copy of every template it reaches.
+    pub fn partsSource(self: *const Typing, t: TypeId) TypeId {
+        return self.alikeSource(t) orelse t;
     }
 
     /// Stops a read of a part the pool has not written.
@@ -6874,6 +7237,13 @@ pub const Typing = struct {
         const instance = lookupInstance(self.instance_of, self.instances, t) orelse return;
         if (instance.parts == .unwritten)
             @panic("compiler defect: a part of an instantiation was read before it was written");
+    }
+
+    /// Stops a read of a fact about what a type owns where the pool has
+    /// neither written the type's parts nor can answer from a representative.
+    fn readsFacts(self: *const Typing, t: TypeId) void {
+        if (self.alikeSource(t) != null) return;
+        self.readsParts(t);
     }
 
     fn lookupInstance(instance_of: []const u32, instances: []const Instance, t: TypeId) ?Instance {
@@ -7145,7 +7515,8 @@ pub const Typing = struct {
         return self.holdsStorageWalk(gpa, &seen, t);
     }
 
-    fn holdsStorageWalk(self: *const Typing, gpa: std.mem.Allocator, seen: *std.AutoHashMapUnmanaged(TypeId, void), t: TypeId) std.mem.Allocator.Error!bool {
+    fn holdsStorageWalk(self: *const Typing, gpa: std.mem.Allocator, seen: *std.AutoHashMapUnmanaged(TypeId, void), held: TypeId) std.mem.Allocator.Error!bool {
+        const t = self.partsSource(held);
         if ((try seen.getOrPut(gpa, t)).found_existing) return false;
         switch (self.get(t)) {
             .borrow => return false,
@@ -7182,7 +7553,8 @@ pub const Typing = struct {
         return self.holdsViewWalk(gpa, &seen, t);
     }
 
-    fn holdsViewWalk(self: *const Typing, gpa: std.mem.Allocator, seen: *std.AutoHashMapUnmanaged(TypeId, void), t: TypeId) std.mem.Allocator.Error!bool {
+    fn holdsViewWalk(self: *const Typing, gpa: std.mem.Allocator, seen: *std.AutoHashMapUnmanaged(TypeId, void), held: TypeId) std.mem.Allocator.Error!bool {
+        const t = self.partsSource(held);
         if ((try seen.getOrPut(gpa, t)).found_existing) return false;
         switch (self.get(t)) {
             .borrow => return true,
@@ -7208,7 +7580,7 @@ pub const Typing = struct {
     }
 
     pub fn mayCarryDependencies(self: *const Typing, t: TypeId) bool {
-        self.readsParts(t);
+        self.readsFacts(t);
         const index = @intFromEnum(t);
         std.debug.assert(index < self.dependency_containment.len);
         return self.dependency_containment[index];
@@ -7274,18 +7646,52 @@ pub const Typing = struct {
     }
 
     pub fn capabilityOf(self: *const Typing, t: TypeId) Capability {
-        self.readsParts(t);
-        return self.capabilities[t.index()];
+        return self.capabilityAsked(t, .capabilities);
     }
 
     pub fn capabilityOfWithin(self: *const Typing, owner: DeclId, t: TypeId) Capability {
+        return self.capabilityAskedWithin(owner, t, .capabilities);
+    }
+
+    /// `t`'s capability, with what the question asks of it noted for the
+    /// watch.
+    fn capabilityAsked(self: *const Typing, t: TypeId, asked: CapabilityWatch.Asked) Capability {
+        self.readsFacts(t);
+        self.noteAsked(t, asked);
+        return self.capabilities[t.index()];
+    }
+
+    /// `t`'s capability within `owner`, with what the question asks of it
+    /// noted for the watch.
+    pub fn capabilityAskedWithin(self: *const Typing, owner: DeclId, t: TypeId, asked: CapabilityWatch.Asked) Capability {
         // Rejected or unrecorded expressions carry no ownership obligation.
         // Their recovery capability does not depend on a declaration's bounds.
-        if (t == .poison) return self.capabilityOf(t);
+        if (t == .poison) return self.capabilityAsked(t, asked);
         const scope = self.contextual_constraints.activeCapabilityScope(owner);
-        if (scope == .none) return self.capabilityOf(t);
+        if (scope == .none) return self.capabilityAsked(t, asked);
+        self.noteAsked(t, asked);
         return self.scoped_capabilities.get(.{ .scope = scope, .ty = t }) orelse
             @panic("scoped capability was not prepared before the immutable typing handoff");
+    }
+
+    /// Notes a question asked of `t` with the watch, unless the type's own
+    /// declaration already answers it: a type declared other than
+    /// `copyable` is never copied, and one declared `linear` is never
+    /// discarded, whatever its parts hold.
+    pub fn noteAsked(self: *const Typing, t: TypeId, asked: CapabilityWatch.Asked) void {
+        const watch = self.capability_watch orelse return;
+        const policy: ?OwnershipPolicy = switch (self.get(t)) {
+            .struct_ => |x| x.ownership_policy,
+            .enum_ => |x| x.ownership_policy,
+            .newtype => |x| x.ownership_policy,
+            else => null,
+        };
+        if (policy) |declared| switch (asked) {
+            .copy => if (declared != .copyable) return,
+            .discard => if (declared == .linear) return,
+            else => {},
+        };
+        watch.note(t, asked);
     }
 
     /// Authored scalar types whose value positions read an independent snapshot.
@@ -7300,24 +7706,26 @@ pub const Typing = struct {
 
     /// Whether no variant of `t` carries a value.
     fn payloadFree(self: *const Typing, t: TypeId, e: anytype) bool {
+        const source = self.partsSource(t);
+        if (source != t) return self.get(source).enum_.payload_field_count == 0;
         self.readsParts(t);
         return e.payload_field_count == 0;
     }
 
     pub fn mayCopy(self: *const Typing, t: TypeId) bool {
-        return self.capabilityOf(t) == .copyable;
+        return self.capabilityAsked(t, .copy) == .copyable;
     }
     pub fn mustConsume(self: *const Typing, t: TypeId) bool {
-        return self.capabilityOf(t) == .linear;
+        return self.capabilityAsked(t, .discard) == .linear;
     }
     pub fn mayDiscard(self: *const Typing, t: TypeId) bool {
         return !self.mustConsume(t);
     }
     pub fn mayCopyWithin(self: *const Typing, owner: DeclId, t: TypeId) bool {
-        return self.capabilityOfWithin(owner, t) == .copyable;
+        return self.capabilityAskedWithin(owner, t, .copy) == .copyable;
     }
     pub fn mustConsumeWithin(self: *const Typing, owner: DeclId, t: TypeId) bool {
-        return self.capabilityOfWithin(owner, t) == .linear;
+        return self.capabilityAskedWithin(owner, t, .discard) == .linear;
     }
     pub fn mayDiscardWithin(self: *const Typing, owner: DeclId, t: TypeId) bool {
         return !self.mustConsumeWithin(owner, t);
@@ -7913,6 +8321,47 @@ pub const Typing = struct {
         };
     }
 
+    /// The checker's routines that read a declared answer before the builder
+    /// reads it, and the checker they run on.
+    pub const AnswerDemand = struct {
+        context: *anyopaque,
+        /// Settles an implementation member's type, or a field delegation's
+        /// element, before `settledBy` reads it.
+        settle: *const fn (context: *anyopaque, member: DeclId) std.mem.Allocator.Error!void,
+        /// Reads the parts of every declaration a type owns or is applied
+        /// to, before a capability or an implementation is asked of it.
+        owned: *const fn (context: *anyopaque, ty: TypeId) std.mem.Allocator.Error!void,
+    };
+
+    /// Which types' capabilities may still change because a part they depend
+    /// on is being read, and the first such type a question was asked about.
+    /// The checker fills `watched` while it reads declared parts; every
+    /// capability read through the builder or a view of it is noted here.
+    pub const CapabilityWatch = struct {
+        /// Each watched type, with the declaration whose part is being read.
+        watched: std.AutoHashMapUnmanaged(TypeId, DeclId) = .empty,
+        /// The first question asked of a watched type since the checker last
+        /// cleared it. A question naming what it asks replaces one that read
+        /// the type's capabilities without saying why.
+        hit: ?Question = null,
+
+        pub const Question = struct { ty: TypeId, asked: Asked };
+
+        /// What a question asked of a type.
+        pub const Asked = enum {
+            /// Its capabilities, read without a requirement in hand.
+            capabilities,
+            discard,
+            copy,
+        };
+
+        fn note(self: *CapabilityWatch, t: TypeId, asked: Asked) void {
+            if (self.watched.count() == 0 or !self.watched.contains(t)) return;
+            if (self.hit) |hit| if (hit.asked != .capabilities or asked == .capabilities or hit.ty != t) return;
+            self.hit = .{ .ty = t, .asked = asked };
+        }
+    };
+
     /// Accumulates types while checking. The checker owns one and discards it.
     pub const Builder = struct {
         const ArrayKey = struct { element: TypeId, count: u32 };
@@ -7953,16 +8402,16 @@ pub const Typing = struct {
         /// Borrowed from the checker, which owns it: readable, so this pass
         /// cannot write into another's answer or free memory it was lent.
         decl_returns: Returns.Reading = .empty,
-        /// While the checker settles implementations' associated types, the
-        /// members it has not settled yet, borrowed from it. A settled
-        /// reference the checker reads (`reading_reference`) reads none of
-        /// them: `settledBy` records in `unsettled_read` the one it was asked
-        /// for, so the definition reading it waits for it. A member read while
-        /// a type's fields are laid out is not a definition's reference and
-        /// reads what has been settled so far.
-        unsettled_members: ?*const std.AutoHashMapUnmanaged(DeclId, void) = null,
-        unsettled_read: DeclId = .none,
-        reading_reference: bool = false,
+        /// What reads a declared answer on demand, set only while the checker
+        /// settles declared answers and null once every one is settled. A
+        /// settled type may be written as another implementation's settled
+        /// reference, `type Reading = Celsius.Reading`, declared after it;
+        /// `settledBy` settles the member it reads before reading it, and a
+        /// capability question reads the parts it depends on first, so no
+        /// answer depends on the order declarations are written in.
+        demand: ?AnswerDemand = null,
+        /// Set alongside `demand`; see `CapabilityWatch`.
+        capability_watch: ?*CapabilityWatch = null,
         /// `Typing.declared_requirements`, borrowed for the same reason: minting
         /// a projection is a reading of what its declaration was bounded by.
         declared_requirements: []const CapabilityRequirement = &.{},
@@ -7985,6 +8434,10 @@ pub const Typing = struct {
         borrowed_types: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty,
         capability_facts: CapabilityFacts = .{},
         scoped_capability_facts: ScopedCapabilityFacts = .{},
+        /// Whether a scoped walk is running. Its pending and queue lists are
+        /// shared, so a preparation started inside one would clear what the
+        /// outer walk still reads.
+        scoped_walk_running: bool = false,
         prepared_implementations: PreparedImplementations = .{},
         dependency_facts: BorrowContainment = .{},
         writer_facts: BorrowContainment = .{},
@@ -8046,6 +8499,62 @@ pub const Typing = struct {
         /// Which entries of `instances` carry each `(decl, args)` pair the pool
         /// interns on.
         minted: Chain(.newest_first) = .empty,
+        /// The positions of alike candidates (`AlikeCandidate`), by the
+        /// parameter at each. A promise added to a parameter decides the
+        /// shape of each listed position again (`decideAlikeAgain`), so a
+        /// decision costs one shape per change to a parameter it reads
+        /// rather than a walk over every instantiation.
+        alike_watch: std.AutoHashMapUnmanaged(TypeId, std.ArrayList(AlikePosition)) = .empty,
+        /// Every template and every instantiation whose arguments are
+        /// distinct type parameters, each in one class of alike candidates.
+        alike_candidates: std.ArrayList(AlikeCandidate) = .empty,
+        /// Each candidate's arguments, as a run: an instantiation's
+        /// arguments, or a template's own parameters.
+        alike_args: std.ArrayList(TypeId) = .empty,
+        /// The shape of each candidate's positions, as a run: the interned
+        /// encoding of what the argument there promises (`shapeOf`).
+        alike_shapes: std.ArrayList(u32) = .empty,
+        /// The interned position shapes, by their encoding, which this
+        /// builder owns.
+        alike_shape_ids: std.StringHashMapUnmanaged(u32) = .empty,
+        /// Each template's candidate, by declaration, made when the first
+        /// instantiation of it is watched.
+        alike_templates: std.AutoHashMapUnmanaged(u32, void) = .empty,
+        /// The classes of alike candidates, and the first live class for each
+        /// declaration and key, the rest chained through `next_same`.
+        alike_classes: std.ArrayList(AlikeClass) = .empty,
+        alike_class_heads: std.AutoHashMapUnmanaged(AlikeClassKey, u32) = .empty,
+        /// `Typing.alike_sources`, kept current as classes change.
+        alike_sources: std.ArrayList(TypeId) = .empty,
+        /// Set where a decision changed the representative of an unwritten
+        /// instantiation, so the fact tables, which recorded the old one,
+        /// are rebuilt.
+        alike_changed: bool = false,
+        /// The settled references promised `Owned` that are read through each
+        /// parameter: `S.Item` under `S` once `where S.Item: Owned` is read.
+        /// Each is part of the parameter's shape at a position whose
+        /// template's parts read its member (`membersRead`).
+        promised_through: std.AutoHashMapUnmanaged(TypeId, std.ArrayList(TypeId)) = .empty,
+        /// The same settled references, by parameter and the member each
+        /// reads first through it, so a shape whose template reads few
+        /// members finds their promises without a walk over the rest.
+        promised_members: std.AutoHashMapUnmanaged(PromisedMember, std.ArrayList(TypeId)) = .empty,
+        /// Every settled reference listed in `promised_through`.
+        promised_standins: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
+        /// The members a template's parts, followed through every template
+        /// they instantiate at its parameter, read through that parameter
+        /// (`membersRead`), by template and position.
+        member_reads: std.AutoHashMapUnmanaged(ReadKey, MembersRead) = .empty,
+        /// The runs `member_reads` names.
+        read_members: std.ArrayList(u32) = .empty,
+        /// How many holds `holdAlikeDecisions` has open, and the parameters
+        /// whose decisions wait for the last to be released.
+        alike_holds: u32 = 0,
+        alike_pending: std.AutoArrayHashMapUnmanaged(TypeId, void) = .empty,
+        /// Whether every template's parts are complete (`templatesComplete`),
+        /// so `membersRead` may answer that a member is not read. Before,
+        /// every member is read.
+        templates_complete: bool = false,
         /// The interpolations substitution minted, and the pieces each holds.
         /// Grown as they are minted rather than sized with the pool, which is
         /// what keeps them the size of the literals a program substitutes into.
@@ -8115,6 +8624,13 @@ pub const Typing = struct {
 
         /// Whether the complete-template refill has run.
         refilled: bool = false,
+        /// How many `fillInstance` calls are running, one inside another: a
+        /// member demanded while an instantiation's parts are written is read
+        /// for a part, not for a definition.
+        filling: u32 = 0,
+        /// The instantiation whose parts the innermost `fillInstance` is
+        /// writing.
+        filling_type: ?TypeId = null,
         /// How many instantiations have had their parts written for the
         /// first time, so a caller can tell whether settling wrote any.
         parts_written: usize = 0,
@@ -8544,6 +9060,10 @@ pub const Typing = struct {
             };
         }
 
+        /// The declaration a renaming substitutes for, which owns no
+        /// parameter, so its by-position replacement touches none.
+        const no_owner: u32 = std.math.maxInt(u32);
+
         /// Memoized only for this immutable replacement key. Pool growth may
         /// intern answers, but a later query sees its own declaration state.
         const TypeSubstitution = struct {
@@ -8554,12 +9074,22 @@ pub const Typing = struct {
             /// The declaration whose `where` clauses a projected member is
             /// selected under, or none.
             within: DeclId = .none,
+            /// Parameters to replace, each by what it maps to, in place of
+            /// `decl`'s by position; `decl` is then `no_owner`.
+            renaming: ?*const std.AutoHashMapUnmanaged(TypeId, TypeId) = null,
+            /// Whether `renaming` met a parameter it does not name.
+            foreign: bool = false,
             memo: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty,
 
             fn apply(self: *TypeSubstitution, builder: *Builder, ty: TypeId) std.mem.Allocator.Error!TypeId {
                 if (self.open) |table| switch (builder.get(ty)) {
                     .open_integer, .open_float, .open_type => |v| return table.resolved(v),
                     else => if (!try builder.mentionsOpen(ty)) return ty,
+                };
+                if (self.renaming) |renaming| if (builder.get(ty) == .parameter and builder.standinOf(ty) == null) {
+                    if (renaming.get(ty)) |to| return to;
+                    self.foreign = true;
+                    return ty;
                 };
                 if (builder.substitutionLeaf(ty, self.decl, self.args)) |answer| return answer;
                 if (self.memo.get(ty)) |answer| return answer;
@@ -8902,7 +9432,8 @@ pub const Typing = struct {
             // `Ring2[X]`, whose parts mint `Ring3[X]`, round every structure
             // that names another, once for each declaration's own parameter.
             // A ground instantiation is written at once, since lowering lays
-            // out every one it reaches.
+            // out every one it reaches; any other is decided alike its
+            // template or not (`watchAlike`).
             const is_ground = try self.allGround(args);
             try self.instances.append(self.gpa, .{
                 .decl = decl,
@@ -8916,7 +9447,9 @@ pub const Typing = struct {
             try self.noteAt(&self.instance_of, made, at, Typing.not_an_instance);
             try self.noteMinted(at, decl.index(), args);
 
-            if (is_ground) try self.fillInstance(at);
+            if (is_ground) {
+                try self.fillInstance(at);
+            } else try self.watchAlike(at);
 
             return made;
         }
@@ -8925,6 +9458,920 @@ pub const Typing = struct {
         pub fn isShell(self: *const Builder, t: TypeId) bool {
             const instance = self.instanceOf(t) orelse return false;
             return instance.parts != .written;
+        }
+
+        /// `Typing.alikeSource`, mid-build.
+        pub fn alikeSource(self: *const Builder, t: TypeId) ?TypeId {
+            const instance = self.instanceOf(t) orelse return null;
+            return Typing.sourceOf(instance, self.alike_sources.items, t);
+        }
+
+        /// `Typing.partsSource`, mid-build.
+        pub fn partsSource(self: *const Builder, t: TypeId) TypeId {
+            return self.alikeSource(t) orelse t;
+        }
+
+        /// Watches the instantiation at `at`, just minted, as an alike
+        /// candidate where its arguments are distinct type parameters, none
+        /// of them a settled reference, and its declaration's parameters are
+        /// interned. It joins the class of its declaration's candidates whose
+        /// arguments promise what its own do, position for position, the
+        /// template among them (`shapeOf`). Certified storage is never alike:
+        /// its containment reads its element argument rather than its parts.
+        ///
+        /// What the arguments are never changes, but what they promise does,
+        /// so each position is listed under the parameter there, and a
+        /// promise added to one decides that position again.
+        ///
+        /// **Bound:** the length of the arguments, with a set of them to see
+        /// they are distinct, and the size of what each promises.
+        fn watchAlike(self: *Builder, at: u32) std.mem.Allocator.Error!void {
+            const instance = self.instances.items[at];
+            if (self.certified_storage != .none and instance.decl == self.certified_storage) return;
+            const decl = instance.decl.index();
+            const args = self.argsOf(instance);
+            if (args.len == 0) return;
+            var distinct: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+            defer distinct.deinit(self.gpa);
+            for (args, 0..) |arg, i| {
+                if (self.standinOf(arg) != null or self.get(arg) != .parameter) return;
+                if (self.internedParameter(decl, @intCast(i)) == null) return;
+                if ((try distinct.getOrPut(self.gpa, arg)).found_existing) return;
+            }
+            if (!self.alike_templates.contains(decl)) {
+                const own = try self.gpa.alloc(TypeId, args.len);
+                defer self.gpa.free(own);
+                for (own, 0..) |*parameter, i| parameter.* = self.internedParameter(decl, @intCast(i)).?;
+                _ = try self.addCandidate(instance.template, instance.template, decl, true, own);
+                try self.alike_templates.put(self.gpa, decl, {});
+            }
+            _ = try self.addCandidate(instance.ty, instance.template, decl, false, self.argsOf(instance));
+            self.settleAlikeChange();
+        }
+
+        /// Adds a candidate, lists each of its positions under the parameter
+        /// there, and puts it in its class.
+        fn addCandidate(
+            self: *Builder,
+            ty: TypeId,
+            template: TypeId,
+            decl: u32,
+            is_template: bool,
+            args: []const TypeId,
+        ) std.mem.Allocator.Error!u32 {
+            const id: u32 = @intCast(self.alike_candidates.items.len);
+            const first_arg: u32 = @intCast(self.alike_args.items.len);
+            try self.alike_args.appendSlice(self.gpa, args);
+            const first_shape: u32 = @intCast(self.alike_shapes.items.len);
+            try self.alike_shapes.appendNTimes(self.gpa, 0, args.len);
+            try self.alike_candidates.append(self.gpa, .{
+                .ty = ty,
+                .template = template,
+                .decl = decl,
+                .is_template = is_template,
+                .first_arg = first_arg,
+                .arg_count = @intCast(args.len),
+                .first_shape = first_shape,
+            });
+            var key: u64 = 0;
+            for (0..args.len) |i| {
+                const position: u32 = @intCast(i);
+                const shape = try self.shapeOf(id, position);
+                self.alike_shapes.items[first_shape + i] = shape;
+                key +%= mixShape(position, shape);
+                const list = try self.alike_watch.getOrPut(self.gpa, self.alike_args.items[first_arg + i]);
+                if (!list.found_existing) list.value_ptr.* = .empty;
+                try list.value_ptr.append(self.gpa, .{ .candidate = id, .position = position });
+            }
+            self.alike_candidates.items[id].key = key;
+            try self.joinAlikeClass(id);
+            return id;
+        }
+
+        /// A position's shape mixed with the position, so a candidate's key
+        /// is the sum over its positions and one position's change is one
+        /// subtraction and one addition.
+        fn mixShape(position: u32, shape: u32) u64 {
+            const both = (@as(u64, position) << 32) | shape;
+            return std.hash.Wyhash.hash(0, std.mem.asBytes(&both));
+        }
+
+        /// The shape of what the argument at `position` of candidate `c`
+        /// promises, interned: equal for two candidates of one declaration
+        /// exactly when their arguments there promise alike once each
+        /// candidate's arguments are renamed to their positions. A shape
+        /// encodes the argument's capability requirement, its `Integer` and
+        /// `Owned` promises, the traits it is bounded by with their
+        /// arguments, its callable bounds, and the settled references read
+        /// through it that a `where` clause promised `Owned`, where the
+        /// candidate's template's parts read their member
+        /// (`membersRead`).
+        ///
+        /// **Bound:** the size of the argument's bounds and promises, the
+        /// members the template reads at `position` or the settled references
+        /// promised through the argument, whichever is fewer, and a sort of
+        /// the promises the shape keeps (`encodePromisedThrough`).
+        fn shapeOf(self: *Builder, c: u32, position: u32) std.mem.Allocator.Error!u32 {
+            const candidate = self.alike_candidates.items[c];
+            const args = self.alike_args.items[candidate.first_arg..][0..candidate.arg_count];
+            const arg = args[position];
+            const promise = self.get(arg).parameter;
+            var words: std.ArrayList(u32) = .empty;
+            defer words.deinit(self.gpa);
+            try words.appendSlice(self.gpa, &.{
+                @intFromEnum(promise.requirement),
+                @intFromBool(promise.integer),
+                @intFromBool(promise.owned),
+                @intFromBool(promise.shareable),
+                @intCast(promise.traits.len),
+            });
+            for (promise.traits) |bound| {
+                try words.appendSlice(self.gpa, &.{ bound.trait, @intCast(bound.args.len) });
+                for (bound.args) |bound_arg| try self.encodeRenamed(&words, bound_arg, args);
+            }
+            try words.append(self.gpa, @intCast(promise.callables.len));
+            for (promise.callables) |callable| try self.encodeRenamed(&words, callable, args);
+            try self.encodePromisedThrough(&words, candidate, position, arg, args);
+            return self.internShape(words.items);
+        }
+
+        /// Appends `ty` to `words`, with each parameter among `args` written
+        /// as its position. Anything the encoding does not take apart is
+        /// written as itself, so two such types encode alike only when they
+        /// are the same type, which at worst keeps two candidates apart.
+        ///
+        /// **Bound:** the nesting height of `ty`.
+        fn encodeRenamed(self: *const Builder, words: *std.ArrayList(u32), ty: TypeId, args: []const TypeId) std.mem.Allocator.Error!void {
+            if (self.standinOf(ty)) |standin| {
+                try words.appendSlice(self.gpa, &.{ 2, standin.trait, standin.member.index(), standin.arg_count });
+                try self.encodeRenamed(words, standin.held, args);
+                for (self.standin_args.items[standin.first_arg..][0..standin.arg_count]) |held| try self.encodeRenamed(words, held, args);
+                return;
+            }
+            if (self.instanceOf(ty)) |instance| {
+                try words.appendSlice(self.gpa, &.{ 3, instance.decl.index(), instance.arg_count });
+                for (self.argsOf(instance)) |held| try self.encodeRenamed(words, held, args);
+                return;
+            }
+            switch (self.get(ty)) {
+                .parameter => |parameter| {
+                    const position: ?u32 = if (parameter.index < args.len and args[parameter.index] == ty)
+                        parameter.index
+                    else if (std.mem.indexOfScalar(TypeId, args, ty)) |at| @intCast(at) else null;
+                    if (position) |at| return words.appendSlice(self.gpa, &.{ 0, at });
+                },
+                .array => |array| {
+                    try words.appendSlice(self.gpa, &.{ 4, array.count });
+                    return self.encodeRenamed(words, array.element, args);
+                },
+                .borrow => |borrow| {
+                    try words.append(self.gpa, 5);
+                    return self.encodeRenamed(words, borrow.referent, args);
+                },
+                else => {},
+            }
+            try words.appendSlice(self.gpa, &.{ 1, @intFromEnum(ty) });
+        }
+
+        /// Appends the settled references read through `arg` that were
+        /// promised `Owned` and whose member the template's parts read at
+        /// `position`, each renamed, in an order that does not depend on the
+        /// order the promises were read in.
+        ///
+        /// Walks whichever side is shorter: every promise through `arg`,
+        /// asking whether the template reads its member, or every member the
+        /// template reads, finding its promises through `promised_members`.
+        /// A template reading one member of a parameter promising many costs
+        /// one lookup, and so does one promise on a template reading many.
+        fn encodePromisedThrough(
+            self: *Builder,
+            words: *std.ArrayList(u32),
+            candidate: AlikeCandidate,
+            position: u32,
+            arg: TypeId,
+            args: []const TypeId,
+        ) std.mem.Allocator.Error!void {
+            const promised = self.promised_through.get(arg) orelse return words.append(self.gpa, 0);
+            const reads = try self.membersRead(candidate.decl, candidate.template, position);
+            const members = self.read_members.items[reads.first..][0..reads.len];
+            var pieces: std.ArrayList(u32) = .empty;
+            defer pieces.deinit(self.gpa);
+            var bounds: std.ArrayList([2]u32) = .empty;
+            defer bounds.deinit(self.gpa);
+            if (reads.every or promised.items.len <= members.len) {
+                for (promised.items) |standin| {
+                    if (!reads.every and !sortedHolds(members, self.memberReadThrough(standin, arg))) continue;
+                    const start: u32 = @intCast(pieces.items.len);
+                    try self.encodePromise(&pieces, standin, args);
+                    try bounds.append(self.gpa, .{ start, @intCast(pieces.items.len) });
+                }
+            } else for (members) |member| {
+                const listed = self.promised_members.get(.{ .parameter = arg, .member = member }) orelse continue;
+                for (listed.items) |standin| {
+                    const start: u32 = @intCast(pieces.items.len);
+                    try self.encodePromise(&pieces, standin, args);
+                    try bounds.append(self.gpa, .{ start, @intCast(pieces.items.len) });
+                }
+            }
+            const Order = struct {
+                fn less(all: []const u32, a: [2]u32, b: [2]u32) bool {
+                    return std.mem.order(u32, all[a[0]..a[1]], all[b[0]..b[1]]) == .lt;
+                }
+            };
+            std.mem.sort([2]u32, bounds.items, @as([]const u32, pieces.items), Order.less);
+            try words.append(self.gpa, @intCast(bounds.items.len));
+            for (bounds.items) |piece| {
+                try words.append(self.gpa, piece[1] - piece[0]);
+                try words.appendSlice(self.gpa, pieces.items[piece[0]..piece[1]]);
+            }
+        }
+
+        /// Appends a settled reference promised through a parameter, renamed,
+        /// and which of `Owned` and `Shareable` it was promised.
+        fn encodePromise(self: *const Builder, pieces: *std.ArrayList(u32), standin: TypeId, args: []const TypeId) std.mem.Allocator.Error!void {
+            try self.encodeRenamed(pieces, standin, args);
+            const promise = self.get(standin).parameter;
+            try pieces.append(self.gpa, @as(u32, @intFromBool(promise.owned)) | @as(u32, @intFromBool(promise.shareable)) << 1);
+        }
+
+        /// Whether the sorted `members` holds `member`.
+        fn sortedHolds(members: []const u32, member: u32) bool {
+            var low: usize = 0;
+            var high: usize = members.len;
+            while (low < high) {
+                const middle = low + (high - low) / 2;
+                if (members[middle] == member) return true;
+                if (members[middle] < member) low = middle + 1 else high = middle;
+            }
+            return false;
+        }
+
+        /// The member a settled reference reads first through `root`, the
+        /// parameter it is read through: `Item` for `S.Item` and for
+        /// `S.Item.Inner` alike.
+        fn memberReadThrough(self: *const Builder, standin: TypeId, root: TypeId) u32 {
+            var at = standin;
+            while (self.standinOf(at)) |read| {
+                if (read.held == root) return read.member.index();
+                at = read.held;
+            }
+            unreachable;
+        }
+
+        fn internShape(self: *Builder, words: []const u32) std.mem.Allocator.Error!u32 {
+            const bytes = std.mem.sliceAsBytes(words);
+            if (self.alike_shape_ids.get(bytes)) |id| return id;
+            const id: u32 = self.alike_shape_ids.count();
+            const owned = try self.gpa.dupe(u8, bytes);
+            errdefer self.gpa.free(owned);
+            try self.alike_shape_ids.put(self.gpa, owned, id);
+            return id;
+        }
+
+        /// Puts candidate `c`, out of any class, in the class of its
+        /// declaration whose shapes equal its own, or in a class of its own.
+        /// The template becomes the representative of the class it enters.
+        ///
+        /// **Bound:** one comparison of shapes for each live class with the
+        /// same declaration and key, which is one unless two keys collide.
+        fn joinAlikeClass(self: *Builder, c: u32) std.mem.Allocator.Error!void {
+            const candidate = self.alike_candidates.items[c];
+            const key: AlikeClassKey = .{ .decl = candidate.decl, .key = candidate.key };
+            var previous: u32 = AlikeCandidate.none;
+            var at = self.alike_class_heads.get(key) orelse AlikeCandidate.none;
+            while (at != AlikeCandidate.none) {
+                const class = self.alike_classes.items[at];
+                if (class.members == 0) {
+                    // A class every member left is unlinked as it is met.
+                    if (previous != AlikeCandidate.none) {
+                        self.alike_classes.items[previous].next_same = class.next_same;
+                    } else if (class.next_same == AlikeCandidate.none) {
+                        _ = self.alike_class_heads.remove(key);
+                    } else self.alike_class_heads.getPtr(key).?.* = class.next_same;
+                    at = class.next_same;
+                    continue;
+                }
+                if (self.sameShapes(c, class.representative)) return self.enterAlikeClass(c, at);
+                previous = at;
+                at = class.next_same;
+            }
+            const id: u32 = @intCast(self.alike_classes.items.len);
+            try self.alike_sources.append(self.gpa, candidate.ty);
+            try self.alike_classes.append(self.gpa, .{
+                .representative = c,
+                .template = if (candidate.is_template) c else AlikeCandidate.none,
+                .head = c,
+                .next_same = self.alike_class_heads.get(key) orelse AlikeCandidate.none,
+            });
+            try self.alike_class_heads.put(self.gpa, key, id);
+            self.placeCandidate(c, id);
+        }
+
+        fn sameShapes(self: *const Builder, a: u32, b: u32) bool {
+            const x = self.alike_candidates.items[a];
+            const y = self.alike_candidates.items[b];
+            return std.mem.eql(
+                u32,
+                self.alike_shapes.items[x.first_shape..][0..x.arg_count],
+                self.alike_shapes.items[y.first_shape..][0..y.arg_count],
+            );
+        }
+
+        fn enterAlikeClass(self: *Builder, c: u32, at: u32) void {
+            const class = &self.alike_classes.items[at];
+            self.alike_candidates.items[c].next = class.head;
+            self.alike_candidates.items[class.head].prev = c;
+            class.head = c;
+            class.members += 1;
+            if (self.alike_candidates.items[c].is_template) {
+                class.template = c;
+                class.representative = c;
+                self.alike_sources.items[at] = self.alike_candidates.items[c].ty;
+                // Every other member was answered from another member.
+                self.alike_changed = true;
+            }
+            self.placeCandidate(c, at);
+        }
+
+        fn placeCandidate(self: *Builder, c: u32, at: u32) void {
+            const candidate = &self.alike_candidates.items[c];
+            candidate.class = at;
+            if (candidate.is_template) return;
+            self.instances.items[self.instance_of.items[@intFromEnum(candidate.ty)]].class = at;
+        }
+
+        /// Takes candidate `c` out of its class. Where it was the
+        /// representative, the template, or else another member, takes its
+        /// place.
+        fn leaveAlikeClass(self: *Builder, c: u32) void {
+            const candidate = &self.alike_candidates.items[c];
+            const at = candidate.class;
+            const class = &self.alike_classes.items[at];
+            if (candidate.prev != AlikeCandidate.none) {
+                self.alike_candidates.items[candidate.prev].next = candidate.next;
+            } else class.head = candidate.next;
+            if (candidate.next != AlikeCandidate.none) self.alike_candidates.items[candidate.next].prev = candidate.prev;
+            candidate.prev = AlikeCandidate.none;
+            candidate.next = AlikeCandidate.none;
+            candidate.class = Instance.no_class;
+            if (!candidate.is_template) self.instances.items[self.instance_of.items[@intFromEnum(candidate.ty)]].class = Instance.no_class;
+            class.members -= 1;
+            if (class.template == c) class.template = AlikeCandidate.none;
+            if (class.representative != c or class.members == 0) return;
+            class.representative = if (class.template != AlikeCandidate.none) class.template else class.head;
+            self.alike_sources.items[at] = self.alike_candidates.items[class.representative].ty;
+            self.alike_changed = true;
+        }
+
+        /// The type candidate `c`'s instantiation is answered from while its
+        /// parts are unwritten: its class's representative.
+        fn candidateSource(self: *const Builder, c: u32) TypeId {
+            const candidate = self.alike_candidates.items[c];
+            return if (candidate.class == Instance.no_class) candidate.ty else self.alike_sources.items[candidate.class];
+        }
+
+        /// Rebuilds the fact tables where a decision changed what an
+        /// instantiation is answered from: they recorded the old
+        /// representative, or passed the instantiation over to be written.
+        fn settleAlikeChange(self: *Builder) void {
+            if (!self.alike_changed) return;
+            self.alike_changed = false;
+            self.capability_facts.dirty = true;
+            self.dependency_facts.invalidateAll();
+            self.unshareable_facts.invalidateAll();
+        }
+
+        /// Decides again the shape of each position listed under `parameter`,
+        /// once a promise of `parameter` has changed, and moves each candidate
+        /// whose shape changed to the class its shapes now name. Every such
+        /// candidate leaves its class before any joins one, so a class is
+        /// never joined by comparing against a member that is about to leave
+        /// it. An instantiation whose representative changes is answered from
+        /// the new one, and one left in a class of its own is written by
+        /// whichever reader next needs its parts, as any other is. While a
+        /// hold is open (`holdAlikeDecisions`) the parameter is only noted,
+        /// and decided once when the hold is released.
+        ///
+        /// **Bound:** one shape per position listed under `parameter`, and
+        /// one class lookup per candidate whose shape changed. A
+        /// declaration's promises are recorded under one hold, so the positions
+        /// at a parameter are decided once per declaration that promises
+        /// something of it, not once per promise: a function writing `n`
+        /// clauses on members of `S` decides each position at `S` once, and
+        /// a parameter's promises are all written by the declaration that
+        /// owns it, plus once when the templates are complete and once for
+        /// each subject read again (`resettleConstraintSubjects`).
+        fn decideAlikeAgain(self: *Builder, parameter: TypeId) std.mem.Allocator.Error!void {
+            if (self.alike_holds > 0) return self.alike_pending.put(self.gpa, parameter, {});
+            const list = self.alike_watch.get(parameter) orelse return;
+            var touched: std.ArrayList(u32) = .empty;
+            defer touched.deinit(self.gpa);
+            for (list.items) |watched| {
+                const shape = try self.shapeOf(watched.candidate, watched.position);
+                const candidate = &self.alike_candidates.items[watched.candidate];
+                const slot = &self.alike_shapes.items[candidate.first_shape + watched.position];
+                if (shape == slot.*) continue;
+                candidate.key = candidate.key -% mixShape(watched.position, slot.*) +% mixShape(watched.position, shape);
+                slot.* = shape;
+                try touched.append(self.gpa, watched.candidate);
+            }
+            if (touched.items.len == 0) return;
+            const before = try self.gpa.alloc(TypeId, touched.items.len);
+            defer self.gpa.free(before);
+            for (touched.items, before) |c, *source| {
+                source.* = self.candidateSource(c);
+                self.leaveAlikeClass(c);
+            }
+            for (touched.items, before) |c, source| {
+                try self.joinAlikeClass(c);
+                if (self.candidateSource(c) != source) self.alike_changed = true;
+            }
+            self.settleAlikeChange();
+        }
+
+        /// Holds the decisions promises would ask of `decideAlikeAgain` until
+        /// the matching `releaseAlikeDecisions`, which decides each parameter
+        /// they named once. Held while one declaration's promises are
+        /// recorded, after its clauses are read, so `n` clauses on members of
+        /// one parameter decide its positions once rather than `n` times,
+        /// each over every earlier promise. Nothing but `promiseContained` runs
+        /// inside a hold, so no question about what a type owns reads a class
+        /// a recorded promise has made stale.
+        pub fn holdAlikeDecisions(self: *Builder) void {
+            self.alike_holds += 1;
+        }
+
+        pub fn releaseAlikeDecisions(self: *Builder) std.mem.Allocator.Error!void {
+            self.alike_holds -= 1;
+            if (self.alike_holds > 0 or self.alike_pending.count() == 0) return;
+            const pending = try self.gpa.dupe(TypeId, self.alike_pending.keys());
+            defer self.gpa.free(pending);
+            self.alike_pending.clearRetainingCapacity();
+            for (pending) |parameter| try self.decideAlikeAgain(parameter);
+        }
+
+        /// Records that every template's parts are complete, so a promise on
+        /// a member no template's parts read may be left out of a shape, and
+        /// decides again every position whose argument has such a promise.
+        /// Before this, `membersRead` answers that every member is read: a
+        /// template's part may still be a type an implementation settles to
+        /// one that reads it.
+        pub fn templatesComplete(self: *Builder) std.mem.Allocator.Error!void {
+            self.templates_complete = true;
+            self.member_reads.clearRetainingCapacity();
+            self.read_members.clearRetainingCapacity();
+            const roots = try self.gpa.alloc(TypeId, self.promised_through.count());
+            defer self.gpa.free(roots);
+            var keys = self.promised_through.keyIterator();
+            var i: usize = 0;
+            while (keys.next()) |root| : (i += 1) roots[i] = root.*;
+            for (roots) |root| try self.decideAlikeAgain(root);
+        }
+
+        /// Lists `standin`, a settled reference promised `Owned`, under the
+        /// parameter `root` it is read through, and under the member it reads
+        /// first there. A reference listed already is left as it is.
+        fn notePromisedThrough(self: *Builder, root: TypeId, standin: TypeId) std.mem.Allocator.Error!void {
+            if ((try self.promised_standins.getOrPut(self.gpa, standin)).found_existing) return;
+            const all = try self.promised_through.getOrPut(self.gpa, root);
+            if (!all.found_existing) all.value_ptr.* = .empty;
+            try all.value_ptr.append(self.gpa, standin);
+            const by_member = try self.promised_members.getOrPut(self.gpa, .{ .parameter = root, .member = self.memberReadThrough(standin, root) });
+            if (!by_member.found_existing) by_member.value_ptr.* = .empty;
+            try by_member.value_ptr.append(self.gpa, standin);
+        }
+
+        const ReadNode = struct { key: ReadKey, template: TypeId };
+
+        /// The members `template`'s parts read through its parameter at
+        /// `position`: each member a part reads through that parameter as a
+        /// settled reference, with those of every template a part holds at
+        /// the parameter, at its position there. A part that holds the
+        /// parameter in a form this does not take apart -- a settled
+        /// reference read through an instantiation holding it, say,
+        /// `Pad[S].Out`, which an implementation may settle to `S.Item` --
+        /// reads every member. Until every template is complete
+        /// (`templatesComplete`), every member is read.
+        ///
+        /// One search from the template over the templates its parts hold at
+        /// the parameter, which may hold one another in a cycle: the members
+        /// each strongly connected group of positions reads are its own
+        /// parts' and those of the groups it reaches, so the search finds the
+        /// groups (Tarjan's algorithm) and answers each once, from the
+        /// answers already given for what it reaches. Every position the
+        /// search visits is remembered. A position whose parts read nothing
+        /// and that reaches one answer shares that answer's run.
+        ///
+        /// **Bound:** each position the search reaches is visited once, each
+        /// visit reading that template's own parts (`ownReads`), and a
+        /// remembered answer stops a later search where it reaches it. A
+        /// group's answer is written in the sum of the members its parts
+        /// read and of the answers it reaches, sorted, so the runs written
+        /// are at most the positions answered times the members their
+        /// parameter's trait declares; a chain of templates reading nothing
+        /// shares one run, and a chain whose every template reads a member of
+        /// its own writes a run per template, as long as the members read
+        /// below it.
+        fn membersRead(self: *Builder, decl: u32, template: TypeId, position: u32) std.mem.Allocator.Error!MembersRead {
+            if (!self.templates_complete) return .all;
+            const root: ReadNode = .{ .key = .{ .decl = decl, .position = position }, .template = template };
+            if (self.member_reads.get(root.key)) |known| return known;
+            // A position visited in this search, by the order it was visited
+            // in. `low` is the earliest visit reachable from it through
+            // positions not yet answered, and its own members and the
+            // answers it reaches start at `own_start` and `reached_start`.
+            const Visit = struct { key: ReadKey, low: u32, open: bool, every: bool, own_start: u32, reached_start: u32 };
+            const Frame = struct { visit: u32, edges_start: u32, next: u32 };
+            var visits: std.ArrayList(Visit) = .empty;
+            defer visits.deinit(self.gpa);
+            var visited: std.AutoHashMapUnmanaged(ReadKey, u32) = .empty;
+            defer visited.deinit(self.gpa);
+            var open: std.ArrayList(u32) = .empty;
+            defer open.deinit(self.gpa);
+            var frames: std.ArrayList(Frame) = .empty;
+            defer frames.deinit(self.gpa);
+            var edges: std.ArrayList(ReadNode) = .empty;
+            defer edges.deinit(self.gpa);
+            var owns: std.ArrayList(u32) = .empty;
+            defer owns.deinit(self.gpa);
+            var reached: std.ArrayList(MembersRead) = .empty;
+            defer reached.deinit(self.gpa);
+
+            var enter: ?ReadNode = root;
+            while (true) {
+                if (enter) |entered| {
+                    enter = null;
+                    const id: u32 = @intCast(visits.items.len);
+                    try visited.put(self.gpa, entered.key, id);
+                    const own_start: u32 = @intCast(owns.items.len);
+                    const edges_start: u32 = @intCast(edges.items.len);
+                    const every = try self.ownReads(entered, &edges, &owns);
+                    try visits.append(self.gpa, .{
+                        .key = entered.key,
+                        .low = id,
+                        .open = true,
+                        .every = every,
+                        .own_start = own_start,
+                        .reached_start = @intCast(reached.items.len),
+                    });
+                    try open.append(self.gpa, id);
+                    try frames.append(self.gpa, .{ .visit = id, .edges_start = edges_start, .next = edges_start });
+                }
+                const top = &frames.items[frames.items.len - 1];
+                if (top.next < edges.items.len) {
+                    const child = edges.items[top.next];
+                    top.next += 1;
+                    if (self.member_reads.get(child.key)) |known| {
+                        try reached.append(self.gpa, known);
+                    } else if (visited.get(child.key)) |at| {
+                        // Unanswered and visited, so open: in this group.
+                        visits.items[top.visit].low = @min(visits.items[top.visit].low, at);
+                    } else enter = child;
+                    continue;
+                }
+                const done = frames.pop().?;
+                edges.shrinkRetainingCapacity(done.edges_start);
+                const visit = visits.items[done.visit];
+                if (visit.low != done.visit) {
+                    const parent = &visits.items[frames.items[frames.items.len - 1].visit];
+                    parent.low = @min(parent.low, visit.low);
+                    continue;
+                }
+                // `done.visit` heads a group: every open position from it on.
+                const group_start = std.mem.lastIndexOfScalar(u32, open.items, done.visit).?;
+                var every = false;
+                for (open.items[group_start..]) |member| every = every or visits.items[member].every;
+                const answer = try self.mergeReads(every, owns.items[visit.own_start..], reached.items[visit.reached_start..]);
+                for (open.items[group_start..]) |member| {
+                    visits.items[member].open = false;
+                    try self.member_reads.put(self.gpa, visits.items[member].key, answer);
+                }
+                open.shrinkRetainingCapacity(group_start);
+                owns.shrinkRetainingCapacity(visit.own_start);
+                reached.shrinkRetainingCapacity(visit.reached_start);
+                if (frames.items.len == 0) return answer;
+                try reached.append(self.gpa, answer);
+            }
+        }
+
+        /// The answer for a group of positions whose parts read `owns`, or
+        /// every member where `every`, and that reach the answers `reached`.
+        fn mergeReads(self: *Builder, every: bool, owns: []const u32, reached: []const MembersRead) std.mem.Allocator.Error!MembersRead {
+            if (every) return .all;
+            var shared: ?MembersRead = null;
+            var alone = owns.len == 0;
+            for (reached) |answer| {
+                if (answer.every) return .all;
+                if (answer.len == 0) continue;
+                if (shared) |one| {
+                    if (one.first != answer.first or one.len != answer.len) alone = false;
+                } else shared = answer;
+            }
+            if (alone) return shared orelse .none;
+            var members: std.ArrayList(u32) = .empty;
+            defer members.deinit(self.gpa);
+            try members.appendSlice(self.gpa, owns);
+            for (reached) |answer| try members.appendSlice(self.gpa, self.read_members.items[answer.first..][0..answer.len]);
+            std.mem.sort(u32, members.items, {}, std.sort.asc(u32));
+            const first: u32 = @intCast(self.read_members.items.len);
+            for (members.items, 0..) |member, k| {
+                if (k > 0 and members.items[k - 1] == member) continue;
+                try self.read_members.append(self.gpa, member);
+            }
+            return .{ .every = false, .first = first, .len = @as(u32, @intCast(self.read_members.items.len)) - first };
+        }
+
+        /// Whether one of `from`'s template's own parts reads every member
+        /// through the parameter; otherwise, in `owns`, each member a part
+        /// reads through it, and in `edges` each template a part holds at the
+        /// parameter, at its position there.
+        ///
+        /// **Bound:** one visit per distinct type among the template's parts
+        /// and what they hold.
+        fn ownReads(self: *Builder, from: ReadNode, edges: *std.ArrayList(ReadNode), owns: *std.ArrayList(u32)) std.mem.Allocator.Error!bool {
+            const held = self.internedParameter(from.key.decl, from.key.position) orelse return true;
+            var pending: std.ArrayList(TypeId) = .empty;
+            defer pending.deinit(self.gpa);
+            var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+            defer seen.deinit(self.gpa);
+            switch (self.pool.items[@intFromEnum(from.template)]) {
+                .struct_ => |x| for (x.first_field..x.first_field + x.field_count) |k| {
+                    try pending.append(self.gpa, self.fields.items(.ty)[k]);
+                },
+                .enum_ => |e| for (e.first_variant..e.first_variant + e.variant_count) |v| {
+                    const first_field = self.variants.items(.first_field)[v];
+                    const field_count = self.variants.items(.field_count)[v];
+                    for (first_field..first_field + field_count) |k| try pending.append(self.gpa, self.fields.items(.ty)[k]);
+                },
+                else => return true,
+            }
+            while (pending.pop()) |ty| {
+                if (ty == held) continue;
+                if ((try seen.getOrPut(self.gpa, ty)).found_existing) continue;
+                if (self.standinOf(ty) != null) {
+                    switch (try self.standinRead(ty, held)) {
+                        .none => {},
+                        .every => return true,
+                        .member => |member| try owns.append(self.gpa, member),
+                    }
+                    continue;
+                }
+                switch (self.get(ty)) {
+                    .parameter => continue,
+                    .array => |a| {
+                        try pending.append(self.gpa, a.element);
+                        continue;
+                    },
+                    .borrow => |b| {
+                        try pending.append(self.gpa, b.referent);
+                        continue;
+                    },
+                    .newtype => |n| {
+                        try pending.append(self.gpa, n.base);
+                        continue;
+                    },
+                    .closure => |c| {
+                        try pending.append(self.gpa, c.environment);
+                        continue;
+                    },
+                    .callable => |signature| {
+                        for (self.callableParams(signature)) |param| try pending.append(self.gpa, param.ty);
+                        try pending.append(self.gpa, signature.result);
+                        continue;
+                    },
+                    else => {},
+                }
+                if (self.instanceOf(ty)) |instance| {
+                    const storage = self.certified_storage != .none and instance.decl == self.certified_storage;
+                    for (0..instance.arg_count) |j| {
+                        const arg = self.argsOf(instance)[j];
+                        if (storage or self.standinOf(arg) != null) {
+                            try pending.append(self.gpa, arg);
+                        } else if (arg == held) {
+                            try edges.append(self.gpa, .{
+                                .key = .{ .decl = instance.decl.index(), .position = @intCast(j) },
+                                .template = instance.template,
+                            });
+                        } else if (self.get(arg) != .parameter and !try self.isGroundMemo(arg)) return true;
+                    }
+                    continue;
+                }
+                // A declared type of its own holds only what it declares.
+                if (!try self.isGroundMemo(ty)) return true;
+            }
+            return false;
+        }
+
+        /// What the settled reference `ty` reads through `held`: the first
+        /// member it reads there, every member where it may read any -- it is
+        /// read through a type holding a parameter that is not a parameter
+        /// itself, or its trait's arguments hold one -- or nothing.
+        fn standinRead(self: *Builder, ty: TypeId, held: TypeId) std.mem.Allocator.Error!union(enum) { none, every, member: u32 } {
+            var at = ty;
+            while (self.standinOf(at)) |read| {
+                for (self.standin_args.items[read.first_arg..][0..read.arg_count]) |arg| {
+                    if (!try self.isGroundMemo(arg)) return .every;
+                }
+                if (read.held == held) return .{ .member = read.member.index() };
+                if (self.standinOf(read.held) == null) {
+                    if (self.get(read.held) == .parameter) return .none;
+                    return if (try self.isGroundMemo(read.held)) .none else .every;
+                }
+                at = read.held;
+            }
+            return .none;
+        }
+
+        fn deinitAlikeWatch(self: *Builder) void {
+            var lists = self.alike_watch.valueIterator();
+            while (lists.next()) |list| list.deinit(self.gpa);
+            self.alike_watch.deinit(self.gpa);
+            self.alike_watch = .empty;
+            self.alike_candidates.deinit(self.gpa);
+            self.alike_candidates = .empty;
+            self.alike_args.deinit(self.gpa);
+            self.alike_args = .empty;
+            self.alike_shapes.deinit(self.gpa);
+            self.alike_shapes = .empty;
+            var shapes = self.alike_shape_ids.keyIterator();
+            while (shapes.next()) |shape| self.gpa.free(shape.*);
+            self.alike_shape_ids.deinit(self.gpa);
+            self.alike_shape_ids = .empty;
+            self.alike_templates.deinit(self.gpa);
+            self.alike_templates = .empty;
+            self.alike_classes.deinit(self.gpa);
+            self.alike_classes = .empty;
+            self.alike_class_heads.deinit(self.gpa);
+            self.alike_class_heads = .empty;
+            var promised = self.promised_through.valueIterator();
+            while (promised.next()) |list| list.deinit(self.gpa);
+            self.promised_through.deinit(self.gpa);
+            self.promised_through = .empty;
+            var by_member = self.promised_members.valueIterator();
+            while (by_member.next()) |list| list.deinit(self.gpa);
+            self.promised_members.deinit(self.gpa);
+            self.promised_members = .empty;
+            self.promised_standins.deinit(self.gpa);
+            self.promised_standins = .empty;
+            self.member_reads.deinit(self.gpa);
+            self.member_reads = .empty;
+            self.read_members.deinit(self.gpa);
+            self.read_members = .empty;
+            self.alike_pending.deinit(self.gpa);
+            self.alike_pending = .empty;
+        }
+
+        test "a reopened pool decides alikeness again when a promise is added" {
+            const gpa = testing.allocator;
+            var builder = try Builder.init(gpa);
+            defer builder.deinit();
+            const holder_decl = DeclId.at(1);
+            const own = try builder.addParameter("T", @intCast(holder_decl.index()), 0, .unrestricted, &.{});
+            const holder = try builder.addStruct("Holder", .affine, &.{.{ .name = "held", .ty = own }});
+            try builder.noteTemplate(holder_decl, 0, holder);
+            const given = try builder.addParameter("U", 2, 0, .unrestricted, &.{});
+            const alike = try builder.instantiate(holder, holder_decl, &.{given});
+            var typing = try builder.finish(.empty);
+            defer typing.deinit(gpa);
+            try testing.expectEqual(@as(?TypeId, holder), typing.alikeSource(alike));
+
+            var reopened = try Builder.reopen(gpa, &typing);
+            defer reopened.deinit();
+            try testing.expectEqual(@as(?TypeId, holder), reopened.alikeSource(alike));
+            try reopened.promiseContained(given, .owned);
+            try testing.expectEqual(@as(?TypeId, null), reopened.alikeSource(alike));
+        }
+
+        test "a template's bound naming its own parameter is compared at the instantiation's arguments" {
+            const gpa = testing.allocator;
+            var builder = try Builder.init(gpa);
+            defer builder.deinit();
+            const pair_decl = DeclId.at(1);
+            const trait: u32 = 9;
+            const second = try builder.addParameter("U", @intCast(pair_decl.index()), 1, .unrestricted, &.{});
+            const first = try builder.addParameter("T", @intCast(pair_decl.index()), 0, .unrestricted, &.{});
+            try builder.setBoundTraits(first, try gpa.dupe(BoundTrait, &.{.{ .trait = trait, .args = try gpa.dupe(TypeId, &.{second}) }}));
+            const pair = try builder.addStruct("Pair", .affine, &.{ .{ .name = "t", .ty = first }, .{ .name = "u", .ty = second } });
+            try builder.noteTemplate(pair_decl, 0, pair);
+            const v = try builder.addParameter("V", 2, 1, .unrestricted, &.{});
+            const t = try builder.addParameter("T", 2, 0, .unrestricted, &.{});
+            try builder.setBoundTraits(t, try gpa.dupe(BoundTrait, &.{.{ .trait = trait, .args = try gpa.dupe(TypeId, &.{v}) }}));
+            // `Pair[T, V]` with `T: Tr2[V]` promises what `Pair[T, U]` with
+            // `T: Tr2[U]` does; `Pair[V, T]` does not.
+            try testing.expectEqual(@as(?TypeId, pair), builder.alikeSource(try builder.instantiate(pair, pair_decl, &.{ t, v })));
+            try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(try builder.instantiate(pair, pair_decl, &.{ v, t })));
+        }
+
+        test "an instantiation promising what its template does is answered from the template until its parts are read" {
+            const gpa = testing.allocator;
+            var builder = try Builder.init(gpa);
+            defer builder.deinit();
+            const holder_decl = DeclId.at(1);
+            const own = try builder.addParameter("T", @intCast(holder_decl.index()), 0, .unrestricted, &.{});
+            const holder = try builder.addStruct("Holder", .affine, &.{.{ .name = "held", .ty = own }});
+            try builder.noteTemplate(holder_decl, 0, holder);
+            const alike_parameter = try builder.addParameter("U", 2, 0, .unrestricted, &.{});
+            const discardable = try builder.addParameter("V", 3, 0, .discardable, &.{});
+
+            // `Holder[U]` promises what `Holder[T]` does, so what it owes is
+            // the template's: it holds something that may be linear.
+            const alike = try builder.instantiate(holder, holder_decl, &.{alike_parameter});
+            try testing.expectEqual(@as(?TypeId, holder), builder.alikeSource(alike));
+            try testing.expectEqual(Capability.linear, try builder.capabilityOf(alike));
+            try testing.expect(!try builder.mayCopy(alike));
+            try testing.expect(try builder.mayCarryDependencies(alike));
+            try testing.expect(builder.isShell(alike));
+
+            // `Holder[V]` promises more than the template, so it is written
+            // to be answered.
+            const bounded = try builder.instantiate(holder, holder_decl, &.{discardable});
+            try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(bounded));
+            try testing.expectEqual(Capability.affine, try builder.capabilityOf(bounded));
+            try testing.expect(!builder.isShell(bounded));
+
+            // Reading a part writes the parts, at the instantiation's own
+            // argument.
+            try testing.expectEqual(alike_parameter, try builder.fieldType(alike, 0));
+            try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(alike));
+            try testing.expectEqual(Capability.linear, try builder.capabilityOf(alike));
+
+            // A promise added to an argument decides the instantiation again.
+            const later = try builder.addParameter("W", 4, 0, .unrestricted, &.{});
+            const once_alike = try builder.instantiate(holder, holder_decl, &.{later});
+            try testing.expectEqual(@as(?TypeId, holder), builder.alikeSource(once_alike));
+            try builder.promiseContained(later, .owned);
+            try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(once_alike));
+            try testing.expect(!try builder.mayCarryDependencies(once_alike));
+            try testing.expect(!builder.isShell(once_alike));
+        }
+
+        test "instantiations whose arguments promise alike are answered from one representative" {
+            const gpa = testing.allocator;
+            var builder = try Builder.init(gpa);
+            defer builder.deinit();
+            const holder_decl = DeclId.at(1);
+            const own = try builder.addParameter("T", @intCast(holder_decl.index()), 0, .unrestricted, &.{});
+            const holder = try builder.addStruct("Holder", .affine, &.{.{ .name = "held", .ty = own }});
+            try builder.noteTemplate(holder_decl, 0, holder);
+            const first = try builder.addParameter("U", 2, 0, .discardable, &.{});
+            const second = try builder.addParameter("V", 3, 0, .discardable, &.{});
+            const copyable = try builder.addParameter("W", 4, 0, .copyable, &.{});
+
+            // `Holder[U]` and `Holder[V]` promise more than the template and
+            // alike each other, so the first minted answers for both.
+            const at_first = try builder.instantiate(holder, holder_decl, &.{first});
+            const at_second = try builder.instantiate(holder, holder_decl, &.{second});
+            const at_copyable = try builder.instantiate(holder, holder_decl, &.{copyable});
+            try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(at_first));
+            try testing.expectEqual(@as(?TypeId, at_first), builder.alikeSource(at_second));
+            try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(at_copyable));
+            try testing.expectEqual(Capability.affine, try builder.capabilityOf(at_second));
+            try testing.expect(builder.isShell(at_second));
+
+            // Once `U` promises more, `Holder[V]` stays in the class without
+            // it and represents that class itself.
+            try builder.promiseContained(first, .owned);
+            try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(at_first));
+            try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(at_second));
+            try testing.expectEqual(Capability.affine, try builder.capabilityOf(at_second));
+
+            // A finished pool answers from the same representative.
+            const third = try builder.addParameter("X", 5, 0, .discardable, &.{});
+            const at_third = try builder.instantiate(holder, holder_decl, &.{third});
+            try testing.expectEqual(@as(?TypeId, at_second), builder.alikeSource(at_third));
+            var typing = try builder.finish(.empty);
+            defer typing.deinit(gpa);
+            try testing.expectEqual(@as(?TypeId, at_second), typing.alikeSource(at_third));
+        }
+
+        test "a promise on a member no part of the template reads leaves an instantiation alike its template" {
+            const gpa = testing.allocator;
+            var builder = try Builder.init(gpa);
+            defer builder.deinit();
+            const holder_decl = DeclId.at(1);
+            const trait: u32 = 9;
+            const item = DeclId.at(20);
+            const other = DeclId.at(21);
+            const own = try builder.addParameter("S", @intCast(holder_decl.index()), 0, .unrestricted, &.{});
+            const own_item = try builder.addSettledStandin(trait, &.{}, own, item, "Item");
+            const holder = try builder.addStruct("Holder", .affine, &.{.{ .name = "item", .ty = own_item }});
+            try builder.noteTemplate(holder_decl, 0, holder);
+            const given = try builder.addParameter("S", 2, 0, .unrestricted, &.{});
+            const given_item = try builder.addSettledStandin(trait, &.{}, given, item, "Item");
+            const given_other = try builder.addSettledStandin(trait, &.{}, given, other, "Other");
+            const alike = try builder.instantiate(holder, holder_decl, &.{given});
+            try testing.expectEqual(@as(?TypeId, holder), builder.alikeSource(alike));
+
+            // Until the templates are complete, a part may yet read any
+            // member, so a promise on `S.Other` keeps it apart.
+            try builder.promiseContained(given_other, .owned);
+            try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(alike));
+            try builder.templatesComplete();
+            try testing.expectEqual(@as(?TypeId, holder), builder.alikeSource(alike));
+
+            // `Holder` holds `S.Item`, so a promise on it does not.
+            try builder.promiseContained(given_item, .owned);
+            try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(alike));
         }
 
         /// Writes `t`'s parts if it is an instantiation that has not had them
@@ -8941,9 +10388,17 @@ pub const Typing = struct {
             try self.fillInstance(at);
         }
 
+        /// Writes `t`'s parts where a question about what it owns needs them:
+        /// where it is an unwritten instantiation that is not alike another.
+        /// An alike one is answered from its representative.
+        pub fn ensureFacts(self: *Builder, t: TypeId) std.mem.Allocator.Error!void {
+            if (self.alikeSource(t) != null) return;
+            try self.ensureFilled(t);
+        }
+
         /// Brings the capability facts up to the pool, writing each unwritten
-        /// instantiation a recorded type owns so that its parts are recorded
-        /// too. Written here rather than inside the walk: writing parts mints
+        /// instantiation a recorded type owns that is not answered from
+        /// another, so that its parts are recorded too. Written here rather than inside the walk: writing parts mints
         /// types and may select implementations, which ask these facts.
         fn settleCapabilities(self: *Builder) std.mem.Allocator.Error!void {
             while (true) {
@@ -8967,17 +10422,26 @@ pub const Typing = struct {
         }
 
         /// Writes the parts of every instantiation the checker minted and
-        /// none read, and of every part those reach.
+        /// none read, and of every part those reach that is not answered from
+        /// another.
         ///
         /// Called by the checker before it hands the pool on: a later pass
         /// reads a finished pool and cannot write to it, and an expression or
         /// a binding the checker recorded may have a type whose parts nothing
-        /// in the checker asked for. Only the instantiations minted before
-        /// the call are written, with what their parts reach; one those
-        /// writes mint as an argument is one no recorded type holds.
+        /// in the checker asked for -- an editor offering the fields of a
+        /// `Desk[L]` names each field's type at `L`. Only the instantiations
+        /// minted before the call are written. What those writes mint is held
+        /// only as a part, never as the type of anything the checker
+        /// recorded, and an alike one among them stays unwritten: a later
+        /// pass asks what it owns, which its representative answers
+        /// (`Typing.partsSource`), and never what its parts are.
         ///
         /// **Bound:** one write per instantiation the checker minted, plus
-        /// the parts those reach -- the work minting them already paid for.
+        /// the parts those reach that are not answered from another -- the
+        /// work minting them already paid for. An alike part is not
+        /// followed, so `G0[T]` holding `G1[T]` holding `G2[T]` writes `G1[T]`
+        /// where it was minted and stops at `G2[T]`, and a chain of n
+        /// templates each holding the next costs n writes, not n²/2.
         pub fn fillMinted(self: *Builder) std.mem.Allocator.Error!void {
             const minted = self.instances.items.len;
             for (0..minted) |at| {
@@ -9016,12 +10480,27 @@ pub const Typing = struct {
             try self.settleCapabilities();
         }
 
+        /// Writes a written instantiation's parts again from its template,
+        /// once the template's own parts have been read. An unwritten one
+        /// copies its template when it is first read, so it is left alone.
+        pub fn refillInstance(self: *Builder, ty: TypeId) std.mem.Allocator.Error!void {
+            const at_id = @intFromEnum(ty);
+            if (at_id >= self.instance_of.items.len) return;
+            const at = self.instance_of.items[at_id];
+            if (at == Typing.not_an_instance or self.instances.items[at].parts != .written) return;
+            try self.fillInstance(at);
+        }
+
         /// Writes an instantiation's parts by substituting its template's,
         /// and then writes the parts of every unwritten instantiation those
-        /// parts hold, so a type whose parts are written holds only types
-        /// whose parts are written. A layout, a cycle or a copy walks a type
-        /// through its parts and never through its arguments, so that walk
-        /// never meets an unwritten one.
+        /// parts hold that is not answered from another, so a type whose
+        /// parts are written holds only types whose parts are written or
+        /// whose representative answers for them (`Typing.partsSource`). A layout, a
+        /// cycle or a copy walks a type through its parts and never through
+        /// its arguments, so that walk meets no other unwritten one. Not
+        /// following an alike part is what keeps templates holding
+        /// one another at their own parameters from writing every template
+        /// at every other's parameter.
         ///
         /// The one routine that writes what an instantiation holds: minting a
         /// ground instantiation, a first read of an unwritten one, and the
@@ -9030,6 +10509,8 @@ pub const Typing = struct {
         /// **Bound:** one substitution per part of each instantiation written,
         /// and an instantiation already written is not written again.
         fn fillInstance(self: *Builder, first: u32) std.mem.Allocator.Error!void {
+            self.filling += 1;
+            defer self.filling -= 1;
             var pending: std.ArrayList(u32) = .empty;
             defer pending.deinit(self.gpa);
             try pending.append(self.gpa, first);
@@ -9040,6 +10521,9 @@ pub const Typing = struct {
                 if (!was_filled) self.instances.items[at].parts = .writing;
                 const args = try self.gpa.dupe(TypeId, self.argsOf(inst));
                 defer self.gpa.free(args);
+                const outer_type = self.filling_type;
+                self.filling_type = inst.ty;
+                defer self.filling_type = outer_type;
                 try self.writeParts(inst.template, inst.ty, inst.decl.index(), args, was_filled);
                 if (!was_filled) {
                     self.instances.items[at].parts = .written;
@@ -9060,7 +10544,8 @@ pub const Typing = struct {
         /// every pool type needs, since it visits each wrapper itself.
         const Reach = enum { direct, through_wrappers };
 
-        /// Queues each unwritten instantiation among `t`'s parts.
+        /// Queues each unwritten instantiation among `t`'s parts that is not
+        /// answered from another.
         fn queueShellParts(self: *Builder, pending: *std.ArrayList(u32), t: TypeId, reach: Reach) std.mem.Allocator.Error!void {
             switch (self.pool.items[@intFromEnum(t)]) {
                 .struct_ => |x| for (x.first_field..x.first_field + x.field_count) |k| {
@@ -9080,8 +10565,9 @@ pub const Typing = struct {
         }
 
         /// Writes every unwritten instantiation that a written type holds
-        /// among its parts, so a walk over every type's parts -- a cycle, a
-        /// width -- meets none. A declared type is written from source and
+        /// among its parts and that is not answered from another, so a walk
+        /// over every type's parts -- a cycle, a width -- meets none but those
+        /// a representative answers for. A declared type is written from source and
         /// may hold an instantiation nothing has read yet.
         ///
         /// **Bound:** one visit per type in the pool, each reading only that
@@ -9102,7 +10588,8 @@ pub const Typing = struct {
             }
         }
 
-        /// Queues `part` where it is an unwritten instantiation, or, with
+        /// Queues `part` where it is an unwritten instantiation not answered
+        /// from another, or, with
         /// `through_wrappers`, where it reaches one as an element, an
         /// environment or a referent: the steps a place or a pattern takes
         /// into a value. A newtype is a declared type whose base is written
@@ -9121,7 +10608,9 @@ pub const Typing = struct {
             const at_id = @intFromEnum(held);
             if (at_id >= self.instance_of.items.len) return;
             const at = self.instance_of.items[at_id];
-            if (at == Typing.not_an_instance or self.instances.items[at].parts != .unwritten) return;
+            if (at == Typing.not_an_instance) return;
+            const instance = self.instances.items[at];
+            if (instance.parts != .unwritten or self.alikeSource(held) != null) return;
             try pending.append(self.gpa, at);
         }
 
@@ -9142,7 +10631,7 @@ pub const Typing = struct {
                         const from = self.fields.items(.ty)[x.first_field + k];
                         const to = try self.substitute(from, decl, args);
                         if (rewrite) {
-                            self.setFieldType(made, @intCast(k), to);
+                            try self.setFieldType(made, @intCast(k), to);
                         } else {
                             const first_field = self.pool.items[@intFromEnum(made)].struct_.first_field;
                             self.fields.items(.ty)[first_field + k] = to;
@@ -9299,19 +10788,39 @@ pub const Typing = struct {
             return self.view().variantFieldType(t, i, f);
         }
 
-        pub fn setVariantFieldType(self: *Builder, t: TypeId, i: u32, f: u32, ty: TypeId) void {
+        pub fn setVariantFieldType(self: *Builder, t: TypeId, i: u32, f: u32, ty: TypeId) !void {
             const e = self.pool.items[@intFromEnum(t)].enum_;
             const first_field = self.variants.items(.first_field)[e.first_variant + i];
-            // Signature checking revisits fields after their shapes settle.
-            // An unchanged edge leaves every derived fact valid.
-            if (self.fields.items(.ty)[first_field + f] == ty) return;
-            self.capability_facts.invalidate(t);
-            self.dependency_facts.invalidate(t);
-            self.writer_facts.invalidate(t);
-            self.unshareable_facts.invalidate(t);
-
+            try self.partChanged(t, self.fields.items(.ty)[first_field + f], ty, false);
             self.fields.items(.ty)[first_field + f] = ty;
+        }
+
+        /// Keeps every fact table built over owned parts current when one
+        /// part of `owner` changes from `old` to `new`.
+        ///
+        /// Declared parts are read twice, and lazily the second time: once for
+        /// callable shapes, and again once settled types are known. Between
+        /// the two a part either stays the same, goes from poison to its type,
+        /// or goes from a callable shape to the same callable with its
+        /// effects. The first leaves every fact valid; the second only adds an
+        /// edge, as does replacing any part a table reads as giving its owner
+        /// nothing, such as `[poison; 2]`; and the third changes nothing a
+        /// fact reads: a callable owns no parts, is always a writer, and its
+        /// own dependency seed is compared. Rebuilding a table on each of
+        /// them would make reading parts between capability questions cost a
+        /// rebuild per question.
+        /// Any other replacement rebuilds the table. `raw_storage_part`
+        /// marks the part certified storage's raw containment skips.
+        fn partChanged(self: *Builder, owner: TypeId, old: TypeId, new: TypeId, raw_storage_part: bool) !void {
+            if (old == new) return;
             self.forgetLayouts();
+            const pool = self.view();
+            const same_callable = old != .poison and self.get(old) == .callable and self.get(new) == .callable and
+                pool.directDependencySeed(old) == pool.directDependencySeed(new);
+            try self.capability_facts.replaced(self.gpa, owner, old, new, same_callable);
+            try self.dependency_facts.replaced(self.gpa, owner, old, new, same_callable, raw_storage_part);
+            try self.writer_facts.replaced(self.gpa, owner, old, new, same_callable, false);
+            try self.unshareable_facts.replaced(self.gpa, owner, old, new, same_callable, false);
         }
 
         /// The first cycle among inline parts, or null. Asked once, after every
@@ -9319,12 +10828,8 @@ pub const Typing = struct {
         /// layout of a type on a cycle does not return.
         pub fn firstCycle(self: *Builder, gpa: std.mem.Allocator) !?Cycle {
             try self.writeHeldParts();
-            return firstCycleIn(
-                gpa,
-                self.pool.items,
-                .fromSlice(self.fields.slice()),
-                .fromSlice(self.variants.slice()),
-            );
+            const typing = self.view();
+            return firstCycleIn(gpa, &typing);
         }
 
         /// The first type at or after `from` whose width crosses what [L-Size]
@@ -9405,15 +10910,13 @@ pub const Typing = struct {
         /// Breaks an edge, which is what a reported cycle needs: every later
         /// pass asks for a layout, and one that cannot terminate would not stop
         /// being asked just because it was diagnosed.
-        pub fn setFieldType(self: *Builder, t: TypeId, i: u32, ty: TypeId) void {
-            self.capability_facts.invalidate(t);
-            self.dependency_facts.invalidate(t);
-            self.writer_facts.invalidate(t);
-            self.unshareable_facts.invalidate(t);
-
+        pub fn setFieldType(self: *Builder, t: TypeId, i: u32, ty: TypeId) !void {
             const x = self.pool.items[@intFromEnum(t)].struct_;
+            const pool = self.view();
+            const raw_storage_part = i == 0 and self.certified_storage != .none and
+                pool.declOfType(t) == self.certified_storage and pool.instanceOf(t) != null;
+            try self.partChanged(t, self.fields.items(.ty)[x.first_field + i], ty, raw_storage_part);
             self.fields.items(.ty)[x.first_field + i] = ty;
-            self.forgetLayouts();
         }
 
         /// Enters a declared newtype, returning its handle.
@@ -9445,14 +10948,9 @@ pub const Typing = struct {
             return id;
         }
 
-        pub fn setNewtypeBase(self: *Builder, t: TypeId, base: TypeId) void {
-            self.capability_facts.invalidate(t);
-            self.dependency_facts.invalidate(t);
-            self.writer_facts.invalidate(t);
-            self.unshareable_facts.invalidate(t);
-
+        pub fn setNewtypeBase(self: *Builder, t: TypeId, base: TypeId) !void {
+            try self.partChanged(t, self.pool.items[@intFromEnum(t)].newtype.base, base, false);
             self.pool.items[@intFromEnum(t)].newtype.base = base;
-            self.forgetLayouts();
         }
 
         pub fn baseOf(self: *const Builder, t: TypeId) TypeId {
@@ -9556,7 +11054,9 @@ pub const Typing = struct {
             self.owned_callable_bounds.deinit(self.gpa);
             self.instances.deinit(self.gpa);
             self.instance_of.deinit(self.gpa);
+            self.alike_sources.deinit(self.gpa);
             self.minted.deinit(self.gpa);
+            self.deinitAlikeWatch();
             self.interpolations.deinit(self.gpa);
             self.interpolation_pieces.deinit(self.gpa);
             self.interpolation_formats.deinit(self.gpa);
@@ -9578,32 +11078,46 @@ pub const Typing = struct {
         }
 
         pub fn mayCarryDependencies(self: *Builder, t: TypeId) !bool {
-            try self.ensureFilled(t);
+            try self.ensureFacts(t);
             try self.settleContainment(&self.dependency_facts, .raw_carriers);
             return self.dependency_facts.values.items[@intFromEnum(t)];
         }
 
         /// Records that `t`, a type parameter or the stand-in for an
-        /// associated type read through one, admits only `Owned` types, so it
-        /// seeds no dependency. Answers already computed are dropped.
-        pub fn promiseOwned(self: *Builder, t: TypeId) void {
-            self.pool.items[@intFromEnum(t)].parameter.owned = true;
-            self.dependency_facts.invalidate(t);
+        /// associated type read through one, admits only types meeting
+        /// `which`: `Owned` ones, so it seeds no dependency, or `Shareable`
+        /// ones, so it seeds no unshareable part. Answers already computed
+        /// are dropped.
+        ///
+        /// A promise on a stand-in, `S.Item`, is one the parameter it is read
+        /// through, `S`, makes for its instantiations: the template an
+        /// instantiation at `S` is answered from reads its own parameter's
+        /// `Item`, which never made it. So the parameter is recorded as
+        /// promising through its settled references, and every
+        /// instantiation compared against it is decided again.
+        pub fn promiseContained(self: *Builder, t: TypeId, which: Containment) std.mem.Allocator.Error!void {
+            const parameter = &self.pool.items[@intFromEnum(t)].parameter;
+            switch (which) {
+                .owned => {
+                    parameter.owned = true;
+                    self.dependency_facts.invalidate(t);
+                },
+                .shareable => {
+                    parameter.shareable = true;
+                    self.unshareable_facts.invalidate(t);
+                },
+            }
+            var root = t;
+            while (self.standinOf(root)) |standin| root = standin.held;
+            if (root != t and self.get(root) == .parameter) try self.notePromisedThrough(root, t);
+            try self.decideAlikeAgain(root);
         }
 
         /// Whether `t` is `Shareable`, over the `unshareable` containment table.
         pub fn isShareable(self: *Builder, t: TypeId) !bool {
-            try self.ensureFilled(t);
+            try self.ensureFacts(t);
             try self.settleContainment(&self.unshareable_facts, .unshareable);
             return !self.unshareable_facts.values.items[@intFromEnum(t)];
-        }
-
-        /// Records that `t`, a type parameter or the stand-in for an
-        /// associated type read through one, admits only `Shareable` types.
-        /// Answers already computed are dropped.
-        pub fn promiseShareable(self: *Builder, t: TypeId) void {
-            self.pool.items[@intFromEnum(t)].parameter.shareable = true;
-            self.unshareable_facts.invalidate(t);
         }
 
         /// Records that the declared type `t` is marked `unshareable`.
@@ -9660,19 +11174,30 @@ pub const Typing = struct {
             parts: std.ArrayList(TypeId) = .empty,
             found: ?TypeId = null,
 
+            /// The table whose answer is explained.
+            fn facts(search: *const WitnessSearch) *BorrowContainment {
+                return if (search.mode == .unshareable) &search.builder.unshareable_facts else &search.builder.dependency_facts;
+            }
+
             /// The seed reached from `ty`, with `steps` holding the path to it.
+            ///
+            /// An alike instantiation on the path has its parts written, so
+            /// the path names the parts at its own arguments.
             fn from(search: *WitnessSearch, ty: TypeId) std.mem.Allocator.Error!?TypeId {
                 if ((try search.visited.getOrPut(search.gpa, ty)).found_existing) return null;
                 const typing = search.builder.view();
                 if (if (search.mode == .unshareable) typing.unshareableSeed(ty) else typing.directDependencySeed(ty)) return ty;
+                if (search.builder.alikeSource(ty) != null) {
+                    try search.builder.ensureFilled(ty);
+                    try search.builder.settleContainment(search.facts(), search.mode);
+                }
                 try BorrowContainment.eachChild(search.builder, ty, search.mode, search);
                 return search.found;
             }
 
             fn child(search: *WitnessSearch, step: ContainmentStep, part: TypeId) std.mem.Allocator.Error!void {
                 if (search.found != null) return;
-                const facts = if (search.mode == .unshareable) &search.builder.unshareable_facts else &search.builder.dependency_facts;
-                if (!facts.values.items[@intFromEnum(part)]) return;
+                if (!search.facts().values.items[@intFromEnum(part)]) return;
                 try search.steps.append(search.gpa, step);
                 try search.parts.append(search.gpa, part);
                 if (try search.from(part)) |seed| {
@@ -9777,7 +11302,12 @@ pub const Typing = struct {
             return id;
         }
 
-        pub fn seal(self: *Builder) void {
+        /// Settles the pool as `finish` does and refuses any further growth.
+        /// A sealed pool is handed on and read through `view`, so every
+        /// question prepared before it, including those a rebuild during
+        /// instantiation dropped, is answered before the seal.
+        pub fn seal(self: *Builder) !void {
+            try self.settleForHandoff();
             self.sealed = true;
         }
 
@@ -10230,6 +11760,7 @@ pub const Typing = struct {
                 .decl_returns = .{ .entries = @constCast(self.decl_returns.entries) },
                 .pool = self.pool.items,
                 .capabilities = self.capability_facts.values.items,
+                .capability_watch = self.capability_watch,
                 .dependency_containment = self.dependency_facts.values.items,
                 .scoped_capabilities = self.scoped_capability_facts.values,
                 .prepared_implementations = self.prepared_implementations,
@@ -10249,6 +11780,8 @@ pub const Typing = struct {
                 .instances = self.instances.items,
                 .instance_args = self.instance_args.items,
                 .instance_of = self.instance_of.items,
+                .alike_sources = self.alike_sources.items,
+                .templates_complete = self.templates_complete,
                 // A settled reference is interned as the parameter it behaves
                 // like, so these are what tell the two apart. Carried by the
                 // view as well as by the finished pool, so `standinOf` answers
@@ -10356,6 +11889,7 @@ pub const Typing = struct {
                 .parameter => |*p| p.traits = traits,
                 else => {},
             }
+            try self.decideAlikeAgain(t);
         }
 
         pub fn setCallableBounds(self: *Builder, t: TypeId, signatures: []const TypeId) std.mem.Allocator.Error!void {
@@ -10370,6 +11904,7 @@ pub const Typing = struct {
                 .parameter => |*p| p.callables = signatures,
                 else => unreachable,
             }
+            try self.decideAlikeAgain(t);
         }
 
         pub fn callableBoundsOn(self: *const Builder, t: TypeId) []const TypeId {
@@ -10584,6 +12119,17 @@ pub const Typing = struct {
             impl_args: []const TypeId,
         ) std.mem.Allocator.Error!?TypeId {
             const member = self.supply.memberOf(impl.decl, sig) orelse return null;
+            // Settling the member may select this same implementation again,
+            // and recording that selection frees the argument slice the
+            // caller handed in, so the arguments are copied first.
+            var copied: ?[]TypeId = null;
+            defer if (copied) |held| self.gpa.free(held);
+            if (self.demand) |demand| {
+                copied = try self.gpa.dupe(TypeId, impl_args);
+                try demand.settle(demand.context, member);
+            }
+            const args = copied orelse impl_args;
+
             // `memberOf` answers with a number, so the identifier is put back
             // here: the table takes one, and this is where the two meet.
             //
@@ -10593,15 +12139,10 @@ pub const Typing = struct {
             // table says so and names both halves, where returning null here
             // said "this implementation supplies no return type" and dropped
             // the member out of overloading with nothing reported.
-            if (self.unsettled_members) |waiting| if (self.reading_reference and waiting.contains(member)) {
-                self.unsettled_read = member;
-                return null;
-            };
             const settled = self.decl_returns.get(member);
             if (settled == .poison) return null;
             if (impl.parameters == 0) return settled;
-
-            return try self.substitute(settled, impl.decl.index(), impl_args);
+            return try self.substitute(settled, impl.decl.index(), args);
         }
 
         /// Settles a concrete trait key once, carrying the answer with the pool
@@ -11007,9 +12548,21 @@ pub const Typing = struct {
             return self.pool.items[@intFromEnum(t)];
         }
 
-        pub fn knownNoncopyable(self: *Builder, t: TypeId) !bool {
-            try self.ensureFilled(t);
+        /// Brings the capability facts up to date for a question about `t`:
+        /// first the declared parts `t` depends on are read, while declared
+        /// answers are being settled, then `t`'s own parts are written if it
+        /// is an unwritten instantiation not answered from another, from a
+        /// template whose parts are now read, and then the facts are brought
+        /// up to the pool.
+        fn settleFactsOf(self: *Builder, t: TypeId) !void {
+            if (self.demand) |demand| try demand.owned(demand.context, t);
+            try self.ensureFacts(t);
             try self.settleCapabilities();
+        }
+
+        pub fn knownNoncopyable(self: *Builder, t: TypeId) !bool {
+            try self.settleFactsOf(t);
+            self.view().noteAsked(t, .copy);
             return self.capability_facts.known_noncopyable.items[t.index()];
         }
 
@@ -11030,16 +12583,195 @@ pub const Typing = struct {
         }
 
         pub fn capabilityOf(self: *Builder, t: TypeId) !Capability {
-            try self.ensureFilled(t);
-            try self.settleCapabilities();
+            try self.settleFactsOf(t);
+            self.view().noteAsked(t, .capabilities);
             return self.capability_facts.values.items[t.index()];
         }
 
+        /// Whether a contextual constraint demanding `requirement` of
+        /// `subject` caps a capability: whether the ceiling it puts on
+        /// `subject` in its scope (`ScopedCapabilityFacts.ensure`) is below
+        /// what `subject` is seeded with. A bound written on a parameter,
+        /// `[T: Discardable]`, is the parameter's own promise, which its seed
+        /// already holds, so it caps nothing, and a scope whose constraints
+        /// cap nothing answers every capability as the pool does.
+        pub fn capsBeyondPromise(self: *const Builder, subject: TypeId, requirement: CapabilityRequirement) bool {
+            const ceiling = assumedCapability(requirement);
+            if (ceiling == .linear) return false;
+            return switch (self.get(subject)) {
+                .parameter => |parameter| @intFromEnum(ceiling) < @intFromEnum(assumedCapability(parameter.requirement)),
+                else => true,
+            };
+        }
+
         pub fn prepareCapabilityWithin(self: *Builder, owner: DeclId, t: TypeId) !void {
-            try self.ensureFilled(t);
-            try self.settleCapabilities();
+            try self.settleFactsOf(t);
             const scope = self.contextual_constraints.activeCapabilityScope(owner);
-            if (scope != .none) try self.scoped_capability_facts.prepare(self, scope, t);
+            if (scope != .none) try self.prepareScopedCapability(scope, t);
+        }
+
+        /// Prepares `t`'s capability within `scope`, a scope whose
+        /// constraints cap a capability: `where L.Entry: Discardable`.
+        ///
+        /// A cap is on types named at the scope's own parameters, and an
+        /// alike instantiation answered from its representative owns the
+        /// representative's parts renamed. So the walk steps from an alike
+        /// instantiation to its representative with the scope's ceilings
+        /// renamed the same way, from the instantiation's arguments to the
+        /// representative's, keeping only ceilings on types held at those
+        /// arguments: the only ones its parts can hold. The renamed ceilings
+        /// are interned, so scopes whose caps rename alike -- `n` functions
+        /// each writing `where S.Item: Discardable` over one `G0[S]` -- share
+        /// one answer for the representative and everything past it.
+        ///
+        /// `t` itself is written where it is alike, and its own parts are
+        /// prepared in the scope: a later pass takes a value of `t` apart
+        /// and asks what each part owes within the scope, and the finished
+        /// pool answers that by scope and part. A scope whose constraints
+        /// cap nothing beyond what their subjects promise has no scoped
+        /// capabilities (`capsBeyondPromise`) and comes nowhere near this.
+        ///
+        /// **Bound:** once per (scope, `t`): one write of `t` where it is
+        /// alike, one visit per type `t` owns in the scope's own context up
+        /// to the first alike instantiation on each path, and one visit per
+        /// type past it in each renamed context not reached before. A step
+        /// renames each of the context's ceilings once, in the size of its
+        /// subject, and asks `membersRead` once for each on a settled
+        /// reference. Renaming may mint the renamed subject, and minting may
+        /// drop these facts or leave the capability facts to rebuild, in
+        /// which case the walk starts again over the types now minted,
+        /// which mints nothing more. A drop lists every root prepared
+        /// before as lost, and `restoreScopedCapabilities` prepares those
+        /// again before the hand-off.
+        fn prepareScopedCapability(self: *Builder, scope: DeclId, t: TypeId) !void {
+            if (self.scoped_capability_facts.roots.contains(.{ .scope = scope, .ty = t })) return;
+            if (self.scoped_walk_running) @panic("compiler defect: a scoped capability was prepared inside another one's walk");
+            self.scoped_walk_running = true;
+            defer self.scoped_walk_running = false;
+            if (self.alikeSource(t) != null) try self.ensureFilled(t);
+            // Bringing the capability facts up to the pool may drop these
+            // facts, so it is done before the walk, and again, with the walk,
+            // wherever renaming left the capability facts to be rebuilt.
+            while (true) {
+                try self.settleCapabilities();
+                if (try self.reachScopedCapability(scope, t) and
+                    !self.capability_facts.dirty and self.capability_facts.pending.items.len == 0) break;
+            }
+            const facts = &self.scoped_capability_facts;
+            try facts.solve(self.gpa);
+            try facts.roots.put(self.gpa, .{ .scope = scope, .ty = t }, {});
+            _ = facts.lost.swapRemove(.{ .scope = scope, .ty = t });
+        }
+
+        /// Prepares again every root whose answers were dropped when the
+        /// capability facts were rebuilt (`ScopedCapabilityFacts.drop`), so
+        /// the pool handed on answers every question prepared before it.
+        /// Preparing one may drop the others again, which lists them again.
+        ///
+        /// **Bound:** one preparation per root dropped, per drop.
+        fn restoreScopedCapabilities(self: *Builder) !void {
+            while (self.scoped_capability_facts.lost.pop()) |lost|
+                try self.prepareScopedCapability(lost.key.scope, lost.key.ty);
+        }
+
+        /// Reaches every node `t` owns within `scope`'s context, linking each
+        /// to what it owns. False where the facts were dropped on the way.
+        fn reachScopedCapability(self: *Builder, scope: DeclId, t: TypeId) !bool {
+            const facts = &self.scoped_capability_facts;
+            const generation = facts.generation;
+            const context = try facts.contextOf(self, scope);
+            try facts.ensure(self, .{ .context = context, .ty = t });
+            if (self.alikeSource(t) == null and self.capability_facts.isRecorded(t)) {
+                const first = self.capability_facts.first_parts.items[t.index()];
+                const count = self.capability_facts.part_counts.items[t.index()];
+                for (self.capability_facts.edges.items[first..][0..count]) |part|
+                    try facts.ensure(self, .{ .context = context, .ty = part.child });
+            }
+            var at: usize = 0;
+            while (at < facts.pending.items.len) : (at += 1) {
+                const owner = facts.pending.items[at];
+                if (self.alikeSource(owner.ty)) |source| {
+                    const step = try self.scopedStep(owner, source) orelse return false;
+                    try facts.ensure(self, step);
+                    try facts.link(self.gpa, owner, step);
+                    continue;
+                }
+                if (!self.capability_facts.isRecorded(owner.ty)) continue;
+                const first = self.capability_facts.first_parts.items[owner.ty.index()];
+                const count = self.capability_facts.part_counts.items[owner.ty.index()];
+                for (self.capability_facts.edges.items[first..][0..count]) |part| {
+                    const child: ScopedCapabilityFacts.Node = .{ .context = owner.context, .ty = part.child };
+                    try facts.ensure(self, child);
+                    try facts.link(self.gpa, owner, child);
+                }
+            }
+            return facts.generation == generation;
+        }
+
+        /// The node an alike instantiation's node steps to: its
+        /// representative `source`, within the context renamed from the
+        /// instantiation's arguments to the representative's. A ceiling no
+        /// part can hold is left out: one on a type holding a parameter that
+        /// is not among the instantiation's arguments, and one on a settled
+        /// reference read through an argument whose member the template's
+        /// parts do not read there (`membersRead`). Null where renaming
+        /// dropped the facts.
+        fn scopedStep(self: *Builder, owner: ScopedCapabilityFacts.Node, source: TypeId) !?ScopedCapabilityFacts.Node {
+            const facts = &self.scoped_capability_facts;
+            const generation = facts.generation;
+            // The update before the walk recorded `owner`, an unwritten alike
+            // instantiation, with its one edge to `source`, and wrote and
+            // recorded every unwritten part an edge reaches.
+            std.debug.assert(self.capability_facts.isRecorded(source));
+            const instance = self.instanceOf(owner.ty).?;
+            var renaming: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty;
+            defer renaming.deinit(self.gpa);
+            var positions: std.AutoHashMapUnmanaged(TypeId, u32) = .empty;
+            defer positions.deinit(self.gpa);
+            const into = self.instanceOf(source);
+            for (self.argsOf(instance), 0..) |from, i| {
+                const to = if (into) |represented| self.argsOf(represented)[i] else self.internedParameter(instance.decl.index(), @intCast(i)).?;
+                try renaming.put(self.gpa, from, to);
+                try positions.put(self.gpa, from, @intCast(i));
+            }
+            const context = facts.contexts.items[owner.context];
+            const held = try self.gpa.dupe(ScopedCapabilityFacts.Ceiling, facts.context_ceilings.items[context.first..][0..context.len]);
+            defer self.gpa.free(held);
+            var renamed: std.ArrayList(ScopedCapabilityFacts.Ceiling) = .empty;
+            defer renamed.deinit(self.gpa);
+            for (held) |ceiling| {
+                // A settled reference read through an argument names a type
+                // the parts hold only where they read its member there.
+                if (self.standinOf(ceiling.subject) != null) {
+                    var root = ceiling.subject;
+                    while (self.standinOf(root)) |read| root = read.held;
+                    if (positions.get(root)) |position| {
+                        const reads = try self.membersRead(instance.decl.index(), instance.template, position);
+                        if (facts.generation != generation) return null;
+                        const members = self.read_members.items[reads.first..][0..reads.len];
+                        if (!reads.every and !sortedHolds(members, self.memberReadThrough(ceiling.subject, root))) continue;
+                    }
+                }
+                const subject = try self.renamedSubject(ceiling.subject, &renaming);
+                if (facts.generation != generation) return null;
+                if (subject) |kept| try renamed.append(self.gpa, .{ .subject = kept, .ceiling = ceiling.ceiling });
+            }
+            std.mem.sort(ScopedCapabilityFacts.Ceiling, renamed.items, {}, struct {
+                fn less(_: void, a: ScopedCapabilityFacts.Ceiling, b: ScopedCapabilityFacts.Ceiling) bool {
+                    return @intFromEnum(a.subject) < @intFromEnum(b.subject);
+                }
+            }.less);
+            return .{ .context = try facts.internContext(self.gpa, renamed.items), .ty = source };
+        }
+
+        /// `subject` with each parameter `renaming` names replaced by what it
+        /// maps to, or null where `subject` holds a parameter it does not
+        /// name.
+        fn renamedSubject(self: *Builder, subject: TypeId, renaming: *const std.AutoHashMapUnmanaged(TypeId, TypeId)) std.mem.Allocator.Error!?TypeId {
+            var substitution: TypeSubstitution = .{ .decl = no_owner, .args = &.{}, .renaming = renaming };
+            defer substitution.memo.deinit(self.gpa);
+            const renamed = try substitution.apply(self, subject);
+            return if (substitution.foreign) null else renamed;
         }
 
         pub fn prepareTraitLookupWithin(self: *Builder, owner: DeclId, trait: DeclId, t: TypeId) !void {
@@ -11049,10 +12781,9 @@ pub const Typing = struct {
         }
 
         pub fn prepareLookupWithin(self: *Builder, owner: DeclId, t: TypeId) !void {
-            try self.ensureFilled(t);
-            try self.settleCapabilities();
+            try self.settleFactsOf(t);
             const capability_scope = self.contextual_constraints.activeCapabilityScope(owner);
-            if (capability_scope != .none) try self.scoped_capability_facts.prepare(self, capability_scope, t);
+            if (capability_scope != .none) try self.prepareScopedCapability(capability_scope, t);
             if (t == .poison) return;
             const scope = self.contextual_constraints.lookupScope(owner);
             var held = t;
@@ -11430,8 +13161,14 @@ pub const Typing = struct {
         }
 
         pub fn capabilityOfWithin(self: *Builder, owner: DeclId, t: TypeId) !Capability {
+            return self.capabilityAsked(owner, t, .capabilities);
+        }
+
+        /// `t`'s capability within `owner`, with what the question asks of it
+        /// noted for the watch.
+        fn capabilityAsked(self: *Builder, owner: DeclId, t: TypeId, asked: Typing.CapabilityWatch.Asked) !Capability {
             try self.prepareCapabilityWithin(owner, t);
-            return self.view().capabilityOfWithin(owner, t);
+            return self.view().capabilityAskedWithin(owner, t, asked);
         }
 
         pub fn invalidateImplementationLookup(self: *Builder) void {
@@ -11445,24 +13182,24 @@ pub const Typing = struct {
         }
 
         pub fn isScalarSnapshot(self: *Builder, t: TypeId) std.mem.Allocator.Error!bool {
-            try self.ensureFilled(t);
+            try self.ensureFacts(t);
             return self.view().isScalarSnapshot(t);
         }
 
         pub fn mayCopy(self: *Builder, t: TypeId) !bool {
-            return try self.capabilityOf(t) == .copyable;
+            return try self.capabilityAsked(.none, t, .copy) == .copyable;
         }
         pub fn mustConsume(self: *Builder, t: TypeId) !bool {
-            return try self.capabilityOf(t) == .linear;
+            return try self.capabilityAsked(.none, t, .discard) == .linear;
         }
         pub fn mayDiscard(self: *Builder, t: TypeId) !bool {
             return !try self.mustConsume(t);
         }
         pub fn mayCopyWithin(self: *Builder, owner: DeclId, t: TypeId) !bool {
-            return try self.capabilityOfWithin(owner, t) == .copyable;
+            return try self.capabilityAsked(owner, t, .copy) == .copyable;
         }
         pub fn mustConsumeWithin(self: *Builder, owner: DeclId, t: TypeId) !bool {
-            return try self.capabilityOfWithin(owner, t) == .linear;
+            return try self.capabilityAsked(owner, t, .discard) == .linear;
         }
         pub fn mayDiscardWithin(self: *Builder, owner: DeclId, t: TypeId) !bool {
             return !try self.mustConsumeWithin(owner, t);
@@ -11473,7 +13210,12 @@ pub const Typing = struct {
         }
 
         pub fn meetsCapabilityWithin(self: *Builder, owner: DeclId, t: TypeId, requirement: CapabilityRequirement) std.mem.Allocator.Error!bool {
-            return meetsCapability(requirement, try self.capabilityOfWithin(owner, t));
+            const asked: Typing.CapabilityWatch.Asked = switch (requirement) {
+                .discardable => .discard,
+                .copyable => .copy,
+                .unrestricted => return true,
+            };
+            return meetsCapability(requirement, try self.capabilityAsked(owner, t, asked));
         }
 
         /// Whether a type is the one a literal mints, answered while the pool
@@ -11533,15 +13275,23 @@ pub const Typing = struct {
             return self.expr_types.items[id.index()];
         }
 
-        pub fn finish(self: *Builder, binding_types: BindingTypes) !Typing {
-            // Settling one table may write parts another has yet to record.
+        /// Brings every fact table up to the pool, and prepares again each
+        /// scoped answer a rebuild dropped, so the pool answers whatever was
+        /// asked of it before. Settling one table may write parts another
+        /// has yet to record, so it repeats until nothing is written.
+        fn settleForHandoff(self: *Builder) !void {
             while (true) {
                 const written = self.parts_written;
                 try self.settleCapabilities();
+                try self.restoreScopedCapabilities();
                 try self.settleContainment(&self.dependency_facts, .raw_carriers);
                 try self.settleContainment(&self.writer_facts, .writers);
                 if (written == self.parts_written) break;
             }
+        }
+
+        pub fn finish(self: *Builder, binding_types: BindingTypes) !Typing {
+            try self.settleForHandoff();
             const mapped = self.interpolation_of.items.len;
             try self.interpolation_of.resize(self.gpa, self.pool.items.len);
             @memset(self.interpolation_of.items[mapped..], not_an_interpolation);
@@ -11551,6 +13301,7 @@ pub const Typing = struct {
             // pool mints nothing. Emptied as well as freed, so a `deinit` after
             // a `finish` that failed part-way frees it once.
             self.minted.deinit(self.gpa);
+            self.deinitAlikeWatch();
             self.minted = .empty;
             self.parameters.deinit(self.gpa);
             self.parameters = .empty;
@@ -11621,6 +13372,9 @@ pub const Typing = struct {
 
             const instance_of = try self.instance_of.toOwnedSlice(self.gpa);
             errdefer self.gpa.free(instance_of);
+
+            const alike_sources = try self.alike_sources.toOwnedSlice(self.gpa);
+            errdefer self.gpa.free(alike_sources);
 
             // The spellings are the one handover that owns what it holds, so
             // it needs the one errdefer that frees the entries too: taken out
@@ -11731,6 +13485,8 @@ pub const Typing = struct {
                 .instances = instances,
                 .instance_args = instance_args,
                 .instance_of = instance_of,
+                .alike_sources = alike_sources,
+                .templates_complete = self.templates_complete,
                 .owned_names = owned_names,
                 .owned_contracts = owned_contracts,
                 .dependency_containment = dependency_containment,
@@ -11796,6 +13552,10 @@ pub const Typing = struct {
             // goes on to mint.
             b.borrowTables(t);
             b.scoped_capability_facts.values = try t.scoped_capabilities.clone(gpa);
+            // Each answer is listed as prepared, so a rebuild that drops it
+            // lists it as lost and the hand-off prepares it again.
+            var answered = t.scoped_capabilities.keyIterator();
+            while (answered.next()) |key| try b.scoped_capability_facts.roots.put(gpa, key.*, {});
             b.prepared_implementations = try t.prepared_implementations.clone(gpa);
             b.certified_storage = t.raw_accesses.storage;
             b.certified_buffer = t.raw_accesses.buffer;
@@ -11896,6 +13656,24 @@ pub const Typing = struct {
                 const args = t.standin_args[s.first_arg..][0..s.arg_count];
                 try b.awaiting.note(gpa, standinKey(s.trait, args, s.held, s.member.index()), @intCast(at));
             }
+            // The alike classes are the builder's own bookkeeping too, and a
+            // reopened pool may check further declarations, whose promises
+            // decide them again. A settled reference promised `Owned` or
+            // `Shareable` is listed under the parameter it is read through, as
+            // `promiseContained` would have, and every instantiation is watched
+            // again, a written one included, since any may represent its
+            // class.
+            for (t.standins) |s| {
+                const promise = b.get(s.ty).parameter;
+                if (!promise.owned and !promise.shareable) continue;
+                var root = s.held;
+                while (b.standinOf(root)) |held| root = held.held;
+                if (b.get(root) != .parameter) continue;
+                try b.notePromisedThrough(root, s.ty);
+            }
+            b.templates_complete = t.templates_complete;
+            for (b.instances.items) |*i| i.class = Instance.no_class;
+            for (0..b.instances.items.len) |at| try b.watchAlike(@intCast(at));
             return b;
         }
     };
@@ -12756,7 +14534,7 @@ test "a stamped layout already worked out is dropped when a field is written" {
     const before = b.generation;
     try testing.expectEqual(before, b.laid_out.items[outer.index()].generation);
 
-    b.setFieldType(outer, 0, inner);
+    try b.setFieldType(outer, 0, inner);
     try testing.expect(b.generation != before);
     try testing.expectEqual(before, b.laid_out.items[outer.index()].generation);
     try testing.expectEqual(@as(u32, 1), b.layoutOf(outer).size);
@@ -12783,7 +14561,7 @@ test "layout generation wrap does not revive cached answers" {
     try testing.expectEqual(@as(u32, 1), b.placed_at.items[first_field]);
 
     b.generation = std.math.maxInt(u32);
-    b.setFieldType(pair, 0, .u64);
+    try b.setFieldType(pair, 0, .u64);
 
     try testing.expectEqual(@as(u32, 1), b.generation);
     try testing.expectEqual(@as(u32, 0), b.laid_out.items[pair.index()].generation);
@@ -13124,9 +14902,9 @@ test "a cycle through other types names every type on it" {
     const a = try b.addStruct("A", .copyable, &.{.{ .name = "b", .ty = .poison }});
     const bb = try b.addStruct("B", .copyable, &.{.{ .name = "c", .ty = .poison }});
     const cc = try b.addStruct("C", .copyable, &.{.{ .name = "a", .ty = .poison }});
-    b.setFieldType(a, 0, bb);
-    b.setFieldType(bb, 0, cc);
-    b.setFieldType(cc, 0, a);
+    try b.setFieldType(a, 0, bb);
+    try b.setFieldType(bb, 0, cc);
+    try b.setFieldType(cc, 0, a);
 
     const cycle = (try b.firstCycle(gpa)).?;
     try testing.expectEqual(@as(usize, 3), cycle.path.len);
@@ -13374,7 +15152,7 @@ test "a sealed pool answers what it holds and refuses to grow only on growth" {
     var b = try Typing.Builder.init(gpa);
     const before = try b.intern(.{ .integer = .{ .signed = true, .bits = 32 } });
 
-    b.seal();
+    try b.seal();
     try testing.expect(b.sealed);
 
     // Reading grows nothing, so a sealed pool still answers it: interning a
@@ -13419,7 +15197,7 @@ test "reopening a finished pool preserves materialized interpolations" {
 
     var reopened = try Typing.Builder.reopen(gpa, &finished);
     defer reopened.deinit();
-    reopened.seal();
+    try reopened.seal();
 
     // These are lookups in the completed pool. A lost type or format index
     // tries to add either interpolation again, which the seal refuses.
@@ -13444,7 +15222,7 @@ fn exerciseScopedCapabilities(gpa: std.mem.Allocator) !void {
     });
     // Owned-part cycles also occur through certified logical storage. Their
     // fixed point must not retain debt supported only by the previous result.
-    builder.setFieldType(record, 0, record);
+    try builder.setFieldType(record, 0, record);
     try testing.expectEqual(Capability.linear, try builder.capabilityOf(record));
     const constraints: ContextualConstraints = .{
         .starts = &.{ 0, 1 },
@@ -13466,9 +15244,9 @@ fn exerciseScopedCapabilities(gpa: std.mem.Allocator) !void {
     try testing.expectEqual(Capability.copyable, builder.view().capabilityOfWithin(owner, empty));
 
     const ticket = try builder.addStruct("Ticket", .linear, &.{});
-    builder.setFieldType(record, 1, ticket);
+    try builder.setFieldType(record, 1, ticket);
     try testing.expectEqual(Capability.linear, try builder.capabilityOfWithin(owner, record));
-    builder.setFieldType(record, 1, parameter);
+    try builder.setFieldType(record, 1, parameter);
     try testing.expectEqual(Capability.affine, try builder.capabilityOfWithin(owner, record));
     builder.setContextualConstraints(.{
         .starts = &.{ 0, 1 },
@@ -13510,6 +15288,83 @@ fn exerciseScopedCapabilityHandoff(gpa: std.mem.Allocator) !void {
     try testing.expectEqual(Capability.affine, try reopened.capabilityOfWithin(owner, wrapper));
     try testing.expectEqual(Capability.affine, reopened.view().capabilityOfWithin(owner, record));
     try testing.expectEqual(Capability.linear, try reopened.capabilityOf(wrapper));
+}
+
+test "scoped capabilities dropped by a rebuild are prepared again before the hand-off" {
+    try testing.checkAllAllocationFailures(testing.allocator, exerciseScopedCapabilityRestore, .{});
+}
+
+fn exerciseScopedCapabilityRestore(gpa: std.mem.Allocator) !void {
+    var builder = try Typing.Builder.init(gpa);
+    defer builder.deinit();
+    const owner = DeclId.at(0);
+    const parameter = try builder.addParameter("T", 0, 0, .unrestricted, &.{});
+    const box = try builder.addStruct("Box", .copyable, &.{.{ .name = "value", .ty = parameter }});
+    const pair = try builder.addStruct("Pair", .copyable, &.{.{ .name = "left", .ty = parameter }});
+    const ticket = try builder.addStruct("Ticket", .linear, &.{});
+    const constraints: ContextualConstraints = .{
+        .starts = &.{ 0, 1 },
+        .parents = &.{.none},
+        .capability_scopes = &.{owner},
+        .items = &.{.{ .subject = parameter, .demand = .{ .requirement = .discardable } }},
+    };
+    builder.setContextualConstraints(constraints);
+    try builder.prepareCapabilityWithin(owner, box);
+    try builder.prepareCapabilityWithin(owner, pair);
+    // Replacing a part that gives its owner something rebuilds the
+    // capability facts, which drops every scoped answer; asking about `pair`
+    // prepares it again, and leaves `box` listed as lost.
+    try builder.setFieldType(pair, 0, ticket);
+    try testing.expectEqual(Capability.linear, try builder.capabilityOfWithin(owner, pair));
+    try testing.expect(builder.scoped_capability_facts.lost.contains(.{ .scope = owner, .ty = box }));
+    var typing = try builder.finish(.empty);
+    defer typing.deinit(gpa);
+    typing.contextual_constraints = constraints;
+    defer typing.contextual_constraints = .{};
+    try testing.expectEqual(Capability.affine, typing.capabilityOfWithin(owner, box));
+    try testing.expectEqual(Capability.linear, typing.capabilityOfWithin(owner, pair));
+}
+
+test "a reopened pool sealed after a rebuild answers every scoped question it was handed" {
+    try testing.checkAllAllocationFailures(testing.allocator, exerciseSealedScopedRestore, .{});
+}
+
+fn exerciseSealedScopedRestore(gpa: std.mem.Allocator) !void {
+    var builder = try Typing.Builder.init(gpa);
+    defer builder.deinit();
+    const owner = DeclId.at(0);
+    const parameter = try builder.addParameter("T", 0, 0, .unrestricted, &.{});
+    const box = try builder.addStruct("Box", .copyable, &.{.{ .name = "value", .ty = parameter }});
+    const pair = try builder.addStruct("Pair", .copyable, &.{.{ .name = "left", .ty = parameter }});
+    const ticket = try builder.addStruct("Ticket", .linear, &.{});
+    const constraints: ContextualConstraints = .{
+        .starts = &.{ 0, 1 },
+        .parents = &.{.none},
+        .capability_scopes = &.{owner},
+        .items = &.{.{ .subject = parameter, .demand = .{ .requirement = .discardable } }},
+    };
+    builder.setContextualConstraints(constraints);
+    try builder.prepareCapabilityWithin(owner, box);
+    try builder.prepareCapabilityWithin(owner, pair);
+    var typing = try builder.finish(.empty);
+    defer typing.deinit(gpa);
+    typing.contextual_constraints = constraints;
+    defer typing.contextual_constraints = .{};
+
+    // Instantiation reopens the pool, may rebuild its capability facts, and
+    // seals it for lowering to read. The rebuild drops both answers; sealing
+    // prepares them again, so the sealed pool's view answers each.
+    var reopened = try Typing.Builder.reopen(gpa, &typing);
+    defer reopened.deinit();
+    try testing.expectEqual(Capability.linear, try reopened.capabilityOf(pair));
+    try reopened.setFieldType(pair, 0, ticket);
+    try testing.expectEqual(Capability.linear, try reopened.capabilityOf(pair));
+    try testing.expect(reopened.scoped_capability_facts.lost.count() != 0);
+    try reopened.seal();
+    try testing.expectEqual(@as(usize, 0), reopened.scoped_capability_facts.lost.count());
+    const view = reopened.view();
+    try testing.expectEqual(Capability.affine, view.capabilityOfWithin(owner, box));
+    try testing.expectEqual(Capability.linear, view.capabilityOfWithin(owner, pair));
 }
 
 test "poison capability remains usable under scoped recovery" {
@@ -13570,10 +15425,10 @@ fn exercisePreparedApplicability(gpa: std.mem.Allocator) !void {
     try builder.prepareLookupWithin(.none, record);
     try testing.expect(!try index.any(gpa, &implementations, &builder.view(), 1, record, .none, .forward));
 
-    builder.setFieldType(record, 0, ticket);
+    try builder.setFieldType(record, 0, ticket);
     try builder.prepareLookupWithin(owner, record);
     try testing.expect(!try index.any(gpa, &implementations, &builder.view(), 1, record, owner, .forward));
-    builder.setFieldType(record, 0, parameter);
+    try builder.setFieldType(record, 0, parameter);
     try builder.prepareLookupWithin(owner, record);
     try testing.expect(try index.any(gpa, &implementations, &builder.view(), 1, record, owner, .forward));
     builder.setContextualConstraints(.{});
@@ -13593,7 +15448,7 @@ fn exercisePreparedApplicability(gpa: std.mem.Allocator) !void {
     reopened.impl_index = index;
     try reopened.prepareLookupWithin(owner, record);
     try testing.expect(try index.any(gpa, &implementations, &reopened.view(), 1, record, owner, .forward));
-    reopened.setFieldType(record, 0, ticket);
+    try reopened.setFieldType(record, 0, ticket);
     try reopened.prepareLookupWithin(owner, record);
     try testing.expect(!try index.any(gpa, &implementations, &reopened.view(), 1, record, owner, .forward));
     try testing.expect(try index.any(gpa, &implementations, &typing, 1, record, owner, .forward));
@@ -13645,12 +15500,12 @@ test "unchanged callable payload fields preserve derived facts" {
     _ = try builder.capabilityOf(callbacks);
     try testing.expect(!try builder.mayCarryDependencies(callbacks));
     const generation = builder.generation;
-    builder.setVariantFieldType(callbacks, 0, 0, callable);
+    try builder.setVariantFieldType(callbacks, 0, 0, callable);
     try testing.expect(!builder.capability_facts.dirty);
     try testing.expect(!builder.dependency_facts.dirty);
     try testing.expectEqual(generation, builder.generation);
 
-    builder.setVariantFieldType(callbacks, 0, 0, observation);
+    try builder.setVariantFieldType(callbacks, 0, 0, observation);
     try testing.expect(builder.generation != generation);
     try testing.expect(try builder.mayCarryDependencies(callbacks));
 }
@@ -13662,9 +15517,9 @@ test "unchanged enum payloads preserve layout generation" {
     const value = try builder.addEnum("Payload", .linear, &.{.{ .name = "Held" }});
     builder.setVariantFields(value, 0, try builder.addFields(&.{.{ .name = "value", .ty = .u8 }}), 1);
     const generation = builder.generation;
-    builder.setVariantFieldType(value, 0, 0, .u8);
+    try builder.setVariantFieldType(value, 0, 0, .u8);
     try testing.expectEqual(generation, builder.generation);
-    builder.setVariantFieldType(value, 0, 0, .u16);
+    try builder.setVariantFieldType(value, 0, 0, .u16);
     try testing.expect(builder.generation != generation);
     try testing.expectEqual(TypeId.u16, (try builder.variantFieldType(value, 0, 0)));
 }
@@ -13891,7 +15746,7 @@ test "shared type DAG substitution bounds allocation work per query" {
     defer finished.deinit(gpa);
     var reopened = try Typing.Builder.reopen(gpa, &finished);
     defer reopened.deinit();
-    reopened.seal();
+    try reopened.seal();
     try testing.expectEqual(second, try reopened.substitute(shared, owner, &.{.u16}));
     try testing.expectEqual(first, try reopened.substitute(shared, owner, &.{.u8}));
 }

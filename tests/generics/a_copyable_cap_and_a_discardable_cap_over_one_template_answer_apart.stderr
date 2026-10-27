@@ -1,0 +1,5 @@
+error[O-Copy]: `Desk[M]` does not permit copying
+  --> tests/generics/a_copyable_cap_and_a_discardable_cap_over_one_template_answer_apart.lin:33:17
+   |
+33 |     let _kept = copy(desk)
+   |                 ^^^^^^^^^^ move the value, or declare a copyable representation

@@ -1,0 +1,25 @@
+// `A.Reading` is `B.Reading`, which is `Holder[A]`, whose field is an
+// `A.Reading`: a `Holder[A]` would hold a `Holder[A]`.
+trait Sensor {
+    type Reading
+}
+
+struct Holder[T: Sensor] {
+    x: T.Reading,
+}
+
+struct A {}
+
+struct B {}
+
+impl Sensor for A {
+    type Reading = B.Reading
+}
+
+impl Sensor for B {
+    type Reading = Holder[A]
+}
+
+fn main() -> UInt8 {
+    0
+}

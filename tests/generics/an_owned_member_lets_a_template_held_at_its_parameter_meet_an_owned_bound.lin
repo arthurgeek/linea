@@ -1,0 +1,32 @@
+// `where S.Item: Owned` promises that a held item carries nothing, so a
+// `Held[S]` meets `keep`'s `Owned` bound.
+trait Source {
+    type Item
+}
+
+struct Held[S: Source] {
+    item: S.Item,
+}
+
+fn keep[T: Owned](sink value: T) -> T {
+    value
+}
+
+fn pass[S: Source](sink held: Held[S]) -> Held[S]
+where S.Item: Owned {
+    keep(held)
+}
+
+struct Numbers {
+    n: UInt8,
+}
+
+impl Source for Numbers {
+    type Item = UInt8
+}
+
+fn main() -> UInt8 {
+    let held = pass(Held[Numbers] { item = 3 })
+    let Held { item } = held
+    item
+}

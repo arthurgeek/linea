@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+  --> tests/traits/a_field_of_a_settled_type_is_checked_against_it.lin:17:37
+   |
+17 |     let sample = Sample { reading = true }
+   |                           ------- expected because of this field
+   |                                     ^^^^ expected `UInt8`, found `Bool`

@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: Holder[A] contains itself
+ --> tests/traits/declared_answers/an_instantiation_holding_itself_through_two_settled_types_has_no_size.lin:7:8
+  |
+7 | struct Holder[T: Sensor] {
+  |        ^^^^^^ a value of this type would have to hold one, so it has no size

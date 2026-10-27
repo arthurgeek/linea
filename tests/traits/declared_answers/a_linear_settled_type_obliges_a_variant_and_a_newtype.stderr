@@ -1,0 +1,18 @@
+error[O-Leak]: `_slot` (a linear `Slot`) is still owned when this path leaves
+  --> tests/traits/declared_answers/a_linear_settled_type_obliges_a_variant_and_a_newtype.lin:26:9
+   |
+26 |     let _slot = Slot.Held(.{ number = 4 })
+   |         ^^^^^ never settled on the path that reaches the end of this block
+29 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it
+error[O-Leak]: `_wrapped` (a linear `Wrapped`) is still owned when this path leaves
+  --> tests/traits/declared_answers/a_linear_settled_type_obliges_a_variant_and_a_newtype.lin:27:9
+   |
+27 |     let _wrapped = Wrapped(.{ number = 5 })
+   |         ^^^^^^^^ never settled on the path that reaches the end of this block
+29 | }
+   | - the block ends here
+   |
+   = help: take it apart with `let Wrapped(_) = _wrapped`, or give it to something that takes it

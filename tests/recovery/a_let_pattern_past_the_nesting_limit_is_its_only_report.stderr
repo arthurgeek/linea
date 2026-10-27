@@ -1,0 +1,5 @@
+error[S-Nesting]: this pattern nests too deeply
+ --> tests/recovery/a_let_pattern_past_the_nesting_limit_is_its_only_report.lin:8:13
+  |
+8 |         let (first, second) = (1, 2)
+  |             ^ the limit is 1000 levels

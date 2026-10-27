@@ -1,0 +1,35 @@
+// `A.Reading` is `B.Reading`, which is `Option[C.Reading]`, which is
+// `Option[UInt8]`: each implementation is declared below the one reading it.
+trait Sensor {
+    type Reading
+}
+
+struct A {}
+
+struct B {}
+
+struct C {}
+
+impl Sensor for A {
+    type Reading = B.Reading
+}
+
+impl Sensor for B {
+    type Reading = Option[C.Reading]
+}
+
+impl Sensor for C {
+    type Reading = UInt8
+}
+
+struct Sample {
+    a: A.Reading,
+}
+
+fn main() -> UInt8 {
+    let sample = Sample { a = .Some(9) }
+    match read sample.a {
+        Some(value) => value,
+        None => 0,
+    }
+}
