@@ -468,7 +468,9 @@ fn typecheckInternal(
     c.builder.certified_foreign_views = c.raw_accesses.foreign_views;
     c.builder.certified_closure_entry = c.raw_accesses.closure_entry_type;
     c.raw_accesses.protocol_dual = c.protocol_dual orelse .none;
+    c.raw_accesses.protocol_step = c.protocol_step orelse .none;
     c.builder.certified_protocol_dual = c.raw_accesses.protocol_dual;
+    c.builder.certified_protocol_step = c.raw_accesses.protocol_step;
     // The resolver settled which declarations tuple syntax names; the pool
     // spells their instances as tuples.
     c.builder.tuple_decls = resolution.tuple_decls;
@@ -27541,25 +27543,35 @@ const Checker = struct {
     /// whatever implementation answers for `N`.
     ///
     /// An implementation whose dual's dual is wrong is not also reported for
-    /// its step, which it compares against the wrong peer. Two protocols
-    /// that name each other and disagree at their step are one mistake,
-    /// reported once, at the implementation written first.
+    /// its step, which it compares against the wrong peer. Two
+    /// implementations that name each other and disagree at their step are
+    /// one mistake, reported once, at the implementation written first.
     ///
-    /// **Bound:** four projections per implementation of `Protocol`, and one
-    /// set entry per step reported.
+    /// An implementation headed by a bare parameter is passed over: outside
+    /// the module declaring `Protocol` it is [M-Impl], and that module
+    /// declares none.
+    ///
+    /// **Bound:** five projections and one implementation lookup per
+    /// implementation of `Protocol`, and one set entry per step reported.
     fn checkProtocolDuals(self: *Checker) std.mem.Allocator.Error!void {
         const trait = self.protocol_decl orelse return;
         const dual = self.protocol_dual orelse return;
         const step = self.protocol_step orelse return;
         const outer_generic = self.generic;
-        defer self.generic = outer_generic;
-        var unmirrored: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        const outer_module = self.current;
+        defer {
+            self.generic = outer_generic;
+            self.current = outer_module;
+        }
+        var unmirrored: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty;
         defer unmirrored.deinit(self.gpa);
         for (self.builder.implementations) |row| {
             if (row.trait != trait.index() or row.isAmbient() or row.decl == .none or !row.valid_key) continue;
+            if (row.head.same(.parameter)) continue;
             const dual_member = self.builder.supply.memberOf(row.decl, dual) orelse continue;
             const step_member = self.builder.supply.memberOf(row.decl, step) orelse continue;
             self.generic = row.decl;
+            self.current = self.program.moduleOf(row.decl);
             const peer = try self.protocolProjection(row.decl, row.ty, dual);
             const peer_of_peer = try self.protocolProjection(row.decl, peer, dual);
             if (peer == .poison or peer_of_peer == .poison) continue;
@@ -27571,8 +27583,9 @@ const Checker = struct {
             const own_step = try self.protocolProjection(row.decl, row.ty, step);
             const mirrored = try self.protocolProjection(row.decl, own_step, dual);
             if (peer_step == .poison or mirrored == .poison or peer_step == mirrored) continue;
-            try unmirrored.put(self.gpa, row.ty, {});
-            if (unmirrored.contains(peer) and peer != row.ty) continue;
+            try unmirrored.put(self.gpa, row.decl, {});
+            const peer_implementation = try self.protocolImplementation(peer);
+            if (peer_implementation) |answering| if (answering != row.decl and unmirrored.contains(answering)) continue;
             try self.reportUnmirroredSteps(row, step_member, peer, own_step, mirrored, peer_step);
         }
     }
@@ -27593,12 +27606,23 @@ const Checker = struct {
     /// nothing about this pair.
     fn protocolDefinition(self: *Checker, held: TypeId, member: node.DeclId) std.mem.Allocator.Error!?node.DeclId {
         if (self.declaringType(held) == null or self.builder.instanceOf(held) != null) return null;
+        const implementation = try self.protocolImplementation(held) orelse return null;
+        // A protocol that is its own dual is labelled once, at the
+        // definition the report blames.
+        if (implementation == self.generic) return null;
+        return self.builder.supply.memberOf(implementation, member);
+    }
+
+    /// The declaration of the implementation that answers `Protocol` for
+    /// `held` in the scope of the implementation being checked, or null
+    /// where a bound or nothing answers.
+    fn protocolImplementation(self: *Checker, held: TypeId) std.mem.Allocator.Error!?node.DeclId {
         const trait = self.protocol_decl orelse return null;
         const choice = try self.builder.implementationChoiceWithin(self.generic, trait, &.{}, held) orelse return null;
         const implementation = choice.declaredImplementation() orelse return null;
         const row = self.builder.implementations[implementation.index()];
         if (row.decl == .none) return null;
-        return self.builder.supply.memberOf(row.decl, member);
+        return row.decl;
     }
 
     /// Reports an implementation whose dual's dual is `back` rather than its
@@ -32918,9 +32942,10 @@ const Checker = struct {
     ///
     /// A written type that does not fit what the call has settled settles
     /// nothing here; the lambda is checked against the callable type it is
-    /// given, which reports the parameter that disagrees. Its diagnostics
-    /// are discarded for the same reason: checking the lambda reads the same
-    /// written type again and reports what is wrong with it there.
+    /// given, which reports the parameter that disagrees. A written type
+    /// whose reading reports anything settles nothing either, and what the
+    /// reading reported and refused is forgotten: checking the lambda reads
+    /// the same written type again and reports it there, once.
     ///
     /// **Bound:** one reading of each written parameter type, and one
     /// settlement of each against the callable type's parameter.
@@ -32942,11 +32967,14 @@ const Checker = struct {
             const diagnostics_start = self.sink.items().len;
             const errors_before = self.sink.error_count;
             const warnings_before = self.sink.warning_count;
+            const refusals = self.refusalMark();
             const written = try self.typeOfRef(param.written);
+            const reported = self.sink.items().len != diagnostics_start;
             self.sink.list.shrinkRetainingCapacity(diagnostics_start);
             self.sink.error_count = errors_before;
             self.sink.warning_count = warnings_before;
-            if (written == .poison) continue;
+            self.forgetRefusalsSince(refusals);
+            if (written == .poison or reported) continue;
             for (settling) |s| {
                 const tried = try self.gpa.dupe(TypeId, s.found);
                 defer self.gpa.free(tried);

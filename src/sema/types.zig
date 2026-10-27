@@ -7991,9 +7991,11 @@ pub const Typing = struct {
         /// `mem.Carried`: a value of an instance carries what its argument
         /// may carry, though it holds no field.
         certified_carried: DeclId = .none,
-        /// The `Dual` that `session.Protocol` declares, read by
-        /// `settledAtWithin` to answer `P.Dual.Dual` with `P`.
+        /// The `Dual` and `Step` that `session.Protocol` declares, read by
+        /// `settledAtWithin` to answer `P.Dual.Dual` with `P` and
+        /// `P.Dual.Step` with `P.Step.Dual`.
         certified_protocol_dual: DeclId = .none,
+        certified_protocol_step: DeclId = .none,
         certified_foreign_views: [3]DeclId = .{ .none, .none, .none },
         /// `mem.ClosureEntry`: its instance at a callable type is the entry
         /// signature an erased closure is called through.
@@ -10211,7 +10213,7 @@ pub const Typing = struct {
         pub fn view(self: *const Builder) Typing {
             return .{
                 .constant_pool = self.constant_pool.*,
-                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .closure_entry_type = self.certified_closure_entry, .foreign_views = self.certified_foreign_views },
+                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .protocol_step = self.certified_protocol_step, .closure_entry_type = self.certified_closure_entry, .foreign_views = self.certified_foreign_views },
                 .tuple_decls = self.tuple_decls,
                 .implementation_selections = self.implementation_selections,
                 .closure_release = self.closure_release,
@@ -10917,6 +10919,7 @@ pub const Typing = struct {
         ) std.mem.Allocator.Error!SettledMember {
             if (self.awaitsTypes(held, args)) {
                 if (self.dualOfDual(held, member)) |protocol| return .{ .ty = protocol, .head_definition = true };
+                if (try self.stepOfDual(owner, trait, args, held, member, named)) |mirrored| return .{ .ty = mirrored, .head_definition = true };
                 if (try self.settledThroughParameterHead(owner, trait, args, held, member)) |settled| return .{ .ty = settled, .head_definition = settled != .poison };
                 return .{ .ty = try self.addSettledStandin(trait, args, held, member, named) };
             }
@@ -10944,6 +10947,24 @@ pub const Typing = struct {
             const inner = self.standinOf(held) orelse return null;
             if (inner.member != member) return null;
             return inner.held;
+        }
+
+        /// `P.Step.Dual`, where `held` is the stand-in `P.Dual` and `member`
+        /// is `session.Protocol`'s `Step`, and null for every other
+        /// projection. [T-Dual] holds every implementation to
+        /// `X.Dual.Step = X.Step.Dual`, so the two spellings are one type;
+        /// `P.Step.Dual` is the one kept, so `P.Dual.Step.Dual` reaches `P.Step`
+        /// through `dualOfDual`.
+        ///
+        /// **Bound:** one table read for `held`, then two projections, neither
+        /// of which reads a stand-in of `Dual` as its key.
+        fn stepOfDual(self: *Builder, owner: DeclId, trait: u32, args: []const TypeId, held: TypeId, member: DeclId, named: []const u8) std.mem.Allocator.Error!?TypeId {
+            if (member == .none or member != self.certified_protocol_step) return null;
+            const inner = self.standinOf(held) orelse return null;
+            if (inner.member != self.certified_protocol_dual) return null;
+            const step = (try self.settledAtWithin(owner, trait, args, inner.held, member, named)).ty;
+            if (step == .poison) return null;
+            return (try self.settledAtWithin(owner, trait, args, step, inner.member, inner.named)).ty;
         }
 
         /// What `member` settles to for a key still holding a type parameter,
@@ -11777,6 +11798,7 @@ pub const Typing = struct {
             b.certified_slice = t.raw_accesses.slice;
             b.certified_carried = t.raw_accesses.carried;
             b.certified_protocol_dual = t.raw_accesses.protocol_dual;
+            b.certified_protocol_step = t.raw_accesses.protocol_step;
             b.certified_foreign_views = t.raw_accesses.foreign_views;
             b.certified_closure_entry = t.raw_accesses.closure_entry_type;
             b.tuple_decls = t.tuple_decls;

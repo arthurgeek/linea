@@ -2257,8 +2257,10 @@ callee's type parameters through the callback parameter's callable type before
 the lambda's body is checked, as an argument whose own type is determined
 does: with `fn start[P: Protocol, F: sink fn(sink me: Chan[P]) -> UInt64](sink
 body: F)`, the call `start(sink [] |sink me: Chan[Worker]| me.id)` settles `P`
-as `Worker`. A written type that disagrees with what the call settled
-otherwise is [T-Call] at the lambda's parameter. A type parameter whose one
+as `Worker`. A written type is read as an argument in its place: one that
+disagrees with what an earlier argument settled is [T-Call] at the lambda's
+parameter, and an argument after the lambda that disagrees with it is
+[T-Mismatch] there, as between any two arguments. A type parameter whose one
 callable bound fits the callback parameter's settles the callee's parameters
 the same way: inside `fn launch[G: sink fn(sink me: Chan[Worker]) ->
 UInt64](sink body: G)`, `start(body)` settles `P` as `Worker`. Known result
@@ -2668,8 +2670,11 @@ parameters: `impl[N: Protocol] Protocol for Quiet[N]` with `type Dual =
 N.Dual` is refused, since its dual's dual is `N` rather than `Quiet[N]`.
 
 **Dual normalisation.** For every `P` bounded by `Protocol`, `P.Dual.Dual` is
-`P`. [T-Dual] proves the equation at every implementation, which is what
-makes it true for whatever settles `P`; a generic function relies on it, so
+`P`, and `P.Dual.Step` is `P.Step.Dual`. [T-Dual] proves both equations at
+every implementation, which is what makes them true for whatever settles `P`;
+a generic implementation is checked through them, so `impl[N: Protocol]
+Protocol for Fwd[N]` with `type Dual = Fwd[N.Dual]` and `type Step = N.Step`
+is accepted. A generic function relies on them too, so
 `fn same[P: Protocol](sink tag: Tag[P]) -> Tag[P.Dual.Dual]` returns `tag`
 unchanged, and a call that settles a parameter `Q` as `P.Dual` reads `Q.Dual`
 as `P`. A `Dual` defined through other definitions that never reach a type,

@@ -83,9 +83,11 @@ pub const RawAccesses = struct {
     /// `mem.Carried`, the zero-sized field type that carries its argument's
     /// dependencies.
     carried: DeclId = .none,
-    /// The `Dual` that `session.Protocol` declares. `P.Dual.Dual` is read as
-    /// `P` wherever `P` still awaits a type.
+    /// The `Dual` and `Step` that `session.Protocol` declares. Wherever `P`
+    /// still awaits a type, `P.Dual.Dual` is read as `P` and `P.Dual.Step`
+    /// as `P.Step.Dual`.
     protocol_dual: DeclId = .none,
+    protocol_step: DeclId = .none,
     span: DeclId = .none,
     buffer_span: DeclId = .none,
     subspan: DeclId = .none,

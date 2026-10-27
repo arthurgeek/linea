@@ -1,0 +1,26 @@
+import std.session
+
+use session.Recv
+use session.Send
+
+struct Twice[phantom T, phantom N: Protocol] {}
+
+struct TwiceBack[phantom T, phantom N: Protocol] {}
+
+// `Twice` sends two `T`s, but `TwiceBack` receives a `T` and then an
+// `Option[T]`, so the second payload has two types.
+impl[T, N: Protocol] Protocol for Twice[T, N] {
+    type Dual = TwiceBack[T, N.Dual]
+    type Step = Send[T, Send[T, N]]
+}
+
+impl[T, N: Protocol] Protocol for TwiceBack[T, N] {
+    type Dual = Twice[T, N.Dual]
+    type Step = Recv[T, Recv[Option[T], N]]
+}
+
+fn main() -> UInt8 {
+    let _twice: Twice[UInt8, session.End] = .{}
+    let _back: TwiceBack[UInt8, session.End] = .{}
+    0
+}

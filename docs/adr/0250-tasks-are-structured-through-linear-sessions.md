@@ -218,7 +218,10 @@ a rule and not a library convention.
 **Normalisation.** For every `P: Protocol`, `P.Dual.Dual` normalises to `P`.
 [T-Dual] proves the involution at each implementation, which justifies the
 equation, and generic combinators need it: a function over `P` that builds the
-dual's dual must be able to hand it back as `P`.
+dual's dual must be able to hand it back as `P`. For the same reason
+`P.Dual.Step` normalises to `P.Step.Dual`, which is what lets a generic
+forwarding protocol, `Fwd[N]` with `type Dual = Fwd[N.Dual]` and
+`type Step = N.Step`, pass [T-Dual] over its parameter.
 
 Two inference changes come with it. A lambda's written parameter types settle
 the callee's type parameters through the callable bound before the lambda's
