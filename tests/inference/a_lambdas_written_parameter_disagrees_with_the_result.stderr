@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `Chan[Worker]`, found `Chan[Boss]`
+  --> tests/inference/a_lambdas_written_parameter_disagrees_with_the_result.lin:35:31
+   |
+35 |     let other: Chan[Worker] = start(sink [] |sink me: Chan[Worker]| me.id)
+   |                ---- expected because of this annotation
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Chan[Worker]`, found `Chan[Boss]`

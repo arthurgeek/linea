@@ -1,0 +1,18 @@
+error[T-Dual]: the dual of `Liar` is `Boss`, whose dual is `Other` rather than `Liar`
+  --> tests/traits/protocols/a_protocol_whose_dual_names_another_dual_is_refused.lin:16:17
+   |
+16 |     type Dual = Boss
+   |                 ^^^^ `Liar` names `Boss` as its peer
+21 |     type Dual = Other
+   |                 ----- `Boss` names `Other`
+   |
+   = help: make `Boss.Dual` `Liar`, or name the protocol whose dual is `Liar`
+error[T-Dual]: the dual of `Boss` is `Other`, whose dual is `Other` rather than `Boss`
+  --> tests/traits/protocols/a_protocol_whose_dual_names_another_dual_is_refused.lin:21:17
+   |
+21 |     type Dual = Other
+   |                 ^^^^^ `Boss` names `Other` as its peer
+26 |     type Dual = Other
+   |                 ----- `Other` names `Other`
+   |
+   = help: make `Other.Dual` `Boss`, or name the protocol whose dual is `Boss`

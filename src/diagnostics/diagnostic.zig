@@ -238,6 +238,9 @@ pub const Code = enum {
     t_where,
     /// An implementation supplies exactly the operations its trait declares.
     t_impl,
+    /// An implementation of `session.Protocol` whose dual's dual is not
+    /// itself, or whose dual's step is not the dual of its step.
+    t_dual,
     /// A structural template is not a valid recipe for its trait.
     t_template,
     /// A derive request cannot produce the implementation it names.
@@ -474,6 +477,7 @@ pub const Code = enum {
             .t_format => "T-Format",
             .t_where => "T-Where",
             .t_impl => "T-Impl",
+            .t_dual => "T-Dual",
             .t_template => "T-Template",
             .t_derive => "T-Derive",
             .t_reflection => "T-Reflection",

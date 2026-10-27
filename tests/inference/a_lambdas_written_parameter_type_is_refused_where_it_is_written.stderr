@@ -1,0 +1,5 @@
+error[T-Bound]: `Box` takes 1 type argument(s), and was given 2
+  --> tests/inference/a_lambdas_written_parameter_type_is_refused_where_it_is_written.lin:13:21
+   |
+13 |     UInt8(pair(|me: Box[UInt8, UInt8]| me.id, b))
+   |                     ^^^ give it the arguments it declares

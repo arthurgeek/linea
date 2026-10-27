@@ -1,0 +1,14 @@
+struct Box[phantom P] {
+    id: UInt64,
+}
+
+// Calls `body` with `other`.
+fn pair[P, F: fn(me: Box[P]) -> UInt64](body: F, other: Box[P]) -> UInt64 {
+    body(other)
+}
+
+fn main() -> UInt8 {
+    let b: Box[UInt8] = .{ id = 1 }
+    // `Box` takes one type argument, and the lambda writes two.
+    UInt8(pair(|me: Box[UInt8, UInt8]| me.id, b))
+}

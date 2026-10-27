@@ -1,0 +1,7 @@
+error[T-Dual]: `Twice[T, N]` and its dual `TwiceBack[T, N.Dual]` disagree at their next step: one end has `T` where the other has `Option[T]`
+  --> tests/traits/protocols/a_generic_pair_whose_steps_disagree_is_refused_once.lin:14:17
+   |
+14 |     type Step = Send[T, Send[T, N]]
+   |                 ^^^^^^^^^^^^^^^^^^^ the dual of `Send[T, Send[T, N]]` is `Recv[T, Recv[T, N.Dual]]`
+   |
+   = help: write each step as what the other end does at the same moment
