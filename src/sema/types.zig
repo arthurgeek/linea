@@ -11165,7 +11165,12 @@ pub const Typing = struct {
             return id;
         }
 
-        pub fn seal(self: *Builder) void {
+        /// Settles the pool as `finish` does and refuses any further growth.
+        /// A sealed pool is handed on and read through `view`, so every
+        /// question prepared before it, including those a rebuild during
+        /// instantiation dropped, is answered before the seal.
+        pub fn seal(self: *Builder) !void {
+            try self.settleForHandoff();
             self.sealed = true;
         }
 
@@ -13096,10 +13101,11 @@ pub const Typing = struct {
             return self.expr_types.items[id.index()];
         }
 
-        pub fn finish(self: *Builder, binding_types: BindingTypes) !Typing {
-            // Settling one table may write parts another has yet to record,
-            // and rebuilding the capability facts drops the scoped answers,
-            // which are prepared again.
+        /// Brings every fact table up to the pool, and prepares again each
+        /// scoped answer a rebuild dropped, so the pool answers whatever was
+        /// asked of it before. Settling one table may write parts another
+        /// has yet to record, so it repeats until nothing is written.
+        fn settleForHandoff(self: *Builder) !void {
             while (true) {
                 const written = self.parts_written;
                 try self.settleCapabilities();
@@ -13108,6 +13114,10 @@ pub const Typing = struct {
                 try self.settleContainment(&self.writer_facts, .writers);
                 if (written == self.parts_written) break;
             }
+        }
+
+        pub fn finish(self: *Builder, binding_types: BindingTypes) !Typing {
+            try self.settleForHandoff();
             const mapped = self.interpolation_of.items.len;
             try self.interpolation_of.resize(self.gpa, self.pool.items.len);
             @memset(self.interpolation_of.items[mapped..], not_an_interpolation);
@@ -14964,7 +14974,7 @@ test "a sealed pool answers what it holds and refuses to grow only on growth" {
     var b = try Typing.Builder.init(gpa);
     const before = try b.intern(.{ .integer = .{ .signed = true, .bits = 32 } });
 
-    b.seal();
+    try b.seal();
     try testing.expect(b.sealed);
 
     // Reading grows nothing, so a sealed pool still answers it: interning a
@@ -15009,7 +15019,7 @@ test "reopening a finished pool preserves materialized interpolations" {
 
     var reopened = try Typing.Builder.reopen(gpa, &finished);
     defer reopened.deinit();
-    reopened.seal();
+    try reopened.seal();
 
     // These are lookups in the completed pool. A lost type or format index
     // tries to add either interpolation again, which the seal refuses.
@@ -15135,6 +15145,48 @@ fn exerciseScopedCapabilityRestore(gpa: std.mem.Allocator) !void {
     defer typing.contextual_constraints = .{};
     try testing.expectEqual(Capability.affine, typing.capabilityOfWithin(owner, box));
     try testing.expectEqual(Capability.linear, typing.capabilityOfWithin(owner, pair));
+}
+
+test "a reopened pool sealed after a rebuild answers every scoped question it was handed" {
+    try testing.checkAllAllocationFailures(testing.allocator, exerciseSealedScopedRestore, .{});
+}
+
+fn exerciseSealedScopedRestore(gpa: std.mem.Allocator) !void {
+    var builder = try Typing.Builder.init(gpa);
+    defer builder.deinit();
+    const owner = DeclId.at(0);
+    const parameter = try builder.addParameter("T", 0, 0, .unrestricted, &.{});
+    const box = try builder.addStruct("Box", .copyable, &.{.{ .name = "value", .ty = parameter }});
+    const pair = try builder.addStruct("Pair", .copyable, &.{.{ .name = "left", .ty = parameter }});
+    const ticket = try builder.addStruct("Ticket", .linear, &.{});
+    const constraints: ContextualConstraints = .{
+        .starts = &.{ 0, 1 },
+        .parents = &.{.none},
+        .capability_scopes = &.{owner},
+        .items = &.{.{ .subject = parameter, .demand = .{ .requirement = .discardable } }},
+    };
+    builder.setContextualConstraints(constraints);
+    try builder.prepareCapabilityWithin(owner, box);
+    try builder.prepareCapabilityWithin(owner, pair);
+    var typing = try builder.finish(.empty);
+    defer typing.deinit(gpa);
+    typing.contextual_constraints = constraints;
+    defer typing.contextual_constraints = .{};
+
+    // Instantiation reopens the pool, may rebuild its capability facts, and
+    // seals it for lowering to read. The rebuild drops both answers; sealing
+    // prepares them again, so the sealed pool's view answers each.
+    var reopened = try Typing.Builder.reopen(gpa, &typing);
+    defer reopened.deinit();
+    try testing.expectEqual(Capability.linear, try reopened.capabilityOf(pair));
+    try reopened.setFieldType(pair, 0, ticket);
+    try testing.expectEqual(Capability.linear, try reopened.capabilityOf(pair));
+    try testing.expect(reopened.scoped_capability_facts.lost.count() != 0);
+    try reopened.seal();
+    try testing.expectEqual(@as(usize, 0), reopened.scoped_capability_facts.lost.count());
+    const view = reopened.view();
+    try testing.expectEqual(Capability.affine, view.capabilityOfWithin(owner, box));
+    try testing.expectEqual(Capability.linear, view.capabilityOfWithin(owner, pair));
 }
 
 test "poison capability remains usable under scoped recovery" {
@@ -15516,7 +15568,7 @@ test "shared type DAG substitution bounds allocation work per query" {
     defer finished.deinit(gpa);
     var reopened = try Typing.Builder.reopen(gpa, &finished);
     defer reopened.deinit();
-    reopened.seal();
+    try reopened.seal();
     try testing.expectEqual(second, try reopened.substitute(shared, owner, &.{.u16}));
     try testing.expectEqual(first, try reopened.substitute(shared, owner, &.{.u8}));
 }

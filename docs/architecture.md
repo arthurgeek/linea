@@ -1611,7 +1611,9 @@ release reaches the closure-release body the supplier above plans. Lowering
 builds both from those keys and the pool's `ClosureEntry` signature, and a call
 through a `mem.Closure` is an ordinary indirect call through its entry.
 Its completed type builder remains sealed and owns the names and layouts it
-created. Emission consumes that builder and finishes it once into the module;
+created. Sealing settles the pool as finishing does, so a scoped capability a
+rebuild dropped during discovery is prepared again before anything reads the
+sealed pool. Emission consumes that builder and finishes it once into the module;
 it neither reopens the pool nor rebuilds its indexes or layout caches.
 
 Reachability walks the expanded active declarations and may therefore select a
