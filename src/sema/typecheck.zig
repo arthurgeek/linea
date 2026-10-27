@@ -32228,13 +32228,7 @@ const Checker = struct {
                 const given = self.builder.callableParams(got);
                 if (wanted.len == given.len) {
                     for (wanted, given) |w, g| {
-                        if (settlement == .matching and
-                            (w.convention != g.convention or
-                                w.stable_address != g.stable_address or
-                                !w.default.eql(g.default)))
-                        {
-                            return true;
-                        }
+                        if (settlement == .matching and !w.samePosition(g)) return true;
                         if (!try self.settlePartInContext(w.ty, g.ty, d, found, clash, settlement, open_context)) return false;
                     }
                 } else if (settlement == .matching) {

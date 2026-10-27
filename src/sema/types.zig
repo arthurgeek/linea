@@ -2195,7 +2195,7 @@ pub const CallableParam = struct {
 
     /// Positional metadata shared by contextual conversion and bound matching.
     /// Types are compared by the caller after any required substitution.
-    fn samePosition(a: CallableParam, b: CallableParam) bool {
+    pub fn samePosition(a: CallableParam, b: CallableParam) bool {
         return a.convention == b.convention and a.stable_address == b.stable_address and
             a.default.eql(b.default);
     }
