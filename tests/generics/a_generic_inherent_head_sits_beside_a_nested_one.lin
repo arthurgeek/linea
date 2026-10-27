@@ -1,0 +1,29 @@
+// `impl[T] Shelf[T]` offers `get` to every shelf, and
+// `impl[T] Shelf[Option[T]]` adds `take` to a shelf of optional items. Member
+// names are unique across both, so a call never has two to choose from.
+struct Shelf[I] {
+    item: I,
+}
+
+impl[T] Shelf[T] {
+    fn get(self: Self) -> T where T: Copyable {
+        copy(self.item)
+    }
+}
+
+impl[T] Shelf[Option[T]] {
+    fn take(sink self: Self) -> Option[T] where carries(self) {
+        let Shelf { item } = self
+        item
+    }
+}
+
+fn main() -> UInt8 {
+    let plain: Shelf[UInt8] = .{ item = 4 }
+    let maybe: Shelf[Option[UInt8]] = .{ item = .Some(6) }
+    let held = maybe.get()
+    match maybe.take() {
+        Some(count) => count + plain.get() + held.unwrap_or(0),
+        None => 0,
+    }
+}

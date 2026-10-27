@@ -1152,17 +1152,17 @@ pub const Ast = struct {
 
     /// The source text a type was written in, its arguments included.
     pub fn writtenText(self: *const Ast, ref: node.TypeRef) []const u8 {
-        return self.writtenWhole(ref).slice(self.partOf(ref.at).source);
+        return self.writtenWholeSpan(ref).slice(self.partOf(ref.at).source);
     }
 
     /// `writtenSpan`, reaching past a named type's arguments to the bracket
     /// that closes them. Bound: the written type's own tokens.
-    fn writtenWhole(self: *const Ast, ref: node.TypeRef) Span {
+    pub fn writtenWholeSpan(self: *const Ast, ref: node.TypeRef) Span {
         const span = self.writtenSpan(ref);
         if (ref.kind != .named and ref.kind != .selection) return span;
         const args = self.typeArgs(ref.args);
         if (args.len == 0) return span;
-        const last = self.writtenWhole(args[args.len - 1]);
+        const last = self.writtenWholeSpan(args[args.len - 1]);
         var at = ref.at.index();
         while (at < self.tokenCount() and self.tokenSpan(TokenId.at(at)).start < last.end) : (at += 1) {}
         while (at < self.tokenCount()) : (at += 1) {

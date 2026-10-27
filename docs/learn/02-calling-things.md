@@ -90,6 +90,85 @@ dot on its first argument; Linea keeps the dot for what the type itself
 offers, so you can tell from a call where to look for its definition. If a
 function belongs with the type, move it into the `impl`.
 
+### Operations for some of a generic type's values
+
+A generic type's `impl` names its type parameters in brackets after `impl`,
+and then writes the type with them. `impl[T] Jar[T]` gives an operation to
+every `Jar`, whatever it holds. The head may also write a parameter inside
+another type: `impl[T] Jar[Option[T]]` gives its operations only to jars
+holding an `Option`, and reads `T` from inside it.
+
+```linea
+import std.io
+
+// A jar on a numbered shelf, holding one item of any type.
+struct Jar[T] {
+    shelf: UInt8,
+    item: T,
+}
+
+// Every jar can say which shelf it sits on.
+impl[T] Jar[T] {
+    fn shelf(self: Self) -> UInt8 {
+        self.shelf
+    }
+}
+
+// Only a jar that may be empty can say whether it is: `T` is read from
+// inside the `Option`.
+impl[T] Jar[Option[T]] {
+    fn is_empty(self: Self) -> Bool {
+        self.item.is_none()
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let flour: Jar[Option[UInt64]] = .{ shelf = 1, item = .Some(500) }
+    let sugar: Jar[Option[UInt64]] = .{ shelf = 2, item = .None }
+    let salt: Jar[UInt64] = .{ shelf = 3, item = 250 }
+    io.println("shelf {flour.shelf()}: empty is {flour.is_empty()}")?
+    io.println("shelf {sugar.shelf()}: empty is {sugar.is_empty()}")?
+    io.println("shelf {salt.shelf()}: {salt.item} grams")?
+    .Ok(0)
+}
+```
+
+```
+shelf 1: empty is false
+shelf 2: empty is true
+shelf 3: 250 grams
+```
+
+`flour` is a `Jar[Option[UInt64]]`, so it has `is_empty` with `T` read as
+`UInt64`, and it has `shelf` too. `salt` is a `Jar[UInt64]`: it has `shelf`,
+and asking whether it is empty is refused, with the head `is_empty` belongs
+to:
+
+<!-- guide: edit 30 io.println("shelf {salt.shelf()}: {salt.item} grams")? -->
+```linea
+    io.println("shelf {salt.shelf()}: empty is {salt.is_empty()}")?
+```
+
+```
+error[T-UnknownOperation]: `Jar[UInt64]` has no operation `is_empty`
+  --> pantry.lin:30:49
+   |
+18 | impl[T] Jar[Option[T]] {
+   |         -------------- `is_empty` is declared for `Jar[Option[T]]`
+30 |     io.println("shelf {salt.shelf()}: empty is {salt.is_empty()}")?
+   |                                                 ^^^^ this is `Jar[UInt64]`, which `Jar[Option[T]]` does not match
+```
+
+The head writes each of its parameters exactly once, at any depth: inside
+another type's brackets, a tuple, an array's element type or a function type.
+A call reads each parameter from the one place the head writes it, so
+`impl[T] Pair[T, T]` is refused with `` `T` is written more than once in
+this implementation's head ``. An operation's name is still declared once per
+type across all of its `impl` blocks, so `Jar` cannot have one `shelf` for
+every jar and another for jars of options. In Rust the same block is
+`impl<T> Jar<Option<T>> { ... }`; Linea leaves out only Rust's repeated
+parameters such as `impl<T> Pair<T, T>`.
+
 ## `&` marks a receiver the call will change
 
 `warm_up` takes `inout self`: it changes the thermostat. When you call it, you

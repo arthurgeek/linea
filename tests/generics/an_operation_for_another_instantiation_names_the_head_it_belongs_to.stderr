@@ -1,0 +1,7 @@
+error[T-UnknownOperation]: `Box[Bool]` has no operation `get`
+  --> tests/generics/an_operation_for_another_instantiation_names_the_head_it_belongs_to.lin:17:5
+   |
+9  | impl Box[UInt8] {
+   |      ---------- `get` is declared for `Box[UInt8]`
+17 |     flag.get()
+   |     ^^^^ this is `Box[Bool]`, which `Box[UInt8]` does not match

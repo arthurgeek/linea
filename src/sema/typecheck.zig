@@ -3274,11 +3274,30 @@ pub const Reach = struct {
         const bindings = try gpa.alloc(TypeId, row.parameters);
         defer gpa.free(bindings);
         @memset(bindings, .poison);
-        // A block is written for a declared type, never for an observation
-        // of one, so its head is held to what the observations reach.
-        const observed = self.typing.observedReceiver(held).receiver;
-        if (!types_mod.ImplIndex.bindKey(self.typing, observed, row.ty, row.decl.index(), bindings)) return false;
+        if (!self.headMatches(row, held, bindings)) return false;
         return self.firstParameterTakes(d, row.decl.index(), bindings, held);
+    }
+
+    /// Whether the head of the block declaring `d` refuses the instantiation
+    /// `held`'s observations reach, so `impl[T, N] Chan[Send[T, N]]` declares
+    /// nothing for a `Chan[Recv[UInt64, End]]`.
+    pub fn headRefusing(self: Reach, gpa: std.mem.Allocator, held: TypeId, d: node.DeclId) !bool {
+        const at = implementationRowIndex(self.impls, self.res.implEnclosing(d)) orelse return false;
+        const row = self.impls[at];
+        const bindings = try gpa.alloc(TypeId, row.parameters);
+        defer gpa.free(bindings);
+        @memset(bindings, .poison);
+        return !self.headMatches(row, held, bindings);
+    }
+
+    /// The one structural match of a block's head against a receiver: each
+    /// parameter the head writes, at whatever depth, is read from the one
+    /// position it stands in. A block is written for a declared type, never
+    /// for an observation of one, so its head is held to what the
+    /// observations reach.
+    fn headMatches(self: Reach, row: types_mod.Implementation, held: TypeId, bindings: []TypeId) bool {
+        const observed = self.typing.observedReceiver(held).receiver;
+        return types_mod.ImplIndex.bindKey(self.typing, observed, row.ty, row.decl.index(), bindings);
     }
 
     /// Whether the first parameter of `d` takes `held` as a call would pass
@@ -24821,8 +24840,40 @@ const Checker = struct {
             .callable => |callable| callable,
             else => return self.record(id, .poison),
         };
+        const receiver = self.ast.withoutGroups(self.ast.unaryOperand(id));
+        // A block whose head the receiver does not match declares nothing for
+        // it: the member exists for another instantiation, which the report
+        // names beside the receiver's.
+        const pool = try self.builder.capabilityView();
+        if (try self.reaching(&pool).headRefusing(self.gpa, passed, dropped.sig)) {
+            const name = self.ast.tokenText(written);
+            const impl = self.res.implEnclosing(dropped.sig);
+            // As written, which says what the head reads and nothing the
+            // checker added to it.
+            const head_name = self.ast.writtenText(self.ast.declHead(impl));
+            const labels = try self.sink.arena.alloc(Label, 2);
+            labels[0] = .{
+                .file = self.ast.fileOf(self.ast.declName(impl)),
+                .span = self.ast.writtenWholeSpan(self.ast.declHead(impl)),
+                .message = try std.fmt.allocPrint(self.sink.arena, "`{s}` is declared for `{s}`", .{ name, head_name }),
+                .style = .secondary,
+            };
+            labels[1] = .{
+                .file = self.ast.fileOfExpr(receiver),
+                .span = self.ast.exprSpan(receiver),
+                .message = try std.fmt.allocPrint(self.sink.arena, "this is `{s}`, which `{s}` does not match", .{ try self.typeName(passed), head_name }),
+                .style = .primary,
+            };
+            try self.sink.add(.{
+                .severity = .err,
+                .code = .t_unknown_operation,
+                .message = try std.fmt.allocPrint(self.sink.arena, "`{s}` has no operation `{s}`", .{ try self.typeName(passed), name }),
+                .labels = labels,
+            });
+            return self.record(id, .poison);
+        }
         const first = self.builder.callableParams(callable)[0];
-        _ = self.reportMismatch(self.ast.withoutGroups(self.ast.unaryOperand(id)), passed, .{
+        _ = self.reportMismatch(receiver, passed, .{
             .ty = first.ty,
             .at = .{ .file = self.ast.fileOf(params[0].name), .span = self.ast.tokenSpan(params[0].name) },
             .reason = .parameter,
@@ -33229,18 +33280,16 @@ const Checker = struct {
                     .callable => |signature| signature,
                     else => return true,
                 };
-                if ((settlement == .matching and !types_mod.sameContracts(want.contracts, got.contracts))) return true;
+                // Contracts take no part in settling. `fn(a: A) -> R` states
+                // `carries(a)`, which a function value over scalars has no
+                // reason to state, so the value that settles `A` differs from
+                // it there. Whether the two contracts agree is asked by the
+                // conversion once the parameters are settled.
                 const wanted = self.builder.callableParams(want);
                 const given = self.builder.callableParams(got);
                 if (wanted.len == given.len) {
                     for (wanted, given) |w, g| {
-                        if (settlement == .matching and
-                            (w.convention != g.convention or
-                                w.stable_address != g.stable_address or
-                                !w.default.eql(g.default)))
-                        {
-                            return true;
-                        }
+                        if (settlement == .matching and !w.samePosition(g)) return true;
                         if (!try self.settlePartInContext(w.ty, g.ty, d, found, clash, settlement, open_context)) return false;
                     }
                 } else if (settlement == .matching) {

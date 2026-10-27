@@ -125,7 +125,8 @@ true of a different implementation.
 | [0079](0079-a-projection-is-one-structural-step.md) | A projection is one structural step for the termination measure | Accepted |
 | [0080](0080-a-dotted-type-name-resolves-through-its-module.md) | A dotted type name resolves through its module | Accepted; trait-slot clause superseded by 0110 |
 | [0081](0081-an-implementation-is-generic-over-its-head.md) | An implementation is generic over its head, and coherence keys on the constructor | Accepted; extended by 0087, 0093, 0139 and 0213; head restriction superseded by 0148; partially superseded by 0142 and 0182 |
-| [0182](0182-a-types-own-implementation-may-fix-its-type-arguments.md) | A type's own implementation may fix its type arguments | Accepted; partially supersedes 0081 |
+| [0182](0182-a-types-own-implementation-may-fix-its-type-arguments.md) | A type's own implementation may fix its type arguments | Accepted; partially supersedes 0081; head clause superseded by 0252 |
+| [0252](0252-a-types-own-implementation-may-write-a-parameter-inside-an-argument.md) | A type's own implementation may write a parameter inside an argument | Accepted; supersedes the head clause of 0182 |
 | [0082](0082-a-comparison-is-a-trait-call.md) | A comparison is a call on the trait it names | Accepted; extended by 0112 and 0138 |
 | [0083](0083-an-arrays-length-is-part-of-its-type-everywhere-it-is-written.md) | An array's length is part of its type, everywhere it is written | Accepted; extends 0061 and 0020; extended by 0149, 0172 and 0198 |
 | [0084](0084-test-is-a-reserved-word-not-a-contextual-one.md) | `test` is a reserved word, not a contextual one | Accepted |
@@ -156,7 +157,7 @@ true of a different implementation.
 | [0124](0124-copyability-and-settlement-are-independent-capabilities.md) | Copyability and settlement are independent capabilities | Accepted; supersedes classification in 0034, 0046, and 0051; extends 0103; refines 0123; extended by 0125, 0131, 0193 and 0221 |
 | [0125](0125-scalar-value-positions-take-snapshots.md) | Scalar value positions take snapshots | Accepted; supersedes universal explicit-copy clause of 0034; extends 0124 |
 | [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) | `Owned` admits a type that can carry no borrow | Accepted; extends 0123 and 0124 |
-| [0250](0250-tasks-are-structured-through-linear-sessions.md) | Tasks are structured through linear sessions | Proposed; only `mem.Carried` is built, and the rest lands in the stages it lists |
+| [0250](0250-tasks-are-structured-through-linear-sessions.md) | Tasks are structured through linear sessions | Proposed; stages 0 to 3 are built (`mem.Carried`, `Shareable`, [T-Dual], postfix session operations through 0252), and the rest lands in the stages it lists |
 | [0126](0126-observations-project-referent-places-transparently.md) | Observations project referent places transparently | Accepted; supersedes projection syntax of 0123; extends 0088 |
 | [0127](0127-constants-retain-distinct-values-and-infer-their-types.md) | Constants infer initializer types and retain distinct integer, boolean and text values | Accepted; extends 0020 and 0059, supersedes the representation decision in 0078; extended by 0140, 0146 and 0157 |
 | [0140](0140-aggregate-constants-retain-checked-construction-plans.md) | Aggregate constants retain shared data and checked construction plans | Accepted; extends 0020, 0059 and 0127; extended by 0157, 0183 and 0227; materialization clause superseded by 0178; unit-expression clause superseded by 0188 |

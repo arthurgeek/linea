@@ -1077,7 +1077,7 @@ const Parser = struct {
             };
             if (!parameter_head) {
                 if (trait_ref.name == .none)
-                    try self.refuseAnInherentHeadThatLeavesAParameterOpen(head, type_params)
+                    try self.refuseAnInherentHeadThatRepeatsAParameter(head, type_params)
                 else
                     _ = try self.refuseAHeadThatIsNotItsParameters(.t_impl, head, type_params, true);
             }
@@ -1371,48 +1371,72 @@ const Parser = struct {
         try testing.expect((try codesOf(gpa, "impl fn(a: UInt8) -> UInt8 {}\nfn main() -> UInt8 { 0 }\n")).len != 0);
     }
 
-    /// A type's own implementation applies its constructor to types: each
-    /// declared parameter stands alone in exactly one position, and every
-    /// other position is a type naming no parameter, as `impl[P] Router[P, ()]`
-    /// is. Its members belong to the instantiations the head matches, and a
-    /// member name is declared once per constructor, so no two members compete
-    /// for one call; a trait's coherence, which keys on the constructor, is
-    /// what keeps a trait implementation's head to its bare parameters.
+    /// A type's own implementation writes each declared parameter at most
+    /// once in its head, at any depth: `impl[T, N] Chan[Send[T, N]]` is
+    /// admitted, `impl[T] Pair[T, T]` and `impl[T] Pair[Option[T], T]` are
+    /// not. A receiver then settles each parameter by reading the one
+    /// position it stands in, with no second position to agree with. Its
+    /// members belong to the instantiations the head matches, and a member
+    /// name is declared once per constructor, so no two members compete for
+    /// one call; a trait's coherence, which keys on the constructor, is what
+    /// keeps a trait implementation's head to its bare parameters. A
+    /// parameter the head never writes is left to the checker, which refuses
+    /// every implementation parameter its key cannot recover.
     ///
     /// A parameter is found where a name stands in a type's position, the
     /// place a bare name resolves to the parameter it spells; the member half
     /// of `mem.SystemAllocator` is not such a place. **Bound:** the head's
     /// written types once per declared parameter.
-    fn refuseAnInherentHeadThatLeavesAParameterOpen(
+    fn refuseAnInherentHeadThatRepeatsAParameter(
         self: *Parser,
         head: node.TypeRef,
         type_params: node.TypeParamRange,
     ) !void {
-        const declared = self.builder.typeParams(type_params);
-        if (declared.len == 0) return;
-
-        const applied = self.builder.typeArgs(head.args);
-        var valid = applied.len != 0;
-        for (declared) |parameter| {
-            if (!valid) break;
+        for (self.builder.typeParams(type_params)) |parameter| {
             const spelling = self.cursor.textOf(parameter.name);
-            var alone: usize = 0;
-            var named: usize = 0;
-            for (applied) |argument| {
-                if (argument.kind == .named and argument.args.len() == 0 and argument.name != .none and
-                    std.mem.eql(u8, self.cursor.textOf(argument.name), spelling)) alone += 1;
-                named += self.typeNames(argument, spelling);
-            }
-            valid = alone == 1 and named == 1;
+            var seen: usize = 0;
+            const again = self.typeNameAfter(head, spelling, &seen, 1) orelse continue;
+            try self.reportAt(
+                .t_impl,
+                again,
+                try std.fmt.allocPrint(self.sink.arena, "`{s}` is written more than once in this implementation's head", .{spelling}),
+                "a receiver settles each parameter from the one position it stands in; write it once",
+            );
         }
-        if (valid) return;
+    }
 
-        try self.reportAt(
-            .t_impl,
-            head.at,
-            "a type's own implementation applies its constructor to each of its parameters once",
-            "write each parameter alone as one argument, and fix the other arguments to types that name no parameter",
-        );
+    /// The token where `spelling` stands in a type's position for the time
+    /// after the first `skip`, counted in written order across `ref`'s
+    /// arguments. `seen` carries the count.
+    fn typeNameAfter(self: *Parser, ref: node.TypeRef, spelling: []const u8, seen: *usize, skip: usize) ?TokenId {
+        for (self.builder.typeArgs(ref.args)) |argument| {
+            if (self.typeNameIn(argument, spelling, seen, skip)) |at| return at;
+        }
+        return null;
+    }
+
+    /// The same, counting `ref` itself first: as a name, the base of a
+    /// selection, or a callable's parameter or result type, and then its
+    /// arguments.
+    fn typeNameIn(self: *Parser, ref: node.TypeRef, spelling: []const u8, seen: *usize, skip: usize) ?TokenId {
+        switch (ref.kind) {
+            .named => if (ref.name != .none and std.mem.eql(u8, self.cursor.textOf(ref.name), spelling)) {
+                if (seen.* == skip) return ref.name;
+                seen.* += 1;
+            },
+            .selection => if (ref.base != .none) {
+                if (self.typeNameIn(self.builder.type_refs.items[ref.base.index()], spelling, seen, skip)) |at| return at;
+            },
+            .callable => if (ref.callable != .none) {
+                const signature = self.builder.callable_types.items[ref.callable.index()];
+                for (self.builder.params.items[signature.params.start..signature.params.end]) |param| {
+                    if (self.typeNameIn(param.written, spelling, seen, skip)) |at| return at;
+                }
+                if (self.typeNameIn(signature.result, spelling, seen, skip)) |at| return at;
+            },
+            else => {},
+        }
+        return self.typeNameAfter(ref, spelling, seen, skip);
     }
 
     /// How many times `spelling` stands in a type's position inside `ref`: as
@@ -1420,23 +1444,7 @@ const Parser = struct {
     /// or result type.
     fn typeNames(self: *Parser, ref: node.TypeRef, spelling: []const u8) usize {
         var count: usize = 0;
-        switch (ref.kind) {
-            .named => if (ref.name != .none and std.mem.eql(u8, self.cursor.textOf(ref.name), spelling)) {
-                count += 1;
-            },
-            .selection => if (ref.base != .none) {
-                count += self.typeNames(self.builder.type_refs.items[ref.base.index()], spelling);
-            },
-            .callable => if (ref.callable != .none) {
-                const signature = self.builder.callable_types.items[ref.callable.index()];
-                for (self.builder.params.items[signature.params.start..signature.params.end]) |param| {
-                    count += self.typeNames(param.written, spelling);
-                }
-                count += self.typeNames(signature.result, spelling);
-            },
-            else => {},
-        }
-        for (self.builder.typeArgs(ref.args)) |argument| count += self.typeNames(argument, spelling);
+        _ = self.typeNameIn(ref, spelling, &count, std.math.maxInt(usize));
         return count;
     }
 

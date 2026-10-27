@@ -1,0 +1,21 @@
+// A type's own implementation may write a parameter inside an argument.
+// `impl[T] Shelf[Option[T]]` belongs to every shelf holding an optional
+// item, and a receiver settles `T` from inside its `Option`.
+struct Shelf[I] {
+    item: I,
+}
+
+impl[T] Shelf[Option[T]] {
+    fn take(sink self: Self) -> Option[T] where carries(self) {
+        let Shelf { item } = self
+        item
+    }
+}
+
+fn main() -> UInt8 {
+    let shelf: Shelf[Option[UInt8]] = .{ item = .Some(3) }
+    match shelf.take() {
+        Some(count) => count,
+        None => 0,
+    }
+}

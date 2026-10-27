@@ -1,0 +1,30 @@
+// A receiver settles each parameter of a type's own implementation from the
+// one position the head writes it in, so a parameter written twice, at any
+// depth, is refused at its second position.
+struct Pair[A, B] {
+    first: A,
+    second: B,
+}
+
+impl[T] Pair[T, T] {
+    fn _same() -> UInt8 {
+        1
+    }
+}
+
+impl[T] Pair[Option[T], T] {
+    fn _wrapped() -> UInt8 {
+        2
+    }
+}
+
+impl[T] Pair[(T, UInt8), Option[T]] {
+    fn _nested() -> UInt8 {
+        3
+    }
+}
+
+fn main() -> UInt8 {
+    let pair: Pair[UInt8, UInt8] = .{ first = 0, second = 1 }
+    pair.first
+}

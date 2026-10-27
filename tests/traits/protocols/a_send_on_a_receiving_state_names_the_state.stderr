@@ -1,0 +1,7 @@
+error[T-UnknownOperation]: `Chan[Recv[UInt64, End]]` has no operation `send`
+  --> tests/traits/protocols/a_send_on_a_receiving_state_names_the_state.lin:31:11
+   |
+14 | impl[T: Discardable, N: Protocol] Chan[Send[T, N]] {
+   |                                   ---------------- `send` is declared for `Chan[Send[T, N]]`
+31 |     UInt8(c.send(UInt64(3)).close())
+   |           ^ this is `Chan[Recv[UInt64, End]]`, which `Chan[Send[T, N]]` does not match

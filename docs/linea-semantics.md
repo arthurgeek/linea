@@ -1482,7 +1482,11 @@ import does, it names the module enclosing a nested library module, as `std.io`
 encloses `std.io.core` and passes its public traits on, and otherwise the
 declaring module, together with the `import` that reaches it. Which module that
 is depends only on where the trait is declared. Where a trait in scope
-declares it only for other receivers, the report names that trait. A call on a
+declares it only for other receivers, the report names that trait. Where the
+type's own implementation declaring the name has a head the receiver does not
+match, `c.send(v)` on a `Chan[Recv[UInt64, End]]` where `send` is declared in
+`impl[T, N: Protocol] Chan[Send[T, N]]`, the report names the receiver's type
+and the head as written. A call on a
 sealed type reaches no part of its representation, so it is refused under this
 rule and never under [M-Opaque].
 
@@ -2771,16 +2775,35 @@ parameters such as `Pair[T, T]`, and reordered parameters such as `Pair[U, T]`
 for binders `T`, `U` are refused. Inherent implementations and explicitly
 marked defaults retain their own head rules.
 
-A type's own implementation applies its constructor to types. Each declared
-parameter stands alone as exactly one argument, and every other argument is a
-type naming no declared parameter: `impl[P] Router[(), P]` is admitted, and its
-members belong to the instantiations whose second argument is `()`. A receiver
-settles each parameter from the position it stands in, and a receiver the head
-does not match is not one of its instantiations. A parameter written twice,
-written inside another argument, or absent from the head is [T-Impl]. Member
-names stay unique per constructor ([N-Duplicate]), so two inherent
-implementations of one type never offer two members for one call
-([ADR 0182](adr/0182-a-types-own-implementation-may-fix-its-type-arguments.md)).
+A type's own implementation writes each declared parameter exactly once in
+its head's arguments, at any depth: as a whole argument, an argument of a
+named type, a tuple's component, an array's element, an observation's
+referent, or a callable type's parameter or result. Every other position holds
+a type naming no declared parameter, and an array's length names none.
+`impl[P] Router[(), P]` is admitted, and its members belong to the
+instantiations whose first argument is `()`; so is
+`impl[T, N: Protocol, H] Chan[Send[T, N], H]`, whose members belong to every
+endpoint whose protocol argument is a `Send`. "Once" counts every position the
+parameter's name stands in as a type, the base of a selection such as `T.Dual`
+included, and not its bounds or the block's `where` clause. A parameter
+written a second time is [T-Impl] at the second position; one the head never
+writes, or writes only as the base of a selection, cannot be recovered from
+the key and is [T-Impl] as for any implementation.
+
+A receiver matches a head by one structural walk: a nominal type matches the
+same declaration and then each argument, a tuple, an array of the same length
+and an observation match their own form and then their parts, a callable
+matches the same invocation and the same convention at each parameter and
+then each parameter's type and its result, and a declared parameter matches
+whatever stands at its one position and is settled to it. Nothing is unified,
+since no parameter has a second position. A receiver the head does not match,
+through any observation of it, is not one of its instantiations, and a postfix
+call that reaches a member only through such a block is [T-UnknownOperation].
+Member names stay unique per constructor ([N-Duplicate]), whatever the heads,
+so two inherent implementations of one type never offer two members for one
+call
+([ADR 0182](adr/0182-a-types-own-implementation-may-fix-its-type-arguments.md),
+[ADR 0252](adr/0252-a-types-own-implementation-may-write-a-parameter-inside-an-argument.md)).
 
 An ordinary trait implementation may instead use a declared parameter as its
 entire head. `impl[S, D: Build[S]] Adapt[D] for S` recovers `S` from the

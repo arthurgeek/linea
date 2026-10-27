@@ -1,6 +1,6 @@
-// Each parameter of a type's own implementation stands alone in one position
-// of its head, so a receiver settles it by that position. A parameter written
-// twice, written inside another type, or not written at all is refused.
+// Each parameter of a type's own implementation stands in exactly one
+// position of its head, so a receiver settles it by that position. A
+// parameter written twice, or not written at all, is refused.
 struct Pair[A, B] {
     first: A,
     second: B,
@@ -9,12 +9,6 @@ struct Pair[A, B] {
 impl[T] Pair[T, T] {
     fn _same() -> UInt8 {
         1
-    }
-}
-
-impl[T] Pair[Option[T], UInt8] {
-    fn _wrapped() -> UInt8 {
-        2
     }
 }
 

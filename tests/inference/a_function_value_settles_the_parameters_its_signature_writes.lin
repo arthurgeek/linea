@@ -1,0 +1,21 @@
+// A function value settles the type parameters a callable parameter writes
+// from its own signature, so `call(halve, 9)` reads `A` as `UInt8` from
+// `halve` before the literal `9` takes a type. A function value held inside
+// another type settles them the same way.
+fn call[A, R](f: fn(a: A) -> R, a: A) -> R {
+    f(a)
+}
+
+fn call_first[A, R](fs: [fn(a: A) -> R; 1], a: A) -> R {
+    (fs[0])(a)
+}
+
+fn halve(a: UInt8) -> UInt8 {
+    a / 2
+}
+
+fn main() -> UInt8 {
+    let f: fn(a: UInt8) -> UInt8 = halve
+    let fs: [fn(a: UInt8) -> UInt8; 1] = [halve]
+    call(f, 9) + call_first(fs, 6)
+}

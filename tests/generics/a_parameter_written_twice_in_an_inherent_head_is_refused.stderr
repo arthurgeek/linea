@@ -1,0 +1,15 @@
+error[T-Impl]: `T` is written more than once in this implementation's head
+ --> tests/generics/a_parameter_written_twice_in_an_inherent_head_is_refused.lin:9:17
+  |
+9 | impl[T] Pair[T, T] {
+  |                 ^ a receiver settles each parameter from the one position it stands in; write it once
+error[T-Impl]: `T` is written more than once in this implementation's head
+  --> tests/generics/a_parameter_written_twice_in_an_inherent_head_is_refused.lin:15:25
+   |
+15 | impl[T] Pair[Option[T], T] {
+   |                         ^ a receiver settles each parameter from the one position it stands in; write it once
+error[T-Impl]: `T` is written more than once in this implementation's head
+  --> tests/generics/a_parameter_written_twice_in_an_inherent_head_is_refused.lin:21:33
+   |
+21 | impl[T] Pair[(T, UInt8), Option[T]] {
+   |                                 ^ a receiver settles each parameter from the one position it stands in; write it once

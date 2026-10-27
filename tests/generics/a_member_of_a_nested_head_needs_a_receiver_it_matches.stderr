@@ -1,0 +1,7 @@
+error[T-UnknownOperation]: `Shelf[UInt8]` has no operation `take`
+  --> tests/generics/a_member_of_a_nested_head_needs_a_receiver_it_matches.lin:16:5
+   |
+7  | impl[T] Shelf[Option[T]] {
+   |         ---------------- `take` is declared for `Shelf[Option[T]]`
+16 |     shelf.take().unwrap_or(0)
+   |     ^^^^^ this is `Shelf[UInt8]`, which `Shelf[Option[T]]` does not match
