@@ -1,0 +1,40 @@
+import std.session
+
+use session.Choose
+use session.End
+use session.Offer
+use session.Recv
+use session.Send
+
+// A worker is offered another word to count, or asked for its total.
+struct Worker {}
+
+// The boss chooses which of the two happens.
+struct Boss {}
+
+impl Protocol for Worker {
+    type Dual = Boss
+    type Step = Offer[Recv[Str, Worker], Send[UInt64, End]]
+}
+
+impl Protocol for Boss {
+    type Dual = Worker
+    type Step = Choose[Send[Str, Boss], Recv[UInt64, End]]
+}
+
+struct Tag[phantom P: Protocol] {
+    at: UInt8,
+}
+
+// Accepts only the boss's next step.
+fn boss_step(tag: Tag[Choose[Send[Str, Boss], Recv[UInt64, End]]]) -> UInt8 {
+    tag.at
+}
+
+fn main() -> UInt8 {
+    // The dual of the worker's step is what the boss does next.
+    let step: Tag[Worker.Step.Dual] = .{ at = 2 }
+    let back: Tag[Worker.Dual.Dual] = .{ at = 1 }
+    let worker: Tag[Worker] = back
+    boss_step(step) + worker.at
+}

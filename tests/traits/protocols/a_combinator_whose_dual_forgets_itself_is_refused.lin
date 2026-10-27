@@ -1,0 +1,17 @@
+import std.session
+
+use session.End
+
+// `Quiet[N]` claims to be `N` with nothing changed, so its dual's dual is `N`
+// rather than `Quiet[N]`.
+struct Quiet[phantom N: Protocol] {}
+
+impl[N: Protocol] Protocol for Quiet[N] {
+    type Dual = N.Dual
+    type Step = N.Step
+}
+
+fn main() -> UInt8 {
+    let _quiet: Quiet[End] = .{}
+    0
+}

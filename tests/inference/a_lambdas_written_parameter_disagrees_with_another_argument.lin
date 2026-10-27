@@ -1,0 +1,35 @@
+import std.session
+
+use session.End
+use session.Recv
+use session.Send
+
+// An endpoint whose next step is `P`.
+struct Chan[phantom P: Protocol] {
+    id: UInt64,
+}
+
+struct Worker {}
+
+struct Boss {}
+
+impl Protocol for Worker {
+    type Dual = Boss
+    type Step = Recv[UInt64, Send[UInt64, End]]
+}
+
+impl Protocol for Boss {
+    type Dual = Worker
+    type Step = Send[UInt64, Recv[UInt64, End]]
+}
+
+// Hands `endpoint` to `body`.
+fn serve[P: Protocol, F: sink fn(sink me: Chan[P]) -> UInt64](sink endpoint: Chan[P], sink body: F) -> UInt64 {
+    body(endpoint)
+}
+
+fn main() -> UInt8 {
+    let boss: Chan[Boss] = .{ id = 1 }
+    // `boss` settles `P` as `Boss`, and the lambda takes a worker's end.
+    UInt8(serve(boss, sink [] |sink me: Chan[Worker]| me.id))
+}

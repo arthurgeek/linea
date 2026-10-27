@@ -2391,8 +2391,9 @@ pub const TypeSelection = struct {
     /// scope an editor's lookup through `base` is answered in.
     owner: DeclId = .none,
     /// Whether the member was settled to the definition an implementation
-    /// headed by a bare parameter gives it, `I.Iter` as `I`, rather than to a
-    /// stand-in awaiting an instantiation.
+    /// headed by a bare parameter gives it, `I.Iter` as `I`, or to the `P`
+    /// that `P.Dual.Dual` is for every protocol, rather than to a stand-in
+    /// awaiting an instantiation.
     head_definition: bool = false,
 };
 
@@ -7990,6 +7991,9 @@ pub const Typing = struct {
         /// `mem.Carried`: a value of an instance carries what its argument
         /// may carry, though it holds no field.
         certified_carried: DeclId = .none,
+        /// The `Dual` that `session.Protocol` declares, read by
+        /// `settledAtWithin` to answer `P.Dual.Dual` with `P`.
+        certified_protocol_dual: DeclId = .none,
         certified_foreign_views: [3]DeclId = .{ .none, .none, .none },
         /// `mem.ClosureEntry`: its instance at a callable type is the entry
         /// signature an erased closure is called through.
@@ -10207,7 +10211,7 @@ pub const Typing = struct {
         pub fn view(self: *const Builder) Typing {
             return .{
                 .constant_pool = self.constant_pool.*,
-                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .carried = self.certified_carried, .closure_entry_type = self.certified_closure_entry, .foreign_views = self.certified_foreign_views },
+                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .closure_entry_type = self.certified_closure_entry, .foreign_views = self.certified_foreign_views },
                 .tuple_decls = self.tuple_decls,
                 .implementation_selections = self.implementation_selections,
                 .closure_release = self.closure_release,
@@ -10890,9 +10894,10 @@ pub const Typing = struct {
         /// What `settledAtWithin` read a member as, and which answer it gave.
         pub const SettledMember = struct {
             ty: TypeId,
-            /// Whether the key still held a parameter and the implementation
-            /// headed by a bare parameter answered it with its own
-            /// definition, rather than a stand-in awaiting an instantiation.
+            /// Whether the key still held a parameter and was answered with
+            /// a definition rather than a stand-in awaiting an instantiation:
+            /// the one an implementation headed by a bare parameter gives,
+            /// or `P` for `P.Dual.Dual`.
             head_definition: bool = false,
         };
 
@@ -10911,6 +10916,7 @@ pub const Typing = struct {
             named: []const u8,
         ) std.mem.Allocator.Error!SettledMember {
             if (self.awaitsTypes(held, args)) {
+                if (self.dualOfDual(held, member)) |protocol| return .{ .ty = protocol, .head_definition = true };
                 if (try self.settledThroughParameterHead(owner, trait, args, held, member)) |settled| return .{ .ty = settled, .head_definition = settled != .poison };
                 return .{ .ty = try self.addSettledStandin(trait, args, held, member, named) };
             }
@@ -10922,6 +10928,22 @@ pub const Typing = struct {
                 return .{ .ty = self.get(held).array.element };
             }
             return .{ .ty = try self.settledBy(row, member, choice.impl_args) orelse .poison };
+        }
+
+        /// `P`, where `held` is the stand-in `P.Dual` and `member` is
+        /// `session.Protocol`'s `Dual`, and null for every other projection.
+        /// [T-Dual] holds every implementation of `Protocol` to
+        /// `X.Dual.Dual = X`, so whatever type settles `P`, `P.Dual.Dual`
+        /// settles to it. A concrete key reaches the implementation and needs
+        /// no answer here; only a key still awaiting a type would otherwise
+        /// become a stand-in that a generic body cannot use as `P`.
+        ///
+        /// **Bound:** one table read for `held`.
+        fn dualOfDual(self: *const Builder, held: TypeId, member: DeclId) ?TypeId {
+            if (member == .none or member != self.certified_protocol_dual) return null;
+            const inner = self.standinOf(held) orelse return null;
+            if (inner.member != member) return null;
+            return inner.held;
         }
 
         /// What `member` settles to for a key still holding a type parameter,
@@ -11754,6 +11776,7 @@ pub const Typing = struct {
             b.certified_buffer = t.raw_accesses.buffer;
             b.certified_slice = t.raw_accesses.slice;
             b.certified_carried = t.raw_accesses.carried;
+            b.certified_protocol_dual = t.raw_accesses.protocol_dual;
             b.certified_foreign_views = t.raw_accesses.foreign_views;
             b.certified_closure_entry = t.raw_accesses.closure_entry_type;
             b.tuple_decls = t.tuple_decls;

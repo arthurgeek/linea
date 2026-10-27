@@ -503,6 +503,142 @@ error[N-Unused]: `Of` is never used
 **What you can do now:** tag a shared shape with a `phantom` parameter when
 two uses of it must never mix.
 
+### Protocols: tags that name each other
+
+A tag can say more than which kind of record a value belongs to. It can say
+what one side of a conversation does next. A **protocol** is a type that
+implements the prelude's `Protocol` trait, which declares two types:
+`Step`, what this side does next, and `Dual`, what the other side does at the
+same moment. `std.session` supplies the steps a protocol is built from:
+`Send[T, N]` sends a `T` and continues as `N`, `Recv[T, N]` receives one,
+`Choose[L, R]` picks one of two continuations, `Offer[L, R]` follows the one
+the other side picks, and `End` is finished. One side's send is the other's
+receive, and one side's choice is the other's offer, so each step's `Dual` is
+its mirror image.
+
+A protocol that goes on for as long as the two sides like is a named type
+that names its partner as its dual:
+
+```linea
+import std.io
+import std.session
+
+use session.Choose
+use session.End
+use session.Offer
+use session.Recv
+use session.Send
+
+// A worker is offered another word to count, or asked for its total.
+struct Worker {}
+
+// The boss decides which of the two happens next.
+struct Boss {}
+
+impl Protocol for Worker {
+    type Dual = Boss
+    type Step = Offer[Recv[Str, Worker], Send[UInt64, End]]
+}
+
+impl Protocol for Boss {
+    type Dual = Worker
+    type Step = Choose[Send[Str, Boss], Recv[UInt64, End]]
+}
+
+// A desk where one side of the conversation sits, tagged with what that side
+// does next.
+@copyable
+struct Desk[phantom P: Protocol] {
+    number: UInt64,
+}
+
+// Only the boss's side is seated here.
+fn seat_boss(desk: Desk[Choose[Send[Str, Boss], Recv[UInt64, End]]]) -> Result[(), io.IoError] {
+    io.println("desk {desk.number} chooses what the worker does next")
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    // The worker's partner does the dual of the worker's step.
+    let partner: Desk[Worker.Step.Dual] = .{ number = 7 }
+    seat_boss(partner)?
+    .Ok(0)
+}
+```
+
+```
+desk 7 chooses what the worker does next
+```
+
+`Worker.Step.Dual` is read one step at a time: the dual of an offer is a
+choice, the dual of receiving a `Str` is sending one, and the dual of
+`Worker` is `Boss`, the type `Worker` names. It is never unfolded further, so
+two protocols may name each other forever.
+
+The compiler checks every implementation of `Protocol` against two equations,
+the rule `[T-Dual]`: the dual of the dual is the protocol itself, and the
+dual's next step is the dual of the protocol's next step. Here `Boss.Dual` is
+`Worker`, and `Boss.Step` is exactly `Worker.Step.Dual`. If the boss sent a
+number where the worker receives a word, the two sides would disagree about
+what travels between them, and the pair is refused where it is declared:
+
+<!-- guide: edit 23 type Step = Choose[Send[Str, Boss], Recv[UInt64, End]] -->
+```linea
+    type Step = Choose[Send[UInt64, Boss], Recv[UInt64, End]]
+```
+
+```
+error[T-Dual]: `Worker` and its dual `Boss` disagree at their next step: one end has `Str` where the other has `UInt64`
+  --> protocol_pair.lin:18:17
+   |
+18 |     type Step = Offer[Recv[Str, Worker], Send[UInt64, End]]
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the dual of `Offer[Recv[Str, Worker], Send[UInt64, End]]` is `Choose[Send[Str, Boss], Recv[UInt64, End]]`
+23 |     type Step = Choose[Send[UInt64, Boss], Recv[UInt64, End]]
+   |                 --------------------------------------------- `Boss.Step` is `Choose[Send[UInt64, Boss], Recv[UInt64, End]]`
+   |
+   = help: write each step as what the other end does at the same moment
+```
+
+A protocol whose dual is defined only through another protocol's dual names no
+protocol at all, and is refused too:
+
+```linea
+struct Ping {}
+
+struct Pong {}
+
+impl Protocol for Ping {
+    type Dual = Pong.Dual
+    type Step = Ping
+}
+
+impl Protocol for Pong {
+    type Dual = Ping.Dual
+    type Step = Pong
+}
+
+fn main() -> UInt8 {
+    let _ping: Ping = .{}
+    let _pong: Pong = .{}
+    0
+}
+```
+
+```
+error[T-Impl]: this associated type is defined through itself: `Ping.Dual` is `Pong.Dual`, `Pong.Dual` is `Ping.Dual`
+ --> ping_pong.lin:6:17
+  |
+6 |     type Dual = Pong.Dual
+  |                 ^^^^^^^^^ define it as a type that does not read back to itself
+```
+
+Because every protocol passes `[T-Dual]`, generic code may rely on the first
+equation: for any `P: Protocol`, `P.Dual.Dual` is `P`. The library has no
+sessions to run a protocol yet; for now a protocol is a checked description of
+a conversation, written once and shared by both sides.
+
+**What you can do now:** describe a conversation as a protocol pair, and let
+the compiler check that the two sides mirror each other.
+
 ## `@opaque`: only the module can make one
 
 A range ([Errors](03-errors.md#limiting-the-values)) checks a number, but many checks do not fit in a `where`. An email
@@ -1701,6 +1837,7 @@ be the only place that can both create a value and end it.
 | an ordinary record that moves and may be dropped | nothing; affine is the default |
 | to allow copies | `@copyable`, then `copy(value)` |
 | a type tag that stores nothing | `struct Id[phantom Of] { ... }` |
+| two sides of a conversation that mirror each other | `impl Protocol for Worker` with `type Dual = Boss` and a `type Step`, and the same for `Boss` |
 | a value only your module can make | `@opaque type Email = Str` or `@opaque struct Account { … }`, with a `pub fn` that checks |
 | a value that must end in one of your functions | `@linear` |
 | a default way to end it | `@(linear, derive(Release))` or `impl Release for T` |
@@ -1722,6 +1859,8 @@ These are the errors the chapter's rules produce:
 | `M-Opaque` | You reached inside an opaque type from outside its module | Use the functions the module provides |
 | `T-Bound` | A type lacks a trait the operation needs, such as `Release` | Implement or derive the trait, or use another operation |
 | `N-Unused` | A type parameter that no field uses | Declare it `phantom`, or remove it |
+| `T-Dual` | Two protocols that name each other do not mirror each other | Write each step as what the other side does at the same moment |
+| `T-Impl` | A protocol's dual is defined only through another's dual | Name a protocol as the dual |
 | `S-Entry` | An attribute or a visibility is written in a shape the language does not accept | Use `@`, pick one of `copyable` and `linear`, drop `pub` or `internal` beside `@opaque` |
 
 The examples put these types to work. The [accounts

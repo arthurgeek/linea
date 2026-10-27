@@ -49,11 +49,12 @@ for the code in brackets to reach the rule itself.
 | `T-DeferLet` | error | Copying, settling and sealing: [`defer let`: bind a value and schedule its release](04-copying-settling-and-sealing.md#defer-let-bind-a-value-and-schedule-its-release) | [§4 Types](../linea-semantics.md#4-types), at `[T-DeferLet]` |
 | `T-Derive` | error | Calling things: [`@derive`: implementations the compiler writes](02-calling-things.md#derive-implementations-the-compiler-writes) | [§4 Types](../linea-semantics.md#4-types), at `[T-Derive]` |
 | `T-Discard` | error | Linea in an hour: [Where a statement ends](01-linea-in-an-hour.md#where-a-statement-ends) | [§4 Types](../linea-semantics.md#4-types), at `[T-Discard]` |
+| `T-Dual` | error | Copying, settling and sealing: [Protocols: tags that name each other](04-copying-settling-and-sealing.md#protocols-tags-that-name-each-other) | [§4 Types](../linea-semantics.md#4-types), at `[T-Dual]` |
 | `T-ExternCallback` | error | Calling C: [Callbacks: C calling Linea](11-calling-c.md#callbacks-c-calling-linea) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternCallback]` |
 | `T-ExternHandle` | error | Calling C: [Text and bytes: `std.ffi`](11-calling-c.md#text-and-bytes-stdffi) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternHandle]` |
 | `T-For` | error | Iterating: [Four ways to walk](05-iterating.md#four-ways-to-walk) | [§4 Types](../linea-semantics.md#4-types), at `[T-For]` |
 | `T-Format` | error | Text: [Format specs: laying a value out](08-text.md#format-specs-laying-a-value-out) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[T-Format]` |
-| `T-Impl` | error | Text: [Reading text as a value](08-text.md#reading-text-as-a-value) | [§4 Types](../linea-semantics.md#4-types), at `[T-Impl]` |
+| `T-Impl` | error | Copying, settling and sealing: [Protocols: tags that name each other](04-copying-settling-and-sealing.md#protocols-tags-that-name-each-other) | [§4 Types](../linea-semantics.md#4-types), at `[T-Impl]` |
 | `T-Index` | error | Linea in an hour: [Arrays, views and collections](01-linea-in-an-hour.md#arrays-views-and-collections) | [§4 Types](../linea-semantics.md#4-types), at `[T-Index]` |
 | `T-Infer` | error | Calling things: [Naming a type argument](02-calling-things.md#naming-a-type-argument) | [§4 Types](../linea-semantics.md#4-types), at `[T-Infer]` |
 | `T-LetElse` | error | Errors: [`let … else`: bind the value, or handle the failure right there](03-errors.md#let--else-bind-the-value-or-handle-the-failure-right-there) | [§4 Types](../linea-semantics.md#4-types), at `[T-LetElse]` |

@@ -1,0 +1,23 @@
+import std.session
+
+use session.End
+use session.Recv
+use session.Send
+
+// An endpoint whose next step is `P`.
+struct Chan[phantom P: Protocol] {
+    id: UInt64,
+}
+
+// Receives where the protocol's next step is a receive. No peer answers
+// here, so it stops the program.
+fn recv[T, N: Protocol](sink _c: Chan[Recv[T, N]]) -> (T, Chan[N]) {
+    panic("no peer sends")
+}
+
+fn main() -> UInt8 {
+    let c: Chan[Send[UInt64, Recv[UInt64, End]]] = .{ id = 1 }
+    // The protocol sends first, so nothing can be received yet.
+    let (answer, rest) = recv(c)
+    UInt8(answer + rest.id)
+}

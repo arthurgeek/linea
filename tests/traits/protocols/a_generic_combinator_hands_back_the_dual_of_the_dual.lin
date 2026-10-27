@@ -1,0 +1,35 @@
+import std.session
+
+use session.End
+use session.Recv
+use session.Send
+
+struct Tag[phantom P: Protocol] {
+    at: UInt64,
+}
+
+// The dual of the dual is the protocol itself, so a `Tag[P]` is a
+// `Tag[P.Dual.Dual]`.
+fn same[P: Protocol](sink tag: Tag[P]) -> Tag[P.Dual.Dual] {
+    tag
+}
+
+// Keeps a tag at the dual of `Q`.
+fn keep[Q: Protocol](sink tag: Tag[Q.Dual]) -> Tag[Q.Dual] {
+    tag
+}
+
+// Called with `Q` as `P.Dual`, `keep` takes and returns a tag at
+// `P.Dual.Dual`, which is `P`.
+fn round_trip[P: Protocol](sink tag: Tag[P]) -> Tag[P] {
+    keep[P.Dual](tag)
+}
+
+fn main() -> UInt8 {
+    let sender: Tag[Send[UInt8, Recv[Str, End]]] = .{ at = 3 }
+    let receiver: Tag[Recv[UInt8, Send[Str, End]]] = .{ at = sender.at }
+    let seen: Tag[Send[UInt8, Recv[Str, End]].Dual] = receiver
+    let kept = same(seen)
+    let turned = round_trip(kept)
+    UInt8(turned.at)
+}

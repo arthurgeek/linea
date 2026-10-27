@@ -1,0 +1,19 @@
+import std.session
+
+use session.End
+use session.Recv
+use session.Send
+
+struct Ask {}
+
+// The dual of `Recv[UInt64, End]` is `Send[UInt64, End]`, not `Ask`, so `Ask`
+// cannot name a combinator as its peer.
+impl Protocol for Ask {
+    type Dual = Recv[UInt64, End]
+    type Step = Send[UInt64, End]
+}
+
+fn main() -> UInt8 {
+    let _ask: Ask = .{}
+    0
+}

@@ -627,7 +627,12 @@ run; stages 5 to 7 extend it.
    pair and a cycle are refused at the declaration; a generic combinator relying
    on `P.Dual.Dual = P` checks; a send on the wrong state is [T-Mismatch]; the
    guide teaches [T-Dual] and writing a protocol, as far as a protocol can be
-   written without the runtime.
+   written without the runtime. **Built.** A definition cycle was already
+   [T-Impl] ("defined through itself"), and an argument whose constructor
+   cannot match its parameter's was already [T-Mismatch] before [T-Infer];
+   this stage adds the corpus cases that hold both to sessions. A type
+   parameter whose one callable bound takes the endpoint settles `P` as a
+   lambda's written parameter types do.
 3. **Postfix session operations** (§15), with their own record.
 4. **The smallest runtime** (§1–§3, §8, §10, §11): one child, `prepare`,
    `start`, `cancel`, a rendezvous channel, join on `close` with its four steps,
@@ -683,8 +688,8 @@ A server joins its handlers in completion order and bounds them with `max:`.
 State shared by every handler is read-only and `Shareable`; state that changes
 across requests belongs to one task, reached over a session.
 
-A body cannot be written inline in `prepare` until stage 2's inference change;
-until then it is bound with `let` first.
+A body can be written inline in `prepare`: its written parameter type settles
+the protocol.
 
 `mem.Carried[H]` is available before anything uses it, and a library author can
 use it today for any type that keeps a callback's dependencies without storing

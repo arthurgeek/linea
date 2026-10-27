@@ -396,6 +396,7 @@ fn typecheckInternal(
         const formatting = FormattingDecls.init(ast, resolution);
         const from_decl = fromDecl(program);
         const settle_decl = settleDecl(program);
+        const protocol_decl = program.libraryDeclIn("session", "Protocol");
 
         break :made .{
             .gpa = gpa,
@@ -453,6 +454,9 @@ fn typecheckInternal(
             .from_member = traitMemberNamed(ast, resolution, from_decl, "from"),
             .settle_decl = settle_decl,
             .settle_reason = traitMemberNamed(ast, resolution, settle_decl, "Reason"),
+            .protocol_decl = protocol_decl,
+            .protocol_dual = traitMemberNamed(ast, resolution, protocol_decl, "Dual"),
+            .protocol_step = traitMemberNamed(ast, resolution, protocol_decl, "Step"),
         };
     };
     c.builder.constant_pool = &c.folded.pool;
@@ -463,6 +467,8 @@ fn typecheckInternal(
     c.builder.certified_carried = c.raw_accesses.carried;
     c.builder.certified_foreign_views = c.raw_accesses.foreign_views;
     c.builder.certified_closure_entry = c.raw_accesses.closure_entry_type;
+    c.raw_accesses.protocol_dual = c.protocol_dual orelse .none;
+    c.builder.certified_protocol_dual = c.raw_accesses.protocol_dual;
     // The resolver settled which declarations tuple syntax names; the pool
     // spells their instances as tuples.
     c.builder.tuple_decls = resolution.tuple_decls;
@@ -1213,6 +1219,7 @@ fn typecheckInternal(
     // and one walk of the pool.
     try c.builder.refillInstances();
     try c.reportLayoutCycles(type_of_decl);
+    try c.checkProtocolDuals();
 
     // Install written constant types before defaults can force initializers.
     // Unannotated constants acquire their type when their initializer is checked.
@@ -6077,6 +6084,11 @@ const Checker = struct {
     /// failure first would leave an error that does.
     settle_decl: ?node.DeclId = null,
     settle_reason: ?node.DeclId = null,
+    /// The library's `session.Protocol` and the two types it declares, which
+    /// [T-Dual] holds every implementation of it to.
+    protocol_decl: ?node.DeclId = null,
+    protocol_dual: ?node.DeclId = null,
+    protocol_step: ?node.DeclId = null,
     /// The place a range names, while the position that may use it whole is
     /// being checked: a `copy` operand, or an assignment's target.
     ///
@@ -27516,6 +27528,182 @@ const Checker = struct {
         );
     }
 
+    /// [T-Dual]: every implementation of `session.Protocol` for `X` names a
+    /// `X.Dual` whose own `Dual` is `X`, and whose `Step` is the dual of
+    /// `X.Step`. Two ends whose protocols broke either equation would
+    /// disagree about what one of them sends.
+    ///
+    /// Each side is one projection of a type the implementation wrote, read
+    /// through whichever implementation answers it, so a named protocol is
+    /// compared by the dual its declaration names and is never unfolded:
+    /// the check ends however the protocols recur. Inside a generic
+    /// implementation `N.Dual.Dual` is `N`, which this same check proves at
+    /// whatever implementation answers for `N`.
+    ///
+    /// An implementation whose dual's dual is wrong is not also reported for
+    /// its step, which it compares against the wrong peer. Two protocols
+    /// that name each other and disagree at their step are one mistake,
+    /// reported once, at the implementation written first.
+    ///
+    /// **Bound:** four projections per implementation of `Protocol`, and one
+    /// set entry per step reported.
+    fn checkProtocolDuals(self: *Checker) std.mem.Allocator.Error!void {
+        const trait = self.protocol_decl orelse return;
+        const dual = self.protocol_dual orelse return;
+        const step = self.protocol_step orelse return;
+        const outer_generic = self.generic;
+        defer self.generic = outer_generic;
+        var unmirrored: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer unmirrored.deinit(self.gpa);
+        for (self.builder.implementations) |row| {
+            if (row.trait != trait.index() or row.isAmbient() or row.decl == .none or !row.valid_key) continue;
+            const dual_member = self.builder.supply.memberOf(row.decl, dual) orelse continue;
+            const step_member = self.builder.supply.memberOf(row.decl, step) orelse continue;
+            self.generic = row.decl;
+            const peer = try self.protocolProjection(row.decl, row.ty, dual);
+            const peer_of_peer = try self.protocolProjection(row.decl, peer, dual);
+            if (peer == .poison or peer_of_peer == .poison) continue;
+            if (peer_of_peer != row.ty) {
+                try self.reportDualOfDual(row, dual_member, peer, peer_of_peer);
+                continue;
+            }
+            const peer_step = try self.protocolProjection(row.decl, peer, step);
+            const own_step = try self.protocolProjection(row.decl, row.ty, step);
+            const mirrored = try self.protocolProjection(row.decl, own_step, dual);
+            if (peer_step == .poison or mirrored == .poison or peer_step == mirrored) continue;
+            try unmirrored.put(self.gpa, row.ty, {});
+            if (unmirrored.contains(peer) and peer != row.ty) continue;
+            try self.reportUnmirroredSteps(row, step_member, peer, own_step, mirrored, peer_step);
+        }
+    }
+
+    /// `held.Dual` or `held.Step`, read in `owner`'s scope through the one
+    /// routine every settled reference is read through.
+    fn protocolProjection(self: *Checker, owner: node.DeclId, held: TypeId, member: node.DeclId) std.mem.Allocator.Error!TypeId {
+        if (held == .poison) return .poison;
+        const trait = self.protocol_decl orelse return .poison;
+        const name = self.ast.tokenText(self.ast.declName(member));
+        return (try self.builder.settledAtWithin(owner, @intCast(trait.index()), &.{}, held, member, name)).ty;
+    }
+
+    /// The definition of `member` in the implementation of `Protocol` for
+    /// `held`, where `held` is a named protocol, one applying no arguments:
+    /// what a report points at beside the definition it blames. Null for a
+    /// combinator, whose definition is written over its parameters and says
+    /// nothing about this pair.
+    fn protocolDefinition(self: *Checker, held: TypeId, member: node.DeclId) std.mem.Allocator.Error!?node.DeclId {
+        if (self.declaringType(held) == null or self.builder.instanceOf(held) != null) return null;
+        const trait = self.protocol_decl orelse return null;
+        const choice = try self.builder.implementationChoiceWithin(self.generic, trait, &.{}, held) orelse return null;
+        const implementation = choice.declaredImplementation() orelse return null;
+        const row = self.builder.implementations[implementation.index()];
+        if (row.decl == .none) return null;
+        return self.builder.supply.memberOf(row.decl, member);
+    }
+
+    /// Reports an implementation whose dual's dual is `back` rather than its
+    /// own type, at its `Dual` definition, with the peer's beside it.
+    fn reportDualOfDual(self: *Checker, row: types_mod.Implementation, member: node.DeclId, peer: TypeId, back: TypeId) std.mem.Allocator.Error!void {
+        const own = try self.typeName(row.ty);
+        const peer_name = try self.typeName(peer);
+        const written = self.ast.declReturnRef(member);
+        const peer_definition = try self.protocolDefinition(peer, self.protocol_dual.?);
+        const labels = try self.sink.arena.alloc(Label, if (peer_definition != null) 2 else 1);
+        labels[0] = .{
+            .file = self.ast.fileOf(written.at),
+            .span = self.ast.wholeWrittenSpan(written),
+            .message = try std.fmt.allocPrint(self.sink.arena, "`{s}` names `{s}` as its peer", .{ own, peer_name }),
+        };
+        if (peer_definition) |defined| {
+            const peer_written = self.ast.declReturnRef(defined);
+            labels[1] = .{
+                .file = self.ast.fileOf(peer_written.at),
+                .span = self.ast.wholeWrittenSpan(peer_written),
+                .message = try std.fmt.allocPrint(self.sink.arena, "`{s}` names `{s}`", .{ peer_name, try self.typeName(back) }),
+                .style = .secondary,
+            };
+        }
+        const notes = try self.sink.arena.alloc([]const u8, 1);
+        notes[0] = if (peer_definition != null)
+            try std.fmt.allocPrint(self.sink.arena, "make `{s}.Dual` `{s}`, or name the protocol whose dual is `{s}`", .{ peer_name, own, own })
+        else
+            try std.fmt.allocPrint(self.sink.arena, "name a protocol whose own `Dual` is `{s}`", .{own});
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_dual,
+            .message = try std.fmt.allocPrint(self.sink.arena, "the dual of `{s}` is `{s}`, whose dual is `{s}` rather than `{s}`", .{ own, peer_name, try self.typeName(back), own }),
+            .labels = labels,
+            .notes = notes,
+        });
+    }
+
+    /// Reports an implementation whose step's dual is not its peer's step,
+    /// at its `Step` definition with the peer's beside it, naming the first
+    /// part where the two disagree.
+    fn reportUnmirroredSteps(
+        self: *Checker,
+        row: types_mod.Implementation,
+        member: node.DeclId,
+        peer: TypeId,
+        own_step: TypeId,
+        mirrored: TypeId,
+        peer_step: TypeId,
+    ) std.mem.Allocator.Error!void {
+        const own = try self.typeName(row.ty);
+        const peer_name = try self.typeName(peer);
+        const written = self.ast.declReturnRef(member);
+        const peer_definition = try self.protocolDefinition(peer, self.protocol_step.?);
+        const labels = try self.sink.arena.alloc(Label, if (peer_definition != null) 2 else 1);
+        labels[0] = .{
+            .file = self.ast.fileOf(written.at),
+            .span = self.ast.wholeWrittenSpan(written),
+            .message = try std.fmt.allocPrint(self.sink.arena, "the dual of `{s}` is `{s}`", .{ try self.typeName(own_step), try self.typeName(mirrored) }),
+        };
+        if (peer_definition) |defined| {
+            const peer_written = self.ast.declReturnRef(defined);
+            labels[1] = .{
+                .file = self.ast.fileOf(peer_written.at),
+                .span = self.ast.wholeWrittenSpan(peer_written),
+                .message = try std.fmt.allocPrint(self.sink.arena, "`{s}.Step` is `{s}`", .{ peer_name, try self.typeName(peer_step) }),
+                .style = .secondary,
+            };
+        }
+        const apart = self.firstDisagreement(mirrored, peer_step);
+        const notes = try self.sink.arena.alloc([]const u8, 1);
+        notes[0] = "write each step as what the other end does at the same moment";
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_dual,
+            .message = try std.fmt.allocPrint(self.sink.arena, "`{s}` and its dual `{s}` disagree at their next step: one end has `{s}` where the other has `{s}`", .{
+                own,
+                peer_name,
+                try self.typeName(apart[0]),
+                try self.typeName(apart[1]),
+            }),
+            .labels = labels,
+            .notes = notes,
+        });
+    }
+
+    /// The first parts of `a` and `b`, read argument by argument from the
+    /// outside in, that are not the same type: `Str` and `UInt64` for
+    /// `Recv[Str, End]` and `Recv[UInt64, End]`. The two themselves where
+    /// their heads differ.
+    ///
+    /// **Bound:** one walk of the smaller of the two types.
+    fn firstDisagreement(self: *const Checker, a: TypeId, b: TypeId) [2]TypeId {
+        const left = self.builder.instanceOf(a) orelse return .{ a, b };
+        const right = self.builder.instanceOf(b) orelse return .{ a, b };
+        if (left.decl != right.decl) return .{ a, b };
+        const left_args = self.builder.argsOf(left);
+        const right_args = self.builder.argsOf(right);
+        if (left_args.len != right_args.len) return .{ a, b };
+        for (left_args, right_args) |l, r| {
+            if (l != r) return self.firstDisagreement(l, r);
+        }
+        return .{ a, b };
+    }
+
     /// An implementation's associated type definition as a program reads
     /// it, `Ping.Dual`: the implementation's type, then the name.
     fn definitionName(self: *Checker, member: node.DeclId) std.mem.Allocator.Error![]const u8 {
@@ -32244,7 +32432,10 @@ const Checker = struct {
                 if (pass != 0 and walked[j]) continue;
                 const declared = try paramType(self, d, j);
                 const value = if (self.ast.exprTag(a) == .marked) self.ast.unaryOperand(a) else a;
-                if (!walked[j] and self.needsCallableContext(value) and self.callbackParameter(declared) != null) continue;
+                if (!walked[j] and self.needsCallableContext(value) and self.callbackParameter(declared) != null) {
+                    if (speaking) try self.settleFromLambdaParameters(d, declared, value, settling);
+                    continue;
+                }
 
                 // An argument whose parameter says nothing about any of them
                 // settles nothing, and checking it here would report whatever is
@@ -32279,7 +32470,9 @@ const Checker = struct {
                 // callee's other type parameters, beyond the callable type itself.
                 const bounds = self.builder.callableBoundsOn(declared);
                 if (bounds.len > 0) {
-                    const supplied = try self.callbackValueSignature(got);
+                    // A type parameter with one callable bound is called as
+                    // that bound, which is what it supplies.
+                    const supplied = try self.callbackCallableSignature(got) orelse got;
                     for (bounds) |interned| {
                         // A bound that is a type parameter waits for the
                         // call's context, below.
@@ -32713,6 +32906,54 @@ const Checker = struct {
             if (self.mentionsParameter(ty, s.owner, .stops)) return true;
         }
         return false;
+    }
+
+    /// Settles what a lambda's written parameter types say of the callee's
+    /// type parameters, through the callable type of the parameter it is
+    /// passed to, before the lambda's body is checked: in
+    /// `start(|me: Chan[Worker]| ...)`, the written `Chan[Worker]` settles
+    /// `P` from `F: fn(me: Chan[P])`. A written type is an argument that
+    /// determines its own type, so it settles in the first pass with the
+    /// others.
+    ///
+    /// A written type that does not fit what the call has settled settles
+    /// nothing here; the lambda is checked against the callable type it is
+    /// given, which reports the parameter that disagrees. Its diagnostics
+    /// are discarded for the same reason: checking the lambda reads the same
+    /// written type again and reports what is wrong with it there.
+    ///
+    /// **Bound:** one reading of each written parameter type, and one
+    /// settlement of each against the callable type's parameter.
+    fn settleFromLambdaParameters(self: *Checker, d: node.DeclId, declared: TypeId, value: ExprId, settling: []const Settling) std.mem.Allocator.Error!void {
+        if (!self.isLambda(value)) return;
+        const callback = self.callbackParameter(declared) orelse return;
+        const bound = try self.boundAtCall(d, declared, callback.signature);
+        if (bound == .poison) return;
+        const signature = switch (self.builder.get(bound)) {
+            .callable => |signature| signature,
+            else => return,
+        };
+        const lambda = self.ast.lambda(self.ast.withoutGroups(value));
+        const wanted_params = try self.gpa.dupe(types_mod.CallableParam, self.builder.callableParams(signature));
+        defer self.gpa.free(wanted_params);
+        if (lambda.params.len != wanted_params.len) return;
+        for (lambda.params, wanted_params) |param, wanted| {
+            if (!param.written.wasWritten() or !self.hasOpenParameter(wanted.ty, settling)) continue;
+            const diagnostics_start = self.sink.items().len;
+            const errors_before = self.sink.error_count;
+            const warnings_before = self.sink.warning_count;
+            const written = try self.typeOfRef(param.written);
+            self.sink.list.shrinkRetainingCapacity(diagnostics_start);
+            self.sink.error_count = errors_before;
+            self.sink.warning_count = warnings_before;
+            if (written == .poison) continue;
+            for (settling) |s| {
+                const tried = try self.gpa.dupe(TypeId, s.found);
+                defer self.gpa.free(tried);
+                var clash: ?Clash = null;
+                if (try self.settle(wanted.ty, written, s.owner, tried, &clash)) @memcpy(s.found, tried);
+            }
+        }
     }
 
     fn reportCallbackInputs(self: *Checker, value: ExprId) void {
