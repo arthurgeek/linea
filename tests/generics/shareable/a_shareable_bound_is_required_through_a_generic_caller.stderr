@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Shareable`, and `U` may stand for a type that is not `Shareable`
+ --> tests/generics/shareable/a_shareable_bound_is_required_through_a_generic_caller.lin:8:5
+  |
+8 |     share(value)
+  |     ^^^^^ add `Shareable` to `U`'s bounds, or drop the bound

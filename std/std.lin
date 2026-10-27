@@ -21,6 +21,7 @@ import testing
 import index
 import iter
 import tuple
+import session
 
 // Equality, comparison and stepping support ==, < and ranges.
 pub use cmp.Equatable
@@ -88,3 +89,6 @@ pub use text.String
 
 // Writer accepts text, and every Display and Debug implementation writes to one.
 pub use fmt.Writer
+
+// Protocol names, as a type, what one end of a session does next.
+pub use session.Protocol

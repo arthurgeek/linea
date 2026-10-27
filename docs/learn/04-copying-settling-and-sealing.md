@@ -91,7 +91,7 @@ error[S-Entry]: attribute names are closed
  --> policies_closed.lin:1:2
   |
 1 | @sealed
-  |  ^^^^^^ use `opaque`, `linear`, `copyable`, `carrier`, or `derive(...)`
+  |  ^^^^^^ use `opaque`, `linear`, `copyable`, `carrier`, `unshareable`, or `derive(...)`
 ```
 
 The `@` is required. Writing `linear struct Ticket` or `opaque struct Ticket`

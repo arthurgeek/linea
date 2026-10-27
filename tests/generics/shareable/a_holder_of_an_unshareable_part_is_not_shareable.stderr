@@ -1,0 +1,25 @@
+error[T-Bound]: `T` requires `Shareable`, and `borrow Desk` is not `Shareable`: it observes a `Desk`, which holds a `mem.Handle[mem.SystemAllocator]`, which is unshareable
+  --> tests/generics/shareable/a_holder_of_an_unshareable_part_is_not_shareable.lin:26:20
+   |
+26 |     let observed = share(borrow desk) + share(seat) + share(count)
+   |                    ^^^^^ `borrow Desk` is not `Shareable`; pass a value that reading never changes, or drop the bound
+error[T-Bound]: `T` requires `Shareable`, and `Seat` is not `Shareable`: `Held` is a `mem.Handle[mem.SystemAllocator]`, which is unshareable
+  --> tests/generics/shareable/a_holder_of_an_unshareable_part_is_not_shareable.lin:26:41
+   |
+26 |     let observed = share(borrow desk) + share(seat) + share(count)
+   |                                         ^^^^^ `Seat` is not `Shareable`; pass a value that reading never changes, or drop the bound
+error[T-Bound]: `T` requires `Shareable`, and `<closure>` is not `Shareable`: `desk` is a `borrow Desk`, which observes a `Desk`, which holds a `mem.Handle[mem.SystemAllocator]`, which is unshareable
+  --> tests/generics/shareable/a_holder_of_an_unshareable_part_is_not_shareable.lin:26:55
+   |
+26 |     let observed = share(borrow desk) + share(seat) + share(count)
+   |                                                       ^^^^^ `<closure>` is not `Shareable`; pass a value that reading never changes, or drop the bound
+error[T-Bound]: `T` requires `Shareable`, and `mem.RefusingAllocator[mem.SystemAllocator]` is not `Shareable`: it holds a `mem.AllocationLog[mem.SystemAllocator]`, which is unshareable
+  --> tests/generics/shareable/a_holder_of_an_unshareable_part_is_not_shareable.lin:29:19
+   |
+29 |     let counted = share(log.allocator()) + share(borrow log)
+   |                   ^^^^^ `mem.RefusingAllocator[mem.SystemAllocator]` is not `Shareable`; pass a value that reading never changes, or drop the bound
+error[T-Bound]: `T` requires `Shareable`, and `borrow mem.AllocationLog[mem.SystemAllocator]` is not `Shareable`: it observes a `mem.AllocationLog[mem.SystemAllocator]`, which is unshareable
+  --> tests/generics/shareable/a_holder_of_an_unshareable_part_is_not_shareable.lin:29:44
+   |
+29 |     let counted = share(log.allocator()) + share(borrow log)
+   |                                            ^^^^^ `borrow mem.AllocationLog[mem.SystemAllocator]` is not `Shareable`; pass a value that reading never changes, or drop the bound

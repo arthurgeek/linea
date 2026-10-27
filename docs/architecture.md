@@ -1001,6 +1001,18 @@ so a type the checker admits as `Owned` is one storage never follows a
 dependency through; its `holdsDependencies` adds only values whose
 representation is an integer, because the address bits of an array are one.
 
+A third table, the builder's `unshareable_facts`, answers `Shareable` over the
+same walk in `unshareable` mode, which follows the edges the writer table
+follows: fields, observed referents and every type argument. Its seeds are a
+declared type whose record says it is marked `@unshareable`, a callable or open
+type, and a type parameter whose record says neither `Shareable` nor `Integer`.
+The checker refuses a `Shareable` argument by asking `isShareable`, and
+`unshareableWitness` finds the path the refusal names over those edges. The
+mark is copied from a template to each instance, so an instantiation of an
+`@unshareable` declaration is unshareable whatever its arguments. No pass after
+the checker reads the answer yet, so the table is not kept in the finished
+`Typing`.
+
 For an instantiated certified `Storage[T, A]`, containment follows its logical
 element T and separate allocator field A instead of following the optional raw
 backing Buffer field. This lets a system-allocated scalar Vec remain independent

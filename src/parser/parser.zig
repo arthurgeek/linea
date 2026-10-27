@@ -776,7 +776,7 @@ const Parser = struct {
     /// Whether the cursor sits on an attribute word written without its `@`.
     fn atBareAttributeWord(self: *const Parser) bool {
         return self.cursor.at(.keyword_opaque) or self.cursor.at(.keyword_linear) or
-            self.cursor.at(.keyword_copyable) or self.cursor.at(.keyword_carrier);
+            self.cursor.at(.keyword_copyable) or self.cursor.at(.keyword_carrier) or self.cursor.at(.keyword_unshareable);
     }
 
     /// Reports a bare attribute word and steps over it. Every word
@@ -784,10 +784,11 @@ const Parser = struct {
     /// `parseProgram`, so recovery always makes progress.
     fn reportBareAttributeWord(self: *Parser, after_visibility: bool) !void {
         const carrier = self.cursor.at(.keyword_carrier);
+        const unshareable = self.cursor.at(.keyword_unshareable);
         const word = self.cursor.advance();
-        if (carrier) {
+        if (carrier or unshareable) {
             const help = if (after_visibility) "write `@` before this word, ahead of the visibility" else "write `@` before this word";
-            return self.reportAt(.s_entry, word, "carrier is a declaration attribute", help);
+            return self.reportAt(.s_entry, word, if (carrier) "carrier is a declaration attribute" else "unshareable is a declaration attribute", help);
         }
         const help = if (after_visibility) "write `@` before this policy, ahead of the visibility" else "write `@` before this policy";
         try self.reportAt(.s_entry, word, "type policies are declaration attributes", help);
@@ -806,6 +807,8 @@ const Parser = struct {
         saw_copyable: bool = false,
         /// The `carrier` item, where one was written.
         carrier: TokenId = .none,
+        /// The `unshareable` item, where one was written.
+        unshareable: TokenId = .none,
     };
 
     fn parseAttributes(self: *Parser) !ParsedAttributes {
@@ -830,7 +833,7 @@ const Parser = struct {
                 try self.reportAt(.s_entry, open, "an attribute group is not empty", "name at least one closed attribute");
             }
             if (open == .none and (self.cursor.atEnd() or self.atDeclaration()) and !self.atAttributeItem() and !self.cursor.at(.keyword_derive)) {
-                try self.reportAt(.s_entry, at, "expected an attribute name after `@`", "use `opaque`, `linear`, `copyable`, `carrier`, or `derive(...)`");
+                try self.reportAt(.s_entry, at, "expected an attribute name after `@`", "use `opaque`, `linear`, `copyable`, `carrier`, `unshareable`, or `derive(...)`");
                 try self.builder.addAttributeItem(.{
                     .kind = .unknown,
                     .name = at,
@@ -862,6 +865,10 @@ const Parser = struct {
                     kind = .carrier;
                     if (result.carrier != .none) try self.reportAt(.s_entry, item_at, "an attribute is written once", "remove the repeated `carrier`");
                     if (result.carrier == .none) result.carrier = item_at;
+                } else if (self.cursor.eat(.keyword_unshareable) != null) {
+                    kind = .unshareable;
+                    if (result.unshareable != .none) try self.reportAt(.s_entry, item_at, "an attribute is written once", "remove the repeated `unshareable`");
+                    if (result.unshareable == .none) result.unshareable = item_at;
                 } else if (self.cursor.eat(.keyword_derive) != null) {
                     kind = .derive;
                     if (!self.cursor.at(.l_paren)) {
@@ -876,7 +883,7 @@ const Parser = struct {
                         if (traits.len() == 0) try self.reportAt(.t_derive, item_at, "a derive request is not empty", "name at least one trait");
                     }
                 } else {
-                    try self.reportAt(.s_entry, item_at, "attribute names are closed", "use `opaque`, `linear`, `copyable`, `carrier`, or `derive(...)`");
+                    try self.reportAt(.s_entry, item_at, "attribute names are closed", "use `opaque`, `linear`, `copyable`, `carrier`, `unshareable`, or `derive(...)`");
                     // The rest of this item is part of the refused name, up to
                     // the separator or the group's end.
                     if (!self.cursor.at(.comma) and !self.cursor.at(.r_paren) and !self.cursor.atEnd()) _ = self.cursor.advance();
@@ -923,6 +930,7 @@ const Parser = struct {
             self.cursor.at(.keyword_linear) or
             self.cursor.at(.keyword_copyable) or
             self.cursor.at(.keyword_carrier) or
+            self.cursor.at(.keyword_unshareable) or
             (self.cursor.at(.keyword_derive) and self.cursor.peekAt(1) == .l_paren);
     }
 
@@ -1890,6 +1898,7 @@ const Parser = struct {
             .keyword_linear,
             .keyword_copyable,
             .keyword_carrier,
+            .keyword_unshareable,
             .keyword_test,
             .keyword_template,
             .keyword_derive,
@@ -9516,14 +9525,36 @@ test "a carrier mark attaches to a struct or an enum and is refused on a newtype
     try testing.expectEqual(@as(u32, 1), repeated.errors);
 }
 
+test "an unshareable mark attaches to any type declaration and is written once" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const accepted = try parseProgramText(gpa,
+        \\@unshareable
+        \\struct Cursor { at: UInt64 }
+        \\@(opaque, copyable, unshareable)
+        \\enum Mark { Start, End }
+        \\@unshareable
+        \\type Offset = UInt64
+    );
+    try testing.expectEqual(@as(u32, 0), accepted.errors);
+    const repeated = try parseProgramText(gpa,
+        \\@(unshareable, unshareable)
+        \\struct Cursor { at: UInt64 }
+    );
+    try testing.expectEqual(@as(u32, 1), repeated.errors);
+    const bare = try parseProgramText(gpa, "unshareable struct Cursor { at: UInt64 }\n");
+    try testing.expectEqual(@as(u32, 1), bare.errors);
+}
+
 test "every word that starts a declaration is consumed when written bare" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
     const words = [_][]const u8{
-        "pub",    "internal", "export", "opaque", "linear", "copyable", "carrier", "test", "template", "derive",
-        "impl",   "fn",       "import", "use",    "enum",   "struct",   "let",     "type", "alias",    "trait",
-        "extern", "default",  "@",
+        "pub",     "internal", "export", "opaque", "linear", "copyable", "carrier", "unshareable", "test",  "template", "derive",
+        "impl",    "fn",       "import", "use",    "enum",   "struct",   "let",     "type",        "alias", "trait",    "extern",
+        "default", "@",
     };
     for (words) |word| {
         // Parsing returns only if recovery steps over the word.

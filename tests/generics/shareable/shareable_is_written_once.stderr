@@ -1,0 +1,10 @@
+error[T-Bound]: `T` is bounded `Shareable` twice
+ --> tests/generics/shareable/shareable_is_written_once.lin:1:10
+  |
+1 | fn twice[T: Shareable + Shareable](sink value: T) -> T {
+  |          ^ drop one of the two bounds
+error[T-Bound]: Integer already includes Shareable
+ --> tests/generics/shareable/shareable_is_written_once.lin:6:12
+  |
+6 | fn counted[N: Integer + Shareable](sink value: N) -> N {
+  |            ^ drop the redundant Shareable bound

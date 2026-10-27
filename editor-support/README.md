@@ -90,10 +90,10 @@ the token disappears, so the word cannot be captured at all. That is why
 `continue` is written where it is used rather than wrapped in a rule of its
 own. Policy attributes share a rule with several literal alternatives.
 
-Closed declaration attributes (`@opaque`, `@linear`, `@copyable`, `@carrier`, and
-`@derive(Traits)`) precede a struct, enum, or newtype and its ordinary visibility.
-Grouped `@(items)` and repeated attributes retain their written order; comments
-may separate them. The editor grammar preserves these groups for indentation
+Closed declaration attributes (`@opaque`, `@linear`, `@copyable`, `@carrier`,
+`@unshareable`, and `@derive(Traits)`) precede a struct, enum, or newtype and its
+ordinary visibility. Grouped `@(items)` and repeated attributes retain their
+written order; comments may separate them. The editor grammar preserves these groups for indentation
 and highlights derive trait paths as types. The compiler validates duplicate
 items, conflicting policies, and derive requirements. Independently constrained
 standalone derives retain their own declaration grammar. Bare policy prefixes

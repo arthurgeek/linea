@@ -1,0 +1,33 @@
+trait Source {
+    type Item
+
+    fn take(inout self: Self) -> Self.Item
+}
+
+struct Counter {
+    next: UInt8,
+}
+
+impl Source for Counter {
+    type Item = UInt8
+
+    fn take(inout self: Self) -> UInt8 {
+        self.next += 1
+        self.next
+    }
+}
+
+fn share[T: Shareable](sink value: T) -> T {
+    value
+}
+
+// `S.Item` has no bound list of its own, so the function promises
+// `Shareable` for it in a `where` clause.
+fn drain[S: Source](inout source: S) -> S.Item {
+    share(&source.take())
+}
+
+fn main() -> UInt8 {
+    var counter = Counter { next = 1 }
+    drain(&counter)
+}

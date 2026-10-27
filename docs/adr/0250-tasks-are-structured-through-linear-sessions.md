@@ -8,11 +8,16 @@ whose type can hold the writer, a `Carried` field for a closure type included)
 and [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) (`Carried[H]` is
 `Owned` exactly when `H` is).
 
-**What is built.** Of this record, only `mem.Carried[H]` (§12) exists. It is the
-precondition every other clause rests on, and it lands first. Nothing else
-described here is available: there is no `std.task`, no `std.session`, no
-mailbox, no `Shareable` bound and no runtime thread. Each remaining clause is
-delivered by a stage of §16, and a stage's change states the clauses it builds.
+**What is built.** Of this record, stages 0 and 1 of §16 exist:
+`mem.Carried[H]` (§12), which every other clause rests on; the `Protocol`
+trait with its combinators in `std.session` (§4); and the `Shareable` bound with
+the `@unshareable` leaf policy on `mem.Arena`, `mem.Handle` and
+`mem.AllocationLog` (§5). Nothing else described here is available: there is
+no `std.task`, no session endpoint, no [O-Cross], no `Owned` payload bound, no
+mailbox, no [T-Dual] and no runtime thread. [O-Cross] is decided here and is
+checked from stage 4, where it is tested against the real `start`. Each
+remaining clause is delivered by a stage of §16, and a stage's change states
+the clauses it builds.
 The guide and `std/README.md` describe only what is built.
 
 ## Context
@@ -236,20 +241,46 @@ and a send moves the value out of the sender and no more. A protocol sends
 `Owned` over the same containment table, and never implementable by a program:
 
 ```text
-shareable = not declared unshared
+shareable = not declared unshareable
             and every owned part shareable
             and every observed referent shareable
 ```
 
 It follows observed referents because a value holding a `borrow T` lets whoever
-observes the value read the referent. The leaf policy `unshared` may be declared
-only in a root whose manifest grants `extern`, since only such a root can write
-a raw store under a `read`. `mem.Arena` and `mem.Handle` are `unshared`: a
-handle's `acquire` takes it by `read` and advances the arena's cursor, so two
-tasks reading one handle would race on that word. Everything holding one is
-unshared structurally, such as a `Vec[T, mem.Handle]`. `Owned` and
-`Shareable` are independent. An arena owns its memory and carries nothing, yet
-is not shareable. A `borrow` of a shareable place is shareable and not owned.
+observes the value read the referent. The leaf policy `@unshareable` may be
+declared only in a module its root's manifest grants `extern`, since only such
+a module can write a raw store under a `read`; elsewhere it is [M-Extern]. It
+is written as a declaration attribute, in the closed set beside `@linear`,
+`@copyable` and `@carrier`:
+
+```linea
+@(opaque, copyable, unshareable)
+struct Handle[H: Allocator = SystemAllocator] {
+    owner: borrow Arena[H],
+}
+```
+
+An attribute, because being unshareable is a fact about a type's representation
+that the declaration states, as `@carrier` and `@copyable` are. A trait would
+be something an `impl` anywhere could claim, and a marker field would put a
+policy inside the braces, which hold the representation and nothing else. The
+word is the exact negation of the bound: `@unshareable` types are the ones that
+are not `Shareable`.
+
+`mem.Arena` and `mem.Handle` are `@unshareable`: a handle's `acquire` takes it
+by `read` and advances the arena's cursor, so two tasks reading one handle
+would race on that word. `mem.AllocationLog` is too, since its allocator
+writes the log's counts under a `read`. Everything holding one is unshareable structurally,
+such as a `Vec[T, mem.Handle]`. `Copyable` is not `Shareable`: a handle is
+copyable, and every copy writes the one cursor. `Owned` and `Shareable` are
+independent. An arena owns its memory and carries nothing, yet is not
+shareable. A `borrow` of a shareable place is shareable and not owned.
+
+An unshareable value still crosses a task boundary whole. A `sink` capture or
+a payload moves it, and afterwards one task alone holds and reads it; what
+[O-Cross] refuses is observing it from two tasks, a `read` capture of it or a
+value carrying an observation of it. The policy therefore does not make a type
+task-local or confined to its creator.
 
 **[O-Cross]** (ownership). A value crosses a task boundary as a capture of a
 task's body. Every observation a capture carries, a `read` capture's own
@@ -258,7 +289,9 @@ capture is held to the same rule, observation by observation. A value carrying
 an exclusive lend crosses only as the capture of the body that holds the lend.
 The report is at the capture and names the part that prevents it, as
 [O-Universe] names the part that prevents a copy. A payload crosses under its
-`Owned` bound and needs no rule of its own.
+`Owned` bound. Whether that bound is the whole of the payload rule is open
+until stage 4 (§16): an `Owned` value may still reach shared storage through
+raw addresses, which [O-Cross] does not see.
 
 Two `inout` captures of disjoint record fields, in two bodies, are two exclusive
 lends of disjoint places, which the overlap relation of [N-Aliased] and
@@ -572,22 +605,29 @@ operations. Its record supersedes the head clause of 0182.
 ### 16. Delivery
 
 Each stage lands as its own change, ends green, and states which clauses of this
-record it builds.
+record it builds. Every stage's exit includes its `docs/learn` update, taught in
+the chapter a reader would look in, with programs that run where the stage can
+run them. The guide's concurrency chapter arrives with stage 4, whose programs
+run; stages 5 to 7 extend it.
 
 0. **`mem.Carried[H]`** (§12). *Exit:* the type in `std.mem`, its tests, the
    containment predicate, corpus cases for each claim of §12 seen to fail
    without it, soundness-matrix cells for an observation held through a
-   `Carried` field, and a green `zig build soundness`. **This change.**
-1. **Ownership across the boundary** (§5). `Shareable`, the `unshared` leaf
-   policy on `mem.Arena` and `mem.Handle`, [O-Cross], and the `Owned` payload
-   bound. *Exit:* the semantics defines both rules; corpus cases for each
-   refusal and each acceptance, the share-nothing cases (a parent reading what
-   a live task reads, disjoint-field lends) included; the program generator's
-   coverage table lists `start`, `send` and `recv` as unreached.
+   `Carried` field, and a green `zig build soundness`. **Built.**
+1. **What may be shared** (§4, §5). `Shareable`, the `@unshareable` leaf policy
+   on `mem.Arena`, `mem.Handle` and every other library type whose `read`
+   writes, and the `Protocol` trait with its combinators. *Exit:* the semantics
+   defines the bound and the policy; corpus cases for each refusal and each
+   acceptance of the bound, the policy refused outside a module granted
+   `extern`, and `impl Shareable` refused; the guide teaches `Shareable`,
+   `@unshareable` and the difference between `Owned` and `Shareable`.
+   **Built.**
 2. **[T-Dual]** (§4), with the normalisation of `P.Dual.Dual`, the refusal of
    cyclic associated types, and the two inference changes. *Exit:* a mismatched
    pair and a cycle are refused at the declaration; a generic combinator relying
-   on `P.Dual.Dual = P` checks; a send on the wrong state is [T-Mismatch].
+   on `P.Dual.Dual = P` checks; a send on the wrong state is [T-Mismatch]; the
+   guide teaches [T-Dual] and writing a protocol, as far as a protocol can be
+   written without the runtime.
 3. **Postfix session operations** (§15), with their own record.
 4. **The smallest runtime** (§1–§3, §8, §10, §11): one child, `prepare`,
    `start`, `cancel`, a rendezvous channel, join on `close` with its four steps,
@@ -598,16 +638,37 @@ record it builds.
    `start`, and an overflow on a worker reported rather than killed; the
    soundness matrix meets an observation held by a live task handle with every
    owner operation (refused before `close`, run clean after it); corpus cases
-   print only after the join, so their output does not depend on scheduling.
+   print only after the join, so their output does not depend on scheduling;
+   [O-Cross] defined in the semantics and checked, with corpus cases for each
+   refusal (a `read` capture of an unshareable place, a `sink` capture whose
+   observation reaches one, an exclusive lend crossing outside the body that
+   holds it) and each acceptance, the share-nothing cases (a parent reading
+   what a live task reads, disjoint-field lends) included; the `Owned` bound on
+   the payloads of `send` and `recv`, refusing `Str`; the program generator's
+   coverage table listing `start`, `send` and `recv` as unreached; soundness
+   matrix cells for capture crossings; and an answer to the question below; a
+   new guide chapter on concurrency covers `prepare` and `start`, sessions,
+   `close` as the join, and what crosses a task boundary, with programs that
+   run.
+
+   *Question for this stage.* The library's internal `mem.ReleaseTag` values
+   write one shared release log through raw addresses when they are released. Tags moved into two tasks
+   would both write that log on release, a race neither `Shareable` (which
+   governs reads) nor an `Owned` payload bound (a tag carries no dependency)
+   refuses. [O-Cross] or the payload rule must answer it, for example by a
+   bound that a moved value reaches no storage another value can reach.
 5. **Runtime stress.** *Exit:* concurrent allocation and free under the
    checked allocator, channel stress, and `prepare` failure under load all pass
-   on Linux.
+   on Linux, and the concurrency chapter says what the runtime guarantees under
+   load.
 6. **The standard library** (§6, §7, §13): `split_inout` over `mem.View`, the
    mailbox with `send_after` and its timers, `recv_until`, and `http.serve`
    over a mailbox with `max:`. *Exit:* every `pub fn` tested beside its
-   definition, a guide chapter whose programs run, and an example that serves
-   connections concurrently.
-7. **`async_map`** (§14). *Exit:* its own record accepted and built.
+   definition, the concurrency chapter extended to the mailbox, timers,
+   `split_inout` and `http.serve` with programs that run, and an example that
+   serves connections concurrently.
+7. **`async_map`** (§14). *Exit:* its own record accepted and built, and the
+   concurrency chapter extended to it.
 
 ## Consequences
 
@@ -675,8 +736,9 @@ forbidding `read` captures would give the same guarantee with no `Shareable`, no
 leaf policy and no [O-Cross]. It refuses programs the checker proves safe: a
 parent reading an owner that a live task also reads, which is race-free because
 neither can write it until `close`, two `inout` lends of disjoint fields, and
-`split_inout`. The one type that makes a shared read unsafe, `mem.Handle`, is
-named by the `unshared` policy instead.
+`split_inout`. The few types whose shared read is unsafe, `mem.Handle` and the
+allocators that write a log under a `read`, are named by the `@unshareable`
+policy instead.
 
 **Naming the capability `Syncable`,** after Rust's `Sync`. Capabilities are
 named for what they permit, as `Owned` names what a value carries.

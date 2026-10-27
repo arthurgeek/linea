@@ -100,7 +100,7 @@ declaration  ::= visibility? "export"? (external | trait | reexport | constant |
                | attribute* visibility? "export"? (function | typedecl) | impl | template_impl | derive_impl
 visibility   ::= "pub" | "internal"
 attribute    ::= "@" attribute_item | "@" "(" attribute_item ("," attribute_item)* ","? ")"
-attribute_item ::= "opaque" | "linear" | "copyable" | "carrier" | "derive" "(" trait_ref ("," trait_ref)* ","? ")"
+attribute_item ::= "opaque" | "linear" | "copyable" | "carrier" | "unshareable" | "derive" "(" trait_ref ("," trait_ref)* ","? ")"
 constant     ::= "let" name (":" type_name)? "=" expression unwrap?
 function     ::= ("test" "trap"?)? "fn" name generics? "(" parameters? ")" ("->" result)? function_where? block
 signature    ::= "fn" name generics? "(" parameters? ")" ("->" result)? function_where?
@@ -1702,6 +1702,7 @@ they are the traits and types most programs write in signatures and bounds:
 | `Vec` | `std.mem` | a growable sequence owning its storage |
 | `String` | `std.text` | growable text owning its storage |
 | `Writer` | `std.io` | the sink `Display` and `Debug` write to, also re-exported by `std.fmt` |
+| `Protocol` | `std.session` | a type naming what one end of a session does next, and its dual |
 
 All other library names require an import of their module. Membership in the
 first group follows from the syntax; membership in the second is a decision
@@ -1972,7 +1973,11 @@ trusts an `extern` signature without inspecting its implementation, so the
 grant bounds that trust to the modules a reviewer was told to read
 ([ADR 0068](adr/0068-a-declaration-may-name-a-symbol-the-runtime-provides.md),
 [ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md),
-[ADR 0228](adr/0228-a-granted-module-calls-c.md)).
+[ADR 0228](adr/0228-a-granted-module-calls-c.md)). A type marked `@unshareable`
+is declared under the same grant, and one in a module the manifest does not
+list is refused: only a module trusted with C can write raw storage under a
+`read`, which is what makes a type unshareable
+([ADR 0250](adr/0250-tasks-are-structured-through-linear-sessions.md)).
 
 **[M-Foreign]** Only a module its root's manifest grants `extern` may use
 `std.ffi`: import it, call any function or method `std.ffi` declares, or take
@@ -2905,11 +2910,13 @@ once here. The predicate checks provenance. It neither requests a new
 implementation nor adds a bound to the generated header.
 
 Declaration attributes form a closed set. `@opaque`, `@linear`, `@copyable`,
-`@carrier`, and `@derive(Traits...)` may be written separately or as items of
-one `@(...)` group. Every group precedes the struct, enum, or newtype it
-modifies, before ordinary visibility. An empty group, unknown item, repeated
-policy or `carrier`, `linear` combined with `copyable`, an attribute before
-another declaration, or `carrier` on a newtype violates [S-Entry]. `@carrier`
+`@carrier`, `@unshareable`, and `@derive(Traits...)` may be written separately or
+as items of one `@(...)` group. Every group precedes the struct, enum, or
+newtype it modifies, before ordinary visibility. An empty group, unknown item,
+a repeated policy, `carrier` or `unshareable`, `linear` combined with `copyable`, an
+attribute before another declaration, or `carrier` on a newtype violates
+[S-Entry]. `@unshareable` marks a type that is not `Shareable` (§5.3); it states
+no ownership policy and is declared only where [M-Extern] grants it. `@carrier`
 marks a struct or an enum; it states no ownership policy and combines with
 either. What it means is under the callable source clauses
 ([ADR 0216](adr/0216-a-carrier-type-supplies-its-signatures-default-contract.md)).
@@ -3261,6 +3268,12 @@ representation is sealed and at a newtype's base. Its help offers only edits
 the program can make: adding `Owned` to the bounds of a parameter the path ends
 at, or `where I.Item: Owned` for an associated type, and dropping the bound where
 the program wrote it. `Owned` written twice on one subject is [T-Bound].
+The `Shareable` bound admits a type two tasks may read one value of at once
+(§5.3), decided the same way and refused the same way: the refusal names the
+path to the part that is not shareable, such as a field holding a
+`mem.Handle`, the `@unshareable` type it reaches, or the type parameter
+not bounded `Shareable`. `Shareable` is written, promised in a `where` clause
+and refused on an enclosing declaration's parameter exactly as `Owned` is.
 `Owned` is written on a type parameter, inline or in its declaration's own
 `where` clause, or in that clause on an associated type read through one of the
 declaration's own parameters: `where I.Item: Owned` under `[I: Iterator]`, or
@@ -3270,8 +3283,9 @@ in a method's `where`, in a trait's bound list or on an associated type's
 declaration it is [T-Bound]: the promise would hold in declarations that never
 made it.
 
-`Copyable`, `Discardable`, `Linear`, `Integer` and `Owned` are decided by the
-compiler, and an implementation of one, such as `impl Owned for Label`, is
+`Copyable`, `Discardable`, `Linear`, `Integer`, `Owned` and `Shareable` are
+decided by the compiler, and an implementation of one, such as
+`impl Owned for Label`, is
 [T-Bound]. A program that declares a trait of one of those names implements its
 own trait.
 
@@ -3379,8 +3393,8 @@ Repeating an explicit capability bound, or explicitly restating one already
 inherited through a trait, is rejected at the declaration. An explicit
 Discardable bound is redundant when Copyable is already required. Linear adds no
 capability requirement and cannot add information beside Copyable or
-Discardable. `Owned` written twice on one parameter, or beside `Integer`, which
-implies it, is rejected the same way. Reaching a capability through two different trait bounds does not
+Discardable. `Owned` or `Shareable` written twice on one parameter, or beside
+`Integer`, which implies both, is rejected the same way. Reaching a capability through two different trait bounds does not
 make either trait redundant: each trait also grants its own operations.
 Diagnostics identify the bounded name and the redundant requirement, including
 an inherited source where applicable.
@@ -5347,6 +5361,24 @@ Owned. The bound narrows only that parameter: another source the body stores
 must still be declared ([O-Escapes]). A dependency never comes from an Owned
 type, so substituting any admitted argument keeps a body checked with the
 parameter unseeded correct.
+
+**Shareable values.** A type is **Shareable** when two tasks may read one value
+of it at once, because no read of it writes. A type is not Shareable when it is
+declared `@unshareable`, or when anything reachable through its fields, variant
+payloads, array elements, newtype base, closure environment, type arguments or
+the referent of an observation is not: an observation lets whoever reads it
+read its referent. `mem.Arena` and `mem.Handle` are `@unshareable`, since a
+handle's `acquire` takes it by `read` and advances the arena's cursor, so
+`Vec[UInt8, mem.Handle]` and `borrow mem.Arena` are not Shareable;
+`mem.AllocationLog` is `@unshareable` too, since its allocator writes the log
+under a `read`. A type
+parameter is not Shareable unless it is bounded `Shareable` or `Integer`, and
+neither is a function value, which may hold anything. Being Shareable is
+independent of being Owned: an arena owns its memory and carries nothing yet
+is not Shareable, and `borrow UInt64` is Shareable and not Owned. It is
+independent of copying too: a `mem.Handle` is copyable, and every copy reaches
+the one cursor. Being unshareable restricts only observation: an unshareable
+value moves, copies and settles as its declaration says.
 
 **Carried dependencies.** `mem.Carried[H]` is a zero-sized field type that
 carries every dependency a value of `H` may carry, read observations and

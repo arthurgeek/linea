@@ -386,7 +386,7 @@ pub const DeriveTrait = struct {
     tokens: TokenRange,
 };
 
-pub const AttributeItemKind = enum(u8) { opaque_, linear, copyable, carrier, derive, unknown };
+pub const AttributeItemKind = enum(u8) { opaque_, linear, copyable, carrier, unshareable, derive, unknown };
 
 pub const AttributeItem = struct {
     kind: AttributeItemKind,
