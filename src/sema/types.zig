@@ -8373,6 +8373,10 @@ pub const Typing = struct {
         borrowed_types: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty,
         capability_facts: CapabilityFacts = .{},
         scoped_capability_facts: ScopedCapabilityFacts = .{},
+        /// Whether a scoped walk is running. Its pending and queue lists are
+        /// shared, so a preparation started inside one would clear what the
+        /// outer walk still reads.
+        scoped_walk_running: bool = false,
         prepared_implementations: PreparedImplementations = .{},
         dependency_facts: BorrowContainment = .{},
         writer_facts: BorrowContainment = .{},
@@ -12462,6 +12466,9 @@ pub const Typing = struct {
         /// again before the hand-off.
         fn prepareScopedCapability(self: *Builder, scope: DeclId, t: TypeId) !void {
             if (self.scoped_capability_facts.roots.contains(.{ .scope = scope, .ty = t })) return;
+            if (self.scoped_walk_running) @panic("compiler defect: a scoped capability was prepared inside another one's walk");
+            self.scoped_walk_running = true;
+            defer self.scoped_walk_running = false;
             if (self.alikeSource(t) != null) try self.ensureFilled(t);
             // Bringing the capability facts up to the pool may drop these
             // facts, so it is done before the walk, and again, with the walk,
