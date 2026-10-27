@@ -342,11 +342,14 @@ sweep, from n to 4n:
 | a template chain under functions promising a member it reads (16000 to 64000) | n^1.11 | n^1.90 |
 | a template chain under functions promising a member it never reads (16000 to 64000) | n^0.99 | n^1.62 |
 | a template chain under functions bounding their parameter Discardable (16000 to 64000) | n^0.99 | n^1.71 |
+| a template chain under functions capping the member it reads Discardable (16000 to 64000) | n^0.92 | n^2.27 |
 | members promised through templates each reading one (16000 to 64000) | n^1.00 | n^2.23 |
 | members promised through one template reading them all (32000 to 128000) | n^0.96 | n^2.14 |
 | members promised by a template's own where clause (32000 to 128000) | n^1.00 | n^2.41 |
 
-The last three were measured "before" from 1000, 4000 and 4000, while each
+The capping chain was measured "before" from 1000, while every alike
+instantiation a capping scope reached was written at the scope's own
+parameters. The last three were measured "before" from 1000, 4000 and 4000, while each
 promise was decided over every earlier one and each member read was its own
 search. Sized as shown, they also need the checker to ask whether a trait
 declares a member in one lookup (`DeclIndex.ownsNamed`) rather than a walk
@@ -510,7 +513,7 @@ decision would be read stale.
 The scoped answer is then read from parts at the scope's own parameters,
 which its caps name as written, and no cap is renamed. But each scope writes
 everything it reaches at its own parameters: `n` functions capping
-`S.Item` over a chain of `n` templates wrote `n` chains, n^2.19, though
+`S.Item` over a chain of `n` templates wrote `n` chains, n^2.27, though
 every one answers as the template's chain does under one renaming. Renaming
 costs a substitution per cap at each step, and only the preparation renames:
 readers ask by scope and type as before.
