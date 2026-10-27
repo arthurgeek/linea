@@ -1,0 +1,13 @@
+fn share[T: Shareable](_value: T) -> UInt64 {
+    1
+}
+
+// `U` may be instantiated with a type that is not shareable, so it cannot
+// stand where `Shareable` is required.
+fn outer[U](value: U) -> UInt64 {
+    share(value)
+}
+
+fn main() -> UInt8 {
+    UInt8(outer(UInt64(3)))
+}

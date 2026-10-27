@@ -422,6 +422,20 @@ pub const Ast = struct {
         return false;
     }
 
+    /// The `unshareable` item written on a type declaration, or `.none`. A value
+    /// of such a type writes through a `read` of it, so two tasks may not
+    /// read one at once. Bounded by the attributes written on the declaration.
+    pub fn declUnshareableToken(self: *const Ast, id: DeclId) TokenId {
+        switch (self.declTag(id)) {
+            .struct_, .enum_, .newtype => {},
+            else => return .none,
+        }
+        for (self.declAttributeGroups(id)) |group| {
+            for (self.attributeItems(group)) |item| if (item.kind == .unshareable) return item.name;
+        }
+        return .none;
+    }
+
     /// How far a declaration's name reaches outside its own module.
     pub fn declVisibility(self: *const Ast, id: DeclId) node.Visibility {
         return self.decls.items(.visibility)[id.index()];

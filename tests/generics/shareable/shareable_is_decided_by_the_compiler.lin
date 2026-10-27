@@ -1,0 +1,10 @@
+struct Label {
+    text: Str,
+}
+
+impl Shareable for Label {}
+
+fn main() -> UInt8 {
+    let label = Label { text = "x" }
+    UInt8(label.text.length())
+}

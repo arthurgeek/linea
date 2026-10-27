@@ -1,8 +1,10 @@
 import std.testing
 
 // An Arena hands out pieces of one backing buffer, and they are released
-// together with the arena.
-@opaque
+// together with the arena. Acquiring advances the arena's cursor through a
+// `read` of its handle, so an arena is `unshareable`: two tasks reading one would
+// both write that cursor.
+@(opaque, unshareable)
 struct Arena[H: Allocator] {
     /// None if allocation failed; subsequent acquire calls then return Oom.
     slab: Option[Buffer[H]],
@@ -14,7 +16,9 @@ struct Arena[H: Allocator] {
 // backing buffer. Moving, replacing or releasing an arena conflicts with live
 // handles and allocations observing it; moving an unobserved arena into or out
 // of a generic function is an ordinary move.
-@(opaque, copyable)
+// A handle is `unshareable` for the reason its arena is: `acquire` takes it by
+// `read` and advances the arena's cursor.
+@(opaque, copyable, unshareable)
 struct Handle[H: Allocator = SystemAllocator] {
     owner: borrow Arena[H],
 }

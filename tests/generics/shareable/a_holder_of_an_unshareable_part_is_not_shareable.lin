@@ -1,0 +1,32 @@
+import std.mem
+
+use mem.Lender
+
+fn share[T: Shareable](_value: T) -> UInt64 {
+    1
+}
+
+// A desk hands out storage through the handle it holds.
+struct Desk {
+    handle: mem.Handle,
+    seats: UInt64,
+}
+
+// A seat is either free or held at a desk.
+enum Seat {
+    Free,
+    Held(mem.Handle),
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 64)
+    let desk = Desk { handle = arena.handle(), seats = 4 }
+    let seat = Seat.Held(arena.handle())
+    let count = [desk] || desk.seats
+    let observed = share(borrow desk) + share(seat) + share(count)
+    // An allocation log counts what its allocator hands out through a `read`.
+    defer let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let counted = share(log.allocator()) + share(borrow log)
+    arena.release()
+    UInt8(observed + counted)
+}

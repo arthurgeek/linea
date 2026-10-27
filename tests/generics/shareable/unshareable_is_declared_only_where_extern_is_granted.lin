@@ -1,0 +1,10 @@
+// A cursor advances its position when it is read.
+@unshareable
+struct Cursor {
+    at: UInt64,
+}
+
+fn main() -> UInt8 {
+    let cursor = Cursor { at = 2 }
+    UInt8(cursor.at)
+}

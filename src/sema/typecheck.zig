@@ -557,7 +557,7 @@ fn typecheckInternal(
     defer c.template_signatures.deinit(gpa);
     defer c.declined_contracts.deinit(gpa);
     defer c.refused_owned_promises.deinit(gpa);
-    defer c.refused_owned_subjects.deinit(gpa);
+    defer c.refused_containment_subjects.deinit(gpa);
     defer c.adopted_contracts.deinit(gpa);
     defer c.fixed_functions.deinit(gpa);
     defer c.refused_members.deinit(gpa);
@@ -829,6 +829,7 @@ fn typecheckInternal(
         if (t == .poison) continue;
         const gop = try c.decl_of_type.getOrPut(gpa, t);
         if (!gop.found_existing) gop.value_ptr.* = each.id;
+        if (ast.declUnshareableToken(each.id) != .none) c.builder.markUnshareable(t);
     }
 
     z_decltypes.end();
@@ -1016,7 +1017,8 @@ fn typecheckInternal(
                 &.{},
             );
             c.builder.pool.items[row[k].index()].parameter.integer = integerDemandedBy(ast, resolution, bounds, reaches);
-            c.builder.pool.items[row[k].index()].parameter.owned = ownedBound(ast, resolution, bounds) != null;
+            c.builder.pool.items[row[k].index()].parameter.owned = containmentBound(ast, resolution, bounds, .owned) != null;
+            c.builder.pool.items[row[k].index()].parameter.shareable = containmentBound(ast, resolution, bounds, .shareable) != null;
         }
     }
 
@@ -1341,6 +1343,12 @@ fn typecheckInternal(
         for (program.declsOf(c.current)) |d| {
             if (c.isRetained(d)) continue;
             if (ast.declIsExtern(d)) try c.checkExtern(d, m.externs, m.library);
+            // Only a module trusted with C can write raw storage under a
+            // `read`, so only such a module can make a type whose read writes.
+            if (!m.externs) {
+                const unshareable = ast.declUnshareableToken(d);
+                if (unshareable != .none) try c.reportUngranted(unshareable, "an `@unshareable` type", "drop `@unshareable`");
+            }
             if (m.externs and foreign_module != .none and c.current != foreign_module)
                 try c.checkForeignPublished(d, foreign_module);
             if (c.program.publishesExport(d)) try c.checkExport(d);
@@ -1813,7 +1821,7 @@ fn capabilityDemand(
                 .discardable => &discardable,
                 .unrestricted => &unrestricted,
             },
-            .trait, .integer, .owned, .unknown => continue,
+            .trait, .integer, .owned, .shareable, .unknown => continue,
         };
         if (source.written == .none) {
             source.written = b.named.name;
@@ -1834,7 +1842,7 @@ fn capabilityDemand(
                     .discardable => &discardable,
                     .unrestricted => &unrestricted,
                 },
-                .trait, .integer, .owned, .unknown => continue,
+                .trait, .integer, .owned, .shareable, .unknown => continue,
             };
             if (source.through == node.DeclId.none) source.through = trait;
         }
@@ -1878,11 +1886,34 @@ fn capabilityToken(ast: *const Ast, res: *const Resolution, bounds: []const node
     return first;
 }
 
-/// The first bound in a run that names `Owned`. Only the run itself is read:
-/// a trait cannot require `Owned`, so no trait it reaches adds the demand.
-fn ownedBound(ast: *const Ast, res: *const Resolution, bounds: []const node.TraitBound) ?TokenId {
+/// The two built-in bounds decided by a containment table rather than by an
+/// implementation: `Owned`, over the dependency table, and `Shareable`, over
+/// the `unshareable` one.
+const Containment = enum {
+    owned,
+    shareable,
+
+    fn spelled(self: Containment) []const u8 {
+        return switch (self) {
+            .owned => "Owned",
+            .shareable => "Shareable",
+        };
+    }
+
+    fn bound(self: Containment) std.meta.Tag(resolve_mod.Bound) {
+        return switch (self) {
+            .owned => .owned,
+            .shareable => .shareable,
+        };
+    }
+};
+
+/// The first bound in a run that names `which`. Only the run itself is read:
+/// a trait cannot require `Owned` or `Shareable`, so no trait it reaches adds
+/// the demand.
+fn containmentBound(ast: *const Ast, res: *const Resolution, bounds: []const node.TraitBound, which: Containment) ?TokenId {
     for (bounds) |bound| {
-        if (bound.kind == .named and resolve_mod.boundNames(ast, bound.named.name, traitAt(ast, res, bound.named.name)) == .owned) return bound.named.name;
+        if (bound.kind == .named and resolve_mod.boundNames(ast, bound.named.name, traitAt(ast, res, bound.named.name)) == which.bound()) return bound.named.name;
     }
     return null;
 }
@@ -5662,10 +5693,11 @@ const Checker = struct {
     /// Declarations whose `where` clause promised `Owned` for a subject that
     /// is not theirs to bound. Their contract is not inferred.
     refused_owned_promises: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
-    /// Each subject a refused `Owned` promise named, with the declaration
-    /// that wrote it. A use inside that declaration that needs the subject
-    /// `Owned` is the refused promise's consequence and is not reported again.
-    refused_owned_subjects: std.AutoHashMapUnmanaged(struct { decl: DeclId, subject: TypeId }, void) = .empty,
+    /// Each subject a refused `Owned` or `Shareable` promise named, with the
+    /// declaration that wrote it. A use inside that declaration that needs
+    /// the subject to meet that bound is the refused promise's consequence
+    /// and is not reported again.
+    refused_containment_subjects: std.AutoHashMapUnmanaged(struct { decl: DeclId, subject: TypeId, which: Containment }, void) = .empty,
     /// Each implementation member without a clause, with the trait signature
     /// whose contract it adopts.
     adopted_contracts: std.AutoHashMapUnmanaged(DeclId, DeclId) = .empty,
@@ -6302,7 +6334,7 @@ const Checker = struct {
             }
         }
 
-        var promised: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        var promised: std.AutoHashMapUnmanaged(Checker.Promise, void) = .empty;
         defer promised.deinit(self.gpa);
         var promises: std.ArrayList(TypeId) = .empty;
         defer promises.deinit(self.gpa);
@@ -6326,13 +6358,17 @@ const Checker = struct {
                 const requirements = self.constraints.requirementsOf(constraint);
                 if (requirements.len == 0) continue;
                 switch (constraint.subject) {
-                    // Each `Owned` the clause writes is a promise, so one
-                    // written twice in a list is refused as one written in
-                    // two clauses is.
+                    // Each `Owned` or `Shareable` the clause writes is a
+                    // promise, so one written twice in a list is refused as
+                    // one written in two clauses is.
                     .written => |written| for (requirements) |requirement| {
                         if (requirement.kind != .named) continue;
-                        if (resolve_mod.boundNames(self.ast, requirement.named.name, traitAt(self.ast, self.res, requirement.named.name)) != .owned) continue;
-                        try self.promiseWrittenOwned(d, written, resolved, requirement.named.name, &promised, &promises, .owned);
+                        const which: Containment = switch (resolve_mod.boundNames(self.ast, requirement.named.name, traitAt(self.ast, self.res, requirement.named.name))) {
+                            .owned => .owned,
+                            .shareable => .shareable,
+                            else => continue,
+                        };
+                        try self.promiseWritten(d, written, resolved, requirement.named.name, which, .itself, &promised, &promises);
                     },
                     .parameter => {},
                 }
@@ -6354,7 +6390,7 @@ const Checker = struct {
                         } else for (requirements) |requirement| {
                             if (requirement.kind == .named) break requirement.named.name;
                         } else self.ast.declName(d);
-                        try self.promiseWrittenOwned(d, written, resolved, bound, &promised, &promises, .integer);
+                        try self.promiseWritten(d, written, resolved, bound, .owned, .integer, &promised, &promises);
                     },
                     .parameter => {},
                 }
@@ -6367,7 +6403,8 @@ const Checker = struct {
                         .callables = callables,
                         .requirement = capabilityDemandedBy(self.ast, self.res, requirements, traits),
                         .integer = integerDemandedBy(self.ast, self.res, requirements, traits),
-                        .owned = ownedBound(self.ast, self.res, requirements) != null,
+                        .owned = containmentBound(self.ast, self.res, requirements, .owned) != null,
+                        .shareable = containmentBound(self.ast, self.res, requirements, .shareable) != null,
                     },
                 });
             }
@@ -6436,8 +6473,9 @@ const Checker = struct {
                 changed = true;
                 // A promise holds for what the subject now reads as.
                 const demand = items[item].demand;
-                if ((demand.owned or demand.integer) and self.ownsSubject(d, settled))
-                    try promises.append(self.gpa, settled);
+                if (!self.ownsSubject(d, settled)) continue;
+                if (demand.owned or demand.integer) try promises.append(self.gpa, settled);
+                if (demand.shareable) self.builder.promiseShareable(settled);
             }
             try self.promiseHeld(promises.items);
         }
@@ -11277,7 +11315,7 @@ const Checker = struct {
         const witness = (try self.builder.dependencyWitness(self.gpa, held)) orelse
             @panic("compiler defect: a type refused for `Owned` has no part that carries a dependency");
         defer witness.deinit(self.gpa);
-        if (self.refused_owned_subjects.contains(.{ .decl = self.generic, .subject = witness.seed })) return;
+        if (self.refused_containment_subjects.contains(.{ .decl = self.generic, .subject = witness.seed, .which = .owned })) return;
         const held_name = try self.typeName(held);
         const seed_name = try self.typeName(witness.seed);
         var help = self.unmetBoundHelp(bound);
@@ -11374,6 +11412,89 @@ const Checker = struct {
             label,
             "`{s}` requires `Owned`, and `{s}` can carry a borrow: `{s}` is {s} `{s}`, {s}",
             .{ subject, held_name, path, article.before(seed_name), seed_name, what },
+        );
+    }
+
+    /// Refuses `held` for the `Shareable` bound written at `bound`, naming the
+    /// parts walked from it to what is not shareable: a type declared
+    /// `unshareable`, a function value, or a type parameter not bounded
+    /// `Shareable`. The path is found over the edges the `unshareable` table was
+    /// computed from, and stops where `reportNotOwned`'s does or at an
+    /// observation, whose referent is named as what it observes.
+    fn reportNotShareable(self: *Checker, subject: []const u8, held: TypeId, bound: TokenId, at: TokenId, span: Span) std.mem.Allocator.Error!void {
+        const witness = (try self.builder.unshareableWitness(self.gpa, held)) orelse unreachable;
+        defer witness.deinit(self.gpa);
+        if (self.refused_containment_subjects.contains(.{ .decl = self.generic, .subject = witness.seed, .which = .shareable })) return;
+        const held_name = try self.typeName(held);
+        const seed_name = try self.typeName(witness.seed);
+        var help = self.unmetBoundHelp(bound);
+        help.another_value = "pass a value that reading never changes";
+        const edit: Edit = if (self.builder.get(witness.seed) == .parameter)
+            try self.boundsEdit("Shareable", witness.seed)
+        else
+            .{ .refused = .{ .reason = try std.fmt.allocPrint(self.sink.arena, "`{s}` is not `Shareable`", .{held_name}), .instead = null } };
+        const label = try self.unmetLabel(help, edit);
+        const file = self.ast.fileOf(at);
+
+        // The seed as a sentence names it: a type parameter bare, any other
+        // type with its article.
+        const what: []const u8 = switch (self.builder.get(witness.seed)) {
+            .parameter => try std.fmt.allocPrint(self.sink.arena, "`{s}`, which may stand for a type that is not `Shareable`", .{seed_name}),
+            .callable, .open_type => try std.fmt.allocPrint(self.sink.arena, "{s} `{s}`, a function value, which may hold a value that is not `Shareable`", .{ article.before(seed_name), seed_name }),
+            else => try std.fmt.allocPrint(self.sink.arena, "{s} `{s}`, which is unshareable", .{ article.before(seed_name), seed_name }),
+        };
+        if (witness.steps.len == 0) return switch (self.builder.get(witness.seed)) {
+            .parameter => self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Shareable`, and `{s}` may stand for a type that is not `Shareable`", .{ subject, held_name }),
+            .callable, .open_type => self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Shareable`, and `{s}` is a function value, which may hold a value that is not `Shareable`", .{ subject, held_name }),
+            else => self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Shareable`, and `{s}` is unshareable", .{ subject, held_name }),
+        };
+
+        // A path is named as far as the reader can select it; an
+        // observation's referent is not a part, so the path stops at the
+        // observation and names its referent as what it observes.
+        var visible = self.selectableSteps(held, witness);
+        var observed: ?TypeId = null;
+        var owner = held;
+        for (witness.parts[0..visible], 0..) |part, index| {
+            if (self.builder.get(owner) == .borrow) {
+                visible = index;
+                observed = part;
+                break;
+            }
+            owner = part;
+        }
+        const tail: []const u8 = if (observed) |referent|
+            (if (referent == witness.seed)
+                try std.fmt.allocPrint(self.sink.arena, "observes {s}", .{what})
+            else
+                try std.fmt.allocPrint(self.sink.arena, "observes {s} `{s}`, which holds {s}", .{ article.before(try self.typeName(referent)), try self.typeName(referent), what }))
+        else
+            try std.fmt.allocPrint(self.sink.arena, "holds {s}", .{what});
+        if (visible == 0) return self.sink.addErrorFmt(
+            .t_bound,
+            file,
+            span,
+            label,
+            "`{s}` requires `Shareable`, and `{s}` is not `Shareable`: it {s}",
+            .{ subject, held_name, tail },
+        );
+        const path = try self.witnessPath(witness.steps[0..visible]);
+        if (visible == witness.steps.len) return self.sink.addErrorFmt(
+            .t_bound,
+            file,
+            span,
+            label,
+            "`{s}` requires `Shareable`, and `{s}` is not `Shareable`: `{s}` is {s}",
+            .{ subject, held_name, path, what },
+        );
+        const part_name = try self.typeName(witness.parts[visible - 1]);
+        try self.sink.addErrorFmt(
+            .t_bound,
+            file,
+            span,
+            label,
+            "`{s}` requires `Shareable`, and `{s}` is not `Shareable`: `{s}` is {s} `{s}`, which {s}",
+            .{ subject, held_name, path, article.before(part_name), part_name, tail },
         );
     }
 
@@ -11525,11 +11646,18 @@ const Checker = struct {
             try self.sink.addErrorFmt(.t_bound, self.ast.fileOf(at), span, "supply a built-in integer type or an Integer-constrained parameter", "`{s}` requires `Integer`, and `{s}` is not a built-in integer type", .{ subject, (try self.typeName(held)) });
             return true;
         }
-        if (ownedBound(self.ast, self.res, bounds)) |bound| if (held != .poison and try self.builder.mayCarryDependencies(held)) {
+        if (containmentBound(self.ast, self.res, bounds, .owned)) |bound| if (held != .poison and try self.builder.mayCarryDependencies(held)) {
             if (mode == .ask) return true;
             if (self.builder.view().mentionsOpenType(held)) return true;
             try self.noteRefused(at);
             try self.reportNotOwned(subject, held, bound, at, span);
+            return true;
+        };
+        if (containmentBound(self.ast, self.res, bounds, .shareable)) |bound| if (held != .poison and !try self.builder.isShareable(held)) {
+            if (mode == .ask) return true;
+            if (self.builder.view().mentionsOpenType(held)) return true;
+            try self.noteRefused(at);
+            try self.reportNotShareable(subject, held, bound, at, span);
             return true;
         };
         if (try self.builder.meetsCapabilityWithin(self.generic, held, requirement)) return false;
@@ -11651,7 +11779,7 @@ const Checker = struct {
     fn namesATrait(self: *const Checker, bound: TokenId) bool {
         return switch (resolve_mod.boundNames(self.ast, bound, traitAt(self.ast, self.res, bound))) {
             .trait => true,
-            .capability, .integer, .owned, .unknown => false,
+            .capability, .integer, .owned, .shareable, .unknown => false,
         };
     }
 
@@ -11667,7 +11795,7 @@ const Checker = struct {
             const ast = self.checker.ast;
             return switch (resolve_mod.boundNames(ast, tok, traitAt(ast, self.checker.res, tok))) {
                 .trait => |d| d,
-                .capability, .integer, .owned, .unknown => null,
+                .capability, .integer, .owned, .shareable, .unknown => null,
             };
         }
 
@@ -13404,7 +13532,8 @@ const Checker = struct {
         // A trait signature's `Self` is bounded by the trait's supertrait
         // list, which may not name `Owned`.
         if (self.builder.standinOf(parameter) == null and std.mem.eql(u8, name, "Self")) {
-            if (std.mem.eql(u8, required, "Owned")) return .{ .refused = .{ .reason = "a trait's `Self` cannot be bounded `Owned`", .instead = null } };
+            if (std.mem.eql(u8, required, "Owned") or std.mem.eql(u8, required, "Shareable"))
+                return .{ .refused = .{ .reason = try std.fmt.allocPrint(self.sink.arena, "a trait's `Self` cannot be bounded `{s}`", .{required}), .instead = null } };
             return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to the trait's supertraits", .{required}) };
         }
         if (self.builder.standinOf(parameter) == null)
@@ -19337,32 +19466,36 @@ const Checker = struct {
         return false;
     }
 
+    /// Refuses `what`, written at `at` in the current module, which only a
+    /// module its root's manifest grants `extern` may declare. The manifest
+    /// and the module are spelled as that manifest writes them: a library's
+    /// module is reached through the library's name, which its manifest omits.
+    fn reportUngranted(self: *Checker, at: TokenId, what: []const u8, otherwise: []const u8) std.mem.Allocator.Error!void {
+        const module = self.program.get(self.current);
+        const roots = self.program.source.roots;
+        const root_name = if (module.root.isDependency() and module.root.index() < roots.len)
+            roots[module.root.index()].name
+        else
+            "";
+        const relative = module_route.withinRoot(self.program.modulePath(self.current), root_name);
+        const shown = if (relative.len == 0) "." else relative;
+        const manifest = if (root_name.len == 0)
+            "linea.json"
+        else
+            try std.fmt.allocPrint(self.sink.arena, "the linea.json of `{s}`", .{root_name});
+        const help = try std.fmt.allocPrint(self.sink.arena, "list this module under \"extern\" in {s} to trust it with C, or {s}", .{ manifest, otherwise });
+        try self.sink.addErrorFmt(
+            .m_extern,
+            self.ast.fileOf(at),
+            self.ast.tokenSpan(at),
+            help,
+            "{s} is declared only in a module its root's manifest grants, and {s} does not list \"{s}\"",
+            .{ what, manifest, shown },
+        );
+    }
+
     fn checkExtern(self: *Checker, d: node.DeclId, granted: bool, library: bool) std.mem.Allocator.Error!void {
-        if (!granted) {
-            // Spelled as the root's own manifest writes it: a library's module
-            // is reached through the library's name, which its manifest omits.
-            const module = self.program.get(self.current);
-            const roots = self.program.source.roots;
-            const root_name = if (module.root.isDependency() and module.root.index() < roots.len)
-                roots[module.root.index()].name
-            else
-                "";
-            const relative = module_route.withinRoot(self.program.modulePath(self.current), root_name);
-            const shown = if (relative.len == 0) "." else relative;
-            const manifest = if (root_name.len == 0)
-                "linea.json"
-            else
-                try std.fmt.allocPrint(self.sink.arena, "the linea.json of `{s}`", .{root_name});
-            const help = try std.fmt.allocPrint(self.sink.arena, "list this module under \"extern\" in {s} to trust it with C, or call a module that is granted", .{manifest});
-            try self.sink.addErrorFmt(
-                .m_extern,
-                self.ast.fileOf(self.ast.declName(d)),
-                self.ast.tokenSpan(self.ast.declName(d)),
-                help,
-                "an `extern` is declared only in a module its root's manifest grants, and {s} does not list \"{s}\"",
-                .{ manifest, shown },
-            );
-        }
+        if (!granted) try self.reportUngranted(self.ast.declName(d), "an `extern`", "call a module that is granted");
         // Another module calling C directly would be trusted with it too, so
         // an `extern` is private, and its module publishes a Linea function
         // that calls it.
@@ -30135,7 +30268,8 @@ const Checker = struct {
                     .callables = callables,
                     .requirement = capabilityDemandedBy(self.ast, self.res, requirements, traits),
                     .integer = integerDemandedBy(self.ast, self.res, requirements, traits),
-                    .owned = ownedBound(self.ast, self.res, requirements) != null,
+                    .owned = containmentBound(self.ast, self.res, requirements, .owned) != null,
+                    .shareable = containmentBound(self.ast, self.res, requirements, .shareable) != null,
                 },
             };
             filled += 1;
@@ -30871,14 +31005,16 @@ const Checker = struct {
             const own = self.ast.declBounds(d);
             if (own.len > 0) {
                 try self.reportCapabilityDemand(own, self.ast.declName(d));
-                if (ownedBound(self.ast, self.res, own)) |bound| try self.sink.addErrorFmt(
-                    .t_bound,
-                    self.ast.fileOf(bound),
-                    self.ast.tokenSpan(bound),
-                    "write `Owned` on the type parameter that needs it",
-                    "`Owned` bounds a type parameter, and `{s}` is not one",
-                    .{self.ast.tokenText(self.ast.declName(d))},
-                );
+                for ([_]Containment{ .owned, .shareable }) |which| {
+                    if (containmentBound(self.ast, self.res, own, which)) |bound| try self.sink.addErrorFmt(
+                        .t_bound,
+                        self.ast.fileOf(bound),
+                        self.ast.tokenSpan(bound),
+                        try std.fmt.allocPrint(self.sink.arena, "write `{s}` on the type parameter that needs it", .{which.spelled()}),
+                        "`{s}` bounds a type parameter, and `{s}` is not one",
+                        .{ which.spelled(), self.ast.tokenText(self.ast.declName(d)) },
+                    );
+                }
             }
             for (self.ast.declTypeParams(d), 0..) |p, k| {
                 try self.reportCapabilityDemand(self.parameterBounds(d, k), p.name);
@@ -30898,8 +31034,8 @@ const Checker = struct {
         };
     }
 
-    /// Records an `Owned` promise a declaration's `where` clause makes about a
-    /// written subject, or refuses it.
+    /// Records an `Owned` or `Shareable` promise a declaration's `where`
+    /// clause makes about a written subject, or refuses it.
     ///
     /// The seed reads `Owned` from the record of the parameter a type stands
     /// for, so a promise holds only for a subject whose record belongs to the
@@ -30909,44 +31045,50 @@ const Checker = struct {
     /// declaration can name. An enclosing implementation's parameter is
     /// shared with that implementation's other members, and a promise there
     /// would be relied on where nothing checked it.
-    fn promiseWrittenOwned(
+    fn promiseWritten(
         self: *Checker,
         d: node.DeclId,
         written: node.TypeRef,
         subject: TypeId,
         bound: TokenId,
-        /// The subjects `d`'s clauses have promised so far.
-        promised: *std.AutoHashMapUnmanaged(TypeId, void),
-        /// The promises to record once every clause of `d` is read.
+        which: Containment,
+        /// The bound written: `which` itself, or `Integer`, which promises
+        /// `Owned` and may be written beside it.
+        written_as: enum { itself, integer },
+        /// The subjects `d`'s clauses have promised so far, by bound.
+        promised: *std.AutoHashMapUnmanaged(Promise, void),
+        /// The `Owned` promises to record once every clause of `d` is read.
         promises: *std.ArrayList(TypeId),
-        /// The bound written: `Owned`, or `Integer`, which promises `Owned`
-        /// and may be written beside it.
-        written_as: enum { owned, integer },
     ) std.mem.Allocator.Error!void {
         if (self.ownsSubject(d, subject)) {
+            const key: Promise = .{ .subject = subject, .which = which };
             if (written_as == .integer) {
-                if (!promised.contains(subject)) try promises.append(self.gpa, subject);
+                if (!promised.contains(key)) try promises.append(self.gpa, subject);
                 return;
             }
-            if ((try promised.getOrPut(self.gpa, subject)).found_existing) return self.sink.addErrorFmt(
+            if ((try promised.getOrPut(self.gpa, key)).found_existing) return self.sink.addErrorFmt(
                 .t_bound,
                 self.ast.fileOf(bound),
                 self.ast.tokenSpan(bound),
                 "drop one of the two bounds",
-                "`{s}` is bounded `Owned` twice",
-                .{self.ast.writtenText(written)},
+                "`{s}` is bounded `{s}` twice",
+                .{ self.ast.writtenText(written), which.spelled() },
             );
-            return try promises.append(self.gpa, subject);
+            return switch (which) {
+                .owned => promises.append(self.gpa, subject),
+                .shareable => self.builder.promiseShareable(subject),
+            };
         }
-        // The signature's contract would be inferred as if the promise held
-        // for some instantiations and not others; the refusal is the mistake,
-        // so the contract is left undecided and nothing is reported against it.
-        try self.refused_owned_promises.put(self.gpa, d, {});
-        try self.refused_owned_subjects.put(self.gpa, .{ .decl = d, .subject = subject }, {});
+        // The signature's contract would be inferred as if an `Owned`
+        // promise held for some instantiations and not others; the refusal is
+        // the mistake, so the contract is left undecided and nothing is
+        // reported against it. `Shareable` decides no contract.
+        if (which == .owned) try self.refused_owned_promises.put(self.gpa, d, {});
+        try self.refused_containment_subjects.put(self.gpa, .{ .decl = d, .subject = subject, .which = which }, {});
         // An implementation's parameter is promised in the implementation's
         // own clause, which every member then relies on.
         const name = switch (written_as) {
-            .owned => "Owned",
+            .itself => which.spelled(),
             .integer => "Integer",
         };
         const help = if (self.implementationOwning(subject) != null)
@@ -30961,7 +31103,7 @@ const Checker = struct {
             "{s} a type parameter of the declaration that writes it, and `{s}` is not one of `{s}`'s",
             .{
                 switch (written_as) {
-                    .owned => "`Owned` bounds",
+                    .itself => try std.fmt.allocPrint(self.sink.arena, "`{s}` bounds", .{which.spelled()}),
                     .integer => "every `Integer` is `Owned`, which bounds only",
                 },
                 self.ast.writtenText(written),
@@ -30969,6 +31111,9 @@ const Checker = struct {
             },
         );
     }
+
+    /// A subject a declaration's `where` clauses promised `which` for.
+    const Promise = struct { subject: TypeId, which: Containment };
 
     /// Rejects repeated or redundant capability bounds, preserving the trait
     /// bounds that also provide operations.
@@ -30985,21 +31130,29 @@ const Checker = struct {
         // and a bound on that list is a token that is there.
         const at = if (named != .none) named else bounds[0].named.name;
 
-        if (ownedBound(self.ast, self.res, bounds)) |first| {
+        for ([_]Containment{ .owned, .shareable }) |which| {
+            const first = containmentBound(self.ast, self.res, bounds, which) orelse continue;
             for (bounds) |bound| {
                 if (bound.kind != .named or bound.named.name == first) continue;
-                if (resolve_mod.boundNames(self.ast, bound.named.name, traitAt(self.ast, self.res, bound.named.name)) != .owned) continue;
+                if (resolve_mod.boundNames(self.ast, bound.named.name, traitAt(self.ast, self.res, bound.named.name)) != which.bound()) continue;
                 return self.sink.addErrorFmt(
                     .t_bound,
                     self.ast.fileOf(at),
                     self.ast.tokenSpan(at),
                     "drop one of the two bounds",
-                    "`{s}` is bounded `Owned` twice",
-                    .{self.ast.tokenText(at)},
+                    "`{s}` is bounded `{s}` twice",
+                    .{ self.ast.tokenText(at), which.spelled() },
                 );
             }
             if (integerDemandedBy(self.ast, self.res, bounds, through)) {
-                return self.sink.addError(.t_bound, self.ast.fileOf(at), self.ast.tokenSpan(at), "Integer already includes Owned", "drop the redundant Owned bound");
+                return self.sink.addErrorFmt(
+                    .t_bound,
+                    self.ast.fileOf(at),
+                    self.ast.tokenSpan(at),
+                    try std.fmt.allocPrint(self.sink.arena, "drop the redundant {s} bound", .{which.spelled()}),
+                    "Integer already includes {s}",
+                    .{which.spelled()},
+                );
             }
         }
 
@@ -31320,6 +31473,7 @@ const Checker = struct {
             .capability => return false,
             .integer => if (got_name != .integer) return false,
             .owned => if (got_name != .owned) return false,
+            .shareable => if (got_name != .shareable) return false,
             .trait => |wanted| switch (got_name) {
                 .trait => |got| if (wanted != got) return false,
                 else => return false,

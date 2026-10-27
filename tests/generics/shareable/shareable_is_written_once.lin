@@ -1,0 +1,12 @@
+fn twice[T: Shareable + Shareable](sink value: T) -> T {
+    value
+}
+
+// Every Integer type is Shareable already.
+fn counted[N: Integer + Shareable](sink value: N) -> N {
+    value
+}
+
+fn main() -> UInt8 {
+    twice(UInt8(1)) + counted(UInt8(2))
+}

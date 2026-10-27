@@ -1,0 +1,33 @@
+trait Source {
+    type Item
+
+    fn take(inout self: Self) -> Self.Item
+}
+
+struct Counter {
+    next: UInt8,
+}
+
+impl Source for Counter {
+    type Item = UInt8
+
+    fn take(inout self: Self) -> UInt8 {
+        self.next += 1
+        self.next
+    }
+}
+
+fn share[T: Shareable](sink value: T) -> T {
+    value
+}
+
+// `S.Item` is read through this function's own parameter `S`, so its `where`
+// clause may bound it.
+fn drain[S: Source](inout source: S) -> S.Item where S.Item: Shareable {
+    share(&source.take())
+}
+
+fn main() -> UInt8 {
+    var counter = Counter { next = 1 }
+    drain(&counter)
+}

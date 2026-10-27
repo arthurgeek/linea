@@ -80,7 +80,9 @@ impl Release for VecTestElement {
 // VecTestAllocator allocates from the system and logs into nine UInt64 words:
 // the event count at byte 0, release tags in bytes 8 through 56, and the
 // allocation count at byte 64. Tag 99 marks a backing buffer's disposal.
-@copyable
+// Acquiring writes the log through a `read` of the allocator, so it is
+// `@unshareable`.
+@(copyable, unshareable)
 struct VecTestAllocator {
     log_at: UInt64,
     log_len: UInt64,

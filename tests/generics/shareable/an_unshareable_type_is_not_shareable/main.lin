@@ -1,0 +1,20 @@
+// A cursor declared `unshareable` may not be read by two tasks at once, and
+// neither may anything that holds one.
+@(copyable, unshareable)
+struct Cursor {
+    at: UInt64,
+}
+
+struct Reader {
+    cursor: Cursor,
+}
+
+fn share[T: Shareable](_value: T) -> UInt64 {
+    1
+}
+
+fn main() -> UInt8 {
+    let cursor = Cursor { at = 2 }
+    let reader = Reader { cursor = copy(cursor) }
+    UInt8(share(cursor) + share(reader) + share(reader.cursor.at))
+}

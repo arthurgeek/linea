@@ -1,0 +1,5 @@
+error[M-Extern]: an `@unshareable` type is declared only in a module its root's manifest grants, and linea.json does not list "."
+ --> tests/generics/shareable/unshareable_is_declared_only_where_extern_is_granted.lin:2:2
+  |
+2 | @unshareable
+  |  ^^^^^^^^^^^ list this module under "extern" in linea.json to trust it with C, or drop `@unshareable`
