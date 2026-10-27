@@ -1,5 +1,5 @@
-// A program declares exactly one entry point. The second `main` is the one
-// refused, and the first is shown beside it.
+// A module declares one entry point. Two are refused once, at the first, and
+// the name they share is not refused again as a duplicate.
 import std.io
 
 fn main() -> UInt8 {

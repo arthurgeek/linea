@@ -80,6 +80,9 @@ pub const RawAccesses = struct {
     storage: DeclId = .none,
     buffer: DeclId = .none,
     slice: DeclId = .none,
+    /// `mem.Carried`, the zero-sized field type that carries its argument's
+    /// dependencies.
+    carried: DeclId = .none,
     span: DeclId = .none,
     buffer_span: DeclId = .none,
     subspan: DeclId = .none,
@@ -136,6 +139,7 @@ pub const RawAccesses = struct {
             .storage = program.libraryDeclIn("mem", "Storage") orelse .none,
             .buffer = program.libraryDeclIn("mem", "Buffer") orelse .none,
             .slice = program.libraryDeclIn("mem", "Slice") orelse .none,
+            .carried = program.libraryDeclIn("mem", "Carried") orelse .none,
             .span = rawAccessDecl(program, ast, "slot_span", 4),
             .buffer_span = rawAccessDecl(program, ast, "buffer_span", 3),
             .subspan = rawAccessDecl(program, ast, "slice_subspan", 3),

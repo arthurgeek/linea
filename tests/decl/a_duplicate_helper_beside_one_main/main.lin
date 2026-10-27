@@ -1,0 +1,9 @@
+// One program across two files declares `total` in both, which is a
+// duplicate name in one module.
+fn total() -> UInt8 {
+    2
+}
+
+fn main() -> UInt8 {
+    total() - 2
+}

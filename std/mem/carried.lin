@@ -1,0 +1,53 @@
+import std.testing
+
+// A Carried[H] field makes the value holding it carry every dependency a value
+// of `H` may carry. A place an `H` reads stays observed, and a place an `H`
+// holds lent `inout` stays lent, until the holder's last use. The field holds
+// no `H` and occupies no bytes, so it owns nothing and settles nothing: the
+// `H` itself lives elsewhere, and its owner settles it. The holder's
+// constructor gives it the dependencies through its contract, such as
+// `where carries(body)` on a function taking `body: H`. A Carried field is
+// copyable and discardable whatever `H` is, so the holder's own declaration
+// decides whether it may be copied or dropped. A holder whose `H` keeps
+// running after the holder is gone, such as a callback another owner still
+// calls, must be linear, so that it is settled only once that `H` is done. A
+// `phantom` parameter carries nothing; a type that keeps a callback's
+// dependencies without storing the callback holds a Carried field instead.
+@copyable
+pub struct Carried[phantom H] {}
+
+// A CarriedTestReceipt keeps the dependencies of the callback it was issued
+// for, which has already run.
+struct CarriedTestReceipt[F] {
+    number: UInt64,
+    held: Carried[F],
+}
+
+// Run `body` once and answer a receipt that keeps what `body` lent.
+fn carried_test_issue[F: sink fn()](sink body: F) -> CarriedTestReceipt[F] where carries(body) {
+    body()
+    .{ number = 1, held = .{} }
+}
+
+test fn a_carried_field_keeps_a_lend_until_its_holders_last_use() {
+    var count = UInt64(0)
+    let receipt = carried_test_issue(
+        sink [inout count] || {
+            count += 1
+        },
+    )
+    let CarriedTestReceipt { number, held: _ } = receipt
+    testing.assert_eq(count + number, 2, "the callback did not run once before the receipt was read")?
+    .Ok(())
+}
+
+// Accept only a value that can carry no dependency.
+fn carried_test_owns_everything[T: Owned](_value: T) -> Bool {
+    true
+}
+
+test fn a_carried_type_that_can_carry_nothing_is_owned() {
+    let held: Carried[UInt64] = .{}
+    testing.assert(carried_test_owns_everything(held), "Carried[UInt64] was not Owned")?
+    .Ok(())
+}

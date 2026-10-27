@@ -1429,7 +1429,8 @@ const BorrowContainment = struct {
         environment,
         /// The elements certified storage holds.
         stored,
-        /// A type argument, which a writer may be.
+        /// A type argument: one a writer may be, or the one `mem.Carried`
+        /// carries the dependencies of.
         argument,
     };
 
@@ -1440,6 +1441,9 @@ const BorrowContainment = struct {
     fn eachChild(builder: *Typing.Builder, ty: TypeId, mode: Mode, visit: anytype) std.mem.Allocator.Error!void {
         try eachPart(builder, ty, mode, visit);
         const view = builder.view();
+        if (carriedArgument(builder, ty)) |carried| {
+            if (mode == .raw_carriers or view.instanceOf(ty) == null) try visit.child(.argument, carried);
+        }
         if (mode == .writers) {
             if (view.instanceOf(ty)) |instance| for (view.argsOf(instance)) |argument| try visit.child(.argument, argument);
         } else if (builder.certified_storage != .none and view.declOfType(ty) == builder.certified_storage) {
@@ -1448,6 +1452,22 @@ const BorrowContainment = struct {
                 if (arguments.len != 0) try visit.child(.stored, arguments[0]);
             }
         }
+    }
+
+    /// The type whose dependencies a `mem.Carried` type holds without holding
+    /// a value of it: its argument, or its own parameter in the declaration.
+    /// Both tables follow it, so a holder carries what that type may carry
+    /// and keeps an exclusive lend wherever that type could write through it.
+    fn carriedArgument(builder: *Typing.Builder, ty: TypeId) ?TypeId {
+        if (builder.certified_carried == .none) return null;
+        const view = builder.view();
+        if (view.declOfType(ty) != builder.certified_carried) return null;
+        if (view.instanceOf(ty)) |instance| {
+            const arguments = view.argsOf(instance);
+            return if (arguments.len != 0) arguments[0] else null;
+        }
+        const held = builder.parameters.get(Typing.Builder.parameterKey(builder.certified_carried.index(), 0)) orelse return null;
+        return @enumFromInt(held);
     }
 
     /// The children `eachChild` hands over other than a type's arguments.
@@ -8318,6 +8338,9 @@ pub const Typing = struct {
         certified_storage: DeclId = .none,
         certified_buffer: DeclId = .none,
         certified_slice: DeclId = .none,
+        /// `mem.Carried`: a value of an instance carries what its argument
+        /// may carry, though it holds no field.
+        certified_carried: DeclId = .none,
         certified_foreign_views: [3]DeclId = .{ .none, .none, .none },
         /// `mem.ClosureEntry`: its instance at a callable type is the entry
         /// signature an erased closure is called through.
@@ -11535,7 +11558,7 @@ pub const Typing = struct {
         pub fn view(self: *const Builder) Typing {
             return .{
                 .constant_pool = self.constant_pool.*,
-                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .closure_entry_type = self.certified_closure_entry, .foreign_views = self.certified_foreign_views },
+                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .carried = self.certified_carried, .closure_entry_type = self.certified_closure_entry, .foreign_views = self.certified_foreign_views },
                 .tuple_decls = self.tuple_decls,
                 .implementation_selections = self.implementation_selections,
                 .closure_release = self.closure_release,
@@ -13281,6 +13304,7 @@ pub const Typing = struct {
             b.certified_storage = t.raw_accesses.storage;
             b.certified_buffer = t.raw_accesses.buffer;
             b.certified_slice = t.raw_accesses.slice;
+            b.certified_carried = t.raw_accesses.carried;
             b.certified_foreign_views = t.raw_accesses.foreign_views;
             b.certified_closure_entry = t.raw_accesses.closure_entry_type;
             b.tuple_decls = t.tuple_decls;

@@ -1,0 +1,23 @@
+// `phantom F` carries nothing: a Marker built from a callback that lends
+// `seen` holds no part that could carry the lend, so `seen` is free as soon as
+// the call that built it returns.
+struct Marker[phantom F] {
+    number: UInt64,
+}
+
+fn mark[F: sink fn()](sink body: F) -> Marker[F] where carries(body) {
+    body()
+    .{ number = 1 }
+}
+
+fn main() -> UInt8 {
+    var seen = UInt64(0)
+    let marker = mark(
+        sink [inout seen] || {
+            seen += 1
+        },
+    )
+    seen += 10
+    let Marker { number } = marker
+    UInt8(number + seen)
+}

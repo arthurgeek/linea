@@ -1,0 +1,132 @@
+import std.mem
+
+// A Ticket keeps the dependencies of the callback it was issued for. The
+// callback runs once when the ticket is issued; the `mem.Carried[F]` field
+// keeps every place it lent or read reserved until the ticket's last use.
+struct Ticket[F] {
+    number: UInt64,
+    held: mem.Carried[F],
+}
+
+fn issue[F: sink fn()](sink body: F) -> Ticket[F] where carries(body) {
+    body()
+    .{ number = 1, held = .{} }
+}
+
+fn redeem[F](sink ticket: Ticket[F]) -> UInt64 {
+    let Ticket { number, held: _ } = ticket
+    number
+}
+
+// A Booth holds a Counter, which holds a Ticket.
+struct Counter[F] {
+    ticket: Ticket[F],
+}
+
+struct Booth[F] {
+    counter: Counter[F],
+}
+
+fn open_booth[F](sink ticket: Ticket[F]) -> Booth[F] where carries(ticket) {
+    .{ counter = .{ ticket } }
+}
+
+fn close_booth[F](sink booth: Booth[F]) -> UInt64 {
+    let Booth { counter } = booth
+    let Counter { ticket } = counter
+    redeem(ticket)
+}
+
+enum Claim[F] {
+    Held(Ticket[F]),
+    Lost,
+}
+
+fn hold[F](sink ticket: Ticket[F]) -> Claim[F] where carries(ticket) {
+    .Held(ticket)
+}
+
+fn settle[F](sink claim: Claim[F]) -> UInt64 {
+    match claim {
+        Held(ticket) => redeem(ticket),
+        Lost => 0,
+    }
+}
+
+// A Boxed[T] holds any value, so it holds whatever that value carries.
+struct Boxed[T] {
+    value: T,
+}
+
+fn wrap[T](sink value: T) -> Boxed[T] where carries(value) {
+    .{ value }
+}
+
+// Each holder below keeps `seen` lent until its own last use. Every write to
+// `seen` comes after that use, so each one is accepted, and the callbacks'
+// six increments land before the writes that follow them.
+fn main() -> UInt8 {
+    var seen = UInt64(0)
+    let booth = open_booth(
+        issue(
+            sink [inout seen] || {
+                seen += 1
+            },
+        ),
+    )
+    var total = close_booth(booth)
+    seen += 10
+    let claim = hold(
+        issue(
+            sink [inout seen] || {
+                seen += 1
+            },
+        ),
+    )
+    total += settle(claim)
+    seen += 10
+    let pair = (
+        UInt64(1),
+        issue(
+            sink [inout seen] || {
+                seen += 1
+            },
+        ),
+    )
+    let (extra, ticket) = pair
+    total += extra + redeem(ticket)
+    seen += 10
+    let boxed = wrap(
+        issue(
+            sink [inout seen] || {
+                seen += 1
+            },
+        ),
+    )
+    let Boxed { value } = boxed
+    total += redeem(value)
+    seen += 10
+    let kept = Option.Some(
+        issue(
+            sink [inout seen] || {
+                seen += 1
+            },
+        ),
+    )
+    match kept {
+        Some(ticket) => {
+            total += redeem(ticket)
+        },
+        None => {},
+    }
+    seen += 10
+    let carried = issue(
+        sink [inout seen] || {
+            seen += 1
+        },
+    )
+    let later = sink [sink carried] || redeem(carried)
+    total += later()
+    seen += 10
+    UInt8(total + seen)
+}

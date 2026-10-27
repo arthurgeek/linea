@@ -1,0 +1,12 @@
+// A program that greets a guest by the name on its badge.
+import std.io
+
+struct Badge {
+    name: Str,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let badge = Badge { name = "Ada" }
+    io.println("hello, {badge.name}")?
+    .Ok(0)
+}

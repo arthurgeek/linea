@@ -1,0 +1,13 @@
+// A second program kept in the same directory, which makes the directory one
+// module with two `main`s.
+import std.io
+
+struct Badge {
+    name: Str,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let badge = Badge { name = "Grace" }
+    io.println("goodbye, {badge.name}")?
+    .Ok(0)
+}

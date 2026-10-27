@@ -339,6 +339,15 @@ pub const Observation = enum {
     /// The owner itself, lent to a call beside an argument that takes it. It
     /// is made by the call, so it meets an operation only there.
     argument,
+    /// A ticket holding a `mem.Carried` field for a callback that read the
+    /// owner's slice. The callback has already run; the field keeps its read
+    /// observation until the ticket's last use.
+    carried_read,
+    /// A ticket holding a `mem.Carried` field for a callback that held the
+    /// vector lent `inout` and pushed once. The field keeps the lend.
+    carried_inout,
+    /// The same ticket for a callback that held a scalar lent `inout`.
+    scalar_carried_inout,
 
     /// Whether the observation can be made of the storage. A vector held in
     /// a field and a fixed array are observed as a vector is, through their
@@ -346,11 +355,11 @@ pub const Observation = enum {
     /// pushes.
     pub fn fits(self: Observation, storage: Storage) bool {
         return switch (self) {
-            .slice, .wrapped, .subspan, .element, .iterator, .mapped, .filtered, .lent_walk, .read_capture => storage == .vec or storage == .field or storage == .array or storage == .walked,
+            .slice, .wrapped, .subspan, .element, .iterator, .mapped, .filtered, .lent_walk, .read_capture, .carried_read => storage == .vec or storage == .field or storage == .array or storage == .walked,
             .bare_slice, .bare_iterator, .bare_mapped => storage == .vec or storage == .field or storage == .array or storage == .walked,
-            .inout_capture => storage == .vec or storage == .walked,
+            .inout_capture, .carried_inout => storage == .vec or storage == .walked,
             .value_view, .entries, .map_inout_capture, .bare_entries => storage == .map,
-            .scalar_inout_capture, .scalar_read_capture => storage == .scalar,
+            .scalar_inout_capture, .scalar_read_capture, .scalar_carried_inout => storage == .scalar,
             .text => storage == .handle,
             .argument => storage == .vec or storage == .map or storage == .handle,
         };
@@ -395,6 +404,19 @@ pub const Observation = enum {
             \\}
             ,
             .scalar_read_capture => "let seen = [owner] || owner",
+            .carried_read => "let view = owner.as_slice()\nlet seen = issue(sink [view] || view[0])",
+            .carried_inout =>
+            \\let seen = issue(sink [inout owner] || {
+            \\    &owner.push(7).unwrap()
+            \\    owner.length()
+            \\})
+            ,
+            .scalar_carried_inout =>
+            \\let seen = issue(sink [inout owner] || {
+            \\    owner += 1
+            \\    owner
+            \\})
+            ,
             .text => "let seen = strchr(owner, 0)",
             // The walk is opened by the loop that walks it, and the owner is
             // lent by the call it is an argument of.
@@ -427,9 +449,27 @@ pub const Observation = enum {
             .inout_capture, .map_inout_capture, .scalar_inout_capture => "&seen()",
             .entries => "match Iterator.next(&seen) { Some(entry) => entry.value, None => 0 }",
             .text => "seen.length()",
+            .carried_read, .carried_inout, .scalar_carried_inout => "redeem(seen)",
             // A bare walk is used only by walking it, inside a `for` meeting,
             // and a lent owner only by the call it is lent to.
             .bare_slice, .bare_iterator, .bare_mapped, .bare_entries, .argument => unreachable,
+        };
+    }
+
+    /// Whether making the observation lends the owner `inout`.
+    fn lendsInout(self: Observation) bool {
+        return switch (self) {
+            .inout_capture, .map_inout_capture, .scalar_inout_capture, .carried_inout, .scalar_carried_inout => true,
+            else => false,
+        };
+    }
+
+    /// Whether the observation is a ticket whose `mem.Carried` field holds
+    /// what its callback observed.
+    fn carried(self: Observation) bool {
+        return switch (self) {
+            .carried_read, .carried_inout, .scalar_carried_inout => true,
+            else => false,
         };
     }
 
@@ -455,6 +495,7 @@ pub const Observation = enum {
             .mapped => .{ .sequence = "seen", .item = "item" },
             .entries => .{ .sequence = "seen", .item = "item.value" },
             .element, .wrapped, .read_capture, .inout_capture, .value_view, .map_inout_capture, .scalar_inout_capture, .scalar_read_capture => null,
+            .carried_read, .carried_inout, .scalar_carried_inout => null,
             .bare_slice, .bare_iterator, .bare_mapped, .bare_entries, .text, .argument => null,
         };
     }
@@ -509,7 +550,7 @@ pub const Cell = struct {
         if (self.meeting == .deferred and self.operation.expression() == null) return false;
         // A second `inout` capture of the place the closure holds is refused
         // whatever the observation does.
-        if (self.meeting == .closure_between and (self.observation == .inout_capture or self.observation == .map_inout_capture or self.observation == .scalar_inout_capture)) return false;
+        if (self.meeting == .closure_between and self.observation.lendsInout()) return false;
         // The owner lent itself exists only in the call it is lent to, and
         // meets only what takes it there: an operation that writes it inside
         // another argument is [N-Aliased], whatever the call holds.
@@ -584,24 +625,25 @@ test "the matrix holds every applicable cell of the three axes" {
     const all = try cells(testing.allocator);
     defer testing.allocator.free(all);
 
-    // Ten vector operations meet ten vector observations, six map
-    // operations meet three map observations, and two assignments meet two
-    // captures, at eight meetings. Consuming operations leave both loops,
-    // assignments leave `defer`, an `inout` capture leaves the meeting between
-    // two calls of a closure already holding the place, and a lent walk leaves
-    // the meeting in one call. Bare walks meet only the non-consuming
-    // operations, in a `for` body. The owner lent itself meets each consuming
-    // operation in one call. A field and an array meet the nine observations a
-    // slice offers, less `defer` for an array's assignments and the lent walk
-    // in one call, and the three bare walks. A walked owner's two operations
-    // meet everything a vector's do. A handle's three operations meet the text
-    // C answers from it, and its close meets the handle lent itself.
-    const vec = 10 * 10 * 8 - 3 * 10 * 2 - 1 * 10 - 10 * 1 - 10 * 1 + 7 * 3 + 3;
+    // Ten vector operations meet twelve vector observations, six map
+    // operations meet three map observations, and two assignments meet three
+    // captures and tickets, at eight meetings. Consuming operations leave both
+    // loops, assignments leave `defer`, each of the two `inout` lends of a
+    // vector leaves the meeting between two calls of a closure already holding
+    // the place, and a lent walk leaves the meeting in one call. Bare walks
+    // meet only the non-consuming operations, in a `for` body. The owner lent
+    // itself meets each consuming operation in one call. A field and an array
+    // meet the ten observations a slice offers, less `defer` for an array's
+    // assignments and the lent walk in one call, and the three bare walks. A
+    // walked owner's two operations meet everything a vector's do. A handle's
+    // three operations meet the text C answers from it, and its close meets
+    // the handle lent itself.
+    const vec = 10 * 12 * 8 - 3 * 12 * 2 - 2 * 10 - 12 * 1 - 10 * 1 + 7 * 3 + 3;
     const map = 6 * 3 * 8 - 2 * 3 * 2 - 6 * 1 + 4 * 1 + 2;
-    const scalar = 2 * 2 * 8 - 2 * 2 - 2 * 1;
-    const field = 2 * (9 * 8 - 1 + 3);
-    const array = 2 * (9 * 7 - 1 + 3);
-    const walked = 2 * (10 * 8 - 1 - 1 + 3);
+    const scalar = 2 * 3 * 8 - 2 * 3 - 2 * 2;
+    const field = 2 * (10 * 8 - 1 + 3);
+    const array = 2 * (10 * 7 - 1 + 3);
+    const walked = 2 * (12 * 8 - 2 - 1 + 3);
     const handle = 3 * 8 - 1 * 2 + 1;
     try testing.expectEqual(@as(usize, vec + map + scalar + field + array + walked + handle), all.len);
     for (all) |cell| try testing.expect(cell.applies());
@@ -622,6 +664,10 @@ test "the matrix holds every applicable cell of the three axes" {
     var lent_and_taken = false;
     for (all) |cell| lent_and_taken = lent_and_taken or (cell.operation == .release and cell.observation == .argument and cell.meeting == .one_call);
     try testing.expect(lent_and_taken);
+    // So is a lend kept by a `mem.Carried` field after its callback ran.
+    var carried = false;
+    for (all) |cell| carried = carried or (cell.operation == .assign and cell.observation == .scalar_carried_inout and cell.meeting == .straight);
+    try testing.expect(carried);
     var handle_text = false;
     for (all) |cell| handle_text = handle_text or (cell.operation == .handle_change and cell.observation == .text and cell.meeting == .straight);
     try testing.expect(handle_text);
@@ -750,6 +796,29 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
             \\fn first(wrapped: Wrapped) -> UInt64 {
             \\    let Wrapped(view) = copy(wrapped)
             \\    view[0]
+            \\}
+            \\
+            \\
+        );
+    }
+    if (observation.carried()) {
+        if (storage == .scalar or storage == .array) try w.raw("import std.mem\n\n");
+        try w.raw(
+            \\struct Ticket[F] {
+            \\    number: UInt64,
+            \\    held: mem.Carried[F],
+            \\}
+            \\
+            \\fn issue[F: sink fn() -> UInt64](sink body: F) -> Ticket[F] where carries(body) {
+            \\    .{ number = body(), held = .{} }
+            \\}
+            \\
+            \\
+        );
+        // A call lends the ticket itself and reads nothing through it.
+        if (cell.meeting != .one_call) try w.raw(
+            \\fn redeem[F](ticket: Ticket[F]) -> UInt64 {
+            \\    ticket.number
             \\}
             \\
             \\
