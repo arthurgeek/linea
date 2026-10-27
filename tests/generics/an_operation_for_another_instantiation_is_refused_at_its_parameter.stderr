@@ -1,7 +1,0 @@
-error[T-Mismatch]: expected `Box[UInt8]`, found `Box[Bool]`
-  --> tests/generics/an_operation_for_another_instantiation_is_refused_at_its_parameter.lin:16:5
-   |
-9  |     fn get(self: Box[UInt8]) -> UInt8 {
-   |            ---- expected because of this parameter
-16 |     flag.get()
-   |     ^^^^ expected `Box[UInt8]`, found `Box[Bool]`

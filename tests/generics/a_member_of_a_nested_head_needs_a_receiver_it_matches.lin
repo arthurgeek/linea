@@ -1,0 +1,17 @@
+// `take` belongs to shelves holding an optional item, so a shelf holding a
+// plain number does not have it.
+struct Shelf[I] {
+    item: I,
+}
+
+impl[T] Shelf[Option[T]] {
+    fn take(sink self: Self) -> Option[T] where carries(self) {
+        let Shelf { item } = self
+        item
+    }
+}
+
+fn main() -> UInt8 {
+    let shelf: Shelf[UInt8] = .{ item = 3 }
+    shelf.take().unwrap_or(0)
+}

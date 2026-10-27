@@ -1,25 +1,15 @@
-error[T-Impl]: a type's own implementation applies its constructor to each of its parameters once
- --> tests/generics/an_inherent_head_leaves_no_parameter_open.lin:9:9
+error[T-Impl]: `T` is written more than once in this implementation's head
+ --> tests/generics/an_inherent_head_leaves_no_parameter_open.lin:9:17
   |
 9 | impl[T] Pair[T, T] {
-  |         ^^^^ write each parameter alone as one argument, and fix the other arguments to types that name no parameter
-error[T-Impl]: a type's own implementation applies its constructor to each of its parameters once
+  |                 ^ a receiver settles each parameter from the one position it stands in; write it once
+error[N-Unused]: `U` is never used
   --> tests/generics/an_inherent_head_leaves_no_parameter_open.lin:15:9
    |
-15 | impl[T] Pair[Option[T], UInt8] {
-   |         ^^^^ write each parameter alone as one argument, and fix the other arguments to types that name no parameter
-error[T-Impl]: a type's own implementation applies its constructor to each of its parameters once
-  --> tests/generics/an_inherent_head_leaves_no_parameter_open.lin:21:12
-   |
-21 | impl[T, U] Pair[T, UInt8] {
-   |            ^^^^ write each parameter alone as one argument, and fix the other arguments to types that name no parameter
-error[N-Unused]: `U` is never used
-  --> tests/generics/an_inherent_head_leaves_no_parameter_open.lin:21:9
-   |
-21 | impl[T, U] Pair[T, UInt8] {
+15 | impl[T, U] Pair[T, UInt8] {
    |         ^ name it in this declaration, or remove it
 error[T-Impl]: implementation parameter `U` cannot be recovered from its key
-  --> tests/generics/an_inherent_head_leaves_no_parameter_open.lin:21:9
+  --> tests/generics/an_inherent_head_leaves_no_parameter_open.lin:15:9
    |
-21 | impl[T, U] Pair[T, UInt8] {
+15 | impl[T, U] Pair[T, UInt8] {
    |         ^ place the parameter in the receiver or trait arguments outside associated-type projections

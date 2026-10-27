@@ -1,0 +1,15 @@
+error[N-Unused]: `U` is never used
+ --> tests/generics/a_parameter_missing_from_an_inherent_head_is_refused.lin:8:9
+  |
+8 | impl[T, U] Shelf[Option[T]] {
+  |         ^ name it in this declaration, or remove it
+error[T-Impl]: implementation parameter `U` cannot be recovered from its key
+ --> tests/generics/a_parameter_missing_from_an_inherent_head_is_refused.lin:8:9
+  |
+8 | impl[T, U] Shelf[Option[T]] {
+  |         ^ place the parameter in the receiver or trait arguments outside associated-type projections
+error[T-Impl]: implementation parameter `P` cannot be recovered from its key
+  --> tests/generics/a_parameter_missing_from_an_inherent_head_is_refused.lin:14:6
+   |
+14 | impl[P: Protocol] Shelf[P.Dual] {
+   |      ^ place the parameter in the receiver or trait arguments outside associated-type projections

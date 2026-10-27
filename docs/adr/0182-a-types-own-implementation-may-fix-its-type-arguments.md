@@ -2,7 +2,9 @@
 
 Status: Accepted — 2026-09-26. Partially supersedes
 [0081](0081-an-implementation-is-generic-over-its-head.md): its head rule now
-governs trait implementations only.
+governs trait implementations only. Head clause superseded by
+[0252](0252-a-types-own-implementation-may-write-a-parameter-inside-an-argument.md):
+a parameter may stand inside an argument, still once.
 
 ## Context
 

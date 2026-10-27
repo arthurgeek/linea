@@ -1,0 +1,32 @@
+import std.session
+
+use session.End
+use session.Recv
+use session.Send
+
+// One end of a session, tagged with what that end does next.
+@linear
+struct Chan[phantom P: Protocol] {
+    id: UInt64,
+}
+
+// `send` belongs to an endpoint whose next step is a send.
+impl[T: Discardable, N: Protocol] Chan[Send[T, N]] {
+    fn send(sink self: Self, sink _value: T) -> Chan[N] {
+        let Chan { id } = self
+        .{ id = id }
+    }
+}
+
+impl Chan[End] {
+    fn close(sink self: Self) -> UInt64 {
+        let Chan { id } = self
+        id
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Chan[Recv[UInt64, End]] = .{ id = 1 }
+    // This end receives first, so it has nothing to send yet.
+    UInt8(c.send(UInt64(3)).close())
+}

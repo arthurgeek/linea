@@ -1,0 +1,23 @@
+// A receiver settles a parameter of a type's own implementation only where
+// the head writes it, so one the head leaves out, or reaches only through an
+// associated type, is refused.
+struct Shelf[I] {
+    item: I,
+}
+
+impl[T, U] Shelf[Option[T]] {
+    fn _loose() -> UInt8 {
+        1
+    }
+}
+
+impl[P: Protocol] Shelf[P.Dual] {
+    fn _mirrored() -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let shelf: Shelf[UInt8] = .{ item = 0 }
+    shelf.item
+}

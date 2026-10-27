@@ -1,0 +1,22 @@
+// `impl[A, R] Slot[fn(a: A) -> R]` matches a slot holding a function that
+// reads its argument. A function that takes its argument `inout` has another
+// signature, so a slot holding one does not have `apply`.
+struct Slot[I] {
+    item: I,
+}
+
+impl[A, R] Slot[fn(a: A) -> R] {
+    fn apply(self: Self, a: A) -> R {
+        (self.item)(a)
+    }
+}
+
+fn bump(inout a: UInt8) -> UInt8 {
+    a += 1
+    a
+}
+
+fn main() -> UInt8 {
+    let s: Slot[fn(inout a: UInt8) -> UInt8] = .{ item = bump }
+    s.apply(3)
+}

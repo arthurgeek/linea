@@ -632,12 +632,112 @@ error[T-Impl]: this associated type is defined through itself: `Ping.Dual` is `P
 ```
 
 Because every protocol passes `[T-Dual]`, generic code may rely on the first
-equation: for any `P: Protocol`, `P.Dual.Dual` is `P`. The library has no
-sessions to run a protocol yet; for now a protocol is a checked description of
-a conversation, written once and shared by both sides.
+equation: for any `P: Protocol`, `P.Dual.Dual` is `P`.
 
-**What you can do now:** describe a conversation as a protocol pair, and let
-the compiler check that the two sides mirror each other.
+### An endpoint whose operations follow its protocol
+
+A protocol can decide which operations a value has. An endpoint type tagged
+with a protocol gives each step its own `impl` block, whose head writes the
+step it is for, with the step's parts as parameters
+([Calling things](02-calling-things.md#operations-for-some-of-a-generic-types-values)
+shows the same heads on an ordinary type). `impl[T, N] Chan[Send[T, N]]` gives
+`send` only to an endpoint whose next step is a send, and `send` answers the
+endpoint at `N`, the step after it. The library has no endpoints that talk to
+another task yet, so this one is written by hand and talks to nobody:
+
+```linea
+import std.io
+import std.session
+
+use session.Choose
+use session.End
+use session.Recv
+use session.Send
+
+// A customer sends an order number, receives a price, then accepts or
+// declines it.
+alias Customer = Send[UInt64, Recv[UInt64, Choose[End, End]]]
+
+// One end of a conversation, tagged with what that end does next. This one
+// talks to nobody: it counts the steps taken, and every price it receives
+// is 12.
+@linear
+struct Chan[phantom P: Protocol] {
+    steps: UInt64,
+}
+
+impl[T: Discardable, N: Protocol] Chan[Send[T, N]] {
+    fn send(sink self: Self, sink _value: T) -> Chan[N] {
+        let Chan { steps } = self
+        .{ steps = steps + 1 }
+    }
+}
+
+impl[N: Protocol] Chan[Recv[UInt64, N]] {
+    fn recv(sink self: Self) -> (UInt64, Chan[N]) {
+        let Chan { steps } = self
+        (12, .{ steps = steps + 1 })
+    }
+}
+
+impl[L: Protocol, R: Protocol] Chan[Choose[L, R]] {
+    fn choose_left(sink self: Self) -> Chan[L] {
+        let Chan { steps } = self
+        .{ steps = steps + 1 }
+    }
+
+    fn choose_right(sink self: Self) -> Chan[R] {
+        let Chan { steps } = self
+        .{ steps = steps + 1 }
+    }
+}
+
+impl Chan[End] {
+    fn close(sink self: Self) -> UInt64 {
+        let Chan { steps } = self
+        steps
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let desk: Chan[Customer] = .{ steps = 0 }
+    let (price, deciding) = desk.send(UInt64(41)).recv()
+    let done = if price <= 20 { deciding.choose_left() } else { deciding.choose_right() }
+    io.println("price {price}, finished after {done.close()} steps")?
+    .Ok(0)
+}
+```
+
+```
+price 12, finished after 3 steps
+```
+
+`desk` starts as a `Chan[Customer]`, so the only operation it has is `send`.
+`send` answers a `Chan[Recv[UInt64, Choose[End, End]]]`, which has only
+`recv`, and so on until `close`, which only a finished endpoint has. Because
+`Chan` is `@linear` and each operation takes the endpoint and answers a new
+one, a program must walk the whole protocol, and in order. Receiving once more
+after the conversation has ended is refused, naming the state the endpoint is
+in:
+
+<!-- guide: edit after 57 let done = if price <= 20 { deciding.choose_left() } else { deciding.choose_right() } -->
+```linea
+    let (_second, done) = done.recv()
+```
+
+```
+error[T-UnknownOperation]: `Chan[End]` has no operation `recv`
+  --> order_desk.lin:58:27
+   |
+28 | impl[N: Protocol] Chan[Recv[UInt64, N]] {
+   |                   --------------------- `recv` is declared for `Chan[Recv[UInt64, N]]`
+58 |     let (_second, done) = done.recv()
+   |                           ^^^^ this is `Chan[End]`, which `Chan[Recv[UInt64, N]]` does not match
+```
+
+**What you can do now:** describe a conversation as a protocol pair, let the
+compiler check that the two sides mirror each other, and give a type tagged
+with a protocol the operations each step allows.
 
 ## `@opaque`: only the module can make one
 
@@ -1838,6 +1938,7 @@ be the only place that can both create a value and end it.
 | to allow copies | `@copyable`, then `copy(value)` |
 | a type tag that stores nothing | `struct Id[phantom Of] { ... }` |
 | two sides of a conversation that mirror each other | `impl Protocol for Worker` with `type Dual = Boss` and a `type Step`, and the same for `Boss` |
+| operations only a value at one protocol step has | `impl[T, N: Protocol] Chan[Send[T, N]] { fn send … }`, one block per step |
 | a value only your module can make | `@opaque type Email = Str` or `@opaque struct Account { … }`, with a `pub fn` that checks |
 | a value that must end in one of your functions | `@linear` |
 | a default way to end it | `@(linear, derive(Release))` or `impl Release for T` |
@@ -1861,6 +1962,7 @@ These are the errors the chapter's rules produce:
 | `N-Unused` | A type parameter that no field uses | Declare it `phantom`, or remove it |
 | `T-Dual` | Two protocols that name each other do not mirror each other | Write each step as what the other side does at the same moment |
 | `T-Impl` | A protocol's dual is defined only through another's dual | Name a protocol as the dual |
+| `T-UnknownOperation` | An endpoint's protocol step has no such operation | Take the steps the protocol lists, in order |
 | `S-Entry` | An attribute or a visibility is written in a shape the language does not accept | Use `@`, pick one of `copyable` and `linear`, drop `pub` or `internal` beside `@opaque` |
 
 The examples put these types to work. The [accounts

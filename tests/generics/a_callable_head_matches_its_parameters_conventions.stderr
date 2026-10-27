@@ -1,0 +1,7 @@
+error[T-UnknownOperation]: `Slot[fn(inout UInt8) -> UInt8]` has no operation `apply`
+  --> tests/generics/a_callable_head_matches_its_parameters_conventions.lin:21:5
+   |
+8  | impl[A, R] Slot[fn(a: A) -> R] {
+   |            ------------------- `apply` is declared for `Slot[fn(a: A) -> R]`
+21 |     s.apply(3)
+   |     ^ this is `Slot[fn(inout UInt8) -> UInt8]`, which `Slot[fn(a: A) -> R]` does not match

@@ -1,6 +1,7 @@
 // `get` is declared for `Box[UInt8]` only, so a postfix call on a `Box[Bool]`
-// cannot take it. The call is refused where the parameter says which box it
-// takes, rather than as a field the type does not have.
+// cannot take it. The call is refused as an operation that box does not have,
+// naming the head `get` is declared for, rather than as a field the type does
+// not have.
 struct Box[T] {
     item: T,
 }
