@@ -269,7 +269,9 @@ The hall read 21 degrees.
 ```
 
 `type Reading` in the trait declares the type, and `type Reading = Int64` in
-the implementation settles it for thermometers. In `Entry`, `S.Reading` is
+the implementation settles it for thermometers. The literal writes `reading`
+first because fields are evaluated in the order they are written, so
+`hall.measure()` reads the hall before `sensor = hall` moves it into the entry. In `Entry`, `S.Reading` is
 whatever `S`'s implementation settles it to, so an `Entry[Thermometer]` holds
 an `Int64`. Rust writes the same field as `reading: S::Reading`.
 
