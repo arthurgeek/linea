@@ -757,17 +757,18 @@ changed it, and moves each candidate whose
 shape changed to the class its shapes name, and `Instance.class` with
 `Typing.alike_sources` is the decision both the builder and the finished
 pool read. `Typing.partsSource` is the one routine every walk over what a
-type owns steps through: the capability and dependency tables record an
-alike instantiation as one edge to its representative, the cycle walk and
+type owns steps through: the capability, dependency and `unshareable`
+tables record an alike instantiation as one edge to its representative, the cycle walk and
 the walk over what types own step to it, and writing a type does not write
 such a part. Every other unwritten part is written with its holder, so a
 walk over parts meets no unwritten type but an alike one. The builder's part
-accessors write what they read, and its capability, dependency and writer
-queries write what they cannot answer from a representative; the three fact
-tables record a type's edges once its parts are written and leave an
-unwritten part that is not alike for the builder to write before answering,
-except that the writer table records an unwritten instantiation by its
-arguments, which usually settle it. Within a scope whose constraints cap a
+accessors write what they read, and its capability, dependency, writer and
+`Shareable` queries write what they cannot answer from a representative; the
+four fact tables record a type's edges once its parts are written and leave
+an unwritten part that is not alike for the builder to write before
+answering, except that the writer and `unshareable` tables record an
+unwritten instantiation that is not alike by its arguments, which usually
+settle it. Within a scope whose constraints cap a
 capability beyond what their subjects promise (`capsBeyondPromise`),
 `prepareScopedCapability` writes the type a question names where it is
 alike, and steps from every alike instantiation past it to its
@@ -1061,7 +1062,10 @@ same walk in `unshareable` mode, which follows the edges the writer table
 follows: fields, observed referents and every type argument. Its seeds are a
 declared type whose record says it is marked `@unshareable`, a callable or open
 type, and a type parameter whose record says neither `Shareable` nor `Integer`.
-The checker refuses a `Shareable` argument by asking `isShareable`, and
+A `Shareable` promise on a parameter or on a settled reference read through
+one is part of an alike instantiation's shape, as an `Owned` one is, and an
+`Integer` promise on a settled reference makes both. The checker refuses a
+`Shareable` argument by asking `isShareable`, and
 `unshareableWitness` finds the path the refusal names over those edges. The
 mark is copied from a template to each instance, so an instantiation of an
 `@unshareable` declaration is unshareable whatever its arguments. No pass after

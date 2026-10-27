@@ -1642,13 +1642,16 @@ const BorrowContainment = struct {
         const at = @intFromEnum(ty);
         if (builder.isShell(ty)) {
             if (self.recorded.items[at] != .nothing) return;
-            if (mode == .raw_carriers) {
-                // What an alike instantiation may carry is what its
-                // representative's parts may: the one edge is to it.
-                const representative = builder.alikeSource(ty) orelse return;
-                self.recorded.items[at] = .representative;
-                try self.edge(gpa, ty, representative);
-                return;
+            if (mode != .writers) {
+                // What an alike instantiation may carry, or whether it is
+                // shareable, is what its representative's parts and
+                // arguments say: the one edge is to it.
+                if (builder.alikeSource(ty)) |representative| {
+                    self.recorded.items[at] = .representative;
+                    try self.edge(gpa, ty, representative);
+                    return;
+                }
+                if (mode == .raw_carriers) return;
             }
             self.recorded.items[at] = .arguments;
             const edges: Edges = .{ .containment = self, .builder = builder, .owner = ty, .mode = mode };
@@ -2992,6 +2995,21 @@ pub fn freeBoundTraits(gpa: std.mem.Allocator, traits: []const BoundTrait) void 
 
 /// What an implementation's parameter demands of whatever binds it.
 ///
+/// The two built-in bounds decided by a containment table rather than by an
+/// implementation: `Owned`, over the dependency table, and `Shareable`, over
+/// the `unshareable` one.
+pub const Containment = enum {
+    owned,
+    shareable,
+
+    pub fn spelled(self: Containment) []const u8 {
+        return switch (self) {
+            .owned => "Owned",
+            .shareable => "Shareable",
+        };
+    }
+};
+
 /// The bounds written on it, read once where the declarations are: a trait is
 /// its declaration rather than its spelling, and the capability is what the same
 /// routine every other bound list is read through says it is.
@@ -9552,6 +9570,7 @@ pub const Typing = struct {
                 @intFromEnum(promise.requirement),
                 @intFromBool(promise.integer),
                 @intFromBool(promise.owned),
+                @intFromBool(promise.shareable),
                 @intCast(promise.traits.len),
             });
             for (promise.traits) |bound| {
@@ -9631,14 +9650,14 @@ pub const Typing = struct {
                 for (promised.items) |standin| {
                     if (!reads.every and !sortedHolds(members, self.memberReadThrough(standin, arg))) continue;
                     const start: u32 = @intCast(pieces.items.len);
-                    try self.encodeRenamed(&pieces, standin, args);
+                    try self.encodePromise(&pieces, standin, args);
                     try bounds.append(self.gpa, .{ start, @intCast(pieces.items.len) });
                 }
             } else for (members) |member| {
                 const listed = self.promised_members.get(.{ .parameter = arg, .member = member }) orelse continue;
                 for (listed.items) |standin| {
                     const start: u32 = @intCast(pieces.items.len);
-                    try self.encodeRenamed(&pieces, standin, args);
+                    try self.encodePromise(&pieces, standin, args);
                     try bounds.append(self.gpa, .{ start, @intCast(pieces.items.len) });
                 }
             }
@@ -9653,6 +9672,14 @@ pub const Typing = struct {
                 try words.append(self.gpa, piece[1] - piece[0]);
                 try words.appendSlice(self.gpa, pieces.items[piece[0]..piece[1]]);
             }
+        }
+
+        /// Appends a settled reference promised through a parameter, renamed,
+        /// and which of `Owned` and `Shareable` it was promised.
+        fn encodePromise(self: *const Builder, pieces: *std.ArrayList(u32), standin: TypeId, args: []const TypeId) std.mem.Allocator.Error!void {
+            try self.encodeRenamed(pieces, standin, args);
+            const promise = self.get(standin).parameter;
+            try pieces.append(self.gpa, @as(u32, @intFromBool(promise.owned)) | @as(u32, @intFromBool(promise.shareable)) << 1);
         }
 
         /// Whether the sorted `members` holds `member`.
@@ -9799,6 +9826,7 @@ pub const Typing = struct {
             self.alike_changed = false;
             self.capability_facts.dirty = true;
             self.dependency_facts.invalidateAll();
+            self.unshareable_facts.invalidateAll();
         }
 
         /// Decides again the shape of each position listed under `parameter`,
@@ -9854,7 +9882,7 @@ pub const Typing = struct {
         /// they named once. Held while one declaration's promises are
         /// recorded, after its clauses are read, so `n` clauses on members of
         /// one parameter decide its positions once rather than `n` times,
-        /// each over every earlier promise. Nothing but `promiseOwned` runs
+        /// each over every earlier promise. Nothing but `promiseContained` runs
         /// inside a hold, so no question about what a type owns reads a class
         /// a recorded promise has made stale.
         pub fn holdAlikeDecisions(self: *Builder) void {
@@ -10198,7 +10226,7 @@ pub const Typing = struct {
             var reopened = try Builder.reopen(gpa, &typing);
             defer reopened.deinit();
             try testing.expectEqual(@as(?TypeId, holder), reopened.alikeSource(alike));
-            try reopened.promiseOwned(given);
+            try reopened.promiseContained(given, .owned);
             try testing.expectEqual(@as(?TypeId, null), reopened.alikeSource(alike));
         }
 
@@ -10259,7 +10287,7 @@ pub const Typing = struct {
             const later = try builder.addParameter("W", 4, 0, .unrestricted, &.{});
             const once_alike = try builder.instantiate(holder, holder_decl, &.{later});
             try testing.expectEqual(@as(?TypeId, holder), builder.alikeSource(once_alike));
-            try builder.promiseOwned(later);
+            try builder.promiseContained(later, .owned);
             try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(once_alike));
             try testing.expect(!try builder.mayCarryDependencies(once_alike));
             try testing.expect(!builder.isShell(once_alike));
@@ -10290,7 +10318,7 @@ pub const Typing = struct {
 
             // Once `U` promises more, `Holder[V]` stays in the class without
             // it and represents that class itself.
-            try builder.promiseOwned(first);
+            try builder.promiseContained(first, .owned);
             try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(at_first));
             try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(at_second));
             try testing.expectEqual(Capability.affine, try builder.capabilityOf(at_second));
@@ -10324,13 +10352,13 @@ pub const Typing = struct {
 
             // Until the templates are complete, a part may yet read any
             // member, so a promise on `S.Other` keeps it apart.
-            try builder.promiseOwned(given_other);
+            try builder.promiseContained(given_other, .owned);
             try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(alike));
             try builder.templatesComplete();
             try testing.expectEqual(@as(?TypeId, holder), builder.alikeSource(alike));
 
             // `Holder` holds `S.Item`, so a promise on it does not.
-            try builder.promiseOwned(given_item);
+            try builder.promiseContained(given_item, .owned);
             try testing.expectEqual(@as(?TypeId, null), builder.alikeSource(alike));
         }
 
@@ -11044,8 +11072,10 @@ pub const Typing = struct {
         }
 
         /// Records that `t`, a type parameter or the stand-in for an
-        /// associated type read through one, admits only `Owned` types, so it
-        /// seeds no dependency. Answers already computed are dropped.
+        /// associated type read through one, admits only types meeting
+        /// `which`: `Owned` ones, so it seeds no dependency, or `Shareable`
+        /// ones, so it seeds no unshareable part. Answers already computed
+        /// are dropped.
         ///
         /// A promise on a stand-in, `S.Item`, is one the parameter it is read
         /// through, `S`, makes for its instantiations: the template an
@@ -11053,9 +11083,18 @@ pub const Typing = struct {
         /// `Item`, which never made it. So the parameter is recorded as
         /// promising through its settled references, and every
         /// instantiation compared against it is decided again.
-        pub fn promiseOwned(self: *Builder, t: TypeId) std.mem.Allocator.Error!void {
-            self.pool.items[@intFromEnum(t)].parameter.owned = true;
-            self.dependency_facts.invalidate(t);
+        pub fn promiseContained(self: *Builder, t: TypeId, which: Containment) std.mem.Allocator.Error!void {
+            const parameter = &self.pool.items[@intFromEnum(t)].parameter;
+            switch (which) {
+                .owned => {
+                    parameter.owned = true;
+                    self.dependency_facts.invalidate(t);
+                },
+                .shareable => {
+                    parameter.shareable = true;
+                    self.unshareable_facts.invalidate(t);
+                },
+            }
             var root = t;
             while (self.standinOf(root)) |standin| root = standin.held;
             if (root != t and self.get(root) == .parameter) try self.notePromisedThrough(root, t);
@@ -11064,17 +11103,9 @@ pub const Typing = struct {
 
         /// Whether `t` is `Shareable`, over the `unshareable` containment table.
         pub fn isShareable(self: *Builder, t: TypeId) !bool {
-            try self.ensureFilled(t);
+            try self.ensureFacts(t);
             try self.settleContainment(&self.unshareable_facts, .unshareable);
             return !self.unshareable_facts.values.items[@intFromEnum(t)];
-        }
-
-        /// Records that `t`, a type parameter or the stand-in for an
-        /// associated type read through one, admits only `Shareable` types.
-        /// Answers already computed are dropped.
-        pub fn promiseShareable(self: *Builder, t: TypeId) void {
-            self.pool.items[@intFromEnum(t)].parameter.shareable = true;
-            self.unshareable_facts.invalidate(t);
         }
 
         /// Records that the declared type `t` is marked `unshareable`.
@@ -13576,13 +13607,14 @@ pub const Typing = struct {
             }
             // The alike classes are the builder's own bookkeeping too, and a
             // reopened pool may check further declarations, whose promises
-            // decide them again. A settled reference promised `Owned` is
-            // listed under the parameter it is read through, as
-            // `promiseOwned` would have, and every instantiation is watched
+            // decide them again. A settled reference promised `Owned` or
+            // `Shareable` is listed under the parameter it is read through, as
+            // `promiseContained` would have, and every instantiation is watched
             // again, a written one included, since any may represent its
             // class.
             for (t.standins) |s| {
-                if (!b.get(s.ty).parameter.owned) continue;
+                const promise = b.get(s.ty).parameter;
+                if (!promise.owned and !promise.shareable) continue;
                 var root = s.held;
                 while (b.standinOf(root)) |held| root = held.held;
                 if (b.get(root) != .parameter) continue;

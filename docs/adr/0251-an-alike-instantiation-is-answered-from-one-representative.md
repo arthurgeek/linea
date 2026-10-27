@@ -93,14 +93,15 @@ Each position of a candidate has a **shape**: what its argument there
 promises, with every one of the candidate's arguments written as its
 position. A shape holds
 
-- the argument's capability requirement, and its `Integer` and `Owned`
-  promises;
+- the argument's capability requirement, and its `Integer`, `Owned` and
+  `Shareable` promises;
 - each trait it is bounded by, with the trait's arguments renamed, so
   `T: Tr2[U]` in `struct G[T: Tr2[U], U]` and `T: Tr2[V]` in `G[T, V]` have
   one shape; and each callable signature it is bounded by, renamed alike;
 - each settled reference read through it that a `where` clause promised
-  `Owned` (or `Integer`, which promises `Owned`), renamed, as a set, but only
-  those whose member `D`'s parts read through that position.
+  `Owned` or `Shareable` (or `Integer`, which promises both), renamed and
+  with which of the two it was promised, as a set, but only those whose
+  member `D`'s parts read through that position.
 
 Two candidates of `D` are **alike** when their shapes are equal position for
 position. A type the renaming does not take apart, a callable signature say,
@@ -138,7 +139,8 @@ or a contract's target selects and of what kind -- is answered from those
 parts and from what the parameters and settled references among them promise.
 None of these answers tells one parameter from another except through what
 each promises: a parameter's capability seed is its requirement, it seeds a
-dependency unless it is promised `Owned`, and an implementation selected
+dependency unless it is promised `Owned`, it seeds an unshareable part
+unless it is promised `Shareable` or `Integer`, and an implementation selected
 inside a part, for `Pad[S].Out`, is selected by the traits the parameter is
 bounded by. The shape holds each of those promises, and so does each settled
 reference read through the argument that a part names: a promise on `S.Item`
@@ -173,12 +175,13 @@ holds it by class, so the builder and the finished pool read one answer
 
 Promises are completed after instantiations are minted: a bound's traits and
 callable signatures are read in a later sweep, and a `where` clause adds
-`Owned` to a parameter or to a settled reference read through one. So the
+`Owned` or `Shareable` to a parameter or to a settled reference read
+through one. So the
 decision is not taken once. `Builder.watchAlike` makes a minted
 instantiation a candidate, making its template one first, and lists each
 position under the parameter there. `setBoundTraits`, `setCallableBounds` and
-`promiseOwned` decide again each position listed under the parameter whose
-promise changed (`decideAlikeAgain`); `promiseOwned` on a settled reference
+`promiseContained` decide again each position listed under the parameter whose
+promise changed (`decideAlikeAgain`); `promiseContained` on a settled reference
 lists it under the parameter it is read through (`promised_through`), and
 under that parameter and the member it reads first there
 (`promised_members`), and decides that parameter's positions. A
@@ -190,19 +193,22 @@ its class, and only once every such candidate has left does any join the
 class its shapes now name, so no class is joined by comparing against a
 member about to leave it. Where the representative leaves, the template, or
 else another member, takes its place. Where what an unwritten instantiation
-is answered from changes, the capability and dependency tables are rebuilt.
+is answered from changes, the capability, dependency and `unshareable`
+tables are rebuilt.
 `templatesComplete`, called once every template is complete and every
 settled type known, decides again every position whose argument has a
-settled reference promised `Owned`, now that `membersRead` may answer that
+settled reference promised `Owned` or `Shareable`, now that `membersRead`
+may answer that
 its member is not read.
 
 `Builder.reopen` makes every instantiation of the pool it reopens a
 candidate again, written ones included, since any may represent its class,
-and lists each settled reference promised `Owned` as `promiseOwned` did, so
+and lists each settled reference promised `Owned` or `Shareable` as
+`promiseContained` did, so
 a pool reopened to check further declarations decides them as the first did.
 It carries whether templates were complete; a check of further declarations
-sets it false until its own templates are. Only `Owned` is promised of a
-settled reference outside a scope: a trait, callable or capability clause on
+sets it false until its own templates are. Only `Owned` and `Shareable` are
+promised of a settled reference outside a scope: a trait, callable or capability clause on
 one is a contextual constraint, read in its scope's lookups and scoped
 capabilities, and writes no part.
 
@@ -215,8 +221,11 @@ writing parts:
 
 - the capability table records such an instantiation, seeded from its
   policy, with one owned edge, to its representative; the dependency table,
-  in its `raw_carriers` mode, records the same edge; the writer table records
-  its arguments, which are parameters and so settle it, as 0248 already did;
+  in its `raw_carriers` mode, records the same edge, and so does the
+  `unshareable` table, whose answer reads every argument as well as every
+  part, so the representative's arguments, which promise what the
+  instantiation's do, answer for them; the writer table records its
+  arguments, which are parameters and so settle it, as 0248 already did;
 - the cycle walk (`firstCycleIn`) walks it as its representative, and where
   that is the template a path names the declarations a reader edits:
   `A contains B contains A`;
@@ -357,10 +366,13 @@ sweep, from n to 4n:
 | a template chain under functions promising a member it never reads (16000 to 64000) | n^0.99 | n^1.62 |
 | a template chain under functions bounding their parameter Discardable (16000 to 64000) | n^0.99 | n^1.71 |
 | a template chain under functions capping the member it reads Discardable (16000 to 64000) | n^0.92 | n^2.27 |
+| a template chain under functions sharing it (16000 to 64000) | n^0.99 | n^2.13 |
 | members promised through templates each reading one (16000 to 64000) | n^1.00 | n^2.23 |
 | members promised through one template reading them all (32000 to 128000) | n^0.96 | n^2.14 |
 | members promised by a template's own where clause (32000 to 128000) | n^1.00 | n^2.41 |
 
+The sharing chain was measured "before" from 1000, while the `unshareable`
+table wrote every alike instantiation whose arguments did not settle it.
 The capping chain was measured "before" from 1000, while every alike
 instantiation a capping scope reached was written at the scope's own
 parameters. The last three were measured "before" from 1000, 4000 and 4000, while each
