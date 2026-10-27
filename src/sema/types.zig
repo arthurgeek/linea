@@ -1642,19 +1642,21 @@ const BorrowContainment = struct {
         const at = @intFromEnum(ty);
         if (builder.isShell(ty)) {
             if (self.recorded.items[at] != .nothing) return;
+            const edges: Edges = .{ .containment = self, .builder = builder, .owner = ty, .mode = mode };
             if (mode != .writers) {
                 // What an alike instantiation may carry, or whether it is
                 // shareable, is what its representative's parts and
-                // arguments say: the one edge is to it.
+                // arguments say: the one edge is to it. A representative
+                // that is an instantiation is written as any other unwritten
+                // part is, so it is recorded too.
                 if (builder.alikeSource(ty)) |representative| {
                     self.recorded.items[at] = .representative;
-                    try self.edge(gpa, ty, representative);
+                    try edges.child(.argument, representative);
                     return;
                 }
                 if (mode == .raw_carriers) return;
             }
             self.recorded.items[at] = .arguments;
-            const edges: Edges = .{ .containment = self, .builder = builder, .owner = ty, .mode = mode };
             const instance = builder.instanceOf(ty).?;
             for (builder.argsOf(instance)) |argument| try edges.child(.argument, argument);
             try self.by_arguments.append(gpa, ty);
