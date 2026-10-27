@@ -1,0 +1,23 @@
+struct Ping {}
+
+struct Pong {}
+
+// Each dual is defined as the other's, so neither ever names a protocol.
+impl Protocol for Ping {
+    type Dual = Pong.Dual
+    type Step = Ping
+}
+
+impl Protocol for Pong {
+    type Dual = Ping.Dual
+    type Step = Pong
+}
+
+struct Tag[phantom P: Protocol] {
+    at: UInt64,
+}
+
+fn main() -> UInt8 {
+    let tag: Tag[Ping.Dual] = .{ at = 1 }
+    UInt8(tag.at)
+}

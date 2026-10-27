@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Chan[Recv[T, N]]`, found `Chan[Send[UInt64, Recv[UInt64, End]]]`
+  --> tests/traits/protocols/a_receive_on_a_sending_state_is_a_mismatch.lin:21:31
+   |
+14 | fn recv[T, N: Protocol](sink _c: Chan[Recv[T, N]]) -> (T, Chan[N]) {
+   |                              -- expected because of this parameter
+21 |     let (answer, rest) = recv(c)
+   |                               ^ expected `Chan[Recv[T, N]]`, found `Chan[Send[UInt64, Recv[UInt64, End]]]`

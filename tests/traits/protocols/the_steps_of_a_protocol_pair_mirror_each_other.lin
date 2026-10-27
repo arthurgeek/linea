@@ -1,0 +1,27 @@
+import std.session
+
+use session.End
+use session.Recv
+use session.Send
+
+struct Client {}
+
+struct Server {}
+
+// Each names the other as its dual, but the client sends text where the server
+// receives a number.
+impl Protocol for Client {
+    type Dual = Server
+    type Step = Send[Str, End]
+}
+
+impl Protocol for Server {
+    type Dual = Client
+    type Step = Recv[UInt64, End]
+}
+
+fn main() -> UInt8 {
+    let _client: Client = .{}
+    let _server: Server = .{}
+    0
+}

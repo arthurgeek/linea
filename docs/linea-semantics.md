@@ -2263,8 +2263,19 @@ inference; a structural parameter then converts its argument to the settled
 structural type, while a bound keeps the argument's own type. When a callback
 parameter has known input types and an undetermined result, its lambda body,
 named function signature, or stored callable signature can determine the
-remaining result parameters. Known result structure still supplies context to
-constructor payloads. Callback constraints within one call may supply another
+remaining result parameters. A lambda's written parameter types settle the
+callee's type parameters through the callback parameter's callable type before
+the lambda's body is checked, as an argument whose own type is determined
+does: with `fn start[P: Protocol, F: sink fn(sink me: Chan[P]) -> UInt64](sink
+body: F)`, the call `start(sink [] |sink me: Chan[Worker]| me.id)` settles `P`
+as `Worker`. A written type is read as an argument in its place: one that
+disagrees with what an earlier argument settled is [T-Call] at the lambda's
+parameter, and an argument after the lambda that disagrees with it is
+[T-Mismatch] there, as between any two arguments. A type parameter whose one
+callable bound fits the callback parameter's settles the callee's parameters
+the same way: inside `fn launch[G: sink fn(sink me: Chan[Worker]) ->
+UInt64](sink body: G)`, `start(body)` settles `P` as `Worker`. Known result
+structure still supplies context to constructor payloads. Callback constraints within one call may supply another
 callback's input types, independently of argument order; each body is checked
 once, and runtime evaluation order is unchanged. A dependency cycle with no
 known input does not infer types from the callback bodies. The completed
@@ -2686,6 +2697,43 @@ cycle that passes through a type's field rather than through definitions,
 `type Iter = S[Box]` where `S[T]` has a field of type `T.Iter`, defines `Iter` as
 an ordinary type; it is the layout of `S[Box]` that contains itself, and
 [T-InfiniteLayout] reports it.
+
+**[T-Dual]** An implementation of `Protocol` (`std.session`) for `X` names
+`X.Dual`, what the other end of a session does while one end does `X`, and
+`X.Step`, what `X` does next. It must satisfy two equations:
+
+- `X.Dual.Dual` is `X`;
+- `X.Dual.Step` is `X.Step.Dual`.
+
+Each side is read through the implementations that answer it, one projection
+at a time. A named protocol is compared by the dual its implementation names
+and is never unfolded, so the check ends however protocols recur: a `Worker`
+whose step is `Offer[Recv[Str, Worker], Send[UInt64, End]]` and a `Boss`
+whose step is `Choose[Send[Str, Boss], Recv[UInt64, End]]` name each other as
+duals and satisfy both equations. A pair that does not is refused at the
+definition that breaks it: `Liar.Dual = Boss` with `Boss.Dual = Other` is
+refused at `Liar`'s `Dual`, naming both definitions, and two protocols that
+name each other but whose steps disagree, one sending `Str` where the other
+receives `UInt64`, are refused once, at the `Step` written first, naming the
+first part where the two differ. An implementation that breaks the first
+equation is not also reported for the second. A named protocol's dual is
+named: `type Dual = Recv[UInt64, End]` for a protocol whose step is
+`Send[UInt64, End]` is refused, since the dual of that receive is a send and
+not the protocol. A generic implementation is checked over its own
+parameters: `impl[N: Protocol] Protocol for Quiet[N]` with `type Dual =
+N.Dual` is refused, since its dual's dual is `N` rather than `Quiet[N]`.
+
+**Dual normalisation.** For every `P` bounded by `Protocol`, `P.Dual.Dual` is
+`P`, and `P.Dual.Step` is `P.Step.Dual`. [T-Dual] proves both equations at
+every implementation, which is what makes them true for whatever settles `P`;
+a generic implementation is checked through them, so `impl[N: Protocol]
+Protocol for Fwd[N]` with `type Dual = Fwd[N.Dual]` and `type Step = N.Step`
+is accepted. A generic function relies on them too, so
+`fn same[P: Protocol](sink tag: Tag[P]) -> Tag[P.Dual.Dual]` returns `tag`
+unchanged, and a call that settles a parameter `Q` as `P.Dual` reads `Q.Dual`
+as `P`. A `Dual` defined through other definitions that never reach a type,
+`type Dual = Pong.Dual` beside `type Dual = Ping.Dual`, is the definition
+cycle above and [T-Impl].
 
 An implementation supplies the trait's type arguments, as in
 `impl Holds[UInt8] for Coins` for `Holds[T]`. A wrong argument count is rejected

@@ -1,0 +1,34 @@
+import std.session
+
+use session.End
+use session.Recv
+use session.Send
+
+struct Liar {}
+
+struct Boss {}
+
+struct Other {}
+
+// `Liar` says its peer is `Boss`, but `Boss` says its peer is `Other`, so the
+// two ends would disagree about what each sends.
+impl Protocol for Liar {
+    type Dual = Boss
+    type Step = Send[Str, End]
+}
+
+impl Protocol for Boss {
+    type Dual = Other
+    type Step = Recv[UInt64, End]
+}
+
+impl Protocol for Other {
+    type Dual = Other
+    type Step = End
+}
+
+fn main() -> UInt8 {
+    let _liar: Liar = .{}
+    let _boss: Boss = .{}
+    0
+}

@@ -1,0 +1,5 @@
+error[T-Impl]: this associated type is defined through itself: `Ping.Dual` is `Pong.Dual`, `Pong.Dual` is `Ping.Dual`
+ --> tests/traits/protocols/a_dual_defined_through_its_peer_is_refused.lin:7:17
+  |
+7 |     type Dual = Pong.Dual
+  |                 ^^^^^^^^^ define it as a type that does not read back to itself

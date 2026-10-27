@@ -1,0 +1,9 @@
+error[T-Dual]: `Client` and its dual `Server` disagree at their next step: one end has `Str` where the other has `UInt64`
+  --> tests/traits/protocols/the_steps_of_a_protocol_pair_mirror_each_other.lin:15:17
+   |
+15 |     type Step = Send[Str, End]
+   |                 ^^^^^^^^^^^^^^ the dual of `Send[Str, End]` is `Recv[Str, End]`
+20 |     type Step = Recv[UInt64, End]
+   |                 ----------------- `Server.Step` is `Recv[UInt64, End]`
+   |
+   = help: write each step as what the other end does at the same moment

@@ -1,0 +1,7 @@
+error[T-Dual]: the dual of `Ask` is `Recv[UInt64, End]`, whose dual is `Send[UInt64, End]` rather than `Ask`
+  --> tests/traits/protocols/a_named_protocol_names_a_named_dual.lin:12:17
+   |
+12 |     type Dual = Recv[UInt64, End]
+   |                 ^^^^^^^^^^^^^^^^^ `Ask` names `Recv[UInt64, End]` as its peer
+   |
+   = help: name a protocol whose own `Dual` is `Ask`

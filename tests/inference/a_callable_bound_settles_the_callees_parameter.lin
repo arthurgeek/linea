@@ -1,0 +1,41 @@
+import std.session
+
+use session.End
+use session.Recv
+use session.Send
+
+// An endpoint whose next step is `P`.
+struct Chan[phantom P: Protocol] {
+    id: UInt64,
+}
+
+struct Worker {}
+
+struct Boss {}
+
+impl Protocol for Worker {
+    type Dual = Boss
+    type Step = Recv[UInt64, Send[UInt64, End]]
+}
+
+impl Protocol for Boss {
+    type Dual = Worker
+    type Step = Send[UInt64, Recv[UInt64, End]]
+}
+
+// Runs `body` on the worker's end and hands back the boss's end with what
+// the body answered.
+fn start[P: Protocol, F: sink fn(sink me: Chan[P]) -> UInt64](sink body: F) -> (Chan[P.Dual], UInt64) {
+    let answer = body(.{ id = 1 })
+    (.{ id = 2 }, answer)
+}
+
+// `G`'s bound takes a `Chan[Worker]`, which settles `start`'s `P`.
+fn launch[G: sink fn(sink me: Chan[Worker]) -> UInt64](sink body: G) -> (Chan[Boss], UInt64) {
+    start(body)
+}
+
+fn main() -> UInt8 {
+    let (boss, answer) = launch(sink [] |sink me: Chan[Worker]| me.id + 3)
+    UInt8(boss.id + answer)
+}

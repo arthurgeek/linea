@@ -101,3 +101,6 @@ carried/a_lend_reaches_through_an_option.lin
 carried/a_lend_reaches_through_a_closure_capture.lin
 carried/a_copied_holder_keeps_the_lend.lin
 carried/a_lend_through_any_holder_ends_at_its_last_use.lin
+# Protocols naming each other pass [T-Dual] whichever implementation is written first.
+traits/protocols/recursive_protocols_name_each_other_as_duals.lin
+traits/protocols/a_generic_combinator_hands_back_the_dual_of_the_dual.lin

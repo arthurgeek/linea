@@ -1,0 +1,7 @@
+error[T-Dual]: the dual of `Quiet[N]` is `N.Dual`, whose dual is `N` rather than `Quiet[N]`
+  --> tests/traits/protocols/a_combinator_whose_dual_forgets_itself_is_refused.lin:10:17
+   |
+10 |     type Dual = N.Dual
+   |                 ^^^^^^ `Quiet[N]` names `N.Dual` as its peer
+   |
+   = help: name a protocol whose own `Dual` is `Quiet[N]`

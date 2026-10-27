@@ -1,0 +1,28 @@
+import std.session
+
+use session.End
+use session.Recv
+use session.Send
+
+// `Fwd[N]` does what `N` does, and its peer does what `N`'s peer does.
+struct Fwd[phantom N: Protocol] {}
+
+impl[N: Protocol] Protocol for Fwd[N] {
+    type Dual = Fwd[N.Dual]
+    type Step = N.Step
+}
+
+struct Tag[phantom P: Protocol] {
+    at: UInt8,
+}
+
+// Accepts only a receive of one byte.
+fn receiving(tag: Tag[Recv[UInt8, End]]) -> UInt8 {
+    tag.at
+}
+
+fn main() -> UInt8 {
+    // The step of the forwarder's peer is the dual of the forwarded send.
+    let tag: Tag[Fwd[Send[UInt8, End]].Dual.Step] = .{ at = 5 }
+    receiving(tag)
+}
