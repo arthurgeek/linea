@@ -3290,17 +3290,16 @@ pub const Reach = struct {
         return self.firstParameterTakes(d, row.decl.index(), bindings, held);
     }
 
-    /// Whether the head of the block declaring `d` matches the instantiation
+    /// Whether the head of the block declaring `d` refuses the instantiation
     /// `held`'s observations reach, so `impl[T, N] Chan[Send[T, N]]` declares
-    /// nothing for a `Chan[Recv[UInt64, End]]`. The head of the block, when
-    /// it does not.
-    pub fn headRefusing(self: Reach, gpa: std.mem.Allocator, held: TypeId, d: node.DeclId) !?TypeId {
-        const at = implementationRowIndex(self.impls, self.res.implEnclosing(d)) orelse return null;
+    /// nothing for a `Chan[Recv[UInt64, End]]`.
+    pub fn headRefusing(self: Reach, gpa: std.mem.Allocator, held: TypeId, d: node.DeclId) !bool {
+        const at = implementationRowIndex(self.impls, self.res.implEnclosing(d)) orelse return false;
         const row = self.impls[at];
         const bindings = try gpa.alloc(TypeId, row.parameters);
         defer gpa.free(bindings);
         @memset(bindings, .poison);
-        return if (self.headMatches(row, held, bindings)) null else row.ty;
+        return !self.headMatches(row, held, bindings);
     }
 
     /// The one structural match of a block's head against a receiver: each
@@ -24477,10 +24476,12 @@ const Checker = struct {
         // it: the member exists for another instantiation, which the report
         // names beside the receiver's.
         const pool = try self.builder.capabilityView();
-        if (try self.reaching(&pool).headRefusing(self.gpa, passed, dropped.sig)) |head| {
+        if (try self.reaching(&pool).headRefusing(self.gpa, passed, dropped.sig)) {
             const name = self.ast.tokenText(written);
-            const head_name = try self.typeName(head);
             const impl = self.res.implEnclosing(dropped.sig);
+            // As written, which says what the head reads and nothing the
+            // checker added to it.
+            const head_name = self.ast.writtenText(self.ast.declHead(impl));
             const labels = try self.sink.arena.alloc(Label, 2);
             labels[0] = .{
                 .file = self.ast.fileOf(self.ast.declName(impl)),

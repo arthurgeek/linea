@@ -4314,6 +4314,10 @@ pub const ImplIndex = struct {
                     const given = pool.callableParams(got);
                     if (wanted.len != given.len) break :blk false;
                     for (given, wanted) |got_parameter, want_parameter| {
+                        // A convention is written, never settled, so a
+                        // parameter taken `inout` is another signature from
+                        // one read, whatever its type.
+                        if (!got_parameter.samePosition(want_parameter)) break :blk false;
                         if (!bindKey(pool, got_parameter.ty, want_parameter.ty, owner, bindings)) break :blk false;
                     }
                     break :blk bindKey(pool, got.result, want.result, owner, bindings);
