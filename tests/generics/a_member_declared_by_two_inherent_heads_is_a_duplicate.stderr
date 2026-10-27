@@ -1,0 +1,5 @@
+error[N-Duplicate]: `take` is already declared in this type
+  --> tests/generics/a_member_declared_by_two_inherent_heads_is_a_duplicate.lin:16:8
+   |
+16 |     fn take(sink self: Self) -> Option[T] where carries(self) {
+   |        ^^^^ a name is declared once

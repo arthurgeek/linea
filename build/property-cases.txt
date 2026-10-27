@@ -75,3 +75,7 @@ carried/a_lend_through_any_holder_ends_at_its_last_use.lin
 # Protocols naming each other pass [T-Dual] whichever implementation is written first.
 traits/protocols/recursive_protocols_name_each_other_as_duals.lin
 traits/protocols/a_generic_combinator_hands_back_the_dual_of_the_dual.lin
+# A receiver reaches the member of the one inherent head it matches whichever implementation is written first.
+traits/protocols/the_operation_an_endpoint_offers_follows_its_protocol.lin
+generics/a_generic_inherent_head_sits_beside_a_nested_one.lin
+generics/inherent_heads_that_never_meet_offer_their_own_members.lin

@@ -1,0 +1,42 @@
+// Two implementations of one type whose heads write different constructors
+// in the same position offer their members to different instantiations: a
+// slot holding a pair has `swap`, one holding an array has `first`, and one
+// holding a function has `apply`.
+struct Slot[I] {
+    item: I,
+}
+
+impl[A, B] Slot[(A, B)] {
+    fn swap(sink self: Self) -> Slot[(B, A)] where carries(self) {
+        let Slot { item: (a, b) } = self
+        .{ item = (b, a) }
+    }
+}
+
+impl[T] Slot[[T; 2]] {
+    fn first(self: Self) -> T where T: Copyable {
+        copy(self.item[0])
+    }
+}
+
+impl[A, R] Slot[fn(a: A) -> R] {
+    fn apply(self: Self, a: A) -> R {
+        (self.item)(a)
+    }
+}
+
+fn twice(a: UInt8) -> UInt8 {
+    a * 2
+}
+
+fn main() -> UInt8 {
+    let pair: Slot[(Bool, UInt8)] = .{ item = (true, 2) }
+    let (count, flag) = pair.swap().item
+    let row: Slot[[UInt8; 2]] = .{ item = [5, 7] }
+    let doubling: Slot[fn(a: UInt8) -> UInt8] = .{ item = twice }
+    if flag {
+        count + row.first() + doubling.apply(3)
+    } else {
+        0
+    }
+}

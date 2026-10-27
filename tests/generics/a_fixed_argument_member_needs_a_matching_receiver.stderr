@@ -1,7 +1,7 @@
-error[T-Mismatch]: expected `Pair[A, ()]`, found `Pair[UInt8, Bool]`
+error[T-UnknownOperation]: `Pair[UInt8, Bool]` has no operation `first_of`
   --> tests/generics/a_fixed_argument_member_needs_a_matching_receiver.lin:16:5
    |
-9  |     fn first_of(self: Self) -> A where A: Copyable {
-   |                 ---- expected because of this parameter
+8  | impl[A] Pair[A, ()] {
+   |         ----------- `first_of` is declared for `Pair[A, ()]`
 16 |     both.first_of()
-   |     ^^^^ expected `Pair[A, ()]`, found `Pair[UInt8, Bool]`
+   |     ^^^^ this is `Pair[UInt8, Bool]`, which `Pair[A, ()]` does not match

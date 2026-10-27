@@ -1,0 +1,25 @@
+// A member name is declared once per type across all of its own
+// implementations, whatever their heads, so a call on a shelf of optional
+// items never has two `take`s to choose between.
+struct Shelf[I] {
+    item: I,
+}
+
+impl[T] Shelf[T] {
+    fn take(sink self: Self) -> T where carries(self) {
+        let Shelf { item } = self
+        item
+    }
+}
+
+impl[T] Shelf[Option[T]] {
+    fn take(sink self: Self) -> Option[T] where carries(self) {
+        let Shelf { item } = self
+        item
+    }
+}
+
+fn main() -> UInt8 {
+    let shelf: Shelf[UInt8] = .{ item = 3 }
+    shelf.take()
+}

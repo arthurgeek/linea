@@ -1,0 +1,80 @@
+import std.session
+
+use session.Choose
+use session.End
+use session.Offer
+use session.Recv
+use session.Send
+
+// One end of a session, tagged with what that end does next. This endpoint
+// talks to nobody: a send keeps nothing, and a receive answers the payload
+// type's default.
+@linear
+struct Chan[phantom P: Protocol, phantom H = ()] {
+    id: UInt64,
+}
+
+// Which continuation the other end picked.
+enum Branch[L: Protocol, R: Protocol, H] {
+    Left(Chan[L, H]),
+    Right(Chan[R, H]),
+}
+
+// Every state may be unfolded one step.
+impl[P: Protocol, H] Chan[P, H] {
+    fn enter(sink self: Self) -> Chan[P.Step, H] {
+        let Chan { id } = self
+        .{ id = id }
+    }
+}
+
+// `T` and `N` are read from inside the protocol argument.
+impl[T: Discardable, N: Protocol, H] Chan[Send[T, N], H] {
+    fn send(sink self: Self, sink _value: T) -> Chan[N, H] {
+        let Chan { id } = self
+        .{ id = id + 1 }
+    }
+}
+
+impl[T: Default, N: Protocol, H] Chan[Recv[T, N], H] {
+    fn recv(sink self: Self) -> (T, Chan[N, H]) {
+        let Chan { id } = self
+        (T.default(), .{ id = id + 1 })
+    }
+}
+
+impl[L: Protocol, R: Protocol, H] Chan[Choose[L, R], H] {
+    fn choose_left(sink self: Self) -> Chan[L, H] {
+        let Chan { id } = self
+        .{ id = id + 1 }
+    }
+}
+
+impl[L: Protocol, R: Protocol, H] Chan[Offer[L, R], H] {
+    fn offer(sink self: Self) -> Branch[L, R, H] {
+        let Chan { id } = self
+        .Right(.{ id = id + 1 })
+    }
+}
+
+// A finished session is closed, and only a finished one.
+impl[H] Chan[End, H] {
+    fn close(sink self: Self) -> UInt64 {
+        let Chan { id } = self
+        id
+    }
+}
+
+fn main() -> UInt8 {
+    let asking: Chan[Send[UInt64, Recv[UInt64, Choose[End, End]]]] = .{ id = 0 }
+    // `send` takes the number and answers the endpoint at `Recv[UInt64, …]`.
+    let (answer, waiting) = asking.send(41).enter().recv()
+    let steps = waiting.choose_left().close()
+
+    let serving: Chan[Offer[Send[Bool, End], End]] = .{ id = 10 }
+    let served = match serving.offer() {
+        Left(sending) => sending.send(true).close(),
+        Right(done) => done.close(),
+    }
+    UInt8(answer + steps + served)
+}
