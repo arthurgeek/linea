@@ -1025,7 +1025,7 @@ const CapabilityFacts = struct {
         const gpa = builder.gpa;
         if (self.dirty) {
             self.pending.clearRetainingCapacity();
-            builder.scoped_capability_facts.deinit(gpa);
+            try builder.scoped_capability_facts.drop(gpa);
             builder.prepared_implementations.clear();
             self.seeds.clearRetainingCapacity();
             self.first_parts.clearRetainingCapacity();
@@ -1061,7 +1061,7 @@ const CapabilityFacts = struct {
         // An added part is not counted in its owner's `part_counts`, which
         // scoped facts read; a scoped answer is prepared from the owner's
         // parts again only once those facts are rebuilt.
-        if (self.pending.items.len != 0) builder.scoped_capability_facts.deinit(gpa);
+        if (self.pending.items.len != 0) try builder.scoped_capability_facts.drop(gpa);
         for (self.pending.items) |added| try self.edge(gpa, builder, added.owner, added.child);
         self.pending.clearRetainingCapacity();
         var next: usize = 0;
@@ -1170,8 +1170,16 @@ const ScopedCapabilityFacts = struct {
     /// Each answer prepared in a scope's own context, by scope and type: what
     /// `Typing.capabilityAskedWithin` reads.
     values: ScopedCapabilityMap = .empty,
+    /// The answers of the finished pool a builder was reopened over. Its
+    /// rows cannot change while types only append, so `drop` keeps them.
+    frozen: ScopedCapabilityMap = .empty,
     /// The types a question within a scope was asked about and prepared.
     roots: std.AutoHashMapUnmanaged(ScopedCapabilityKey, void) = .empty,
+    /// The roots whose answers `drop` discarded, which
+    /// `Builder.restoreScopedCapabilities` prepares again before the pool is
+    /// handed on, so every question prepared once is answered by the
+    /// finished pool.
+    lost: std.AutoArrayHashMapUnmanaged(ScopedCapabilityKey, void) = .empty,
     scope_contexts: std.AutoHashMapUnmanaged(DeclId, u32) = .empty,
     contexts: std.ArrayList(Context) = .empty,
     context_ceilings: std.ArrayList(Ceiling) = .empty,
@@ -1188,9 +1196,36 @@ const ScopedCapabilityFacts = struct {
     /// minted types, which may drop them, can tell that it must start again.
     generation: u32 = 0,
 
+    /// Discards every answer, and every root prepared under the contextual
+    /// constraints set now; see `drop` for the answers those constraints
+    /// still decide.
     fn deinit(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator) void {
         self.values.deinit(gpa);
+        self.frozen.deinit(gpa);
         self.roots.deinit(gpa);
+        self.lost.deinit(gpa);
+        self.values = .empty;
+        self.frozen = .empty;
+        self.roots = .empty;
+        self.lost = .empty;
+        self.clearDerived(gpa);
+    }
+
+    /// Discards the answers derived from the capability facts, once those
+    /// are rebuilt, and lists every root prepared so far in `lost`: the
+    /// contextual constraints still decide the questions, and the facts now
+    /// answer them differently. The finished pool's answers are kept.
+    fn drop(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator) !void {
+        var roots = self.roots.keyIterator();
+        while (roots.next()) |root| try self.lost.put(gpa, root.*, {});
+        self.roots.clearRetainingCapacity();
+        self.values.clearRetainingCapacity();
+        var frozen = self.frozen.iterator();
+        while (frozen.next()) |entry| try self.values.put(gpa, entry.key_ptr.*, entry.value_ptr.*);
+        self.clearDerived(gpa);
+    }
+
+    fn clearDerived(self: *ScopedCapabilityFacts, gpa: std.mem.Allocator) void {
         self.scope_contexts.deinit(gpa);
         self.contexts.deinit(gpa);
         self.context_ceilings.deinit(gpa);
@@ -1203,7 +1238,17 @@ const ScopedCapabilityFacts = struct {
         self.edges.deinit(gpa);
         self.pending.deinit(gpa);
         self.queue.deinit(gpa);
-        self.* = .{ .generation = self.generation +% 1 };
+        self.scope_contexts = .empty;
+        self.contexts = .empty;
+        self.context_ceilings = .empty;
+        self.interned = .empty;
+        self.ceilings = .empty;
+        self.answers = .empty;
+        self.states = .empty;
+        self.edges = .empty;
+        self.pending = .empty;
+        self.queue = .empty;
+        self.generation +%= 1;
     }
 
     /// `scope`'s own context: the lowest ceiling its constraints and its
@@ -9728,7 +9773,7 @@ pub const Typing = struct {
         ///
         /// **Bound:** one shape per position listed under `parameter`, and
         /// one class lookup per candidate whose shape changed. A
-        /// declaration's clauses are read under one hold, so the positions
+        /// declaration's promises are recorded under one hold, so the positions
         /// at a parameter are decided once per declaration that promises
         /// something of it, not once per promise: a function writing `n`
         /// clauses on members of `S` decides each position at `S` once, and
@@ -9765,10 +9810,12 @@ pub const Typing = struct {
 
         /// Holds the decisions promises would ask of `decideAlikeAgain` until
         /// the matching `releaseAlikeDecisions`, which decides each parameter
-        /// they named once. Held while one declaration's clauses are read,
-        /// so `n` clauses on members of one parameter decide its positions
-        /// once rather than `n` times, each over every earlier promise. No
-        /// question about what a type owns is asked while clauses are read.
+        /// they named once. Held while one declaration's promises are
+        /// recorded, after its clauses are read, so `n` clauses on members of
+        /// one parameter decide its positions once rather than `n` times,
+        /// each over every earlier promise. Nothing but `promiseOwned` runs
+        /// inside a hold, so no question about what a type owns reads a class
+        /// a recorded promise has made stale.
         pub fn holdAlikeDecisions(self: *Builder) void {
             self.alike_holds += 1;
         }
@@ -12414,7 +12461,9 @@ pub const Typing = struct {
         /// reference. Renaming may mint the renamed subject, and minting may
         /// drop these facts or leave the capability facts to rebuild, in
         /// which case the walk starts again over the types now minted,
-        /// which mints nothing more.
+        /// which mints nothing more. A drop lists every root prepared
+        /// before as lost, and `restoreScopedCapabilities` prepares those
+        /// again before the hand-off.
         fn prepareScopedCapability(self: *Builder, scope: DeclId, t: TypeId) !void {
             if (self.scoped_capability_facts.roots.contains(.{ .scope = scope, .ty = t })) return;
             if (self.alikeSource(t) != null) try self.ensureFilled(t);
@@ -12429,6 +12478,18 @@ pub const Typing = struct {
             const facts = &self.scoped_capability_facts;
             try facts.solve(self.gpa);
             try facts.roots.put(self.gpa, .{ .scope = scope, .ty = t }, {});
+            _ = facts.lost.swapRemove(.{ .scope = scope, .ty = t });
+        }
+
+        /// Prepares again every root whose answers were dropped when the
+        /// capability facts were rebuilt (`ScopedCapabilityFacts.drop`), so
+        /// the pool handed on answers every question prepared before it.
+        /// Preparing one may drop the others again, which lists them again.
+        ///
+        /// **Bound:** one preparation per root dropped, per drop.
+        fn restoreScopedCapabilities(self: *Builder) !void {
+            while (self.scoped_capability_facts.lost.pop()) |lost|
+                try self.prepareScopedCapability(lost.key.scope, lost.key.ty);
         }
 
         /// Reaches every node `t` owns within `scope`'s context, linking each
@@ -12476,10 +12537,10 @@ pub const Typing = struct {
         fn scopedStep(self: *Builder, owner: ScopedCapabilityFacts.Node, source: TypeId) !?ScopedCapabilityFacts.Node {
             const facts = &self.scoped_capability_facts;
             const generation = facts.generation;
-            if (!self.capability_facts.isRecorded(source)) {
-                try self.settleFactsOf(source);
-                if (facts.generation != generation) return null;
-            }
+            // The update before the walk recorded `owner`, an unwritten alike
+            // instantiation, with its one edge to `source`, and wrote and
+            // recorded every unwritten part an edge reaches.
+            std.debug.assert(self.capability_facts.isRecorded(source));
             const instance = self.instanceOf(owner.ty).?;
             var renaming: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty;
             defer renaming.deinit(self.gpa);
@@ -13033,10 +13094,13 @@ pub const Typing = struct {
         }
 
         pub fn finish(self: *Builder, binding_types: BindingTypes) !Typing {
-            // Settling one table may write parts another has yet to record.
+            // Settling one table may write parts another has yet to record,
+            // and rebuilding the capability facts drops the scoped answers,
+            // which are prepared again.
             while (true) {
                 const written = self.parts_written;
                 try self.settleCapabilities();
+                try self.restoreScopedCapabilities();
                 try self.settleContainment(&self.dependency_facts, .raw_carriers);
                 try self.settleContainment(&self.writer_facts, .writers);
                 if (written == self.parts_written) break;
@@ -13300,6 +13364,7 @@ pub const Typing = struct {
             // goes on to mint.
             b.borrowTables(t);
             b.scoped_capability_facts.values = try t.scoped_capabilities.clone(gpa);
+            b.scoped_capability_facts.frozen = try t.scoped_capabilities.clone(gpa);
             b.prepared_implementations = try t.prepared_implementations.clone(gpa);
             b.certified_storage = t.raw_accesses.storage;
             b.certified_buffer = t.raw_accesses.buffer;
@@ -15029,6 +15094,41 @@ fn exerciseScopedCapabilityHandoff(gpa: std.mem.Allocator) !void {
     try testing.expectEqual(Capability.affine, try reopened.capabilityOfWithin(owner, wrapper));
     try testing.expectEqual(Capability.affine, reopened.view().capabilityOfWithin(owner, record));
     try testing.expectEqual(Capability.linear, try reopened.capabilityOf(wrapper));
+}
+
+test "scoped capabilities dropped by a rebuild are prepared again before the hand-off" {
+    try testing.checkAllAllocationFailures(testing.allocator, exerciseScopedCapabilityRestore, .{});
+}
+
+fn exerciseScopedCapabilityRestore(gpa: std.mem.Allocator) !void {
+    var builder = try Typing.Builder.init(gpa);
+    defer builder.deinit();
+    const owner = DeclId.at(0);
+    const parameter = try builder.addParameter("T", 0, 0, .unrestricted, &.{});
+    const box = try builder.addStruct("Box", .copyable, &.{.{ .name = "value", .ty = parameter }});
+    const pair = try builder.addStruct("Pair", .copyable, &.{.{ .name = "left", .ty = parameter }});
+    const ticket = try builder.addStruct("Ticket", .linear, &.{});
+    const constraints: ContextualConstraints = .{
+        .starts = &.{ 0, 1 },
+        .parents = &.{.none},
+        .capability_scopes = &.{owner},
+        .items = &.{.{ .subject = parameter, .demand = .{ .requirement = .discardable } }},
+    };
+    builder.setContextualConstraints(constraints);
+    try builder.prepareCapabilityWithin(owner, box);
+    try builder.prepareCapabilityWithin(owner, pair);
+    // Replacing a part that gives its owner something rebuilds the
+    // capability facts, which drops every scoped answer; asking about `pair`
+    // prepares it again, and leaves `box` listed as lost.
+    try builder.setFieldType(pair, 0, ticket);
+    try testing.expectEqual(Capability.linear, try builder.capabilityOfWithin(owner, pair));
+    try testing.expect(builder.scoped_capability_facts.lost.contains(.{ .scope = owner, .ty = box }));
+    var typing = try builder.finish(.empty);
+    defer typing.deinit(gpa);
+    typing.contextual_constraints = constraints;
+    defer typing.contextual_constraints = .{};
+    try testing.expectEqual(Capability.affine, typing.capabilityOfWithin(owner, box));
+    try testing.expectEqual(Capability.linear, typing.capabilityOfWithin(owner, pair));
 }
 
 test "poison capability remains usable under scoped recovery" {

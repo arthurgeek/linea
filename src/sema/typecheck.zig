@@ -6304,10 +6304,13 @@ const Checker = struct {
 
         var promised: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
         defer promised.deinit(self.gpa);
+        var promises: std.ArrayList(TypeId) = .empty;
+        defer promises.deinit(self.gpa);
         for (0..self.ast.declCount()) |i| {
             const d = node.DeclId.at(@intCast(i));
             starts[i] = @intCast(contextual.items.len);
             promised.clearRetainingCapacity();
+            promises.clearRetainingCapacity();
             const enclosing = self.res.implEnclosing(d);
             parents[i] = if (enclosing != .none and enclosing != d)
                 enclosing
@@ -6315,8 +6318,6 @@ const Checker = struct {
                 self.traitDeclaring(d) orelse node.DeclId.none;
 
             const range = self.constraints.rangeOfDeclaration(d);
-            // The declaration's promises are decided once they are all read.
-            self.builder.holdAlikeDecisions();
             for (range.start..range.end) |at| {
                 const resolved = self.constraint_subjects[at];
                 if (resolved == .poison) continue;
@@ -6331,7 +6332,7 @@ const Checker = struct {
                     .written => |written| for (requirements) |requirement| {
                         if (requirement.kind != .named) continue;
                         if (resolve_mod.boundNames(self.ast, requirement.named.name, traitAt(self.ast, self.res, requirement.named.name)) != .owned) continue;
-                        try self.promiseWrittenOwned(d, written, resolved, requirement.named.name, &promised, .owned);
+                        try self.promiseWrittenOwned(d, written, resolved, requirement.named.name, &promised, &promises, .owned);
                     },
                     .parameter => {},
                 }
@@ -6353,7 +6354,7 @@ const Checker = struct {
                         } else for (requirements) |requirement| {
                             if (requirement.kind == .named) break requirement.named.name;
                         } else self.ast.declName(d);
-                        try self.promiseWrittenOwned(d, written, resolved, bound, &promised, .integer);
+                        try self.promiseWrittenOwned(d, written, resolved, bound, &promised, &promises, .integer);
                     },
                     .parameter => {},
                 }
@@ -6370,7 +6371,7 @@ const Checker = struct {
                     },
                 });
             }
-            try self.builder.releaseAlikeDecisions();
+            try self.promiseHeld(promises.items);
         }
         starts[self.ast.declCount()] = @intCast(contextual.items.len);
         for (capability_scopes, 0..) |*scope, index| {
@@ -6407,6 +6408,8 @@ const Checker = struct {
     fn resettleConstraintSubjects(self: *Checker) std.mem.Allocator.Error!void {
         const items = @constCast(self.contextual_constraints.items);
         var changed = false;
+        var promises: std.ArrayList(TypeId) = .empty;
+        defer promises.deinit(self.gpa);
         for (0..self.ast.declCount()) |i| {
             const d = node.DeclId.at(@intCast(i));
             const range = self.constraints.rangeOfDeclaration(d);
@@ -6414,7 +6417,7 @@ const Checker = struct {
             var item: usize = if (i < self.contextual_constraints.starts.len) self.contextual_constraints.starts[i] else continue;
             self.self_at_call = if (self.ast.declIsSignature(d)) try self.signatureSelfType(d) else null;
             defer self.self_at_call = null;
-            self.builder.holdAlikeDecisions();
+            promises.clearRetainingCapacity();
             for (range.start..range.end) |at| {
                 const resolved = self.constraint_subjects[at];
                 const constraint = self.constraints.records[at];
@@ -6434,11 +6437,23 @@ const Checker = struct {
                 // A promise holds for what the subject now reads as.
                 const demand = items[item].demand;
                 if ((demand.owned or demand.integer) and self.ownsSubject(d, settled))
-                    try self.builder.promiseOwned(settled);
+                    try promises.append(self.gpa, settled);
             }
-            try self.builder.releaseAlikeDecisions();
+            try self.promiseHeld(promises.items);
         }
         if (changed) self.builder.setContextualConstraints(self.contextual_constraints);
+    }
+
+    /// Records the promises one declaration's clauses make, after every
+    /// clause is read, under one hold (`holdAlikeDecisions`): `n` promises
+    /// on members of one parameter decide its positions once, and no type
+    /// question is asked while the decisions wait, so none reads a class
+    /// that a recorded promise has already made stale.
+    fn promiseHeld(self: *Checker, promises: []const TypeId) std.mem.Allocator.Error!void {
+        if (promises.len == 0) return;
+        self.builder.holdAlikeDecisions();
+        for (promises) |subject| try self.builder.promiseOwned(subject);
+        try self.builder.releaseAlikeDecisions();
     }
 
     /// Resolution reads a template member only when it plans the template, so
@@ -30886,13 +30901,15 @@ const Checker = struct {
         bound: TokenId,
         /// The subjects `d`'s clauses have promised so far.
         promised: *std.AutoHashMapUnmanaged(TypeId, void),
+        /// The promises to record once every clause of `d` is read.
+        promises: *std.ArrayList(TypeId),
         /// The bound written: `Owned`, or `Integer`, which promises `Owned`
         /// and may be written beside it.
         written_as: enum { owned, integer },
     ) std.mem.Allocator.Error!void {
         if (self.ownsSubject(d, subject)) {
             if (written_as == .integer) {
-                if (!promised.contains(subject)) try self.builder.promiseOwned(subject);
+                if (!promised.contains(subject)) try promises.append(self.gpa, subject);
                 return;
             }
             if ((try promised.getOrPut(self.gpa, subject)).found_existing) return self.sink.addErrorFmt(
@@ -30903,7 +30920,7 @@ const Checker = struct {
                 "`{s}` is bounded `Owned` twice",
                 .{self.ast.writtenText(written)},
             );
-            return try self.builder.promiseOwned(subject);
+            return try promises.append(self.gpa, subject);
         }
         // The signature's contract would be inferred as if the promise held
         // for some instantiations and not others; the refusal is the mistake,
