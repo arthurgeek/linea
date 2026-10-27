@@ -1,0 +1,15 @@
+error[S-Nesting]: this pattern nests too deeply
+  --> tests/recovery/a_refused_pattern_hides_no_other_undefined_name.lin:11:22
+   |
+11 |         let (first, (second, third)) = triple
+   |                      ^^^^^^ the limit is 1000 levels
+error[N-Undefined]: undefined name `secnd`
+  --> tests/recovery/a_refused_pattern_hides_no_other_undefined_name.lin:13:22
+   |
+13 |         let _spare = secnd
+   |                      ^^^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `third`
+  --> tests/recovery/a_refused_pattern_hides_no_other_undefined_name.lin:16:13
+   |
+16 |     total + third
+   |             ^^^^^ no binding with this name is in scope

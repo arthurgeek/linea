@@ -4158,13 +4158,54 @@ const Parser = struct {
     ) std.mem.Allocator.Error!ExprId {
         const at = self.cursor.current();
         if (self.depth == max_nesting) {
-            try self.refuseToDescend(at, "this pattern nests too deeply");
+            try self.reportNesting(at, "this pattern nests too deeply");
+            self.stepOverPattern();
             return self.builder.addLiteral(.err, at, self.rangeFrom(at));
         }
         self.depth += 1;
         self.deepest = @max(self.deepest, self.depth);
         defer self.depth -= 1;
         return readPattern(self);
+    }
+
+    /// Steps over the one pattern under the cursor: a name or a path, the
+    /// type arguments after it, and the parenthesised or braced group it
+    /// opens. What follows the pattern is left for the construct that holds
+    /// it: the `=` of a `let`, the `in` of a `for`, the `|` that closes a
+    /// closure's parameters, the `=>` of an arm, or the next part of an
+    /// enclosing pattern. A group that is never closed, or that nests too
+    /// deeply to measure, is stepped over to the closer of what encloses it.
+    fn stepOverPattern(self: *Parser) void {
+        const from = self.cursor.current();
+        _ = self.cursor.eat(.dot);
+        if (self.cursor.eat(.identifier) != null) {
+            while (!self.cursor.precededByNewline() and self.cursor.at(.dot) and self.cursor.peekAt(1) == .identifier) {
+                _ = self.cursor.advance();
+                _ = self.cursor.advance();
+            }
+        }
+        if (self.cursor.at(.l_bracket) and !self.stepOverGroup()) return;
+        if (self.cursor.current() != from and self.cursor.precededByNewline()) return;
+        if (self.cursor.at(.l_paren) or self.cursor.at(.l_brace)) {
+            _ = self.stepOverGroup();
+            return;
+        }
+        // A literal, or a token no pattern begins with, is one token.
+        if (self.cursor.current() == from and !self.cursor.atEnd() and self.cursor.peek().nesting() == 0) {
+            _ = self.cursor.advance();
+        }
+    }
+
+    /// Steps over the balanced group the cursor opens, and says whether it
+    /// closes. One that does not is stepped over to the closer of what
+    /// encloses it.
+    fn stepOverGroup(self: *Parser) bool {
+        const end = self.delimiterEnd(self.cursor.current()) orelse {
+            self.skipToEnclosingCloser();
+            return false;
+        };
+        self.cursor.seek(@intCast(end.index() + 1));
+        return true;
     }
 
     /// A pattern where a binder may stand: in a variant's or newtype's
@@ -5207,7 +5248,7 @@ const Parser = struct {
             try self.parseBraced("an `else` handles the failure in a block");
         n += 1;
         m.operand();
-        if (!m.wrap()) return self.tooDeeplyNested(at);
+        if (!m.wrap()) return self.tooDeeplyNestedOver(at, start);
 
         const e = try self.builder.addCall(at, self.rangeFrom(start), operand, run[0..n], &.{});
         self.builder.retag(e, .unwrap_else);
@@ -5324,7 +5365,7 @@ const Parser = struct {
         _ = self.cursor.advance();
         const value = try self.parseExpr(1);
         m.operand();
-        if (!m.wrap()) return self.tooDeeplyNested(op);
+        if (!m.wrap()) return self.tooDeeplyNestedOver(op, start);
         return self.builder.addBinary(tag, op, self.rangeFrom(start), lhs, value);
     }
 
@@ -5395,7 +5436,7 @@ const Parser = struct {
 
                 const rhs = try self.parseExpr(prec + 1);
                 m.operand();
-                if (!m.wrap()) return self.tooDeeplyNested(op_token);
+                if (!m.wrap()) return self.tooDeeplyNestedOver(op_token, start);
 
                 lhs = try self.builder.addRange(
                     op_token,
@@ -5426,7 +5467,7 @@ const Parser = struct {
 
             const rhs = try self.parseExpr(prec + 1);
             m.operand();
-            if (!m.wrap()) return self.tooDeeplyNested(op_token);
+            if (!m.wrap()) return self.tooDeeplyNestedOver(op_token, self.builder.exprStart(lhs));
 
             const start = self.builder.exprStart(lhs);
             lhs = try self.builder.addBinary(
@@ -5516,8 +5557,17 @@ const Parser = struct {
     /// applies: the expression is present, and skipping again would undo the
     /// balanced step that leaves the caller's delimiter in place.
     fn tooDeeplyNested(self: *Parser, at: TokenId) std.mem.Allocator.Error!ExprId {
+        return self.tooDeeplyNestedOver(at, at);
+    }
+
+    /// The expression that stands where a chain's next level was refused:
+    /// `at` is the operator or suffix that would have built the level, and
+    /// `from` the start of the chain the error replaces. The error covers
+    /// the whole chain, so what the chain already named is still written
+    /// inside it for the resolver to find.
+    fn tooDeeplyNestedOver(self: *Parser, at: TokenId, from: TokenId) std.mem.Allocator.Error!ExprId {
         try self.refuseToDescend(at, "this expression nests too deeply");
-        return self.builder.addLiteral(.err, at, self.rangeFrom(at));
+        return self.builder.addLiteral(.err, at, self.rangeFrom(from));
     }
 
     /// Refuses to read further, and steps over what would have been read.
@@ -5527,17 +5577,32 @@ const Parser = struct {
     /// thousand frames each reporting the bracket it could not find, which
     /// describes one mistake a thousand times.
     fn refuseToDescend(self: *Parser, at: TokenId, what: []const u8) std.mem.Allocator.Error!void {
-        if (!self.reported_nesting) {
-            self.reported_nesting = true;
-            try self.reportAt(
-                .s_nesting,
-                at,
-                what,
-                "the limit is 1000 levels",
-            );
-        }
+        try self.reportNesting(at, what);
+        self.skipToEnclosingCloser();
+    }
+
+    /// [S-Nesting], reported once for the whole file: the levels past the
+    /// limit are one mistake.
+    fn reportNesting(self: *Parser, at: TokenId, what: []const u8) std.mem.Allocator.Error!void {
+        if (self.reported_nesting) return;
+        self.reported_nesting = true;
+        try self.reportAt(
+            .s_nesting,
+            at,
+            what,
+            "the limit is 1000 levels",
+        );
+    }
+
+    /// Steps to the closer that ends what encloses the cursor, over every
+    /// balanced group on the way. In a control header it stops at the brace
+    /// that opens the construct's body, which is not part of the header: a
+    /// header reads no struct literal, so a brace outside every group there
+    /// is always the body's.
+    fn skipToEnclosingCloser(self: *Parser) void {
         var depth: u32 = 0;
         while (!self.cursor.atEnd()) {
+            if (depth == 0 and self.control_header and self.cursor.at(.l_brace)) break;
             switch (self.cursor.peek().nesting()) {
                 1 => depth += 1,
                 -1 => {
@@ -5603,7 +5668,7 @@ const Parser = struct {
                 if (!named) {
                     try self.reportAt(.s_name, name, "expected a name after `.`", "a `.` selects a part");
                 }
-                if (!m.wrap()) return self.tooDeeplyNested(dot);
+                if (!m.wrap()) return self.tooDeeplyNestedOver(dot, start);
                 base = try self.builder.addUnary(.field, name, self.rangeFrom(start), base);
 
                 // A selection with no name is still a selection: the `.` was
@@ -5630,7 +5695,7 @@ const Parser = struct {
                 }
                 path = false;
                 m.operand();
-                if (!m.wrap()) return self.tooDeeplyNested(paren);
+                if (!m.wrap()) return self.tooDeeplyNestedOver(paren, start);
                 continue;
             }
             // A bracket after a value is an index. After a path, or directly
@@ -5650,7 +5715,7 @@ const Parser = struct {
                     .none => try self.parseIndex(),
                     .too_deep => try self.skipTooDeepBracket(open, close.?),
                 };
-                if (!m.wrap()) return self.tooDeeplyNested(open);
+                if (!m.wrap()) return self.tooDeeplyNestedOver(open, start);
                 base = try self.builder.addBinary(.index, open, self.rangeFrom(start), base, idx);
                 if (types == .types) try self.builder.addBracketTypes(base, types.types);
                 continue;
@@ -5683,10 +5748,10 @@ const Parser = struct {
                     path = false;
                     self.builder.markFallible(base);
                     m.operand();
-                    if (!m.wrap()) return self.tooDeeplyNested(paren);
+                    if (!m.wrap()) return self.tooDeeplyNestedOver(paren, start);
                     continue;
                 }
-                if (!m.wrap()) return self.tooDeeplyNested(mark);
+                if (!m.wrap()) return self.tooDeeplyNestedOver(mark, start);
                 base = try self.builder.addUnary(.try_, mark, self.rangeFrom(start), base);
                 path = false;
                 continue;

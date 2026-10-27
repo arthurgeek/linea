@@ -3,8 +3,3 @@ error[S-Nesting]: this pattern nests too deeply
      |
 2013 | ... Held(Held(Held(Held(Held(Held(Held(Held(Held(Held(Held(Held(Held(Held(inner))))))))))))))))))))))))))))))))))))))))))))) ...
      |                                                                 ^^^^ the limit is 1000 levels
-error[N-Undefined]: undefined name `inner`
-    --> tests/recovery/a_pattern_nests_too_deeply.lin:2013:6024
-     |
-2013 | ... )))))))))))))))))))))))))))))))))))))))))))))))))))))))) => inner,
-     |                                                                 ^^^^^ no binding with this name is in scope

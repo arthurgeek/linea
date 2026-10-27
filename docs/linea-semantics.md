@@ -829,6 +829,13 @@ counted from the type's source position: a type nested five levels inside
 another construct has five fewer levels available, and terms earlier in a
 chain add no depth above a type they do not enclose.
 
+The limit is reported once per file. What stands past it is stepped over, up to
+the end of the pattern, or of the expression's enclosing group or block, and
+nothing inside it is reported again: a binder written there is bound, with no
+known type, so a use of it is not [N-Undefined], and a name used there counts
+as used, so it is not [N-Unused]. A control header stops at the brace that
+opens its body, so the body is still read.
+
 **[S-Paren]** A parenthesised expression or type, and a tuple, is closed.
 
 **[S-Tuple]** A tuple has at least two components and at most eight, in a

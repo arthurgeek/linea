@@ -1,0 +1,5 @@
+error[S-Nesting]: this pattern nests too deeply
+  --> tests/recovery/a_closure_pattern_past_the_nesting_limit_is_its_only_report.lin:12:1016
+   |
+12 | ... (((((((((((((((((((((((((((((((((((((((((((((((apply(pair, |(left, right)| left + right))))))))))))))))))))))))))))))))) ...
+   |                                                                 ^ the limit is 1000 levels
