@@ -687,8 +687,14 @@ static pthread_cond_t worker_pool_not_empty = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t worker_pool_not_full = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t worker_pool_drained = PTHREAD_COND_INITIALIZER;
 
+/* A worker never ends, so its signal stack is mapped for the life of the
+ * process. It is not thread-local: glibc carves a thread's static
+ * thread-local storage out of the stack the thread is given, and a 64 KiB
+ * array there would leave no room on a task's smallest stack. */
 static void init_worker_thread(void) {
-    static __thread char worker_signal_stack[65536];
+    void *const worker_signal_stack =
+        mmap(0, signal_stack_bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (worker_signal_stack == MAP_FAILED) fail("linea: a worker thread cannot map its signal stack\n");
     unsigned long low = 0;
 #if defined(__APPLE__)
     pthread_t self = pthread_self();
@@ -707,7 +713,7 @@ static void init_worker_thread(void) {
     const unsigned long pool_guard_bytes = 1UL << 20;
     const unsigned long guard = low > pool_guard_bytes ? low - pool_guard_bytes : 0;
     const unsigned long limit = low > pool_guard_bytes ? low + above : 0;
-    if (linea_thread_begin((unsigned long)worker_signal_stack, sizeof worker_signal_stack, guard, limit) != 0) {
+    if (linea_thread_begin((unsigned long)worker_signal_stack, signal_stack_bytes, guard, limit) != 0) {
         fail("linea: a worker thread cannot install its signal stack\n");
     }
 }
