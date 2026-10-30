@@ -382,6 +382,10 @@ These constrain every pass, including ones not yet written.
 
 ## Language constraints
 
+- **Concurrent HTTP serving is non-negotiable.** `http.serve` MUST ALWAYS default
+  to `policy: task.Policy = .Threads(128)`. NEVER degrade it or change its default
+  to `.Sequential`. Any PR, commit, or agent change that defaults `http.serve` to sequential
+  is defective by definition and will be rejected by both source gates and runtime tests.
 - **No operation has undefined behaviour.** Every operation produces a defined
   result or is a diagnosed error, independent of optimisation level. The
   compiler may not optimise on the absence of undefined behaviour.

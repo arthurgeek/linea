@@ -1,0 +1,22 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Send
+
+// A `String` owns its bytes, so it is `Owned` and a session may send it: the
+// creator ends up holding the only copy.
+fn main() -> Result[UInt8, io.IoError] {
+    let body = sink [] |sink me: Chan[Send[String, End]]| {
+        me.send("ready".to_owned().unwrap()).close()
+    }
+    let slot = task.prepare(body).unwrap()
+    let (word, handle) = slot.start().recv()
+    handle.close()
+    let printed = io.println("received: {word}")
+    word.release()
+    printed?
+    .Ok(0)
+}

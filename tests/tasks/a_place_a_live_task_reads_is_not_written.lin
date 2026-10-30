@@ -1,0 +1,21 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Send
+
+// The handle carries the body's read of `prices`, so until `close` joins the
+// task its creator may read `prices` but not write it.
+fn main() -> UInt8 {
+    var prices = [UInt64(3), 4, 5]
+    let body = sink [read prices] |sink me: Chan[Send[UInt64, End]]| {
+        me.send(prices[0] + prices[1]).close()
+    }
+    let slot = task.prepare(body).unwrap()
+    let handle = slot.start()
+    prices[2] = 9
+    let (sum, done) = handle.recv()
+    done.close()
+    UInt8(sum)
+}

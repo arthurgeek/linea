@@ -1,0 +1,11 @@
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+  --> tests/tasks/a_place_a_live_task_holds_lent_is_not_read.lin:17:16
+   |
+11 |     let body = sink [inout count] |sink me: Chan[End]| {
+   |                            ----- lent `inout` here
+17 |     let seen = count
+   |                ^^^^^ this uses the place while it is lent
+18 |     handle.close()
+   |     ------ a value holding the lend is still used here
+   |
+   = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure

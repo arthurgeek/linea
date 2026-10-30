@@ -1,0 +1,34 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+struct Tally {
+    wins: UInt64,
+    losses: UInt64,
+}
+
+// Each body holds one field of `tally` lent `inout`. The fields do not
+// overlap, so the two tasks never reach the same place, and both lends end
+// when their handles are closed.
+fn main() -> Result[UInt8, io.IoError] {
+    var tally = Tally { wins = 0, losses = 0 }
+    let winning = sink [inout wins = tally.wins] |sink me: Chan[End]| {
+        wins += 2
+        me.close()
+    }
+    let losing = sink [inout losses = tally.losses] |sink me: Chan[End]| {
+        losses += 1
+        me.close()
+    }
+    let first = task.prepare(winning).unwrap()
+    let second = task.prepare(losing).unwrap()
+    let wins_handle = first.start()
+    let losses_handle = second.start()
+    wins_handle.close()
+    losses_handle.close()
+    io.println("wins: {tally.wins}, losses: {tally.losses}")?
+    .Ok(0)
+}

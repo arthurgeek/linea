@@ -82,10 +82,10 @@ fn attachField(comptime field: std.builtin.Type.StructField, gpa: Allocator, sav
     } else if (comptime in(name, &.{ "call_index", "impl_index", "supply_index", "defaults" })) {
         // Rebuilt below from relocated semantic records.
     } else if (comptime in(name, &.{
-        "capabilities",   "dependency_containment", "writer_containment",    "constant_texts",        "constant_pool",    "constant_materializations", "variants",     "fields",
-        "interpolations", "interpolation_pieces",   "interpolation_formats", "interpolation_borrows", "interpolation_of", "callable_params",           "closure_args", "template_of",
-        "module_paths",   "instance_args",          "instance_of",           "owned_names",           "owned_contracts",  "owned_callable_bounds",     "from_end",     "binding_types",
-        "generation",     "standin_args",           "standin_of",            "broken_types",          "alike_sources",    "templates_complete",
+        "capabilities",   "dependency_containment", "writer_containment",    "unshareable_containment", "constant_texts",        "constant_pool",   "constant_materializations", "variants",    "fields",
+        "interpolations", "interpolation_pieces",   "interpolation_formats", "interpolation_borrows",   "interpolation_of",      "callable_params", "closure_args",              "template_of", "module_paths",
+        "instance_args",  "instance_of",            "owned_names",           "owned_contracts",         "owned_callable_bounds", "from_end",        "binding_types",             "generation",  "standin_args",
+        "standin_of",     "broken_types",           "alike_sources",         "templates_complete",
     })) {
         // Type, binding, closure, string and compact semantic-run IDs stay fixed.
     } else @compileError("classify retained Typing field: " ++ name);

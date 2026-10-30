@@ -1,0 +1,69 @@
+import std.task
+
+struct Inner[T: Discardable] {
+    held: T,
+}
+
+struct Outer[T: Discardable] {
+    inner: Inner[T],
+}
+
+fn nest[T: Discardable](sink value: T) -> Outer[T] where carries(value) {
+    Outer[T] { inner = Inner[T] { held = value } }
+}
+
+// `dispatch_worker` returns no handle to join the worker, so its body cannot
+// borrow a local place (`read`), take a view of local storage (`Str`), or
+// capture a place `inout` -- directly or through nested wrappers.
+fn main() -> UInt8 {
+    var count = UInt64(0)
+    task.dispatch_worker(
+        sink [inout count] || {
+            count += 1
+        },
+        1,
+    )
+
+    let limit = UInt64(10)
+    task.dispatch_worker(
+        sink [read limit] || {
+            let _seen = limit
+        },
+        1,
+    )
+
+    defer let greeting = "hi".to_owned().unwrap()
+    let slice = greeting.view()
+    task.dispatch_worker(
+        sink [sink slice] || {
+            let _len = slice.length()
+        },
+        1,
+    )
+
+    let nested_slice = nest(greeting.view())
+    task.dispatch_worker(
+        sink [sink nested_slice] || {
+            let _len = nested_slice.inner.held.length()
+        },
+        1,
+    )
+
+    var tallied = UInt64(0)
+    let nested_writer = nest(
+        inout [inout tallied] || {
+            tallied += 1
+        },
+    )
+    task.dispatch_worker(
+        sink [sink nested_writer] || {
+            let Outer { inner: Inner { held: writer } } = nested_writer
+            var call = writer
+            &call()
+        },
+        1,
+    )
+
+    task.drain_workers()
+    0
+}

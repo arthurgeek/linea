@@ -18,7 +18,7 @@ A test is not emitted.
     func.func private @linea_set_args(i32, !llvm.ptr)
     func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
     func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-    func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+    func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
       cf.br ^b0
     ^b0:
       %v0 = arith.constant 0 : i64 loc("tests/decl/a_helper_only_a_test_calls_is_used.lin":19:5)

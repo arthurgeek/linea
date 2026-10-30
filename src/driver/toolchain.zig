@@ -499,11 +499,11 @@ test "a sanitized runtime is linked with its sanitizer and the undefined-behavio
     try testing.expectEqualStrings("-fsanitize=undefined", argv.items[1]);
 }
 
-/// The system libraries the runtime archive references, which follow it.
-/// macOS math symbols are supplied by libSystem, which the host C compiler
-/// already links.
+/// The system libraries the runtime archive references, which follow it:
+/// the math library and the threads a task runs on. macOS supplies both in
+/// libSystem, which the host C compiler already links.
 fn appendSystemLink(gpa: std.mem.Allocator, argv: *std.ArrayList([]const u8)) !void {
-    if (builtin.os.tag == .linux) try argv.append(gpa, "-lm");
+    if (builtin.os.tag == .linux) try argv.appendSlice(gpa, &.{ "-lm", "-lpthread" });
 }
 
 /// Holds an emitted module to MLIR's own verifier, without lowering it.

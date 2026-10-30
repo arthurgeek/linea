@@ -43,6 +43,9 @@ int linea_test_socket(int domain, int type, int protocol) {
 
 int linea_test_setsockopt(int fd, int level, int name, const void *value, socklen_t len) {
     last_socket_fd = fd;
+#if defined(SO_NOSIGPIPE)
+    if (name == SO_NOSIGPIPE) return setsockopt(fd, level, name, value, len);
+#endif
     if (fail_setsockopt_with_enoprotoopt) {
         fail_setsockopt_with_enoprotoopt = 0;
         errno = ENOPROTOOPT;

@@ -1,0 +1,26 @@
+import std.mem
+import std.session
+import std.task
+
+use mem.Lender
+use session.Chan
+use session.End
+
+// A report holds an arena handle, so reading the report could acquire from the
+// arena: the report is not `Shareable`.
+struct Report {
+    pages: UInt64,
+    scratch: mem.Handle,
+}
+
+fn main() -> UInt8 {
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    let report = Report { pages = 3, scratch = arena.handle() }
+    let body = sink [read report] |sink me: Chan[End]| {
+        let _pages = report.pages
+        me.close()
+    }
+    let slot = task.prepare(body).unwrap()
+    slot.start().close()
+    0
+}

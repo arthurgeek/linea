@@ -1,0 +1,10 @@
+error[T-Bound]: `T` requires `Shareable`, and `Wrapper[<closure>]` is not `Shareable`: `held` is a `<closure>`, which is unshareable
+  --> tests/tasks/an_inout_closure_is_not_shareable.lin:22:13
+   |
+22 |     let a = require_shareable(wrapped)
+   |             ^^^^^^^^^^^^^^^^^ `Wrapper[<closure>]` is not `Shareable`; pass a value that reading never changes, or drop the bound
+error[T-Bound]: `T` requires `Shareable`, and `<closure>` is unshareable
+  --> tests/tasks/an_inout_closure_is_not_shareable.lin:29:13
+   |
+29 |     let b = require_shareable(mutating)
+   |             ^^^^^^^^^^^^^^^^^ `<closure>` is not `Shareable`; pass a value that reading never changes, or drop the bound

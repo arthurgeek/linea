@@ -1,0 +1,7 @@
+error[O-Cross]: a task cannot read `handle` while its creator may read it too: a `mem.Handle[mem.SystemAllocator]` is not `Shareable`
+  --> tests/tasks/a_read_capture_of_an_arena_handle_does_not_cross.lin:14:27
+   |
+14 |     let body = sink [read handle] |sink me: Chan[End]| {
+   |                           ^^^^^^ this capture is read by the task
+   |
+   = help: reading this value may change it; move it into one task, or give the task a value that reading never changes

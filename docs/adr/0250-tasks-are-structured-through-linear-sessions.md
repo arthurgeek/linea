@@ -1,6 +1,8 @@
 # 250. Tasks are structured through linear sessions
 
-Status: Proposed — 2026-10-26. Once built, it would extend
+Status: Proposed — 2026-10-26; complemented by
+[0253](0253-independent-work-runs-through-an-explicit-executor-policy.md)
+(independent work and execution policy). Once built, it would extend
 [0099](0099-a-phantom-parameter-carries-its-bound.md) (a type's dependencies
 come from its fields, and a `mem.Carried` field carries its argument's),
 [0193](0193-a-closure-may-hold-a-place-lent-inout.md) (a lend reaches a value
@@ -8,20 +10,25 @@ whose type can hold the writer, a `Carried` field for a closure type included)
 and [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) (`Carried[H]` is
 `Owned` exactly when `H` is).
 
-**What is built.** Of this record, stages 0 to 3 of §16 exist:
-`mem.Carried[H]` (§12), which every other clause rests on; the `Protocol`
-trait with its combinators in `std.session` (§4); the `Shareable` bound with
-the `@unshareable` leaf policy on `mem.Arena`, `mem.Handle` and
-`mem.AllocationLog` (§5); [T-Dual] (§4); and the implementation heads postfix
-session operations need (§15), recorded in
-[0252](0252-a-types-own-implementation-may-write-a-parameter-inside-an-argument.md).
-Nothing else described here is available: there is no `std.task`, no session
-endpoint in `std`, no [O-Cross], no `Owned` payload bound, no mailbox and no
-runtime thread. [O-Cross] is decided here and is
-checked from stage 4, where it is tested against the real `start`. Each
-remaining clause is delivered by a stage of §16, and a stage's change states
-the clauses it builds.
-The guide and `std/README.md` describe only what is built.
+**What is built.** Stages 0 to 4 of §16 exist: `mem.Carried[H]` (§12), which
+every other clause rests on; the `Protocol` trait with its combinators in
+`std.session` (§4); the `Shareable` bound with the `@unshareable` leaf policy
+on `mem.Arena`, `mem.Handle` and `mem.AllocationLog` (§5); [T-Dual] (§4); the
+implementation heads postfix session operations need (§15), recorded in
+[0252](0252-a-types-own-implementation-may-write-a-parameter-inside-an-argument.md);
+and the smallest runtime. Stage 4 builds `std.task` (`prepare`,
+`prepare_in`, `start`, `cancel`, `default_stack_bytes`), the endpoint
+`session.Chan` with its postfix operations (§1 to §3), the `Owned` payload
+bound, [O-Cross] (§5), the answer to the `mem.ReleaseTag` question (§5), one
+thread per task with a rendezvous session and the join of §2 in
+`runtime/task.c`, thread-safe runtime archives with the checking allocator
+under one lock (§10), stack probes and an alternate signal stack on every
+thread (§11), the runtime's C tests, a thread sanitizer lane, soundness
+matrix cells for an observation a live task holds, corpus cases that run,
+and the guide's concurrency chapter. There is no mailbox. Each remaining
+clause is delivered by a stage of §16, and a stage's change states the
+clauses it builds. The guide and `std/README.md` describe only what is
+built.
 
 ## Context
 
@@ -97,43 +104,70 @@ The signatures below fix the shape each stage builds. Names and conventions
 are decided; the stage that builds an operation may refine a parameter label,
 and says so in its own change.
 
-### 1. A task is prepared, then started
+### 1. A task is started in one call, or prepared and then started
 
-Creating a task has two phases, so that a failure destroys nothing.
+Creating a task can fail, since the system may refuse a thread or a stack, and
+a failure must destroy nothing a program cannot drop.
 
 ```linea
-pub fn prepare[P: Protocol, F: sink fn(sink me: Chan[P])](read body: F) -> Result[Slot[P, F, mem.SystemAllocator], PrepareError]
-pub fn prepare_in[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator](allocator: A, stack: UInt64, read body: F) -> Result[Slot[P, F, A], PrepareError] where carries(.Ok: allocator)
+pub fn start[P: Protocol, F: Discardable + sink fn(sink me: Chan[P])](sink body: F) -> Result[Chan[P.Dual, (F, mem.SystemAllocator)], PrepareError] where carries(.Ok: body)
+pub fn start_in[P: Protocol, F: Discardable + sink fn(sink me: Chan[P]), A: Allocator](allocator: A, sink body: F, stack: UInt64) -> Result[Chan[P.Dual, (F, A)], PrepareError] where carries(.Ok: body, allocator)
+
+pub fn prepare[P: Protocol, F: sink fn(sink me: Chan[P])](sink body: F) -> Result[Slot[P, F, mem.SystemAllocator], Unstarted[F]] where carries(.Ok: body), carries(.Err: body)
+pub fn prepare_in[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator](allocator: A, sink body: F, stack: UInt64) -> Result[Slot[P, F, A], Unstarted[F]] where carries(.Ok: body, allocator), carries(.Err: body)
 
 impl[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator] Slot[P, F, A] {
-    pub fn start(sink self: Self, sink body: F) -> Chan[P.Dual, F] where carries(body)
-    pub fn cancel(sink self: Self)
+    pub fn start(sink self: Self) -> Chan[P.Dual, (F, A)] where carries(self)
+    pub fn cancel(sink self: Self) -> F where carries(self.body)
 }
 ```
 
-- `task.prepare` performs every fallible step. It reads `body` only to fix `F`
-  and its layout, allocates the task's record and the body's storage, and
-  creates the thread parked on a start latch. It answers a linear `Slot` that
-  holds no dependency of the body. A failure answers `PrepareError`, naming
-  allocation or thread creation, and the body is untouched.
-- `slot.start(body)` is the **commit point**. It moves the body into the
-  task's storage, releases the latch and answers the handle. It cannot fail.
-  Before it the caller owns everything, and no child code runs. After it the
-  task owns the body.
+- `task.start(body)` is the everyday form. It prepares and starts in one call,
+  and a failure drops the body and answers the reason. That is safe exactly
+  when dropping the body is safe, so the body is bounded `Discardable`: it
+  owns nothing linear. A body that does own something linear is refused by
+  [T-Bound], whose help names the two-step form.
+- `task.prepare(body)` takes the body and performs every fallible step: it
+  allocates the body's storage and creates the thread parked on a start
+  latch. It answers a linear `Slot` that holds the body, so the slot carries
+  every dependency the body captured, and a place the body holds lent
+  `inout` is as reserved while the slot lives as while the task runs. A
+  failure answers `Unstarted[F]`, which holds the body and the
+  `PrepareError`, naming allocation or thread creation, so a body owning a
+  linear value is handed back to its owner. `Unstarted` implements `Release`
+  and `Settle` ([0184](0184-a-failure-holding-an-owned-value-settles-to-its-reason.md))
+  when `F` is Discardable, so `task.prepare(body).settled()?` hands the reason
+  on; a body owning something linear is taken back from the failure.
+- `slot.start()` is the **commit point**. It moves the body into the task's
+  storage, releases the latch and answers the handle. It cannot fail. It is
+  written in the library over the runtime's `linea_task_start`: it moves the
+  body, and after it the `mem.Buffer[A]` that owns the bytes, into those
+  bytes, and hands the runtime two fixed library functions as callbacks
+  ([T-ExternCallback]), `run_body[P, F]`, which the task's thread calls with
+  its endpoint and the bytes' address, and `mem.release_kept_bytes[F, A]`,
+  which `close` calls on the joining thread after the join. Both are generic
+  functions the compiler instantiates for the start's `F` and `A`, so no
+  primitive the compiler replaces is needed. Before it no child code runs,
+  and every way out, a failed `prepare` or a `cancel`, hands the body back.
+  After it the task owns the body.
 - `slot.cancel()` settles an unused slot: it releases the latch with nothing to
-  run and joins the parked thread.
+  run, joins the parked thread and answers the body.
 - A `Slot` is linear and has one owner, so `start` and `cancel` cannot race,
   and [O-Leak] refuses a slot a path abandons.
 
-A body capturing a linear value therefore survives a failed `prepare` and is
-settled by its owner afterwards. The `_in` form takes the allocator first and
-the stack size by name, as every allocating API does
+The handle is `Chan[P.Dual, (F, A)]`: the task keeps the bytes `prepare_in`
+acquired from `allocator` until the join, so the handle keeps whatever the
+slot carried from the allocator, such as an observation of an arena, and the
+arena cannot be released while the task runs. `body` comes before `stack:`,
+since a positional argument cannot follow a named one ([S-Args]). The `_in`
+forms take the allocator first and the stack size by name, as every
+allocating API does
 ([0220](0220-a-constructor-or-function-that-allocates-pairs-a-system-form-with-an-in-form.md),
 [0191](0191-the-caller-chooses-every-allocator.md)).
 
 ### 2. The handle is the creator's endpoint, and `close` is the join
 
-`start` answers `Chan[P.Dual, F]`, the creator's end of the session whose other
+`start` answers `Chan[P.Dual, (F, A)]`, the creator's end of the session whose other
 end the body receives as `me`. Its contract `carries(body)` gives the handle
 every dependency the body captured: each `read` capture is an observation, each
 `inout` capture an exclusive lend. [O-Borrow], [O-Escapes] and [O-Leak] then
@@ -173,7 +207,7 @@ struct Chan[phantom P: Protocol, H = ()] {
 }
 ```
 
-`H` is the body's type for a task's handle and `()` for a delegated endpoint.
+`H` is `(F, A)`, the body's type and its allocator's, for a task's handle and `()` for a delegated endpoint.
 The `mem.Carried[H]` field is what makes the handle carry the body's
 dependencies (§12).
 
@@ -295,9 +329,35 @@ capture is held to the same rule, observation by observation. A value carrying
 an exclusive lend crosses only as the capture of the body that holds the lend.
 The report is at the capture and names the part that prevents it, as
 [O-Universe] names the part that prevents a copy. A payload crosses under its
-`Owned` bound. Whether that bound is the whole of the payload rule is open
-until stage 4 (§16): an `Owned` value may still reach shared storage through
-raw addresses, which [O-Cross] does not see.
+`Owned` bound. That bound is the whole of the payload rule, by the
+decision below.
+
+**A value that writes storage another value owns observes it.** The library's
+internal `mem.ReleaseTag` used to hold its `ReleaseLog`'s address as integers
+and write the log's words through it when released. It carried no dependency,
+so it was `Owned`, and two tags moved into two tasks would both write the log's
+count, a race neither `Shareable` nor `Owned` saw. Stage 4 decides it by the
+rule that already makes `mem.Handle` observe its arena and
+`mem.RefusingAllocator` observe its `AllocationLog`: a trusted module that
+writes, through a raw address, storage another value owns states it with an
+observation of that value, and a value whose read writes is `@unshareable`. So
+a tag observes its log (`log: borrow ReleaseLog`), and `ReleaseLog` is
+`@unshareable`. A tag is then not `Owned`, so it is no payload, and a tag moved
+into a task by `sink` carries an observation of an unshareable log, which
+[O-Cross] refuses. That refusal is not conservative: even one tag moved into
+one task would race with its creator reading the log. The library's HTTP
+extractor tests are the one place a log is still written through an address
+nothing observes: an extractor sees only its request, so the log's address
+reaches it in a header, and a private probe in `std.http` records through
+`mem.record_release`. Those tests start no task.
+
+Two other answers lost. Refusing to move an unshareable value across a task
+boundary would contradict the rule above that such a value crosses whole, and
+would forbid moving an arena into the task that uses it, which is race-free. A
+log per task would remove the race between two tags, and leave the race
+between a task writing the log and its creator reading it. A new policy for a
+value whose release writes shared state would be a second mechanism for what an
+observation already says, and would need its own soundness argument.
 
 Two `inout` captures of disjoint record fields, in two bodies, are two exclusive
 lends of disjoint places, which the overlap relation of [N-Aliased] and
@@ -485,17 +545,49 @@ both ends have settled. Both runtime archives are thread-safe. In the checked
 archive every piece of global checking state, its regions and spill table
 included, is under its lock. Concurrent stress tests cover allocation and free.
 
+*Built.* `runtime/task.h` states the edges and `runtime/task.c` keeps them:
+start is a release of the latch under the session's mutex, which the thread
+acquires before it reads the body; a send fills the slot under the mutex and
+waits until the receiver's copy has emptied it, counting values so a sender
+waits for its own and not merely for an empty slot; the join is
+`pthread_join`. The handle's endpoint and the task's differ in their lowest
+bit, so one record serves both, and it is freed by the handle's `close`
+after the join, the only end that waits.
+
+**A payload moves through bytes.** `send` moves the value into bytes from the
+system allocator, the runtime copies them straight into the receiver's
+bytes once both ends have met, and the receiver moves the value out, so one
+copy crosses between the two tasks and the runtime allocates nothing.
+Running out of memory for those bytes is a trap, since neither operation can
+fail. Moving the value with no bytes of its own, from the sender's frame into
+the receiver's, would need the address of a value in a frame, which the
+language deliberately never gives, and a lowering of `send` and `recv` the
+compiler would own; the copy through bytes the library already writes costs
+an allocation per message and nothing else. This stays the payload path until
+a measurement shows the allocation matters.
+
 ### 11. Stacks
 
 - **Size.** `task.default_stack_bytes` names the stack size `prepare` uses, and
   `prepare_in(allocator, stack:, body)` takes one explicitly. The stack size is
-  an allocation size and is never hidden.
+  an allocation size and is never hidden. It is two mebibytes, by
+  measurement: the deepest path through the library, parsing and rendering a
+  JSON document nested as deeply as the parser accepts while sorting twenty
+  thousand numbers and formatting a float, overflows 64 KiB and fits 96 KiB
+  optimised, and overflows 512 KiB and fits 768 KiB at `-O 0`. Two mebibytes
+  is more than twice the unoptimised need, and costs address space, not
+  memory, until it is touched. Below every task's stack lie 64 KiB of guard
+  pages.
 - **Overflow.** The compiler emits stack probes for every frame larger than the
   guard page, so no frame jumps the guard. Every thread, `main` included, has
   an alternate signal stack allocated at thread start and freed at join, so a
   guard-page fault on any thread runs the fault handler, which reports the
   overflow and aborts the process, on the path `main`'s overflow takes too
   ([0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md)).
+  *Built:* every generated body carries `"probe-stack"="inline-asm"`, and
+  the report is `linea: a stack overflowed`. A thread installs its signal
+  stack before it parks, so a failure there is `prepare`'s to report. A
+  sanitized runtime leaves faults to the sanitizer's own handler.
 
 ### 12. `mem.Carried[H]`: a field that carries without owning
 
@@ -651,46 +743,81 @@ run; stages 5 to 7 extend it.
    whose head refuses it is [T-UnknownOperation] naming the head. There is no
    `Chan` in `std` until stage 4, so the corpus and the guide write their
    own endpoint type over `std.session`.
-4. **The smallest runtime** (§1–§3, §8, §10, §11): one child, `prepare`,
-   `start`, `cancel`, a rendezvous channel, join on `close` with its four steps,
-   thread-safe archives, the checked archive's lock, stack probes and an
-   alternate signal stack per thread. *Exit:* runtime tests for forced
-   allocation failure, forced thread failure, the body still usable after
-   either, `cancel` settling the parked thread, a body that never runs before
-   `start`, and an overflow on a worker reported rather than killed; the
-   soundness matrix meets an observation held by a live task handle with every
-   owner operation (refused before `close`, run clean after it); corpus cases
-   print only after the join, so their output does not depend on scheduling;
-   [O-Cross] defined in the semantics and checked, with corpus cases for each
-   refusal (a `read` capture of an unshareable place, a `sink` capture whose
-   observation reaches one, an exclusive lend crossing outside the body that
-   holds it) and each acceptance, the share-nothing cases (a parent reading
-   what a live task reads, disjoint-field lends) included; the `Owned` bound on
-   the payloads of `send` and `recv`, refusing `Str`; the program generator's
+4. **The smallest runtime** (§1–§3, §8, §10, §11), built in two changes that
+   land together. One child, `prepare`, `start`, `cancel`, a rendezvous
+   channel, join on `close` with its four steps, thread-safe archives, the
+   checked archive's lock, stack probes and an alternate signal stack per
+   thread. *Exit:* runtime tests for forced allocation failure, forced thread
+   failure, the body still usable after either, `cancel` settling the parked
+   thread, a body that never runs before `start`, and an overflow on a worker
+   reported rather than killed; the soundness matrix meets an observation
+   held by a live task handle with every owner operation (refused before
+   `close`, run clean after it); corpus cases print only after the join, so
+   their output does not depend on scheduling; [O-Cross] defined in the
+   semantics and checked, with corpus cases for each refusal (a `read`
+   capture of an unshareable place, a `sink` capture whose observation
+   reaches one, an exclusive lend crossing outside the body that holds it)
+   and each acceptance, the share-nothing cases (a parent reading what a live
+   task reads, disjoint-field lends) included; the `Owned` bound on the
+   payloads of `send` and `recv`, refusing `Str`; the program generator's
    coverage table listing `start`, `send` and `recv` as unreached; soundness
-   matrix cells for capture crossings; and an answer to the question below; a
-   new guide chapter on concurrency covers `prepare` and `start`, sessions,
-   `close` as the join, and what crosses a task boundary, with programs that
-   run.
+   matrix cells for capture crossings; and an answer to the question below;
+   a new guide chapter on concurrency covers `prepare` and `start`,
+   sessions, `close` as the join, and what crosses a task boundary, with
+   programs that run. The runtime's C tests (`runtime/task_test.c` and
+   `runtime/task_fault_test.c`, under `zig build test-native-task`) and a
+   thread sanitizer lane, which runs the corpus and every native runtime
+   test, move here from stage 5, since the runtime they watch arrives here.
+   **Built.** The C tests cover prepare, start and cancel, the rendezvous,
+   choose and offer, close joining only after the body returns, many tasks
+   at once, concurrent allocation under the checked archive's lock and an
+   overflow on a worker and on `main`, and inject failures into the record's
+   allocation, each mapping, `pthread_create` and `sigaltstack`. The guide's
+   chapter is framed against JavaScript's `async`/`await` and Rust's threads
+   and futures, and teaches gathering results (`Promise.all`) and a producer
+   and consumer.
 
    *Question for this stage.* The library's internal `mem.ReleaseTag` values
    write one shared release log through raw addresses when they are released. Tags moved into two tasks
    would both write that log on release, a race neither `Shareable` (which
    governs reads) nor an `Owned` payload bound (a tag carries no dependency)
-   refuses. [O-Cross] or the payload rule must answer it, for example by a
-   bound that a moved value reaches no storage another value can reach.
+   refuses. **Answered** in §5: a tag observes its log, and the log is
+   `@unshareable`.
 5. **Runtime stress.** *Exit:* concurrent allocation and free under the
    checked allocator, channel stress, and `prepare` failure under load all pass
    on Linux, and the concurrency chapter says what the runtime guarantees under
-   load.
+   load. The thread sanitizer and the runtime's C tests are stage 4's.
 6. **The standard library** (§6, §7, §13): `split_inout` over `mem.View`, the
    mailbox with `send_after` and its timers, `recv_until`, and `http.serve`
    over a mailbox with `max:`. *Exit:* every `pub fn` tested beside its
    definition, the concurrency chapter extended to the mailbox, timers,
    `split_inout` and `http.serve` with programs that run, and an example that
-   serves connections concurrently.
+   serves connections concurrently. The chapter gains, each with an example:
+   a race against a timeout (`Promise.race`) through `recv_until` or a
+   mailbox and `send_after`; a bounded worker pool, a mailbox with `max:`;
+   a chat server in the spirit of Tokio's, with `http.serve` or a mailbox
+   owning the room; and a mailbox rewrite of `examples/party_guest_list.lin`
+   where each friend starts into the party's mailbox, the party matches messages
+   until the mailbox reports `Closed`, and guests print in arrival order, with
+   only its `.cmd` test sorting the output to keep the check deterministic.
+
+   *Decided:* `http.serve` becomes concurrent by default.
+   `http.serve(max: n, handler)` runs each handler on a task started into a
+   mailbox, with at most `n` live. Handler bodies are unchanged: there is no
+   `async`, no `await` and no colouring, since tasks are threads and I/O stays
+   blocking. A handler that captures nothing, or reads only `Shareable` state,
+   compiles unchanged. A handler with a mutable capture, such as
+   `inout visitors`, is refused by [O-Cross] at the capture, and the report's
+   help points at the owning-task pattern: the state lives in one task, and
+   handlers send it messages through a mailbox. The stage's exit gains the
+   migration of every handler in the library and the examples in the same
+   change (`std/net/serve.lin`, the HTTP examples, the guide) and that
+   [O-Cross] help for a mutable capture. A sequential `serve` kept beside a
+   separate concurrent entry point lost: the safe concurrent form would then
+   be the one a reader has to find.
 7. **`async_map`** (§14). *Exit:* its own record accepted and built, and the
-   concurrency chapter extended to it.
+   concurrency chapter extended to it with an example of a
+   concurrency-limited map, the shape JavaScript writes with `for await`.
 
 ## Consequences
 
@@ -828,15 +955,29 @@ external obligation and holds no lend of a survivor's owner. It is deferred; a
 record that takes it delivers the failure as a protocol branch at `close`, never
 as an exception.
 
+**A slot that holds no body: `prepare(body)` reading it, then
+`slot.start(body)` taking it.** A failure then left the body with its owner
+without a type to hand it back in, but every program wrote the body twice,
+once to fix its type and once to move it, and the slot carried none of the
+body's dependencies until the start. Moving the body at `prepare` writes it
+once, makes the slot carry its captures, and hands it back in `Unstarted` or
+from `cancel`; the one-call `start` covers the bodies that own nothing
+linear, so the two-step form serves the bodies whose failure the program
+must handle.
+
+**A compiler-owned `task_start`**, replaced in lowering as
+`mem.closure_entry` is, with a generated thread entry and a generated
+release of the body's bytes. Both are ordinary generic functions the library
+can write over the typed storage primitives, and [T-ExternCallback] already
+hands C a fixed function's address, so the compiler would have owned two
+bodies and a signature check for nothing the library could not say.
+
 **Detached tasks.** Nothing in the library or the examples needs one, and the
 bound "the body depends on nothing" is a new kind of bound the contract language
 does not have.
 
 ## Open questions
 
-- **The value of `task.default_stack_bytes`.** Open until the runtime stage,
-  which measures the library's deepest frames and states the value with its
-  reason.
 - **Two exclusive lends returned from one call** (`split_inout` answering both
   halves). Open; it needs an exclusive-lend-creating contract and disjoint
   synthetic sub-places.

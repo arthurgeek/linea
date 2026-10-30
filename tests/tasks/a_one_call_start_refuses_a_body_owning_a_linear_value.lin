@@ -1,0 +1,20 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+@linear
+struct Token {
+    number: UInt64,
+}
+
+fn main() -> UInt8 {
+    let token = Token { number = 3 }
+    let body = sink [sink token] |sink me: Chan[End]| {
+        let Token { number: _ } = token
+        me.close()
+    }
+    task.start(body).unwrap().close()
+    0
+}

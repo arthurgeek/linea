@@ -282,6 +282,70 @@ impl File {
         .Ok(())
     }
 
+    // Read up to `count` bytes into `buffer` at `buffer_offset` starting at
+    // `file_offset` in the file, without moving any file offset.
+    pub fn read_at[A: Allocator](self: Self, inout buffer: mem.Buffer[A], buffer_offset: UInt64, count: UInt64, file_offset: UInt64) -> Result[UInt64, io.IoError] {
+        let answer = mem.read_fd_at(&buffer, self.fd, buffer_offset, count, file_offset)
+        if answer < 0 {
+            .Err(io.IoError.from_os(.Read, Int32(0 - answer)))
+        } else {
+            .Ok(UInt64(answer))
+        }
+    }
+
+    // Write `bytes` starting at `file_offset` in the file, without moving any
+    // file offset.
+    pub fn write_at(self: Self, bytes: mem.Slice[UInt8], file_offset: UInt64) -> Result[UInt64, io.IoError] {
+        let answer = mem.write_slice_fd_at(bytes, self.fd, file_offset)
+        if answer < 0 {
+            .Err(io.IoError.from_os(.Write, Int32(0 - answer)))
+        } else {
+            .Ok(UInt64(answer))
+        }
+    }
+
+    test fn positional_file_reads_and_writes_at_offsets() {
+        defer let owned = scratch_path()
+        let path = Path.from_str(owned.view()).unwrap()
+        defer remove_scratch(path)
+        let file = File.create(path, policy: .Replace).unwrap()
+        let w1 = file.write_at("hello world".as_bytes(), 0).unwrap()
+        let w2 = file.write_at("linea".as_bytes(), 6).unwrap()
+        file.close().unwrap()
+
+        let reader = File.open(path).unwrap()
+        var buf = mem.system().acquire(16).unwrap()
+        let r1 = reader.read_at(&buf, 0, 5, 0).unwrap()
+        let b0 = buf.load_byte(0)
+        let b1 = buf.load_byte(1)
+        let b2 = buf.load_byte(2)
+        let b3 = buf.load_byte(3)
+        let b4 = buf.load_byte(4)
+        let r2 = reader.read_at(&buf, 0, 5, 6).unwrap()
+        let c0 = buf.load_byte(0)
+        let c1 = buf.load_byte(1)
+        let c2 = buf.load_byte(2)
+        let c3 = buf.load_byte(3)
+        let c4 = buf.load_byte(4)
+        buf.release()
+        reader.close().unwrap()
+        testing.assert_eq(w1, 11, "first positional write length wrong")?
+        testing.assert_eq(w2, 5, "second positional write length wrong")?
+        testing.assert_eq(r1, 5, "first positional read length wrong")?
+        testing.assert_eq(b0, UInt8(104), "h wrong")?
+        testing.assert_eq(b1, UInt8(101), "e wrong")?
+        testing.assert_eq(b2, UInt8(108), "l wrong")?
+        testing.assert_eq(b3, UInt8(108), "l wrong")?
+        testing.assert_eq(b4, UInt8(111), "o wrong")?
+        testing.assert_eq(r2, 5, "second positional read length wrong")?
+        testing.assert_eq(c0, UInt8(108), "l wrong")?
+        testing.assert_eq(c1, UInt8(105), "i wrong")?
+        testing.assert_eq(c2, UInt8(110), "n wrong")?
+        testing.assert_eq(c3, UInt8(101), "e wrong")?
+        testing.assert_eq(c4, UInt8(97), "a wrong")?
+        .Ok(())
+    }
+
     // Close the file, reporting a failed close, which `Release` ignores.
     pub fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
         let File { fd: fd } = self

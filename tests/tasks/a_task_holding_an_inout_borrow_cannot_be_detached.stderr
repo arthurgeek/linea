@@ -1,0 +1,5 @@
+error[T-Bound]: `H` requires `Owned`, and `(<closure>, mem.SystemAllocator)` can carry a borrow: `_0.count` is a `borrow UInt64`, an observation of another value
+  --> tests/tasks/a_task_holding_an_inout_borrow_cannot_be_detached.lin:18:28
+   |
+18 |     let detached = session.detach(handle)
+   |                            ^^^^^^ `(<closure>, mem.SystemAllocator)` is not `Owned`; pass a value whose type owns everything it holds

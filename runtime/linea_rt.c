@@ -9,11 +9,24 @@
 
 #define _GNU_SOURCE
 #define _DARWIN_C_SOURCE
+#include <errno.h>
+#include <pthread.h>
+#include <signal.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
+
+/* A sanitizer installs a fault handler of its own, which reports a stack
+ * overflow and a wild access with more than this one can say, so a
+ * sanitized runtime leaves the faults to it. */
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+#define LINEA_SANITIZED 1
+#endif
+#endif
 
 /* The interface between generated code and this file, versioned so the two
  * cannot silently disagree.
@@ -24,6 +37,10 @@
  * separately from the compiler; before then both are built from one tree and
  * cannot disagree. */
 #define LINEA_RUNTIME_ABI 1
+
+#ifndef LINEA_CHECK_STORAGE
+#define LINEA_CHECK_STORAGE 0
+#endif
 
 /* Defined only so a generated object can refer to it. Never called.
  *
@@ -58,6 +75,142 @@ static void fail(const char *message) {
     }
     abort();
 }
+
+/* The guard pages below the stack of the thread running: an access in
+ * `[guard_low, guard_high)` is an overflow. Zero where the thread has
+ * recorded none. Thread-local, so the fault handler, which runs on the
+ * faulting thread, reads its own thread's. */
+static __thread unsigned long guard_low = 0;
+static __thread unsigned long guard_high = 0;
+
+#if !defined(LINEA_SANITIZED)
+/* What a fault in a stack's guard pages reports, on any thread. */
+static const char *const overflow_report = "linea: a stack overflowed\n";
+
+#if LINEA_CHECK_STORAGE
+static void storage_fault(unsigned long address);
+#endif
+
+/* Runs on a fault, on the faulting thread's alternate signal stack, so an
+ * overflow, which leaves no stack to run on, is still reported. A fault in
+ * the guard pages is an overflow, and an address inside a region of the
+ * checking allocator is that allocator's to explain. Any other fault is left
+ * to the default action, which `SA_RESETHAND` has already restored, so
+ * returning re-executes the access and ends the process as it would have
+ * ended without this handler. */
+static void on_fault(int signal, siginfo_t *info, void *context) {
+    (void)signal;
+    (void)context;
+    const unsigned long address = (unsigned long)info->si_addr;
+    if (address >= guard_low && address < guard_high) fail(overflow_report);
+#if LINEA_CHECK_STORAGE
+    storage_fault(address);
+#endif
+}
+
+static void install_fault_handler(void) {
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_sigaction = on_fault;
+    sigemptyset(&action.sa_mask);
+    /* Linux spells `SA_RESETHAND` as 0x80000000, an unsigned value that does
+     * not fit the `int` of `sa_flags`. The conversion is made explicitly so
+     * the implicit-conversion check does not trap on it. */
+    const unsigned flags = (unsigned)SA_SIGINFO | (unsigned)SA_RESETHAND | (unsigned)SA_ONSTACK;
+    action.sa_flags = (int)flags;
+    if (sigaction(SIGSEGV, &action, 0) != 0 || sigaction(SIGBUS, &action, 0) != 0) {
+        fail("linea: the runtime cannot install its fault handler\n");
+    }
+}
+
+static pthread_once_t fault_handler_once = PTHREAD_ONCE_INIT;
+#endif
+
+static void install_pipe_handler(void) {
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = SIG_IGN;
+    (void)sigaction(SIGPIPE, &action, 0);
+}
+
+static pthread_once_t pipe_handler_once = PTHREAD_ONCE_INIT;
+
+/* Installs the fault handler once per process, from whichever thread asks
+ * first. */
+static void ensure_fault_handler(void) {
+    (void)pthread_once(&pipe_handler_once, install_pipe_handler);
+#if !defined(LINEA_SANITIZED)
+    if (pthread_once(&fault_handler_once, install_fault_handler) != 0) {
+        fail("linea: the runtime cannot install its fault handler\n");
+    }
+#endif
+}
+
+/* Installs the `bytes` at `at` as the calling thread's alternate signal
+ * stack, and records `[low, high)` as the guard pages below its stack. Every
+ * thread a task runs on calls it before running Linea code. Answers zero, or
+ * the errno that kept the signal stack from being installed. */
+int linea_thread_begin(unsigned long at, unsigned long bytes, unsigned long low, unsigned long high) {
+    ensure_fault_handler();
+    stack_t alternate;
+    memset(&alternate, 0, sizeof alternate);
+    alternate.ss_sp = (void *)at;
+    alternate.ss_size = bytes;
+    if (sigaltstack(&alternate, 0) != 0) return errno;
+    guard_low = low;
+    guard_high = high;
+    return 0;
+}
+
+/* Removes the calling thread's alternate signal stack, so its bytes can be
+ * freed once the thread is joined. */
+void linea_thread_end(void) {
+    stack_t alternate;
+    memset(&alternate, 0, sizeof alternate);
+    alternate.ss_flags = SS_DISABLE;
+    /* macOS checks the size even of a stack being removed. */
+    alternate.ss_size = MINSIGSTKSZ;
+    if (sigaltstack(&alternate, 0) != 0) fail("linea: a thread cannot remove its signal stack\n");
+    guard_low = 0;
+    guard_high = 0;
+}
+
+/* Below the lowest address the system reports for the main thread's stack,
+ * the bytes a fault is taken as that stack's overflow in. Linux keeps a
+ * mebibyte unmapped below a growing stack. */
+static const unsigned long main_guard_bytes = 1UL << 20;
+
+/* The main thread's alternate signal stack. It lives as long as the process,
+ * since the main thread is never joined. */
+static char main_signal_stack[65536];
+
+/* Gives the main thread what `linea_thread_begin` gives a task's: an
+ * alternate signal stack and the bounds of its stack's guard, read from the
+ * system's record of the main thread's stack. */
+static void begin_main_thread(void) {
+    unsigned long low = 0;
+#if defined(__APPLE__)
+    pthread_t self = pthread_self();
+    low = (unsigned long)pthread_get_stackaddr_np(self) - (unsigned long)pthread_get_stacksize_np(self);
+#elif defined(__linux__)
+    pthread_attr_t attributes;
+    void *start = 0;
+    size_t size = 0;
+    if (pthread_getattr_np(pthread_self(), &attributes) == 0) {
+        if (pthread_attr_getstack(&attributes, &start, &size) == 0) low = (unsigned long)start;
+        (void)pthread_attr_destroy(&attributes);
+    }
+#endif
+    const long page = sysconf(_SC_PAGESIZE);
+    const unsigned long above = page > 0 ? (unsigned long)page : 4096UL;
+    const unsigned long guard = low > main_guard_bytes ? low - main_guard_bytes : 0;
+    const unsigned long limit = low > main_guard_bytes ? low + above : 0;
+    if (linea_thread_begin((unsigned long)main_signal_stack, sizeof main_signal_stack, guard, limit) != 0) {
+        fail("linea: the main thread cannot install its signal stack\n");
+    }
+}
+
+static pthread_once_t main_thread_once = PTHREAD_ONCE_INIT;
 
 /* Zeroed heap memory from the C allocator, or zero where it refuses. */
 static unsigned long system_alloc(unsigned long size) {
@@ -182,11 +335,11 @@ void linea_storage_extent(unsigned long at, unsigned long len) {
  * `guarded_limit` live allocations, further ones come from `calloc` and are
  * only checked for double and unknown disposal; that bound keeps a program with
  * many small live allocations within memory and within the number of mappings
- * a kernel allows a process. The runtime creates no threads, so none of this
- * state is shared. */
-#include <signal.h>
-#include <string.h>
-#include <sys/mman.h>
+ * a kernel allows a process.
+ *
+ * Tasks allocate and free from their own threads, so every piece of the
+ * state below, the regions, their extents and the spill table, is read and
+ * written only with `storage_lock` held. */
 
 enum { canary = 0xA5 };
 
@@ -228,6 +381,22 @@ static unsigned long *spilled = 0;
 static unsigned long spilled_capacity = 0;
 static unsigned long spilled_used = 0;
 
+static pthread_mutex_t storage_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Whether the calling thread holds `storage_lock`, so the fault handler does
+ * not wait for a lock its own thread holds. */
+static __thread int holding_lock = 0;
+
+static void lock_storage(void) {
+    if (pthread_mutex_lock(&storage_lock) != 0) fail("linea: storage checking cannot take its lock\n");
+    holding_lock = 1;
+}
+
+static void unlock_storage(void) {
+    holding_lock = 0;
+    if (pthread_mutex_unlock(&storage_lock) != 0) fail("linea: storage checking cannot release its lock\n");
+}
+
 static unsigned long round_up(unsigned long n, unsigned long to) {
     return (n + to - 1) / to * to;
 }
@@ -267,7 +436,7 @@ static const char *verdict(const struct region *r, unsigned long address) {
 
 /* Aborts unless the `len` bytes at `at` lie within one live allocation's
  * requested extent, or wholly outside every region. */
-static void check_extent(unsigned long at, unsigned long len) {
+static void check_extent_locked(unsigned long at, unsigned long len) {
     if (len == 0) return;
     const unsigned long last = len - 1 > ~0UL - at ? ~0UL : at + (len - 1);
     const struct region *r = region_holding(at);
@@ -281,38 +450,26 @@ static void check_extent(unsigned long at, unsigned long len) {
     if (at < e->at || last - e->at >= e->size) fail(storage_reports[reached_outside]);
 }
 
-/* Runs on a fault. An address inside a region is this allocator's to explain;
- * any other fault is left to the default action, which `SA_RESETHAND` has
- * already restored, so returning re-executes the access and ends the process
- * as it would have ended without this handler. */
-static void on_fault(int signal, siginfo_t *info, void *context) {
-    (void)signal;
-    (void)context;
-    const unsigned long address = (unsigned long)info->si_addr;
+/* Explains a fault at `address` where it lies inside a region: an abort
+ * naming what the access reached. Called by the fault handler on the
+ * faulting thread, which takes the lock unless that thread already holds it,
+ * as it does when the fault is inside this allocator. */
+static void storage_fault(unsigned long address) {
+    const int held = holding_lock;
+    if (!held && pthread_mutex_trylock(&storage_lock) != 0) return;
     const struct region *r = region_holding(address);
-    if (r == 0) return;
-    const char *message = verdict(r, address);
+    const char *message = r == 0 ? 0 : verdict(r, address);
+    if (!held) pthread_mutex_unlock(&storage_lock);
     if (message != 0) fail(message);
 }
 
+/* Sets up the allocator once; called with the lock held. */
 static void set_up(void) {
     if (page_bytes != 0) return;
     const long page = sysconf(_SC_PAGESIZE);
     if (page <= 0) fail("linea: the system reports no page size\n");
     page_bytes = (unsigned long)page;
-
-    struct sigaction action;
-    memset(&action, 0, sizeof action);
-    action.sa_sigaction = on_fault;
-    sigemptyset(&action.sa_mask);
-    /* Linux spells `SA_RESETHAND` as 0x80000000, an unsigned value that does
-     * not fit the `int` of `sa_flags`. The conversion is made explicitly so
-     * the implicit-conversion check does not trap on it. */
-    const unsigned flags = (unsigned)SA_SIGINFO | (unsigned)SA_RESETHAND;
-    action.sa_flags = (int)flags;
-    if (sigaction(SIGSEGV, &action, 0) != 0 || sigaction(SIGBUS, &action, 0) != 0) {
-        fail("linea: storage checking cannot install its fault handler\n");
-    }
+    ensure_fault_handler();
 }
 
 /* Reserves a region able to hold `need` bytes after its leading guard page,
@@ -394,7 +551,7 @@ static unsigned long spill_alloc(unsigned long size) {
     return at;
 }
 
-static unsigned long checked_alloc(unsigned long size) {
+static unsigned long checked_alloc_locked(unsigned long size) {
     set_up();
     /* The C allocator decides whether a request is refused, so both runtimes
      * refuse exactly the requests `calloc` refuses. Its answer is released
@@ -449,7 +606,7 @@ static int untouched(unsigned long at, unsigned long len) {
     return seen == 0;
 }
 
-static void checked_free(unsigned long at, unsigned long size) {
+static void checked_free_locked(unsigned long at, unsigned long size) {
     const struct region *r = region_holding(at);
     struct extent *e = r == 0 ? 0 : extent_below(r, at);
     if (e == 0 || e->at != at) {
@@ -481,6 +638,25 @@ static void checked_free(unsigned long at, unsigned long size) {
     e->freed = 1;
     guarded_live -= 1;
 }
+
+static void check_extent(unsigned long at, unsigned long len) {
+    lock_storage();
+    check_extent_locked(at, len);
+    unlock_storage();
+}
+
+static unsigned long checked_alloc(unsigned long size) {
+    lock_storage();
+    const unsigned long at = checked_alloc_locked(size);
+    unlock_storage();
+    return at;
+}
+
+static void checked_free(unsigned long at, unsigned long size) {
+    lock_storage();
+    checked_free_locked(at, size);
+    unlock_storage();
+}
 #endif
 
 /* The process's arguments, retained rather than copied.
@@ -511,6 +687,7 @@ static char **linea_envp = 0;
 static unsigned long linea_envc = 0UL;
 
 void linea_set_args(int argc, char **argv) {
+    if (pthread_once(&main_thread_once, begin_main_thread) != 0) fail("linea: the main thread cannot be set up\n");
     linea_argc = argc;
     linea_argv = argv;
     linea_envp = environ;

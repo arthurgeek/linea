@@ -1,0 +1,39 @@
+import std.io
+import std.mem
+import std.session
+import std.task
+
+use mem.Slice
+use session.Chan
+use session.End
+use session.Send
+
+// A legitimate wrapper over `Str` and `Slice[UInt64]` can spawn a joined task
+// that reads the borrowed views and closes the handle before returning.
+struct Packet {
+    label: Str,
+    numbers: Slice[UInt64],
+}
+
+fn measure_in_task(packet: Packet) -> UInt64 {
+    let body = sink [read packet] |sink me: Chan[Send[UInt64, End]]| {
+        var sum = packet.label.length()
+        for n in copy(packet.numbers) {
+            sum += *n
+        }
+        me.send(sum).close()
+    }
+    let slot = task.prepare(body).unwrap()
+    let (total, done) = slot.start().recv()
+    done.close()
+    total
+}
+
+fn main() -> UInt8 {
+    defer let owned = "hello".to_owned().unwrap()
+    let items: [UInt64; 3] = [10, 20, 7]
+    let packet = Packet { label = owned.view(), numbers = items.as_slice() }
+    let total = measure_in_task(packet)
+    io.println("{owned} = {total}").unwrap()
+    0
+}

@@ -4533,8 +4533,12 @@ argument names a function or is a lambda that captures nothing, because C calls
 an entry generated for one fixed function; a function value whose target is
 known only at run time is refused. The entry takes the callback's parameters in
 their C widths and calls the function, and nothing but an `extern` call is
-handed one. The compiler believes the declaration: C calls the callback only
-during the call, on the calling thread, with the context it was lent.
+handed one. The compiler believes the declaration: C calls a callback that
+takes a context only during the call, on the calling thread, with the context
+it was lent. A callback without a context holds nothing but its fixed
+function, so C may keep it and call it later, from any thread; the standard
+library's `task` hands the runtime the function a task's thread runs this
+way.
 
 ```linea
 struct Tally { total: Int64 }
@@ -5910,6 +5914,62 @@ nothing to release. Under a
 fixed signature the result type is fixed too, so a returned view is offered no
 copy; a stored view still is, which is the fix for a route handler that keeps a
 request's text in its state.
+
+**[O-Cross]** A value crosses a task boundary as a capture of the body that
+`task.start`, `task.start_in`, `task.prepare` or `task.prepare_in` takes for a
+new task. The task runs on another
+thread while its creator runs on, so what the body carries is used by both at
+once until `close` joins the task. Every observation the body carries must
+observe a `Shareable` place: a `read` capture's own observation of its source,
+and every observation a captured value holds, a value moved in by a `sink`
+capture included, one observation at a time. Two readers of a Shareable place
+cannot race, since neither may write it while the handle lives ([O-Borrow]),
+and a place that is not Shareable is written by a read. A value carrying an
+exclusive lend crosses only as the body's own `inout` capture of the place:
+the body is then the one writer, and the handle keeps every other use of the
+place out until the join. A lend held by another value the body captures, such
+as a closure moved in by `sink`, is refused. A body whose type is a type
+parameter or a function value carries captures the function cannot see, so it
+does not cross. The report is at the capture, names the place, and names the
+part of its type that is not Shareable. An unshareable value itself still
+crosses whole: a `sink` capture of a `mem.Arena` moves the arena, and only the
+task reads it afterwards.
+
+```linea
+fn main() -> UInt8 {
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    let handle = arena.handle()
+    let body = sink [read handle] |sink me: Chan[End]| {
+        let _bytes = handle.acquire(8)
+        me.close()
+    }
+    task.start(body).unwrap().close()
+    0
+}
+```
+
+The body reads `handle`, whose `acquire` advances the arena's cursor through a
+`read`, while `main` could acquire from the arena too, so the capture is
+[O-Cross]. A payload crosses under its operation's `Owned` bound instead:
+`send` and `recv` take a `T: Owned`, so a session sends `text.String` and not
+`Str`. A library value that writes storage another value owns observes that
+owner, as the standard library's `ReleaseTag` observes the `ReleaseLog` it
+writes, so the bound and this rule see the write
+([ADR 0250](adr/0250-tasks-are-structured-through-linear-sessions.md) §5).
+
+A task runs on its own operating-system thread. `start` orders everything
+its creator did before it before everything the body does; a `send` returns
+once the other end has received the value, and orders everything the sender
+did before it before everything the receiver does after the `recv`; `close`
+on the handle returns once the body has returned and its thread has been
+joined, and orders everything the body did before everything after the
+`close`. With [O-Borrow], [O-Cross] and the `Owned` payload bound, every
+other location is reached by one task between two of these points, or only
+read, so an accepted program has no data race and behaves at every
+optimisation level as if its tasks' steps were interleaved one at a time. A
+task's stack has guard pages below it, and every generated function probes a
+frame larger than a page as it grows, so an overflow on any thread, `main`
+included, stops the program with `linea: a stack overflowed`.
 
 **[O-Temporary]** A value that is borrowed where it is written without being a
 place, such as `log.field("count", 3)`'s `3`, an argument `base + 2` to a

@@ -86,6 +86,15 @@ long linea_write_some(int fd, unsigned long at, unsigned long len) {
     if (invalid != 0) return -(long)invalid;
     if (len == 0) return 0;
 
+    struct sigaction action;
+    if (sigaction(SIGPIPE, NULL, &action) == 0 && action.sa_handler == SIG_IGN) {
+        ssize_t count;
+        do {
+            count = write(fd, (const void *)(uintptr_t)at, (size_t)len);
+        } while (count < 0 && errno == EINTR);
+        return count < 0 ? -(long)errno : (long)count;
+    }
+
     sigset_t blocked, previous, pending;
     if (sigemptyset(&blocked) != 0 || sigaddset(&blocked, SIGPIPE) != 0) abort();
     const int mask_error = pthread_sigmask(SIG_BLOCK, &blocked, &previous);
@@ -119,6 +128,40 @@ long linea_write_some(int fd, unsigned long at, unsigned long len) {
      * the runtime contract; reporting it as I/O would lose accepted bytes. */
     if (pthread_sigmask(SIG_SETMASK, &previous, NULL) != 0) abort();
     return error != 0 ? -(long)error : (long)count;
+}
+
+long linea_read_at(int fd, unsigned long at, unsigned long len, unsigned long offset) {
+    const int invalid = byte_range(at, len);
+    if (invalid != 0) return -(long)invalid;
+    if (len == 0) return 0;
+    if (offset > (unsigned long)INT64_MAX) return -(long)EOVERFLOW;
+    ssize_t count;
+    do {
+        count = pread(fd, (void *)(uintptr_t)at, (size_t)len, (off_t)offset);
+    } while (count < 0 && errno == EINTR);
+    return count < 0 ? -(long)errno : (long)count;
+}
+
+long linea_write_at(int fd, unsigned long at, unsigned long len, unsigned long offset) {
+    const int invalid = byte_range(at, len);
+    if (invalid != 0) return -(long)invalid;
+    if (len == 0) return 0;
+    if (offset > (unsigned long)INT64_MAX) return -(long)EOVERFLOW;
+    ssize_t count;
+    do {
+        count = pwrite(fd, (const void *)(uintptr_t)at, (size_t)len, (off_t)offset);
+    } while (count < 0 && errno == EINTR);
+    return count < 0 ? -(long)errno : (long)count;
+}
+
+static pthread_mutex_t g_output_lock = PTHREAD_MUTEX_INITIALIZER;
+
+void linea_io_output_lock(void) {
+    if (pthread_mutex_lock(&g_output_lock) != 0) abort();
+}
+
+void linea_io_output_unlock(void) {
+    if (pthread_mutex_unlock(&g_output_lock) != 0) abort();
 }
 
 long linea_close(int fd) {

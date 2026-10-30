@@ -1,0 +1,22 @@
+import std.mem
+import std.session
+import std.task
+
+use mem.Lender
+use session.Chan
+use session.End
+
+// The task keeps its body in bytes from the arena until `close` joins it, so
+// the handle carries the arena's handle and the arena cannot be released
+// while the task runs.
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 4096)
+    let body = sink [] |sink me: Chan[End]| {
+        me.close()
+    }
+    let slot = task.prepare_in(arena.handle(), body, stack: task.default_stack_bytes).unwrap()
+    let handle = slot.start()
+    arena.release()
+    handle.close()
+    0
+}

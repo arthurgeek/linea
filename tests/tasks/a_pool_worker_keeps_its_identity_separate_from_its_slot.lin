@@ -1,0 +1,29 @@
+import std.session
+import std.task
+
+fn main() -> UInt8 {
+    if task.worker_id() != 0 || task.worker_slot() != 0 {
+        return 1
+    }
+    var mb: session.Mailbox[(UInt64, UInt64), UInt64] = session.Mailbox.open(0)
+    let sender = &mb.sender()
+    task.dispatch_worker(
+        sink [sink sender] || {
+            sender.send((task.worker_id(), task.worker_slot())).close()
+        },
+        1,
+    )
+    task.drain_workers()
+    let (id, slot) = match mb.recv() {
+        Message(pair, rest) => {
+            rest.close()
+            pair
+        },
+        Closed => (0, 999),
+    }
+    if id >= 1 && slot == 0 {
+        0
+    } else {
+        2
+    }
+}

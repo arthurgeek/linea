@@ -1,0 +1,77 @@
+// Collect a party's guest list from friends who each decide on a task of
+// their own whether to come.
+import std.io
+import std.mem
+import std.session
+import std.task
+import std.text
+
+use mem.Vec
+use session.Chan
+use session.End
+use session.Send
+
+// A friend's answer. Its name is a `String` the answer owns, so the answer
+// is `Owned` and can travel from the friend's task to the party.
+struct Rsvp {
+    name: text.String,
+    attending: Bool,
+}
+
+// Friends with short names are too busy.
+fn decide(name: Str) -> Rsvp {
+    .{ name = name.to_owned().unwrap(), attending = name.length() > 3 }
+}
+
+// Add the friend who answered to the guest list if they are coming, and let
+// go of the name otherwise.
+fn admit(inout guests: Vec[text.String], sink answer: Rsvp) {
+    let Rsvp { name, attending } = answer
+    if attending {
+        &guests.push(name).settled().unwrap()
+    } else {
+        name.release()
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    // The guest list is owned by the party alone. The friends share nothing
+    // with it or with each other, which [O-Cross] enforces here.
+    let alice = sink [] |sink me: Chan[Send[Rsvp, End]]| {
+        me.send(decide("Alice")).close()
+    }
+    let bob = sink [] |sink me: Chan[Send[Rsvp, End]]| {
+        me.send(decide("Bob")).close()
+    }
+    let carol = sink [] |sink me: Chan[Send[Rsvp, End]]| {
+        me.send(decide("Carol")).close()
+    }
+    // `task.start` prepares and starts each friend in one call, since a
+    // friend's body owns nothing that must be settled.
+    let from_alice = task.start(alice).unwrap()
+    let from_bob = task.start(bob).unwrap()
+    let from_carol = task.start(carol).unwrap()
+
+    // `defer var` releases the guest list, and the names in it, whenever
+    // `main` returns.
+    defer var guests: Vec[text.String] = Vec.new()
+
+    // This is a gather: the party collects the answers in the order it closes
+    // the handles, so they come back in invitation order however the friends
+    // finish, and the list is the same on every run.
+    let (alice_answer, alice_done) = from_alice.recv()
+    alice_done.close()
+    admit(&guests, alice_answer)
+    let (bob_answer, bob_done) = from_bob.recv()
+    bob_done.close()
+    admit(&guests, bob_answer)
+    let (carol_answer, carol_done) = from_carol.recv()
+    carol_done.close()
+    admit(&guests, carol_answer)
+
+    io.println("Party guest list:")?
+    for read guest in guests {
+        io.println("  {guest}")?
+    }
+    .Ok(0)
+}

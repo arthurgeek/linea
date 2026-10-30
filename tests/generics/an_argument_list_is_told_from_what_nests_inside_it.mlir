@@ -14,7 +14,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -178,7 +178,7 @@ module {
     %v76 = arith.addi %v75, %p76 : i64 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:23)
     func.return %v76 : i64 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:5)
   }
-  func.func private @"lin.;two[Int64,Wrap[UInt8]]"(%a0: i64, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;two[Int64,Wrap[UInt8]]"(%a0: i64, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -191,7 +191,7 @@ module {
     %v0 = arith.constant 1 : i64 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":19:5)
     func.return %v0 : i64 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":19:5)
   }
-  func.func private @"lin.;two[Wrap[UInt8],Int64]"(%a0: !llvm.ptr, %a1: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;two[Wrap[UInt8],Int64]"(%a0: !llvm.ptr, %a1: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -204,7 +204,7 @@ module {
     %v0 = arith.constant 1 : i64 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":19:5)
     func.return %v0 : i64 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":19:5)
   }
-  func.func private @"lin.;one[Wrap[UInt8]]"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;one[Wrap[UInt8]]"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %pl0 = arith.constant 1 : i64
@@ -214,7 +214,7 @@ module {
     %v0 = arith.constant 2 : i64 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":23:5)
     func.return %v0 : i64 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":23:5)
   }
-  func.func private @"lin.;one[Wrap[Wrap[UInt8]]]"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;one[Wrap[Wrap[UInt8]]]"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %pl0 = arith.constant 1 : i64
@@ -224,7 +224,7 @@ module {
     %v0 = arith.constant 2 : i64 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":23:5)
     func.return %v0 : i64 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":23:5)
   }
-  func.func private @"lin.;Wrap[UInt8].mix[Int64]"(%a0: !llvm.ptr, %a1: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;Wrap[UInt8].mix[Int64]"(%a0: !llvm.ptr, %a1: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -237,7 +237,7 @@ module {
     %v0 = arith.constant 4 : i64 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":31:9)
     func.return %v0 : i64 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":31:9)
   }
-  func.func private @"lin.;Wrap[Wrap[UInt8]].mix[Wrap[UInt8]]"(%a0: !llvm.ptr, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;Wrap[Wrap[UInt8]].mix[Wrap[UInt8]]"(%a0: !llvm.ptr, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64

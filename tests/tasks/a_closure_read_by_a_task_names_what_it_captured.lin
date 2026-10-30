@@ -1,0 +1,27 @@
+import std.mem
+import std.session
+import std.task
+
+use mem.Lender
+use session.Chan
+use session.End
+
+// `grab` holds the arena's handle, so reading `grab` from a task could
+// acquire from the arena while `main` does.
+fn main() -> UInt8 {
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    let handle = arena.handle()
+    let grab = [sink handle] || -> UInt64 {
+        match handle.acquire(8) {
+            Ok(_) => 1,
+            Err(_) => 0,
+        }
+    }
+    let body = sink [read grab] |sink me: Chan[End]| {
+        let _got = grab()
+        me.close()
+    }
+    let slot = task.prepare(body).unwrap()
+    slot.start().close()
+    0
+}

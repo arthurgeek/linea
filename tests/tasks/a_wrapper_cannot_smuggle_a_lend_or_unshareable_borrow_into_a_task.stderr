@@ -1,0 +1,17 @@
+error[T-Bound]: `T` requires `Shareable`, and `<closure>` is unshareable
+  --> tests/tasks/a_wrapper_cannot_smuggle_a_lend_or_unshareable_borrow_into_a_task.lin:43:5
+   |
+43 |     spawn_shareable(box_of(bump))
+   |     ^^^^^^^^^^^^^^^ `<closure>` is not `Shareable`; pass a value that reading never changes, or drop the bound
+error[T-Bound]: `T` requires `Shareable`, and `borrow mem.Arena[mem.SystemAllocator]` is not `Shareable`: it observes a `mem.Arena[mem.SystemAllocator]`, which is unshareable
+  --> tests/tasks/a_wrapper_cannot_smuggle_a_lend_or_unshareable_borrow_into_a_task.lin:46:5
+   |
+46 |     spawn_shareable(box_of(borrow arena))
+   |     ^^^^^^^^^^^^^^^ `borrow mem.Arena[mem.SystemAllocator]` is not `Shareable`; pass a value that reading never changes, or drop the bound
+error[O-Cross]: a task cannot take a value observing `box`, which its creator may read too: a `Box[T]` is not `Shareable`: `item` is a `T`, which is unshareable
+  --> tests/tasks/a_wrapper_cannot_smuggle_a_lend_or_unshareable_borrow_into_a_task.lin:19:27
+   |
+19 |     let body = sink [sink box] |sink me: Chan[End]| {
+   |                           ^^^ this capture observes it
+   |
+   = help: reading this value may change it; move it into one task, or give the task a value that reading never changes

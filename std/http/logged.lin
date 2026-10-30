@@ -25,9 +25,6 @@ import std.time
 struct Logged[H, S: log.Sink, A: Allocator] {
     handler: H,
     logger: log.Logger[S, A],
-    // `started` records when the handler was given the request whose exchange
-    // is under way.
-    started: Option[time.Instant],
 }
 
 // Releasing a `Logged` releases the handler and the logger it holds.
@@ -36,7 +33,6 @@ derive[H: Release, S: log.Sink + Release, A: Allocator] Release for Logged[H, S,
 // `Logged` takes the state its handler takes and passes it on.
 impl[P: Allocator, T, H: Handler[T, P], S: log.Sink, A: Allocator] Handler[T, P] for Logged[H, S, A] {
     fn serve_http(inout self: Self, inout state: T, request: Request[P]) -> Result[Response[P], Error[P]] {
-        self.started = .Some(time.Instant.now())
         &self.handler.serve_http(&state, request)
     }
 }
@@ -47,9 +43,13 @@ impl[H: Observer, S: log.Sink, A: Allocator] Observer for Logged[H, S, A] where 
     fn observe[P: Allocator](inout self: Self, event: Event[P]) {
         match read event {
             Exchanged(exchange) => {
-                let duration: Option[time.Duration] = match mem.take(&self.started) {
-                    Some(start) => .Some(start.elapsed()),
-                    None => .None,
+                let duration: Option[time.Duration] = if exchange.request.is_none() {
+                    .None
+                } else {
+                    match read exchange.duration {
+                        Some(duration) => .Some(copy(duration)),
+                        None => .None,
+                    }
                 }
                 let fields: Access[P] = .{ exchange = copy(exchange), duration }
                 let _dropped = self.logger.log(level_of(exchange), "request", fields)
@@ -127,7 +127,7 @@ impl[P: Allocator] log.Fields for Access[P] {
 // logging through the same logger elsewhere, which a logger to standard
 // error allows.
 pub fn logged[H, S: log.Sink, A: Allocator](sink logger: log.Logger[S, A], sink handler: H) -> Logged[H, S, A] where carries(logger, handler) {
-    .{ handler, logger, started = .None }
+    .{ handler, logger }
 }
 
 test fn an_exchange_is_logged_at_the_level_its_status_calls_for() {
@@ -137,17 +137,17 @@ test fn an_exchange_is_logged_at_the_level_its_status_calls_for() {
     let broken = io.IoError { operation = .Write, category = .BrokenPipe, code = .None, progress = 0 }
     let file = log.capture()
     var served = logged(file.logger(minimum: .Info), Counting { observed = 0 })
-    let event1: Event = .Exchanged(.{ request = .Some(copy(request)), status = .Some(.Ok), body_bytes = 12, failure = .None })
+    let event1: Event = .Exchanged(.{ request = .Some(copy(request)), status = .Some(.Ok), body_bytes = 12, duration = .None, failure = .None })
     &served.observe(event1)
-    let event2: Event = .Exchanged(.{ request = .Some(copy(request)), status = .Some(.NotFound), body_bytes = 10, failure = .Some(.Refused(.Some("not found"))) })
+    let event2: Event = .Exchanged(.{ request = .Some(copy(request)), status = .Some(.NotFound), body_bytes = 10, duration = .None, failure = .Some(.Refused(.Some("not found"))) })
     &served.observe(event2)
-    let event3: Event = .Exchanged(.{ request = .Some(request), status = .Some(.Ok), body_bytes = 4096, failure = .Some(.Write(broken)) })
+    let event3: Event = .Exchanged(.{ request = .Some(request), status = .Some(.Ok), body_bytes = 4096, duration = .None, failure = .Some(.Write(broken)) })
     &served.observe(event3)
-    let event4: Event = .Exchanged(.{ request = .None, status = .Some(.BadRequest), body_bytes = 0, failure = .Some(.Unread(.Status(.BadRequest))) })
+    let event4: Event = .Exchanged(.{ request = .None, status = .Some(.BadRequest), body_bytes = 0, duration = .None, failure = .Some(.Unread(.Status(.BadRequest))) })
     &served.observe(event4)
-    let event5: Event = .Exchanged(.{ request = .None, status = .Some(.ServiceUnavailable), body_bytes = 0, failure = .Some(.Memory) })
+    let event5: Event = .Exchanged(.{ request = .None, status = .Some(.ServiceUnavailable), body_bytes = 0, duration = .None, failure = .Some(.Memory) })
     &served.observe(event5)
-    let Logged { handler, logger, started: _ } = served
+    let Logged { handler, logger } = served
     logger.release()
     defer let lines = file.finish()
     let expected =
@@ -168,7 +168,7 @@ test fn a_retried_accept_is_logged_as_a_warning() {
     let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
     let event: Event = .AcceptRetried(.{ error = .Io(exhausted), pause = time.Duration.from_nanoseconds(5000000) })
     &served.observe(event)
-    let Logged { handler, logger, started: _ } = served
+    let Logged { handler, logger } = served
     logger.release()
     defer let lines = file.finish()
     testing.assert_eq(lines.view(), "WARN accepting a connection failed error=\"Accept failed (ResourceExhausted) after 0 bytes\" retry_in=5ms\n", "the retry line changed")?
@@ -181,7 +181,7 @@ test fn the_bound_address_is_logged_as_listening() {
     var served = logged(file.logger(minimum: .Info), Counting { observed = 0 })
     let event: Event = .Listening(net.loopback(8080))
     &served.observe(event)
-    let Logged { handler, logger, started: _ } = served
+    let Logged { handler, logger } = served
     logger.release()
     defer let lines = file.finish()
     testing.assert_eq(lines.view(), "INFO listening address=127.0.0.1:8080\n", "the listening line changed")?
@@ -199,11 +199,11 @@ test fn a_logged_router_logs_each_exchange_it_serves() {
     let malformed = send(bound, "garbage\r\n\r\n")
     let file = log.capture()
     var served = logged(file.logger(minimum: .Info), health_router())
-    let serving = serve(listener, &served, limits: serving(3))
+    let serving = serve(listener, &served, limits: serving(3), policy: .Sequential)
     defer let health = read_to_end(found)
     defer let absent = read_to_end(missing)
     defer let refused = read_to_end(malformed)
-    let Logged { handler, logger, started: _ } = served
+    let Logged { handler, logger } = served
     handler.release()
     logger.release()
     defer let lines = file.finish()

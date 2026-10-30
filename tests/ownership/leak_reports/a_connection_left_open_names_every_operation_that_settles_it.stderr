@@ -6,4 +6,4 @@ error[O-Leak]: `_visitor` (a linear `net.Connection`) is still owned when this p
 7 | }
   | - the block ends here
   |
-  = help: settle it first with `_visitor.release()`, `_visitor.close()` or `_visitor.reset()`
+  = help: settle it first with `_visitor.close()`, `_visitor.into_fd()`, `_visitor.reset()` or …

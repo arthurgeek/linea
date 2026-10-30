@@ -362,11 +362,15 @@ fn typecheckInternal(
 
         errdefer for (closure_descriptors) |descriptor| gpa.free(descriptor.owned_fields);
         for (closure_descriptors, 0..) |*descriptor, index| {
-            const captures = resolution.closureCaptures(@enumFromInt(index));
+            const closure_id: resolve_mod.ClosureId = @enumFromInt(index);
+            const lambda_expr = resolution.closures.exprOf(closure_id);
+            const captures = resolution.closureCaptures(closure_id);
             var count: usize = 0;
-            for (captures) |capture| if (capture.convention == .sink) {
-                count += 1;
-            };
+            var lends = false;
+            for (captures) |capture| {
+                if (capture.convention == .sink) count += 1;
+                if (capture.convention == .inout) lends = true;
+            }
             const owned = try gpa.alloc(types_mod.FieldOrdinal, count);
             var next: usize = 0;
             for (captures, 0..) |capture, field| if (capture.convention == .sink) {
@@ -374,6 +378,10 @@ fn typecheckInternal(
                 next += 1;
             };
             descriptor.owned_fields = owned;
+            descriptor.lends = lends;
+            if (lambda_expr != .none and ast.exprTag(lambda_expr) == .lambda) {
+                descriptor.invocation = ast.lambda(lambda_expr).invocation;
+            }
         }
 
         const binder_places = try gpa.alloc(?Checker.BinderPlace, resolution.bindingCount());
@@ -11097,7 +11105,13 @@ const Checker = struct {
                         .name = self.ast.tokenText(self.ast.declName(d)),
                         .reason = self.disposalReason(d),
                     } else null,
-                    .parameter => null,
+                    // A one-call start drops the body when preparing fails,
+                    // and the form that hands it back is the edit to make.
+                    .parameter => if (d == self.raw_accesses.task_start or d == self.raw_accesses.task_start_in) .{
+                        .name = self.ast.tokenText(self.ast.declName(d)),
+                        .reason = null,
+                        .help = "this body owns a linear value, so a failed start would abandon it; use `task.prepare(body)` and `slot.start()`",
+                    } else null,
                 },
             )) {
                 switch (constraint.subject) {
@@ -11524,6 +11538,9 @@ const Checker = struct {
         /// Why the operation disposes of a value when its name does not say,
         /// appended to the general help.
         reason: ?[]const u8,
+        /// The whole help for an unmet `Discardable`, where the operation
+        /// names the form a program uses instead.
+        help: ?[]const u8 = null,
     };
 
     /// Refuses `held` for the `Owned` bound written at `bound`, naming the
@@ -11894,6 +11911,7 @@ const Checker = struct {
         // A closure's capability is its captures', so the report names the
         // capture that fails the bound: the closure itself has no name a
         // reader could change, and neither has a bound in another module.
+        const replaced: ?[]const u8 = if (requirement == .discardable) if (operation) |named| named.help else null else null;
         if (try self.capturePreventing(held, requirement)) |capture| {
             const why, const lacks = switch (requirement) {
                 .copyable => .{ "a value of it may be copied", "cannot be copied" },
@@ -11904,7 +11922,7 @@ const Checker = struct {
                 .t_bound,
                 self.ast.fileOf(at),
                 span,
-                switch (requirement) {
+                replaced orelse switch (requirement) {
                     .copyable => try std.fmt.allocPrint(self.sink.arena, "capture `{s}` by `read`, or capture a copyable value taken from it", .{capture.name}),
                     else => try std.fmt.allocPrint(self.sink.arena, "capture `{s}` by `read`, or build it in memory that is dropped with its owner, such as an arena's", .{capture.name}),
                 },
@@ -11913,7 +11931,7 @@ const Checker = struct {
             );
             return true;
         }
-        const help = if (operation != null and requirement == .discardable) help: {
+        const help = if (replaced) |text| text else if (operation != null and requirement == .discardable) help: {
             const held_name = try self.typeName(held);
             const general = try std.fmt.allocPrint(self.sink.arena, "`{s}` may dispose of {s} `{s}`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before", .{ operation.?.name, article.before(held_name), held_name });
             break :help if (operation.?.reason) |reason|
@@ -21565,23 +21583,24 @@ const Checker = struct {
             try self.signatureSelfType(self.generic)
         else if (self.enclosingRow(self.generic)) |implementation| implementation.ty else TypeId.poison;
         var environment = self.closure_descriptors[closure.index()].environment;
+        // Copying a closure would duplicate an `inout` capture's
+        // exclusive lend, so an environment holding one is affine.
+        const lends = for (resolved_captures) |capture| {
+            if (capture.convention == .inout) break true;
+        } else false;
         if (resolved_captures.len != 0 and environment == .unit) {
             const name = try std.fmt.allocPrint(self.gpa, "captures.{d}", .{closure.index()});
             self.builder.owned_names.append(self.gpa, name) catch |err| {
                 self.gpa.free(name);
                 return err;
             };
-            // Copying a closure would duplicate an `inout` capture's
-            // exclusive lend, so an environment holding one is affine.
-            const lends = for (resolved_captures) |capture| {
-                if (capture.convention == .inout) break true;
-            } else false;
             environment = try self.builder.addStruct(name, if (lends) .affine else .copyable, environment_fields);
         }
         self.closure_descriptors[closure.index()] = .{
             .owned_fields = self.closure_descriptors[closure.index()].owned_fields,
             .environment = environment,
             .invocation = lambda.invocation,
+            .lends = lends,
             .enclosing = self.generic,
             .parameters = parameters,
             .expr = id,
@@ -41266,6 +41285,7 @@ fn runtimeScalarName(scalar: runtime_symbols.Scalar) []const u8 {
         .f32 => "Float32",
         .f64 => "Float64",
         .unit => "()",
+        .callback => "fn(...)",
         .ptr => unreachable,
     };
 }

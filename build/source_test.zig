@@ -13,7 +13,7 @@ const runtime_symbols = @import("runtime_symbols");
 test "runtime archive members have stable names and separate linkage" {
     const archive = @embedFile("runtime_archive");
     try testing.expect(std.mem.startsWith(u8, archive, "!<arch>\n"));
-    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "clock.o", "linea_float.o", "math.o" };
+    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "clock.o", "task.o", "linea_float.o", "math.o" };
     var member: usize = 0;
     var offset: usize = 8;
     var long_names: []const u8 = "";
@@ -1137,6 +1137,10 @@ fn scalarOf(written: []const u8) ?runtime_symbols.Parameter {
         .{ "*i64", .{ .scalar = .i64, .passing = .inout } },
         .{ "unsigned long *", .{ .scalar = .u64, .passing = .inout } },
         .{ "long *", .{ .scalar = .i64, .passing = .inout } },
+        // The function pointer types `task.h` names.
+        .{ "linea_task_entry", .{ .scalar = .callback } },
+        .{ "linea_task_release", .{ .scalar = .callback } },
+        .{ "linea_task_worker", .{ .scalar = .callback } },
     };
     for (spellings) |s| if (std.mem.eql(u8, s[0], t)) return s[1];
     return null;
@@ -3315,4 +3319,11 @@ test "a sequential run orders exactly the heavy steps its suite selects" {
     try testing.expectEqualSlices(test_roots.Heavy, &.{ .compile_unit_tests, .unit_tests }, unit.slice());
     const conformance = test_roots.heavyOrder(test_roots.select(.{ .suite = .conformance, .optimize = .ReleaseFast, .filtered = false }), .{ .properties = false, .guide = true });
     try testing.expectEqualSlices(test_roots.Heavy, &.{ .compile_compiler, .compile_runner, .corpus, .examples }, conformance.slice());
+}
+
+test "http.serve must always default to concurrent worker execution (.Threads(128))" {
+    const serve_lin = try std.Io.Dir.cwd().readFileAlloc(testing.io, "std/http/serve.lin", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(serve_lin);
+    const expected = "policy: task.Policy = .Threads(128)";
+    try testing.expect(std.mem.indexOf(u8, serve_lin, expected) != null);
 }

@@ -1,0 +1,54 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.Choose
+use session.End
+use session.Offer
+use session.Recv
+use session.Send
+
+// A counter receives a number, then either sends its double or stops.
+struct Counter {}
+
+impl Protocol for Counter {
+    type Dual = Asker
+    type Step = Recv[UInt64, Offer[Send[UInt64, End], End]]
+}
+
+struct Asker {}
+
+impl Protocol for Asker {
+    type Dual = Counter
+    type Step = Send[UInt64, Choose[Recv[UInt64, End], End]]
+}
+
+// Ask one counter for a double and tell another to stop. `enter` unfolds the
+// named protocol to its first step.
+fn ask(number: UInt64, wanted: Bool) -> UInt64 {
+    let body = sink [] |sink me: Chan[Counter]| {
+        let (number, waiting) = me.enter().recv()
+        match waiting.offer() {
+            Left(answering) => answering.send(number * 2).close(),
+            Right(done) => done.close(),
+        }
+    }
+    let slot = task.prepare(body).unwrap()
+    let asking = slot.start().enter().send(number)
+    if wanted {
+        let (doubled, done) = asking.choose_left().recv()
+        done.close()
+        doubled
+    } else {
+        asking.choose_right().close()
+        0
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let doubled = ask(21, true)
+    let stopped = ask(5, false)
+    io.println("doubled: {doubled}, stopped: {stopped}")?
+    .Ok(0)
+}

@@ -23,6 +23,8 @@ const generate = @import("generate.zig");
 const loader = @import("../driver/loader.zig");
 const Head = @import("../sema/resolve.zig").Head;
 const accessGranted = @import("../sema/typecheck.zig").accessGranted;
+const intrinsics = @import("../sema/intrinsics.zig");
+const ExpandedProgram = @import("../syntax/expanded_program.zig").ExpandedProgram;
 
 /// Whether the generator reaches a construct, and why where it does not.
 ///
@@ -476,6 +478,63 @@ fn noteSpellings(ast: *const Ast, typing: *const Typing, seen: *Seen) void {
     }
 }
 
+/// Which library operations a generated program calls: the ones whose
+/// meaning no syntax tag, type or instruction names, because what they do
+/// happens in the runtime.
+pub const Operation = enum {
+    /// `slot.start()`, which runs a task's body on a thread of its own.
+    start,
+    /// `chan.send(value)`, a rendezvous with the other end of a session.
+    send,
+    /// `chan.recv()`, the other half of that rendezvous.
+    recv,
+};
+
+pub fn reachOfOperation(tag: Operation) Reach {
+    return switch (tag) {
+        // A generated program is run, and these need the runtime's threads
+        // and channels. Once it runs them, the generator can start a task
+        // whose body sends a generated value over a protocol it writes, and
+        // print only after `close` has joined the task, so the output does not
+        // depend on scheduling.
+        .start, .send, .recv => .{ .missing = "the runtime that runs a task and its sessions" },
+    };
+}
+
+/// Whether `file` belongs to a module of the standard library. Asked only of
+/// the few calls that reach a listed operation, so a walk of the modules'
+/// files per call is bounded by the library's files.
+fn inLibrary(program: *const ExpandedProgram, file: anytype) bool {
+    for (program.source.modules) |module| {
+        if (!module.library) continue;
+        for (module.files) |held| if (held == file) return true;
+    }
+    return false;
+}
+
+/// The library operations a generated program calls, read off the calls the
+/// checker normalised in the program loaded beside the library.
+fn noteOperations(program: *const ExpandedProgram, ast: *const Ast, typing: *const Typing, seen: *Seen) void {
+    const operations = [_]struct { Operation, node.DeclId }{
+        .{ .start, intrinsics.memberOf(program, ast, "task", "Slot", "start") },
+        .{ .send, intrinsics.memberOf(program, ast, "session", "Chan", "send") },
+        .{ .recv, intrinsics.memberOf(program, ast, "session", "Chan", "recv") },
+    };
+    for (typing.calls) |call| {
+        const d = switch (call.target) {
+            .declared => |d| d,
+            else => continue,
+        };
+        for (operations) |operation| {
+            if (operation[1] == .none or operation[1] != d) continue;
+            // The library's own calls, its tests' included, are not the
+            // generated program's.
+            if (inLibrary(program, ast.fileOfExpr(call.at))) continue;
+            seen.operations.insert(operation[0]);
+        }
+    }
+}
+
 /// Which parameter conventions a generated program uses.
 ///
 /// A fourth axis, and the one ownership made necessary: a convention is not a
@@ -603,6 +662,7 @@ const Seen = struct {
     nestings: std.EnumSet(Nesting),
     spellings: std.EnumSet(Spelling),
     insts: std.EnumSet(Inst.Tag),
+    operations: std.EnumSet(Operation),
 };
 
 /// What a run of the generator reaches, across every axis at once so the whole
@@ -617,6 +677,7 @@ fn sweep(backing: std.mem.Allocator, seeds: usize) !Seen {
         .nestings = .initEmpty(),
         .spellings = .initEmpty(),
         .insts = .initEmpty(),
+        .operations = .initEmpty(),
     };
 
     const library = try loader.CheckedLibrary.init(backing);
@@ -670,6 +731,7 @@ fn sweep(backing: std.mem.Allocator, seeds: usize) !Seen {
         // paths and nothing past them.
         const loaded = try generate.checkAccepted(gpa, library, text);
         const semantics = &loaded.semantics;
+        noteOperations(&semantics.expanded, &semantics.expanded.ast, &semantics.typing, &seen);
         var module = (try lowerProgram(gpa, &semantics.expanded, &semantics.res, &semantics.typing, &semantics.disposals, &loaded.sink, .program)) orelse return error.SourceRejected;
         defer module.deinit(gpa);
         for (module.functions) |f| {
@@ -729,6 +791,7 @@ test "every construct the table calls generated is generated" {
     try hold(Nesting, reachOfNesting, seen.nestings, "nesting");
     try hold(Spelling, reachOfSpelling, seen.spellings, "spellings");
     try hold(Inst.Tag, reachOfInst, seen.insts, "instructions");
+    try hold(Operation, reachOfOperation, seen.operations, "library operations");
 }
 
 test "every construct is classified" {
@@ -743,6 +806,7 @@ test "every construct is classified" {
     for (std.enums.values(Nesting)) |t| _ = reachOfNesting(t);
     for (std.enums.values(Spelling)) |t| _ = reachOfSpelling(t);
     for (std.enums.values(Inst.Tag)) |t| _ = reachOfInst(t);
+    for (std.enums.values(Operation)) |t| _ = reachOfOperation(t);
 }
 
 test "callable source and MIR forms are generated" {
@@ -911,6 +975,11 @@ test "a gap says what would close it" {
         .impossible => |why| try testing.expect(why.len > 0),
         .missing => |why| try testing.expect(why.len > 0),
     };
+    for (std.enums.values(Operation)) |t| switch (reachOfOperation(t)) {
+        .generated => {},
+        .impossible => |why| try testing.expect(why.len > 0),
+        .missing => |why| try testing.expect(why.len > 0),
+    };
 }
 
 /// The gaps that have been looked at and written down, with what each waits
@@ -929,7 +998,7 @@ test "a gap says what would close it" {
 /// something, and a gap nobody wrote down is a gap nobody closes. Emptying it
 /// is the outcome, not the end of the mechanism: the test below fails just as
 /// loudly for a gap that opens as for an entry that goes stale.
-const recorded_gaps = [_][]const u8{};
+const recorded_gaps = [_][]const u8{ "start", "send", "recv" };
 
 /// What holding one axis's gaps to the recorded list found.
 const Gaps = struct {
@@ -1014,6 +1083,7 @@ test "a gap is either closed or written down" {
         .{ TypeTag, reachOfType, "semantic types" },
         .{ Nesting, reachOfNesting, "nesting" },
         .{ Spelling, reachOfSpelling, "spellings" },
+        .{ Operation, reachOfOperation, "library operations" },
     }) |axis| {
         const found = try gapsOf(axis[0], axis[1], axis[2], recorded_gaps[0..], &said.writer);
         if (found.wrong) wrong = true;
@@ -1024,9 +1094,9 @@ test "a gap is either closed or written down" {
 }
 
 test "a recorded gap is reported, and one that closed fails" {
-    // The loop above runs over an empty list, so nothing in it can fail today
-    // and a run says nothing about whether it works. Here it is, over a table
-    // written for the purpose: what a real axis will do the day it has a gap.
+    // The loop above runs over the gaps written down today, so a run of it
+    // never shows a gap nobody wrote down or an entry that went stale. Here
+    // both are, over a table written for the purpose.
     const Fabricated = enum { written_down, nobody_wrote_it_down, already_closed };
     const reach = struct {
         fn of(t: Fabricated) Reach {

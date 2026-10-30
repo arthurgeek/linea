@@ -14,7 +14,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x f64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     cf.br ^b0
@@ -26,7 +26,7 @@ module {
     %v4 = arith.constant 0 : i64 loc("tests/codegen/a_float_division_is_not_guarded.lin":7:5)
     func.return %v4 : i64 loc("tests/codegen/a_float_division_is_not_guarded.lin":7:5)
   }
-  func.func private @"lin.;quotient"(%a0: f64, %a1: f64) -> f64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;quotient"(%a0: f64, %a1: f64) -> f64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x f64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64

@@ -1,0 +1,21 @@
+import std.mem
+import std.session
+import std.task
+
+use mem.Lender
+use session.Chan
+use session.End
+
+// Moving the handle into the task moves only the handle: the arena it observes
+// stays with the creator, which may acquire from it while the task does.
+fn main() -> UInt8 {
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    let handle = arena.handle()
+    let body = sink [sink handle] |sink me: Chan[End]| {
+        let _bytes = handle.acquire(8)
+        me.close()
+    }
+    let slot = task.prepare(body).unwrap()
+    slot.start().close()
+    0
+}

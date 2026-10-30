@@ -6,7 +6,7 @@ test that matches. The rest of what the binary holds is left out here.
   $ awk '/@linea_str[0-9]*\("deep\./ { print } /func\.func (private @lin\._h\.dispatch|@main)\(/ { shown = 1 } shown { print } shown && /^  }$/ { shown = 0 }' out
     llvm.mlir.global internal constant @linea_str0("deep.doubling_two_gives_four") : !llvm.array<28 x i8>
     llvm.mlir.global internal constant @linea_str1("deep.doubling_one_gives_two") : !llvm.array<27 x i8>
-    func.func private @lin._h.dispatch() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+    func.func private @lin._h.dispatch() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
       %z0 = arith.constant 16 : i64
       %s0 = llvm.alloca %z0 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
       %z1 = arith.constant 16 : i64

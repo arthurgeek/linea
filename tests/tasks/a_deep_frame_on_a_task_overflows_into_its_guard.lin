@@ -1,0 +1,29 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+// Each call of `descend` keeps a hundred and twenty-eight kibibytes of
+// numbers in its frame, more than the guard below a task's stack, and calls
+// itself without end. The stack runs out on the task's thread, and the
+// process stops saying so, whichever frame reaches the guard first.
+fn descend(depth: UInt64) -> UInt64 {
+    let row = [UInt64(0), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    let block = [copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), row]
+    let slab = [copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), block]
+    var frame = [copy(slab), copy(slab), copy(slab), slab]
+    frame[depth % 4][depth % 16][depth % 16][depth % 16] = depth
+    frame[(depth + 1) % 4][depth % 16][0][0] + descend(depth + 1)
+}
+
+fn main() -> UInt8 {
+    var reached = UInt64(0)
+    let body = sink [inout reached] |sink me: Chan[End]| {
+        reached = descend(0)
+        me.close()
+    }
+    let slot = task.prepare(body).unwrap()
+    slot.start().close()
+    UInt8(reached % 256)
+}

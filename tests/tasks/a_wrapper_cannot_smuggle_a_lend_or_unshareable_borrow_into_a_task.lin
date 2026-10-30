@@ -1,0 +1,50 @@
+import std.mem
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+struct Box[T] {
+    item: T,
+}
+
+fn box_of[T](sink item: T) -> Box[T] where carries(item) {
+    .{ item }
+}
+
+// A generic wrapper without `T: Shareable` cannot send `item` into a task,
+// because `T` may carry an exclusive lend or an unshareable borrow.
+fn spawn_unbounded[T: Discardable](sink box: Box[T]) {
+    let body = sink [sink box] |sink me: Chan[End]| {
+        let Box { item: _ } = box
+        me.close()
+    }
+    let slot = task.prepare(body).unwrap()
+    slot.start().close()
+}
+
+// Even when the wrapper requires `T: Shareable`, a caller cannot pass a
+// closure holding an `inout` lend or a borrow of an unshareable owner.
+fn spawn_shareable[T: Shareable + Discardable](sink box: Box[T]) {
+    let body = sink [sink box] |sink me: Chan[End]| {
+        let Box { item: _ } = box
+        me.close()
+    }
+    let slot = task.prepare(body).unwrap()
+    slot.start().close()
+}
+
+fn main() -> UInt8 {
+    var count = UInt64(0)
+    let bump = sink [inout count] || {
+        count += 1
+    }
+    spawn_shareable(box_of(bump))
+
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    spawn_shareable(box_of(borrow arena))
+
+    spawn_unbounded(box_of(UInt64(1)))
+    0
+}

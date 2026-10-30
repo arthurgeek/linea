@@ -1,0 +1,31 @@
+// A closure that captures a place `inout`, or that is called `inout`, writes
+// through its environment, so it is not `Shareable`, neither directly nor
+// inside a generic wrapper.
+struct Wrapper[T] {
+    held: T,
+}
+
+fn wrap_value[T](sink held: T) -> Wrapper[T] where carries(held) {
+    .{ held }
+}
+
+fn require_shareable[T: Shareable](_value: T) -> UInt64 {
+    1
+}
+
+fn main() -> UInt8 {
+    var count = UInt64(0)
+    let lending = sink [inout count] || {
+        count += 1
+    }
+    let wrapped = wrap_value(lending)
+    let a = require_shareable(wrapped)
+
+    var step = UInt64(1)
+    let mutating = inout [sink step] || -> UInt64 {
+        step += 1
+        step
+    }
+    let b = require_shareable(mutating)
+    UInt8(a + b)
+}

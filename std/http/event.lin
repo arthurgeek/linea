@@ -3,6 +3,7 @@ import std.io
 import std.mem
 import std.net
 import std.testing
+import std.time
 
 // An `Observer` is told what happened while serving. `serve` calls `observe`
 // once each exchange has ended, after its answer has been written and its
@@ -47,6 +48,7 @@ pub struct Exchange[P: Allocator = mem.SystemAllocator] {
     request: Option[Request[P]],
     status: Option[Status],
     body_bytes: UInt64,
+    duration: Option[time.Duration],
     failure: Option[Failure],
 }
 

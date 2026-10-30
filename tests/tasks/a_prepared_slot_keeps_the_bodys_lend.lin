@@ -1,0 +1,19 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+// The slot holds the body, so until the task is joined the place the body
+// holds lent `inout` is not the creator's to write.
+fn main() -> UInt8 {
+    var count = UInt64(0)
+    let body = sink [inout count] |sink me: Chan[End]| {
+        count += 1
+        me.close()
+    }
+    let slot = task.prepare(body).unwrap()
+    count = 5
+    slot.start().close()
+    UInt8(count)
+}

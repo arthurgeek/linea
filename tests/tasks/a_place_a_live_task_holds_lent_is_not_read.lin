@@ -1,0 +1,20 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+// The body holds `count` lent `inout`, so until `close` joins the task its
+// creator may not even read `count`.
+fn main() -> UInt8 {
+    var count = UInt64(0)
+    let body = sink [inout count] |sink me: Chan[End]| {
+        count += 1
+        me.close()
+    }
+    let slot = task.prepare(body).unwrap()
+    let handle = slot.start()
+    let seen = count
+    handle.close()
+    UInt8(seen)
+}

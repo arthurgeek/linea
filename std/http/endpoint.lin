@@ -353,12 +353,12 @@ test fn the_first_refusing_extractor_answers_the_request() {
     .Ok(())
 }
 
-// Each probe is the tag of a log the request names by address, so a test sees
-// which probes were released and in what order. A request asks one probe to
-// refuse with 400 through `X-Refuse`.
+// Each probe records its code in a log the request names by address, so a
+// test sees which probes were released and in what order. A request asks one
+// probe to refuse with 400 through `X-Refuse`.
 @derive(Release)
 struct First {
-    tag: mem.ReleaseTag,
+    tag: ProbeTag,
 }
 
 impl[P: Allocator] Extract[P] for First {
@@ -369,7 +369,7 @@ impl[P: Allocator] Extract[P] for First {
 
 @derive(Release)
 struct Second {
-    tag: mem.ReleaseTag,
+    tag: ProbeTag,
 }
 
 impl[P: Allocator] Extract[P] for Second {
@@ -380,7 +380,7 @@ impl[P: Allocator] Extract[P] for Second {
 
 @derive(Release)
 struct Third {
-    tag: mem.ReleaseTag,
+    tag: ProbeTag,
 }
 
 impl[P: Allocator] Extract[P] for Third {
@@ -391,7 +391,7 @@ impl[P: Allocator] Extract[P] for Third {
 
 @derive(Release)
 struct Fourth {
-    tag: mem.ReleaseTag,
+    tag: ProbeTag,
 }
 
 impl[P: Allocator] Extract[P] for Fourth {
@@ -402,7 +402,7 @@ impl[P: Allocator] Extract[P] for Fourth {
 
 @derive(Release)
 struct Fifth {
-    tag: mem.ReleaseTag,
+    tag: ProbeTag,
 }
 
 impl[P: Allocator] Extract[P] for Fifth {
@@ -413,7 +413,7 @@ impl[P: Allocator] Extract[P] for Fifth {
 
 @derive(Release)
 struct Sixth {
-    tag: mem.ReleaseTag,
+    tag: ProbeTag,
 }
 
 impl[P: Allocator] Extract[P] for Sixth {
@@ -422,15 +422,32 @@ impl[P: Allocator] Extract[P] for Sixth {
     }
 }
 
+// A ProbeTag records `code` in the log at `at` when it is released. An
+// extractor sees only its request, so the log reaches it as the address a
+// header carries rather than as a value it observes.
+@linear
+struct ProbeTag {
+    at: UInt64,
+    extent: UInt64,
+    code: UInt64,
+}
+
+impl Release for ProbeTag {
+    fn release(sink self: Self) {
+        let ProbeTag { at, extent, code } = self
+        mem.record_release(at, extent, code)
+    }
+}
+
 // Read the log the request names and tag it with `code`, or refuse when the
 // request asks `name` to refuse.
-fn probe_tag[P: Allocator](request: Request[P], name: Str, code: UInt64) -> Result[mem.ReleaseTag, Error[P]] {
+fn probe_tag[P: Allocator](request: Request[P], name: Str, code: UInt64) -> Result[ProbeTag, Error[P]] {
     if request.header("X-Refuse") == Option.Some(copy(name)) {
         return .Err(error(request, .BadRequest, "{name} refused"))
     }
     let at = request.header("X-Log-At").unwrap_or("0").parse[UInt64]().unwrap_or(0)
     let extent = request.header("X-Log-Extent").unwrap_or("0").parse[UInt64]().unwrap_or(0)
-    .Ok(mem.ReleaseTag { at, extent, code })
+    .Ok(.{ at, extent, code })
 }
 
 // `Greedy` asks the request's arena for more than a small arena holds, so it
@@ -509,12 +526,10 @@ fn probed_t6(inout calls: CallCount, _p0: First, _p1: Second, _p2: Third, _p3: F
 // and leaves the log holding exactly `released`.
 fn probe(inout router: Router[CallCount], target: Str, refused: Str, answer: Str, released: mem.Slice[UInt64]) -> Bool {
     let log = mem.ReleaseLog.open(8)
-    // Tagging and releasing one probe reads the log's address and records a
-    // leading 0 that every expectation starts with.
-    let marker = log.tag(0)
-    let at = marker.at
-    let extent = marker.extent
-    marker.release()
+    // Releasing one tag records a leading 0 that every expectation starts
+    // with.
+    log.tag(0).release()
+    let (at, extent) = log.words()
     var calls = CallCount { calls = 0 }
     let at_text = fmt.render_owned("{at}").unwrap()
     let extent_text = fmt.render_owned("{extent}").unwrap()
@@ -610,10 +625,8 @@ test fn an_extractor_the_arena_cannot_hold_answers_500_and_releases_what_was_rea
     defer var router: Router[CallCount] = Router.new()
     testing.assert_ok_eq(&router.route("GET /greedy", greedy_after_a_probe), (), "registering failed")?
     let log = mem.ReleaseLog.open(4)
-    let marker = log.tag(0)
-    let at = marker.at
-    let extent = marker.extent
-    marker.release()
+    log.tag(0).release()
+    let (at, extent) = log.words()
     var calls = CallCount { calls = 0 }
     let at_text = fmt.render_owned("{at}").unwrap()
     let extent_text = fmt.render_owned("{extent}").unwrap()

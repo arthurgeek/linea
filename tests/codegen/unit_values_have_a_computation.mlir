@@ -14,7 +14,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     cf.br ^b0
   ^b0:
     %v0 = arith.constant 0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":10:13)
@@ -24,7 +24,7 @@ module {
     %v4 = arith.constant 0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":13:5)
     func.return %v4 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":13:5)
   }
-  func.func private @"lin.;consume[$28$29]"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;consume[$28$29]"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     llvm.store %a0, %s0 : i64, !llvm.ptr
@@ -33,13 +33,13 @@ module {
     %v0 = arith.constant 0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":1:26)
     func.return %v0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":1:26)
   }
-  func.func private @"lin.;empty"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;empty"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     cf.br ^b0
   ^b0:
     %v0 = arith.constant 0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":3:12)
     func.return %v0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":3:12)
   }
-  func.func private @"lin.;bare"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;bare"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     cf.br ^b0
   ^b0:
     %v0 = arith.constant 0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":6:5)

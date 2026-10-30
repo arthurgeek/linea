@@ -1,0 +1,5 @@
+error[T-Bound]: `F` requires `Discardable`, because a value of it may be dropped without a release, and this closure captures `token`, a `Token` that must be released
+  --> tests/tasks/a_one_call_start_refuses_a_body_owning_a_linear_value.lin:18:10
+   |
+18 |     task.start(body).unwrap().close()
+   |          ^^^^^ this body owns a linear value, so a failed start would abandon it; use `task.prepare(body)` and `slot.start()`

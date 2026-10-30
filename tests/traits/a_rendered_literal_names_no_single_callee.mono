@@ -61,6 +61,8 @@ pub struct IoError {
     progress: UInt64,
 }
 
+struct OutputLock {}
+
 @(opaque, copyable)
 struct Str {
     bytes: std.mem.Slice[UInt8],
@@ -136,6 +138,7 @@ fn ;main() -> std.result.Result[UInt8,std.io.core.IoError] {
 }
 
 pub fn std.io.core;println[Point](x: Point) -> std.result.Result[(),std.io.core.IoError] {
+    defer let _guard = std.io.core;acquire_output_lock()
     var w = std.io.core;stdout()
     std.io.core;line[Point,std.io.core.Descriptor](x, &w)
 }
@@ -144,6 +147,11 @@ fn std.io.core;report[std.io.core.IoError](e: std.io.core.IoError) -> UInt8 {
     std.io.core;eprint[std.text.Str]("error: ")
     std.io.core;eprintln[std.io.core.IoError](e)
     1
+}
+
+fn std.io.core;acquire_output_lock() -> std.io.core.OutputLock {
+    linea_io_output_lock()
+    std.io.core.OutputLock {}
 }
 
 pub fn std.io.core;stdout() -> std.io.core.Descriptor {
@@ -155,15 +163,23 @@ pub fn std.io.core;line[Point,std.io.core.Descriptor](x: Point, inout w: std.io.
     std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "\n")
 }
 
+fn std.io.core.OutputLock;std.release;Release.release(sink _self: std.io.core.OutputLock) {
+    linea_io_output_unlock()
+}
+
 pub fn std.io.core;eprint[std.text.Str](x: std.text.Str) {
+    defer let _guard = std.io.core;acquire_output_lock()
     var w = std.io.core;stderr()
     std.io.core;eprint_to[std.text.Str,std.io.core.Descriptor](x, &w)
 }
 
 pub fn std.io.core;eprintln[std.io.core.IoError](x: std.io.core.IoError) {
+    defer let _guard = std.io.core;acquire_output_lock()
     var w = std.io.core;stderr()
     std.io.core;eprintln_to[std.io.core.IoError,std.io.core.Descriptor](x, &w)
 }
+
+extern fn linea_io_output_lock()
 
 pub fn std.io.core;descriptor(fd: Int32) -> std.io.core.Descriptor {
     Descriptor(fd)
@@ -177,6 +193,8 @@ fn std.io.core.Descriptor;std.io.core;Writer.write_str(inout self: std.io.core.D
     let _written = std.io.core;write_all[std.io.core.Descriptor](&self, std.text;Str.as_bytes(s))?
     .Ok(())
 }
+
+extern fn linea_io_output_unlock()
 
 pub fn std.io.core;stderr() -> std.io.core.Descriptor {
     std.io.core;descriptor(2)

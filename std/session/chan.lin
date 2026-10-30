@@ -1,0 +1,259 @@
+import std.mem
+import std.task
+import std.testing
+import std.time
+
+// A Chan is one end of a session, and `P` is what this end does next. It is
+// linear, and each operation consumes it and answers it at the protocol's
+// next state, so an endpoint used twice is refused by [O-Move] and an
+// operation the state does not offer by the endpoint's type. [O-Leak] refuses
+// an endpoint a path abandons, so every session is driven to `End` and
+// closed. `H` is `(F, A)` for the endpoint `task.start` answers, which is the
+// task's handle: the body's type and the allocator its bytes came from. It is
+// `()` for every other endpoint. The `mem.Carried[H]` field makes the handle
+// carry what the body captured and what the allocator observes: a place the
+// body reads cannot be written, moved or released, a place it holds lent
+// `inout` cannot be touched, and the allocator's owner cannot be released,
+// until `close` has joined the task.
+@(opaque, linear)
+struct Chan[phantom P: Protocol, H = ()] {
+    endpoint: UInt64,
+    body: mem.Carried[H],
+}
+
+// Tell the peer of `endpoint` which continuation of a choice this end takes:
+// 0 for the left one, 1 for the right one. The call returns once the peer has
+// read it.
+extern fn linea_chan_choose(endpoint: UInt64, branch: UInt8)
+
+// Wait until the peer of `endpoint` chooses, and answer 0 for the left
+// continuation or 1 for the right one.
+extern fn linea_chan_offer(endpoint: UInt64) -> UInt8
+
+// Finish this end of a session. For a task's handle the call returns once the
+// task's body has returned and its thread has been joined, and releases the
+// bytes the body was kept in.
+extern fn linea_chan_close(endpoint: UInt64)
+
+impl[P: Protocol, H] Chan[P, H] {
+    // Answer the endpoint `endpoint` names. `task.start` builds a task's
+    // handle with it.
+    internal fn opened(endpoint: UInt64) -> Self {
+        .{ endpoint, body = .{} }
+    }
+
+    // Unfold a named protocol one step: the same endpoint, at the protocol
+    // its `Step` names. Nothing happens at run time.
+    pub fn enter(sink self: Self) -> Chan[P.Step, H] {
+        let Chan { endpoint, body } = self
+        .{ endpoint, body }
+    }
+
+    test fn entering_a_protocol_keeps_the_endpoint() {
+        let asking: Chan[SessionTestAsk] = Chan.opened(7)
+        let Chan { endpoint, body: _ } = asking.enter()
+        testing.assert_eq(endpoint, UInt64(7), "entering a protocol changed the endpoint")?
+        .Ok(())
+    }
+}
+
+// Detach a handle from its body tracking, returning an erased endpoint.
+// Permitted only when `H: Owned`, proving that the body and allocator
+// hold no live borrows, lends, or local allocations. The erased handle
+// remains linear and must still be closed/joined.
+pub fn detach[P: Protocol, H: Owned](sink chan: Chan[P, H]) -> Chan[P, ()] {
+    let Chan { endpoint, body: _ } = chan
+    .{ endpoint, body = .{} }
+}
+
+impl[P: Protocol, H: Owned] Chan[P, H] {
+    // Detach a handle from its body tracking, returning an erased endpoint.
+    // The erased handle remains linear and must still be closed/joined.
+    pub fn detach(sink self: Self) -> Chan[P, ()] {
+        let Chan { endpoint, body: _ } = self
+        .{ endpoint, body = .{} }
+    }
+
+    test fn an_owned_handle_can_be_detached() {
+        let body = sink [] |sink me: Chan[Recv[UInt64, End]]| {
+            let (_, done) = me.recv()
+            done.close()
+        }
+        let slot = task.prepare(body).unwrap()
+        let handle = slot.start()
+        let detached: Chan[Send[UInt64, End], ()] = detach(handle)
+        detached.send(100).close()
+        .Ok(())
+    }
+}
+
+impl[T: Owned, N: Protocol, H] Chan[Send[T, N], H] {
+    // Send `value` to the peer and answer this end at `N`. The send returns
+    // once the peer has taken the value. A payload is `Owned`, so it carries
+    // no observation and no lend, and the endpoint holds nothing after the
+    // send that it did not hold before.
+    pub fn send(sink self: Self, sink value: T) -> Chan[N, H] {
+        let Chan { endpoint, body } = self
+        mem.send_payload(endpoint, value)
+        .{ endpoint, body }
+    }
+
+    test fn a_send_hands_the_value_to_the_peer() {
+        let body = sink [] |sink me: Chan[Recv[UInt64, Send[UInt64, End]]]| {
+            let (number, answering) = me.recv()
+            answering.send(number + 1).close()
+        }
+        let slot = task.prepare(body).unwrap()
+        let (answer, done) = slot.start().send(41).recv()
+        done.close()
+        testing.assert_eq(answer, 42, "the peer did not receive what was sent")?
+    }
+}
+
+impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
+    // Wait for the peer to send, and answer the value with this end at `N`.
+    // A receive cannot fail: a peer that wants to stop says so through a
+    // branch the protocol offers.
+    pub fn recv(sink self: Self) -> (T, Chan[N, H]) {
+        let Chan { endpoint, body } = self
+        let value: T = mem.receive_payload(endpoint)
+        (value, .{ endpoint, body })
+    }
+
+    test fn a_receive_answers_what_the_peer_sent() {
+        let body = sink [] |sink me: Chan[Send[UInt64, Send[UInt64, End]]]| {
+            me.send(3).send(4).close()
+        }
+        let slot = task.prepare(body).unwrap()
+        let (first, waiting) = slot.start().recv()
+        let (second, done) = waiting.recv()
+        done.close()
+        testing.assert_eq((first, second), (UInt64(3), UInt64(4)), "the values did not arrive in the order they were sent")?
+    }
+
+    // Wait for the peer to send until `timeout` elapses, answering the value and the
+    // endpoint at the next state, or handing the endpoint back if timed out.
+    pub fn recv_until(sink self: Self, timeout: time.Duration) -> TimedRecv[T, N, H] {
+        let Chan { endpoint, body } = self
+        match mem.receive_payload_until[T](endpoint, timeout.nanoseconds()) {
+            Some(value) => .Received(value, .{ endpoint, body }),
+            None => .TimedOut(.{ endpoint, body }),
+        }
+    }
+}
+
+// TimedRecv is the outcome of `recv_until`: either the message arrived and the
+// session advanced to `N`, or timeout elapsed and this end remains at `Recv[T, N]`.
+pub enum TimedRecv[T: Owned, N: Protocol, H] {
+    Received(T, Chan[N, H]),
+    TimedOut(Chan[Recv[T, N], H]),
+}
+
+impl[L: Protocol, R: Protocol, H] Chan[Choose[L, R], H] {
+    // Take the left continuation, and tell the peer so.
+    pub fn choose_left(sink self: Self) -> Chan[L, H] {
+        let Chan { endpoint, body } = self
+        linea_chan_choose(endpoint, 0)
+        .{ endpoint, body }
+    }
+
+    test fn choosing_left_runs_the_peers_left_branch() {
+        let body = sink [] |sink me: SessionTestReporting| {
+            session_test_branch_reporter(me)
+        }
+        let slot = task.prepare(body).unwrap()
+        let (branch, done) = slot.start().choose_left().recv()
+        done.close()
+        testing.assert_eq(branch, 1, "the peer did not take the left branch")?
+    }
+
+    // Take the right continuation, and tell the peer so.
+    pub fn choose_right(sink self: Self) -> Chan[R, H] {
+        let Chan { endpoint, body } = self
+        linea_chan_choose(endpoint, 1)
+        .{ endpoint, body }
+    }
+
+    test fn choosing_right_runs_the_peers_right_branch() {
+        let body = sink [] |sink me: SessionTestReporting| {
+            session_test_branch_reporter(me)
+        }
+        let slot = task.prepare(body).unwrap()
+        let (branch, done) = slot.start().choose_right().recv()
+        done.close()
+        testing.assert_eq(branch, 2, "the peer did not take the right branch")?
+    }
+}
+
+// An end that is offered two branches and reports which one it was given.
+alias SessionTestReporting = Chan[Offer[Send[UInt64, End], Send[UInt64, End]]]
+
+// Offer two branches and send which one the peer chose: 1 for the left, 2
+// for the right.
+fn session_test_branch_reporter(sink me: SessionTestReporting) {
+    match me.offer() {
+        Left(reporting) => reporting.send(1).close(),
+        Right(reporting) => reporting.send(2).close(),
+    }
+}
+
+// Branch is the continuation the peer chose at an `Offer[L, R]`, holding this
+// end at that continuation.
+pub enum Branch[L: Protocol, R: Protocol, H] {
+    Left(Chan[L, H]),
+    Right(Chan[R, H]),
+}
+
+impl[L: Protocol, R: Protocol, H] Chan[Offer[L, R], H] {
+    // Wait for the peer to choose, and answer this end at the continuation it
+    // chose.
+    pub fn offer(sink self: Self) -> Branch[L, R, H] {
+        let Chan { endpoint, body } = self
+        if linea_chan_offer(endpoint) == 0 {
+            .Left(.{ endpoint, body })
+        } else {
+            .Right(.{ endpoint, body })
+        }
+    }
+
+    test fn an_offer_answers_the_branch_the_peer_chose() {
+        let body = sink [] |sink me: Chan[Choose[End, End]]| {
+            me.choose_right().close()
+        }
+        let slot = task.prepare(body).unwrap()
+        let right = match slot.start().offer() {
+            Left(done) => {
+                done.close()
+                false
+            },
+            Right(done) => {
+                done.close()
+                true
+            },
+        }
+        testing.assert(right, "the offer did not answer the right branch")?
+    }
+}
+
+impl[H] Chan[End, H] {
+    // Finish a session that has reached `End`. Closing a task's handle is the
+    // join: it returns once the body has returned and its thread has ended, and
+    // only then does the handle stop carrying what the body captured.
+    pub fn close(sink self: Self) {
+        let Chan { endpoint, body: _ } = self
+        linea_chan_close(endpoint)
+    }
+
+    test fn closing_a_handle_waits_for_the_body() {
+        var steps = UInt64(0)
+        let body = sink [inout steps] |sink me: Chan[End]| {
+            for _ in 0..1000 {
+                steps += 1
+            }
+            me.close()
+        }
+        let slot = task.prepare(body).unwrap()
+        slot.start().close()
+        testing.assert_eq(steps, 1000, "the handle was closed before the body returned")?
+    }
+}

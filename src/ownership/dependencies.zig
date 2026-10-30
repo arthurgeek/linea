@@ -10,10 +10,12 @@ const ExpandedProgram = @import("../syntax/expanded_program.zig").ExpandedProgra
 const node = @import("../syntax/node.zig");
 const ExprId = node.ExprId;
 const BindingId = @import("../sema/ids.zig").BindingId;
+const ids = @import("../sema/ids.zig");
 const resolve_mod = @import("../sema/resolve.zig");
 const Resolution = resolve_mod.Resolution;
 const types = @import("../sema/types.zig");
 const helpTypeName = @import("../sema/typecheck.zig").helpTypeName;
+const writtenTypeName = @import("../sema/typecheck.zig").writtenTypeName;
 const HelpImports = @import("../sema/typecheck.zig").HelpImports;
 const importNote = @import("../sema/typecheck.zig").importNote;
 const clauseEdit = @import("../sema/typecheck.zig").clauseEdit;
@@ -970,6 +972,15 @@ const Analysis = struct {
     /// clause written where none was must keep. Sized by the function's
     /// parameters.
     covered_owners: std.AutoHashMapUnmanaged(BindingId, void) = .empty,
+    /// The captures and task bodies already reported by [O-Cross], so a
+    /// capture refused for its own observation is not refused again for
+    /// what that observation contains. Sized by the function's captures.
+    crossings_reported: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// What each capture took into its closure, keyed by the capture's
+    /// source and joined over every construction the walk reaches, so an
+    /// [O-Cross] report names the capture a crossing dependency came
+    /// through. Sized by the function's captures.
+    capture_sets: std.AutoHashMapUnmanaged(ExprId, SetId) = .empty,
 
     const Arrival = struct { cell: Cell, owner: BindingId };
 
@@ -986,6 +997,8 @@ const Analysis = struct {
         self.lend_sites.deinit(self.gpa);
         self.pending_escapes.deinit(self.gpa);
         self.covered_owners.deinit(self.gpa);
+        self.crossings_reported.deinit(self.gpa);
+        self.capture_sets.deinit(self.gpa);
         self.walk_sources.deinit(self.gpa);
         self.reported.deinit(self.gpa);
         self.selections.deinit(self.gpa);
@@ -1667,7 +1680,10 @@ const Analysis = struct {
                     try self.borrowed(state, source)
                 else
                     try self.value(state, source);
-                try self.put(state, Cell.capture(source), try self.store.prefixed(captured, try self.projectionPath(projection)));
+                const held = try self.store.prefixed(captured, try self.projectionPath(projection));
+                try self.put(state, Cell.capture(source), held);
+                const recorded = try self.capture_sets.getOrPut(self.gpa, source);
+                recorded.value_ptr.* = if (recorded.found_existing) try self.store.join(recorded.value_ptr.*, held) else held;
                 return;
             }
             // Each field becomes live before later initializers run. Joining
@@ -2071,6 +2087,12 @@ const Analysis = struct {
                 try self.changeThrough(state, arg, id);
             }
         }
+        if (report) switch (normalized.target) {
+            // A body forwarded from one of these functions to another is its
+            // caller's argument, checked where the caller wrote it.
+            .declared => |d| if (self.typing.raw_accesses.crossesTask(d) and !self.typing.raw_accesses.crossesTask(self.function.owner)) try self.crossing(state, normalized, d),
+            else => {},
+        };
         // The callable is invoked after its arguments finish evaluating.
         // Its observations must survive their effects and inout writes too.
         if (normalized.target.calleeIsValue()) try self.stale(try self.value(state, self.ast.call(id).callee), .{ .used = self.ast.call(id).callee }, report);
@@ -2088,6 +2110,269 @@ const Analysis = struct {
             const previous = try self.store.select(state.get(Cell.binding(root)) orelse .empty, path);
             try self.write(state, root, path, try self.store.join(previous, added), id, id, report);
         }
+    }
+
+    /// [O-Cross]: the `body` a call to `task.Slot.start` moves into a task
+    /// runs on another thread while its creator runs on, so every dependency
+    /// the body carries is one both may use at once. An observation must be
+    /// of a `Shareable` place, so two readers cannot race, and an exclusive
+    /// lend must be one of the body's own `inout` captures, which nothing but
+    /// the body can reach until the task is joined. A body whose type names
+    /// no closure, such as a type parameter, carries captures this function
+    /// cannot see, so it does not cross.
+    fn crossing(self: *Analysis, state: *const State, call: types.NormalizedCall, start: node.DeclId) !void {
+        // The parameter is found by the name `prepare` declares it under. The
+        // callable signature is interned by shape, so its spellings may be
+        // another function's of the same shape.
+        for (self.ast.declParams(start), call.args) |param, arg| {
+            if (arg == .none or !std.mem.eql(u8, self.ast.tokenText(param.name), "body")) continue;
+            const ty = self.typing.exprType(arg);
+            const closure: ?ids.ClosureId = switch (self.typing.get(ty)) {
+                .closure => |held| held.closure,
+                else => null,
+            };
+            if (closure == null) {
+                if (ty == .poison or !self.typing.mayCarryDependencies(ty)) return;
+                if ((try self.crossings_reported.getOrPut(self.gpa, arg)).found_existing) return;
+                const name = try writtenTypeName(self.sink.arena, self.ast, self.program, self.res, self.typing, self.functionModule(), ty);
+                return self.sink.add(.{
+                    .severity = .err,
+                    .code = .o_cross,
+                    .message = try std.fmt.allocPrint(self.sink.arena, "a task's body of type `{s}` may carry captures that cannot cross to another task", .{name}),
+                    .labels = try self.sink.arena.dupe(diagnostics.Label, &.{.{ .file = self.ast.fileOfExpr(arg), .span = self.ast.exprSpan(arg), .message = "what this body captures is not known here" }}),
+                    .notes = try self.sink.arena.dupe([]const u8, &.{"start the task where its body is written, so its captures can be checked"}),
+                });
+            }
+            var captures = try CrossingCaptures.index(self, closure.?);
+            defer captures.deinit(self.gpa);
+            const unjoined = self.typing.raw_accesses.dispatchesTask(start);
+            // A capture's own observation or lend is reported before what
+            // the captured value contains, which the same capture explains.
+            const facts = self.store.facts(try self.value(state, arg));
+            for ([_]bool{ true, false }) |own_pass| for (facts) |fact| {
+                if (fact.invalid != .none) continue;
+                const capture = captures.captureOf(fact);
+                if (own_pass != self.ownsDependency(capture, fact)) continue;
+                const at = if (capture) |held| held.source else arg;
+                if (unjoined) {
+                    if ((try self.crossings_reported.getOrPut(self.gpa, at)).found_existing) continue;
+                    try self.crossingUnjoined(at, own_pass, fact);
+                    continue;
+                }
+                if (fact.origin.lent != .none) {
+                    if (own_pass) continue;
+                    if ((try self.crossings_reported.getOrPut(self.gpa, at)).found_existing) continue;
+                    try self.crossingLend(at, fact);
+                    continue;
+                }
+                const observed_type = self.observedType(fact) orelse continue;
+                if (self.typing.isShareable(observed_type)) continue;
+                if ((try self.crossings_reported.getOrPut(self.gpa, at)).found_existing) continue;
+                try self.crossingObservation(at, own_pass, fact, observed_type);
+            };
+        }
+    }
+
+    /// Whether `fact` is `capture`'s own: the observation a `read` capture
+    /// makes of its source, or the lend an `inout` capture makes of it.
+    fn ownsDependency(self: *const Analysis, capture: ?resolve_mod.ResolvedCapture, fact: Fact) bool {
+        const held = capture orelse return false;
+        if (fact.origin.lent != .none) return held.convention == .inout and held.source == fact.origin.lent;
+        return held.convention == .read and fact.origin.temporary == .none and
+            self.ast.refersToBinding(held.source) and self.res.targetOf(held.source) == fact.origin.place.root;
+    }
+
+    /// Which capture of a task's body gave it each dependency: the capture
+    /// whose own observation or lend it is, or the capture whose captured
+    /// value carried it there, as `capture_sets` recorded. A dependency no
+    /// capture's recorded set holds has none, and its report names the body.
+    /// Sized by the body's captures and the dependencies they took in, so a
+    /// dependency's capture is a lookup, not a walk over every capture.
+    const CrossingCaptures = struct {
+        const Carried = struct { root: BindingId, path: PathId, temporary: ExprId };
+
+        reads: std.AutoHashMapUnmanaged(BindingId, resolve_mod.ResolvedCapture) = .empty,
+        lends: std.AutoHashMapUnmanaged(ExprId, resolve_mod.ResolvedCapture) = .empty,
+        carried: std.AutoHashMapUnmanaged(Carried, resolve_mod.ResolvedCapture) = .empty,
+
+        fn index(analysis: *const Analysis, closure: ids.ClosureId) !CrossingCaptures {
+            var built: CrossingCaptures = .{};
+            errdefer built.deinit(analysis.gpa);
+            const gpa = analysis.gpa;
+            for (analysis.res.closureCaptures(closure)) |capture| {
+                switch (capture.convention) {
+                    .inout => try built.lends.put(gpa, capture.source, capture),
+                    .read => if (analysis.ast.refersToBinding(capture.source)) {
+                        const entry = try built.reads.getOrPut(gpa, analysis.res.targetOf(capture.source));
+                        if (!entry.found_existing) entry.value_ptr.* = capture;
+                    },
+                    else => {},
+                }
+                const held = analysis.capture_sets.get(capture.source) orelse continue;
+                for (analysis.store.facts(held)) |fact| {
+                    const key: Carried = .{ .root = fact.origin.place.root, .path = fact.origin.place.path, .temporary = fact.origin.temporary };
+                    const entry = try built.carried.getOrPut(gpa, key);
+                    if (!entry.found_existing) entry.value_ptr.* = capture;
+                }
+            }
+            return built;
+        }
+
+        fn deinit(self: *CrossingCaptures, gpa: Allocator) void {
+            self.reads.deinit(gpa);
+            self.lends.deinit(gpa);
+            self.carried.deinit(gpa);
+        }
+
+        fn captureOf(self: *const CrossingCaptures, fact: Fact) ?resolve_mod.ResolvedCapture {
+            if (fact.origin.lent != .none) {
+                if (self.lends.get(fact.origin.lent)) |capture| return capture;
+            } else if (fact.origin.temporary == .none) {
+                if (self.reads.get(fact.origin.place.root)) |capture| return capture;
+            }
+            return self.carried.get(.{ .root = fact.origin.place.root, .path = fact.origin.place.path, .temporary = fact.origin.temporary });
+        }
+    };
+
+    /// The type of the place `fact` observes, or null where its path selects
+    /// nothing a type names, such as a projection the library keeps opaque.
+    fn observedType(self: *const Analysis, fact: Fact) ?types.TypeId {
+        const owner = if (fact.origin.temporary != .none)
+            self.typing.exprType(fact.origin.temporary)
+        else if (fact.origin.place.root != .none)
+            self.typing.bindingType(fact.origin.place.root)
+        else
+            return null;
+        return self.typeAtPath(owner, fact.origin.place.path) orelse owner;
+    }
+
+    /// The module a report names types from: that of the declaration whose
+    /// body this is, or encloses this closure.
+    fn functionModule(self: *const Analysis) ModuleId {
+        return if (self.function.owner == .none) ModuleId.none else self.program.moduleOf(self.function.owner);
+    }
+
+    /// The part of `ty` that is not `Shareable`, named as far as a reader can
+    /// select it: down the fields of records while one field's type is
+    /// unshareable. Null where no field explains it, because `ty` is itself
+    /// declared `unshareable`, or is an observation, a callable or a type
+    /// parameter.
+    ///
+    /// **Bound:** each step enters a field a record holds by value, and no
+    /// record holds itself by value, so the walk is as deep as `ty` nests.
+    fn unshareablePart(self: *const Analysis, ty: types.TypeId) !?[]const u8 {
+        var parts: std.ArrayList(u8) = .empty;
+        var at = ty;
+        while (true) {
+            // A closure's environment holds its captures, named as fields.
+            if (self.typing.get(at) == .closure) {
+                if (self.typing.unshareableSeed(at)) break;
+                at = self.typing.get(at).closure.environment;
+            }
+            if (self.typing.get(at) != .struct_ or self.typing.unshareableSeed(at)) break;
+            const count = self.typing.fieldCount(at);
+            const index = for (0..count) |i| {
+                if (!self.typing.isShareable(self.typing.fieldType(at, @intCast(i)))) break i;
+            } else break;
+            if (parts.items.len != 0) try parts.append(self.sink.arena, '.');
+            try parts.appendSlice(self.sink.arena, self.typing.fieldName(at, @intCast(index)));
+            at = self.typing.fieldType(at, @intCast(index));
+        }
+        if (parts.items.len == 0) return null;
+        // An observation's referent is what it observes, not a part.
+        const observes = self.typing.get(at) == .borrow;
+        if (observes) at = self.typing.get(at).borrow.referent;
+        const name = try writtenTypeName(self.sink.arena, self.ast, self.program, self.res, self.typing, self.functionModule(), at);
+        return try std.fmt.allocPrint(self.sink.arena, "`{s}` {s} a `{s}`", .{ parts.items, if (observes) "observes" else "is", name });
+    }
+
+    fn crossingObservation(self: *Analysis, at: ExprId, own: bool, fact: Fact, observed_type: types.TypeId) !void {
+        const arena = self.sink.arena;
+        const owner = if (fact.origin.place.root != .none)
+            try self.program.subjectAt(arena, self.res.declaringToken(fact.origin.place.root))
+        else
+            "a temporary";
+        const type_name = try writtenTypeName(arena, self.ast, self.program, self.res, self.typing, self.functionModule(), observed_type);
+        // A closure has no name a reader could write, so it is called a closure.
+        const subject = if (self.typing.get(observed_type) == .closure) "a closure" else try std.fmt.allocPrint(arena, "a `{s}`", .{type_name});
+        const why = if (try self.unshareablePart(observed_type)) |part|
+            try std.fmt.allocPrint(arena, "{s} is not `Shareable`: {s}, which is unshareable", .{ subject, part })
+        else
+            try std.fmt.allocPrint(arena, "{s} is not `Shareable`", .{subject});
+        const message = if (own)
+            try std.fmt.allocPrint(arena, "a task cannot read {s} while its creator may read it too: {s}", .{ owner, why })
+        else
+            try std.fmt.allocPrint(arena, "a task cannot take a value observing {s}, which its creator may read too: {s}", .{ owner, why });
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .o_cross,
+            .message = message,
+            .labels = try arena.dupe(diagnostics.Label, &.{.{
+                .file = self.ast.fileOfExpr(at),
+                .span = self.ast.exprSpan(at),
+                .message = if (own) "this capture is read by the task" else "this capture observes it",
+            }}),
+            .notes = try arena.dupe([]const u8, &.{"reading this value may change it; move it into one task, or give the task a value that reading never changes"}),
+        });
+    }
+
+    fn crossingLend(self: *Analysis, at: ExprId, fact: Fact) !void {
+        const arena = self.sink.arena;
+        const owner = if (fact.origin.place.root != .none)
+            try self.program.subjectAt(arena, self.res.declaringToken(fact.origin.place.root))
+        else
+            "a temporary";
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .o_cross,
+            .message = try std.fmt.allocPrint(arena, "a task cannot take {s} lent `inout` through another value: only the body's own `inout` capture lends a place to a task", .{owner}),
+            .labels = try arena.dupe(diagnostics.Label, &.{
+                .{ .file = self.ast.fileOfExpr(at), .span = self.ast.exprSpan(at), .message = "this capture holds the lend" },
+                .{ .file = self.ast.fileOfExpr(fact.origin.lent), .span = self.ast.exprSpan(fact.origin.lent), .message = "lent `inout` here", .style = .secondary },
+            }),
+            .notes = try arena.dupe([]const u8, &.{"capture the place `inout` in the task's body itself"}),
+        });
+    }
+
+    fn crossingUnjoined(self: *Analysis, at: ExprId, own: bool, fact: Fact) !void {
+        const arena = self.sink.arena;
+        const owner = if (fact.origin.place.root != .none)
+            try self.program.subjectAt(arena, self.res.declaringToken(fact.origin.place.root))
+        else
+            "a temporary";
+        if (fact.origin.lent != .none) {
+            const labels: []const diagnostics.Label = if (own)
+                try arena.dupe(diagnostics.Label, &.{
+                    .{ .file = self.ast.fileOfExpr(at), .span = self.ast.exprSpan(at), .message = "this capture lends the place `inout`" },
+                })
+            else
+                try arena.dupe(diagnostics.Label, &.{
+                    .{ .file = self.ast.fileOfExpr(at), .span = self.ast.exprSpan(at), .message = "this capture holds the lend" },
+                    .{ .file = self.ast.fileOfExpr(fact.origin.lent), .span = self.ast.exprSpan(fact.origin.lent), .message = "lent `inout` here", .style = .secondary },
+                });
+            return self.sink.add(.{
+                .severity = .err,
+                .code = .o_cross,
+                .message = try std.fmt.allocPrint(arena, "an unjoined task cannot take {s} lent `inout`: nothing joins the task before {s} is used or ends", .{ owner, owner }),
+                .labels = labels,
+                .notes = try arena.dupe([]const u8, &.{"an unjoined task returns no handle to join it; move an owned value into the task with `sink`, or start a joined task with `task.prepare` or `task.start`"}),
+            });
+        }
+        const message = if (own)
+            try std.fmt.allocPrint(arena, "an unjoined task cannot read {s}: nothing joins the task before {s} ends", .{ owner, owner })
+        else
+            try std.fmt.allocPrint(arena, "an unjoined task cannot take a value observing {s}: nothing joins the task before {s} ends", .{ owner, owner });
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .o_cross,
+            .message = message,
+            .labels = try arena.dupe(diagnostics.Label, &.{.{
+                .file = self.ast.fileOfExpr(at),
+                .span = self.ast.exprSpan(at),
+                .message = if (own) "this capture is read by the task" else "this capture observes it",
+            }}),
+            .notes = try arena.dupe([]const u8, &.{"an unjoined task returns no handle to join it; move an owned value into the task with `sink`, or start a joined task with `task.prepare` or `task.start`"}),
+        });
     }
 
     fn originWithinPath(self: *Analysis, origin: Origin, path: PathId, borrows: bool) !bool {

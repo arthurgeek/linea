@@ -1,0 +1,119 @@
+// A session payload moves between two tasks as bytes. The sender moves the
+// value into bytes the system allocator lends, the runtime copies them into
+// the receiver's bytes once both ends have met, and the receiver moves the
+// value out. A payload is `Owned`, so its bytes name nothing either task
+// observes, and moving them moves the whole value.
+
+// Hand the `len` bytes at `at` to the peer of `endpoint`. The call returns
+// once the peer has copied them.
+extern fn linea_chan_send(endpoint: UInt64, at: UInt64, len: UInt64)
+
+// Wait until the peer of `endpoint` sends, and copy the `len` bytes it sent
+// to `at`.
+extern fn linea_chan_recv(endpoint: UInt64, at: UInt64, len: UInt64)
+
+extern fn linea_chan_recv_until(endpoint: UInt64, at: UInt64, len: UInt64, timeout_ns: UInt64) -> UInt8
+
+extern fn linea_mailbox_send(mb: UInt64, at: UInt64, len: UInt64)
+
+extern fn linea_mailbox_recv(mb: UInt64, at: UInt64, len: UInt64) -> UInt8
+
+extern fn linea_mailbox_timer(mb: UInt64, timeout_ns: UInt64, at: UInt64, len: UInt64) -> UInt64
+
+extern fn linea_mailbox_timer_cancel(timer: UInt64, at: UInt64, len: UInt64) -> UInt8
+
+// Move `value` to the peer of `endpoint`. Running out of memory for the bytes
+// it moves through is a trap, since a send cannot fail.
+internal fn send_payload[T](endpoint: UInt64, sink value: T) {
+    let shape: SlotType[T] = .Type
+    var storage: Storage[T, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
+    let at = storage.at
+    let len = storage.len
+    slot_put(&storage, at, len, 0, value)
+    linea_chan_send(endpoint, at, len)
+    storage.dispose()
+}
+
+// Wait for the peer of `endpoint` to send a `T`, and answer it. Running out
+// of memory for the bytes it moves through is a trap, since a receive cannot
+// fail.
+internal fn receive_payload[T](endpoint: UInt64) -> T {
+    let shape: SlotType[T] = .Type
+    var storage: Storage[T, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
+    let at = storage.at
+    let len = storage.len
+    linea_chan_recv(endpoint, at, len)
+    let value: T = slot_take(&storage, at, len, 0)
+    storage.dispose()
+    value
+}
+
+// Wait for the peer of `endpoint` to send a `T` before `timeout_ns` elapses.
+internal fn receive_payload_until[T](endpoint: UInt64, timeout_ns: UInt64) -> Option[T] {
+    let shape: SlotType[T] = .Type
+    var storage: Storage[T, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
+    let at = storage.at
+    let len = storage.len
+    let rc = linea_chan_recv_until(endpoint, at, len, timeout_ns)
+    if rc == 1 {
+        let value: T = slot_take(&storage, at, len, 0)
+        storage.dispose()
+        .Some(value)
+    } else {
+        storage.dispose()
+        .None
+    }
+}
+
+internal fn mailbox_send_payload[T](mb: UInt64, sink value: T) {
+    let shape: SlotType[T] = .Type
+    var storage: Storage[T, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
+    let at = storage.at
+    let len = storage.len
+    slot_put(&storage, at, len, 0, value)
+    linea_mailbox_send(mb, at, len)
+    storage.dispose()
+}
+
+internal fn mailbox_receive_payload[T](mb: UInt64) -> Option[T] {
+    let shape: SlotType[T] = .Type
+    var storage: Storage[T, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
+    let at = storage.at
+    let len = storage.len
+    let rc = linea_mailbox_recv(mb, at, len)
+    if rc == 1 {
+        let value: T = slot_take(&storage, at, len, 0)
+        storage.dispose()
+        .Some(value)
+    } else {
+        storage.dispose()
+        .None
+    }
+}
+
+internal fn mailbox_timer_payload[T](mb: UInt64, timeout_ns: UInt64, sink value: T) -> UInt64 {
+    let shape: SlotType[T] = .Type
+    var storage: Storage[T, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
+    let at = storage.at
+    let len = storage.len
+    slot_put(&storage, at, len, 0, value)
+    let timer_handle = linea_mailbox_timer(mb, timeout_ns, at, len)
+    storage.dispose()
+    timer_handle
+}
+
+internal fn mailbox_timer_cancel_payload[T](timer_handle: UInt64) -> Option[T] {
+    let shape: SlotType[T] = .Type
+    var storage: Storage[T, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
+    let at = storage.at
+    let len = storage.len
+    let rc = linea_mailbox_timer_cancel(timer_handle, at, len)
+    if rc == 0 {
+        let value: T = slot_take(&storage, at, len, 0)
+        storage.dispose()
+        .Some(value)
+    } else {
+        storage.dispose()
+        .None
+    }
+}

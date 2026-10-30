@@ -1,0 +1,7 @@
+error[O-Cross]: a task cannot read `report` while its creator may read it too: a `Report` is not `Shareable`: `scratch` is a `mem.Handle[mem.SystemAllocator]`, which is unshareable
+  --> tests/tasks/a_record_read_by_a_task_names_its_unshareable_part.lin:19:27
+   |
+19 |     let body = sink [read report] |sink me: Chan[End]| {
+   |                           ^^^^^^ this capture is read by the task
+   |
+   = help: reading this value may change it; move it into one task, or give the task a value that reading never changes

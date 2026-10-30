@@ -1,0 +1,18 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Send
+
+// A `Str` views text another value owns, so it is not `Owned` and no session
+// sends it.
+fn main() -> UInt8 {
+    let body = sink [] |sink me: Chan[Send[Str, End]]| {
+        me.send("ready").close()
+    }
+    let slot = task.prepare(body).unwrap()
+    let (word, handle) = slot.start().recv()
+    handle.close()
+    UInt8(word.length())
+}

@@ -6,6 +6,10 @@ extern fn linea_read_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
 
 extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
 
+extern fn linea_read_at(fd: Int32, at: UInt64, len: UInt64, offset: UInt64) -> Int64
+
+extern fn linea_write_at(fd: Int32, at: UInt64, len: UInt64, offset: UInt64) -> Int64
+
 // Read up to `count` bytes from `fd` into `buffer` at `offset`, checking the
 // range first, and return the runtime's count or negated errno. Transport holds
 // the owner for the complete call. Bounds precede address arithmetic; only the
@@ -22,6 +26,20 @@ internal fn write_slice_fd(bytes: Slice[UInt8], fd: Int32) -> Int64 {
     linea_write_some(fd, bytes.at, bytes.len)
 }
 
+// Read up to `count` bytes from `fd` into `buffer` at `buffer_offset` starting at
+// `file_offset` in the file.
+internal fn read_fd_at[A: Allocator](inout buffer: Buffer[A], fd: Int32, buffer_offset: UInt64, count: UInt64, file_offset: UInt64) -> Int64 {
+    if buffer_offset > buffer.len || count > buffer.len - buffer_offset {
+        panic("buffer I/O range is out of bounds")
+    }
+    linea_read_at(fd, buffer.at + buffer_offset, count, file_offset)
+}
+
+// Write `bytes` to `fd` starting at `file_offset` in the file.
+internal fn write_slice_fd_at(bytes: Slice[UInt8], fd: Int32, file_offset: UInt64) -> Int64 {
+    linea_write_at(fd, bytes.at, bytes.len, file_offset)
+}
+
 test fn empty_fd_requests_do_not_access_a_descriptor() {
     // -1 is invalid, so success proves that a zero-byte request bypasses I/O.
     let allocator = system()
@@ -29,8 +47,10 @@ test fn empty_fd_requests_do_not_access_a_descriptor() {
         return testing.assert(false, "test buffer allocation failed")
     }
     testing.assert_eq(read_fd(&bytes, -1, 1, 0), 0, "an empty read reached the descriptor")?
+    testing.assert_eq(read_fd_at(&bytes, -1, 1, 0, 0), 0, "an empty positional read reached the descriptor")?
     let empty = bytes.as_slice().subspan(start: 1, count: 0).unwrap()
     testing.assert_eq(write_slice_fd(empty, -1), 0, "an empty write reached the descriptor")?
+    testing.assert_eq(write_slice_fd_at(empty, -1, 0), 0, "an empty positional write reached the descriptor")?
     .Ok(())
 }
 

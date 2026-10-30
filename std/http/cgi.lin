@@ -3,6 +3,7 @@ import std.fmt
 import std.io
 import std.mem
 import std.testing
+import std.time
 
 use env.Entries
 use env.Entry
@@ -563,6 +564,7 @@ fn answer_cgi[V: CgiVariables, R: io.Reader + Discardable, D: CgiOutput, H: Hand
     var note = String.new_in(memory)
     var body: BodyWriter[P] = .{ output = unanswered, answering = copy(request), failure = .None, in_body = false, body_bytes = 0, framing = .Cgi }
     var nothing = ()
+    let started = time.Instant.now()
     let answered: Answered = match &handler.serve_http(&nothing, request) {
         Ok(response) => {
             let status = response.status()
@@ -576,8 +578,9 @@ fn answer_cgi[V: CgiVariables, R: io.Reader + Discardable, D: CgiOutput, H: Hand
             Answered { status, refused = true, noted, sent = settle_cgi(body, written, &note, &destination) }
         },
     }
+    let duration: Option[time.Duration] = .Some(started.elapsed())
     let failure = answer_failure(answered, note)
-    let event: Event[P] = .Exchanged(.{ request = .Some(request), status = .Some(copy(answered.status)), body_bytes = answered.sent.body_bytes, failure })
+    let event: Event[P] = .Exchanged(.{ request = .Some(request), status = .Some(copy(answered.status)), body_bytes = answered.sent.body_bytes, duration, failure })
     &handler.observe(event)
     .Ok(())
 }
@@ -630,7 +633,7 @@ fn observe_unanswered[H: Observer](inout handler: H, status: Status, sink wrote:
         Ok(_) => cause,
         Err(reason) => .Write(io.IoError.from(reason)),
     }
-    let event: Event = .Exchanged(.{ request = .None, status = .Some(copy(status)), body_bytes = 0, failure = .Some(failure) })
+    let event: Event = .Exchanged(.{ request = .None, status = .Some(copy(status)), body_bytes = 0, duration = .None, failure = .Some(failure) })
     &handler.observe(event)
 }
 

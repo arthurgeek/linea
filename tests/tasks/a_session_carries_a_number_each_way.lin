@@ -1,0 +1,23 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+// The body receives a number and sends back its square. Each `send` returns
+// once the other end has taken the value.
+fn main() -> Result[UInt8, io.IoError] {
+    let body = sink [] |sink me: Chan[Recv[UInt64, Send[UInt64, End]]]| {
+        let (number, answering) = me.recv()
+        answering.send(number * number).close()
+    }
+    let slot = task.prepare(body).unwrap()
+    let asking = slot.start().send(12)
+    let (square, done) = asking.recv()
+    done.close()
+    io.println("square: {square}")?
+    .Ok(0)
+}

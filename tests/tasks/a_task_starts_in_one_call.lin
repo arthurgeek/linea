@@ -1,0 +1,26 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Send
+
+// A body that owns nothing linear starts in one call: a failure drops the
+// body and answers the reason.
+fn doubled(number: UInt64) -> Result[UInt64, task.PrepareError] {
+    let body = sink [read number] |sink me: Chan[Send[UInt64, End]]| {
+        me.send(number * 2).close()
+    }
+    let (answer, done) = task.start(body)?.recv()
+    done.close()
+    .Ok(answer)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    match doubled(21) {
+        Ok(answer) => io.println("doubled: {answer}")?,
+        Err(reason) => io.println("not started: {reason}")?,
+    }
+    .Ok(0)
+}

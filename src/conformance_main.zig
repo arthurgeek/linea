@@ -8790,9 +8790,9 @@ fn compileWithLibrary(
 
 /// Whether a sanitizer reported a fault on standard error.
 ///
-/// The address and leak sanitizers each name themselves in the first
-/// line of a report, and the undefined-behaviour checks the runtime is built
-/// with say `runtime error:` when they report rather than trap.
+/// The address, leak and thread sanitizers each name themselves in the
+/// first line of a report, and the undefined-behaviour checks the runtime is
+/// built with say `runtime error:` when they report rather than trap.
 fn sanitizerReported(errors: []const u8) bool {
     return std.mem.indexOf(u8, errors, "Sanitizer") != null or
         std.mem.indexOf(u8, errors, "runtime error:") != null;
@@ -8801,6 +8801,7 @@ fn sanitizerReported(errors: []const u8) bool {
 test "a sanitizer report is found wherever it sits on standard error" {
     try testing.expect(sanitizerReported("==12==ERROR: AddressSanitizer: heap-use-after-free on address"));
     try testing.expect(sanitizerReported("printed first\n==12==ERROR: LeakSanitizer: detected memory leaks"));
+    try testing.expect(sanitizerReported("WARNING: ThreadSanitizer: data race (pid=7)"));
     try testing.expect(sanitizerReported("linea_rt.c:40:3: runtime error: signed integer overflow"));
     try testing.expect(!sanitizerReported("linea: index out of bounds at main.lin:4:9\n"));
     try testing.expect(!sanitizerReported(""));
