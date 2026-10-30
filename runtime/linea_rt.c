@@ -168,8 +168,10 @@ void linea_thread_end(void) {
     stack_t alternate;
     memset(&alternate, 0, sizeof alternate);
     alternate.ss_flags = SS_DISABLE;
-    /* macOS checks the size even of a stack being removed. */
-    alternate.ss_size = MINSIGSTKSZ;
+    /* macOS checks the size even of a stack being removed. glibc defines
+     * `MINSIGSTKSZ` as a `sysconf` call, a `long`, and Linux ignores the size
+     * of a stack being removed. */
+    alternate.ss_size = (size_t)MINSIGSTKSZ;
     if (sigaltstack(&alternate, 0) != 0) fail("linea: a thread cannot remove its signal stack\n");
     guard_low = 0;
     guard_high = 0;
