@@ -281,20 +281,35 @@ void linea_chan_close(unsigned long endpoint) {
     destroy(t);
 }
 
+/* Sets `*deadline` to `now` plus `step_sec` seconds and `step_nsec`
+ * nanoseconds and answers 1, or answers 0 when that time is past the largest
+ * `time_t`. No clock reaches a time `time_t` cannot hold, so a wait whose
+ * deadline would be past it waits without one. `step_nsec` is below one
+ * second. */
+static int deadline_after(struct timespec now, uint64_t step_sec, long step_nsec, struct timespec *deadline) {
+    long nsec = now.tv_nsec + step_nsec;
+    int carry = 0;
+    if (nsec >= 1000000000L) {
+        carry = 1;
+        nsec -= 1000000000L;
+    }
+    time_t sec;
+    if (__builtin_add_overflow(now.tv_sec, step_sec, &sec) || __builtin_add_overflow(sec, carry, &sec)) return 0;
+    deadline->tv_sec = sec;
+    deadline->tv_nsec = nsec;
+    return 1;
+}
+
 uint8_t linea_chan_recv_until(unsigned long endpoint, unsigned long at, unsigned long len, unsigned long timeout_ns) {
     struct task *t = task_of(endpoint);
     linea_storage_extent(at, len);
+    struct timespec now;
+    if (clock_gettime(CLOCK_REALTIME, &now) != 0) fail("linea: clock_gettime failed\n");
     struct timespec deadline;
-    clock_gettime(CLOCK_REALTIME, &deadline);
-    deadline.tv_sec += timeout_ns / 1000000000UL;
-    deadline.tv_nsec += timeout_ns % 1000000000UL;
-    if (deadline.tv_nsec >= 1000000000L) {
-        deadline.tv_sec += 1;
-        deadline.tv_nsec -= 1000000000L;
-    }
+    const int timed = deadline_after(now, timeout_ns / 1000000000UL, (long)(timeout_ns % 1000000000UL), &deadline);
     must(pthread_mutex_lock(&t->lock));
     while (!t->full || t->from == endpoint) {
-        int rc = pthread_cond_timedwait(&t->changed, &t->lock, &deadline);
+        int rc = timed ? pthread_cond_timedwait(&t->changed, &t->lock, &deadline) : pthread_cond_wait(&t->changed, &t->lock);
         if (rc == ETIMEDOUT && (!t->full || t->from == endpoint)) {
             must(pthread_mutex_unlock(&t->lock));
             return 0;
@@ -496,8 +511,10 @@ static void *mailbox_timer_runner(void *arg) {
         uint64_t elapsed_ns = elapsed_sec * 1000000000ULL + elapsed_nsec;
         uint64_t remaining_ns = t->nanoseconds - elapsed_ns;
 
-        /* Cap single wait interval to at most 86400 seconds (1 day) to prevent
-         * any integer overflow in time_t, long, or kernel timeout representation. */
+        /* One wait covers at most a day, and the loop waits again for what
+         * remains. The day keeps the interval macOS is handed far inside what
+         * its conversion to a deadline can hold; elsewhere `deadline_after`
+         * checks the sum. */
         const uint64_t max_step_ns = 86400ULL * 1000000000ULL;
         uint64_t step_ns = remaining_ns > max_step_ns ? max_step_ns : remaining_ns;
 
@@ -508,20 +525,16 @@ static void *mailbox_timer_runner(void *arg) {
         int rc = pthread_cond_timedwait_relative_np(&t->cond, &t->lock, &rel_timeout);
 #else
         struct timespec deadline;
-        time_t step_sec = (time_t)(step_ns / 1000000000ULL);
-        long step_nsec = (long)(step_ns % 1000000000ULL);
-        deadline.tv_sec = now.tv_sec + step_sec;
-        deadline.tv_nsec = now.tv_nsec + step_nsec;
-        if (deadline.tv_nsec >= 1000000000L) {
-            deadline.tv_sec += 1;
-            deadline.tv_nsec -= 1000000000L;
-        }
-        int rc = pthread_cond_timedwait(&t->cond, &t->lock, &deadline);
+        int rc = deadline_after(now, step_ns / 1000000000ULL, (long)(step_ns % 1000000000ULL), &deadline)
+                     ? pthread_cond_timedwait(&t->cond, &t->lock, &deadline)
+                     : pthread_cond_wait(&t->cond, &t->lock);
 #endif
         if (rc == ETIMEDOUT) {
             continue;
         }
-        if (rc != 0 && rc != EINTR) {
+        /* POSIX does not let a condition wait return EINTR: a signal resumes
+         * the wait or ends it as a spurious wakeup, which the loop rechecks. */
+        if (rc != 0) {
             must(pthread_mutex_unlock(&t->lock));
             fail("linea: timer condition timedwait failed\n");
         }
@@ -1036,8 +1049,10 @@ uint8_t linea_latch_arrive_and_wait_timeout(unsigned long handle, unsigned long 
             rem_nsec = target_nsec + 1000000000ULL - elapsed_nsec;
         }
 
-        /* Cap single wait interval to at most 86400 seconds (1 day) to prevent
-         * any integer overflow in time_t, long, or kernel timeout representation. */
+        /* One wait covers at most a day, and the loop waits again for what
+         * remains. The day keeps the interval macOS is handed far inside what
+         * its conversion to a deadline can hold; elsewhere `deadline_after`
+         * checks the sum. */
         const uint64_t max_step_sec = 86400ULL;
         uint64_t step_sec = rem_sec;
         uint64_t step_nsec = rem_nsec;
@@ -1053,18 +1068,16 @@ uint8_t linea_latch_arrive_and_wait_timeout(unsigned long handle, unsigned long 
         int rc = pthread_cond_timedwait_relative_np(&l->cond, &l->lock, &rel_timeout);
 #else
         struct timespec deadline;
-        deadline.tv_sec = now.tv_sec + (time_t)step_sec;
-        deadline.tv_nsec = now.tv_nsec + (long)step_nsec;
-        if (deadline.tv_nsec >= 1000000000L) {
-            deadline.tv_sec += 1;
-            deadline.tv_nsec -= 1000000000L;
-        }
-        int rc = pthread_cond_timedwait(&l->cond, &l->lock, &deadline);
+        int rc = deadline_after(now, step_sec, (long)step_nsec, &deadline)
+                     ? pthread_cond_timedwait(&l->cond, &l->lock, &deadline)
+                     : pthread_cond_wait(&l->cond, &l->lock);
 #endif
         if (rc == ETIMEDOUT) {
             continue;
         }
-        if (rc != 0 && rc != EINTR) {
+        /* POSIX does not let a condition wait return EINTR: a signal resumes
+         * the wait or ends it as a spurious wakeup, which the loop rechecks. */
+        if (rc != 0) {
             must(pthread_mutex_unlock(&l->lock));
             fail("linea: latch condition timedwait failed\n");
         }

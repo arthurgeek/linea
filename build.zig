@@ -1671,6 +1671,8 @@ pub fn build(b: *std.Build) void {
         "-Dmmap=linea_test_mmap",
         "-Dmunmap=linea_test_munmap",
         "-Dcalloc=linea_test_calloc",
+        "-Dclock_gettime=linea_test_clock_gettime",
+        "-Dpthread_cond_wait=linea_test_pthread_cond_wait",
     }) catch @panic("OOM");
     var refused_signal_flags: std.ArrayList([]const u8) = .empty;
     refused_signal_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
