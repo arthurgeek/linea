@@ -4,19 +4,24 @@
 #undef NDEBUG
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "task.h"
 
-/* `task.c` is compiled with its thread creation, joins, mappings and record
- * allocation renamed to these, and `linea_rt.c` with its `sigaltstack`, so
- * each can be made to fail where the system would. Each counts what it made
- * and otherwise does what the system call does. */
+/* `task.c` is compiled with its thread creation, joins, mappings, record
+ * allocation, monotonic clock reads and untimed condition waits renamed to
+ * these, and `linea_rt.c` with its `sigaltstack`, so each can be made to fail
+ * or answer where the system would. Each counts what it made and otherwise
+ * does what the system call does. */
 static int refuse_create = 0;
 static int refuse_record = 0;
 static int refuse_signal_stack = 0;
@@ -64,6 +69,45 @@ void *linea_test_calloc(size_t count, size_t size) {
     return calloc(count, size);
 }
 
+/* While `clock_is_late` is set, every clock reads `late_clock` and each
+ * untimed condition wait is counted in `untimed_waits`. */
+static int clock_is_late = 0;
+static struct timespec late_clock;
+static unsigned long untimed_waits = 0;
+
+int linea_test_clock_gettime(clockid_t clock, struct timespec *now);
+int linea_test_clock_gettime(clockid_t clock, struct timespec *now) {
+    if (__atomic_load_n(&clock_is_late, __ATOMIC_SEQ_CST)) {
+        *now = late_clock;
+        return 0;
+    }
+    return clock_gettime(clock, now);
+}
+
+int linea_test_pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *lock);
+int linea_test_pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *lock) {
+    if (__atomic_load_n(&clock_is_late, __ATOMIC_SEQ_CST)) __atomic_add_fetch(&untimed_waits, 1, __ATOMIC_SEQ_CST);
+    return pthread_cond_wait(cond, lock);
+}
+
+/* Sets every clock an hour before the largest `time_t`. */
+static void make_the_clock_late(time_t latest) {
+    late_clock = (struct timespec){.tv_sec = latest - 3600, .tv_nsec = 999999999L};
+    __atomic_store_n(&untimed_waits, 0, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&clock_is_late, 1, __ATOMIC_SEQ_CST);
+}
+
+static void make_the_clock_true(void) {
+    __atomic_store_n(&clock_is_late, 0, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&untimed_waits, 0, __ATOMIC_SEQ_CST);
+}
+
+/* Waits until a runtime thread has entered an untimed condition wait while the
+ * clock is late. */
+static void await_an_untimed_wait(void) {
+    while (__atomic_load_n(&untimed_waits, __ATOMIC_SEQ_CST) == 0) sched_yield();
+}
+
 int linea_test_sigaltstack(const stack_t *installed, stack_t *previous);
 int linea_test_sigaltstack(const stack_t *installed, stack_t *previous) {
     if (refuse_signal_stack && installed != 0 && (installed->ss_flags & SS_DISABLE) == 0) {
@@ -104,6 +148,81 @@ static void nothing_is_left_and_the_body_still_runs(long refused, long expected)
     released = 0;
 }
 
+/* The largest value of `time_t`, which is signed on every target the runtime
+ * builds for. */
+_Static_assert((time_t)-1 < 0, "time_t is signed");
+static const time_t latest_time = (time_t)((((uintmax_t)1 << (sizeof(time_t) * CHAR_BIT - 1)) - 1));
+
+/* A timeout of three days, in milliseconds and in nanoseconds. Read an hour
+ * before the largest `time_t`, it ends past the last time a deadline can
+ * name. */
+static const unsigned long three_days_ms = 3UL * 86400UL * 1000UL;
+static const unsigned long three_days_ns = 3UL * 86400UL * 1000000000UL;
+
+/* Counts the latch down once the waiting thread is in its wait. */
+static void *count_down_thread(void *latch) {
+    await_an_untimed_wait();
+    linea_latch_count_down(*(unsigned long *)latch);
+    return 0;
+}
+
+/* A latch whose timeout ends after the last time `time_t` holds waits without
+ * a deadline, and is still released by its last arrival. */
+static void a_latch_timeout_past_the_last_time_waits_without_a_deadline(void) {
+    unsigned long latch = linea_latch_open(2);
+    make_the_clock_late(latest_time);
+    pthread_t other;
+    assert(pthread_create(&other, 0, count_down_thread, &latch) == 0);
+    assert(linea_latch_arrive_and_wait_timeout(latch, three_days_ms) == 1);
+    assert(pthread_join(other, 0) == 0);
+    make_the_clock_true();
+    linea_latch_free(latch);
+}
+
+/* A mailbox timer whose duration ends after the last time `time_t` holds waits
+ * without a deadline, and is still cancelled with its payload returned. */
+static void a_timer_past_the_last_time_waits_without_a_deadline(void) {
+    unsigned long mailbox = linea_mailbox_open();
+    unsigned long payload = 4242;
+    make_the_clock_late(latest_time);
+    const unsigned long timer = linea_mailbox_timer(mailbox, three_days_ns, (unsigned long)&payload, sizeof(payload));
+    await_an_untimed_wait();
+    unsigned long returned = 0;
+    assert(linea_mailbox_timer_cancel(timer, (unsigned long)&returned, sizeof(returned)) == 0);
+    assert(returned == 4242);
+    make_the_clock_true();
+    linea_mailbox_close(mailbox);
+}
+
+/* The body of a task that sends one payload once its creator waits for it. */
+static void send_once_awaited(unsigned long endpoint, unsigned long at, unsigned long len) {
+    (void)at;
+    (void)len;
+    await_an_untimed_wait();
+    unsigned long payload = 4242;
+    linea_chan_send(endpoint, (unsigned long)&payload, sizeof(payload));
+    linea_chan_close(endpoint);
+}
+
+static void release_nothing(unsigned long at, unsigned long len) {
+    (void)at;
+    (void)len;
+}
+
+/* A timed receive whose timeout ends after the last time `time_t` holds waits
+ * without a deadline, and still takes what the peer sends. */
+static void a_receive_timeout_past_the_last_time_waits_without_a_deadline(void) {
+    const long task = linea_task_prepare(1UL << 16);
+    assert(task > 0);
+    const unsigned long session = linea_task_start((unsigned long)task, send_once_awaited, release_nothing, 0, 0);
+    make_the_clock_late(latest_time);
+    unsigned long received = 0;
+    assert(linea_chan_recv_until(session, (unsigned long)&received, sizeof(received), three_days_ns) == 1);
+    assert(received == 4242);
+    make_the_clock_true();
+    linea_chan_close(session);
+}
+
 int main(void) {
     refuse_record = 1;
     long refused = linea_task_prepare(1UL << 16);
@@ -136,6 +255,14 @@ int main(void) {
     linea_task_cancel((unsigned long)task);
     assert(maps == unmaps && creates == joins && ran == 0 && released == 0);
 
-    puts("native task faults: refused records, mappings, threads and signal stacks leave nothing behind");
+    a_receive_timeout_past_the_last_time_waits_without_a_deadline();
+    /* macOS hands a latch or a timer an interval relative to the clock it
+     * reads itself, so no deadline is computed for them there. */
+#if !defined(__APPLE__)
+    a_latch_timeout_past_the_last_time_waits_without_a_deadline();
+    a_timer_past_the_last_time_waits_without_a_deadline();
+#endif
+
+    puts("native task faults: refused records, mappings, threads and signal stacks leave nothing behind, and a wait past the last time has no deadline");
     return 0;
 }
