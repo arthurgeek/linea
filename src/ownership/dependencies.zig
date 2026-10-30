@@ -2145,7 +2145,6 @@ const Analysis = struct {
             }
             var captures = try CrossingCaptures.index(self, closure.?);
             defer captures.deinit(self.gpa);
-            const unjoined = self.typing.raw_accesses.dispatchesTask(start);
             // A capture's own observation or lend is reported before what
             // the captured value contains, which the same capture explains.
             const facts = self.store.facts(try self.value(state, arg));
@@ -2154,11 +2153,6 @@ const Analysis = struct {
                 const capture = captures.captureOf(fact);
                 if (own_pass != self.ownsDependency(capture, fact)) continue;
                 const at = if (capture) |held| held.source else arg;
-                if (unjoined) {
-                    if ((try self.crossings_reported.getOrPut(self.gpa, at)).found_existing) continue;
-                    try self.crossingUnjoined(at, own_pass, fact);
-                    continue;
-                }
                 if (fact.origin.lent != .none) {
                     if (own_pass) continue;
                     if ((try self.crossings_reported.getOrPut(self.gpa, at)).found_existing) continue;
@@ -2331,47 +2325,6 @@ const Analysis = struct {
                 .{ .file = self.ast.fileOfExpr(fact.origin.lent), .span = self.ast.exprSpan(fact.origin.lent), .message = "lent `inout` here", .style = .secondary },
             }),
             .notes = try arena.dupe([]const u8, &.{"capture the place `inout` in the task's body itself"}),
-        });
-    }
-
-    fn crossingUnjoined(self: *Analysis, at: ExprId, own: bool, fact: Fact) !void {
-        const arena = self.sink.arena;
-        const owner = if (fact.origin.place.root != .none)
-            try self.program.subjectAt(arena, self.res.declaringToken(fact.origin.place.root))
-        else
-            "a temporary";
-        if (fact.origin.lent != .none) {
-            const labels: []const diagnostics.Label = if (own)
-                try arena.dupe(diagnostics.Label, &.{
-                    .{ .file = self.ast.fileOfExpr(at), .span = self.ast.exprSpan(at), .message = "this capture lends the place `inout`" },
-                })
-            else
-                try arena.dupe(diagnostics.Label, &.{
-                    .{ .file = self.ast.fileOfExpr(at), .span = self.ast.exprSpan(at), .message = "this capture holds the lend" },
-                    .{ .file = self.ast.fileOfExpr(fact.origin.lent), .span = self.ast.exprSpan(fact.origin.lent), .message = "lent `inout` here", .style = .secondary },
-                });
-            return self.sink.add(.{
-                .severity = .err,
-                .code = .o_cross,
-                .message = try std.fmt.allocPrint(arena, "an unjoined task cannot take {s} lent `inout`: nothing joins the task before {s} is used or ends", .{ owner, owner }),
-                .labels = labels,
-                .notes = try arena.dupe([]const u8, &.{"an unjoined task returns no handle to join it; move an owned value into the task with `sink`, or start a joined task with `task.prepare` or `task.start`"}),
-            });
-        }
-        const message = if (own)
-            try std.fmt.allocPrint(arena, "an unjoined task cannot read {s}: nothing joins the task before {s} ends", .{ owner, owner })
-        else
-            try std.fmt.allocPrint(arena, "an unjoined task cannot take a value observing {s}: nothing joins the task before {s} ends", .{ owner, owner });
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .o_cross,
-            .message = message,
-            .labels = try arena.dupe(diagnostics.Label, &.{.{
-                .file = self.ast.fileOfExpr(at),
-                .span = self.ast.exprSpan(at),
-                .message = if (own) "this capture is read by the task" else "this capture observes it",
-            }}),
-            .notes = try arena.dupe([]const u8, &.{"an unjoined task returns no handle to join it; move an owned value into the task with `sink`, or start a joined task with `task.prepare` or `task.start`"}),
         });
     }
 

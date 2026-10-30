@@ -1,7 +1,6 @@
 import std.collections
 import std.fmt
 import std.mem
-import std.task
 import std.testing
 
 use mem.Closure
@@ -602,22 +601,20 @@ impl[S, P: Allocator] Handler[S, P] for Router[S, P] {
                 if pattern.find(r"{").is_none() {
                     return (self.handlers[index])(&state, request)
                 }
-                task.handler_lock()
+                // The values of the request answered last are dropped, and
+                // their storage is kept for these.
                 &self.matched.clear()
                 &self.fields.clear()
-                let recorded = record_path_values(&self.matched, &self.fields, pattern, request.path())
-                let res = match recorded {
-                    Ok(_) => {
-                        let matched = Str.from_bytes(self.matched.as_slice()).unwrap()
-                        (self.handlers[index])(&state, request.routed(matched, self.fields.as_slice()))
-                    },
-                    Err(refusal) => .Err(match refusal {
+                match record_path_values(&self.matched, &self.fields, pattern, request.path()) {
+                    Ok(_) => {},
+                    Err(refusal) => return .Err(match refusal {
                         Allocation(_) => Error.new(.InternalServerError),
                         _ => error(request, .BadRequest, "a path value is not percent-encoded UTF-8"),
                     }),
                 }
-                task.handler_unlock()
-                return res
+                // Every recorded name and value is UTF-8, so the whole is.
+                let matched = Str.from_bytes(self.matched.as_slice()).unwrap()
+                return (self.handlers[index])(&state, request.routed(matched, self.fields.as_slice()))
             },
             Unmatched => .Err(error(request, .NotFound, "not found")),
             WrongMethod(table) => {

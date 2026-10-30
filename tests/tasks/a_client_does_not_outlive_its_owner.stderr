@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/tasks/a_client_does_not_outlive_its_owner.lin:12:27
+   |
+12 |     let Tally { count } = tally.close()
+   |                           ^^^^^ keep this place available until the last use of its observation
+13 |     counter.call(|inout t: Tally| t.count += 1)
+   |     ------- the observation is still used here

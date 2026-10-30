@@ -1,0 +1,25 @@
+import std.task
+
+struct Tally {
+    count: UInt64,
+}
+
+// A call runs on the owning task's thread, so what it captures must be owned:
+// a client borrows an owning task, and a call holding one could wait on the
+// task that runs it.
+fn main() -> UInt8 {
+    let tally = task.own(Tally { count = 0 }).unwrap()
+    let counter = tally.client()
+    counter.call(
+        [counter] |inout t: Tally| {
+            t.count += 1
+            counter.call(|inout u: Tally| u.count += 1)
+        },
+    )
+    let Tally { count } = tally.close()
+    if count == 2 {
+        0
+    } else {
+        1
+    }
+}

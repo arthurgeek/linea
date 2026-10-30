@@ -1,4 +1,5 @@
 import std.mem
+import std.task
 import std.testing
 
 // `Stated` holds the application's state and the handler that answers with
@@ -92,6 +93,44 @@ impl[P: Allocator, S, H: Handler[S, P]] Handler[(), P] for Stated[S, H] {
 
 // A `Stated` passes every event on to the handler it holds.
 impl[S, H: Observer] Observer for Stated[S, H] {
+    fn observe[P: Allocator](inout self: Self, event: Event[P]) {
+        &self.handler.observe(event)
+    }
+}
+
+// `WithClient` holds a handler and a client of the owning task that keeps the
+// routes' shared state, and lends the client to the handler on every request.
+// Each serving task holds its own, so no handler is reached by two tasks.
+struct WithClient[S: Owned, H] {
+    client: task.Client[S],
+    handler: H,
+}
+
+// `with_client` makes a handler that lends `client` to `handler`, which may be
+// a router or a whole stack of middleware around one, on every request.
+fn with_client[S: Owned, H](sink handler: H, sink client: task.Client[S]) -> WithClient[S, H] where carries(handler, client) {
+    .{ client, handler }
+}
+
+// Releasing a `WithClient` releases the handler; the client borrows its owning
+// task and holds nothing to release.
+impl[S: Owned, H: Release] Release for WithClient[S, H] {
+    fn release(sink self: Self) {
+        let WithClient { client: _, handler } = self
+        handler.release()
+    }
+}
+
+// A `WithClient` answers a request by lending its client to the handler it
+// holds. It takes `()` itself, which is what serving lends.
+impl[P: Allocator, S: Owned, H: Handler[task.Client[S], P]] Handler[(), P] for WithClient[S, H] {
+    fn serve_http(inout self: Self, inout _state: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+        &self.handler.serve_http(&self.client, request)
+    }
+}
+
+// A `WithClient` passes every event on to the handler it holds.
+impl[S: Owned, H: Observer] Observer for WithClient[S, H] {
     fn observe[P: Allocator](inout self: Self, event: Event[P]) {
         &self.handler.observe(event)
     }

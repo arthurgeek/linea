@@ -149,50 +149,12 @@ static void nothing_is_left_and_the_body_still_runs(long refused, long expected)
 }
 
 /* The largest value of `time_t`, which is signed on every target the runtime
- * builds for. */
-_Static_assert((time_t)-1 < 0, "time_t is signed");
+ * builds for; `main` checks that it is. */
 static const time_t latest_time = (time_t)((((uintmax_t)1 << (sizeof(time_t) * CHAR_BIT - 1)) - 1));
 
-/* A timeout of three days, in milliseconds and in nanoseconds. Read an hour
- * before the largest `time_t`, it ends past the last time a deadline can
- * name. */
-static const unsigned long three_days_ms = 3UL * 86400UL * 1000UL;
+/* A timeout of three days in nanoseconds. Read an hour before the largest
+ * `time_t`, it ends past the last time a deadline can name. */
 static const unsigned long three_days_ns = 3UL * 86400UL * 1000000000UL;
-
-/* Counts the latch down once the waiting thread is in its wait. */
-static void *count_down_thread(void *latch) {
-    await_an_untimed_wait();
-    linea_latch_count_down(*(unsigned long *)latch);
-    return 0;
-}
-
-/* A latch whose timeout ends after the last time `time_t` holds waits without
- * a deadline, and is still released by its last arrival. */
-static void a_latch_timeout_past_the_last_time_waits_without_a_deadline(void) {
-    unsigned long latch = linea_latch_open(2);
-    make_the_clock_late(latest_time);
-    pthread_t other;
-    assert(pthread_create(&other, 0, count_down_thread, &latch) == 0);
-    assert(linea_latch_arrive_and_wait_timeout(latch, three_days_ms) == 1);
-    assert(pthread_join(other, 0) == 0);
-    make_the_clock_true();
-    linea_latch_free(latch);
-}
-
-/* A mailbox timer whose duration ends after the last time `time_t` holds waits
- * without a deadline, and is still cancelled with its payload returned. */
-static void a_timer_past_the_last_time_waits_without_a_deadline(void) {
-    unsigned long mailbox = linea_mailbox_open();
-    unsigned long payload = 4242;
-    make_the_clock_late(latest_time);
-    const unsigned long timer = linea_mailbox_timer(mailbox, three_days_ns, (unsigned long)&payload, sizeof(payload));
-    await_an_untimed_wait();
-    unsigned long returned = 0;
-    assert(linea_mailbox_timer_cancel(timer, (unsigned long)&returned, sizeof(returned)) == 0);
-    assert(returned == 4242);
-    make_the_clock_true();
-    linea_mailbox_close(mailbox);
-}
 
 /* The body of a task that sends one payload once its creator waits for it. */
 static void send_once_awaited(unsigned long endpoint, unsigned long at, unsigned long len) {
@@ -255,13 +217,8 @@ int main(void) {
     linea_task_cancel((unsigned long)task);
     assert(maps == unmaps && creates == joins && ran == 0 && released == 0);
 
+    assert((time_t)-1 < 0);
     a_receive_timeout_past_the_last_time_waits_without_a_deadline();
-    /* macOS hands a latch or a timer an interval relative to the clock it
-     * reads itself, so no deadline is computed for them there. */
-#if !defined(__APPLE__)
-    a_latch_timeout_past_the_last_time_waits_without_a_deadline();
-    a_timer_past_the_last_time_waits_without_a_deadline();
-#endif
 
     puts("native task faults: refused records, mappings, threads and signal stacks leave nothing behind, and a wait past the last time has no deadline");
     return 0;

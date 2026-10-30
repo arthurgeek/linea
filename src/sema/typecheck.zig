@@ -1469,6 +1469,7 @@ fn typecheckInternal(
     z_bodies.end();
 
     try c.settleExternSymbols();
+    try c.checkThreadStarts();
 
     try c.resolveAllOpen();
 
@@ -19767,6 +19768,43 @@ const Checker = struct {
             return self.sink.addError(.t_extern, self.ast.fileOf(self.ast.declName(d)), self.ast.tokenSpan(self.ast.declName(d)), "a typed storage primitive must have its compiler-defined signature", "restore the private storage declaration's parameter and result types");
         }
         try self.checkForeignSignature(d, .t_extern);
+    }
+
+    /// Refuses every expression naming a runtime function that starts a
+    /// thread, as a callee or as a value, outside `task.Slot.start`
+    /// ([T-ThreadStart]). The body such a function hands to its thread keeps
+    /// running after the call returns, and only `Slot.start`'s handle carries
+    /// what that body captured until the thread is joined; anywhere else the
+    /// body's lends and observations would end while it still runs. The
+    /// declarations are found by the symbol they name, so a module's own
+    /// `extern` of the symbol is refused as the library's would be. One walk
+    /// over the expressions, each asked one lookup in the few declarations
+    /// found.
+    fn checkThreadStarts(self: *Checker) std.mem.Allocator.Error!void {
+        var starters: std.ArrayList(node.DeclId) = .empty;
+        defer starters.deinit(self.gpa);
+        for (0..self.ast.declCount()) |i| {
+            const d = node.DeclId.at(@intCast(i));
+            if (!self.ast.declIsExtern(d)) continue;
+            const signature = runtime_symbols.signatureOf(self.ast.tokenText(self.ast.declName(d))) orelse continue;
+            if (signature.starts_thread) try starters.append(self.gpa, d);
+        }
+        if (starters.items.len == 0) return;
+        for (0..self.ast.exprCount()) |i| {
+            const id = ExprId.at(@intCast(i));
+            const b = self.res.targetOf(id);
+            if (b == .none or self.res.kindOf(b) != .function) continue;
+            const d = self.res.declaredBy(b);
+            if (std.mem.indexOfScalar(node.DeclId, starters.items, d) == null) continue;
+            if (self.expression_owners[i] == self.raw_accesses.task_slot_start and self.raw_accesses.task_slot_start != .none) continue;
+            _ = self.report(
+                .t_thread_start,
+                id,
+                "`{s}` runs Linea code on a thread of its own, and only `task.Slot.start` may hand it a body",
+                .{self.ast.tokenText(self.ast.declName(d))},
+                "start the task with `task.prepare(body)` and `start()`, whose handle keeps what the body captured until `close` joins it",
+            );
+        }
     }
 
     /// Holds an `extern` naming a `linea_` symbol to the signature the runtime

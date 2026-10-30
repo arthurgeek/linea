@@ -1,0 +1,5 @@
+error[T-Bound]: `F` requires `Owned`, and `<closure>` can carry a borrow: `counter` is a `borrow task.Client[Tally]`, an observation of another value
+  --> tests/tasks/a_call_cannot_hold_a_client.lin:13:13
+   |
+13 |     counter.call(
+   |             ^^^^ `<closure>` is not `Owned`; pass a value whose type owns everything it holds

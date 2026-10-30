@@ -61,55 +61,20 @@ void linea_chan_close(unsigned long endpoint);
 /* Wait until the peer of `endpoint` sends or timeout elapses. Returns 1 if received, 0 on timeout. */
 uint8_t linea_chan_recv_until(unsigned long endpoint, unsigned long at, unsigned long len, unsigned long timeout_ns);
 
-/* Mailbox: many children / senders, one receiver. */
-unsigned long linea_mailbox_open(void);
-void linea_mailbox_close(unsigned long mb);
-void linea_mailbox_send(unsigned long mb, unsigned long at, unsigned long len);
-uint8_t linea_mailbox_recv(unsigned long mb, unsigned long at, unsigned long len);
-void linea_mailbox_add_child(unsigned long mb);
-void linea_mailbox_remove_child(unsigned long mb);
-unsigned long linea_mailbox_timer(unsigned long mb, unsigned long nanoseconds, unsigned long at, unsigned long len);
-uint8_t linea_mailbox_timer_cancel(unsigned long timer_handle, unsigned long at, unsigned long len);
-
-/* Dispatch `worker(ctx)` on a background worker thread bounded by `max_workers`. */
-typedef void (*linea_task_worker)(unsigned long ctx);
-void linea_task_dispatch_worker(linea_task_worker worker, unsigned long ctx, unsigned long max_workers);
-
-/* Wait until all active background worker threads have completed. */
-void linea_task_drain_workers(void);
-
-/* Worker identity (1-based on pool workers, 0 on non-pool threads) and
- * separate thread-local storage slot (initialized to 0 on every thread). */
-unsigned long linea_task_worker_id(void);
-void linea_task_set_worker_id(unsigned long wid);
-unsigned long linea_task_worker_slot(void);
-void linea_task_set_worker_slot(unsigned long slot);
-
-/* Bounded FIFO connection queue for persistent worker tasks. */
-unsigned long linea_conn_queue_open(void);
-void linea_conn_queue_push(unsigned long handle, int fd);
-int linea_conn_queue_pop(unsigned long handle);
-void linea_conn_queue_close(unsigned long handle);
-void linea_conn_queue_free(unsigned long handle);
-
-/* Serialization lock for concurrent handler mutations (path-parameter buffers and observer callbacks). */
-void linea_handler_lock(void);
-void linea_handler_unlock(void);
-
-/* Latch synchronization primitives */
-unsigned long linea_latch_open(unsigned long count);
-void linea_latch_count_down(unsigned long handle);
-void linea_latch_wait(unsigned long handle);
-uint8_t linea_latch_arrive_and_wait(unsigned long handle);
-uint8_t linea_latch_arrive_and_wait_timeout(unsigned long handle, unsigned long timeout_ms);
-void linea_latch_free(unsigned long handle);
-
-/* Test synchronization latches for cross-server concurrency tests */
-void linea_test_net_latch_init(void);
-void linea_test_net_latch_signal_started(void);
-void linea_test_net_latch_wait_started(void);
-void linea_test_net_latch_wait_hold(void);
-void linea_test_net_latch_release_hold(void);
-void linea_test_net_latch_cleanup(void);
+/* An owning task's call queue: many callers, one owner. A call hands the
+ * owner the `len` bytes at `at` and returns once the owner has finished with
+ * them, so everything the caller did before the call happens before the
+ * owner's work on it, and that work happens before the call returns. Calls
+ * are served one at a time. */
+unsigned long linea_owner_open(void);
+void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len);
+/* Wait for the next call and copy its `len` bytes to `at`, answering 1, or
+ * answer 0 once the queue is closed and no call waits. */
+uint8_t linea_owner_next(unsigned long queue, unsigned long at, unsigned long len);
+/* Finish the call `linea_owner_next` answered, releasing its caller. */
+void linea_owner_done(unsigned long queue);
+/* Accept no further calls; the owner's next wait answers 0. */
+void linea_owner_close(unsigned long queue);
+void linea_owner_free(unsigned long queue);
 
 #endif

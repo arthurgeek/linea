@@ -1,0 +1,147 @@
+import std.mem
+import std.testing
+
+// An owning task holds one value, its state, and runs calls against it one at
+// a time on its own thread. Other tasks reach the state only through a
+// `Client`, so the state is never touched by two threads, and no lock guards
+// it. A call returns once the owning task has run it, so everything the
+// caller did before the call happens before the call runs, and the call
+// happens before it returns.
+extern fn linea_owner_open() -> UInt64
+
+extern fn linea_owner_done(queue: UInt64)
+
+extern fn linea_owner_close(queue: UInt64)
+
+extern fn linea_owner_free(queue: UInt64)
+
+// What an owning task's thread runs: it receives its state and its call
+// queue, runs each call against the state until the queue closes, and sends
+// the state back.
+fn run_owner[S: Owned](sink me: Chan[Recv[(S, UInt64), Send[S, End]]]) {
+    let ((state, queue), rest) = me.recv()
+    var held = state
+    var serving = true
+    while serving {
+        match mem.next_owner_request[S](queue) {
+            Some(job) => {
+                job(&held)
+                job.release()
+                linea_owner_done(queue)
+            },
+            None => serving = false,
+        }
+    }
+    rest.send(held).close()
+}
+
+// A running owning task. `close` joins it and answers its state. It is linear,
+// so a program cannot drop it while its task runs.
+@(opaque, linear)
+struct Owner[S: Owned] {
+    queue: UInt64,
+    handle: Chan[Recv[S, End]],
+}
+
+// A failed `own`: the state, handed back, and why the task could not be made.
+pub struct Unowned[S] {
+    state: S,
+    reason: PrepareError,
+}
+
+// Start a task that owns `state`. It fails when the task's thread or stack
+// cannot be made, and hands the state back then.
+pub fn own[S: Owned](sink state: S) -> Result[Owner[S], Unowned[S]] {
+    // The body captures nothing, so its handle carries no dependency and is
+    // detached to a type `Owner` can name; it is still joined by `close`.
+    let body = sink [] |sink me: Chan[Recv[(S, UInt64), Send[S, End]]]| run_owner[S](me)
+    match prepare(body) {
+        Ok(slot) => {
+            let queue = linea_owner_open()
+            let handle = slot.start().detach().send((state, queue))
+            .Ok(.{ queue, handle })
+        },
+        Err(unstarted) => {
+            let Unstarted { body: _, reason } = unstarted
+            .Err(.{ state, reason })
+        },
+    }
+}
+
+test fn an_owning_task_hands_its_state_back_when_closed() {
+    let owner = own(UInt64(41)).unwrap()
+    let state = owner.close()
+    testing.assert_eq(state, UInt64(41), "the state came back changed")?
+}
+
+impl[S: Owned] Owner[S] {
+    // A client of this owning task. It borrows the owner, so `close` cannot
+    // run while a client is still used, and every task holding one must be
+    // joined first.
+    pub fn client(self: Self) -> Client[S] where borrows(self) {
+        .{ owner = borrow self }
+    }
+
+    test fn a_client_reaches_the_state_its_owner_holds() {
+        let owner = own(UInt64(7)).unwrap()
+        let doubled = owner.client().call(|inout n: UInt64| n * 2)
+        let state = owner.close()
+        testing.assert_eq(doubled, UInt64(14), "the call did not read the owner's state")?
+        testing.assert_eq(state, UInt64(7), "reading the state changed it")?
+    }
+
+    // Stop taking calls, join the task, and answer its state.
+    pub fn close(sink self: Self) -> S {
+        let Owner { queue, handle } = self
+        linea_owner_close(queue)
+        let (state, done) = handle.recv()
+        done.close()
+        linea_owner_free(queue)
+        state
+    }
+
+    test fn closing_answers_every_change_a_call_made() {
+        let owner = own(UInt64(0)).unwrap()
+        let counter = owner.client()
+        for _ in 0..10 {
+            counter.call(|inout n: UInt64| n += 1)
+        }
+        testing.assert_eq(owner.close(), UInt64(10), "a change was lost")?
+    }
+}
+
+// How a task reaches an owning task's state. Copies of a client reach the
+// same owner, so each task that calls it takes its own copy.
+@(opaque, copyable)
+struct Client[S: Owned] {
+    owner: borrow Owner[S],
+}
+
+impl[S: Owned] Client[S] {
+    // Run `job` against the owner's state on the owner's thread, and answer
+    // what it answers. Calls from every client run one at a time, in the
+    // order they reach the owner. `job` moves to another thread, so what it
+    // captures must be owned: it cannot hold a client, whose call could wait
+    // on the task running it.
+    pub fn call[R: Owned, F: Owned + Release + fn(inout state: S) -> R](self: Self, sink job: F) -> R {
+        mem.call_owner[S, R, F](self.owner.queue, job)
+    }
+
+    test fn calls_from_two_tasks_run_one_at_a_time() {
+        let owner = own(UInt64(0)).unwrap()
+        let counter = owner.client()
+        let other = prepare(
+            sink [sink counter = copy(counter)] |sink me: Chan[End]| {
+                for _ in 0..500 {
+                    counter.call(|inout n: UInt64| n += 1)
+                }
+                me.close()
+            },
+        ).unwrap().start()
+        for _ in 0..500 {
+            counter.call(|inout n: UInt64| n += 1)
+        }
+        other.close()
+        testing.assert_eq(owner.close(), UInt64(1000), "two tasks' calls overlapped")?
+    }
+}

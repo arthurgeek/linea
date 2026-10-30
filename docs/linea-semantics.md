@@ -4598,6 +4598,18 @@ signature agrees with every other declaration of the symbol, so
 [T-ExternAgreement] does not also report a `linea_` symbol
 ([ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md)).
 
+**[T-ThreadStart]** A runtime function that runs Linea code on a thread of its
+own, `linea_task_start`, may be named, as a callee or as a value, only inside
+`task.Slot.start`. A body handed to such a function keeps running after the
+call returns, and `Slot.start` alone answers a handle that carries what the
+body captured until `close` joins the thread, so the body's reads and lends
+last as long as it runs ([O-Cross]). Anywhere else they would end while the
+body still ran, so a module granted `extern` that declares the symbol cannot
+start a thread with it, and no library can offer an unjoined or detached task.
+The rule reads the symbol a declaration names, so every root's declaration of
+it is held to the rule as the standard library's is
+([ADR 0250](adr/0250-tasks-are-structured-through-linear-sessions.md)).
+
 **[T-Export]** An `export`'s parameters and result cross the foreign boundary
 as an `extern`'s do, and the result may also be Unit. It applies the same
 boundary restriction as [T-Extern], using the same predicate; the separate rule
