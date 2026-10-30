@@ -1,0 +1,21 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+// A generic `F` may stand for a closure whose captures cannot cross, and this
+// function cannot see them, so it cannot start a task with it.
+fn run_in_task[F: sink fn(sink me: Chan[End])](sink body: F) {
+    let slot = task.prepare(body).unwrap()
+    slot.start().close()
+}
+
+fn main() -> UInt8 {
+    run_in_task(
+        sink [] |sink me: Chan[End]| {
+            me.close()
+        },
+    )
+    0
+}

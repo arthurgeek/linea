@@ -40,7 +40,7 @@ module {
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_write_some(i32, i64, i64) -> i64
   func.func private @linea_io_category(i32) -> (i8 {llvm.zeroext})
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -269,7 +269,7 @@ module {
     llvm.store %sw163, %s7 : i8, !llvm.ptr loc("tests/text/an_interpolation_stops_at_the_first_failure.lin":18:5)
     cf.br ^b16 loc("tests/text/an_interpolation_stops_at_the_first_failure.lin":18:5)
   }
-  func.func private @"lin.std.io.core;descriptor"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.io.core;descriptor"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
     %pw0 = arith.trunci %a0 : i64 to i32
@@ -280,7 +280,7 @@ module {
     %v0 = arith.extsi %lw0 : i32 to i64 loc("std/io/core/descriptor.lin":L:C)
     func.return %v0 : i64 loc("std/io/core/descriptor.lin":L:C)
   }
-  func.func private @"lin.std.text.Str;std.fmt;Display.fmt[std.io.core.Descriptor]"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.text.Str;std.fmt;Display.fmt[std.io.core.Descriptor]"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -294,7 +294,7 @@ module {
     func.call @"lin.std.io.core.Descriptor;std.io.core;Writer.write_str"(%sret, %v0, %v1) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> () loc("std/fmt/render.lin":L:C)
     func.return loc("std/fmt/render.lin":L:C)
   }
-  func.func private @"lin.Int64;std.fmt;Display.fmt[std.io.core.Descriptor]"(%sret: !llvm.ptr, %a0: i64, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.Int64;std.fmt;Display.fmt[std.io.core.Descriptor]"(%sret: !llvm.ptr, %a0: i64, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -337,7 +337,7 @@ module {
     func.call @"lin.std.fmt;format_unsigned[std.io.core.Descriptor]"(%sret, %v14, %v15) : (!llvm.ptr, i64, !llvm.ptr) -> () loc("std/fmt/decimal.lin":L:C)
     func.return loc("std/fmt/decimal.lin":L:C)
   }
-  func.func private @"lin.std.io.core.Descriptor;std.io.core;Writer.write_str"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.io.core.Descriptor;std.io.core;Writer.write_str"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -393,7 +393,7 @@ module {
     "llvm.intr.memcpy"(%sret, %s3, %rl17) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/io/core/descriptor.lin":L:C)
     func.return loc("std/io/core/descriptor.lin":L:C)
   }
-  func.func private @"lin.std.fmt;format_signed[std.io.core.Descriptor]"(%sret: !llvm.ptr, %a0: i64, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.fmt;format_signed[std.io.core.Descriptor]"(%sret: !llvm.ptr, %a0: i64, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -657,7 +657,7 @@ module {
     "llvm.intr.memcpy"(%sret, %s10, %rl88) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/fmt/decimal.lin":L:C)
     func.return loc("std/fmt/decimal.lin":L:C)
   }
-  func.func private @"lin.std.fmt;format_unsigned[std.io.core.Descriptor]"(%sret: !llvm.ptr, %a0: i64, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.fmt;format_unsigned[std.io.core.Descriptor]"(%sret: !llvm.ptr, %a0: i64, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -809,7 +809,7 @@ module {
     "llvm.intr.memcpy"(%sret, %s6, %rl40) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/fmt/decimal.lin":L:C)
     func.return loc("std/fmt/decimal.lin":L:C)
   }
-  func.func private @"lin.std.text;Str.as_bytes"(%sret: !llvm.ptr, %a0: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.text;Str.as_bytes"(%sret: !llvm.ptr, %a0: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 16 : i64
@@ -825,7 +825,7 @@ module {
     "llvm.intr.memcpy"(%sret, %s1, %rl6) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/text/str.lin":L:C)
     func.return loc("std/text/str.lin":L:C)
   }
-  func.func private @"lin.std.io.core;write_all[std.io.core.Descriptor]"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.io.core;write_all[std.io.core.Descriptor]"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -1083,7 +1083,7 @@ module {
     "llvm.intr.memcpy"(%sret, %s12, %rl157) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/io/core/byte_writer.lin":L:C)
     func.return loc("std/io/core/byte_writer.lin":L:C)
   }
-  func.func private @"lin.std.io.core.IoError;std.convert;From[std.io.core.WriteFailure[std.io.core.IoError]].from"(%sret: !llvm.ptr, %a0: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.io.core.IoError;std.convert;From[std.io.core.WriteFailure[std.io.core.IoError]].from"(%sret: !llvm.ptr, %a0: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 64 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -1204,7 +1204,7 @@ module {
     %v82 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     cf.br ^b6 loc("std/io/core/error.lin":L:C)
   }
-  func.func private @"lin.std.fmt;scale"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.fmt;scale"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -1307,7 +1307,7 @@ module {
     %v23 = llvm.load %s1 : !llvm.ptr -> i64 loc("std/fmt/decimal.lin":L:C)
     func.return %v23 : i64 loc("std/fmt/decimal.lin":L:C)
   }
-  func.func private @"lin.std.fmt;digits"(%sret: !llvm.ptr, %a0: i64, %a1: i1) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.fmt;digits"(%sret: !llvm.ptr, %a0: i64, %a1: i1) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -1434,7 +1434,7 @@ module {
     func.call @"lin.std.option;Option[std.text.Str].unwrap_or"(%sret, %rs35, %s6) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> () loc("std/fmt/decimal.lin":L:C)
     func.return loc("std/fmt/decimal.lin":L:C)
   }
-  func.func private @"lin.std.fmt;scale_unsigned"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.fmt;scale_unsigned"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -1509,7 +1509,7 @@ module {
     %v23 = llvm.load %s1 : !llvm.ptr -> i64 loc("std/fmt/decimal.lin":L:C)
     func.return %v23 : i64 loc("std/fmt/decimal.lin":L:C)
   }
-  func.func private @"lin.std.mem;Slice[UInt8].length"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.mem;Slice[UInt8].length"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     llvm.store %a0, %s0 : !llvm.ptr, !llvm.ptr
@@ -1521,7 +1521,7 @@ module {
     %v3 = llvm.load %v2 : !llvm.ptr -> i64 loc("std/mem/slice.lin":L:C)
     func.return %v3 : i64 loc("std/mem/slice.lin":L:C)
   }
-  func.func private @"lin.std.mem;Slice[UInt8].subspan"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: i64, %a2: i64) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.mem;Slice[UInt8].subspan"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: i64, %a2: i64) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -1661,7 +1661,7 @@ module {
     "llvm.intr.memcpy"(%s3, %s4, %cl60) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/slice.lin":L:C)
     cf.br ^b3 loc("std/mem/slice.lin":L:C)
   }
-  func.func private @"lin.std.option;Option[std.mem.Slice[UInt8]].unwrap"(%sret: !llvm.ptr, %a0: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.option;Option[std.mem.Slice[UInt8]].unwrap"(%sret: !llvm.ptr, %a0: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 24 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 16 : i64
@@ -1723,7 +1723,7 @@ module {
     func.call @linea_panic(%pva2, %pvl2, %pf2, %tl2, %tc2) : (i64, i64, !llvm.ptr, i32, i32) -> () loc("std/option/option.lin":L:C)
     llvm.unreachable loc("std/option/option.lin":L:C)
   }
-  func.func private @"lin.std.io.core.Descriptor;std.io.core;ByteWriter.write_some"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.io.core.Descriptor;std.io.core;ByteWriter.write_some"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -1869,7 +1869,7 @@ module {
     "llvm.intr.memcpy"(%sret, %s6, %rl70) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/io/core/descriptor.lin":L:C)
     func.return loc("std/io/core/descriptor.lin":L:C)
   }
-  func.func private @"lin.std.text;Str.slice"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: i64, %a2: i64) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.text;Str.slice"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: i64, %a2: i64) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -1987,7 +1987,7 @@ module {
     "llvm.intr.memcpy"(%s4, %s6, %cl62) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/text/str.lin":L:C)
     cf.br ^b6 loc("std/text/str.lin":L:C)
   }
-  func.func private @"lin.std.option;Option[std.text.Str].unwrap_or"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.option;Option[std.text.Str].unwrap_or"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 24 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 16 : i64
@@ -2035,7 +2035,7 @@ module {
     "llvm.intr.memcpy"(%s2, %s1, %cl19) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
     cf.br ^b1 loc("std/option/option.lin":L:C)
   }
-  func.func private @"lin.std.mem;write_slice_fd"(%a0: !llvm.ptr, %a1: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.mem;write_slice_fd"(%a0: !llvm.ptr, %a1: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -2058,7 +2058,7 @@ module {
     %v9 = func.call @linea_write_some(%va9_0, %v4, %v8) : (i32, i64, i64) -> i64 loc("std/mem/fd.lin":L:C)
     func.return %v9 : i64 loc("std/mem/fd.lin":L:C)
   }
-  func.func private @"lin.std.io.core;IoError.from_os"(%sret: !llvm.ptr, %a0: i64, %a1: i64, %a2: i64) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.io.core;IoError.from_os"(%sret: !llvm.ptr, %a0: i64, %a1: i64, %a2: i64) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -2257,7 +2257,7 @@ module {
     llvm.store %v107, %s4 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
     cf.br ^b1 loc("std/io/core/error.lin":L:C)
   }
-  func.func private @"lin.std.text;Str.length"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.text;Str.length"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     llvm.store %a0, %s0 : !llvm.ptr, !llvm.ptr
@@ -2268,7 +2268,7 @@ module {
     %v3 = func.call @"lin.std.mem;Slice[UInt8].length"(%v0) : (!llvm.ptr) -> i64 loc("std/text/str.lin":L:C)
     func.return %v3 : i64 loc("std/text/str.lin":L:C)
   }
-  func.func private @"lin.std.text;starts_a_character"(%a0: !llvm.ptr, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.text;starts_a_character"(%a0: !llvm.ptr, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -2370,7 +2370,7 @@ module {
     llvm.store %sw42, %s3 : i8, !llvm.ptr loc("std/text/str.lin":L:C)
     cf.br ^b4 loc("std/text/str.lin":L:C)
   }
-  func.func private @"lin.std.text;Str.byte"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: i64) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.text;Str.byte"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: i64) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64

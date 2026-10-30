@@ -67,6 +67,43 @@ static void broken_pipe(void) {
     assert(close(pipe_fds[1]) == 0);
 }
 
+struct broken_pipe_arg {
+    int fd;
+    long result;
+};
+
+static void *broken_pipe_worker(void *ptr) {
+    struct broken_pipe_arg *arg = ptr;
+    arg->result = linea_write_some(arg->fd, ADDRESS("x"), 1);
+    return NULL;
+}
+
+static void concurrent_broken_pipe(void) {
+    enum { num_threads = 16 };
+    struct sigaction sa, old_sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = SIG_IGN;
+    assert(sigaction(SIGPIPE, &sa, &old_sa) == 0);
+
+    int pipe_fds[2];
+    assert(pipe(pipe_fds) == 0);
+    assert(close(pipe_fds[0]) == 0);
+
+    pthread_t threads[num_threads];
+    struct broken_pipe_arg args[num_threads];
+    for (int i = 0; i < num_threads; i++) {
+        args[i].fd = pipe_fds[1];
+        args[i].result = 0;
+        assert(pthread_create(&threads[i], NULL, broken_pipe_worker, &args[i]) == 0);
+    }
+    for (int i = 0; i < num_threads; i++) {
+        assert(pthread_join(threads[i], NULL) == 0);
+        assert(args[i].result == -EPIPE);
+    }
+    assert(close(pipe_fds[1]) == 0);
+    assert(sigaction(SIGPIPE, &old_sa, NULL) == 0);
+}
+
 static void random_bytes(void) {
     unsigned char bytes[300];
     memset(bytes, 0x55, sizeof(bytes));
@@ -249,11 +286,41 @@ static void error_categories(void) {
     assert(linea_io_category(INT_MAX) == LINEA_IO_OTHER);
 }
 
+static void positional_io_and_output_lock(void) {
+    char template[] = "/tmp/linea_pos_XXXXXX";
+    int fd = mkstemp(template);
+    assert(fd >= 0);
+    unlink(template);
+
+    assert(linea_read_at(fd, 0, 0, 0) == 0);
+    assert(linea_write_at(fd, 0, 0, 0) == 0);
+    assert(linea_read_at(fd, 0, 1, 0) == -EFAULT);
+    assert(linea_write_at(fd, 0, 1, 0) == -EFAULT);
+
+    assert(linea_write_at(fd, ADDRESS("hello world"), 11, 0) == 11);
+    assert(linea_write_at(fd, ADDRESS("linea"), 5, 6) == 5);
+
+    char buf[16] = {0};
+    assert(linea_read_at(fd, ADDRESS(buf), 5, 0) == 5);
+    assert(memcmp(buf, "hello", 5) == 0);
+
+    memset(buf, 0, sizeof(buf));
+    assert(linea_read_at(fd, ADDRESS(buf), 5, 6) == 5);
+    assert(memcmp(buf, "linea", 5) == 0);
+
+    assert(linea_close(fd) == 0);
+
+    linea_io_output_lock();
+    linea_io_output_unlock();
+}
+
 int main(void) {
     error_categories();
     transfers();
     random_bytes();
     broken_pipe();
+    concurrent_broken_pipe();
+    positional_io_and_output_lock();
     short_write();
     searchable_parent();
     filesystem();

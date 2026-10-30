@@ -1,0 +1,21 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use task.Slot
+use task.Unstarted
+
+// `ready` has the shape of `prepare` and names its parameter otherwise. The
+// body it prepares is a `J` whose captures `ready` cannot see.
+fn ready[J: sink fn(sink me: Chan[End])](sink job: J) -> Result[Slot[End, J], Unstarted[J]] where carries(.Ok: job), carries(.Err: job) {
+    task.prepare(job)
+}
+
+fn main() -> UInt8 {
+    let body = sink [] |sink me: Chan[End]| {
+        me.close()
+    }
+    ready(body).unwrap().start().close()
+    0
+}

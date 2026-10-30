@@ -14,7 +14,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 16 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 16 : i64
@@ -75,7 +75,7 @@ module {
     llvm.store %sw28, %s2 : i8, !llvm.ptr loc("tests/generics/a_symbol_holds_no_brackets.lin":16:5)
     cf.br ^b1 loc("tests/generics/a_symbol_holds_no_brackets.lin":16:5)
   }
-  func.func private @"lin.;ident[std.option.Option[UInt8]]"(%sret: !llvm.ptr, %a0: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;ident[std.option.Option[UInt8]]"(%sret: !llvm.ptr, %a0: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 16 : i64

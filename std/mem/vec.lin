@@ -831,6 +831,34 @@ impl[T, A: Allocator] Vec[T, A] {
         .Some(taken)
     }
 
+    // Split the vector at `at` into two disjoint views lent to `body`.
+    pub fn split_inout[F: inout fn(inout left: View[T], inout right: View[T])](inout self: Self, at: UInt64, inout body: F) {
+        if at > self.len {
+            panic("split_inout: split index out of bounds")
+        }
+        let shape: SlotType[T] = .Type
+        let stride = slot_stride(shape)
+        let storage_at = self.storage.at
+        var left: View[T] = .{ at = storage_at, len = at, carried = .{} }
+        var right: View[T] = .{ at = storage_at + at * stride, len = self.len - at, carried = .{} }
+        &body(&left, &right)
+    }
+
+    test fn vec_split_inout_lends_disjoint_halves() {
+        defer var values: Vec[UInt64] = Vec.new()
+        for i in 0..10 {
+            &values.push(i).unwrap()
+        }
+        var verified = false
+        var check = inout [inout verified] |inout left: View[UInt64], inout right: View[UInt64]| {
+            testing.assert_eq(left.length(), 4, "left length wrong").unwrap()
+            testing.assert_eq(right.length(), 6, "right length wrong").unwrap()
+            verified = true
+        }
+        &values.split_inout(4, &check)
+        testing.assert(verified, "split_inout callback did not run")?
+    }
+
     test fn vec_pop_takes_elements_last_first_and_keeps_capacity() {
         defer var values: Vec[UInt64] = Vec.new()
         for number in UInt64(0)..3 {

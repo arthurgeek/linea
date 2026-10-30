@@ -174,6 +174,10 @@ pub const Code = enum {
     o_uncommitted,
     /// An observation escapes its owner or the permitted callable sources.
     o_escapes,
+    /// A task's body captures what may not cross to another task: an
+    /// observation of a place that is not `Shareable`, or a lend the body
+    /// does not hold itself.
+    o_cross,
     o_borrow,
     /// A value borrowing a temporary is used after the temporary's statement
     /// ends.
@@ -458,6 +462,7 @@ pub const Code = enum {
             .o_defer_dead => "O-DeferDead",
             .o_uncommitted => "O-Uncommitted",
             .o_escapes => "O-Escapes",
+            .o_cross => "O-Cross",
             .o_borrow => "O-Borrow",
             .o_temporary => "O-Temporary",
             .o_loop => "O-Loop",

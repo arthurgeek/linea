@@ -16,6 +16,10 @@ pub const storage_extent = "linea_storage_extent";
 /// Defined only by the checking runtime, so an archive answers whether it
 /// checks storage.
 pub const storage_checked = "linea_storage_checked";
+/// What a task's thread calls before and after it runs Linea code, to install
+/// and remove its alternate signal stack and record its stack's guard.
+pub const thread_begin = "linea_thread_begin";
+pub const thread_end = "linea_thread_end";
 
 /// Whether a runtime archive holds the checking allocator: whether its bytes
 /// name the symbol only that allocator defines. Every archive format spells a
@@ -52,6 +56,8 @@ const owned = [_][]const u8{
     // What the runtime's own files call between themselves.
     storage_extent,
     storage_checked,
+    thread_begin,
+    thread_end,
 };
 
 /// Whether a name is one the runtime already owns.
@@ -78,8 +84,11 @@ test "a runtime symbol is refused and an ordinary name is not" {
 
 /// A scalar a runtime function's signature names, as C and Linea agree on it.
 /// `ptr` is an address the compiler passes as a pointer: no Linea declaration
-/// spells it, so only the symbols the compiler owns use it.
-pub const Scalar = enum { u8, i32, u32, i64, u64, f32, f64, ptr, unit };
+/// spells it, so only the symbols the compiler owns use it. `callback` is the
+/// address of a function C calls: the Linea declaration spells a plain `fn`
+/// type, whose parameters and result [T-ExternCallback] holds to what
+/// crosses, and C a function pointer type.
+pub const Scalar = enum { u8, i32, u32, i64, u64, f32, f64, ptr, callback, unit };
 
 /// How a runtime function takes a parameter: by value, or through a pointer
 /// the callee writes, which a Linea declaration spells `inout`.
@@ -152,6 +161,19 @@ pub const storage_extent_signature: Signature = .{
     .parameters = &.{ p(.u64), p(.u64) },
     .result = .unit,
 };
+/// The alternate signal stack's address and size, then the bounds of the
+/// stack's guard pages. It answers zero, or the errno that kept the signal
+/// stack from being installed.
+pub const thread_begin_signature: Signature = .{
+    .symbol = thread_begin,
+    .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64) },
+    .result = .i32,
+};
+pub const thread_end_signature: Signature = .{
+    .symbol = thread_end,
+    .parameters = &.{},
+    .result = .unit,
+};
 
 /// The signature of every float-math operation, in the operation's own order.
 pub const math_functions = math: {
@@ -178,6 +200,8 @@ pub const owned_functions = [_]Signature{
     panic_signature,
     set_args_signature,
     storage_extent_signature,
+    thread_begin_signature,
+    thread_end_signature,
 } ++ math_functions;
 
 test "every function the compiler owns is a name the runtime refuses" {
@@ -207,6 +231,10 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_errno", .parameters = &.{}, .result = .i32 },
     .{ .symbol = "linea_read_some", .parameters = &.{ p(.i32), p(.u64), p(.u64) }, .result = .i64 },
     .{ .symbol = "linea_write_some", .parameters = &.{ p(.i32), p(.u64), p(.u64) }, .result = .i64 },
+    .{ .symbol = "linea_read_at", .parameters = &.{ p(.i32), p(.u64), p(.u64), p(.u64) }, .result = .i64 },
+    .{ .symbol = "linea_write_at", .parameters = &.{ p(.i32), p(.u64), p(.u64), p(.u64) }, .result = .i64 },
+    .{ .symbol = "linea_io_output_lock", .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_io_output_unlock", .parameters = &.{}, .result = .unit },
     .{ .symbol = "linea_close", .parameters = &.{p(.i32)}, .result = .i64 },
     .{ .symbol = "linea_random_bytes", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64 },
     .{ .symbol = "linea_open_parent", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64 },
@@ -225,6 +253,49 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_net_reset", .parameters = &.{p(.i32)}, .result = .i64 },
     .{ .symbol = "linea_clock_read", .parameters = &.{ p(.u8), .{ .scalar = .i64, .passing = .inout }, written }, .result = .i64 },
     .{ .symbol = "linea_clock_sleep", .parameters = &.{p(.u64)}, .result = .i64 },
+    // A task's thread and the rendezvous channel of its session.
+    .{ .symbol = "linea_task_prepare", .parameters = &.{p(.u64)}, .result = .i64 },
+    .{ .symbol = "linea_task_start", .parameters = &.{ p(.u64), p(.callback), p(.callback), p(.u64), p(.u64) }, .result = .u64 },
+    .{ .symbol = "linea_task_cancel", .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_chan_send", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_chan_recv", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_chan_choose", .parameters = &.{ p(.u64), p(.u8) }, .result = .unit },
+    .{ .symbol = "linea_chan_offer", .parameters = &.{p(.u64)}, .result = .u8 },
+    .{ .symbol = "linea_chan_close", .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_chan_recv_until", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64) }, .result = .u8 },
+    .{ .symbol = "linea_mailbox_open", .parameters = &.{}, .result = .u64 },
+    .{ .symbol = "linea_mailbox_close", .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_mailbox_send", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_mailbox_recv", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .u8 },
+    .{ .symbol = "linea_mailbox_add_child", .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_mailbox_remove_child", .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_mailbox_timer", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64) }, .result = .u64 },
+    .{ .symbol = "linea_mailbox_timer_cancel", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .u8 },
+    .{ .symbol = "linea_task_dispatch_worker", .parameters = &.{ p(.callback), p(.u64), p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_task_drain_workers", .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_task_worker_id", .parameters = &.{}, .result = .u64 },
+    .{ .symbol = "linea_task_set_worker_id", .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_task_worker_slot", .parameters = &.{}, .result = .u64 },
+    .{ .symbol = "linea_task_set_worker_slot", .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_handler_lock", .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_handler_unlock", .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_conn_queue_open", .parameters = &.{}, .result = .u64 },
+    .{ .symbol = "linea_conn_queue_push", .parameters = &.{ p(.u64), p(.i32) }, .result = .unit },
+    .{ .symbol = "linea_conn_queue_pop", .parameters = &.{p(.u64)}, .result = .i32 },
+    .{ .symbol = "linea_conn_queue_close", .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_conn_queue_free", .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_latch_open", .parameters = &.{p(.u64)}, .result = .u64 },
+    .{ .symbol = "linea_latch_count_down", .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_latch_wait", .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_latch_arrive_and_wait", .parameters = &.{p(.u64)}, .result = .u8 },
+    .{ .symbol = "linea_latch_arrive_and_wait_timeout", .parameters = &.{ p(.u64), p(.u64) }, .result = .u8 },
+    .{ .symbol = "linea_latch_free", .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_test_net_latch_init", .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_test_net_latch_signal_started", .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_test_net_latch_wait_started", .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_test_net_latch_wait_hold", .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_test_net_latch_release_hold", .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_test_net_latch_cleanup", .parameters = &.{}, .result = .unit },
     .{ .symbol = "linea_float64_parse", .parameters = &.{ p(.u64), p(.u64), written, written }, .result = .u64 },
     .{ .symbol = "linea_float64_debug", .parameters = &.{ p(.u64), written, written, written, written }, .result = .u64 },
     .{ .symbol = "linea_float64_shortest", .parameters = &.{ p(.u64), .{ .scalar = .i64, .passing = .inout } }, .result = .u64 },

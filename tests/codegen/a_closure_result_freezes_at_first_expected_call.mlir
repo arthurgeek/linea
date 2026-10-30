@@ -14,7 +14,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -53,7 +53,7 @@ module {
     %v11 = arith.addi %v10, %p11 : i64 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":5:11)
     func.return %v11 : i64 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":5:5)
   }
-  func.func private @lin.closure.0() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @lin.closure.0() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     cf.br ^b0
   ^b0:
     %v0 = arith.constant 7 : i64 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":2:23)

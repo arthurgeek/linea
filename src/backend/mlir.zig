@@ -354,6 +354,10 @@ pub fn emit(
     return true;
 }
 
+/// The LLVM function attribute that makes a body probe each page of a frame
+/// larger than one as it allocates it, inline rather than through a call.
+const probe_stack = "[\"probe-stack\", \"inline-asm\"]";
+
 /// The MLIR type a runtime signature's scalar is passed as.
 fn mlirType(scalar: runtime_symbols.Scalar) []const u8 {
     return switch (scalar) {
@@ -362,7 +366,7 @@ fn mlirType(scalar: runtime_symbols.Scalar) []const u8 {
         .i64, .u64 => "i64",
         .f32 => "f32",
         .f64 => "f64",
-        .ptr => "!llvm.ptr",
+        .ptr, .callback => "!llvm.ptr",
         .unit => unreachable,
     };
 }
@@ -726,10 +730,15 @@ fn emitFunction(
     // reaches is the thunk, and the thunk is in this module and references the
     // body. So a library has the shape a program has, and neither has a body
     // the optimiser must keep on the chance of a caller it cannot see.
+    //
+    // Every body probes its stack: a frame larger than a page touches each
+    // page in turn as it grows, so no frame steps over the guard pages below
+    // a thread's stack into memory beyond them, and an overflow faults in the
+    // guard, where the runtime reports it.
     if (mir.return_type == .never) {
-        try w.writeAll(" attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [\"noreturn\"]} {\n");
+        try w.writeAll(" attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [\"noreturn\", " ++ probe_stack ++ "]} {\n");
     } else {
-        try w.writeAll(" attributes {llvm.linkage = #llvm.linkage<internal>} {\n");
+        try w.writeAll(" attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [" ++ probe_stack ++ "]} {\n");
     }
 
     // The entry block, always first, because a function is entered at the block

@@ -2524,6 +2524,8 @@ pub const ClosureDescriptor = struct {
     owned_fields: []const FieldOrdinal = &.{},
     environment: TypeId = .unit,
     invocation: node.Convention = .read,
+    /// Whether any capture lends its source `inout`.
+    lends: bool = false,
     enclosing: DeclId,
     /// What the closure type's `impl_args` and `self_ty` bind in `enclosing`.
     parameters: BodyParameters = .{},
@@ -6078,6 +6080,9 @@ pub const Typing = struct {
     folded_indices: std.AutoHashMapUnmanaged(ExprId, u64) = .empty,
     dependency_containment: []const bool = &.{},
     writer_containment: []const bool = &.{},
+    /// Whether a value of each type may not be read by two tasks at once:
+    /// the answer `Shareable` refuses, indexed by type.
+    unshareable_containment: []const bool = &.{},
     observation_traits: []const bool = &.{},
     /// Checked values of accepted module and implementation constants. Binding
     /// and expression types retain their nominal identity.
@@ -6514,6 +6519,7 @@ pub const Typing = struct {
         self.folded_indices.deinit(gpa);
         gpa.free(self.dependency_containment);
         gpa.free(self.writer_containment);
+        gpa.free(self.unshareable_containment);
 
         gpa.free(self.observation_traits);
         self.constant_values.deinit(gpa);
@@ -7473,10 +7479,14 @@ pub const Typing = struct {
     /// stand for a closure holding anything; or a type parameter whose bounds
     /// promise neither `Shareable` nor the integer family, all of which is
     /// shareable.
-    fn unshareableSeed(self: *const Typing, t: TypeId) bool {
+    pub fn unshareableSeed(self: *const Typing, t: TypeId) bool {
         return switch (self.get(t)) {
             .parameter => |p| !(p.shareable or p.integer),
-            .callable, .open_type => true,
+            .open_type => true,
+            .callable => false,
+            .closure => |closure| closure.closure.index() >= self.closures.len or
+                self.closureOf(closure.closure).invocation == .inout or
+                self.closureOf(closure.closure).lends,
             .struct_ => |record| record.unshareable,
             .enum_ => |sum| sum.unshareable,
             .newtype => |nominal| nominal.unshareable,
@@ -7592,6 +7602,14 @@ pub const Typing = struct {
         const index = @intFromEnum(t);
         std.debug.assert(index < self.writer_containment.len);
         return self.writer_containment[index];
+    }
+
+    /// Whether `t` is `Shareable`: whether two tasks may read one value of it
+    /// at once, as the builder's `isShareable` answered while checking.
+    pub fn isShareable(self: *const Typing, t: TypeId) bool {
+        const index = @intFromEnum(t);
+        std.debug.assert(index < self.unshareable_containment.len);
+        return !self.unshareable_containment[index];
     }
 
     test "an Owned or Integer parameter carries nothing, and a carrier names its path" {
@@ -8744,7 +8762,7 @@ pub const Typing = struct {
                 self.gpa.free(name);
                 return err;
             };
-            return self.addStruct(name, .copyable, fields);
+            return self.addStruct(name, shape.ownership_policy, fields);
         }
 
         pub fn internClosure(self: *Builder, closure: ids.ClosureId, args: []const TypeId, impl_args: []const TypeId, self_ty: TypeId) !TypeId {
@@ -13286,6 +13304,7 @@ pub const Typing = struct {
                 try self.restoreScopedCapabilities();
                 try self.settleContainment(&self.dependency_facts, .raw_carriers);
                 try self.settleContainment(&self.writer_facts, .writers);
+                try self.settleContainment(&self.unshareable_facts, .unshareable);
                 if (written == self.parts_written) break;
             }
         }
@@ -13407,7 +13426,9 @@ pub const Typing = struct {
             const writer_containment = try self.writer_facts.values.toOwnedSlice(self.gpa);
             self.writer_facts.deinit(self.gpa);
             errdefer self.gpa.free(writer_containment);
+            const unshareable_containment = try self.unshareable_facts.values.toOwnedSlice(self.gpa);
             self.unshareable_facts.deinit(self.gpa);
+            errdefer self.gpa.free(unshareable_containment);
 
             const owned_contracts = try self.owned_contracts.toOwnedSlice(self.gpa);
             errdefer {
@@ -13491,6 +13512,7 @@ pub const Typing = struct {
                 .owned_contracts = owned_contracts,
                 .dependency_containment = dependency_containment,
                 .writer_containment = writer_containment,
+                .unshareable_containment = unshareable_containment,
                 .owned_bounds = owned_bounds,
                 .owned_callable_bounds = owned_callable_bounds,
                 .binding_types = binding_types,

@@ -1,0 +1,27 @@
+import std.io
+import std.mem
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+// A body that owns nothing linear may be dropped with a failed preparation,
+// so the failure settles to its reason and `?` hands the reason on.
+fn count_once(inout count: UInt64, stack: UInt64) -> Result[(), task.PrepareError] {
+    let body = sink [inout count] |sink me: Chan[End]| {
+        count += 1
+        me.close()
+    }
+    let slot = task.prepare_in(mem.system(), body, stack).settled()?
+    slot.start().close()
+    .Ok(())
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var count = UInt64(0)
+    let first = count_once(&count, task.default_stack_bytes)
+    let second = count_once(&count, 4611686018427387904)
+    io.println("count: {count}, first: {first.is_ok()}, second: {second.is_ok()}")?
+    .Ok(0)
+}

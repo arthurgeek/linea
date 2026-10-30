@@ -1357,6 +1357,11 @@ const Checker = struct {
     /// named, because a postfix call reaches the type's own first.
     fn settleHelp(self: *const Checker, t: TypeId, lead: []const u8, receiver: ?[]const u8) std.mem.Allocator.Error![]const u8 {
         const arena = self.sink.arena;
+        // A failed preparation holds the body it was given, which owns
+        // something linear, so the edit is to take the body back.
+        if (receiver) |r| if (self.typing.declOfType(t)) |d| if (d == self.typing.raw_accesses.task_unstarted) {
+            return std.fmt.allocPrint(arena, "the body is still yours after a failed `prepare`: take it back with `let Unstarted {{ body, reason }} = {s}` and settle it before this path leaves", .{r});
+        };
         var ops: std.ArrayList([]const u8) = .empty;
         var more = false;
         if (receiver) |r| {

@@ -1,0 +1,7 @@
+error[T-Bound]: `E` requires `Settle`, and `task.Unstarted[<closure>]` does not implement it
+  --> tests/tasks/a_linear_body_does_not_settle_a_failed_prepare.lin:19:35
+   |
+19 |     let slot = task.prepare(body).settled()?
+   |                                   ^^^^^^^ `<closure>` is not `Discardable`; pass a value whose type implements it
+   |
+   = help: `task.Unstarted[F]` implements `Settle` when `F` is `Discardable`, and `<closure>` is not

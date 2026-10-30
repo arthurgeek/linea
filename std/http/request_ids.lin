@@ -233,7 +233,7 @@ test fn a_numbered_exchange_is_logged_with_its_number() {
     let missing = send(bound, "GET /nowhere HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: forged\r\n\r\n")
     let file = log.capture()
     var served = with_request_ids(logged(file.logger(minimum: .Info), health_router()))
-    let serving = serve(listener, &served, limits: serving(2))
+    let serving = serve(listener, &served, limits: serving(2), policy: .Sequential)
     defer let health = read_to_end(found)
     defer let absent = read_to_end(missing)
     served.release()

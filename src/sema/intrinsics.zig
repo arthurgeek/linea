@@ -129,6 +129,17 @@ pub const RawAccesses = struct {
     closure_entry: DeclId = .none,
     closure_settle: DeclId = .none,
     closure_size: DeclId = .none,
+    /// `task.prepare`, `task.prepare_in`, `task.start`, `task.start_in` and
+    /// `task.dispatch_worker`, whose `body` argument crosses into a task
+    /// ([O-Cross]), and the two `start` forms, which drop a body a failed
+    /// start could not keep and so take only a Discardable one.
+    task_prepare: DeclId = .none,
+    task_prepare_in: DeclId = .none,
+    task_start: DeclId = .none,
+    task_start_in: DeclId = .none,
+    task_dispatch_worker: DeclId = .none,
+    /// `task.Unstarted`, the failure of a preparation, which holds the body.
+    task_unstarted: DeclId = .none,
     /// `ffi.Bytes`, `ffi.CText` and `ffi.CTextList`: copyable newtypes over a
     /// C address whose dependencies originate at the value, as a
     /// `mem.Slice`'s do, so a contract can tie one to what it views.
@@ -157,11 +168,17 @@ pub const RawAccesses = struct {
             .place = rawAccessDecl(program, ast, "slot_place", 5),
             .closure = program.libraryDeclIn("mem", "Closure") orelse .none,
             .closure_entry_type = program.libraryDeclIn("mem", "ClosureEntry") orelse .none,
-            .closure_open_in = closureOpenDecl(program, ast, "open_in"),
-            .closure_open = closureOpenDecl(program, ast, "open"),
+            .closure_open_in = memberOf(program, ast, "mem", "Closure", "open_in"),
+            .closure_open = memberOf(program, ast, "mem", "Closure", "open"),
             .closure_entry = rawAccessDecl(program, ast, "closure_entry", 1),
             .closure_settle = rawAccessDecl(program, ast, "closure_settle", 1),
             .closure_size = rawAccessDecl(program, ast, "closure_size", 1),
+            .task_prepare = moduleFunction(program, ast, "task", "prepare"),
+            .task_prepare_in = moduleFunction(program, ast, "task", "prepare_in"),
+            .task_start = moduleFunction(program, ast, "task", "start"),
+            .task_start_in = moduleFunction(program, ast, "task", "start_in"),
+            .task_dispatch_worker = moduleFunction(program, ast, "task", "dispatch_worker"),
+            .task_unstarted = program.libraryDeclIn("task", "Unstarted") orelse .none,
             .foreign_views = .{
                 program.libraryDeclIn("ffi", "Bytes") orelse .none,
                 program.libraryDeclIn("ffi", "CText") orelse .none,
@@ -254,6 +271,27 @@ pub const RawAccesses = struct {
         return d != DeclId.none and
             (d == self.store or d == self.load or d == self.store8 or d == self.load8 or self.floatBits(d) or self.typed(d));
     }
+    /// Whether `d` prepares a joinable task (`prepare`, `prepare_in`).
+    pub fn preparesTask(self: RawAccesses, d: DeclId) bool {
+        return d != DeclId.none and (d == self.task_prepare or d == self.task_prepare_in);
+    }
+
+    /// Whether `d` prepares and starts a joinable task in one call (`start`, `start_in`).
+    pub fn startsTask(self: RawAccesses, d: DeclId) bool {
+        return d != DeclId.none and (d == self.task_start or d == self.task_start_in);
+    }
+
+    /// Whether `d` dispatches an unjoined worker task (`dispatch_worker`).
+    pub fn dispatchesTask(self: RawAccesses, d: DeclId) bool {
+        return d != DeclId.none and d == self.task_dispatch_worker;
+    }
+
+    /// Whether `d` is one of the library functions whose `body` crosses into
+    /// a task.
+    pub fn crossesTask(self: RawAccesses, d: DeclId) bool {
+        return self.preparesTask(d) or self.startsTask(d) or self.dispatchesTask(d);
+    }
+
     pub fn typed(self: RawAccesses, d: DeclId) bool {
         return d != DeclId.none and (d == self.stride or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or self.processText(d) != null or self.erasure(d));
     }
@@ -306,17 +344,28 @@ pub const RawAccesses = struct {
     }
 };
 
-/// `Closure.open_in` or `Closure.open` in the library's `mem`: the member of
-/// that name of an implementation whose head names `Closure`. Other types in
-/// `mem` declare an `open` of their own, so the name alone does not identify it.
-fn closureOpenDecl(program: *const ExpandedProgram, ast: *const Ast, member: []const u8) DeclId {
-    const closure = program.libraryDeclIn("mem", "Closure") orelse return .none;
-    const module = program.moduleOf(closure);
-    for (program.declsOf(module)) |d| {
+/// The member `member` of an implementation whose head names `owner`, the
+/// library's type of that name in `module_name`: `Closure.open_in` and
+/// `Closure.open` in `mem`, or `Slot.start` in `task`. Other types in a module
+/// declare members of the same names, so the name alone does not identify it.
+pub fn memberOf(program: *const ExpandedProgram, ast: *const Ast, module_name: []const u8, owner: []const u8, member: []const u8) DeclId {
+    const declared = program.libraryDeclIn(module_name, owner) orelse return .none;
+    for (program.declsOf(program.moduleOf(declared))) |d| {
         const name = ast.declName(d);
-        const owner = ast.memberOwner(d);
-        if (name == .none or owner == .none) continue;
-        if (std.mem.eql(u8, ast.tokenText(name), member) and std.mem.eql(u8, ast.tokenText(owner), "Closure")) return d;
+        const head = ast.memberOwner(d);
+        if (name == .none or head == .none) continue;
+        if (std.mem.eql(u8, ast.tokenText(name), member) and std.mem.eql(u8, ast.tokenText(head), owner)) return d;
+    }
+    return .none;
+}
+
+/// The library function `name` of `module_name` that is no type's member.
+fn moduleFunction(program: *const ExpandedProgram, ast: *const Ast, module_name: []const u8, name: []const u8) DeclId {
+    const declared = program.libraryDeclIn(module_name, name) orelse return .none;
+    for (program.declsOf(program.moduleOf(declared))) |d| {
+        const named = ast.declName(d);
+        if (named == .none or ast.memberOwner(d) != .none or ast.declTag(d) != .function) continue;
+        if (std.mem.eql(u8, ast.tokenText(named), name)) return d;
     }
     return .none;
 }
@@ -356,6 +405,10 @@ pub fn matchesRuntime(typing: *const Typing, declared: types_mod.CallableSignatu
     const params = typing.callableParams(declared);
     if (params.len != expected.parameters.len) return false;
     for (params, expected.parameters) |param, want| {
+        if (want.scalar == .callback) {
+            if (typing.get(param.ty) != .callable or param.convention != .read) return false;
+            continue;
+        }
         if (param.ty != runtimeScalarType(want.scalar)) return false;
         const convention: @TypeOf(param.convention) = switch (want.passing) {
             .read => .read,
@@ -391,8 +444,9 @@ pub fn runtimeScalarType(scalar: runtime_symbols.Scalar) TypeId {
         .f64 => .f64,
         .unit => .unit,
         // Only the symbols the compiler owns take a pointer, and none of them
-        // is declared in Linea.
-        .ptr => unreachable,
+        // is declared in Linea. A callback is a callable type of its own
+        // declaration, which `matchesRuntime` reads before asking here.
+        .ptr, .callback => unreachable,
     };
 }
 

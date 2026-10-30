@@ -1,0 +1,37 @@
+error[O-Cross]: an unjoined task cannot take `count` lent `inout`: nothing joins the task before `count` is used or ends
+  --> tests/tasks/an_unjoined_worker_refuses_borrows_and_lends.lin:21:21
+   |
+21 |         sink [inout count] || {
+   |                     ^^^^^ this capture lends the place `inout`
+   |
+   = help: an unjoined task returns no handle to join it; move an owned value into the task with `sink`, or start a joined task with `task.prepare` or `task.start`
+error[O-Cross]: an unjoined task cannot read `limit`: nothing joins the task before `limit` ends
+  --> tests/tasks/an_unjoined_worker_refuses_borrows_and_lends.lin:29:20
+   |
+29 |         sink [read limit] || {
+   |                    ^^^^^ this capture is read by the task
+   |
+   = help: an unjoined task returns no handle to join it; move an owned value into the task with `sink`, or start a joined task with `task.prepare` or `task.start`
+error[O-Cross]: an unjoined task cannot take a value observing `greeting`: nothing joins the task before `greeting` ends
+  --> tests/tasks/an_unjoined_worker_refuses_borrows_and_lends.lin:38:20
+   |
+38 |         sink [sink slice] || {
+   |                    ^^^^^ this capture observes it
+   |
+   = help: an unjoined task returns no handle to join it; move an owned value into the task with `sink`, or start a joined task with `task.prepare` or `task.start`
+error[O-Cross]: an unjoined task cannot take a value observing `greeting`: nothing joins the task before `greeting` ends
+  --> tests/tasks/an_unjoined_worker_refuses_borrows_and_lends.lin:46:20
+   |
+46 |         sink [sink nested_slice] || {
+   |                    ^^^^^^^^^^^^ this capture observes it
+   |
+   = help: an unjoined task returns no handle to join it; move an owned value into the task with `sink`, or start a joined task with `task.prepare` or `task.start`
+error[O-Cross]: an unjoined task cannot take `tallied` lent `inout`: nothing joins the task before `tallied` is used or ends
+  --> tests/tasks/an_unjoined_worker_refuses_borrows_and_lends.lin:59:20
+   |
+54 |         inout [inout tallied] || {
+   |                      ------- lent `inout` here
+59 |         sink [sink nested_writer] || {
+   |                    ^^^^^^^^^^^^^ this capture holds the lend
+   |
+   = help: an unjoined task returns no handle to join it; move an owned value into the task with `sink`, or start a joined task with `task.prepare` or `task.start`

@@ -1,0 +1,10 @@
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/tasks/a_viewed_text_is_not_a_payload.lin:12:12
+   |
+12 |         me.send("ready").close()
+   |            ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/tasks/a_viewed_text_is_not_a_payload.lin:15:39
+   |
+15 |     let (word, handle) = slot.start().recv()
+   |                                       ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds

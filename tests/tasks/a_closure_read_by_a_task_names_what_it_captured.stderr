@@ -1,0 +1,7 @@
+error[O-Cross]: a task cannot read `grab` while its creator may read it too: a closure is not `Shareable`: `handle` is a `mem.Handle[mem.SystemAllocator]`, which is unshareable
+  --> tests/tasks/a_closure_read_by_a_task_names_what_it_captured.lin:20:27
+   |
+20 |     let body = sink [read grab] |sink me: Chan[End]| {
+   |                           ^^^^ this capture is read by the task
+   |
+   = help: reading this value may change it; move it into one task, or give the task a value that reading never changes

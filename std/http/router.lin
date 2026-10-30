@@ -1,6 +1,7 @@
 import std.collections
 import std.fmt
 import std.mem
+import std.task
 import std.testing
 
 use mem.Closure
@@ -144,10 +145,8 @@ struct Router[S = (), P: Allocator = mem.SystemAllocator] {
     // `patterns` holds each handler's pattern path as a range of `paths`.
     patterns: Vec[Span, P],
     paths: String[P],
-    // `matched` holds the names and decoded values of the path values of the
-    // request answered last, as UTF-8, and `matched_fields` their ranges there.
     matched: Vec[UInt8, P],
-    matched_fields: Vec[Field, P],
+    fields: Vec[Field, P],
 }
 
 // A `Slot` is where a pattern's handler is registered: the node its path ends
@@ -206,7 +205,7 @@ impl[S, P: Allocator] Router[S, P] {
             patterns = Vec.new_in(allocator),
             paths = String.new_in(allocator),
             matched = Vec.new_in(allocator),
-            matched_fields = Vec.new_in(allocator),
+            fields = Vec.new_in(allocator),
         }
     }
 
@@ -603,20 +602,22 @@ impl[S, P: Allocator] Handler[S, P] for Router[S, P] {
                 if pattern.find(r"{").is_none() {
                     return (self.handlers[index])(&state, request)
                 }
-                // The values of the request answered last are dropped, and
-                // their storage is kept for these.
+                task.handler_lock()
                 &self.matched.clear()
-                &self.matched_fields.clear()
-                match record_path_values(&self.matched, &self.matched_fields, pattern, request.path()) {
-                    Ok(_) => {},
-                    Err(refusal) => return .Err(match refusal {
+                &self.fields.clear()
+                let recorded = record_path_values(&self.matched, &self.fields, pattern, request.path())
+                let res = match recorded {
+                    Ok(_) => {
+                        let matched = Str.from_bytes(self.matched.as_slice()).unwrap()
+                        (self.handlers[index])(&state, request.routed(matched, self.fields.as_slice()))
+                    },
+                    Err(refusal) => .Err(match refusal {
                         Allocation(_) => Error.new(.InternalServerError),
                         _ => error(request, .BadRequest, "a path value is not percent-encoded UTF-8"),
                     }),
                 }
-                // Every recorded name and value is UTF-8, so the whole is.
-                let matched = Str.from_bytes(self.matched.as_slice()).unwrap()
-                return (self.handlers[index])(&state, request.routed(matched, self.matched_fields.as_slice()))
+                task.handler_unlock()
+                return res
             },
             Unmatched => .Err(error(request, .NotFound, "not found")),
             WrongMethod(table) => {

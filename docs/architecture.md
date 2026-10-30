@@ -1404,6 +1404,16 @@ and of the whole owner, and a read inspects only lends. Normalized calls determi
 access. Dependencies are carried by the closure environment through the existing
 owner graph.
 
+A task's body crosses to another thread at a call to `task.Slot.start`,
+which `RawAccesses.slot_start` names by identity. At that call the dependency
+analysis reads the facts the `body` argument carries and holds them to
+[O-Cross]: an observation's place must be `Shareable`, which it asks of
+`Typing.isShareable`, the table the checker settled for the `Shareable` bound,
+and an exclusive lend must be one of the body's own `inout` captures. Which
+capture a fact came through is read from `capture_sets`, what each capture
+took into its closure, sized by the function's captures; ownership computes
+no shareability of its own.
+
 Ownership runs even when type checking reports errors. A place with a poison
 type has no usable capability information, so it cannot support meaningful
 ownership checks. Other, correctly typed places are still checked; an unrelated

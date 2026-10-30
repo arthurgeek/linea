@@ -1,0 +1,25 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+@linear
+struct Token {
+    number: UInt64,
+}
+
+// A failed preparation hands the body back, and a body owning a token must
+// still be settled on that path.
+fn main() -> UInt8 {
+    let token = Token { number = 2 }
+    let body = sink [sink token] |sink me: Chan[End]| {
+        let Token { number: _ } = token
+        me.close()
+    }
+    match task.prepare(body) {
+        Ok(slot) => slot.start().close(),
+        Err(_failure) => {},
+    }
+    0
+}

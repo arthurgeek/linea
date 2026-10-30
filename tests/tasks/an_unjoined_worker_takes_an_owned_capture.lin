@@ -1,0 +1,37 @@
+import std.io
+import std.session
+import std.task
+
+// `dispatch_worker` accepts a body that transfers ownership of `Owned` values
+// by `sink`.
+fn main() -> UInt8 {
+    let env = UInt64(0)
+    var mb: session.Mailbox[UInt64, UInt64] = session.Mailbox.open(env)
+    let sender = &mb.sender()
+    let owned_text = "worker".to_owned().unwrap()
+
+    task.dispatch_worker(
+        sink [sink sender, sink owned_text] || {
+            let len = owned_text.length()
+            owned_text.release()
+            sender.send(len).close()
+        },
+        1,
+    )
+
+    task.drain_workers()
+    let total = match mb.recv() {
+        Message(len, next_mb) => {
+            match next_mb.recv() {
+                Message(_, rest) => {
+                    rest.close()
+                    0
+                },
+                Closed => len,
+            }
+        },
+        Closed => 0,
+    }
+    io.println("{total}").unwrap()
+    0
+}

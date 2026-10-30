@@ -1,0 +1,11 @@
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+  --> tests/tasks/a_prepared_slot_keeps_the_bodys_lend.lin:16:5
+   |
+11 |     let body = sink [inout count] |sink me: Chan[End]| {
+   |                            ----- lent `inout` here
+16 |     count = 5
+   |     ^^^^^ this uses the place while it is lent
+17 |     slot.start().close()
+   |     ---- a value holding the lend is still used here
+   |
+   = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure

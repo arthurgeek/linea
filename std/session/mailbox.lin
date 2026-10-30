@@ -1,0 +1,219 @@
+import std.mem
+import std.testing
+import std.time
+
+extern fn linea_mailbox_open() -> UInt64
+
+extern fn linea_mailbox_close(mb: UInt64)
+
+extern fn linea_mailbox_add_child(mb: UInt64)
+
+extern fn linea_mailbox_remove_child(mb: UInt64)
+
+pub enum Received[M: Owned + Discardable, E: Shareable] {
+    Message(M, Mailbox[M, E]),
+    Closed,
+}
+
+pub enum TimerResult[M: Owned + Discardable] {
+    Fired,
+    Cancelled(M),
+}
+
+@(opaque, linear)
+struct Timer[phantom M: Owned + Discardable] {
+    handle: UInt64,
+}
+
+impl[M: Owned + Discardable] Timer[M] {
+    pub fn cancel(sink self: Self) -> TimerResult[M] {
+        let Timer { handle } = self
+        match mem.mailbox_timer_cancel_payload[M](handle) {
+            Some(msg) => .Cancelled(msg),
+            None => .Fired,
+        }
+    }
+}
+
+@(opaque, linear)
+struct Sender[phantom M: Owned + Discardable] {
+    mb: UInt64,
+}
+
+impl[M: Owned + Discardable] Sender[M] {
+    pub fn clone(self: Self) -> Self {
+        linea_mailbox_add_child(self.mb)
+        Sender[M] { mb = self.mb }
+    }
+
+    pub fn send(sink self: Self, sink message: M) -> Self {
+        let Sender { mb } = self
+        mem.mailbox_send_payload(mb, message)
+        Sender[M] { mb }
+    }
+
+    pub fn close(sink self: Self) {
+        let Sender { mb } = self
+        linea_mailbox_remove_child(mb)
+    }
+}
+
+@(opaque, linear)
+struct Mailbox[phantom M: Owned + Discardable, E: Shareable] {
+    handle: UInt64,
+    env: mem.Carried[E],
+}
+
+impl[M: Owned + Discardable, E: Shareable] Mailbox[M, E] {
+    pub fn open(_env: E) -> Self where borrows(_env) {
+        let handle = linea_mailbox_open()
+        .{ handle, env = .{} }
+    }
+
+    pub fn close(sink self: Self) {
+        let Mailbox { handle, env: _ } = self
+        linea_mailbox_close(handle)
+    }
+
+    pub fn sender(inout self: Self) -> Sender[M] {
+        linea_mailbox_add_child(self.handle)
+        Sender[M] { mb = self.handle }
+    }
+
+    pub fn recv(sink self: Self) -> Received[M, E] where carries(self) {
+        let Mailbox { handle, env } = self
+        match mem.mailbox_receive_payload[M](handle) {
+            Some(msg) => .Message(msg, .{ handle, env }),
+            None => {
+                linea_mailbox_close(handle)
+                .Closed
+            },
+        }
+    }
+
+    pub fn send_after(inout self: Self, after: time.Duration, sink message: M) -> Timer[M] {
+        let timer_handle = mem.mailbox_timer_payload[M](self.handle, after.nanoseconds(), message)
+        Timer[M] { handle = timer_handle }
+    }
+}
+
+test fn mailbox_sends_and_receives_messages() {
+    let env = UInt64(42)
+    var mb: Mailbox[UInt64, UInt64] = Mailbox.open(env)
+    let s1 = &mb.sender()
+    let s2 = s1.clone()
+    s1.send(100).close()
+    s2.send(200).close()
+    match mb.recv() {
+        Message(msg1, mb2) => {
+            match mb2.recv() {
+                Message(msg2, mb3) => {
+                    let sum = msg1 + msg2
+                    let closed_matches = match mb3.recv() {
+                        Closed => true,
+                        Message(_, mb4) => {
+                            mb4.close()
+                            false
+                        },
+                    }
+                    testing.assert(sum == 300, "message sum mismatch")?
+                    testing.assert(closed_matches, "expected closed mailbox")?
+                },
+                Closed => testing.assert(false, "second message not received")?,
+            }
+        },
+        Closed => testing.assert(false, "mailbox closed prematurely")?,
+    }
+}
+
+test fn mailbox_sender_closing_one_clone_keeps_mailbox_open() {
+    let env = UInt64(1)
+    var mb: Mailbox[UInt64, UInt64] = Mailbox.open(env)
+    let s1 = &mb.sender()
+    let s2 = s1.clone()
+    s1.close()
+    s2.send(42).close()
+    match mb.recv() {
+        Message(msg, mb2) => {
+            let received = msg == 42
+            let closed_matches = match mb2.recv() {
+                Closed => true,
+                Message(_, mb3) => {
+                    mb3.close()
+                    false
+                },
+            }
+            testing.assert(received, "received message mismatch")?
+            testing.assert(closed_matches, "expected closed mailbox after all senders closed")?
+        },
+        Closed => return testing.assert(false, "mailbox closed when s1 closed despite s2 open"),
+    }
+    .Ok(())
+}
+
+test fn timer_cancels_promptly_without_blocking() {
+    let env = UInt64(0)
+    var mb: Mailbox[UInt64, UInt64] = Mailbox.open(env)
+    let timer = &mb.send_after(time.Duration.from_seconds(10), 999)
+    let start = time.Instant.now()
+    let result = timer.cancel()
+    let elapsed = start.elapsed().nanoseconds()
+    mb.close()
+    match result {
+        Cancelled(val) => {
+            testing.assert_eq(val, 999, "cancelled payload mismatch")?
+        },
+        Fired => {
+            testing.assert(false, "timer should have been cancelled")?
+        },
+    }
+    testing.assert(elapsed < 100000000, "timer cancellation took too long")?
+    .Ok(())
+}
+
+test fn timer_with_duration_at_and_beyond_signed_boundary() {
+    let env = UInt64(0)
+    var mb: Mailbox[UInt64, UInt64] = Mailbox.open(env)
+    defer mb.close()
+
+    // 1. INT64_MAX nanoseconds (signed 64-bit boundary)
+    let max_signed_ns: UInt64 = 9223372036854775807
+    let timer_signed = &mb.send_after(time.Duration.from_nanoseconds(max_signed_ns), 777)
+    let res_signed = timer_signed.cancel()
+    match res_signed {
+        Cancelled(val) => {
+            testing.assert_eq(val, 777, "signed boundary payload mismatch")?
+        },
+        Fired => {
+            testing.assert(false, "signed boundary timer fired prematurely")?
+        },
+    }
+
+    // 2. INT64_MAX + 1 nanoseconds (right beyond signed 64-bit boundary)
+    let past_signed_ns: UInt64 = max_signed_ns + 1
+    let timer_past = &mb.send_after(time.Duration.from_nanoseconds(past_signed_ns), 888)
+    let res_past = timer_past.cancel()
+    match res_past {
+        Cancelled(val) => {
+            testing.assert_eq(val, 888, "past signed boundary payload mismatch")?
+        },
+        Fired => {
+            testing.assert(false, "past signed boundary timer fired prematurely")?
+        },
+    }
+
+    // 3. UINT64_MAX nanoseconds (max unsigned 64-bit value)
+    let max_unsigned_ns: UInt64 = max_signed_ns * 2 + 1
+    let timer_max = &mb.send_after(time.Duration.from_nanoseconds(max_unsigned_ns), 999)
+    let res_max = timer_max.cancel()
+    match res_max {
+        Cancelled(val) => {
+            testing.assert_eq(val, 999, "max unsigned payload mismatch")?
+        },
+        Fired => {
+            testing.assert(false, "max unsigned timer fired prematurely")?
+        },
+    }
+
+    .Ok(())
+}

@@ -1,0 +1,118 @@
+// Estimate how long each article of a newsletter takes to read. Each article
+// is measured on a task of its own, all three at once, and the report is
+// printed once every task has been joined.
+import std.io
+import std.session
+import std.task
+import std.testing
+
+use session.Chan
+use session.End
+use session.Send
+
+// What measuring one article finds. It holds only numbers, so it is `Owned`
+// and a task may send it back.
+@(copyable, derive(Equatable, Debug))
+struct Measure {
+    words: UInt64,
+    sentences: UInt64,
+}
+
+// Count the words of `text`, separated by spaces, and its sentences, each
+// ending in a full stop.
+fn measure(text: Str) -> Measure {
+    var words = UInt64(0)
+    for _ in text.split(" ").unwrap() {
+        words += 1
+    }
+    // A full stop is byte 46 in UTF-8, and `*byte` reads the byte the loop
+    // points at.
+    var sentences = UInt64(0)
+    for byte in text.as_bytes() {
+        if *byte == 46 {
+            sentences += 1
+        }
+    }
+    .{ words, sentences }
+}
+
+test fn measure_counts_words_and_sentences() {
+    testing.assert_eq(measure("One two. Three four five."), .{ words = 5, sentences = 2 }, "the measure was wrong")?
+}
+
+// The minutes an article of `words` words takes at two hundred words a
+// minute, rounded up.
+fn minutes_for(words: UInt64) -> UInt64 {
+    (words + 199) / 200
+}
+
+test fn minutes_for_rounds_up() {
+    testing.assert_eq(minutes_for(1), 1, "a short article took no time")?
+    testing.assert_eq(minutes_for(400), 2, "an exact count was rounded")?
+}
+
+// Print one line of the report.
+fn report(title: Str, found: Measure) -> Result[(), io.IoError] {
+    io.println("{title}: {found.words} words, {found.sentences} sentences, about {minutes_for(found.words)} min")
+}
+
+// Measure the three articles at once. Every task is prepared before any
+// starts, so a preparation that fails cancels the ones before it and hands
+// its reason on with no task left running.
+fn measure_all(harbour: Str, library: Str, weather: Str) -> Result[(Measure, Measure, Measure), task.PrepareError] {
+    // Each body reads its article. A `Str` is `Shareable`, so the tasks and
+    // their creator may all read the texts at once, and none may change them
+    // until every task is joined.
+    let measure_harbour = sink [read harbour] |sink me: Chan[Send[Measure, End]]| {
+        me.send(measure(harbour)).close()
+    }
+    let measure_library = sink [read library] |sink me: Chan[Send[Measure, End]]| {
+        me.send(measure(library)).close()
+    }
+    let measure_weather = sink [read weather] |sink me: Chan[Send[Measure, End]]| {
+        me.send(measure(weather)).close()
+    }
+    let harbour_slot = task.prepare(measure_harbour).settled()?
+    let library_slot = task.prepare(measure_library).settled() else |reason| {
+        let _unrun = harbour_slot.cancel()
+        return .Err(reason)
+    }
+    let weather_slot = task.prepare(measure_weather).settled() else |reason| {
+        let _unrun = harbour_slot.cancel()
+        let _also_unrun = library_slot.cancel()
+        return .Err(reason)
+    }
+
+    // Starting cannot fail, and all three start before any is waited for.
+    let harbour_task = harbour_slot.start()
+    let library_task = library_slot.start()
+    let weather_task = weather_slot.start()
+
+    // Gather: receive each result, then `close` joins its task.
+    let (harbour_measure, harbour_done) = harbour_task.recv()
+    harbour_done.close()
+    let (library_measure, library_done) = library_task.recv()
+    library_done.close()
+    let (weather_measure, weather_done) = weather_task.recv()
+    weather_done.close()
+    .Ok((harbour_measure, library_measure, weather_measure))
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let harbour = "The harbour reopened on Monday. Fishing boats returned before dawn. The market was full by seven."
+    let library = "The library extends its hours. It now opens at eight and closes at ten. Students asked for the change for a year."
+    let weather = "Rain is expected all week. Bring a coat."
+    let (harbour_measure, library_measure, weather_measure) = match measure_all(harbour, library, weather) {
+        Ok(measures) => measures,
+        Err(reason) => {
+            io.println("could not start a task: {reason}")?
+            return .Ok(1)
+        },
+    }
+    report("Harbour", harbour_measure)?
+    report("Library", library_measure)?
+    report("Weather", weather_measure)?
+    let total = harbour_measure.words + library_measure.words + weather_measure.words
+    io.println("Whole newsletter: {total} words, about {minutes_for(total)} min")?
+    .Ok(0)
+}

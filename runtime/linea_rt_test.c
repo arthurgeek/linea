@@ -103,7 +103,7 @@ static void environment(void) {
     assert(linea_env_at(count) == 0 && linea_env_len(count) == 0);
 }
 
-#if LINEA_CHECK_STORAGE
+#if defined(LINEA_CHECK_STORAGE) && LINEA_CHECK_STORAGE
 /* Runs `body` in a child and checks it was killed by `signal` without writing anything. */
 static void dies_by(void (*body)(void), int signal) {
     pid_t pid = fork();
@@ -285,7 +285,7 @@ int main(void) {
     allocation();
     arguments();
     environment();
-#if LINEA_CHECK_STORAGE
+#if defined(LINEA_CHECK_STORAGE) && LINEA_CHECK_STORAGE
     checked_allocation();
     fault_handler_is_one_shot_and_informative();
 #if defined(__linux__)
@@ -310,7 +310,7 @@ int main(void) {
     aborts_saying(free_nothing, "linea: a disposal named no extent to release\n");
     aborts_saying(trap_overflow, "linea: integer overflow at t.lin:3:7\n");
     aborts_saying(panic_message, "linea: panic: boom at t.lin:1:2\n");
-#if LINEA_CHECK_STORAGE
+#if defined(LINEA_CHECK_STORAGE) && LINEA_CHECK_STORAGE
     puts("native runtime: checked allocation, arguments, environment and aborts passed");
 #else
     puts("native runtime: allocation, arguments, environment and aborts passed");

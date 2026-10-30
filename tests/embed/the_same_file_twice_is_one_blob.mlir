@@ -27,7 +27,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     cf.br ^b0
   ^b0:
     %v0 = llvm.mlir.addressof @linea_static0 : !llvm.ptr loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:11)
@@ -77,7 +77,7 @@ module {
     %v10 = arith.addi %v9, %p10 : i64 loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:5)
     func.return %v10 : i64 loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:5)
   }
-  func.func private @"lin.std.text;Str.length"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.text;Str.length"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     llvm.store %a0, %s0 : !llvm.ptr, !llvm.ptr
@@ -88,7 +88,7 @@ module {
     %v3 = func.call @"lin.std.mem;Slice[UInt8].length"(%v0) : (!llvm.ptr) -> i64 loc("std/text/str.lin":L:C)
     func.return %v3 : i64 loc("std/text/str.lin":L:C)
   }
-  func.func private @"lin.std.mem;Slice[UInt8].length"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.std.mem;Slice[UInt8].length"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     llvm.store %a0, %s0 : !llvm.ptr, !llvm.ptr

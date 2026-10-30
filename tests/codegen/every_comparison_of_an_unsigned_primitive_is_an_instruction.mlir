@@ -14,7 +14,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -154,7 +154,7 @@ module {
     %v72 = arith.extui %lw72 : i8 to i64 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":36:5)
     func.return %v72 : i64 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":36:5)
   }
-  func.func private @"lin.;eq"(%a0: i64, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;eq"(%a0: i64, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -172,7 +172,7 @@ module {
     %v2 = arith.cmpi eq, %v0, %v1 : i64 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":8:5)
     func.return %v2 : i1 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":8:5)
   }
-  func.func private @"lin.;ne"(%a0: i64, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;ne"(%a0: i64, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -190,7 +190,7 @@ module {
     %v2 = arith.cmpi ne, %v0, %v1 : i64 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":12:5)
     func.return %v2 : i1 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":12:5)
   }
-  func.func private @"lin.;lt"(%a0: i64, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;lt"(%a0: i64, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -208,7 +208,7 @@ module {
     %v2 = arith.cmpi ult, %v0, %v1 : i64 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":16:5)
     func.return %v2 : i1 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":16:5)
   }
-  func.func private @"lin.;le"(%a0: i64, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;le"(%a0: i64, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -226,7 +226,7 @@ module {
     %v2 = arith.cmpi ule, %v0, %v1 : i64 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":20:5)
     func.return %v2 : i1 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":20:5)
   }
-  func.func private @"lin.;gt"(%a0: i64, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;gt"(%a0: i64, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -244,7 +244,7 @@ module {
     %v2 = arith.cmpi ugt, %v0, %v1 : i64 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":24:5)
     func.return %v2 : i1 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":24:5)
   }
-  func.func private @"lin.;ge"(%a0: i64, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;ge"(%a0: i64, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -262,7 +262,7 @@ module {
     %v2 = arith.cmpi uge, %v0, %v1 : i64 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":28:5)
     func.return %v2 : i1 loc("tests/codegen/every_comparison_of_an_unsigned_primitive_is_an_instruction.lin":28:5)
   }
-  func.func private @"lin.;alike"(%a0: i1, %a1: i1) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;alike"(%a0: i1, %a1: i1) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64

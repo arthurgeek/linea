@@ -302,6 +302,7 @@ The library tests itself.
   ok    fs.path_display_escapes_undecodable_bytes_without_losing_them
   ok    fs.path_errors_are_independent_of_released_input_bytes
   ok    fs.paths_preserve_non_utf8_bytes_and_reject_nul_at_its_offset
+  ok    fs.positional_file_reads_and_writes_at_offsets
   ok    fs.reading_a_file_accepts_its_exact_byte_limit
   ok    fs.reading_a_file_allocates_from_the_system_allocator
   ok    fs.reading_a_file_allocates_its_bytes_from_an_arena
@@ -543,6 +544,10 @@ The library tests itself.
   ok    http.arena_arithmetic_stops_at_the_largest_integer
   ok    http.bodyless_statuses_are_recognised
   ok    http.bodyless_statuses_emit_no_content_type_and_no_body
+  ok    http.concurrent_requests_execute_simultaneously_without_serialization
+  ok    http.concurrent_routing_with_path_parameters
+  ok    http.concurrent_serving_in_an_arena_allocator
+  ok    http.concurrent_workers_pool_and_reuse_arenas_across_requests
   ok    http.content_length_alone_frames_the_body
   ok    http.content_length_must_be_digits_and_agree
   ok    http.cookie_decodes_the_percent_encoded_value
@@ -568,6 +573,7 @@ The library tests itself.
   ok    http.headers_go_out_in_order_before_the_default_content_type
   ok    http.headers_walk_in_arrival_order
   ok    http.http_11_host_header_is_strictly_enforced
+  ok    http.http_serve_defaults_to_concurrent_worker_execution
   ok    http.identical_shapes_are_a_duplicate
   ok    http.into_state_returns_the_state_and_releases_the_handler
   ok    http.json_decodes_the_body_or_names_what_is_wrong
@@ -579,6 +585,7 @@ The library tests itself.
   ok    http.non_ascii_values_without_escapes_read_as_sent
   ok    http.one_connection_is_served_and_serve_returns
   ok    http.only_reads_the_single_value_whatever_its_name
+  ok    http.overlapping_concurrent_requests_execute_in_parallel
   ok    http.path_values_belong_to_the_request_answered
   ok    http.percent_decoding_reads_escapes_in_either_case_and_keeps_plus
   ok    http.percent_decoding_refuses_an_escape_that_is_not_two_hexadecimal_digits
@@ -592,6 +599,9 @@ The library tests itself.
   ok    http.request_is_https_checks_forwarded_headers_and_env
   ok    http.running_out_of_memory_answers_500
   ok    http.same_origin_policy_validates_requests
+  ok    http.sequential_routing_with_path_parameters
+  ok    http.serve_opened_defaults_to_concurrent_worker_execution
+  ok    http.serving_concurrently_with_workers
   ok    http.serving_in_an_arena_carves_the_exchanges_from_it
   ok    http.serving_reports_an_accept_failure_when_closing_the_listener_fails_too
   ok    http.serving_that_cannot_begin_announces_nothing_and_releases_the_handler
@@ -612,9 +622,11 @@ The library tests itself.
   ok    http.the_unreserved_bytes_are_letters_digits_and_four_marks
   ok    http.transfer_encoding_is_not_implemented
   ok    http.transient_accept_failures_are_retried_until_a_connection_is_served
+  ok    http.two_server_instances_with_different_allocators_and_interleaved_requests
   ok    http.unescaping_keeps_bytes_that_are_not_utf8
   ok    http.whitespace_around_pairs_is_tolerated_and_names_match_exactly
   ok    http.with_state_lends_its_state_to_every_request
+  ok    http.zero_workers_closes_listener_immediately
   ok    index.a_from_end_index_displays_its_source_notation
   ok    index.derived_from_end_debug_renders_the_offset
   ok    index.derived_from_end_equality_compares_the_offset
@@ -658,6 +670,7 @@ The library tests itself.
   ok    io.core.an_io_error_converts_into_itself_unchanged
   ok    io.core.an_io_error_displays_its_numeric_reason
   ok    io.core.closing_a_descriptor_wrapper_succeeds
+  ok    io.core.concurrent_output_locking
   ok    io.core.derived_io_error_debug_renders_the_code
   ok    io.core.derived_io_error_equality_compares_the_code
   ok    io.core.derived_io_error_release_consumes_the_code
@@ -1142,11 +1155,13 @@ The library tests itself.
   ok    mem.vec_release_visits_each_element_once_in_reverse_order
   ok    mem.vec_remove_closes_the_gap_and_preserves_absent_indices
   ok    mem.vec_reserved_insertions_do_not_allocate
+  ok    mem.vec_split_inout_lends_disjoint_halves
   ok    mem.vec_truncate_releases_the_tail_last_first_and_keeps_capacity
   ok    mem.vec_unallocated_byte_storage_has_no_buffer
   ok    net.a_backlog_holds_one_to_4096_connections
   ok    net.a_client_reports_the_listener_as_its_peer
   ok    net.a_connection_close_reports_success
+  ok    net.a_connection_dismantles_into_its_fd_and_adopts_back
   ok    net.a_connection_reaches_its_own_listener
   ok    net.a_connection_reset_before_accept_is_reported_as_reset_and_the_next_is_accepted
   ok    net.a_connection_to_a_closed_port_is_refused
@@ -1179,10 +1194,14 @@ The library tests itself.
   ok    net.listen_queues_the_default_backlog_or_the_one_given
   ok    net.loopback_names_this_host
   ok    net.serve_runs_the_handler_once_for_each_connection_and_returns
+  ok    net.serve_workers_handles_connections_concurrently
+  ok    net.serve_workers_sequential_policy
   ok    net.serving_no_connections_returns_at_once_and_closes_the_listener
   ok    net.the_accept_pause_doubles_to_one_second
   ok    net.the_handler_reads_from_each_connection_and_names_its_peer
   ok    net.transient_accept_failures_are_retried_until_a_connection_is_served
+  ok    net.two_independent_servers_drain_their_own_workers
+  ok    net.zero_workers_closes_the_listener_and_returns
   ok    option.a_mutable_and_then_calls_its_transform_only_for_some
   ok    option.a_mutable_fallback_runs_only_for_none
   ok    option.a_mutable_map_calls_its_transform_only_for_some
@@ -1268,8 +1287,44 @@ The library tests itself.
   ok    scalar.sine_uses_radians_and_preserves_special_values
   ok    scalar.square_roots_preserve_zero_and_infinite_limits
   ok    scalar.trunc_rounds_toward_zero_and_keeps_the_sign
+  ok    session.a_receive_answers_what_the_peer_sent
+  ok    session.a_send_hands_the_value_to_the_peer
+  ok    session.an_offer_answers_the_branch_the_peer_chose
+  ok    session.an_owned_handle_can_be_detached
+  ok    session.choosing_left_runs_the_peers_left_branch
+  ok    session.choosing_right_runs_the_peers_right_branch
+  ok    session.closing_a_handle_waits_for_the_body
+  ok    session.entering_a_protocol_keeps_the_endpoint
+  ok    session.mailbox_sender_closing_one_clone_keeps_mailbox_open
+  ok    session.mailbox_sends_and_receives_messages
   ok    session.the_dual_of_a_protocol_is_what_its_peer_does
   ok    session.the_dual_of_the_dual_is_the_protocol
+  ok    session.timer_cancels_promptly_without_blocking
+  ok    session.timer_with_duration_at_and_beyond_signed_boundary
+  ok    task.a_cancelled_slot_runs_nothing_and_gives_the_body_back
+  ok    task.a_connection_queue_buffers_and_hands_over_descriptors
+  ok    task.a_connection_queue_passes_descriptors_between_tasks
+  ok    task.a_failed_preparation_settles_to_its_reason
+  ok    task.a_prepared_body_runs_once_its_task_starts
+  ok    task.a_refused_allocation_hands_the_body_back
+  ok    task.a_started_task_answers_its_handle
+  ok    task.a_task_can_set_and_read_its_worker_id
+  ok    task.a_task_started_in_one_call_runs_its_body
+  ok    task.a_task_that_cannot_start_answers_the_reason
+  ok    task.a_thread_that_cannot_be_made_hands_the_body_back
+  ok    task.all_runs_sequentially_and_on_threads
+  ok    task.background_workers_dispatch_and_drain
+  ok    task.join3_runs_sequentially_and_on_threads
+  ok    task.join4_runs_sequentially_and_on_threads
+  ok    task.join_runs_on_threads
+  ok    task.join_runs_sequentially
+  ok    task.latch_synchronizes_tasks_and_times_out
+  ok    task.mailbox_owning_task_counts_concurrent_increments
+  ok    task.map_preserves_deterministic_order
+  ok    task.map_results_preserves_all_slots
+  ok    task.thread_pool_executes_work_and_closes
+  ok    task.worker_identity_is_separate_from_worker_slot
+  ok    task.worker_slots_are_thread_local
   ok    testing.a_failure_displays_the_callers_message
   ok    testing.a_new_recorder_holds_nothing
   ok    testing.a_recorder_keeps_what_was_rendered_into_it
@@ -1430,4 +1485,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1427 passed, 0 failed
+  1482 passed, 0 failed

@@ -1,0 +1,23 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Send
+
+// A task handle that carries an `inout` borrow cannot have its tracking
+// erased by `detach`, because `detach` requires `H: Owned`.
+fn main() -> UInt8 {
+    var count = UInt64(0)
+    let body = sink [inout count] |sink me: Chan[Send[UInt64, End]]| {
+        count += 1
+        me.send(count).close()
+    }
+    let slot = task.prepare(body).unwrap()
+    let handle = slot.start()
+    let detached = session.detach(handle)
+    let (first, done) = detached.recv()
+    let premature = count
+    done.close()
+    UInt8(first + premature)
+}

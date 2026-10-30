@@ -1,0 +1,9 @@
+error[O-Cross]: a task cannot take `count` lent `inout` through another value: only the body's own `inout` capture lends a place to a task
+  --> tests/tasks/a_lend_held_by_another_closure_does_not_cross.lin:14:27
+   |
+11 |     let bump = sink [inout count] || {
+   |                            ----- lent `inout` here
+14 |     let body = sink [sink bump] |sink me: Chan[End]| {
+   |                           ^^^^ this capture holds the lend
+   |
+   = help: capture the place `inout` in the task's body itself

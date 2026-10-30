@@ -1,0 +1,22 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+// `launch` lends its own `count` capture to the task's body, so the handle it
+// would return carries that lend out of the closure that makes it.
+fn main() -> UInt8 {
+    var count = UInt64(0)
+    var launch = inout [inout count] || {
+        let body = sink [inout count] |sink me: Chan[End]| {
+            count += 1
+            me.close()
+        }
+        let slot = task.prepare(body).unwrap()
+        slot.start()
+    }
+    let handle = &launch()
+    handle.close()
+    UInt8(count)
+}

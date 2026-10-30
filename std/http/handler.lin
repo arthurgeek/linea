@@ -24,6 +24,12 @@ pub trait Handler[S, P: Allocator] {
     fn serve_http(inout self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] where borrows(self), carries(request)
 }
 
+impl[P: Allocator] Handler[(), P] for fn(request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn serve_http(inout self: Self, inout _state: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+        self(request)
+    }
+}
+
 fn greeting[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
     text(request, "hello")
 }

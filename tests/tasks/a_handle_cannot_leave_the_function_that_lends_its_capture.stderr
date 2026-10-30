@@ -1,0 +1,9 @@
+error[O-Escapes]: a value holding a place lent `inout` cannot leave the function that lends it
+  --> tests/tasks/a_handle_cannot_leave_the_function_that_lends_its_capture.lin:17:9
+   |
+12 |         let body = sink [inout count] |sink me: Chan[End]| {
+   |                                ----- lent `inout` here
+17 |         slot.start()
+   |         ^^^^^^^^^^^^ this value holds the lend
+   |
+   = help: finish with the value inside this function, or give the closure its own state with a `sink` capture

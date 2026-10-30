@@ -35,6 +35,10 @@ static long stream_socket(void) {
     /* socket does not block; Linux and macOS document no EINTR for it. */
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return -(long)errno;
+#if defined(SO_NOSIGPIPE)
+    int nosigpipe = 1;
+    (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof nosigpipe);
+#endif
     int failed = close_on_exec(fd);
     if (failed != 0) { close(fd); return -(long)failed; }
     return fd;
@@ -62,6 +66,10 @@ long linea_net_accept(int listener) {
     int fd;
     do { fd = accept(listener, NULL, NULL); } while (fd < 0 && errno == EINTR);
     if (fd < 0) return -(long)errno;
+#if defined(SO_NOSIGPIPE)
+    int nosigpipe = 1;
+    (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof nosigpipe);
+#endif
     int failed = close_on_exec(fd);
     if (failed != 0) { close(fd); return -(long)failed; }
     return fd;

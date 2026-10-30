@@ -348,6 +348,20 @@ pub const Observation = enum {
     carried_inout,
     /// The same ticket for a callback that held a scalar lent `inout`.
     scalar_carried_inout,
+    /// A live task's handle, whose body captured the owner's slice and sends
+    /// its first element. The handle keeps the read observation until
+    /// `close` joins the task.
+    task_read,
+    /// A live task's handle, whose body holds the vector lent `inout`,
+    /// pushes once and sends the length.
+    task_inout,
+    /// A live task's handle, whose body captured a view of one of the map's
+    /// values.
+    task_map_read,
+    /// A live task's handle, whose body reads a scalar it captured `read`.
+    task_scalar_read,
+    /// A live task's handle, whose body holds a scalar lent `inout`.
+    task_scalar_inout,
 
     /// Whether the observation can be made of the storage. A vector held in
     /// a field and a fixed array are observed as a vector is, through their
@@ -355,11 +369,11 @@ pub const Observation = enum {
     /// pushes.
     pub fn fits(self: Observation, storage: Storage) bool {
         return switch (self) {
-            .slice, .wrapped, .subspan, .element, .iterator, .mapped, .filtered, .lent_walk, .read_capture, .carried_read => storage == .vec or storage == .field or storage == .array or storage == .walked,
+            .slice, .wrapped, .subspan, .element, .iterator, .mapped, .filtered, .lent_walk, .read_capture, .carried_read, .task_read => storage == .vec or storage == .field or storage == .array or storage == .walked,
             .bare_slice, .bare_iterator, .bare_mapped => storage == .vec or storage == .field or storage == .array or storage == .walked,
-            .inout_capture, .carried_inout => storage == .vec or storage == .walked,
-            .value_view, .entries, .map_inout_capture, .bare_entries => storage == .map,
-            .scalar_inout_capture, .scalar_read_capture, .scalar_carried_inout => storage == .scalar,
+            .inout_capture, .carried_inout, .task_inout => storage == .vec or storage == .walked,
+            .value_view, .entries, .map_inout_capture, .bare_entries, .task_map_read => storage == .map,
+            .scalar_inout_capture, .scalar_read_capture, .scalar_carried_inout, .task_scalar_read, .task_scalar_inout => storage == .scalar,
             .text => storage == .handle,
             .argument => storage == .vec or storage == .map or storage == .handle,
         };
@@ -418,6 +432,40 @@ pub const Observation = enum {
             \\})
             ,
             .text => "let seen = strchr(owner, 0)",
+            .task_read =>
+            \\let view = owner.as_slice()
+            \\let body = sink [view] |sink me: session.Chan[session.Send[UInt64, session.End]]| {
+            \\    me.send(view[0]).close()
+            \\}
+            \\let seen = task.prepare(body).unwrap().start()
+            ,
+            .task_inout =>
+            \\let body = sink [inout owner] |sink me: session.Chan[session.Send[UInt64, session.End]]| {
+            \\    &owner.push(7).unwrap()
+            \\    me.send(owner.length()).close()
+            \\}
+            \\let seen = task.prepare(body).unwrap().start()
+            ,
+            .task_map_read =>
+            \\let view = owner.get(2).unwrap()
+            \\let body = sink [view] |sink me: session.Chan[session.Send[UInt64, session.End]]| {
+            \\    me.send(*view).close()
+            \\}
+            \\let seen = task.prepare(body).unwrap().start()
+            ,
+            .task_scalar_read =>
+            \\let body = sink [read owner] |sink me: session.Chan[session.Send[UInt64, session.End]]| {
+            \\    me.send(owner).close()
+            \\}
+            \\let seen = task.prepare(body).unwrap().start()
+            ,
+            .task_scalar_inout =>
+            \\let body = sink [inout owner] |sink me: session.Chan[session.Send[UInt64, session.End]]| {
+            \\    owner += 1
+            \\    me.send(owner).close()
+            \\}
+            \\let seen = task.prepare(body).unwrap().start()
+            ,
             // The walk is opened by the loop that walks it, and the owner is
             // lent by the call it is an argument of.
             .bare_slice, .bare_iterator, .bare_mapped, .bare_entries, .argument => "",
@@ -450,6 +498,7 @@ pub const Observation = enum {
             .entries => "match Iterator.next(&seen) { Some(entry) => entry.value, None => 0 }",
             .text => "seen.length()",
             .carried_read, .carried_inout, .scalar_carried_inout => "redeem(seen)",
+            .task_read, .task_inout, .task_map_read, .task_scalar_read, .task_scalar_inout => "joined(seen)",
             // A bare walk is used only by walking it, inside a `for` meeting,
             // and a lent owner only by the call it is lent to.
             .bare_slice, .bare_iterator, .bare_mapped, .bare_entries, .argument => unreachable,
@@ -459,7 +508,16 @@ pub const Observation = enum {
     /// Whether making the observation lends the owner `inout`.
     fn lendsInout(self: Observation) bool {
         return switch (self) {
-            .inout_capture, .map_inout_capture, .scalar_inout_capture, .carried_inout, .scalar_carried_inout => true,
+            .inout_capture, .map_inout_capture, .scalar_inout_capture, .carried_inout, .scalar_carried_inout, .task_inout, .task_scalar_inout => true,
+            else => false,
+        };
+    }
+
+    /// Whether the observation is a task's handle, which is linear: it is
+    /// used once, by the `close` that joins the task.
+    fn task(self: Observation) bool {
+        return switch (self) {
+            .task_read, .task_inout, .task_map_read, .task_scalar_read, .task_scalar_inout => true,
             else => false,
         };
     }
@@ -496,6 +554,7 @@ pub const Observation = enum {
             .entries => .{ .sequence = "seen", .item = "item.value" },
             .element, .wrapped, .read_capture, .inout_capture, .value_view, .map_inout_capture, .scalar_inout_capture, .scalar_read_capture => null,
             .carried_read, .carried_inout, .scalar_carried_inout => null,
+            .task_read, .task_inout, .task_map_read, .task_scalar_read, .task_scalar_inout => null,
             .bare_slice, .bare_iterator, .bare_mapped, .bare_entries, .text, .argument => null,
         };
     }
@@ -557,6 +616,10 @@ pub const Cell = struct {
         if (self.observation == .argument) return self.meeting == .one_call and self.operation.consumes();
         // A walk is used by walking it, which no call does.
         if (self.meeting == .one_call and self.observation == .lent_walk) return false;
+        // A task's handle is used once, by its join, so it meets no
+        // operation in a loop that would use it on every pass, nor in a
+        // call that would lend it and leave it unjoined.
+        if (self.observation.task() and (self.meeting.loops() or self.meeting == .one_call)) return false;
         return true;
     }
 
@@ -645,7 +708,18 @@ test "the matrix holds every applicable cell of the three axes" {
     const array = 2 * (10 * 7 - 1 + 3);
     const walked = 2 * (12 * 8 - 2 - 1 + 3);
     const handle = 3 * 8 - 1 * 2 + 1;
-    try testing.expectEqual(@as(usize, vec + map + scalar + field + array + walked + handle), all.len);
+    // A live task's handle meets each operation of its storage at the five
+    // meetings that use it once, less `defer` for an operation with no
+    // expression and the meeting between two calls of a closure for a body
+    // holding the owner lent `inout`.
+    const vec_tasks = (10 * 5 - 1) + (10 * 4 - 1);
+    const map_tasks = 6 * 5;
+    const scalar_tasks = 2 * 4 + 2 * 3;
+    const field_tasks = 2 * 5;
+    const array_tasks = 2 * 4;
+    const walked_tasks = 2 * 5 + 2 * 4;
+    const tasks = vec_tasks + map_tasks + scalar_tasks + field_tasks + array_tasks + walked_tasks;
+    try testing.expectEqual(@as(usize, vec + map + scalar + field + array + walked + handle + tasks), all.len);
     for (all) |cell| try testing.expect(cell.applies());
     // The shape the matrix exists for is one of its cells.
     var motivating = false;
@@ -668,6 +742,10 @@ test "the matrix holds every applicable cell of the three axes" {
     var carried = false;
     for (all) |cell| carried = carried or (cell.operation == .assign and cell.observation == .scalar_carried_inout and cell.meeting == .straight);
     try testing.expect(carried);
+    // So is a place a live task reads, met with a write before the join.
+    var task_read = false;
+    for (all) |cell| task_read = task_read or (cell.operation == .push and cell.observation == .task_read and cell.meeting == .straight);
+    try testing.expect(task_read);
     var handle_text = false;
     for (all) |cell| handle_text = handle_text or (cell.operation == .handle_change and cell.observation == .text and cell.meeting == .straight);
     try testing.expect(handle_text);
@@ -819,6 +897,20 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
         if (cell.meeting != .one_call) try w.raw(
             \\fn redeem[F](ticket: Ticket[F]) -> UInt64 {
             \\    ticket.number
+            \\}
+            \\
+            \\
+        );
+    }
+    if (observation.task()) {
+        try w.raw(
+            \\import std.session
+            \\import std.task
+            \\
+            \\fn joined[H](sink handle: session.Chan[session.Recv[UInt64, session.End], H]) -> UInt64 {
+            \\    let (value, done) = handle.recv()
+            \\    done.close()
+            \\    value
             \\}
             \\
             \\
