@@ -11,6 +11,7 @@ import std.time
 
 use io.BufferOpenFailure
 use io.Reader
+use task.Unowned
 use task.Unstarted
 
 // A request buffer holds 4 KiB of input at a time.
@@ -28,14 +29,19 @@ let linger_reads: UInt64 = 16
 // `serve` stops with `Accept` when accepting a connection fails with an
 // error that retrying does not answer, with `Close` when closing the listener
 // fails, and, before accepting anything, with `ArenaTooSmall` when
-// `limits.request_arena_bytes` cannot hold every request the limits admit and
-// with `Memory` when `parent` refuses the buffer a 503 discards input into.
+// `limits.request_arena_bytes` cannot hold every request the limits admit,
+// with `Memory` when `parent` refuses the buffer a 503 discards input into,
+// with `NoWorkers` when the policy is `.Threads(0)`, which would answer
+// nothing, and with `Task` when the task that keeps a shared state cannot be
+// started.
 @(copyable, derive(Equatable, Debug))
 pub enum ServeError {
     Accept(net.NetError),
     Close(io.IoError),
     ArenaTooSmall,
     Memory(mem.Oom),
+    NoWorkers,
+    Task(task.PrepareError),
 }
 
 impl ServeError {
@@ -55,6 +61,11 @@ impl Display for ServeError {
             Accept(error) => net.ServeError.Accept(copy(error)).fmt(&w),
             Close(error) => net.ServeError.Close(copy(error)).fmt(&w),
             ArenaTooSmall => &w.write_str("the request arena cannot hold every request the limits admit"),
+            NoWorkers => &w.write_str("a policy of no threads answers no request"),
+            Task(reason) => {
+                &w.write_str("the task that keeps the shared state could not be started: ")?
+                reason.fmt(&w)
+            },
             Memory(reason) => {
                 &w.write_str("the parent refused the buffer a refused request is discarded into: ")?
                 reason.fmt(&w)
@@ -74,50 +85,60 @@ test fn a_serve_error_displays_its_cause() {
     testing.assert_eq(small.view(), "the request arena cannot hold every request the limits admit", "the arena refusal changed")?
     defer let memory = fmt.render_owned(ServeError.Memory(.Exhausted)).unwrap()
     testing.assert_eq(memory.view(), "the parent refused the buffer a refused request is discarded into: Exhausted", "the memory refusal changed")?
+    defer let none = fmt.render_owned(ServeError.NoWorkers).unwrap()
+    testing.assert_eq(none.view(), "a policy of no threads answers no request", "the empty policy's refusal changed")?
+    defer let unstarted = fmt.render_owned(ServeError.Task(.Thread)).unwrap()
+    testing.assert_eq(unstarted.view(), "the task that keeps the shared state could not be started: Thread", "the task refusal changed")?
     .Ok(())
 }
 
-// Accept connections on `listener` and answer one request on each through
-// `handler`, one connection at a time. `handler` takes no state of its own: a
-// program that shares state serves `http.with_state(state, handler)`, which
-// owns it and lends it down. Serving keeps one arena of
+// Accept connections on `listener` and answer the requests on each through a
+// handler, on as many tasks as `policy` allows: `.Threads(n)` serves up to `n`
+// connections at once, and `.Sequential` one at a time. Each task builds its
+// own handler with `make_handler` and keeps it for every connection it serves,
+// so no handler is reached by two tasks and none needs a lock. A program whose
+// handlers share state serves through `listen_and_serve_with`, which keeps
+// that state in an owning task. Each task keeps one arena of
 // `limits.request_arena_bytes` carved from the system allocator, or from the
-// `parent` `serve_in` takes: each request is read into
-// it, the handler builds its response in it, and once the response is
-// written the arena is rewound, which zeroes only the bytes that exchange
-// used, so a small request costs little however large the arena is. When
-// `parent` refuses the arena, the request is answered 503 and the arena is
-// opened again for the next. The 503 discards the unread request into a
-// 4 KiB buffer taken from `parent` once, before anything is accepted, so a
-// parent that refuses every arena still has each client read its 503 rather
-// than a reset. Once each exchange has ended, serving tells
-// `handler` how through `observe`, failures included, and continues; it writes
-// nothing to standard error of its own. A reset connection or running out of
-// descriptors while accepting is reported the same way and retried after a
-// pause that grows while the failure repeats; any other accept failure ends
-// serving with `Accept`. Serving ends with `Ok` after `limits.connections`
-// connections, and never ends when that is `.None`. The listener is closed on
-// every exit.
-pub fn serve[L: net.Acceptor + io.Close, H: Handler[(), mem.SystemAllocator] + Observer + Shareable](sink listener: L, inout handler: H, limits: Limits = standard_limits, policy: task.Policy = .Threads(128)) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
-    match copy(policy) {
-        Sequential => serve_announcing(listener, &handler, mem.system(), limits, .None),
-        Threads(workers) => {
-            if workers == 0 {
-                let _closed = listener.close()
-                return .Ok(())
-            }
-            if workers == 1 {
-                serve_announcing(listener, &handler, mem.system(), limits, .None)
-            } else {
-                serve_concurrent(listener, &handler, limits, .None, workers)
-            }
-        },
-    }
+// `parent` `serve_in` takes: each request is read into it, the handler builds
+// its response in it, and once the response is written the arena is rewound,
+// which zeroes only the bytes that exchange used, so a small request costs
+// little however large the arena is. When `parent` refuses the arena, the
+// request is answered 503 and the arena is opened again for the next. The 503
+// discards the unread request into a 4 KiB buffer each task takes from
+// `parent` once, before it serves anything, so a parent that refuses every
+// arena still has each client read its 503 rather than a reset. Once each
+// exchange has ended, serving tells that task's handler how through
+// `observe`, failures included, and continues; it writes nothing to standard
+// error of its own. A reset connection or running out of descriptors while
+// accepting is reported the same way and retried after a pause that grows
+// while the failure repeats; any other accept failure ends serving with
+// `Accept`. Serving ends with `Ok` after `limits.connections` connections, and
+// never ends when that is `.None`. Every task is joined and the listener is
+// closed on every exit.
+pub fn serve[L: net.Acceptor + io.Close + Owned + Shareable, H: Handler[(), mem.SystemAllocator] + Observer + Release, M: Shareable + Copyable + fn() -> H](sink listener: L, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128)) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+    serve_made(listener, mem.system(), make_handler, limits, policy, .None)
 }
 
-// `serve_in` serves as `serve` does, carving each request's arena, and the
-// buffer a refused request is discarded into, from `parent`.
-pub fn serve_in[P: Allocator, L: net.Acceptor + io.Close, H: Handler[(), P] + Observer](parent: P, sink listener: L, inout handler: H, limits: Limits = standard_limits, _policy: task.Policy = .Sequential) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+// `serve_in` serves as `serve` does, carving each task's arenas, and the
+// buffer a refused request is discarded into, from `parent`, which every task
+// reads, so it must be `Shareable`.
+pub fn serve_in[P: Allocator + Shareable, L: net.Acceptor + io.Close + Owned + Shareable, H: Handler[(), P] + Observer + Release, M: Shareable + Copyable + fn() -> H](parent: P, sink listener: L, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128)) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+    serve_made(listener, parent, make_handler, limits, policy, .None)
+}
+
+// Serve as `serve` does, one connection at a time, through the one `handler`
+// the caller lends, which keeps its changes across connections for the caller
+// to read once serving has stopped. A slow client holds up the ones queued
+// behind it.
+pub fn serve_sequentially[L: net.Acceptor + io.Close, H: Handler[(), mem.SystemAllocator] + Observer](sink listener: L, inout handler: H, limits: Limits = standard_limits) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+    serve_announcing(listener, &handler, mem.system(), limits, .None)
+}
+
+// `serve_sequentially_in` serves as `serve_sequentially` does, carving its
+// arena, and the buffer a refused request is discarded into, from `parent`,
+// which only this task reads, such as an arena's handle.
+pub fn serve_sequentially_in[P: Allocator, L: net.Acceptor + io.Close, H: Handler[(), P] + Observer](parent: P, sink listener: L, inout handler: H, limits: Limits = standard_limits) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
     serve_announcing(listener, &handler, parent, limits, .None)
 }
 
@@ -126,7 +147,7 @@ test fn serving_in_an_arena_carves_the_exchanges_from_it() {
     defer arena.release()
     defer var router = Router.new_in(arena.handle())
     let listener = net.listen(net.loopback(0)).unwrap()
-    let served = serve_in(arena.handle(), listener, &router, limits: serving(0))
+    let served = serve_sequentially_in(arena.handle(), listener, &router, limits: serving(0))
     testing.assert(served.is_ok(), "serving nothing from an arena failed")?
     .Ok(())
 }
@@ -182,324 +203,233 @@ fn serve_announcing[L: net.Acceptor + io.Close, H: Handler[(), P] + Observer, P:
     }
 }
 
-fn serve_concurrent[
-    L: net.Acceptor + io.Close,
-    H: Handler[(), mem.SystemAllocator] + Observer + Shareable,
-](sink listener: L, inout handler: H, limits: Limits, announce: Option[net.Address], workers: UInt64) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
-    var accepting = listener
+// What the listener's owning task holds while tasks serve it: the listener,
+// how many connections it has handed out, the most it hands out, the pause
+// after a transient accept failure, and the failure that ended accepting.
+struct Accepting[L] {
+    listener: L,
+    served: UInt64,
+    limit: Option[UInt64],
+    pause_ms: UInt64,
+    stopped: Option[net.NetError],
+}
+
+// What a serving task is handed when it asks for its next connection.
+enum Next {
+    Connection(net.Accepted),
+    Retried(net.AcceptRetry),
+    Stop,
+}
+
+impl[L: net.Acceptor] Accepting[L] {
+    // Accept the next connection, unless accepting has stopped or handed out
+    // the most it may.
+    fn next(inout self: Self) -> Next {
+        if self.stopped.is_some() || net.reached(self.limit, self.served) {
+            return .Stop
+        }
+        match net.accept_attempt(&self.listener, &self.pause_ms) {
+            Connected(accepted) => {
+                self.served += 1
+                .Connection(accepted)
+            },
+            Retry(retry) => .Retried(retry),
+            Failed(error) => {
+                self.stopped = .Some(error)
+                .Stop
+            },
+        }
+    }
+}
+
+// Serve `listener` with handlers `make_handler` builds, on the tasks `policy`
+// allows. The listener is kept by an owning task, which each serving task asks
+// for its next connection, so a task takes a connection only once it is free
+// and a slow client holds up no other. When the owning task cannot be made,
+// this thread serves alone.
+fn serve_made[L: net.Acceptor + io.Close + Owned + Shareable, P: Allocator + Shareable, H: Handler[(), P] + Observer + Release, M: Shareable + Copyable + fn() -> H](sink listener: L, parent: P, make_handler: M, limits: Limits, policy: task.Policy, announce: Option[net.Address]) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+    let workers = match copy(policy) {
+        Sequential => 1,
+        Threads(count) => count,
+    }
     if workers == 0 {
-        let _closed = accepting.close()
-        return .Ok(())
+        let _closed = listener.close()
+        return .Err(.NoWorkers)
+    }
+    if workers == 1 {
+        var handler = make_handler()
+        let served = serve_announcing(listener, &handler, parent, limits, announce)
+        handler.release()
+        return served
     }
     let needed = smallest_arena(limits)
     if needed == UInt64.max || limits.request_arena_bytes < needed {
-        let _closed = accepting.close()
+        let _closed = listener.close()
         return .Err(.ArenaTooSmall)
+    }
+    let accepting: Accepting[L] = .{ listener, served = 0, limit = copy(limits.connections), pause_ms = 0, stopped = .None }
+    let owner = match task.own(accepting) {
+        Ok(owner) => owner,
+        Err(Unowned { state, reason: _ }) => {
+            let Accepting { listener: alone, served: _, limit: _, pause_ms: _, stopped: _ } = state
+            var handler = make_handler()
+            let served = serve_announcing(alone, &handler, parent, limits, announce)
+            handler.release()
+            return served
+        },
     }
     match read announce {
         Some(address) => {
-            let listening: Event[mem.SystemAllocator] = .Listening(copy(address))
-            task.handler_lock()
-            &handler.observe(listening)
-            task.handler_unlock()
+            var announcer = make_handler()
+            let listening: Event[P] = .Listening(copy(address))
+            &announcer.observe(listening)
+            announcer.release()
         },
         None => {},
     }
-
-    let queue = task.ConnectionQueue.open() else {
-        let _closed = accepting.close()
-        return .Err(.Memory(.Exhausted))
-    }
-    let queue_handle = queue.handle()
-    var active: mem.Vec[task.WorkerTask, mem.SystemAllocator] = mem.Vec.new()
-    var failed_reason: Option[task.PrepareError] = .None
-    for worker_idx in 0..workers {
-        if failed_reason.is_some() {
-            break
-        }
-        let wid = worker_idx + 1
-        let body = sink [inout handler, sink limits = copy(limits), sink wid, sink queue_handle = copy(queue_handle)] |sink me: session.Chan[session.End]| {
-            task.set_worker_id(wid)
-            task.set_worker_slot(wid)
-            var refusal = mem.system().acquire(request_buffer_bytes) else |_| {
-                me.close()
-                return
-            }
-            var arena = mem.Arena.open(mem.system(), limits.request_arena_bytes)
-            while true {
-                let fd = queue_handle.pop()
-                if fd < 0 {
-                    break
-                }
-                let connection = net.adopt(fd)
-                let accepted = time.Instant.now()
-                let res = serve_connection(connection, &handler, arena.handle(), &refusal, limits, accepted)
-                match res {
-                    Answered => &arena.rewind(),
-                    ArenaRefused => mem.exchange(&arena, mem.Arena.open(mem.system(), limits.request_arena_bytes)).release(),
-                }
-            }
-            arena.release()
-            refusal.release()
-            me.close()
-        }
-        match task.prepare(body) {
-            Ok(slot) => {
-                let running = slot.start_worker()
-                &active.push(running).unwrap()
-            },
-            Err(unstarted) => {
-                let Unstarted { body: _, reason } = unstarted
-                failed_reason = .Some(reason)
-            },
-        }
-    }
-    match failed_reason {
-        Some(reason) => {
-            queue.close()
-            var pending = active.drain()
-            for worker in &pending {
-                worker.close()
-            }
-            pending.finish().unwrap()
-            queue.release()
-            let _closed = accepting.close()
-            return .Err(match reason {
-                Allocation => .ArenaTooSmall,
-                Thread => .Memory(.Exhausted),
-            })
-        },
-        None => {},
-    }
-
-    var served: UInt64 = 0
-    var pause_ms: UInt64 = 0
-    var stopped: Option[net.NetError] = .None
-    while stopped.is_none() && !net.reached(limits.connections, served) {
-        match net.accept_attempt(&accepting, &pause_ms) {
-            Connected(Accepted { connection, address: _ }) => {
-                let fd = net.into_fd(connection)
-                queue_handle.push(fd)
-                served += 1
-            },
-            Retry(retry) => {
-                let pause = copy(retry.pause)
-                let event: Event[mem.SystemAllocator] = .AcceptRetried(retry)
-                task.handler_lock()
-                &handler.observe(event)
-                task.handler_unlock()
-                time.sleep(pause)
-            },
-            Failed(error) => stopped = .Some(error),
-        }
-    }
-
-    queue.close()
-    var pending = active.drain()
-    for worker in &pending {
-        worker.close()
-    }
-    pending.finish().unwrap()
-    queue.release()
-
-    match net.finish(accepting, stopped) {
+    let refused = serve_on_tasks[L, P, H, M](workers, owner.client(), parent, make_handler, limits)
+    let Accepting { listener: accepted, served: _, limit: _, pause_ms: _, stopped } = owner.close()
+    let finished: Result[(), ServeError] = match net.finish(accepted, stopped) {
         Ok(_) => .Ok(()),
         Err(error) => .Err(ServeError.of(error)),
     }
-}
-
-fn test_worker_handler(request: Request[mem.SystemAllocator]) -> Result[Response[mem.SystemAllocator], Error[mem.SystemAllocator]] {
-    text(request, "ok")
-}
-
-test fn serving_concurrently_with_workers() {
-    let listener = net.listen(net.loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    let client1 = send(bound, health_request)
-    let client2 = send(bound, health_request)
-    var handler = test_worker_handler
-    let served = serve(listener, &handler, limits: serving(2), policy: .Threads(2))
-    defer let r1 = read_to_end(client1)
-    defer let r2 = read_to_end(client2)
-    testing.assert_ok_eq(served, (), "threaded serving failed")?
-    testing.assert_eq(r1.view(), health_answer, "first threaded request wrong")?
-    testing.assert_eq(r2.view(), health_answer, "second threaded request wrong")?
-}
-
-fn test_arena_handler(request: Request[mem.Handle[mem.SystemAllocator]]) -> Result[Response[mem.Handle[mem.SystemAllocator]], Error[mem.Handle[mem.SystemAllocator]]] {
-    text(request, "arena_worker_ok")
-}
-
-test fn concurrent_serving_in_an_arena_allocator() {
-    let listener = net.listen(net.loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    let client1 = send(bound, health_request)
-    let client2 = send(bound, health_request)
-    defer let arena = mem.Arena.open(mem.system(), size: 67108864)
-    var handler = test_arena_handler
-    let served = serve_in(arena.handle(), listener, &handler, limits: serving(2))
-    defer let r1 = read_to_end(client1)
-    defer let r2 = read_to_end(client2)
-    testing.assert_ok_eq(served, (), "serve_in with arena failed")?
-    testing.assert(r1.view().find("arena_worker_ok").is_some(), "first response failed")?
-    testing.assert(r2.view().find("arena_worker_ok").is_some(), "second response failed")?
-    .Ok(())
-}
-
-fn test_server1_handler(request: Request[mem.Handle[mem.SystemAllocator]]) -> Result[Response[mem.Handle[mem.SystemAllocator]], Error[mem.Handle[mem.SystemAllocator]]] {
-    text(request, "server1_arena")
-}
-
-fn test_server2_handler(request: Request[mem.SystemAllocator]) -> Result[Response[mem.SystemAllocator], Error[mem.SystemAllocator]] {
-    text(request, "server2_system")
-}
-
-test fn two_server_instances_with_different_allocators_and_interleaved_requests() {
-    let listener1 = net.listen(net.loopback(0)).unwrap()
-    let bound1 = listener1.local_address().unwrap()
-    let listener2 = net.listen(net.loopback(0)).unwrap()
-    let bound2 = listener2.local_address().unwrap()
-
-    let task1 = task.prepare(
-        sink [sink listener1] |sink me: session.Chan[session.End]| {
-            defer let arena = mem.Arena.open(mem.system(), size: 67108864)
-            var h1 = test_server1_handler
-            let _s = serve_in(arena.handle(), listener1, &h1, limits: serving(2))
-            me.close()
-        },
-    ).unwrap().start()
-
-    let task2 = task.prepare(
-        sink [sink listener2] |sink me: session.Chan[session.End]| {
-            var h2 = test_server2_handler
-            let _s = serve(listener2, &h2, limits: serving(2), policy: .Threads(2))
-            me.close()
-        },
-    ).unwrap().start()
-
-    // Interleave requests to both servers
-    let c1_a = send(bound1, health_request)
-    let c2_a = send(bound2, health_request)
-    let c1_b = send(bound1, health_request)
-    let c2_b = send(bound2, health_request)
-
-    defer let r1_a = read_to_end(c1_a)
-    defer let r2_a = read_to_end(c2_a)
-    defer let r1_b = read_to_end(c1_b)
-    defer let r2_b = read_to_end(c2_b)
-
-    task1.close()
-    task2.close()
-
-    testing.assert(r1_a.view().find("server1_arena").is_some(), "server 1 request a wrong")?
-    testing.assert(r1_b.view().find("server1_arena").is_some(), "server 1 request b wrong")?
-    testing.assert(r2_a.view().find("server2_system").is_some(), "server 2 request a wrong")?
-    testing.assert(r2_b.view().find("server2_system").is_some(), "server 2 request b wrong")?
-    .Ok(())
-}
-
-fn test_slow_fast_handler(request: Request[mem.SystemAllocator]) -> Result[Response[mem.SystemAllocator], Error[mem.SystemAllocator]] {
-    if request.path() == "/slow" {
-        time.sleep(time.Duration.from_milliseconds(200))
-        text(request, "slow_ok")
-    } else {
-        text(request, "fast_ok")
+    match refused {
+        Some(reason) => .Err(.Memory(reason)),
+        None => finished,
     }
 }
 
-test fn overlapping_concurrent_requests_execute_in_parallel() {
-    let listener = net.listen(net.loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    let client_slow = send(bound, "GET /slow HTTP/1.1\r\nHost: loopback\r\n\r\n")
-    let client_fast = send(bound, "GET /fast HTTP/1.1\r\nHost: loopback\r\n\r\n")
-    let server_task = task.prepare(
-        sink [sink listener] |sink me: session.Chan[session.End]| {
-            var handler = test_slow_fast_handler
-            let _served = serve(listener, &handler, limits: serving(2), policy: .Threads(2))
-            me.close()
+// Serve on `count` tasks: half of them are started on a new task, which
+// divides them again, and this thread serves the rest, so starting them takes
+// a depth of the logarithm of `count`. Every task started is joined before
+// this returns. A task that cannot be made leaves its share to this thread.
+// It answers a refusal of the buffer a 503 discards into, when this thread's
+// own serving met one.
+fn serve_on_tasks[L: net.Acceptor + Owned + Shareable, P: Allocator + Shareable, H: Handler[(), P] + Observer + Release, M: Shareable + Copyable + fn() -> H](count: UInt64, acceptor: task.Client[Accepting[L]], parent: P, make_handler: M, limits: Limits) -> Option[mem.Oom] {
+    if count <= 1 {
+        return serve_worker[L, P, H, M](acceptor, parent, make_handler, limits)
+    }
+    let half = count / 2
+    let body = sink [half, sink acceptor = copy(acceptor), sink parent = copy(parent), sink make_handler = copy(make_handler), sink limits = copy(limits)] |sink me: session.Chan[session.End]| {
+        let _refused = serve_on_tasks[L, P, H, M](half, acceptor, parent, make_handler, limits)
+        me.close()
+    }
+    match task.prepare(body) {
+        Ok(slot) => {
+            let started = slot.start()
+            let refused = serve_on_tasks[L, P, H, M](count - half, acceptor, parent, make_handler, limits)
+            started.close()
+            refused
         },
-    ).unwrap().start()
-
-    let start = time.Instant.now()
-    defer let fast_resp = read_to_end(client_fast)
-    let fast_elapsed = start.elapsed().nanoseconds()
-    defer let slow_resp = read_to_end(client_slow)
-    server_task.close()
-
-    testing.assert(fast_resp.view().find("fast_ok").is_some(), "fast request failed")?
-    testing.assert(slow_resp.view().find("slow_ok").is_some(), "slow request failed")?
-    testing.assert(fast_elapsed < 150000000, "fast request was blocked behind slow request")?
-    .Ok(())
+        Err(unstarted) => {
+            let Unstarted { body: _, reason: _ } = unstarted
+            serve_on_tasks[L, P, H, M](count - half, acceptor, parent, make_handler, limits)
+        },
+    }
 }
 
-test fn zero_workers_closes_listener_immediately() {
+// One serving task: build a handler, then serve each connection the
+// listener's owning task hands out until it says to stop. It answers the
+// refusal of its 503 buffer, when `parent` refused it and it served nothing.
+fn serve_worker[L: net.Acceptor + Owned + Shareable, P: Allocator + Shareable, H: Handler[(), P] + Observer + Release, M: Shareable + Copyable + fn() -> H](acceptor: task.Client[Accepting[L]], parent: P, make_handler: M, limits: Limits) -> Option[mem.Oom] {
+    var refusal = parent.acquire(request_buffer_bytes) else |reason| {
+        return .Some(reason)
+    }
+    var handler = make_handler()
+    var arena = mem.Arena.open(parent, limits.request_arena_bytes)
+    var serving = true
+    while serving {
+        match acceptor.call(|inout accepting: Accepting[L]| &accepting.next()) {
+            Connection(Accepted { connection, address: _ }) => {
+                match serve_connection(connection, &handler, arena.handle(), &refusal, limits, time.Instant.now()) {
+                    Answered => &arena.rewind(),
+                    ArenaRefused => mem.exchange(&arena, mem.Arena.open(parent, limits.request_arena_bytes)).release(),
+                }
+            },
+            Retried(retry) => {
+                let pause = copy(retry.pause)
+                let event: Event[P] = .AcceptRetried(retry)
+                &handler.observe(event)
+                time.sleep(pause)
+            },
+            Stop => serving = false,
+        }
+    }
+    arena.release()
+    refusal.release()
+    handler.release()
+    .None
+}
+
+test fn serving_answers_each_client_on_its_own_task() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
-    var handler = test_worker_handler
-    let served = serve(listener, &handler, limits: standard_limits, policy: .Threads(0))
-    testing.assert_ok_eq(served, (), "zero workers should finish immediately and close listener")?
-    defer let attempt = net.connect(bound)
-    testing.assert(attempt.is_err(), "closed listener should refuse new connection")?
-    .Ok(())
-}
-
-fn test_retention_handler(request: Request[mem.SystemAllocator]) -> Result[Response[mem.SystemAllocator], Error[mem.SystemAllocator]] {
-    let wid = task.worker_id()
-    let slot = task.worker_slot()
-    let message = fmt.render_owned("wid={wid} slot={slot}").unwrap()
-    defer message.release()
-    text(request, message.view())
-}
-
-test fn concurrent_workers_pool_and_reuse_arenas_across_requests() {
-    let listener = net.listen(net.loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    var handler = test_retention_handler
-
     let client1 = send(bound, health_request)
     let client2 = send(bound, health_request)
-    let client3 = send(bound, health_request)
-    let client4 = send(bound, health_request)
-
-    let served = serve(listener, &handler, limits: serving(4), policy: .Threads(2))
-
+    let served = serve(listener, health_router, limits: serving(2), policy: .Threads(2))
     defer let r1 = read_to_end(client1)
     defer let r2 = read_to_end(client2)
-    defer let r3 = read_to_end(client3)
-    defer let r4 = read_to_end(client4)
-
-    testing.assert_ok_eq(served, (), "concurrent serving failed")?
-
-    // Check pool worker identity: all requests must be served by pooled workers (wid >= 1), not one-off threads (wid == 0)
-    testing.assert(r1.view().find("wid=0").is_none(), "request 1 not served by a pool worker")?
-    testing.assert(r2.view().find("wid=0").is_none(), "request 2 not served by a pool worker")?
-    testing.assert(r3.view().find("wid=0").is_none(), "request 3 not served by a pool worker")?
-    testing.assert(r4.view().find("wid=0").is_none(), "request 4 not served by a pool worker")?
-
-    // Check slot retention: with 4 requests across 2 workers, at least some requests must reuse a slot (slot > 0)
-    let has_slot_reuse = r1.view().find("slot=0").is_none() || r2.view().find("slot=0").is_none() || r3.view().find("slot=0").is_none() || r4.view().find("slot=0").is_none()
-    testing.assert(has_slot_reuse, "no worker slot was retained and reused across requests")?
-
+    testing.assert_ok_eq(served, (), "serving on two tasks failed")?
+    testing.assert_eq(r1.view(), health_answer, "the first client was not answered")?
+    testing.assert_eq(r2.view(), health_answer, "the second client was not answered")?
     .Ok(())
 }
 
-test fn http_serve_defaults_to_concurrent_worker_execution() {
+test fn a_policy_of_no_threads_is_refused_and_closes_the_listener() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
-    var handler = test_retention_handler
+    let served = serve(listener, health_router, limits: standard_limits, policy: .Threads(0))
+    let refused = match net.connect(bound) {
+        Ok(connection) => {
+            connection.close().unwrap()
+            false
+        },
+        Err(_) => true,
+    }
+    testing.assert_eq(served, .Err(.NoWorkers), "a policy of no threads was not refused")?
+    testing.assert(refused, "the listener was left open")?
+    .Ok(())
+}
 
+// `meet` counts its request in the shared tally, then waits until the other
+// request has been counted too: two requests are answered only when they are
+// served at once.
+fn meet[P: Allocator](inout tally: task.Client[Tally], request: Request[P]) -> Result[Response[P], Error[P]] {
+    tally.call(|inout t: Tally| t.visits += 1)
+    var waited: UInt64 = 0
+    while tally.call(|inout t: Tally| t.visits) < 2 && waited < 5000 {
+        time.sleep(time.Duration.from_milliseconds(1))
+        waited += 1
+    }
+    if waited < 5000 {
+        text(request, "ok")
+    } else {
+        .Err(Error.new(.ServiceUnavailable))
+    }
+}
+
+fn meeting_router() -> Router[task.Client[Tally]] {
+    var router: Router[task.Client[Tally]] = Router.new()
+    &router.route_raw("GET /health", meet).unwrap()
+    router
+}
+
+test fn serving_by_default_answers_two_requests_at_once() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
     let client1 = send(bound, health_request)
     let client2 = send(bound, health_request)
-
-    // Exercise http.serve without `policy:` to verify the default argument executes with concurrent pool workers
-    let served = serve(listener, &handler, limits: serving(2))
-
+    let owner = task.own(Tally { visits = 0 }).unwrap()
+    let counter = owner.client()
+    let made = [sink counter] || -> WithClient[Tally, Router[task.Client[Tally]]] where carries(counter) with_client(meeting_router(), copy(counter))
+    let served = serve(listener, made, limits: serving(2))
+    let tally = owner.close()
     defer let r1 = read_to_end(client1)
     defer let r2 = read_to_end(client2)
-
-    testing.assert_ok_eq(served, (), "default serving failed")?
-    testing.assert(r1.view().find("wid=0").is_none(), "default serve did not use concurrent pool workers")?
-    testing.assert(r2.view().find("wid=0").is_none(), "default serve did not use concurrent pool workers")?
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert_eq(tally.visits, UInt64(2), "a request was not counted")?
+    testing.assert_eq(r1.view(), health_answer, "the first request did not meet the second")?
+    testing.assert_eq(r2.view(), health_answer, "the second request did not meet the first")?
     .Ok(())
 }
 
@@ -520,7 +450,7 @@ test fn sequential_routing_with_path_parameters() {
     let client1 = send(bound, "GET /items/alpha HTTP/1.1\r\nHost: loopback\r\n\r\n")
     let client2 = send(bound, "GET /items/beta HTTP/1.1\r\nHost: loopback\r\n\r\n")
     defer var router = items_router()
-    let served = serve(listener, &router, limits: serving(2))
+    let served = serve_sequentially(listener, &router, limits: serving(2))
     defer let r1 = read_to_end(client1)
     defer let r2 = read_to_end(client2)
     testing.assert_ok_eq(served, (), "sequential serving failed")?
@@ -529,48 +459,17 @@ test fn sequential_routing_with_path_parameters() {
     .Ok(())
 }
 
-test fn concurrent_routing_with_path_parameters() {
+test fn each_task_routes_path_parameters_through_its_own_router() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let client1 = send(bound, "GET /items/alpha HTTP/1.1\r\nHost: loopback\r\n\r\n")
     let client2 = send(bound, "GET /items/beta HTTP/1.1\r\nHost: loopback\r\n\r\n")
-    defer var router = items_router()
-    let served = serve(listener, &router, limits: serving(2), policy: .Threads(2))
+    let served = serve(listener, items_router, limits: serving(2), policy: .Threads(2))
     defer let r1 = read_to_end(client1)
     defer let r2 = read_to_end(client2)
-    testing.assert_ok_eq(served, (), "threaded serving failed")?
+    testing.assert_ok_eq(served, (), "serving on two tasks failed")?
     testing.assert(r1.view().find("alpha").is_some(), "first request did not get its path value")?
     testing.assert(r2.view().find("beta").is_some(), "second request did not get its path value")?
-    .Ok(())
-}
-
-fn barrier_route_handler(inout latch: task.LatchHandle, request: Request[mem.SystemAllocator]) -> Result[Response[mem.SystemAllocator], Error[mem.SystemAllocator]] {
-    let entered = latch.arrive_and_wait_timeout(2000)
-    if !entered {
-        return text(request, "timed_out")
-    }
-    text(request, "barrier_ok")
-}
-
-test fn concurrent_requests_execute_simultaneously_without_serialization() {
-    let listener = net.listen(net.loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    defer let latch = task.Latch.open(2).unwrap()
-    let handle = latch.handle()
-    var router: Router[task.LatchHandle] = Router.new()
-    &router.route_raw("GET /slow", barrier_route_handler).unwrap()
-    &router.route_raw("GET /fast", barrier_route_handler).unwrap()
-    defer var server = with_state(handle, router)
-
-    let client1 = send(bound, "GET /slow HTTP/1.1\r\nHost: loopback\r\n\r\n")
-    let client2 = send(bound, "GET /fast HTTP/1.1\r\nHost: loopback\r\n\r\n")
-
-    let served = serve(listener, &server, limits: serving(2), policy: .Threads(2))
-    defer let r1 = read_to_end(client1)
-    defer let r2 = read_to_end(client2)
-    testing.assert_ok_eq(served, (), "concurrent serving failed")?
-    testing.assert(r1.view().find("barrier_ok").is_some(), "first request did not synchronize at barrier")?
-    testing.assert(r2.view().find("barrier_ok").is_some(), "second request did not synchronize at barrier")?
     .Ok(())
 }
 
@@ -579,7 +478,7 @@ test fn one_connection_is_served_and_serve_returns() {
     // The backlog queues the connection before serve accepts it.
     let client = send(listener.local_address().unwrap(), health_request)
     defer var router = health_router()
-    let served = serve(listener, &router, limits: serving(1))
+    let served = serve_sequentially(listener, &router, limits: serving(1))
     defer let received = read_to_end(client)
     testing.assert_ok_eq(served, (), "serving failed")?
     testing.assert_eq(received.view(), health_answer, "the request was not answered")?
@@ -592,7 +491,7 @@ test fn a_malformed_request_is_answered_and_serving_continues() {
     let malformed = send(bound, "garbage\r\n\r\n")
     let valid = send(bound, health_request)
     defer var router = health_router()
-    let served = serve(listener, &router, limits: serving(2))
+    let served = serve_sequentially(listener, &router, limits: serving(2))
     defer let refused = read_to_end(malformed)
     defer let answered = read_to_end(valid)
     testing.assert_ok_eq(served, (), "serving failed")?
@@ -610,7 +509,7 @@ test fn a_silent_client_times_out_and_the_next_is_served() {
     let valid = send(bound, health_request)
     defer var router = health_router()
     let limits = Limits { first_byte_timeout_ms = 50, read_timeout_ms = 100, ..serving(4) }
-    let served = serve(listener, &router, limits: limits)
+    let served = serve_sequentially(listener, &router, limits: limits)
     defer let idle = read_to_end(silent)
     defer let timed_out = read_to_end(partial)
     defer let answered = read_to_end(valid)
@@ -667,7 +566,7 @@ test fn a_client_reset_before_accept_never_stops_serving_and_the_next_is_served(
     // ends either way, and only `valid`'s answer is asserted.
     let extra = send(bound, health_request)
     defer var router = health_router()
-    let served = serve(listener, &router, limits: serving(2))
+    let served = serve_sequentially(listener, &router, limits: serving(2))
     defer let answered = read_to_end(valid)
     let _extra_closed = extra.close()
     testing.assert_ok_eq(served, (), "serving failed")?
@@ -685,7 +584,7 @@ test fn a_refused_body_left_unread_does_not_lose_the_answer() {
     }
     defer var router = health_router()
     let limits = Limits { max_body_bytes = 16, ..serving(1) }
-    let served = serve(listener, &router, limits: limits)
+    let served = serve_sequentially(listener, &router, limits: limits)
     defer let received = read_to_end(client)
     testing.assert_ok_eq(served, (), "serving failed")?
     testing.assert_eq(received.view(), "HTTP/1.1 413 Content Too Large\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "the refusal was lost")?
@@ -696,7 +595,7 @@ test fn a_handler_error_before_headers_answers_its_status() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), health_request)
     var handler = Unprocessable { refused = 0 }
-    let served = serve(listener, &handler, limits: serving(1))
+    let served = serve_sequentially(listener, &handler, limits: serving(1))
     defer let received = read_to_end(client)
     testing.assert_ok_eq(served, (), "serving failed")?
     testing.assert_eq(received.view(), "HTTP/1.1 422 Unprocessable Content\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nUnprocessable Content\n", "the handler's status was not answered")?
@@ -740,7 +639,7 @@ test fn every_exchange_returns_its_arena_to_the_parent() {
         request_arena_bytes = 98304,
         ..serving(10),
     }
-    let served = serve_in(parent.allocator(), listener, &router, limits: limits)
+    let served = serve_sequentially_in(parent.allocator(), listener, &router, limits: limits)
     router.release()
     let settled = parent.all_disposed()
     let acquired = parent.acquired()
@@ -783,7 +682,7 @@ test fn an_arena_parent_serves_every_exchange_from_one_request_arena() {
     defer let parent = mem.Arena.open(mem.system(), size: 102408)
     defer let tables = mem.Arena.open(mem.system(), size: 16384)
     var router = exchanges_router(tables.handle())
-    let served = serve_in(parent.handle(), listener, &router, limits: limits)
+    let served = serve_sequentially_in(parent.handle(), listener, &router, limits: limits)
     router.release()
     defer let health = read_to_end(first)
     defer let echoed = read_to_end(second)
@@ -819,7 +718,7 @@ test fn each_allocation_failure_covers_every_acquisition_from_the_parent() -> Re
                 request_arena_bytes = 98304,
                 ..serving(1),
             }
-            let served = serve_in(allocator, listener, &router, limits: limits)
+            let served = serve_sequentially_in(allocator, listener, &router, limits: limits)
             router.release()
             tables.release()
             let answer = read_or_reset(client)
@@ -861,7 +760,7 @@ test fn a_streamed_answer_goes_out_as_it_is_written() {
     let counted = send(bound, "GET /count HTTP/1.1\r\nHost: loopback\r\n\r\n")
     let broken = send(bound, "GET /broken HTTP/1.1\r\nHost: loopback\r\n\r\n")
     defer var router = exchanges_router(mem.system())
-    let served = serve(listener, &router, limits: serving(2))
+    let served = serve_sequentially(listener, &router, limits: serving(2))
     defer let full = read_to_end(counted)
     defer let cut = read_or_reset(broken)
     testing.assert_ok_eq(served, (), "serving failed")?
@@ -884,7 +783,7 @@ test fn a_refused_arena_is_answered_503() {
     // Serving first takes the buffer a 503 discards input into, then opens the
     // arena; refuse the arena.
     parent.refuse_attempt(parent.attempts() + 2)
-    let served = serve_in(parent.allocator(), listener, &router, limits: serving(2))
+    let served = serve_sequentially_in(parent.allocator(), listener, &router, limits: serving(2))
     router.release()
     let settled = parent.all_disposed()
     parent.release()
@@ -918,7 +817,7 @@ test fn every_connection_is_answered_503_while_the_parent_refuses_the_arena() {
         request_arena_bytes = 98304,
         ..serving(2),
     }
-    let served = serve_in(parent.handle(), listener, &router, limits: limits)
+    let served = serve_sequentially_in(parent.handle(), listener, &router, limits: limits)
     router.release()
     defer let answered_first = read_or_reset(first)
     defer let answered_second = read_or_reset(second)
@@ -933,7 +832,7 @@ test fn a_parent_that_refuses_the_discard_buffer_ends_serving_before_accepting()
     defer let parent = mem.Arena.open(mem.system(), size: 0)
     defer let tables = mem.Arena.open(mem.system(), size: 16384)
     defer var router = exchanges_router(tables.handle())
-    let served = serve_in(parent.handle(), listener, &router, limits: serving(1))
+    let served = serve_sequentially_in(parent.handle(), listener, &router, limits: serving(1))
     testing.assert_eq(served, .Err(.Memory(.Exhausted)), "serving began without a buffer to discard refused input into")?
     .Ok(())
 }
@@ -1000,7 +899,7 @@ test fn transient_accept_failures_are_retried_until_a_connection_is_served() {
     let reset = io.IoError { operation = .Accept, category = .ConnectionReset, code = .None, progress = 0 }
     let scripted = net.scripted(listener, [.Some(.Io(exhausted)), .Some(.Io(reset)), .None, .None], .None)
     defer var router = health_router()
-    let served = serve(scripted, &router, limits: serving(1))
+    let served = serve_sequentially(scripted, &router, limits: serving(1))
     defer let received = read_to_end(client)
     testing.assert_eq(served, .Ok(()), "serving did not retry")?
     testing.assert_eq(received.view(), health_answer, "the connection after the failures was not answered")?
@@ -1019,7 +918,7 @@ test fn each_accept_retry_is_observed_with_its_pause() {
     let reset = io.IoError { operation = .Accept, category = .ConnectionReset, code = .None, progress = 0 }
     let scripted = net.scripted(listener, [.Some(.Io(copy(exhausted))), .Some(.Io(reset)), .None, .Some(.Io(exhausted))], .None)
     var recorded = Recorded.new()
-    let served = serve(scripted, &recorded, limits: serving(2))
+    let served = serve_sequentially(scripted, &recorded, limits: serving(2))
     defer let answered = read_to_end(first)
     defer let also_answered = read_to_end(second)
     testing.assert_ok_eq(served, (), "serving failed")?
@@ -1035,7 +934,7 @@ test fn a_fatal_accept_failure_ends_serving_and_closes_the_listener() {
     let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
     let scripted = net.scripted(listener, [.Some(.Io(copy(invalid))), .None, .None, .None], .None)
     defer var router = health_router()
-    let served = serve(scripted, &router, limits: serving(1))
+    let served = serve_sequentially(scripted, &router, limits: serving(1))
     let refused = match net.connect(bound) {
         Ok(connection) => {
             connection.close().unwrap()
@@ -1053,7 +952,7 @@ test fn a_failed_listener_close_ends_serving_with_close() {
     let failure = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
     let scripted = net.scripted(listener, [.None, .None, .None, .None], .Some(copy(failure)))
     defer var router = health_router()
-    let served = serve(scripted, &router, limits: serving(0))
+    let served = serve_sequentially(scripted, &router, limits: serving(0))
     testing.assert_eq(served, .Err(.Close(failure)), "a failed close was not reported")?
     .Ok(())
 }
@@ -1090,35 +989,130 @@ test fn a_listen_and_serve_error_displays_its_cause() {
     .Ok(())
 }
 
-// Open a listener at `address` and serve on it as `serve` does, so the program
-// chooses what it serves and this function owns the listener and the handler.
-// `state` is what the routes share, wrapped around `handler` as `with_state`
-// does; a service that shares nothing leaves it out, and its state is `()`.
-// Each exchange's memory comes from the system allocator; `listen_and_serve_in`
-// takes the allocator it comes from first.
+// Open a listener at `address` and serve on it as `serve` does, so this
+// function owns the listener, with a handler `make_handler` builds for each
+// serving task. Each exchange's memory comes from the system allocator;
+// `listen_and_serve_in` takes the allocator it comes from first. A program
+// whose routes share state serves through `listen_and_serve_with`, and one
+// that serves one connection at a time through a handler it built itself
+// through `listen_and_serve_sequentially`.
 //
-// `handler` and `state` are released on every failure, including when listening
-// fails, and the listener is closed on every exit. On success the handler is
-// released and the state is returned, so a program reads what its routes
-// changed and releases it. Once serving can begin, which is after the limits and
-// the parent have been accepted and before anything is accepted, `handler` is
-// told the address the listener is bound to as `Event.Listening`, which is how
-// a program that asked for port 0 learns its port. A program that opens its own
-// listener calls `serve`.
-pub fn listen_and_serve[H: Handler[S, mem.SystemAllocator] + Observer + Release + Shareable, S: Release + Shareable = ()](address: net.Address, sink handler: H, sink state: S = (), limits: Limits = standard_limits, policy: task.Policy = .Threads(128)) -> Result[S, ListenAndServeError] where carries(state, handler) {
-    let server = with_state(state, handler)
-    let listener = net.listen(address, backlog: net.Backlog(1024)) else |error| {
-        server.release()
-        return .Err(.Listen(error))
-    }
-    let bound = listener.local_address()
-    let served = serve_opened(listener, bound, server, limits, policy)?
-    .Ok(served.into_state())
+// The listener is closed on every exit. Once serving can begin, which is after
+// the limits and the parent have been accepted and before anything is
+// accepted, a handler `make_handler` builds for the purpose is told the address
+// the listener is bound to as `Event.Listening`, which is how a program that
+// asked for port 0 learns its port. A program that opens its own listener
+// calls `serve`.
+pub fn listen_and_serve[H: Handler[(), mem.SystemAllocator] + Observer + Release, M: Shareable + Copyable + fn() -> H](address: net.Address, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128)) -> Result[(), ListenAndServeError] {
+    listen_and_serve_in(mem.system(), address, make_handler, limits, policy)
+}
+
+test fn a_listening_server_answers_on_every_task_it_serves_with() {
+    let served = listen_and_serve(net.loopback(0), health_router, limits: serving(0))
+    testing.assert_ok_eq(served, (), "listening without serving failed")?
+    .Ok(())
 }
 
 // `listen_and_serve_in` listens and serves as `listen_and_serve` does, carving
-// each exchange's memory from `parent`.
-pub fn listen_and_serve_in[P: Allocator, H: Handler[S, P] + Observer + Release, S: Release = ()](parent: P, address: net.Address, sink handler: H, sink state: S = (), limits: Limits = standard_limits, _policy: task.Policy = .Sequential) -> Result[S, ListenAndServeError] where carries(state, handler) {
+// each task's memory from `parent`, which every task reads, so it must be
+// `Shareable`.
+pub fn listen_and_serve_in[P: Allocator + Shareable, H: Handler[(), P] + Observer + Release, M: Shareable + Copyable + fn() -> H](parent: P, address: net.Address, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128)) -> Result[(), ListenAndServeError] {
+    let listener = net.listen(address, backlog: net.Backlog(1024)) else |error| {
+        return .Err(.Listen(error))
+    }
+    let bound = listener.local_address()
+    serve_opened(listener, bound, parent, make_handler, limits, policy)
+}
+
+test fn listening_in_the_system_allocator_serves_nothing_when_told_to() {
+    let served = listen_and_serve_in(mem.system(), net.loopback(0), health_router, limits: serving(0))
+    testing.assert_ok_eq(served, (), "listening without serving failed")?
+    .Ok(())
+}
+
+// Listen and serve as `listen_and_serve` does, keeping `state` in an owning
+// task for the routes to share. Every handler `make_handler` builds is lent a
+// client of that task on each request, and reaches the state through
+// `call`, which runs on the owning task one call at a time, so no request
+// changes the state while another reads it and no lock guards it. Once every
+// serving task has been joined, the owning task is closed and the state is
+// returned, so a program reads what its routes changed and releases it. The
+// state is released on every failure.
+pub fn listen_and_serve_with[S: Owned + Shareable + Release, H: Handler[task.Client[S], mem.SystemAllocator] + Observer + Release, M: Shareable + Copyable + fn() -> H](address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128)) -> Result[S, ListenAndServeError] {
+    listen_and_serve_with_in(mem.system(), address, make_handler, state, limits, policy)
+}
+
+test fn the_shared_state_counts_every_request_from_every_task() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let clients = [send(bound, health_request), send(bound, health_request), send(bound, health_request), send(bound, health_request)]
+    let owner = task.own(Tally { visits = 0 }).unwrap()
+    let counter = owner.client()
+    let made = [sink counter] || -> WithClient[Tally, Router[task.Client[Tally]]] where carries(counter) with_client(visits_router(), copy(counter))
+    let served = serve_opened(listener, .Ok(bound), mem.system(), made, serving(4), policy: .Threads(4))
+    let tally = owner.close()
+    var answered: UInt64 = 0
+    for client in clients {
+        defer let answer = read_to_end(client)
+        if answer.view() == health_answer {
+            answered += 1
+        }
+    }
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert_eq(answered, UInt64(4), "a request was not answered")?
+    testing.assert_eq(tally.visits, UInt64(4), "a visit was lost")?
+    .Ok(())
+}
+
+// `listen_and_serve_with_in` listens and serves as `listen_and_serve_with`
+// does, carving each task's memory from `parent`.
+pub fn listen_and_serve_with_in[P: Allocator + Shareable, S: Owned + Shareable + Release, H: Handler[task.Client[S], P] + Observer + Release, M: Shareable + Copyable + fn() -> H](parent: P, address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128)) -> Result[S, ListenAndServeError] {
+    let owner = match task.own(state) {
+        Ok(owner) => owner,
+        Err(Unowned { state: kept, reason }) => {
+            kept.release()
+            return .Err(.Serve(.Task(reason)))
+        },
+    }
+    let client = owner.client()
+    let made = [sink make_handler = copy(make_handler), sink client] || -> WithClient[S, H] where carries(client, make_handler) with_client(make_handler(), copy(client))
+    let served = listen_and_serve_in(parent, address, made, limits, policy)
+    let state = owner.close()
+    match served {
+        Ok(_) => .Ok(state),
+        Err(error) => {
+            state.release()
+            .Err(error)
+        },
+    }
+}
+
+test fn the_state_comes_back_when_serving_with_it_ends() {
+    let served = listen_and_serve_with_in(mem.system(), net.loopback(0), visits_router, Tally { visits = 7 }, limits: serving(0))
+    let kept = match served {
+        Ok(tally) => tally.visits,
+        Err(_) => 0,
+    }
+    testing.assert_eq(kept, UInt64(7), "the state was not returned")?
+    .Ok(())
+}
+
+// Open a listener at `address` and serve on it one connection at a time
+// through `handler`, with `state` wrapped around it as `with_state` does; a
+// service that shares nothing leaves it out, and its state is `()`. `handler`
+// and `state` are released on every failure, including when listening fails,
+// and the listener is closed on every exit. On success the handler is released
+// and the state is returned, so a program reads what its routes changed and
+// releases it. The handler is told the bound address as `Event.Listening`
+// before anything is accepted.
+pub fn listen_and_serve_sequentially[H: Handler[S, mem.SystemAllocator] + Observer + Release, S: Release = ()](address: net.Address, sink handler: H, sink state: S = (), limits: Limits = standard_limits) -> Result[S, ListenAndServeError] where carries(state, handler) {
+    listen_and_serve_sequentially_in(mem.system(), address, handler, state, limits)
+}
+
+// `listen_and_serve_sequentially_in` listens and serves as
+// `listen_and_serve_sequentially` does, carving each exchange's memory from
+// `parent`, which only this task reads, such as an arena's handle.
+pub fn listen_and_serve_sequentially_in[P: Allocator, H: Handler[S, P] + Observer + Release, S: Release = ()](parent: P, address: net.Address, sink handler: H, sink state: S = (), limits: Limits = standard_limits) -> Result[S, ListenAndServeError] where carries(state, handler) {
     let server = with_state(state, handler)
     let listener = net.listen(address, backlog: net.Backlog(1024)) else |error| {
         server.release()
@@ -1133,14 +1127,14 @@ test fn listening_in_an_arena_carves_the_exchanges_from_it() {
     let arena = mem.Arena.open(mem.system(), size: 1048576)
     defer arena.release()
     let router = Router.new_in(arena.handle())
-    let served = listen_and_serve_in(arena.handle(), net.loopback(0), router, limits: serving(0))
+    let served = listen_and_serve_sequentially_in(arena.handle(), net.loopback(0), router, limits: serving(0))
     testing.assert(served.is_ok(), "listening without serving from an arena failed")?
     .Ok(())
 }
 
 test fn the_state_is_returned_when_serving_ends() {
     let router: Router[Tally] = Router.new()
-    let served = listen_and_serve(net.loopback(0), router, state: Tally { visits = 7 }, limits: serving(0))
+    let served = listen_and_serve_sequentially(net.loopback(0), router, state: Tally { visits = 7 }, limits: serving(0))
     let kept = match served {
         Ok(tally) => tally.visits,
         Err(_) => 0,
@@ -1154,13 +1148,8 @@ test fn serve_opened_defaults_to_concurrent_worker_execution() {
     let bound = listener.local_address().unwrap()
     let client1 = send(bound, health_request)
     let client2 = send(bound, health_request)
-    var router = health_router()
-    let served = serve_opened(listener, .Ok(bound), router, serving(2))
+    let served = serve_opened(listener, .Ok(bound), mem.system(), health_router, serving(2))
     let ok = served.is_ok()
-    match served {
-        Ok(r) => r.release(),
-        Err(_) => (),
-    }
     defer let r1 = read_to_end(client1)
     defer let r2 = read_to_end(client2)
     testing.assert(ok, "default serve_opened failed")?
@@ -1172,7 +1161,7 @@ test fn serve_opened_defaults_to_concurrent_worker_execution() {
 test fn a_listening_server_announces_the_port_it_bound_before_accepting() {
     let file = log.capture()
     let announcer = Announcer { report = file.logger(minimum: .Info) }
-    let served = listen_and_serve(net.loopback(0), announcer, limits: serving(0))
+    let served = listen_and_serve_sequentially(net.loopback(0), announcer, limits: serving(0))
     defer let lines = file.finish()
     testing.assert_ok_eq(served, (), "serving nothing failed")?
     testing.assert_eq(lines.view(), "INFO announced bound=true\n", "the bound address was not announced")?
@@ -1181,7 +1170,7 @@ test fn a_listening_server_announces_the_port_it_bound_before_accepting() {
 
 test fn a_server_that_serves_nothing_ends_and_releases_its_handler() {
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let served = listen_and_serve_in(log.allocator(), net.loopback(0), exchanges_router(log.allocator()), limits: serving(0))
+    let served = listen_and_serve_sequentially_in(log.allocator(), net.loopback(0), exchanges_router(log.allocator()), limits: serving(0))
     let settled = log.all_disposed()
     log.release()
     testing.assert_ok_eq(served, (), "serving nothing failed")?
@@ -1193,7 +1182,7 @@ test fn a_port_that_is_taken_is_a_listen_failure_and_the_handler_is_released() {
     let held = net.listen(net.loopback(0)).unwrap()
     let taken = held.local_address().unwrap()
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let served = listen_and_serve_in(log.allocator(), taken, exchanges_router(log.allocator()), limits: serving(1))
+    let served = listen_and_serve_sequentially_in(log.allocator(), taken, exchanges_router(log.allocator()), limits: serving(1))
     let settled = log.all_disposed()
     log.release()
     held.close().unwrap()
@@ -1211,11 +1200,11 @@ test fn serving_that_cannot_begin_announces_nothing_and_releases_the_handler() {
     let file = log.capture()
     let announcer = Announcer { report = file.logger(minimum: .Info) }
     let small = Limits { request_arena_bytes = 1, ..serving(1) }
-    let arena = listen_and_serve(net.loopback(0), announcer, limits: small)
+    let arena = listen_and_serve_sequentially(net.loopback(0), announcer, limits: small)
     defer let parent = mem.Arena.open(mem.system(), size: 0)
-    let memory = listen_and_serve_in(parent.handle(), net.loopback(0), Announcer { report = file.logger(minimum: .Info) }, limits: serving(1))
+    let memory = listen_and_serve_sequentially_in(parent.handle(), net.loopback(0), Announcer { report = file.logger(minimum: .Info) }, limits: serving(1))
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let released = listen_and_serve_in(log.allocator(), net.loopback(0), exchanges_router(log.allocator()), limits: Limits { request_arena_bytes = 1, ..serving(1) })
+    let released = listen_and_serve_sequentially_in(log.allocator(), net.loopback(0), exchanges_router(log.allocator()), limits: Limits { request_arena_bytes = 1, ..serving(1) })
     let settled = log.all_disposed()
     log.release()
     defer let lines = file.finish()
@@ -1228,36 +1217,17 @@ test fn serving_that_cannot_begin_announces_nothing_and_releases_the_handler() {
 }
 
 // Serve on `listener` after its bound address `bound` was read, for
-// `listen_and_serve`. A bound address that could not be read is a
-// `Listen` failure; the listener is closed, and a failure to close it is
-// dropped in favour of the reported one. `server` is released on every
-// failure and returned on success.
-fn serve_opened[L: net.Acceptor + io.Close, H: Handler[(), mem.SystemAllocator] + Observer + Release + Shareable](sink listener: L, sink bound: Result[net.Address, net.NetError], sink server: H, limits: Limits, policy: task.Policy = .Threads(128)) -> Result[H, ListenAndServeError] where L.CloseError: Into[io.IoError], carries(server) {
+// `listen_and_serve`, with handlers `make_handler` builds. A bound address
+// that could not be read is a `Listen` failure; the listener is closed, and a
+// failure to close it is dropped in favour of the reported one.
+fn serve_opened[L: net.Acceptor + io.Close + Owned + Shareable, P: Allocator + Shareable, H: Handler[(), P] + Observer + Release, M: Shareable + Copyable + fn() -> H](sink listener: L, sink bound: Result[net.Address, net.NetError], parent: P, make_handler: M, limits: Limits, policy: task.Policy = .Threads(128)) -> Result[(), ListenAndServeError] where L.CloseError: Into[io.IoError] {
     let address = bound else |error| {
         let _closed = listener.close()
-        server.release()
         return .Err(.Listen(error))
     }
-    var held = server
-    let outcome = match copy(policy) {
-        Sequential => serve_announcing(listener, &held, mem.system(), limits, .Some(address)),
-        Threads(workers) => {
-            if workers == 0 {
-                let _closed = listener.close()
-                .Ok(())
-            } else if workers == 1 {
-                serve_announcing(listener, &held, mem.system(), limits, .Some(address))
-            } else {
-                serve_concurrent(listener, &held, limits, .Some(address), workers)
-            }
-        },
-    }
-    match outcome {
-        Ok(_) => .Ok(held),
-        Err(error) => {
-            held.release()
-            .Err(.Serve(error))
-        },
+    match serve_made(listener, parent, make_handler, limits, policy, .Some(address)) {
+        Ok(_) => .Ok(()),
+        Err(error) => .Err(.Serve(error)),
     }
 }
 
@@ -1514,7 +1484,7 @@ fn served_form_at_limits(sink limits: Limits, pair_part: Str) -> String {
     var router = Router.new()
     &router.route_raw("POST /health", health).unwrap()
     let smallest = smallest_arena(limits)
-    serve(listener, &router, limits: Limits { request_arena_bytes = smallest, ..limits }).unwrap()
+    serve_sequentially(listener, &router, limits: Limits { request_arena_bytes = smallest, ..limits }).unwrap()
     router.release()
     read_to_end(client)
 }
@@ -1570,7 +1540,7 @@ fn served_at_limits(sink limits: Limits, header_lines: UInt64, line_length: UInt
     request.release()
     var router = exchanges_router(mem.system())
     let smallest = smallest_arena(limits)
-    serve(listener, &router, limits: Limits { request_arena_bytes = smallest, ..limits }).unwrap()
+    serve_sequentially(listener, &router, limits: Limits { request_arena_bytes = smallest, ..limits }).unwrap()
     router.release()
     read_to_end(client)
 }
@@ -1581,7 +1551,7 @@ test fn an_arena_below_the_body_limit_is_refused_before_serving() {
     defer var router = health_router()
     let limits = serving(1)
     // The field reads `limits` before the base takes it.
-    let refused = serve(listener, &router, limits: Limits { request_arena_bytes = smallest_arena(limits) - 1, ..limits })
+    let refused = serve_sequentially(listener, &router, limits: Limits { request_arena_bytes = smallest_arena(limits) - 1, ..limits })
     let closed = match net.connect(bound) {
         Ok(connection) => {
             connection.close().unwrap()
@@ -1610,7 +1580,7 @@ test fn limits_beyond_every_arena_are_refused_without_overflowing() {
     for limits in candidates {
         let listener = net.listen(net.loopback(0)).unwrap()
         var router = health_router()
-        let answer = serve(listener, &router, limits: limits)
+        let answer = serve_sequentially(listener, &router, limits: limits)
         refused = refused && answer == .Err(.ArenaTooSmall)
         router.release()
     }
@@ -1689,9 +1659,7 @@ fn serve_connection[H: Handler[(), P] + Observer, P: Allocator](sink connection:
         Err(error) => {
             close_connection(configured)
             let event: Event[P] = .Exchanged(.{ request = .None, status = .None, body_bytes = 0, duration = .None, failure = .Some(.Timeouts(error)) })
-            task.handler_lock()
             &handler.observe(event)
-            task.handler_unlock()
             return .Answered
         },
     }
@@ -1748,9 +1716,7 @@ fn answer_exchange[H: Handler[(), P] + Observer, P: Allocator](sink source: Requ
             },
         }
         let event: Event[P] = .Exchanged(.{ request = .None, status, body_bytes = 0, duration = .None, failure = .Some(failure) })
-        task.handler_lock()
         &handler.observe(event)
-        task.handler_unlock()
         return .Answered
     }
     let request = message.request()
@@ -1762,9 +1728,7 @@ fn answer_exchange[H: Handler[(), P] + Observer, P: Allocator](sink source: Requ
         let _answered = refuse(&refused, .InternalServerError, memory)
         close_connection(refused)
         let event: Event[P] = .Exchanged(.{ request = .Some(request), status = .Some(.InternalServerError), body_bytes = 0, duration = .None, failure = .Some(.Memory) })
-        task.handler_lock()
         &handler.observe(event)
-        task.handler_unlock()
         return .Answered
     }
     let head_only = request.method() == Method.Head
@@ -1794,9 +1758,7 @@ fn answer_exchange[H: Handler[(), P] + Observer, P: Allocator](sink source: Requ
     let duration = handler_start.elapsed()
     let failure = answer_failure(answered, note)
     let event: Event[P] = .Exchanged(.{ request = .Some(request), status = .Some(copy(answered.status)), body_bytes = answered.sent.body_bytes, duration = .Some(duration), failure })
-    task.handler_lock()
     &handler.observe(event)
-    task.handler_unlock()
     .Answered
 }
 
@@ -1917,9 +1879,7 @@ fn refuse_for_want_of_arena[H: Handler[(), P] + Observer, P: Allocator](sink con
         Err(reason) => .Write(reason),
     }
     let event: Event[P] = .Exchanged(.{ request = .None, status = .Some(.ServiceUnavailable), body_bytes = 0, duration = .None, failure = .Some(failure) })
-    task.handler_lock()
     &handler.observe(event)
-    task.handler_unlock()
     .ArenaRefused
 }
 
@@ -1999,6 +1959,19 @@ fn health[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P],
 fn health_router() -> Router[()] {
     var router = Router.new()
     &router.route_raw("GET /health", health).unwrap()
+    router
+}
+
+// `visit` counts a visit in the state an owning task keeps, and answers "ok".
+fn count_visit[P: Allocator](inout tally: task.Client[Tally], request: Request[P]) -> Result[Response[P], Error[P]] {
+    tally.call(|inout t: Tally| t.visits += 1)
+    text(request, "ok")
+}
+
+// `visits_router` builds a router that counts every `GET /health`.
+fn visits_router() -> Router[task.Client[Tally]] {
+    var router: Router[task.Client[Tally]] = Router.new()
+    &router.route_raw("GET /health", count_visit).unwrap()
     router
 }
 

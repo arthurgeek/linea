@@ -1,0 +1,5 @@
+error[T-ThreadStart]: `linea_task_start` runs Linea code on a thread of its own, and only `task.Slot.start` may hand it a body
+  --> tests/tasks/a_thread_starts_only_through_the_joined_start/main.lin:21:18
+   |
+21 |     let handle = linea_task_start(UInt64(prepared), run, release_nothing, 0, 0)
+   |                  ^^^^^^^^^^^^^^^^ start the task with `task.prepare(body)` and `start()`, whose handle keeps what the body captured until `close` joins it

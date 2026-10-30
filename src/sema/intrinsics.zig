@@ -129,17 +129,20 @@ pub const RawAccesses = struct {
     closure_entry: DeclId = .none,
     closure_settle: DeclId = .none,
     closure_size: DeclId = .none,
-    /// `task.prepare`, `task.prepare_in`, `task.start`, `task.start_in` and
-    /// `task.dispatch_worker`, whose `body` argument crosses into a task
-    /// ([O-Cross]), and the two `start` forms, which drop a body a failed
-    /// start could not keep and so take only a Discardable one.
+    /// `task.prepare`, `task.prepare_in`, `task.start` and `task.start_in`,
+    /// whose `body` argument crosses into a task ([O-Cross]), and the two
+    /// `start` forms, which drop a body a failed start could not keep and so
+    /// take only a Discardable one.
     task_prepare: DeclId = .none,
     task_prepare_in: DeclId = .none,
     task_start: DeclId = .none,
     task_start_in: DeclId = .none,
-    task_dispatch_worker: DeclId = .none,
     /// `task.Unstarted`, the failure of a preparation, which holds the body.
     task_unstarted: DeclId = .none,
+    /// `task.Slot.start`, the one function that may call a runtime symbol
+    /// that starts a thread ([T-ThreadStart]): the handle it answers carries
+    /// the body's dependencies until the thread is joined.
+    task_slot_start: DeclId = .none,
     /// `ffi.Bytes`, `ffi.CText` and `ffi.CTextList`: copyable newtypes over a
     /// C address whose dependencies originate at the value, as a
     /// `mem.Slice`'s do, so a contract can tie one to what it views.
@@ -177,8 +180,8 @@ pub const RawAccesses = struct {
             .task_prepare_in = moduleFunction(program, ast, "task", "prepare_in"),
             .task_start = moduleFunction(program, ast, "task", "start"),
             .task_start_in = moduleFunction(program, ast, "task", "start_in"),
-            .task_dispatch_worker = moduleFunction(program, ast, "task", "dispatch_worker"),
             .task_unstarted = program.libraryDeclIn("task", "Unstarted") orelse .none,
+            .task_slot_start = memberOf(program, ast, "task", "Slot", "start"),
             .foreign_views = .{
                 program.libraryDeclIn("ffi", "Bytes") orelse .none,
                 program.libraryDeclIn("ffi", "CText") orelse .none,
@@ -281,15 +284,10 @@ pub const RawAccesses = struct {
         return d != DeclId.none and (d == self.task_start or d == self.task_start_in);
     }
 
-    /// Whether `d` dispatches an unjoined worker task (`dispatch_worker`).
-    pub fn dispatchesTask(self: RawAccesses, d: DeclId) bool {
-        return d != DeclId.none and d == self.task_dispatch_worker;
-    }
-
     /// Whether `d` is one of the library functions whose `body` crosses into
     /// a task.
     pub fn crossesTask(self: RawAccesses, d: DeclId) bool {
-        return self.preparesTask(d) or self.startsTask(d) or self.dispatchesTask(d);
+        return self.preparesTask(d) or self.startsTask(d);
     }
 
     pub fn typed(self: RawAccesses, d: DeclId) bool {

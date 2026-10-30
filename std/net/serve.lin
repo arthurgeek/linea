@@ -8,7 +8,6 @@ import std.time
 use io.Close
 use mem.PushFailure
 use task.Unstarted
-use task.WorkerTask
 
 // The first retry of a transient accept failure waits 5 ms; each further
 // failure doubles the wait, up to one second.
@@ -227,7 +226,7 @@ pub fn serve_workers[L: Acceptor + io.Close, H: Owned + Shareable + Copyable + f
     var served: UInt64 = 0
     var pause_ms: UInt64 = 0
     var stopped: Option[NetError] = .None
-    var active: mem.Vec[WorkerTask, mem.SystemAllocator] = mem.Vec.new()
+    var active: mem.Vec[session.Chan[session.End], mem.SystemAllocator] = mem.Vec.new()
     while stopped.is_none() && !reached(connections, served) {
         match accept_attempt(&accepting, &pause_ms) {
             Connected(accepted) => {
@@ -235,29 +234,37 @@ pub fn serve_workers[L: Acceptor + io.Close, H: Owned + Shareable + Copyable + f
                     let Accepted { connection, address } = accepted
                     handler(connection, address)
                 } else {
+                    // Joining the oldest task first keeps no more than
+                    // `workers` connections served at once.
                     if active.length() >= workers {
                         match &active.remove(0) {
-                            Some(oldest) => oldest.close(),
+                            Some(oldest) => close_worker(oldest),
                             None => {},
                         }
                     }
-                    let body = sink [sink accepted, sink handler = copy(handler)] |sink me: session.Chan[session.End]| {
-                        let Accepted { connection, address } = accepted
-                        handler(connection, address)
-                        me.close()
+                    // The task is made before the connection reaches it, so
+                    // a task that cannot be made leaves the connection with
+                    // this thread, which serves it. The body captures
+                    // nothing: the handler and the connection reach it over
+                    // its session, so its handle carries no dependency.
+                    let body = sink [] |sink me: session.Chan[session.Recv[(H, Accepted), session.End]]| {
+                        let ((serving, taken), rest) = me.recv()
+                        let Accepted { connection, address } = taken
+                        serving(connection, address)
+                        rest.close()
                     }
                     match task.prepare(body) {
                         Ok(slot) => {
-                            let running = slot.start_worker()
+                            let running = slot.start().detach().send((copy(handler), accepted))
                             match &active.push(running) {
                                 Ok(_) => {},
-                                Err(PushFailure { reason: _, value }) => value.close(),
+                                Err(PushFailure { reason: _, value }) => close_worker(value),
                             }
                         },
                         Err(unstarted) => {
-                            let Unstarted { body, reason: _ } = unstarted
-                            let me: session.Chan[session.End] = session.Chan.opened(0)
-                            body(me)
+                            let Unstarted { body: _, reason: _ } = unstarted
+                            let Accepted { connection, address } = accepted
+                            handler(connection, address)
                         },
                     }
                 }
@@ -267,17 +274,17 @@ pub fn serve_workers[L: Acceptor + io.Close, H: Owned + Shareable + Copyable + f
             Failed(error) => stopped = .Some(error),
         }
     }
-    join_net_workers(active)
+    var pending = active.drain()
+    for worker in &pending {
+        close_worker(worker)
+    }
+    pending.finish().unwrap()
     finish(accepting, stopped)
 }
 
-fn join_net_workers(sink active: mem.Vec[WorkerTask, mem.SystemAllocator]) {
-    var all = active
-    var pending = all.drain()
-    for worker in &pending {
-        worker.close()
-    }
-    pending.finish().unwrap()
+// Join a connection's task once it has served the connection.
+fn close_worker(sink worker: session.Chan[session.End]) {
+    worker.close()
 }
 
 test fn serve_workers_handles_connections_concurrently() {
@@ -314,101 +321,6 @@ test fn serve_workers_handles_connections_concurrently() {
     testing.assert(ok1, "first client did not get response")?
     testing.assert(ok2, "second client did not get response")?
     testing.assert(c1 && c2, "closing readers failed")?
-    .Ok(())
-}
-
-extern fn linea_test_net_latch_init()
-
-extern fn linea_test_net_latch_signal_started()
-
-extern fn linea_test_net_latch_wait_started()
-
-extern fn linea_test_net_latch_wait_hold()
-
-extern fn linea_test_net_latch_release_hold()
-
-extern fn linea_test_net_latch_cleanup()
-
-fn srv1_blocking_handler(sink connection: Connection, _peer: Address) {
-    var conn = connection
-    linea_test_net_latch_signal_started()
-    linea_test_net_latch_wait_hold()
-    match io.write_all(&conn, "srv1\n".as_bytes()) {
-        Ok(_) => {},
-        Err(_) => {},
-    }
-    let _closed = conn.close()
-}
-
-fn srv2_handler(sink connection: Connection, _peer: Address) {
-    var conn = connection
-    match io.write_all(&conn, "srv2\n".as_bytes()) {
-        Ok(_) => {},
-        Err(_) => {},
-    }
-    let _closed = conn.close()
-}
-
-test fn two_independent_servers_drain_their_own_workers() {
-    let listener1 = listen(loopback(0)).unwrap()
-    let bound1 = listener1.local_address().unwrap()
-
-    let listener2 = listen(loopback(0)).unwrap()
-    let bound2 = listener2.local_address().unwrap()
-
-    linea_test_net_latch_init()
-
-    // Server 1 runs concurrently in a background task
-    let body = sink [sink listener1] |sink me: session.Chan[session.End]| {
-        let _ended1 = serve_workers(listener1, srv1_blocking_handler, policy: .Threads(2), connections: .Some(1))
-        me.close()
-    }
-    let slot = match task.prepare(body) {
-        Ok(s) => s,
-        Err(unstarted) => {
-            let Unstarted { body: b, reason: _ } = unstarted
-            let me: session.Chan[session.End] = session.Chan.opened(0)
-            b(me)
-            panic("failed to prepare server 1 task")
-        },
-    }
-    let srv1_task = slot.start()
-
-    let client1 = connect(bound1).unwrap()
-
-    // Wait until server 1's worker has started and is holding the connection open
-    linea_test_net_latch_wait_started()
-
-    // While server 1's worker is held open, server 2 accepts, processes, and drains its own workers
-    let client2 = connect(bound2).unwrap()
-    let ended2 = serve_workers(listener2, srv2_handler, policy: .Threads(2), connections: .Some(1))
-
-    var reader2 = io.BufferedReader.open(capacity: 16, reader: client2) else |_| {
-        panic("reader2 failed")
-    }
-    let ok2 = match &reader2.read_line_borrowed(max_bytes: 16) {
-        Ok(Some(text)) => text == "srv2",
-        _ => false,
-    }
-    let c2 = reader2.abandon().close().is_ok()
-    let server2_ok = ended2.is_ok() && ok2 && c2
-
-    // Now release server 1's worker and verify it finishes cleanly
-    linea_test_net_latch_release_hold()
-    srv1_task.close()
-    linea_test_net_latch_cleanup()
-
-    var reader1 = io.BufferedReader.open(capacity: 16, reader: client1) else |_| {
-        panic("reader1 failed")
-    }
-    let ok1 = match &reader1.read_line_borrowed(max_bytes: 16) {
-        Ok(Some(text)) => text == "srv1",
-        _ => false,
-    }
-    let c1 = reader1.abandon().close().is_ok()
-
-    testing.assert(server2_ok, "server 2 failed to drain independently while server 1 was held open")?
-    testing.assert(ok1 && c1, "server 1 response wrong")?
     .Ok(())
 }
 

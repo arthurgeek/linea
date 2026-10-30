@@ -360,6 +360,10 @@ pub const Code = enum {
     /// An `extern` in the runtime's `linea_` namespace whose symbol the
     /// runtime does not declare, or whose signature is not the runtime's.
     t_extern_runtime,
+    /// A call to a runtime function that runs Linea code on a thread of its
+    /// own, anywhere but the one start whose handle keeps the body's
+    /// dependencies until the thread is joined.
+    t_thread_start,
     /// An `export` whose signature holds a type that may not cross.
     t_export,
     /// A type parameter whose declaration says the wrong thing about what it
@@ -531,6 +535,7 @@ pub const Code = enum {
             .t_extern_callback => "T-ExternCallback",
             .t_extern_handle => "T-ExternHandle",
             .t_extern_runtime => "T-ExternRuntime",
+            .t_thread_start => "T-ThreadStart",
             .t_export => "T-Export",
             .t_phantom => "T-Phantom",
             .t_projection => "T-Projection",

@@ -199,7 +199,7 @@ test fn a_logged_router_logs_each_exchange_it_serves() {
     let malformed = send(bound, "garbage\r\n\r\n")
     let file = log.capture()
     var served = logged(file.logger(minimum: .Info), health_router())
-    let serving = serve(listener, &served, limits: serving(3), policy: .Sequential)
+    let serving = serve_sequentially(listener, &served, limits: serving(3))
     defer let health = read_to_end(found)
     defer let absent = read_to_end(missing)
     defer let refused = read_to_end(malformed)

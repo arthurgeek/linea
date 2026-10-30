@@ -1,0 +1,24 @@
+// A module granted `extern` may declare the runtime's task symbols, but it
+// cannot start a thread itself: only `task.Slot.start` answers a handle that
+// keeps what the body captured until the thread is joined.
+extern fn linea_task_prepare(stack_bytes: UInt64) -> Int64
+
+extern fn linea_task_start(task: UInt64, entry: fn(endpoint: UInt64, at: UInt64, len: UInt64), release: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64) -> UInt64
+
+extern fn linea_chan_close(endpoint: UInt64)
+
+fn run(endpoint: UInt64, _at: UInt64, _len: UInt64) {
+    linea_chan_close(endpoint)
+}
+
+fn release_nothing(_at: UInt64, _len: UInt64) {}
+
+fn main() -> UInt8 {
+    let prepared = linea_task_prepare(65536)
+    if prepared < 0 {
+        return 1
+    }
+    let handle = linea_task_start(UInt64(prepared), run, release_nothing, 0, 0)
+    linea_chan_close(handle)
+    0
+}
