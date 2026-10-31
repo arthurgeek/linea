@@ -266,7 +266,7 @@ test fn a_malformed_id_the_client_sent_is_replaced() {
 }
 
 // A request whose allocator has nothing left is still given an id, since the
-// id is made with the middleware's own allocator.
+// id is made without allocating and copied into the middleware's buffers.
 test fn a_generated_id_takes_nothing_from_the_request_allocator() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     defer var identifying = with_request_ids(Echoing { served = 0 })
