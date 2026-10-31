@@ -1,0 +1,7 @@
+error[O-Cross]: a task cannot read `kept` while its creator may read it too: a `mem.Closure[fn() -> UInt64, mem.SystemAllocator]` is not `Shareable`
+  --> tests/tasks/an_erased_closure_owning_an_arena_does_not_cross.lin:21:27
+   |
+21 |     let body = sink [read kept] |sink me: Chan[Send[UInt64, End]]| {
+   |                           ^^^^ this capture is read by the task
+   |
+   = help: reading this value may change it; move it into one task, or give the task a value that reading never changes

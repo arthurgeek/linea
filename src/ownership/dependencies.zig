@@ -894,7 +894,9 @@ pub fn check(gpa: Allocator, program: *const ExpandedProgram, res: *const Resolu
         const initial: Analysis = .{ .gpa = gpa, .ast = &program.ast, .program = program, .res = res, .typing = typing, .cfg = cfg, .function = function, .cancelled = cancelled, .sink = sink, .store = .{ .gpa = gpa } };
         var analysis = initial;
         defer analysis.deinit();
-        if (!try analysis.seedsDependencies()) continue;
+        // A function that starts a task is analysed even when it holds no
+        // dependency, so [O-Cross] sees a copy it moves into the task.
+        if (!try analysis.seedsDependencies() and !analysis.startsTask()) continue;
         analysis.deinit();
         analysis = initial;
         try analysis.analyze();
@@ -1022,6 +1024,25 @@ const Analysis = struct {
             state.clearRetainingCapacity();
             try self.transfer(&state, index, .probe);
             if (self.store.sets.items.len != 0) return true;
+        }
+        return false;
+    }
+
+    /// Whether the function calls one of the functions whose `body` crosses
+    /// into a task. One walk over the function's operations.
+    fn startsTask(self: *const Analysis) bool {
+        for (self.cfg.blocks[self.function.blocks.start..self.function.blocks.end]) |block| {
+            var ops = self.cfg.opsOf(block);
+            while (ops.next()) |op| {
+                if (self.cfg.opTag(op) != .committed) continue;
+                const at = self.cfg.opAt(op);
+                if (self.ast.exprTag(at) != .call) continue;
+                const normalized = self.typing.call_index.callOf(self.typing, at) orelse continue;
+                switch (normalized.target) {
+                    .declared => |d| if (self.typing.raw_accesses.crossesTask(d)) return true,
+                    else => {},
+                }
+            }
         }
         return false;
     }
@@ -2164,6 +2185,25 @@ const Analysis = struct {
                 if ((try self.crossings_reported.getOrPut(self.gpa, at)).found_existing) continue;
                 try self.crossingObservation(at, own_pass, fact, observed_type);
             };
+            // A copy of a copyable value that is not `Shareable` reaches the
+            // state the creator's copy reaches, as a `mem.Handle`'s copies
+            // reach one arena, so moving one into the task shares that state
+            // with no observation to say so. A capture already reported
+            // through what it observes is not reported again.
+            for (self.res.closureCaptures(closure.?)) |capture| {
+                const captured = self.typing.exprType(capture.source);
+                if (capture.convention != .sink) continue;
+                if (captured == .poison or !self.typing.mayCopy(captured) or self.typing.isShareable(captured)) continue;
+                if ((try self.crossings_reported.getOrPut(self.gpa, capture.source)).found_existing) continue;
+                const name = try writtenTypeName(self.sink.arena, self.ast, self.program, self.res, self.typing, self.functionModule(), captured);
+                try self.sink.add(.{
+                    .severity = .err,
+                    .code = .o_cross,
+                    .message = try std.fmt.allocPrint(self.sink.arena, "a task cannot take a copy of a `{s}`: it is copyable and not `Shareable`, so its copies share what they reach", .{name}),
+                    .labels = try self.sink.arena.dupe(diagnostics.Label, &.{.{ .file = self.ast.fileOfExpr(capture.source), .span = self.ast.exprSpan(capture.source), .message = "this capture moves a copy into the task" }}),
+                    .notes = try self.sink.arena.dupe([]const u8, &.{"give the task a value of its own whose type is not copyable, or one that is `Shareable`"}),
+                });
+            }
         }
     }
 

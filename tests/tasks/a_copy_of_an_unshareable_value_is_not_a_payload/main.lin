@@ -1,0 +1,28 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Recv
+
+// A payload moves to the other end of a session, so it must own what it
+// reaches. A copyable `@unshareable` type's copies share one state, so a copy
+// owns nothing of its own.
+@(copyable, unshareable)
+struct Cursor {
+    at: UInt64,
+}
+
+fn main() -> UInt8 {
+    let cursor = Cursor { at = 1 }
+    let body = sink [] |sink me: Chan[Recv[Cursor, End]]| {
+        let (theirs, rest) = me.recv()
+        let _seen = theirs.at
+        rest.close()
+    }
+    let started = task.prepare(body).unwrap().start()
+    let done = started.send(copy(cursor))
+    let _mine = cursor.at
+    done.close()
+    0
+}

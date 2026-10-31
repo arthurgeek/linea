@@ -13,6 +13,6 @@ fn main() -> Result[UInt8, http.ServeError] {
         Ok(_) => {},
         Err(_) => return .Ok(1),
     }
-    http.serve(listener, &router)?
+    http.serve_sequentially(listener, &router)?
     return .Ok(0)
 }

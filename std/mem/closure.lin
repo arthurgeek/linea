@@ -34,7 +34,9 @@ import std.testing
 // parameter; through a generic allocator the callback must be Discardable. A
 // Closure is not itself a callable meeting a bound; a lambda that calls it,
 // `[kept] |x: UInt64| kept(x)`, is one, and may be kept in turn.
-@opaque
+// A `Closure` is unshareable: the callable it erased may own a value whose
+// read writes, such as an arena, and its type does not say what it owns.
+@(opaque, unshareable)
 struct Closure[S, A: Allocator = SystemAllocator] {
     /// Runs the stored callable: `S`'s arguments, then `at` and `len`.
     entry: ClosureEntry[S],

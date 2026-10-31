@@ -4,15 +4,16 @@ import std.net
 
 use mem.Lender
 
-// `listen_and_serve_in` takes the allocator each request's memory is carved
-// from first. This server is told to serve no connection, so it returns as
-// soon as it is listening.
+// `listen_and_serve_sequentially_in` takes the allocator each request's memory
+// is carved from first, and an arena's handle may be one, since only one task
+// serves. This server is told to serve no connection, so it returns as soon as
+// it is listening.
 fn main() -> UInt8 {
     let arena = mem.Arena.open(mem.system(), size: 1048576)
     defer arena.release()
     let router = http.Router.new_in(arena.handle())
     let limits = http.Limits { connections = .Some(0), ..http.Limits.default() }
-    match http.listen_and_serve_in(arena.handle(), net.loopback(0), router, limits: limits) {
+    match http.listen_and_serve_sequentially_in(arena.handle(), net.loopback(0), router, limits: limits) {
         Ok(_) => 0,
         Err(_) => 1,
     }
