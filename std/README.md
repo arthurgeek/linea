@@ -39,7 +39,7 @@ authoritative.
 | [range](range/range.lin) | `start..end`, `start..=end`, Range | Bounds supply the element type; generic ranges use Steppable. |
 | [tuple](tuple/tuple.lin) | Tuple2 to Tuple8, with components `_0` to `_7` | A tuple is a positional aggregate of two to eight components. Write `(1, "a")` to build one, `let (n, name) = pair` to take it apart, and `pair._0` to select a component by its field name; the long form `tuple.Tuple2[UInt8, Str] { _0 = 1, _1 = "a" }` builds the same value. It is copyable where every component is and linear where any is. It is Equatable, Equivalent, Comparable, Ordered, Hash, Default and Release wherever every component is: order compares the components by position, and Release settles them last first. Display writes `(1, a)` and Debug `(1, "a")`. |
 | [session](session/session.lin) | Protocol; End, Send, Recv, Choose, Offer; [Chan, Branch](session/chan.lin) | A protocol is a type naming what one end of a session does next, and its `Dual` names what the other end does at the same moment. A `Chan[P, H]` is one linear end of a session at state `P`: `send(value)`, `recv()`, `choose_left()`, `choose_right()`, `offer()` and `enter()` each take it and answer it at the next state, and `close()` ends it at `End`. A payload is `T: Owned`, so a session sends `String`, not `Str`. A session has one slot: `send` returns once the other end has taken the value, and a choice is a send of its branch. A task's handle is the creator's end, and its `close()` returns once the body has returned and the task's thread is joined. |
-| [task](task/task.lin) | start, start_in, prepare, prepare_in, Slot.start, Slot.cancel, Unstarted, default_stack_bytes, PrepareError | `task.start(body)` prepares and starts a task in one call and answers its handle, the creator's `Chan`, or the `PrepareError` with the body dropped, so the body must be `Discardable`; `start_in(allocator, body, stack:)` names the allocator and the stack size. A body that owns something linear is prepared: `task.prepare(body)` takes it, performs every step that can fail and answers a linear `Slot` holding it, or `Unstarted`, which hands the body back beside the reason and settles to the reason when the body is Discardable. `slot.start()` cannot fail; `slot.cancel()` joins the parked thread and answers the body. The handle carries every dependency the body captured until `close()` joins the task. A body's captures must cross the task boundary ([O-Cross](../docs/linea-semantics.md)): what it reads must be `Shareable`, and a place it holds lent `inout` must be its own capture. Each task runs on its own operating-system thread, with a stack of `default_stack_bytes` (two mebibytes) or the `stack:` given, guard pages below it and an overflow reported as `linea: a stack overflowed`. |
+| [task](task/task.lin) | start, start_in, prepare, prepare_in, Slot.start, Slot.cancel, Unstarted, default_stack_bytes, PrepareError; join, join3, join4, all, map, map_results, Policy; [own, Owner, Client, Unowned](task/owner.lin) | `task.start(body)` prepares and starts a task in one call and answers its handle, the creator's `Chan`, or the `PrepareError` with the body dropped, so the body must be `Discardable`; `start_in(allocator, body, stack:)` names the allocator and the stack size. A body that owns something linear is prepared: `task.prepare(body)` takes it, performs every step that can fail and answers a linear `Slot` holding it, or `Unstarted`, which hands the body back beside the reason and settles to the reason when the body is Discardable. `slot.start()` cannot fail; `slot.cancel()` joins the parked thread and answers the body. The handle carries every dependency the body captured until `close()` joins the task. A body's captures must cross the task boundary ([O-Cross](../docs/linea-semantics.md)): what it reads must be `Shareable`, and a place it holds lent `inout` must be its own capture. Each task runs on its own operating-system thread, with a stack of `default_stack_bytes` (two mebibytes) or the `stack:` given, guard pages below it and an overflow reported as `linea: a stack overflowed`. `task.own(state)` starts an owning task that holds `state` and answers its linear `Owner`, or `Unowned` with the state when the task cannot be made; `owner.client()` answers a copyable `Client` that borrows the owner, and `client.call(job)` runs an `Owned` job against the state on the owning task, one call at a time, and answers what it answers; `owner.close()`, refused while a client is used, joins the task and answers the state. |
 | [index](index/index.lin) | Index, FromEnd, `collection[index]`, `collection[^1]` | Index projections identify places; a reader can inspect or mutate the same element. |
 | [cmp](cmp/cmp.lin) | Equatable/Comparable; Equivalent/Ordered | Partial comparison and total-order promises differ. Algorithms needing total order should require Ordered, as `Vec.sort` does; Float64 and Float32 are only Comparable, so floats sort with `sort_by(Float64.total_less)`, IEEE 754's total order. |
 | [convert](convert/try_from.lin) | TryFrom and TryInto, [From and Into](convert/into.lin), and numeric conversion syntax | TryFrom observes its source and returns Option, supplying TryInto automatically; From consumes its source and returns the destination directly, supplying Into automatically. All four are in the prelude and all are explicit. `Target(value)` performs a primitive numeric conversion; `Target?(value)` is reserved for newtype construction. Bool is not numeric. |
@@ -109,8 +109,10 @@ and explicit output settlement. The [config editor](../examples/config_editor.li
 keeps parsed views in an input owner, renders owned output, and saves atomically.
 Its batch stdin mode never prompts from the same consumed stream.
 
-Set collections, HTTP clients, TLS and concurrency APIs are not provided; the
-HTTP server answers one request per connection, one connection at a time.
+Set collections, HTTP clients and TLS are not provided. The HTTP server
+answers one request per connection, on as many joined tasks at once as its
+policy allows, each with a handler of its own, and `serve_sequentially`
+answers one connection at a time.
 Only a module that its root's `linea.json` lists under `"extern"` may declare
 `extern` functions. The standard library's manifest lists the seven modules
 that call the runtime:
@@ -750,40 +752,62 @@ normalizes key/value lines and removes comments and blank lines.
 ## Serve HTTP
 
 A handler is a function whose parameters name what it reads, and returns the
-response. `http.with_state` owns the state, a router picks the handler by
-method and path, and `http.listen_and_serve` opens a listener, accepts
-connections and answers one request on each:
+response. A router picks the handler by method and path, and
+`http.listen_and_serve_with` opens a listener and answers many requests at
+once, one request on each connection, keeping the state the routes share in an
+owning task that each serving task reaches through a `task.Client`:
 
 ```linea
 import std.http
 import std.io
 import std.net
+import std.task
 
-// `Greeter` is the state every handler shares.
+// `Greeter` is the state every handler shares. The server answers many
+// requests at once, so it lives in an owning task.
 @derive(Release)
 struct Greeter {
     greeted: UInt64,
 }
 
 // `http.Path[Str]` reads the route's one path value, `{name}`, before the
-// router calls `hello`.
-fn hello(inout greeter: Greeter, name: http.Path[Str], request: http.Request) -> Result[http.Response, http.Error] {
-    greeter.greeted += 1
-    http.text(request, "hello, {name.value}, visitor {greeter.greeted}\n")
+// router calls `hello`. One call counts the visitor and answers the new count.
+fn hello(inout greeter: task.Client[Greeter], name: http.Path[Str], request: http.Request) -> Result[http.Response, http.Error] {
+    let visitor = greeter.call(
+        |inout g: Greeter| {
+            g.greeted += 1
+            g.greeted
+        },
+    )
+    http.text(request, "hello, {name.value}, visitor {visitor}\n")
+}
+
+// Register the route on a router whose routes take a client of the owning task.
+fn routes(inout router: http.Router[task.Client[Greeter]]) -> Result[(), http.RouteError] {
+    &router.route(r"GET /hello/{name}", hello)
 }
 
 fn main() -> UInt8 {
-    // The annotation names the state the routes take.
-    var router: http.Router[Greeter] = http.Router.new()
-    if &router.route(r"GET /hello/{name}", hello).is_err() {
-        router.release()
+    var checked: http.Router[task.Client[Greeter]] = http.Router.new()
+    if routes(&checked).is_err() {
+        checked.release()
         return 2
     }
-    // `listen_and_serve` takes the router, opens the listener, and closes it
-    // and releases the router on every path. `state:` is lent to the router
-    // on every request and returned when serving ends. `let … else |error|`
-    // reports why listening or serving failed and leaves `main`.
-    let greeter = http.listen_and_serve(net.loopback(8080), router, state: Greeter { greeted = 0 }) else |error| {
+    checked.release()
+    // Each serving task builds its own router, lent its client of the owning
+    // task by `http.with_state`. The route was checked above, so registering
+    // it again cannot fail.
+    let serving = |greeter: task.Client[Greeter]| -> where carries(greeter) {
+        var router: http.Router[task.Client[Greeter]] = http.Router.new()
+        routes(&router).unwrap()
+        http.with_state(copy(greeter), router)
+    }
+    // `listen_and_serve_with` opens the listener, keeps the `Greeter` in an
+    // owning task while it answers many requests at once, joins every serving
+    // task, closes the listener on every path, and returns the `Greeter` when
+    // serving ends. `let … else |error|` reports why listening or serving
+    // failed and leaves `main`.
+    let greeter = http.listen_and_serve_with(net.loopback(8080), serving, Greeter { greeted = 0 }) else |error| {
         io.eprintln("{error}")
         return 1
     }
@@ -802,8 +826,11 @@ pattern matches its own path alone, so `/` answers only the root and
 with `Allow`, and no match 404.
 
 Requests are served from one arena of `limits.request_arena_bytes` (48 MiB by
-default) carved from the system allocator, or from the `parent` that `serve_in`
-and `listen_and_serve_in` take first. A request's text and body
+default) for each serving task, carved from the system allocator, or from the
+`parent` that `serve_in` and `listen_and_serve_in` take first, which every task
+reads, so it is `Shareable`; `serve_sequentially_in` and
+`listen_and_serve_sequentially_in` take any parent, such as an arena's handle,
+and answer one connection at a time. A request's text and body
 live there, and so does everything the handler builds through
 `request.allocator()`: `http.text` renders any `Display` value, `http.html`
 renders any `Display` value as `text/html; charset=utf-8`, `http.redirect`
@@ -900,9 +927,11 @@ Everything the routes share and change lives in one state, like axum's
 `State`: `http.with_state(state, handler)` owns it, lends it as `inout state`
 through every middleware to the route that answers, and releases it with the
 server, so the state may hold a database connection or a vector from
-`mem.system()`. `serve` answers one request at a time, so no lock is needed,
-and `server.state()` reads it back, such as a count to log once serving
-stops. A `Router[S, P]` takes a state of type `S`, named by an annotation on
+`mem.system()`. Each serving task holds its own handler, so a state it lends
+is that task's alone; state every task shares lives in an owning task, which
+`listen_and_serve_with` starts, and a route reaches it through a
+`task.Client`'s `call`. `server.state()` reads a lent state back, such as a
+count to log once `serve_sequentially` stops. A `Router[S, P]` takes a state of type `S`, named by an annotation on
 `Router.new()` or `Router.new_in(allocator)`. A program with nothing to share
 leaves the annotation out and serves a `Router[()]`. A handler takes the state
 `inout`, even one that only reads it, because the state is one convention; a
@@ -1016,10 +1045,10 @@ impl[P: Allocator] http.Extract[P] for Caller {
 ```
 
 `Caller` borrows its name from the request, so it lives as long as the request
-does. `App` is the state, a struct
-holding the program's logger and the count of messages echoed; every handler
-logs through `app.logger`, so the logger is given once, to `with_state`, and
-no route needs a closure to carry it. `request.path_value(name)`,
+does. `App` is the state every request shares, the count of messages echoed,
+kept in an owning task; `Ctx` is what each serving task lends its handlers, a
+client of that task and a logger, given once to `with_state`, so no route needs
+a closure to carry it. `request.path_value(name)`,
 `request.query()` and `request.header(name)` still read the raw text when a
 handler wants it.
 
@@ -1108,7 +1137,7 @@ request once the response has been written or streamed:
 let logger = log.to_stderr(minimum: .Info)
 var server = http.logged(copy(logger), router)
 defer server.release()
-match http.serve(listener, &server) {
+match http.serve_sequentially(listener, &server) {
     Ok(_) => 0,
     Err(error) => {
         logger.error("serving stopped", log.field("error", error))
