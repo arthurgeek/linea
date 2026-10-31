@@ -39815,12 +39815,13 @@ test "borrow storage certificates accept optional allocation and reject mismatch
 
 test "the closure certificate accepts the library's shape and rejects a changed one" {
     const cases = [_]struct { head: []const u8, fields: []const u8, valid: bool }{
-        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = true },
-        .{ .head = "@(opaque, linear)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
-        .{ .head = "@opaque", .fields = "entry: S, settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
-        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
-        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), len: UInt64, at: UInt64, storage: Option[Buffer[A]]", .valid = false },
-        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[UInt8]]", .valid = false },
+        .{ .head = "@(opaque, unshareable)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = true },
+        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@(opaque, linear, unshareable)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@(opaque, unshareable)", .fields = "entry: S, settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@(opaque, unshareable)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@(opaque, unshareable)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), len: UInt64, at: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@(opaque, unshareable)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[UInt8]]", .valid = false },
     };
     for (cases) |case| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
