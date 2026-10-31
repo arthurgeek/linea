@@ -389,6 +389,7 @@ The library tests itself.
   ok    http.a_linger_read_waits_no_longer_than_the_read_timeout
   ok    http.a_listen_and_serve_error_displays_its_cause
   ok    http.a_listening_server_announces_the_port_it_bound_before_accepting
+  ok    http.a_listening_server_answers_on_every_task_it_serves_with
   ok    http.a_literal_beats_a_parameter_at_the_same_position
   ok    http.a_logged_router_logs_each_exchange_it_serves
   ok    http.a_malformed_header_is_refused
@@ -403,6 +404,7 @@ The library tests itself.
   ok    http.a_method_mismatch_gives_way_to_a_less_specific_path
   ok    http.a_method_pattern_beats_a_methodless_one
   ok    http.a_method_token_names_its_method_exactly
+  ok    http.a_middleware_drawing_from_a_count_keeps_its_buffers_in_an_arena
   ok    http.a_missing_request_method_answers_nothing
   ok    http.a_name_that_is_not_a_token_is_refused
   ok    http.a_named_code_finds_its_variant
@@ -427,6 +429,7 @@ The library tests itself.
   ok    http.a_pattern_ending_in_a_slash_matches_that_path_alone
   ok    http.a_pattern_splits_into_its_method_and_path
   ok    http.a_percent_error_displays_its_reason
+  ok    http.a_policy_of_no_threads_is_refused_and_closes_the_listener
   ok    http.a_port_that_is_taken_is_a_listen_failure_and_the_handler_is_released
   ok    http.a_prefixed_cookie_is_cleared_with_secure
   ok    http.a_prefixed_cookie_keeps_the_rules_its_prefix_names
@@ -544,10 +547,6 @@ The library tests itself.
   ok    http.arena_arithmetic_stops_at_the_largest_integer
   ok    http.bodyless_statuses_are_recognised
   ok    http.bodyless_statuses_emit_no_content_type_and_no_body
-  ok    http.concurrent_requests_execute_simultaneously_without_serialization
-  ok    http.concurrent_routing_with_path_parameters
-  ok    http.concurrent_serving_in_an_arena_allocator
-  ok    http.concurrent_workers_pool_and_reuse_arenas_across_requests
   ok    http.content_length_alone_frames_the_body
   ok    http.content_length_must_be_digits_and_agree
   ok    http.cookie_decodes_the_percent_encoded_value
@@ -562,6 +561,7 @@ The library tests itself.
   ok    http.each_allocation_failure_covers_every_table_a_route_grows
   ok    http.each_limit_answers_its_status_at_one_past_the_bound
   ok    http.each_request_is_numbered_for_the_handler_and_the_response
+  ok    http.each_task_routes_path_parameters_through_its_own_router
   ok    http.every_connection_is_answered_503_while_the_parent_refuses_the_arena
   ok    http.every_exchange_returns_its_arena_to_the_parent
   ok    http.every_shape_releases_its_extractors_last_first_and_stops_at_a_refusal
@@ -573,7 +573,6 @@ The library tests itself.
   ok    http.headers_go_out_in_order_before_the_default_content_type
   ok    http.headers_walk_in_arrival_order
   ok    http.http_11_host_header_is_strictly_enforced
-  ok    http.http_serve_defaults_to_concurrent_worker_execution
   ok    http.identical_shapes_are_a_duplicate
   ok    http.into_state_returns_the_state_and_releases_the_handler
   ok    http.json_decodes_the_body_or_names_what_is_wrong
@@ -581,11 +580,11 @@ The library tests itself.
   ok    http.json_refuses_a_body_that_is_not_utf8
   ok    http.limits_beyond_every_arena_are_refused_without_overflowing
   ok    http.listening_in_an_arena_carves_the_exchanges_from_it
+  ok    http.listening_in_the_system_allocator_serves_nothing_when_told_to
   ok    http.no_match_is_404
   ok    http.non_ascii_values_without_escapes_read_as_sent
   ok    http.one_connection_is_served_and_serve_returns
   ok    http.only_reads_the_single_value_whatever_its_name
-  ok    http.overlapping_concurrent_requests_execute_in_parallel
   ok    http.path_values_belong_to_the_request_answered
   ok    http.percent_decoding_reads_escapes_in_either_case_and_keeps_plus
   ok    http.percent_decoding_refuses_an_escape_that_is_not_two_hexadecimal_digits
@@ -601,7 +600,8 @@ The library tests itself.
   ok    http.same_origin_policy_validates_requests
   ok    http.sequential_routing_with_path_parameters
   ok    http.serve_opened_defaults_to_concurrent_worker_execution
-  ok    http.serving_concurrently_with_workers
+  ok    http.serving_answers_each_client_on_its_own_task
+  ok    http.serving_by_default_answers_two_requests_at_once
   ok    http.serving_in_an_arena_carves_the_exchanges_from_it
   ok    http.serving_reports_an_accept_failure_when_closing_the_listener_fails_too
   ok    http.serving_that_cannot_begin_announces_nothing_and_releases_the_handler
@@ -618,15 +618,16 @@ The library tests itself.
   ok    http.the_library_extractors_and_a_type_that_reads_itself_are_arguments
   ok    http.the_protocol_the_client_spoke_is_not_the_programs
   ok    http.the_root_pattern_matches_the_root_alone
+  ok    http.the_shared_state_counts_every_request_from_every_task
+  ok    http.the_state_comes_back_when_serving_with_it_ends
   ok    http.the_state_is_returned_when_serving_ends
   ok    http.the_unreserved_bytes_are_letters_digits_and_four_marks
   ok    http.transfer_encoding_is_not_implemented
   ok    http.transient_accept_failures_are_retried_until_a_connection_is_served
-  ok    http.two_server_instances_with_different_allocators_and_interleaved_requests
+  ok    http.two_middlewares_drawing_from_one_count_number_requests_once
   ok    http.unescaping_keeps_bytes_that_are_not_utf8
   ok    http.whitespace_around_pairs_is_tolerated_and_names_match_exactly
   ok    http.with_state_lends_its_state_to_every_request
-  ok    http.zero_workers_closes_listener_immediately
   ok    index.a_from_end_index_displays_its_source_notation
   ok    index.derived_from_end_debug_renders_the_offset
   ok    index.derived_from_end_equality_compares_the_offset
@@ -1200,7 +1201,6 @@ The library tests itself.
   ok    net.the_accept_pause_doubles_to_one_second
   ok    net.the_handler_reads_from_each_connection_and_names_its_peer
   ok    net.transient_accept_failures_are_retried_until_a_connection_is_served
-  ok    net.two_independent_servers_drain_their_own_workers
   ok    net.zero_workers_closes_the_listener_and_returns
   ok    option.a_mutable_and_then_calls_its_transform_only_for_some
   ok    option.a_mutable_fallback_runs_only_for_none
@@ -1295,36 +1295,29 @@ The library tests itself.
   ok    session.choosing_right_runs_the_peers_right_branch
   ok    session.closing_a_handle_waits_for_the_body
   ok    session.entering_a_protocol_keeps_the_endpoint
-  ok    session.mailbox_sender_closing_one_clone_keeps_mailbox_open
-  ok    session.mailbox_sends_and_receives_messages
   ok    session.the_dual_of_a_protocol_is_what_its_peer_does
   ok    session.the_dual_of_the_dual_is_the_protocol
-  ok    session.timer_cancels_promptly_without_blocking
-  ok    session.timer_with_duration_at_and_beyond_signed_boundary
   ok    task.a_cancelled_slot_runs_nothing_and_gives_the_body_back
-  ok    task.a_connection_queue_buffers_and_hands_over_descriptors
-  ok    task.a_connection_queue_passes_descriptors_between_tasks
+  ok    task.a_client_reaches_the_state_its_owner_holds
   ok    task.a_failed_preparation_settles_to_its_reason
   ok    task.a_prepared_body_runs_once_its_task_starts
   ok    task.a_refused_allocation_hands_the_body_back
   ok    task.a_started_task_answers_its_handle
-  ok    task.a_task_can_set_and_read_its_worker_id
   ok    task.a_task_started_in_one_call_runs_its_body
   ok    task.a_task_that_cannot_start_answers_the_reason
   ok    task.a_thread_that_cannot_be_made_hands_the_body_back
   ok    task.all_runs_sequentially_and_on_threads
-  ok    task.background_workers_dispatch_and_drain
+  ok    task.an_owning_task_hands_its_state_back_when_closed
+  ok    task.calls_from_two_tasks_run_one_at_a_time
+  ok    task.closing_answers_every_change_a_call_made
   ok    task.join3_runs_sequentially_and_on_threads
   ok    task.join4_runs_sequentially_and_on_threads
   ok    task.join_runs_on_threads
   ok    task.join_runs_sequentially
-  ok    task.latch_synchronizes_tasks_and_times_out
-  ok    task.mailbox_owning_task_counts_concurrent_increments
   ok    task.map_preserves_deterministic_order
   ok    task.map_results_preserves_all_slots
-  ok    task.thread_pool_executes_work_and_closes
-  ok    task.worker_identity_is_separate_from_worker_slot
-  ok    task.worker_slots_are_thread_local
+  ok    task.releasing_a_client_leaves_its_owner_serving
+  ok    task.releasing_an_owner_joins_its_task
   ok    testing.a_failure_displays_the_callers_message
   ok    testing.a_new_recorder_holds_nothing
   ok    testing.a_recorder_keeps_what_was_rendered_into_it
@@ -1485,4 +1478,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1482 passed, 0 failed
+  1475 passed, 0 failed

@@ -3324,6 +3324,22 @@ test "a sequential run orders exactly the heavy steps its suite selects" {
 test "http.serve must always default to concurrent worker execution (.Threads(128))" {
     const serve_lin = try std.Io.Dir.cwd().readFileAlloc(testing.io, "std/http/serve.lin", testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(serve_lin);
-    const expected = "policy: task.Policy = .Threads(128)";
-    try testing.expect(std.mem.indexOf(u8, serve_lin, expected) != null);
+    try testing.expect(servesConcurrentlyByDefault(serve_lin));
+}
+
+/// Whether the declaration of `pub fn serve` in `text`, its signature up to
+/// the body's opening brace, defaults its policy to `.Threads(128)`. Another
+/// function declaring that default answers nothing for `serve`.
+fn servesConcurrentlyByDefault(text: []const u8) bool {
+    const head = "\npub fn serve[";
+    const start = std.mem.indexOf(u8, text, head) orelse return false;
+    const signature_end = std.mem.indexOfScalarPos(u8, text, start + 1, '{') orelse return false;
+    const signature = text[start..signature_end];
+    return std.mem.indexOf(u8, signature, "policy: task.Policy = .Threads(128)") != null;
+}
+
+test "only serve's own signature answers for its default" {
+    try testing.expect(servesConcurrentlyByDefault("x\npub fn serve[L](sink listener: L, policy: task.Policy = .Threads(128)) -> R {\n}"));
+    try testing.expect(!servesConcurrentlyByDefault("x\npub fn serve[L](sink listener: L, policy: task.Policy = .Sequential) -> R {\n}\npub fn other(policy: task.Policy = .Threads(128)) {\n}"));
+    try testing.expect(!servesConcurrentlyByDefault("x\npub fn listen_and_serve(policy: task.Policy = .Threads(128)) {\n}"));
 }
