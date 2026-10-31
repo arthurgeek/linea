@@ -105,6 +105,23 @@ static void must(int status) {
     if (status != 0) fail("linea: a task's lock failed\n");
 }
 
+/* Initialises a record's condition variable. On Linux its timed waits read
+ * the monotonic clock, which a change to the system's time does not move;
+ * Darwin has no such setting, and `wait_until` measures there instead. */
+static int condition_init(pthread_cond_t *cond) {
+#if defined(__APPLE__)
+    return pthread_cond_init(cond, 0);
+#else
+    pthread_condattr_t attributes;
+    int status = pthread_condattr_init(&attributes);
+    if (status != 0) return status;
+    status = pthread_condattr_setclock(&attributes, CLOCK_MONOTONIC);
+    if (status == 0) status = pthread_cond_init(cond, &attributes);
+    if (pthread_condattr_destroy(&attributes) != 0) fail("linea: a condition variable's attributes could not be released\n");
+    return status;
+#endif
+}
+
 static struct task *task_of(unsigned long endpoint) {
     return (struct task *)(endpoint & ~1UL);
 }
@@ -171,7 +188,7 @@ long linea_task_prepare(unsigned long stack_bytes) {
     }
     status = pthread_mutex_init(&t->lock, 0);
     if (status != 0) goto unmap_signal_stack;
-    status = pthread_cond_init(&t->changed, 0);
+    status = condition_init(&t->changed);
     if (status != 0) goto destroy_lock;
     t->state = beginning;
 
@@ -359,6 +376,36 @@ void linea_owner_free(unsigned long queue) {
     free(q);
 }
 
+/* Waits on the record's condition variable until `deadline` on the monotonic
+ * clock, answering 0 when woken and ETIMEDOUT once the deadline has passed.
+ * Darwin's condition variable cannot read the monotonic clock, so there the
+ * wait is relative and recomputed from that clock on every call; a wait is
+ * at most `longest_relative_wait_sec` long, since Darwin refuses a relative
+ * time it cannot add to its own, and a capped wait that ends answers 0 so the
+ * caller waits again. */
+static int wait_until(struct task *t, const struct timespec *deadline) {
+#if defined(__APPLE__)
+    enum { longest_relative_wait_sec = 86400 };
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) fail("linea: clock_gettime failed\n");
+    if (now.tv_sec > deadline->tv_sec || (now.tv_sec == deadline->tv_sec && now.tv_nsec >= deadline->tv_nsec))
+        return ETIMEDOUT;
+    struct timespec remaining = {.tv_sec = deadline->tv_sec - now.tv_sec, .tv_nsec = deadline->tv_nsec - now.tv_nsec};
+    if (remaining.tv_nsec < 0) {
+        remaining.tv_sec -= 1;
+        remaining.tv_nsec += 1000000000L;
+    }
+    if (remaining.tv_sec >= longest_relative_wait_sec) {
+        remaining.tv_sec = longest_relative_wait_sec;
+        remaining.tv_nsec = 0;
+    }
+    const int rc = pthread_cond_timedwait_relative_np(&t->changed, &t->lock, &remaining);
+    return rc == ETIMEDOUT ? 0 : rc;
+#else
+    return pthread_cond_timedwait(&t->changed, &t->lock, deadline);
+#endif
+}
+
 /* Sets `*deadline` to `now` plus `step_sec` seconds and `step_nsec`
  * nanoseconds and answers 1, or answers 0 when that time is past the largest
  * `time_t`. No clock reaches a time `time_t` cannot hold, so a wait whose
@@ -382,12 +429,12 @@ uint8_t linea_chan_recv_until(unsigned long endpoint, unsigned long at, unsigned
     struct task *t = task_of(endpoint);
     linea_storage_extent(at, len);
     struct timespec now;
-    if (clock_gettime(CLOCK_REALTIME, &now) != 0) fail("linea: clock_gettime failed\n");
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) fail("linea: clock_gettime failed\n");
     struct timespec deadline;
     const int timed = deadline_after(now, timeout_ns / 1000000000UL, (long)(timeout_ns % 1000000000UL), &deadline);
     must(pthread_mutex_lock(&t->lock));
     while (!t->full || t->from == endpoint) {
-        int rc = timed ? pthread_cond_timedwait(&t->changed, &t->lock, &deadline) : pthread_cond_wait(&t->changed, &t->lock);
+        int rc = timed ? wait_until(t, &deadline) : pthread_cond_wait(&t->changed, &t->lock);
         if (rc == ETIMEDOUT && (!t->full || t->from == endpoint)) {
             must(pthread_mutex_unlock(&t->lock));
             return 0;
