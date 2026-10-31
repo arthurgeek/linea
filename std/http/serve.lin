@@ -4,7 +4,6 @@ import std.io
 import std.log
 import std.mem
 import std.net
-import std.session
 import std.task
 import std.testing
 import std.time
@@ -12,7 +11,6 @@ import std.time
 use io.BufferOpenFailure
 use io.Reader
 use task.Unowned
-use task.Unstarted
 
 // A request buffer holds 4 KiB of input at a time.
 let request_buffer_bytes: UInt64 = 4096
@@ -203,43 +201,13 @@ fn serve_announcing[L: net.Acceptor + io.Close, H: Handler[(), P] + Observer, P:
     }
 }
 
-// What the listener's owning task holds while tasks serve it: the listener,
-// how many connections it has handed out, the most it hands out, the pause
-// after a transient accept failure, and the failure that ended accepting.
-struct Accepting[L] {
-    listener: L,
-    served: UInt64,
-    limit: Option[UInt64],
-    pause_ms: UInt64,
-    stopped: Option[net.NetError],
-}
-
-// What a serving task is handed when it asks for its next connection.
-enum Next {
-    Connection(net.Accepted),
-    Retried(net.AcceptRetry),
-    Stop,
-}
-
-impl[L: net.Acceptor] Accepting[L] {
-    // Accept the next connection, unless accepting has stopped or handed out
-    // the most it may.
-    fn next(inout self: Self) -> Next {
-        if self.stopped.is_some() || net.reached(self.limit, self.served) {
-            return .Stop
-        }
-        match net.accept_attempt(&self.listener, &self.pause_ms) {
-            Connected(accepted) => {
-                self.served += 1
-                .Connection(accepted)
-            },
-            Retry(retry) => .Retried(retry),
-            Failed(error) => {
-                self.stopped = .Some(error)
-                .Stop
-            },
-        }
-    }
+// What every serving task of `serve` is given: the allocator its buffers and
+// arenas come from, what builds its handler, and the limits it serves under.
+@copyable
+struct Serving[P, M] {
+    parent: P,
+    make_handler: M,
+    limits: Limits,
 }
 
 // Serve `listener` with handlers `make_handler` builds, on the tasks `policy`
@@ -267,13 +235,11 @@ fn serve_made[L: net.Acceptor + io.Close + Owned + Shareable, P: Allocator + Sha
         let _closed = listener.close()
         return .Err(.ArenaTooSmall)
     }
-    let accepting: Accepting[L] = .{ listener, served = 0, limit = copy(limits.connections), pause_ms = 0, stopped = .None }
-    let owner = match task.own(accepting) {
+    let owner = match task.own(net.Accepting.open(listener, limits.connections)) {
         Ok(owner) => owner,
         Err(Unowned { state, reason: _ }) => {
-            let Accepting { listener: alone, served: _, limit: _, pause_ms: _, stopped: _ } = state
             var handler = make_handler()
-            let served = serve_announcing(alone, &handler, parent, limits, announce)
+            let served = serve_announcing(state.close_alone(), &handler, parent, limits, announce)
             handler.release()
             return served
         },
@@ -287,9 +253,9 @@ fn serve_made[L: net.Acceptor + io.Close + Owned + Shareable, P: Allocator + Sha
         },
         None => {},
     }
-    let refused = serve_on_tasks[L, P, H, M](workers, owner.client(), parent, make_handler, limits)
-    let Accepting { listener: accepted, served: _, limit: _, pause_ms: _, stopped } = owner.close()
-    let finished: Result[(), ServeError] = match net.finish(accepted, stopped) {
+    let serving: Serving[P, M] = .{ parent = copy(parent), make_handler = copy(make_handler), limits = copy(limits) }
+    let refused = net.on_tasks(workers, owner.client(), serving, serve_worker[L, P, H, M])
+    let finished: Result[(), ServeError] = match owner.close().finish() {
         Ok(_) => .Ok(()),
         Err(error) => .Err(ServeError.of(error)),
     }
@@ -299,39 +265,11 @@ fn serve_made[L: net.Acceptor + io.Close + Owned + Shareable, P: Allocator + Sha
     }
 }
 
-// Serve on `count` tasks: half of them are started on a new task, which
-// divides them again, and this thread serves the rest, so starting them takes
-// a depth of the logarithm of `count`. Every task started is joined before
-// this returns. A task that cannot be made leaves its share to this thread.
-// It answers a refusal of the buffer a 503 discards into, when this thread's
-// own serving met one.
-fn serve_on_tasks[L: net.Acceptor + Owned + Shareable, P: Allocator + Shareable, H: Handler[(), P] + Observer + Release, M: Shareable + Copyable + fn() -> H](count: UInt64, acceptor: task.Client[Accepting[L]], parent: P, make_handler: M, limits: Limits) -> Option[mem.Oom] {
-    if count <= 1 {
-        return serve_worker[L, P, H, M](acceptor, parent, make_handler, limits)
-    }
-    let half = count / 2
-    let body = sink [half, sink acceptor = copy(acceptor), sink parent = copy(parent), sink make_handler = copy(make_handler), sink limits = copy(limits)] |sink me: session.Chan[session.End]| {
-        let _refused = serve_on_tasks[L, P, H, M](half, acceptor, parent, make_handler, limits)
-        me.close()
-    }
-    match task.prepare(body) {
-        Ok(slot) => {
-            let started = slot.start()
-            let refused = serve_on_tasks[L, P, H, M](count - half, acceptor, parent, make_handler, limits)
-            started.close()
-            refused
-        },
-        Err(unstarted) => {
-            let Unstarted { body: _, reason: _ } = unstarted
-            serve_on_tasks[L, P, H, M](count - half, acceptor, parent, make_handler, limits)
-        },
-    }
-}
-
 // One serving task: build a handler, then serve each connection the
 // listener's owning task hands out until it says to stop. It answers the
 // refusal of its 503 buffer, when `parent` refused it and it served nothing.
-fn serve_worker[L: net.Acceptor + Owned + Shareable, P: Allocator + Shareable, H: Handler[(), P] + Observer + Release, M: Shareable + Copyable + fn() -> H](acceptor: task.Client[Accepting[L]], parent: P, make_handler: M, limits: Limits) -> Option[mem.Oom] {
+fn serve_worker[L: net.Acceptor + Owned + Shareable, P: Allocator + Shareable, H: Handler[(), P] + Observer + Release, M: Shareable + Copyable + fn() -> H](serving: Serving[P, M], acceptor: task.Client[net.Accepting[L]]) -> Option[mem.Oom] {
+    let Serving { parent, make_handler, limits } = copy(serving)
     var refusal = parent.acquire(request_buffer_bytes) else |reason| {
         return .Some(reason)
     }
@@ -339,7 +277,7 @@ fn serve_worker[L: net.Acceptor + Owned + Shareable, P: Allocator + Shareable, H
     var arena = mem.Arena.open(parent, limits.request_arena_bytes)
     var serving = true
     while serving {
-        match acceptor.call(|inout accepting: Accepting[L]| &accepting.next()) {
+        match acceptor.call(|inout accepting: net.Accepting[L]| &accepting.next()) {
             Connection(Accepted { connection, address: _ }) => {
                 match serve_connection(connection, &handler, arena.handle(), &refusal, limits, time.Instant.now()) {
                     Answered => &arena.rewind(),
