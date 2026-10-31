@@ -17,7 +17,8 @@ One server then answers every request below in turn, and stops after the last.
 
 Workers answer requests at once and log each one after its answer is written,
 so `ask` waits for a request's line before the next request is sent, which
-keeps the log in the order the requests were made.
+keeps the log in the order the requests were made. The 413 below is logged
+without a method, so its step waits for its own line.
 
   $ ask() { before=$(grep -c ' request method=' server.log); curl -s --max-time 30 "$@"; for i in $(seq 600); do [ "$(grep -c ' request method=' server.log)" -gt "$before" ] && break; sleep 0.05; done; }
 
@@ -94,7 +95,7 @@ A path no route matches is answered 404.
 A body one byte past the 1 MiB limit is answered 413 without being read, and
 the server goes on answering the requests after it.
 
-  $ head -c 1048577 /dev/zero | curl -s --max-time 30 -o /dev/null -w '%{http_code}\n' --expect100-timeout 30 --data-binary @- "http://127.0.0.1:$port/echo"
+  $ head -c 1048577 /dev/zero | curl -s --max-time 30 -o /dev/null -w '%{http_code}\n' --expect100-timeout 30 --data-binary @- "http://127.0.0.1:$port/echo"; for i in $(seq 600); do grep -q 'status=413' server.log && break; sleep 0.05; done
   413
 
 GET /stats reports how many messages the server has echoed, a count every

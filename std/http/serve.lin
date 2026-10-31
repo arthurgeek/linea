@@ -290,6 +290,7 @@ fn serve_worker[L: net.Acceptor + Owned + Shareable, P: Allocator + Shareable, H
                 &handler.observe(event)
                 time.sleep(pause)
             },
+            Wait(pause) => time.sleep(pause),
             Stop => serving = false,
         }
     }

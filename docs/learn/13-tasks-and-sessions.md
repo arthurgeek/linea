@@ -1034,7 +1034,7 @@ Linea provides three core combinators for independent work:
 
 Each takes a `policy: task.Policy`:
 - `Policy.Sequential`: runs synchronously inline on the caller's stack with zero thread overhead and complete determinism.
-- `Policy.Threads(max)`: runs the work on tasks of its own. `map` and `all` divide their items among at most `max` tasks; `join`, `join3` and `join4` start a task for each job whenever `max` is more than 1, and run the jobs in turn on the caller when it is 1. A `max` of 0 stops the program.
+- `Policy.Threads(max)`: runs the work on tasks of its own. `map` and `all` divide their items among at most `max` tasks; `join`, `join3` and `join4` run up to `max` jobs at once, on `max - 1` tasks of their own and the caller, and run the jobs in turn on the caller when `max` is 1. A `max` of 0 stops the program.
 
 `independent_work.lin`:
 
