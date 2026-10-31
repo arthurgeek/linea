@@ -246,6 +246,7 @@ fn serve_connections[L: Acceptor + Owned + Shareable, H: Owned + Shareable + Cop
         match acceptor.call(|inout accepting: Accepting[L]| &accepting.next()) {
             Connection(Accepted { connection, address }) => handler(connection, address),
             Retried(retry) => time.sleep(retry.pause),
+            Wait(pause) => time.sleep(pause),
             Stop => serving = false,
         }
     }
@@ -253,41 +254,83 @@ fn serve_connections[L: Acceptor + Owned + Shareable, H: Owned + Shareable + Cop
 
 // What a listener's owning task holds while tasks serve it: the listener, how
 // many connections it has handed out, the most it hands out, the pause after
-// a transient accept failure, and the failure that ended accepting.
+// a transient accept failure and when that failure was seen, and the failure
+// that ended accepting.
 internal struct Accepting[L] {
     listener: L,
     served: UInt64,
     limit: Option[UInt64],
     pause_ms: UInt64,
+    retried_at: Option[time.Instant],
     stopped: Option[NetError],
 }
 
 // What a serving task is handed when it asks for its next connection.
+// `Retried` goes to the one task whose accept failed, which reports it and
+// waits its pause; `Wait` goes to every task that asks before that pause has
+// passed, so the listener is tried again once per pause however many tasks
+// serve it.
 internal enum Next {
     Connection(Accepted),
     Retried(AcceptRetry),
+    Wait(time.Duration),
     Stop,
+}
+
+// What a serving task did with what `Accepting.next` told it, for tests.
+@(copyable, derive(Equatable, Debug))
+enum Told {
+    Connected,
+    Retried,
+    Waited,
+    Stopped,
+}
+
+fn told(sink next: Next) -> Told {
+    match next {
+        Connection(Accepted { connection, address: _ }) => {
+            connection.close().unwrap()
+            .Connected
+        },
+        Retried(_) => .Retried,
+        Wait(_) => .Waited,
+        Stop => .Stopped,
+    }
 }
 
 impl[L: Acceptor] Accepting[L] {
     // Keep `listener`, to hand out at most `limit` connections, or any number
     // when that is `.None`.
     internal fn open(sink listener: L, limit: Option[UInt64]) -> Accepting[L] where carries(listener) {
-        .{ listener, served = 0, limit = copy(limit), pause_ms = 0, stopped = .None }
+        .{ listener, served = 0, limit = copy(limit), pause_ms = 0, retried_at = .None, stopped = .None }
     }
 
-    // Accept the next connection, unless accepting has stopped or handed out
-    // the most it may.
+    // Accept the next connection, unless accepting has stopped, handed out
+    // the most it may, or is waiting out the pause after a failed accept.
     internal fn next(inout self: Self) -> Next {
         if self.stopped.is_some() || reached(self.limit, self.served) {
             return .Stop
         }
+        match read self.retried_at {
+            Some(at) => {
+                let waited = at.elapsed()
+                let pause = time.Duration.from_milliseconds(self.pause_ms)
+                if waited < pause {
+                    return .Wait(time.Duration.from_nanoseconds(pause.nanoseconds() - waited.nanoseconds()))
+                }
+            },
+            None => {},
+        }
+        self.retried_at = .None
         match accept_attempt(&self.listener, &self.pause_ms) {
             Connected(accepted) => {
                 self.served += 1
                 .Connection(accepted)
             },
-            Retry(retry) => .Retried(retry),
+            Retry(retry) => {
+                self.retried_at = .Some(time.Instant.now())
+                .Retried(retry)
+            },
             Failed(error) => {
                 self.stopped = .Some(error)
                 .Stop
@@ -295,10 +338,27 @@ impl[L: Acceptor] Accepting[L] {
         }
     }
 
+    test fn next_asks_the_listener_nothing_until_a_retry_has_waited_its_pause() {
+        let listener = listen(loopback(0)).unwrap()
+        let client = connect(listener.local_address().unwrap()).unwrap()
+        let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
+        let script = scripted(listener, [.Some(.Io(exhausted)), .None, .None, .None], .None)
+        var accepting = Accepting.open(script, limit: .None)
+        let retried = told(&accepting.next())
+        let early = told(&accepting.next())
+        time.sleep(time.Duration.from_milliseconds(first_pause_ms))
+        let later = told(&accepting.next())
+        accepting.finish().unwrap()
+        client.close().unwrap()
+        testing.assert_eq(retried, Told.Retried, "the failed accept was not retried")?
+        testing.assert_eq(early, Told.Waited, "the listener was asked again before the pause ended")?
+        testing.assert_eq(later, Told.Connected, "the connection was not accepted after the pause")?
+    }
+
     // The listener, for a thread that serves it alone because its owning
     // task could not be made.
     internal fn close_alone(sink self: Self) -> L where carries(self.listener) {
-        let Accepting { listener, served: _, limit: _, pause_ms: _, stopped: _ } = self
+        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped: _ } = self
         listener
     }
 }
@@ -307,7 +367,7 @@ impl[L: Acceptor + io.Close] Accepting[L] {
     // Close the listener and report the accept failure that ended serving,
     // or the failure to close it.
     internal fn finish(sink self: Self) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
-        let Accepting { listener, served: _, limit: _, pause_ms: _, stopped } = self
+        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped } = self
         finish(listener, stopped)
     }
 }

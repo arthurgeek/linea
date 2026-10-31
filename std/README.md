@@ -1176,7 +1176,7 @@ var server = http.with_request_ids(http.logged(copy(logger), router))
 ```
 
 ```text
-2026-09-25T09:31:02Z INFO request method=GET path=/health request_id=0199803c-4d8e-7b21-a8f3-62c94e1d07b5 status=200 bytes=2 duration=41µs
+2026-09-25T09:31:02Z INFO request method=GET path=/health request_id=01a0d7e7-698c-7b21-a8f3-62c94e1d07b5 status=200 bytes=2 duration=41µs
 ```
 
 The handler reads the id with `request.header("X-Request-Id")`, and the

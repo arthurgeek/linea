@@ -371,6 +371,7 @@ The library tests itself.
   ok    http.a_form_content_type_is_named_exactly
   ok    http.a_form_of_one_pair_too_many_is_refused_with_413
   ok    http.a_form_of_the_most_pairs_is_answered_in_the_smallest_arena
+  ok    http.a_generated_id_takes_nothing_from_the_request_allocator
   ok    http.a_get_is_answered_with_a_status_header
   ok    http.a_handler_cannot_set_the_status_as_a_header
   ok    http.a_handler_error_before_headers_answers_its_status
@@ -1197,6 +1198,7 @@ The library tests itself.
   ok    net.finish_closes_the_listener_and_reports_the_accept_failure_before_the_close_failure
   ok    net.listen_queues_the_default_backlog_or_the_one_given
   ok    net.loopback_names_this_host
+  ok    net.next_asks_the_listener_nothing_until_a_retry_has_waited_its_pause
   ok    net.serve_runs_the_handler_once_for_each_connection_and_returns
   ok    net.serve_workers_handles_connections_concurrently
   ok    net.serve_workers_sequential_policy
@@ -1500,4 +1502,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1497 passed, 0 failed
+  1499 passed, 0 failed
