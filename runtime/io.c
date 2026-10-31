@@ -176,6 +176,18 @@ long linea_random_bytes(unsigned long at, unsigned long len) {
     return result == 0 ? (long)count : -(long)errno;
 }
 
+long linea_random_words(unsigned long *high, unsigned long *low) {
+    uint64_t words[2];
+    int result;
+    do {
+        result = getentropy(words, sizeof(words));
+    } while (result != 0 && errno == EINTR);
+    if (result != 0) return -(long)errno;
+    *high = (unsigned long)words[0];
+    *low = (unsigned long)words[1];
+    return 0;
+}
+
 /* `(memchr)` names the function rather than the macro newer glibc headers
  * define with C11's `_Generic`, which this C99 source may not use. */
 static int path_bytes(unsigned long at, unsigned long extent, int component) {

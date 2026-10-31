@@ -113,6 +113,12 @@ static void random_bytes(void) {
     assert(linea_random_bytes(ADDRESS(bytes), sizeof(bytes)) == 256);
     for (size_t i = 256; i < sizeof(bytes); ++i) assert(bytes[i] == 0x55);
     assert(linea_random_bytes(ADDRESS(bytes + 256), 44) == 44);
+    unsigned long first[2] = {0, 0};
+    unsigned long second[2] = {0, 0};
+    assert(linea_random_words(&first[0], &first[1]) == 0);
+    assert(linea_random_words(&second[0], &second[1]) == 0);
+    /* Two reads of 128 random bits agree with probability 2^-128. */
+    assert(first[0] != second[0] || first[1] != second[1]);
 }
 
 static void short_write(void) {
