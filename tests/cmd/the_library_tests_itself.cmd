@@ -1288,6 +1288,8 @@ The library tests itself.
   ok    scalar.square_roots_preserve_zero_and_infinite_limits
   ok    scalar.trunc_rounds_toward_zero_and_keeps_the_sign
   ok    session.a_receive_answers_what_the_peer_sent
+  ok    session.a_receive_until_answers_what_a_prompt_peer_sent
+  ok    session.a_receive_until_hands_the_endpoint_back_when_the_peer_is_late
   ok    session.a_send_hands_the_value_to_the_peer
   ok    session.an_offer_answers_the_branch_the_peer_chose
   ok    session.an_owned_handle_can_be_detached
@@ -1478,4 +1480,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1475 passed, 0 failed
+  1477 passed, 0 failed
