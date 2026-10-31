@@ -82,6 +82,10 @@ test trap fn fd_reads_reject_a_count_past_the_remaining_buffer() -> Result[(), t
 // and return a count, a descriptor, a mode, zero, or a negated errno.
 extern fn linea_random_bytes(at: UInt64, len: UInt64) -> Int64
 
+// The runtime writes two random words to `high` and `low` and answers 0, or
+// leaves both and answers a negated errno.
+extern fn linea_random_words(inout high: UInt64, inout low: UInt64) -> Int64
+
 extern fn linea_open_parent(at: UInt64, extent: UInt64) -> Int64
 
 extern fn linea_open_at(parent: Int32, at: UInt64, extent: UInt64, policy: UInt8, mode: UInt64) -> Int64
@@ -99,6 +103,23 @@ internal fn _random_bytes[A: Allocator](inout buffer: Buffer[A], offset: UInt64,
         panic("random byte range is out of bounds")
     }
     linea_random_bytes(buffer.at + offset, count)
+}
+
+// Write 128 random bits to `high` and `low`, from the operating system's
+// random source, and answer 0, or leave both and answer a negated errno.
+internal fn random_words(inout high: UInt64, inout low: UInt64) -> Int64 {
+    linea_random_words(&high, &low)
+}
+
+test fn random_words_differ_between_reads() {
+    var first_high: UInt64 = 0
+    var first_low: UInt64 = 0
+    var second_high: UInt64 = 0
+    var second_low: UInt64 = 0
+    testing.assert_eq(random_words(&first_high, &first_low), Int64(0), "the first read failed")?
+    testing.assert_eq(random_words(&second_high, &second_low), Int64(0), "the second read failed")?
+    // Two reads of 128 random bits agree with probability 2^-128.
+    testing.assert(first_high != second_high || first_low != second_low, "two reads gave the same bits")?
 }
 
 // Open the directory named by the NUL-terminated `path`.

@@ -66,6 +66,10 @@ int main(void) {
     char bytes[8] = {0};
     assert(pipe(descriptors) == 0);
     assert(linea_random_bytes((unsigned long)(uintptr_t)bytes, sizeof(bytes)) == -EIO);
+    unsigned long high = 3;
+    unsigned long low = 4;
+    assert(linea_random_words(&high, &low) == -EIO);
+    assert(high == 3 && low == 4);
     assert(linea_write_some(descriptors[1], (unsigned long)(uintptr_t)"abcd", 4) == 2);
     assert(linea_read_some(descriptors[0], (unsigned long)(uintptr_t)bytes, sizeof(bytes)) == 2);
     assert(memcmp(bytes, "ab", 2) == 0);

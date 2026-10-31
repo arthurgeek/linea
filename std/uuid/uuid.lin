@@ -1,0 +1,377 @@
+import std.fmt
+import std.hash
+import std.mem
+import std.testing
+import std.text
+import std.time
+
+use hash.Hash
+
+// `Uuid` is a 128-bit universally unique identifier, as RFC 9562 defines it.
+// It is held as two 64-bit halves: `high` is the first eight bytes of the
+// identifier and `low` the last eight, each read as a big-endian number, so
+// comparing the halves in order compares the bytes in order. A version 7
+// identifier begins with the time it was made, so ordering by `Comparable`
+// orders such identifiers by time. Display writes the 36-character form,
+// `0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17`, in lowercase.
+@(opaque, copyable, derive(Equatable, Equivalent, Comparable, Hash))
+struct Uuid {
+    high: UInt64,
+    low: UInt64,
+}
+
+// `Variant` is the layout family the top bits of byte 8 select. Every
+// identifier `v4` and `v7` make is `Rfc9562`; the others are reserved for
+// older layouts and are read only from identifiers made elsewhere.
+@(copyable, derive(Equatable, Equivalent, Debug, Display))
+pub enum Variant {
+    // The top bit is 0: the reserved Apollo NCS layout.
+    Ncs,
+    // The top two bits are 10: the layout RFC 9562 defines.
+    Rfc9562,
+    // The top three bits are 110: reserved for Microsoft's GUIDs.
+    Microsoft,
+    // The top three bits are 111: reserved for a future definition.
+    Future,
+}
+
+// `ParseError` says why `Uuid.parse` refused its text, naming the byte offset
+// where the text stops being an identifier.
+@(copyable, derive(Equatable, Equivalent, Debug))
+pub enum ParseError {
+    // The text is not 36 bytes long; the payload is its length.
+    Length(UInt64),
+    // The byte at this offset should be a hexadecimal digit and is not.
+    Digit(UInt64),
+    // The byte at this offset should be `-` and is not.
+    Hyphen(UInt64),
+}
+
+impl Display for ParseError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Length(length) => "a UUID is 36 bytes long, and this text is {length}".fmt(&w),
+            Digit(at) => "byte {at} of the UUID is not a hexadecimal digit".fmt(&w),
+            Hyphen(at) => "byte {at} of the UUID is not a hyphen".fmt(&w),
+        }
+    }
+}
+
+test fn a_parse_error_says_where_the_text_went_wrong() {
+    defer let length = fmt.render_owned(ParseError.Length(12)).unwrap()
+    testing.assert_eq(length.view(), "a UUID is 36 bytes long, and this text is 12", "the length message changed")?
+    defer let digit = fmt.render_owned(ParseError.Digit(3)).unwrap()
+    testing.assert_eq(digit.view(), "byte 3 of the UUID is not a hexadecimal digit", "the digit message changed")?
+    defer let hyphen = fmt.render_owned(ParseError.Hyphen(8)).unwrap()
+    testing.assert_eq(hyphen.view(), "byte 8 of the UUID is not a hyphen", "the hyphen message changed")?
+}
+
+// Powers of two the layout is built from with arithmetic: a version occupies
+// bits 12 to 15 of `high`, counted from the least significant, so it is a
+// multiple of 2^12 below 2^16; a v7 timestamp is 48 bits above them; and the
+// RFC 9562 variant is the top two bits of `low`, 10, which is 2^63 above 62
+// free bits.
+let two_to_12: UInt64 = 4096
+
+let two_to_16: UInt64 = 65536
+
+let two_to_62: UInt64 = 4611686018427387904
+
+let two_to_63: UInt64 = 9223372036854775808
+
+// The top byte of `low` is byte 8 of the identifier, which holds the variant.
+let two_to_56: UInt64 = 72057594037927936
+
+// A millisecond is 1,000,000 nanoseconds, and a second 1,000 milliseconds.
+let nanoseconds_per_millisecond: UInt64 = 1000000
+
+let milliseconds_per_second: UInt64 = 1000
+
+// The written form is 32 hexadecimal digits and four hyphens: 36 bytes.
+let text_length: UInt64 = 36
+
+// Read 128 bits from the operating system's random source. A machine whose
+// random source cannot be read cannot make an identifier at all, so this
+// panics rather than answering an error every caller would pass on.
+fn random_halves() -> (UInt64, UInt64) {
+    var high: UInt64 = 0
+    var low: UInt64 = 0
+    if mem.random_words(&high, &low) != 0 {
+        panic("the operating system's random source cannot be read")
+    }
+    (high, low)
+}
+
+// `low` with its top two bits set to 10, the RFC 9562 variant, and the other
+// 62 bits taken from `random`.
+fn with_variant(random: UInt64) -> UInt64 {
+    two_to_63 + random % two_to_62
+}
+
+impl Uuid {
+    // `v4` makes a version 4 identifier: 122 bits from the operating system's
+    // random source, with the version and variant bits RFC 9562 sets. Two
+    // identifiers it makes are equal with a probability of about 2^-122 per
+    // pair.
+    pub fn v4() -> Uuid {
+        let (high, low) = random_halves()
+        let version: UInt64 = 4
+        .{ high = high - high % two_to_16 + version * two_to_12 + high % two_to_12, low = with_variant(low) }
+    }
+
+    test fn a_v4_identifier_has_version_4_and_the_rfc_variant() {
+        let id = Uuid.v4()
+        testing.assert_eq(id.version(), UInt8(4), "the version is not 4")?
+        testing.assert_eq(id.variant(), Variant.Rfc9562, "the variant is not RFC 9562")?
+        testing.assert(Uuid.v4() != Uuid.v4(), "two random identifiers were equal")?
+    }
+
+    // `v7` makes a version 7 identifier: the milliseconds since the Unix epoch
+    // the wall clock reads, in the first 48 bits, then the version, then 74
+    // bits from the operating system's random source and the variant.
+    // Identifiers made in different milliseconds sort by the time they were
+    // made; two made in the same millisecond are in either order. A wall clock
+    // set before 1970 cannot be written in 48 unsigned bits, so it panics, as
+    // a wall clock that cannot be read does.
+    pub fn v7() -> Uuid {
+        let now = time.now()
+        if now.unix_seconds() < 0 {
+            panic("the wall clock is set before 1970, which a version 7 UUID cannot record")
+        }
+        let milliseconds = UInt64(now.unix_seconds()) * milliseconds_per_second + UInt64(now.nanoseconds()) / nanoseconds_per_millisecond
+        let (high, low) = random_halves()
+        let version: UInt64 = 7
+        .{ high = milliseconds * two_to_16 + version * two_to_12 + high % two_to_12, low = with_variant(low) }
+    }
+
+    test fn a_v7_identifier_records_when_it_was_made() {
+        let before = time.now()
+        let id = Uuid.v7()
+        let after = time.now()
+        testing.assert_eq(id.version(), UInt8(7), "the version is not 7")?
+        testing.assert_eq(id.variant(), Variant.Rfc9562, "the variant is not RFC 9562")?
+        let made = id.timestamp().unwrap()
+        testing.assert(made.unix_seconds() >= before.unix_seconds() && made.unix_seconds() <= after.unix_seconds(), "the recorded time is not the time it was made")?
+    }
+
+    test fn v7_identifiers_made_in_later_milliseconds_sort_later() {
+        let first = Uuid.v7()
+        time.sleep(time.Duration.from_milliseconds(2))
+        let second = Uuid.v7()
+        testing.assert(first < second, "a later identifier sorted first")?
+    }
+
+    // `nil` is the identifier whose 128 bits are all zero.
+    pub fn nil() -> Uuid {
+        .{ high = 0, low = 0 }
+    }
+
+    test fn the_nil_identifier_is_all_zero() {
+        defer let written = fmt.render_owned(Uuid.nil()).unwrap()
+        testing.assert_eq(written.view(), "00000000-0000-0000-0000-000000000000", "nil is not all zero")?
+    }
+
+    // `max` is the identifier whose 128 bits are all one. No identifier
+    // sorts after it.
+    pub fn max() -> Uuid {
+        .{ high = UInt64.max, low = UInt64.max }
+    }
+
+    test fn the_max_identifier_is_all_one_and_sorts_last() {
+        defer let written = fmt.render_owned(Uuid.max()).unwrap()
+        testing.assert_eq(written.view(), "ffffffff-ffff-ffff-ffff-ffffffffffff", "max is not all one")?
+        testing.assert(Uuid.v7() < Uuid.max(), "an identifier sorted after max")?
+        testing.assert(Uuid.nil() < Uuid.v4(), "an identifier sorted before nil")?
+    }
+
+    // `from_bytes` makes the identifier whose 16 bytes are `bytes`, in the
+    // order they are written.
+    pub fn from_bytes(bytes: [UInt8; 16]) -> Uuid {
+        var high: UInt64 = 0
+        var low: UInt64 = 0
+        for i in 0..8 {
+            high = high * 256 + UInt64(bytes[i])
+            low = low * 256 + UInt64(bytes[i + 8])
+        }
+        .{ high, low }
+    }
+
+    test fn bytes_come_back_as_they_went_in() {
+        let bytes: [UInt8; 16] = [1, 144, 179, 226, 124, 26, 125, 78, 159, 33, 58, 92, 142, 11, 109, 23]
+        let id = Uuid.from_bytes(bytes)
+        testing.assert_eq(id.bytes(), bytes, "the bytes changed")?
+        defer let written = fmt.render_owned(id).unwrap()
+        testing.assert_eq(written.view(), "0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17", "the bytes were written out of order")?
+    }
+
+    // `bytes` returns the identifier's 16 bytes in the order they are written.
+    pub fn bytes(self: Self) -> [UInt8; 16] {
+        var bytes: [UInt8; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        var high = self.high
+        var low = self.low
+        for i in 0..8 {
+            bytes[7 - i] = UInt8(high % 256)
+            bytes[15 - i] = UInt8(low % 256)
+            high = high / 256
+            low = low / 256
+        }
+        bytes
+    }
+
+    test fn the_bytes_of_max_are_all_255() {
+        testing.assert_eq(Uuid.max().bytes(), [UInt8(255), 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255], "a byte of max is not 255")?
+    }
+
+    // `version` returns the version number in bits 48 to 51: 4 for a random
+    // identifier, 7 for a time-ordered one, and 0 for `nil`.
+    pub fn version(self: Self) -> UInt8 {
+        UInt8(self.high / two_to_12 % 16)
+    }
+
+    test fn the_version_is_read_from_its_four_bits() {
+        testing.assert_eq(Uuid.nil().version(), UInt8(0), "nil has a version")?
+        testing.assert_eq(Uuid.max().version(), UInt8(15), "max's version bits are not all one")?
+        testing.assert_eq(Uuid.parse("6ba7b810-9dad-11d1-80b4-00c04fd430c8").unwrap().version(), UInt8(1), "a version 1 identifier read another version")?
+    }
+
+    // `variant` returns the layout family the top bits of byte 8 select.
+    pub fn variant(self: Self) -> Variant {
+        let byte = self.low / two_to_56
+        if byte < 128 {
+            .Ncs
+        } else if byte < 192 {
+            .Rfc9562
+        } else if byte < 224 {
+            .Microsoft
+        } else {
+            .Future
+        }
+    }
+
+    test fn the_variant_is_read_from_the_top_bits_of_byte_8() {
+        testing.assert_eq(Uuid.nil().variant(), Variant.Ncs, "nil is not NCS")?
+        testing.assert_eq(Uuid.parse("00000000-0000-0000-bfff-000000000000").unwrap().variant(), Variant.Rfc9562, "10 is not RFC 9562")?
+        testing.assert_eq(Uuid.parse("00000000-0000-0000-c000-000000000000").unwrap().variant(), Variant.Microsoft, "110 is not Microsoft")?
+        testing.assert_eq(Uuid.max().variant(), Variant.Future, "111 is not reserved for the future")?
+    }
+
+    // `timestamp` returns the moment a version 7 identifier records, to the
+    // millisecond, or `None` for any other version, and for one whose 48
+    // bits name a moment past the year 9999.
+    pub fn timestamp(self: Self) -> Option[time.Timestamp] {
+        if self.version() != 7 {
+            return .None
+        }
+        let milliseconds = self.high / two_to_16
+        let seconds = milliseconds / milliseconds_per_second
+        let nanoseconds = milliseconds % milliseconds_per_second * nanoseconds_per_millisecond
+        time.Timestamp.from_unix(Int64(seconds), UInt32(nanoseconds))
+    }
+
+    test fn a_timestamp_is_read_only_from_version_7() {
+        // RFC 9562's version 7 example records 2022-02-22T19:22:22Z.
+        let example = Uuid.parse("017f22e2-79b0-7cc3-98c4-dc0c0c07398f").unwrap()
+        let recorded = example.timestamp().unwrap()
+        testing.assert_eq(recorded.unix_seconds(), Int64(1645557742), "the example's seconds changed")?
+        testing.assert_eq(recorded.nanoseconds(), UInt32(0), "the example's milliseconds changed")?
+        testing.assert(Uuid.v4().timestamp().is_none(), "a random identifier recorded a time")?
+    }
+
+    // `parse` reads the 36-byte form RFC 9562 writes: 32 hexadecimal digits,
+    // in either case, with a hyphen after the 8th, 12th, 16th and 20th. Any
+    // other text is refused with the offset of the first byte that does not
+    // fit, or with its length when that is not 36.
+    pub fn parse(written: Str) -> Result[Uuid, ParseError] {
+        if written.length() != text_length {
+            return .Err(.Length(written.length()))
+        }
+        var high: UInt64 = 0
+        var low: UInt64 = 0
+        var digits: UInt64 = 0
+        for at in 0..text_length {
+            let byte = written.byte(at).unwrap()
+            if at == 8 || at == 13 || at == 18 || at == 23 {
+                if byte != 45 {
+                    return .Err(.Hyphen(at))
+                }
+                continue
+            }
+            let value = text.hex_digit_value(byte) else {
+                return .Err(.Digit(at))
+            }
+            if digits < 16 {
+                high = high * 16 + UInt64(value)
+            } else {
+                low = low * 16 + UInt64(value)
+            }
+            digits += 1
+        }
+        .Ok(.{ high, low })
+    }
+
+    test fn an_identifier_parses_back_to_itself() {
+        let id = Uuid.v7()
+        defer let written = fmt.render_owned(id).unwrap()
+        testing.assert_eq(Uuid.parse(written.view()).unwrap(), id, "the written form parsed to another identifier")?
+        testing.assert_eq(Uuid.parse("0190B3E2-7C1A-7D4E-9F21-3A5C8E0B6D17").unwrap(), Uuid.parse("0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17").unwrap(), "uppercase digits parsed differently")?
+    }
+
+    test fn text_that_is_not_an_identifier_is_refused_where_it_goes_wrong() {
+        refused_as("0190b3e2", .Length(8), "a short text was not refused by length")?
+        refused_as(r"{0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17}", .Length(38), "braces were accepted")?
+        refused_as("0190b3e2_7c1a-7d4e-9f21-3a5c8e0b6d17", .Hyphen(8), "an underscore was read as a hyphen")?
+        refused_as("0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6dz7", .Digit(34), "z was read as a digit")?
+        refused_as("0190b3e27c1a-7d4e-9f21-3a5c8e0b6d17a", .Hyphen(8), "a misplaced hyphen was accepted")?
+    }
+}
+
+// Check that `written` is refused with `reason`.
+fn refused_as(written: Str, reason: ParseError, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
+    let parsed = Uuid.parse(written)
+    testing.assert(match read parsed {
+        Ok(_) => false,
+        Err(got) => got == reason,
+    }, said)
+}
+
+// The offsets at which Display writes a hyphen before the byte: after the
+// 4th, 6th, 8th and 10th of the 16 bytes.
+fn hyphen_before(byte: UInt64) -> Bool {
+    byte == 4 || byte == 6 || byte == 8 || byte == 10
+}
+
+impl Display for Uuid {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        let bytes = self.bytes()
+        for i in 0..16 {
+            if hyphen_before(i) {
+                "-".fmt(&w)?
+            }
+            text.hex_digit(bytes[i] / 16).unwrap().fmt(&w)?
+            text.hex_digit(bytes[i] % 16).unwrap().fmt(&w)?
+        }
+        .Ok(())
+    }
+}
+
+// Debug writes the same 36-byte form Display does, so a failed comparison
+// shows the identifiers as they are written everywhere else.
+impl Debug for Uuid {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.fmt(&w)
+    }
+}
+
+test fn debug_writes_the_identifier_as_display_does() {
+    let id = Uuid.parse("0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17").unwrap()
+    var recorder = testing.Recorder.of(64).unwrap()
+    let wrote = id.debug(&recorder).is_ok()
+    let holds = recorder.holds("0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17")
+    recorder.release()
+    testing.assert(wrote && holds, "debug wrote another form")?
+}
+
+test fn equal_identifiers_hash_alike() {
+    let id = Uuid.v4()
+    testing.assert_eq(id.hash(), Uuid.from_bytes(id.bytes()).hash(), "equal identifiers hashed differently")?
+}
