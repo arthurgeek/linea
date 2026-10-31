@@ -1,27 +1,73 @@
+import std.mem
 import std.testing
 
-extern fn linea_io_output_lock()
+// The bytes a value renders to, gathered so they reach `target` in one write
+// once the value has rendered: a line two tasks print at once is written
+// whole, and nothing is held while the value's `fmt` runs, so a `fmt` that
+// prints prints too. When the bytes cannot be gathered, those gathered so far
+// are written and the rest goes straight to `target`.
+struct Gathered {
+    bytes: mem.Vec[UInt8, mem.SystemAllocator],
+    target: Descriptor,
+}
 
-extern fn linea_io_output_unlock()
+impl Gathered {
+    fn into(sink target: Descriptor) -> Gathered {
+        .{ bytes = mem.Vec.new(), target }
+    }
 
-struct OutputLock {}
+    // Write what was gathered to the target in one write, and empty it.
+    fn flush(inout self: Self) -> Result[(), IoError] {
+        let written = write_all(&self.target, self.bytes.as_slice())
+        &self.bytes.clear()
+        let _ = written else |failure| {
+            return .Err(failure.into())
+        }
+        .Ok(())
+    }
 
-impl Release for OutputLock {
-    fn release(sink _self: Self) {
-        linea_io_output_unlock()
+    // Write what is left and release the buffer.
+    fn finish(sink self: Self) -> Result[(), IoError] {
+        var gathered = self
+        let flushed = &gathered.flush()
+        let Gathered { bytes, target: _ } = gathered
+        bytes.release()
+        flushed
     }
 }
 
-fn acquire_output_lock() -> OutputLock {
-    linea_io_output_lock()
-    OutputLock {}
+impl Writer for Gathered {
+    type Error = IoError
+
+    fn write_str(inout self: Self, s: Str) -> Result[(), IoError] where carries() {
+        match &self.bytes.append_slice(s.as_bytes()) {
+            Ok(_) => .Ok(()),
+            Err(_) => {
+                &self.flush()?
+                &self.target.write_str(s)
+            },
+        }
+    }
+}
+
+test fn gathered_bytes_reach_the_target_once_rendering_ends() {
+    var out = Gathered.into(stdout())
+    let rendered = "ready".fmt(&out).is_ok()
+    let gathered = out.bytes.length()
+    let written = out.finish().is_ok()
+    testing.assert(rendered, "gathering text failed")?
+    testing.assert_eq(gathered, UInt64(5), "the text was not gathered")?
+    testing.assert(written, "writing what was gathered failed")?
+    .Ok(())
 }
 
 // Render `x` to standard output and report a failed write.
 pub fn print[T: Display](x: T) -> Result[(), IoError] {
-    defer let _guard = acquire_output_lock()
-    var w = stdout()
-    x.fmt(&w)
+    var w = Gathered.into(stdout())
+    let rendered = x.fmt(&w)
+    let written = w.finish()
+    rendered?
+    written
 }
 
 test fn print_renders_a_value_to_standard_output() {
@@ -63,9 +109,11 @@ test fn a_line_is_the_value_and_the_ending_after_it() {
 
 // Render `x` and a line ending to standard output, and report a failed write.
 pub fn println[T: Display](x: T) -> Result[(), IoError] {
-    defer let _guard = acquire_output_lock()
-    var w = stdout()
-    line(x, &w)
+    var w = Gathered.into(stdout())
+    let rendered = line(x, &w)
+    let written = w.finish()
+    rendered?
+    written
 }
 
 test fn println_ends_the_value_with_a_line_on_standard_output() {
@@ -84,9 +132,11 @@ fn eprint_to[T: Display, W: Writer](x: T, inout w: W) where W.Error: Discardable
 // Render `x` to standard error and ignore a failed write: standard-error
 // output is best-effort debugging output.
 pub fn eprint[T: Display](x: T) {
-    defer let _guard = acquire_output_lock()
-    var w = stderr()
+    var w = Gathered.into(stderr())
     eprint_to(x, &w)
+    let _ = w.finish() else |_| {
+        return
+    }
 }
 
 test fn eprint_renders_a_value_and_ignores_a_refused_write() {
@@ -114,18 +164,25 @@ fn eprintln_to[T: Display, W: Writer](x: T, inout w: W) where W.Error: Discardab
 
 // Render `x` and a line ending to standard error, and ignore a failed write.
 pub fn eprintln[T: Display](x: T) {
-    defer let _guard = acquire_output_lock()
-    var w = stderr()
+    var w = Gathered.into(stderr())
     eprintln_to(x, &w)
+    let _ = w.finish() else |_| {
+        return
+    }
 }
 
-test fn concurrent_output_locking() {
-    {
-        defer let _guard = acquire_output_lock()
-        var w = stdout()
-        testing.assert(line("concurrent_output_locked", &w).is_ok(), "guarded line write failed")?
+// `Noisy` prints a note while it is rendered.
+struct Noisy {}
+
+impl Display for Noisy {
+    fn fmt[W: Writer](_self: Self, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        eprintln("rendering a noisy value")
+        "noisy".fmt(&w)
     }
-    testing.assert(println("after_guard_released").is_ok(), "println after guard release failed")?
+}
+
+test fn a_value_that_prints_while_it_is_printed_is_printed() {
+    testing.assert(println(Noisy {}).is_ok(), "printing a value that prints failed")?
     .Ok(())
 }
 

@@ -269,8 +269,6 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_write_some", .parameters = &.{ p(.i32), p(.u64), p(.u64) }, .result = .i64 },
     .{ .symbol = "linea_read_at", .parameters = &.{ p(.i32), p(.u64), p(.u64), p(.u64) }, .result = .i64 },
     .{ .symbol = "linea_write_at", .parameters = &.{ p(.i32), p(.u64), p(.u64), p(.u64) }, .result = .i64 },
-    .{ .symbol = "linea_io_output_lock", .parameters = &.{}, .result = .unit },
-    .{ .symbol = "linea_io_output_unlock", .parameters = &.{}, .result = .unit },
     .{ .symbol = "linea_close", .parameters = &.{p(.i32)}, .result = .i64 },
     .{ .symbol = "linea_random_bytes", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64 },
     .{ .symbol = "linea_open_parent", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64 },

@@ -35,8 +35,6 @@ long linea_read_some(int fd, unsigned long at, unsigned long len);
 long linea_write_some(int fd, unsigned long at, unsigned long len);
 long linea_read_at(int fd, unsigned long at, unsigned long len, unsigned long offset);
 long linea_write_at(int fd, unsigned long at, unsigned long len, unsigned long offset);
-void linea_io_output_lock(void);
-void linea_io_output_unlock(void);
 long linea_close(int fd);
 /* Random bytes make at most 256 bytes of progress per call. */
 long linea_random_bytes(unsigned long at, unsigned long len);
