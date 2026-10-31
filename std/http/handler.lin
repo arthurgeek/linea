@@ -7,8 +7,9 @@ import std.testing
 // to that route. `serve` calls `serve_http` once per request with `P`, the
 // allocator each exchange's arena is carved from, and a `()` state: a program
 // that shares state wraps its handler in `http.with_state`, which owns the
-// state and lends it down. `serve` answers one request at a time, so each
-// handler changes the state in turn.
+// state and lends it down. Each serving task builds a handler of its own, so
+// the state a handler lends is that task's alone; state every task shares lives
+// in an owning task, which `listen_and_serve_with` starts.
 //
 // The response may view the request and what is stored in its arena, and what
 // `self` owns, such as the names of the path values a router matched: it is

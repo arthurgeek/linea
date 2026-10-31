@@ -138,8 +138,8 @@ server](../../examples/http-json-echo/main.lin) greets the name in its path:
 ```linea
 // `http.Path[Str]` reads the route's only path value, `{name}`, which the
 // router has percent-decoded, and `.value` is the text.
-fn greet(inout app: App, name: http.Path[Str], request: http.Request) -> Result[http.Response, http.Error] {
-    app.logger.info("greeting", log.field("name", name.value))
+fn greet(inout ctx: Ctx, name: http.Path[Str], request: http.Request) -> Result[http.Response, http.Error] {
+    ctx.logger.info("greeting", log.field("name", name.value))
     // `http.json` encodes the greeting, escaping any quote in the name.
     http.json(request, Greeting { hello = copy(name.value) })
 }
@@ -165,19 +165,25 @@ errors for a spec the value cannot take.
 ## Keeping state and logging around a router
 
 `http.logged` wraps a handler so every request leaves one log line, and
-`http.listen_and_serve` owns the state your routes share, given as `state:`,
-and lends it to the route that answers each request. The [countdown
-server](../../examples/countdown-server/main.lin) does both:
+`http.listen_and_serve_with` keeps the state your routes share in an owning
+task while many requests are answered at once. Each serving task builds its
+own handler around a client of that task, and a route reaches the state
+through the client's `call`. The [JSON echo
+server](../../examples/http-json-echo/main.lin) does both:
 
-<!-- guide: excerpt examples/countdown-server/main.lin -->
+<!-- guide: excerpt examples/http-json-echo/main.lin -->
 ```linea
-let server = http.logged(copy(logger), router)
-let app = App { logger = copy(logger) }
+let serving = [sink logger = copy(logger)] |app: task.Client[App]| -> where carries(app) {
+    var router: http.Router[Ctx] = http.Router.new()
+    routes(&router).unwrap()
+    let ctx = Ctx { app = copy(app), logger = copy(logger) }
+    http.with_request_ids(http.logged(copy(logger), http.with_state(ctx, router)))
+}
 ```
 
-<!-- guide: excerpt examples/countdown-server/main.lin -->
+<!-- guide: excerpt examples/http-json-echo/main.lin -->
 ```linea
-let finished = http.listen_and_serve(net.loopback(options.port), server, state: app, limits: limits) else |error| {
+let finished = http.listen_and_serve_with(net.loopback(options.port), serving, App { echoed = 0 }, limits: limits) else |error| {
     logger.error("serving stopped", log.field("error", error))
     return 1
 }

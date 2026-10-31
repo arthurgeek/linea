@@ -1034,35 +1034,105 @@ Linea provides three core combinators for independent work:
 
 Each takes a `policy: task.Policy`:
 - `Policy.Sequential`: runs synchronously inline on the caller's stack with zero thread overhead and complete determinism.
-- `Policy.Threads(max)`: distributes work across dedicated worker threads bounded by `max`.
+- `Policy.Threads(max)`: runs the work on tasks of its own. `map` and `all` divide their items among at most `max` tasks; `join`, `join3` and `join4` start a task for each job whenever `max` is more than 1, and run the jobs in turn on the caller when it is 1. A `max` of 0 stops the program.
 
-And `task.ThreadPool` provides a reusable linear worker pool with `open` and `close` for long-lived services.
+`independent_work.lin`:
+
+```linea
+import std.io
+import std.mem
+import std.task
+
+fn square(sink n: UInt64) -> UInt64 {
+    n * n
+}
+
+fn seven() -> UInt64 {
+    7
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    // `join` runs two jobs at once and answers both results, in order.
+    let (sum, product) = task.join(.Threads(2), sink [] || UInt64(2 + 3), sink [] || UInt64(2 * 3))
+    io.println("join: {sum} and {product}")?
+    // `map` applies `square` to every item on up to two threads, and keeps the
+    // items' order.
+    var items: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
+    for n in 1..=4 {
+        &items.push(n).unwrap()
+    }
+    defer let squares = task.map(.Threads(2), items, square)
+    for squared in squares.as_slice() {
+        io.println("map: {*squared}")?
+    }
+    // `all` runs jobs of one type, here three calls of `seven`.
+    var jobs: mem.Vec[fn() -> UInt64, mem.SystemAllocator] = mem.Vec.new()
+    for _ in 0..3 {
+        &jobs.push(seven).unwrap()
+    }
+    defer let sevens: mem.Vec[UInt64, mem.SystemAllocator] = task.all(.Sequential, jobs)
+    io.println("all: {sevens.length()} results")?
+    .Ok(0)
+}
+```
+
+```
+join: 5 and 6
+map: 1
+map: 4
+map: 9
+map: 16
+all: 3 results
+```
+
+Each job is `Owned`: it takes what it needs with `sink` and holds no view of a
+value the caller keeps, so the jobs and the caller never touch one value at
+once. `map`'s function is also `Shareable` and `Copyable`, since every thread
+calls a copy of it. A job that panics, or a thread that cannot be made, stops
+the program; the combinators answer only the results.
 
 ## Moving a handler from sequential to concurrent
 
-In Linea, servers like `http.serve` accept an explicit execution policy:
+`http.serve` answers many requests at once, on up to 128 serving tasks unless
+its `policy:` says otherwise. No handler is reached by two tasks: each serving
+task builds its own, so `serve` takes a function that builds one rather than
+one handler. `http.serve_sequentially` lends the one handler it is given to
+every request, one connection at a time, so the caller reads the handler back
+once serving stops:
 
-<!-- guide: unchecked illustrative snippet -->
 ```linea
-http.serve(listener, &handler, policy: .Sequential)
+import std.http
+import std.net
+
+// Each serving task calls this to build its own router.
+fn routes() -> http.Router[()] {
+    http.Router.new()
+}
+
+// Serve many requests at once, each task with a router of its own.
+fn serve_concurrently(sink listener: net.Listener) -> Result[(), http.ServeError] {
+    http.serve(listener, routes)
+}
+
+// Serve one connection at a time through the one router the caller keeps.
+fn serve_in_turn(sink listener: net.Listener, inout router: http.Router[()]) -> Result[(), http.ServeError] {
+    http.serve_sequentially(listener, &router)
+}
 ```
 
-In sequential mode, handlers run inline on the caller thread, processing one request at
-a time. In concurrent mode with worker tasks, concurrent handlers cannot share mutable places
-or exclusive `inout` references without violating Linea's ownership rules (`[O-Borrow]`
-and `[O-Cross]`).
-
-Linea has no locks and no mutexes in user code. To share mutable state across concurrent
-requests, you migrate the mutable state into an **owning task** and communicate via messages:
-the owning task is the sole owner of the state, and concurrent request handlers send messages
-to its mailbox, completely eliminating data races, locks, and torn reads by design.
+A handler that keeps a count every task must see cannot keep it in itself,
+since each task has its own handler. It keeps it in an owning task instead,
+and `http.listen_and_serve_with` starts one for the state a server's routes
+share ([Networking](09-networking.md#shared-state)).
 
 ## The owning-task pattern
 
-Where Rust programs often wrap shared state in `Arc<Mutex<T>>` or `Arc<RwLock<T>>`,
-Linea separates state ownership from concurrency entirely. The mutable state is kept
-by a dedicated task or the main thread, while concurrent workers hold a `Sender`
-connected to its `Mailbox`.
+Where Rust programs often wrap shared state in `Arc<Mutex<T>>` or
+`Arc<RwLock<T>>`, Linea gives the state to one task. `task.own(state)` starts
+an **owning task** that holds it, and a `task.Client` reaches it: the client's
+`call` runs the closure it is given on the owning task, against the state, one
+call at a time, and answers what the closure answers. No other task touches
+the state, so there is nothing to lock.
 
 `owning_task.lin`:
 
@@ -1073,38 +1143,35 @@ import std.task
 
 use session.Chan
 use session.End
-use session.Mailbox
 
-// Tail recursion receives each message until every sender is closed.
-fn count_messages(sink mb: Mailbox[UInt64, UInt64], total: UInt64) -> UInt64 {
-    match mb.recv() {
-        Message(n, next_mb) => count_messages(next_mb, total + n),
-        Closed => total,
-    }
+struct Tally {
+    count: UInt64,
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    let env = UInt64(0)
-    var mb: Mailbox[UInt64, UInt64] = Mailbox.open(env)
-    let s1 = &mb.sender()
-    let s2 = s1.clone()
-
-    let slot1 = task.prepare(sink [sink s1] |sink me: Chan[End]| {
-        s1.send(10).close()
-        me.close()
-    }).unwrap()
-    let handle1 = slot1.start()
-
-    let slot2 = task.prepare(sink [sink s2] |sink me: Chan[End]| {
-        s2.send(20).close()
-        me.close()
-    }).unwrap()
-    let handle2 = slot2.start()
-
-    let total = count_messages(mb, 0)
-    handle1.close()
-    handle2.close()
-    io.println("total counted: {total}")?
+    // `task.own` starts a task that owns the tally; no other task touches it.
+    let tally = task.own(Tally { count = 0 }).unwrap()
+    let counter = tally.client()
+    // Each task takes its own copy of the client, and `call` runs the closure
+    // it is given on the owning task, against the tally, one call at a time.
+    let first = task.start(
+        sink [sink counter = copy(counter)] |sink me: Chan[End]| {
+            counter.call(|inout t: Tally| t.count += 10)
+            me.close()
+        },
+    ).unwrap()
+    let second = task.start(
+        sink [sink counter] |sink me: Chan[End]| {
+            counter.call(|inout t: Tally| t.count += 20)
+            me.close()
+        },
+    ).unwrap()
+    first.close()
+    second.close()
+    // Both tasks holding a client have been joined, so the owning task can be
+    // closed, and `close` hands the tally back.
+    let Tally { count } = tally.close()
+    io.println("total counted: {count}")?
     .Ok(0)
 }
 ```
@@ -1113,6 +1180,45 @@ fn main() -> Result[UInt8, io.IoError] {
 total counted: 30
 ```
 
-Each worker task owns its `Sender`, sends messages into the queue, and closes its
-sender when finished. When the last sender closes, `mb.recv()` yields `Closed`,
-ending the recursion and returning the aggregated state without mutex contention.
+A client borrows the owning task it came from, so `tally.close()` is refused
+while a client is still used: every task holding one is joined first, and
+`close` hands the state back. A call's closure runs on the owning task's
+thread, so it must own what it captures. A client is a borrow, so a closure
+holding one is refused: it could call the task that runs it, which would wait
+for itself:
+
+`holding_a_client.lin`:
+
+```linea
+import std.task
+
+struct Tally {
+    count: UInt64,
+}
+
+fn main() -> UInt8 {
+    let tally = task.own(Tally { count = 0 }).unwrap()
+    let counter = tally.client()
+    // The closure captures the client, so it borrows the owning task it runs on.
+    counter.call(
+        [counter] |inout t: Tally| {
+            t.count += 1
+            counter.call(|inout u: Tally| u.count += 1)
+        },
+    )
+    let Tally { count } = tally.close()
+    if count == 2 {
+        0
+    } else {
+        1
+    }
+}
+```
+
+```
+error[T-Bound]: `F` requires `Owned`, and `<closure>` can carry a borrow: `counter` is a `borrow task.Client[Tally]`, an observation of another value
+  --> holding_a_client.lin:11:13
+   |
+11 |     counter.call(
+   |             ^^^^ `<closure>` is not `Owned`; pass a value whose type owns everything it holds
+```

@@ -409,9 +409,12 @@ escapes it.
 
 ## Shared state and signing
 
-Both `home` and `sign` take `inout app: App` from `http.Router[App]`. `App.open`
-opens `Book` once before accepting connections; because `http.listen_and_serve`
-answers one connection at a time, every request shares that connection.
+Both `home` and `sign` take `inout ctx: Ctx` from `http.Router[Ctx]`. `App.open`
+opens `Book` once before accepting connections, and
+`http.listen_and_serve_with` keeps the `App` in an owning task while many
+requests are answered at once: a route reaches the book through
+`ctx.book.call`, which runs on that task one call at a time, so every request
+shares the one connection and no two use it at once.
 
 `POST /sign` extracts the URL-encoded form into `Signature` through
 `http.Form[Signature]`. Before touching the database, `sign` in
@@ -481,8 +484,8 @@ fn with_lf_line_breaks[A: Allocator](allocator: A, text: Str) -> Result[String[A
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
-fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Result[http.Response, http.Error] {
-    if !http.same_origin(request, trust: app.proxy_trust) {
+fn sign(inout ctx: Ctx, form: http.Form[Signature], request: http.Request) -> Result[http.Response, http.Error] {
+    if !http.same_origin(request, trust: ctx.proxy_trust) {
         return .Err(http.error(request, .Forbidden, "a signature is accepted only from this guest book's own page"))
     }
     let name = form.value.name.trim_ascii()
@@ -497,7 +500,18 @@ fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Re
     if holds_disallowed_character(name, keeps_line_breaks: false) || holds_disallowed_character(message, keeps_line_breaks: true) {
         return .Err(http.error(request, .UnprocessableContent, "a name holds no control characters, and a message only line breaks and tabs"))
     }
-    let _ = &app.book.sign(name, message) else |error| {
+    // The name and message are views into the request. The signature is
+    // written on the task that owns the book, so they are copied into strings
+    // of their own, which the call takes with it.
+    let signer = name.to_owned() else |_| {
+        return .Err(http.Error.new(.InternalServerError))
+    }
+    let said = message.to_owned() else |_| {
+        signer.release()
+        return .Err(http.Error.new(.InternalServerError))
+    }
+    let signed = ctx.book.call([sink signer, sink said] |inout app: App| &app.book.sign(signer.view(), said.view()))
+    let _ = signed else |error| {
         return .Err(unavailable(request, error))
     }
     // `303 See Other` tells the browser to load the page with `GET /`, so
@@ -530,13 +544,16 @@ fn limits() -> http.Limits {
 }
 ```
 
-`main` in `examples/guest-book/main.lin` registers the routes on
-`http.Router[App]`, serves the loopback port with those limits, and closes
-`app` when finished:
+`main` in `examples/guest-book/main.lin` checks the routes once, opens the
+`App`, and serves the loopback port with those limits through
+`http.listen_and_serve_with`, which keeps the `App` in an owning task while
+many requests are answered at once and hands it back to be closed when
+serving stops. Each serving task builds its own router on `http.Router[Ctx]`,
+lent a context that holds a client of that task:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
-fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
+fn routes(inout router: http.Router[Ctx]) -> Result[(), http.RouteError] {
     &router.route("GET /", home)?
     &router.route("GET /favicon.ico", favicon)?
     &router.route("POST /sign", sign)
@@ -556,19 +573,30 @@ fn main() -> UInt8 {
         return 64
     }
     let logger = log.to_stderr(minimum: .Info)
-    var router: http.Router[App] = http.Router.new()
-    let _ = routes(&router) else |error| {
+    // The routes are registered once here, so a refused pattern is reported
+    // before anything is served.
+    var checked: http.Router[Ctx] = http.Router.new()
+    let _ = routes(&checked) else |error| {
         logger.error("cannot register a route", log.field("error", error))
-        router.release()
+        checked.release()
         return 2
     }
+    checked.release()
     let app = App.open(database_path()) else |error| {
-        router.release()
         io.eprintln("guest-book: {error}")
         error.release()
         return 1
     }
-    let app = http.listen_and_serve(net.loopback(port), http.logged(logger, router), state: app, limits: limits()) else |error| {
+    // Each serving task builds its own handler with this closure, given a
+    // client of the task that owns the `App`: a router lent the task's `Ctx` by
+    // `http.with_state`, inside `http.logged`. The routes were checked above,
+    // so registering them again cannot fail.
+    let serving = [sink logger] |book: task.Client[App]| -> where carries(book) {
+        var router: http.Router[Ctx] = http.Router.new()
+        routes(&router).unwrap()
+        http.logged(copy(logger), http.with_state(Ctx { book = copy(book), proxy_trust = proxy_trust() }, router))
+    }
+    let app = http.listen_and_serve_with(net.loopback(port), serving, app, limits: limits()) else |error| {
         io.eprintln("guest-book: {error}")
         return 1
     }
