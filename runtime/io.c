@@ -154,16 +154,6 @@ long linea_write_at(int fd, unsigned long at, unsigned long len, unsigned long o
     return count < 0 ? -(long)errno : (long)count;
 }
 
-static pthread_mutex_t g_output_lock = PTHREAD_MUTEX_INITIALIZER;
-
-void linea_io_output_lock(void) {
-    if (pthread_mutex_lock(&g_output_lock) != 0) abort();
-}
-
-void linea_io_output_unlock(void) {
-    if (pthread_mutex_unlock(&g_output_lock) != 0) abort();
-}
-
 long linea_close(int fd) {
     /* close is not retried after EINTR: POSIX leaves the descriptor's fate
      * unspecified in that case, and this runtime's supported kernels remove
