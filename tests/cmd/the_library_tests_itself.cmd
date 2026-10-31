@@ -348,7 +348,6 @@ The library tests itself.
   ok    http.a_cgi_head_request_is_answered_with_the_head_alone
   ok    http.a_cgi_request_answers_each_limits_status_one_past_the_bound
   ok    http.a_client_reset_before_accept_never_stops_serving_and_the_next_is_served
-  ok    http.a_client_sent_number_is_never_logged
   ok    http.a_cookie_error_displays_its_reason
   ok    http.a_cookie_is_cleared_with_an_empty_expired_value
   ok    http.a_cookie_is_set_with_the_attributes_given
@@ -376,7 +375,7 @@ The library tests itself.
   ok    http.a_handler_cannot_set_the_status_as_a_header
   ok    http.a_handler_error_before_headers_answers_its_status
   ok    http.a_handler_error_is_answered_with_its_status_and_message
-  ok    http.a_handlers_own_number_is_replaced
+  ok    http.a_handlers_own_id_is_replaced
   ok    http.a_head_request_is_answered_with_the_head_alone
   ok    http.a_header_error_displays_its_reason
   ok    http.a_header_is_found_by_its_folded_name
@@ -393,6 +392,8 @@ The library tests itself.
   ok    http.a_literal_beats_a_parameter_at_the_same_position
   ok    http.a_logged_router_logs_each_exchange_it_serves
   ok    http.a_malformed_header_is_refused
+  ok    http.a_malformed_id_the_client_sent_is_replaced
+  ok    http.a_malformed_or_unread_client_id_is_never_logged
   ok    http.a_malformed_pair_is_skipped_and_the_others_survive
   ok    http.a_malformed_pattern_is_refused
   ok    http.a_malformed_request_is_answered_and_serving_continues
@@ -404,7 +405,6 @@ The library tests itself.
   ok    http.a_method_mismatch_gives_way_to_a_less_specific_path
   ok    http.a_method_pattern_beats_a_methodless_one
   ok    http.a_method_token_names_its_method_exactly
-  ok    http.a_middleware_drawing_from_a_count_keeps_its_buffers_in_an_arena
   ok    http.a_missing_request_method_answers_nothing
   ok    http.a_name_that_is_not_a_token_is_refused
   ok    http.a_named_code_finds_its_variant
@@ -412,8 +412,6 @@ The library tests itself.
   ok    http.a_new_header_list_is_empty
   ok    http.a_new_request_holds_its_method_target_and_body
   ok    http.a_new_router_answers_404
-  ok    http.a_numbered_exchange_is_logged_with_its_number
-  ok    http.a_numbered_request_keeps_the_rest_of_the_request
   ok    http.a_param_value_is_found_by_its_exact_name_once
   ok    http.a_param_value_parses_borrows_or_is_optional
   ok    http.a_parameter_beats_a_remainder
@@ -468,7 +466,7 @@ The library tests itself.
   ok    http.a_request_read_after_its_deadline_from_accept_times_out
   ok    http.a_request_split_into_single_bytes_parses_as_one
   ok    http.a_request_that_leaves_no_room_for_the_response_is_answered_500
-  ok    http.a_request_the_handler_never_saw_is_logged_without_a_number
+  ok    http.a_request_the_handler_never_saw_is_logged_without_an_id
   ok    http.a_request_with_a_body_parses
   ok    http.a_request_without_a_cookie_header_has_no_cookies
   ok    http.a_response_body_is_text_only_when_it_is_held_utf8
@@ -512,7 +510,8 @@ The library tests itself.
   ok    http.a_text_response_past_the_arena_is_refused
   ok    http.a_value_may_hold_equals_signs_and_quotes_around_it_are_dropped
   ok    http.a_variable_that_is_not_utf8_is_read_as_its_bytes
-  ok    http.a_walk_of_the_headers_shows_one_number
+  ok    http.a_walk_of_the_headers_shows_one_id
+  ok    http.a_well_formed_id_the_client_sent_is_kept
   ok    http.a_wrong_method_is_405_with_allow
   ok    http.add_header_keeps_the_values_a_name_already_has
   ok    http.adding_a_header_keeps_earlier_values
@@ -536,6 +535,9 @@ The library tests itself.
   ok    http.an_html_response_holds_its_rendered_body_and_content_type
   ok    http.an_html_response_past_the_arena_is_refused
   ok    http.an_http_variable_is_a_header
+  ok    http.an_id_is_kept_only_when_it_is_short_visible_ascii
+  ok    http.an_identified_exchange_is_logged_with_its_id
+  ok    http.an_identified_request_keeps_the_rest_of_the_request
   ok    http.an_io_error_answers_500
   ok    http.an_origin_displays_in_canonical_form
   ok    http.an_origin_parses_ipv6_with_custom_port
@@ -557,10 +559,10 @@ The library tests itself.
   ok    http.decoding_appends_the_bytes_escapes_spell
   ok    http.each_accept_retry_is_observed_with_its_pause
   ok    http.each_allocation_failure_covers_every_acquisition_from_the_parent
-  ok    http.each_allocation_failure_covers_every_buffer_the_numbering_grows
+  ok    http.each_allocation_failure_covers_every_buffer_identifying_grows
   ok    http.each_allocation_failure_covers_every_table_a_route_grows
   ok    http.each_limit_answers_its_status_at_one_past_the_bound
-  ok    http.each_request_is_numbered_for_the_handler_and_the_response
+  ok    http.each_request_gets_a_time_ordered_uuid
   ok    http.each_task_routes_path_parameters_through_its_own_router
   ok    http.every_connection_is_answered_503_while_the_parent_refuses_the_arena
   ok    http.every_exchange_returns_its_arena_to_the_parent
@@ -624,7 +626,6 @@ The library tests itself.
   ok    http.the_unreserved_bytes_are_letters_digits_and_four_marks
   ok    http.transfer_encoding_is_not_implemented
   ok    http.transient_accept_failures_are_retried_until_a_connection_is_served
-  ok    http.two_middlewares_drawing_from_one_count_number_requests_once
   ok    http.unescaping_keeps_bytes_that_are_not_utf8
   ok    http.whitespace_around_pairs_is_tolerated_and_names_match_exactly
   ok    http.with_state_lends_its_state_to_every_request
@@ -1092,6 +1093,7 @@ The library tests itself.
   ok    mem.open_records_into_the_backing_the_caller_chooses
   ok    mem.open_refuses_the_acquisition_it_names
   ok    mem.peak_bytes_remembers_the_most_bytes_live_at_once
+  ok    mem.random_words_differ_between_reads
   ok    mem.refuse_attempt_refuses_a_later_acquisition_through_live_handles
   ok    mem.releasing_a_closure_returns_its_bytes
   ok    mem.releasing_a_drain_stopped_early_releases_only_what_remains
@@ -1162,6 +1164,7 @@ The library tests itself.
   ok    mem.vec_unallocated_byte_storage_has_no_buffer
   ok    net.a_backlog_holds_one_to_4096_connections
   ok    net.a_client_reports_the_listener_as_its_peer
+  ok    net.a_client_that_holds_its_task_holds_up_no_other
   ok    net.a_connection_close_reports_success
   ok    net.a_connection_reaches_its_own_listener
   ok    net.a_connection_reset_before_accept_is_reported_as_reset_and_the_next_is_accepted
@@ -1312,7 +1315,9 @@ The library tests itself.
   ok    task.an_owning_task_hands_its_state_back_when_closed
   ok    task.calls_from_two_tasks_run_one_at_a_time
   ok    task.closing_answers_every_change_a_call_made
+  ok    task.join3_runs_no_more_closures_at_once_than_its_bound
   ok    task.join3_runs_sequentially_and_on_threads
+  ok    task.join4_runs_no_more_closures_at_once_than_its_bound
   ok    task.join4_runs_sequentially_and_on_threads
   ok    task.join_runs_on_threads
   ok    task.join_runs_sequentially
@@ -1479,5 +1484,20 @@ The library tests itself.
   ok    tuple.seven_tuple_compares_and_hashes_by_every_component
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
+  ok    uuid.a_parse_error_says_where_the_text_went_wrong
+  ok    uuid.a_timestamp_is_read_only_from_version_7
+  ok    uuid.a_v4_identifier_has_version_4_and_the_rfc_variant
+  ok    uuid.a_v7_identifier_records_when_it_was_made
+  ok    uuid.an_identifier_parses_back_to_itself
+  ok    uuid.bytes_come_back_as_they_went_in
+  ok    uuid.debug_writes_the_identifier_as_display_does
+  ok    uuid.equal_identifiers_hash_alike
+  ok    uuid.text_that_is_not_an_identifier_is_refused_where_it_goes_wrong
+  ok    uuid.the_bytes_of_max_are_all_255
+  ok    uuid.the_max_identifier_is_all_one_and_sorts_last
+  ok    uuid.the_nil_identifier_is_all_zero
+  ok    uuid.the_variant_is_read_from_the_top_bits_of_byte_8
+  ok    uuid.the_version_is_read_from_its_four_bits
+  ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1477 passed, 0 failed
+  1497 passed, 0 failed
