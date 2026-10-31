@@ -13,9 +13,9 @@ import std.time
 //
 // The line is at `Info` for a 2xx or 3xx status, `Warn` for a 4xx, and
 // `Error` for a 5xx or an answer that failed, with an `error` field saying
-// why. A request that `with_request_ids` numbered, which therefore wraps this
-// middleware, adds a `request_id` field after the path, read from the request's
-// own number rather than from any header. A request that could
+// why. A request that `with_request_ids` gave an id, which therefore wraps
+// this middleware, adds a `request_id` field after the path, read from the
+// request's own id rather than from any header. A request that could
 // not be read has no method or path, and one the handler never saw has no
 // duration. A failed accept serving will retry is
 // logged at `Warn`, and the address `listen_and_serve` bound is logged at
@@ -84,7 +84,7 @@ fn level_of[P: Allocator](exchange: Exchange[P]) -> log.Level {
 }
 
 // `Access` is the fields of an exchange's line: the method and path when the
-// request was read, its `request_id` when `with_request_ids` numbered it, the
+// request was read, its `request_id` when `with_request_ids` gave it one, the
 // status, the body bytes, the duration when the handler ran, and the failure
 // when there was one.
 struct Access[P: Allocator] {
@@ -99,7 +99,7 @@ impl[P: Allocator] log.Fields for Access[P] {
                 &visitor.field("method", request.method_text())?
                 &visitor.field("path", request.path())?
                 match read request.request_id {
-                    Some(number) => &visitor.field("request_id", number)?,
+                    Some(id) => &visitor.field("request_id", id)?,
                     None => {},
                 }
             },

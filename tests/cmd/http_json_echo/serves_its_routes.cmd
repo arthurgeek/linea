@@ -68,12 +68,13 @@ posts them, and confirms them as JSON.
   {"signed_up":"Ada López","age":30}
 
 A path matched only under other methods is answered 405, and Allow names them.
+The request sends its own id, which the answer and the log line keep.
 
-  $ curl -s --max-time 30 -D - -X DELETE "http://127.0.0.1:$port/echo" | tr -d '\r'
+  $ curl -s --max-time 30 -D - -H 'X-Request-Id: trace-9' -X DELETE "http://127.0.0.1:$port/echo" | tr -d '\r'
   HTTP/1.1 405 Method Not Allowed
   Connection: close
   Allow: POST
-  X-Request-Id: 9
+  X-Request-Id: trace-9
   Content-Type: text/plain; charset=utf-8
   
   method not allowed
@@ -99,25 +100,25 @@ it stops.
   $ curl -s --max-time 30 "http://127.0.0.1:$port/stats"
   {"echoed":2}
   $ for i in $(seq 600); do kill -0 $server 2>/dev/null || break; sleep 0.05; done; kill $server 2>/dev/null && echo "the server did not stop"; wait $server
-  $ sed -E -e 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z /TIME /' -e 's/duration=[^ ]+/duration=D/' -e 's/127[.]0[.]0[.]1:[0-9]+/127.0.0.1:PORT/g' server.log
+  $ sed -E -e 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z /TIME /' -e 's/duration=[^ ]+/duration=D/' -e 's/127[.]0[.]0[.]1:[0-9]+/127.0.0.1:PORT/g' -e 's/request_id=[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/request_id=UUID7/' server.log
   TIME INFO listening address=127.0.0.1:PORT
-  TIME INFO request method=GET path=/health request_id=1 status=200 bytes=2 duration=D
+  TIME INFO request method=GET path=/health request_id=UUID7 status=200 bytes=2 duration=D
   TIME INFO echoing a message caller=ada bytes=5
-  TIME INFO request method=POST path=/echo request_id=2 status=200 bytes=27 duration=D
+  TIME INFO request method=POST path=/echo request_id=UUID7 status=200 bytes=27 duration=D
   TIME INFO greeting name=ada
-  TIME INFO request method=GET path=/greet/ada request_id=3 status=200 bytes=15 duration=D
-  TIME WARN request method=POST path=/echo request_id=4 status=415 bytes=65 duration=D error="the handler refused the request: expected a JSON body, sent with `Content-Type: application/json`"
-  TIME WARN request method=POST path=/echo request_id=5 status=401 bytes=52 duration=D error="the handler refused the request: name the caller with `Authorization: Bearer <name>`"
-  TIME WARN request method=POST path=/echo request_id=6 status=422 bytes=27 duration=D error="the handler refused the request: missing field at $[\"text\"]"
-  TIME WARN request method=POST path=/signup request_id=7 status=415 bytes=82 duration=D error="the handler refused the request: expected a form body, sent with `Content-Type: application/x-www-form-urlencoded`"
+  TIME INFO request method=GET path=/greet/ada request_id=UUID7 status=200 bytes=15 duration=D
+  TIME WARN request method=POST path=/echo request_id=UUID7 status=415 bytes=65 duration=D error="the handler refused the request: expected a JSON body, sent with `Content-Type: application/json`"
+  TIME WARN request method=POST path=/echo request_id=UUID7 status=401 bytes=52 duration=D error="the handler refused the request: name the caller with `Authorization: Bearer <name>`"
+  TIME WARN request method=POST path=/echo request_id=UUID7 status=422 bytes=27 duration=D error="the handler refused the request: missing field at $[\"text\"]"
+  TIME WARN request method=POST path=/signup request_id=UUID7 status=415 bytes=82 duration=D error="the handler refused the request: expected a form body, sent with `Content-Type: application/x-www-form-urlencoded`"
   TIME INFO signed up name="Ada López" age=30
-  TIME INFO request method=POST path=/signup request_id=8 status=200 bytes=35 duration=D
-  TIME WARN request method=DELETE path=/echo request_id=9 status=405 bytes=19 duration=D
-  TIME WARN request method=GET path=/nowhere request_id=10 status=404 bytes=10 duration=D error="the handler refused the request: not found"
+  TIME INFO request method=POST path=/signup request_id=UUID7 status=200 bytes=35 duration=D
+  TIME WARN request method=DELETE path=/echo request_id=trace-9 status=405 bytes=19 duration=D
+  TIME WARN request method=GET path=/nowhere request_id=UUID7 status=404 bytes=10 duration=D error="the handler refused the request: not found"
   TIME WARN request status=413 bytes=0 error="reading the request failed: the request was refused with 413 Content Too Large"
   TIME INFO echoing a message caller=alan bytes=2
-  TIME INFO request method=POST path=/echo request_id=11 status=200 bytes=25 duration=D
-  TIME INFO request method=GET path=/stats request_id=12 status=200 bytes=12 duration=D
+  TIME INFO request method=POST path=/echo request_id=UUID7 status=200 bytes=25 duration=D
+  TIME INFO request method=GET path=/stats request_id=UUID7 status=200 bytes=12 duration=D
   TIME INFO stopped echoed=2
 
 A port that is not a number is named in the error, before the usage.

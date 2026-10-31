@@ -1406,10 +1406,10 @@ fn main() -> UInt8 {
     // Each serving task builds its handler with this closure, given a client
     // of the task that owns the `App`: `http.with_state` lends the task's `Ctx`
     // to the router, `http.logged` logs the address the server listens on and
-    // one line per request, and `http.with_request_ids` around it numbers each
-    // request the task answers, so the number is in the response and in the
-    // logged line. The routes were checked above, so registering them again
-    // cannot fail.
+    // one line per request, and `http.with_request_ids` around it gives each
+    // request an id, the one its client sent or a new time-ordered UUID, so
+    // the id is in the response and in the logged line. The routes were
+    // checked above, so registering them again cannot fail.
     let serving = [sink logger = copy(logger)] |app: task.Client[App]| -> where carries(app) {
         var router: http.Router[Ctx] = http.Router.new()
         routes(&router, "Weather stations report here.\n").unwrap()
@@ -1441,14 +1441,14 @@ $ curl -X POST -H 'Authorization: Bearer harbour' -H 'Content-Type: application/
 $ curl -i -X POST -H 'Content-Type: application/json' -d '{"celsius":21,"sky":"clear"}' http://127.0.0.1:8080/readings
 HTTP/1.1 401 Unauthorized
 Connection: close
-X-Request-Id: 3
+X-Request-Id: 01a0e2f7-c2ac-7e8e-9099-6f031600a35a
 Content-Type: text/plain; charset=utf-8
 
 name the station with `Authorization: Bearer <name>`
-$ curl -i -X POST -H 'Authorization: Bearer harbour' -H 'Content-Type: application/json' -d '{"celsius":21}' http://127.0.0.1:8080/readings
+$ curl -i -X POST -H 'X-Request-Id: harbour-check-4' -H 'Authorization: Bearer harbour' -H 'Content-Type: application/json' -d '{"celsius":21}' http://127.0.0.1:8080/readings
 HTTP/1.1 422 Unprocessable Content
 Connection: close
-X-Request-Id: 4
+X-Request-Id: harbour-check-4
 Content-Type: text/plain; charset=utf-8
 
 missing field at $["sky"]
@@ -1460,7 +1460,7 @@ day 2: sunny
 $ curl -i 'http://127.0.0.1:8080/outlook?days=many'
 HTTP/1.1 400 Bad Request
 Connection: close
-X-Request-Id: 7
+X-Request-Id: 01a0e2f7-c325-7f29-893b-658c95e60af5
 Content-Type: text/plain; charset=utf-8
 
 cannot read query value "days" from "many": invalid decimal syntax at byte 0
@@ -1471,14 +1471,14 @@ While it runs, standard error shows what happened:
 <!-- guide: unchecked the output of an edited or partial program -->
 ```text
 2026-09-27T13:04:43Z INFO listening address=127.0.0.1:8080
-2026-09-27T13:04:43Z INFO request method=GET path=/ request_id=1 status=200 bytes=30 duration=91µs
+2026-09-27T13:04:43Z INFO request method=GET path=/ request_id=01a0e2f7-c204-752e-9651-0c5ca6a3a450 status=200 bytes=30 duration=91µs
 2026-09-27T13:04:43Z INFO reading station=harbour celsius=21
-2026-09-27T13:04:43Z INFO request method=POST path=/readings request_id=2 status=200 bytes=45 duration=144µs
-2026-09-27T13:04:43Z WARN request method=POST path=/readings request_id=3 status=401 bytes=53 duration=28µs error="the handler refused the request: name the station with `Authorization: Bearer <name>`"
-2026-09-27T13:04:43Z WARN request method=POST path=/readings request_id=4 status=422 bytes=26 duration=37µs error="the handler refused the request: missing field at $[\"sky\"]"
-2026-09-27T13:04:43Z INFO request method=GET path=/stats request_id=5 status=200 bytes=11 duration=25µs
-2026-09-27T13:04:43Z INFO request method=GET path=/outlook request_id=6 status=200 bytes=26 duration=27µs
-2026-09-27T13:04:43Z WARN request method=GET path=/outlook request_id=7 status=400 bytes=77 duration=28µs error="the handler refused the request: cannot read query value \"days\" from \"many\": invalid decimal syntax at byte 0"
+2026-09-27T13:04:43Z INFO request method=POST path=/readings request_id=01a0e2f7-c28f-7128-85d9-0ed99531985d status=200 bytes=45 duration=144µs
+2026-09-27T13:04:43Z WARN request method=POST path=/readings request_id=01a0e2f7-c2ac-7e8e-9099-6f031600a35a status=401 bytes=53 duration=28µs error="the handler refused the request: name the station with `Authorization: Bearer <name>`"
+2026-09-27T13:04:43Z WARN request method=POST path=/readings request_id=harbour-check-4 status=422 bytes=26 duration=37µs error="the handler refused the request: missing field at $[\"sky\"]"
+2026-09-27T13:04:43Z INFO request method=GET path=/stats request_id=01a0e2f7-c2ee-76ca-8d3a-1fb190c192cf status=200 bytes=11 duration=25µs
+2026-09-27T13:04:43Z INFO request method=GET path=/outlook request_id=01a0e2f7-c30b-7f28-9a17-953fa09f76b5 status=200 bytes=26 duration=27µs
+2026-09-27T13:04:43Z WARN request method=GET path=/outlook request_id=01a0e2f7-c325-7f29-893b-658c95e60af5 status=400 bytes=77 duration=28µs error="the handler refused the request: cannot read query value \"days\" from \"many\": invalid decimal syntax at byte 0"
 ```
 
 The rest of this section takes it apart.
@@ -1965,21 +1965,27 @@ answer has been sent, with its status, size and duration: `Info` for 2xx and
 3xx, `Warn` for 4xx, `Error` for 5xx. The `reading` line comes from `record`
 itself, through `app.logger`, while it answers.
 
-`http.with_request_ids(handler)` is middleware too. It numbers the requests it
-passes on, 1, 2, 3 and so on, so a client can quote the number when reporting a
-problem. Each request the handler receives carries the number as an
-`X-Request-Id` header, read with `request.header("X-Request-Id")`. Any header
-of that name the client sent is removed, so the handler never sees a number a
-client chose. The handler's answer, a response or a refusal, carries the same
-header, replacing one the handler set itself. An answer the server writes
-without the handler, such as a 413 or a 503, has no number.
+`http.with_request_ids(handler)` is middleware too. It gives every request it
+passes on an id, so a client can quote the id when reporting a problem and the
+lines several services log about one request can be found together. When the
+client, or a proxy in front of the server, sent an `X-Request-Id` header that
+is 1 to 128 bytes of visible ASCII, that is the id. Otherwise the id is a new
+version 7 UUID from `std.uuid`, which begins with the millisecond it was made,
+so ids sort by time. Each serving task makes its ids on its own, so serving on
+many tasks needs nothing shared between them.
+
+Each request the handler receives carries the id as an `X-Request-Id` header,
+read with `request.header("X-Request-Id")`; any other header of that name the
+client sent is removed. The handler's answer, a response or a refusal, carries
+the same header, replacing one the handler set itself. An answer the server
+writes without the handler, such as a 413 or a 503, has no id.
 
 Wrap it around `logged`, as `stations.lin` does, and each logged line gains
-`request_id=3`. The number is printed from a field only `with_request_ids`
-sets, never from a header, so plain `http.logged` never logs a client's value.
-Wrapped inside `logged`, the handler and the answer still carry the number,
-but the line has no `request_id` field. You do not need `http.Observer` for
-any of this.
+`request_id=` and the id. The id is printed from a field only
+`with_request_ids` sets, never from a header, so plain `http.logged` never logs
+a client's value, and a malformed one never reaches the log at all. Wrapped
+inside `logged`, the handler and the answer still carry the id, but the line
+has no `request_id` field. You do not need `http.Observer` for any of this.
 
 `serve` writes no log of its own. It reports each finished exchange, failures
 included, to its handler through the `http.Observer` trait, which every handler
@@ -2295,8 +2301,8 @@ application that runs both ways and stores its entries in SQLite.
   reaches it through `call`. `listen_and_serve` serves a service that shares
   nothing.
 - `http.logged` logs every request, and handlers log through a logger kept in
-  the context each serving task lends them. `http.with_request_ids` numbers each request and answer, and
-  around `logged` puts the number in the line.
+  the context each serving task lends them. `http.with_request_ids` gives each request and answer an
+  id, the client's or a new UUID, and around `logged` puts the id in the line.
 - A closure can be a route, registered with `route_raw`, or a streamed body that carries what its handler
   computed; `body.flush()` sends what has been written.
 - `http.listen_and_serve(address, make_handler, limits:, policy:)` opens the
