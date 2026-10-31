@@ -76,6 +76,11 @@ pub fn changesForeignHandle(program: *const ExpandedProgram, ast: *const Ast, po
     return isForeignHandle(program, ast, pool, t);
 }
 
+/// The functions of `std.task` whose `body` argument crosses into a task
+/// ([O-Cross]). `RawAccesses` names each as the field `task_` and its name,
+/// and the soundness matrix starts a live task through each.
+pub const task_entry_points = [_][]const u8{ "prepare", "prepare_in", "start", "start_in" };
+
 pub const RawAccesses = struct {
     storage: DeclId = .none,
     buffer: DeclId = .none,
@@ -154,7 +159,7 @@ pub const RawAccesses = struct {
 
     /// Identify private storage declarations before checking their generic signatures.
     pub fn init(program: *const ExpandedProgram, ast: *const Ast) RawAccesses {
-        return .{
+        var raw: RawAccesses = .{
             .storage = program.libraryDeclIn("mem", "Storage") orelse .none,
             .buffer = program.libraryDeclIn("mem", "Buffer") orelse .none,
             .slice = program.libraryDeclIn("mem", "Slice") orelse .none,
@@ -176,10 +181,6 @@ pub const RawAccesses = struct {
             .closure_entry = rawAccessDecl(program, ast, "closure_entry", 1),
             .closure_settle = rawAccessDecl(program, ast, "closure_settle", 1),
             .closure_size = rawAccessDecl(program, ast, "closure_size", 1),
-            .task_prepare = moduleFunction(program, ast, "task", "prepare"),
-            .task_prepare_in = moduleFunction(program, ast, "task", "prepare_in"),
-            .task_start = moduleFunction(program, ast, "task", "start"),
-            .task_start_in = moduleFunction(program, ast, "task", "start_in"),
             .task_unstarted = program.libraryDeclIn("task", "Unstarted") orelse .none,
             .task_slot_start = memberOf(program, ast, "task", "Slot", "start"),
             .foreign_views = .{
@@ -189,6 +190,8 @@ pub const RawAccesses = struct {
             },
             .errno = program.libraryDeclIn("ffi", "Errno") orelse .none,
         };
+        inline for (task_entry_points) |name| @field(raw, "task_" ++ name) = moduleFunction(program, ast, "task", name);
+        return raw;
     }
 
     /// Scalar operations become intrinsics only after their complete signatures are checked.
