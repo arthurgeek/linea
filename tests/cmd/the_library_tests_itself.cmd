@@ -665,18 +665,19 @@ The library tests itself.
   ok    io.an_oversized_line_retains_its_consumed_prefix
   ok    io.buffered_output_retries_only_its_unsent_suffix
   ok    io.core.a_line_is_the_value_and_the_ending_after_it
+  ok    io.core.a_value_that_prints_while_it_is_printed_is_printed
   ok    io.core.a_write_to_a_descriptor_the_process_lacks_reports_why
   ok    io.core.an_empty_descriptor_read_does_not_access_the_descriptor
   ok    io.core.an_input_failure_displays_its_position_and_reason
   ok    io.core.an_io_error_converts_into_itself_unchanged
   ok    io.core.an_io_error_displays_its_numeric_reason
   ok    io.core.closing_a_descriptor_wrapper_succeeds
-  ok    io.core.concurrent_output_locking
   ok    io.core.derived_io_error_debug_renders_the_code
   ok    io.core.derived_io_error_equality_compares_the_code
   ok    io.core.derived_io_error_release_consumes_the_code
   ok    io.core.eprint_renders_a_value_and_ignores_a_refused_write
   ok    io.core.eprintln_renders_a_line_and_ignores_a_refused_write
+  ok    io.core.gathered_bytes_reach_the_target_once_rendering_ends
   ok    io.core.io_errors_preserve_operation_category_and_progress
   ok    io.core.io_operations_and_categories_display_their_names
   ok    io.core.print_renders_a_value_to_standard_output
@@ -1162,7 +1163,6 @@ The library tests itself.
   ok    net.a_backlog_holds_one_to_4096_connections
   ok    net.a_client_reports_the_listener_as_its_peer
   ok    net.a_connection_close_reports_success
-  ok    net.a_connection_dismantles_into_its_fd_and_adopts_back
   ok    net.a_connection_reaches_its_own_listener
   ok    net.a_connection_reset_before_accept_is_reported_as_reset_and_the_next_is_accepted
   ok    net.a_connection_to_a_closed_port_is_refused

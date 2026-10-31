@@ -6,6 +6,19 @@ struct Refuses {
     seen: UInt64,
 }
 
+@(copyable, derive(Equatable, Equivalent, Debug))
+pub enum SystemAllocator {
+    System,
+}
+
+@linear
+struct SystemAllocation {}
+
+@(copyable, derive(Equatable, Equivalent, Display, Debug, Release))
+pub enum Oom {
+    Exhausted,
+}
+
 @(copyable, derive(Equatable, Debug, Release))
 pub enum WriteFailureKind {
     Underlying,
@@ -64,11 +77,22 @@ pub struct IoError {
     progress: UInt64,
 }
 
-struct OutputLock {}
+struct Gathered {
+    bytes: std.mem.Vec[UInt8,std.mem.SystemAllocator],
+    target: std.io.core.Descriptor,
+}
 
 @(opaque, copyable)
 struct Str {
     bytes: std.mem.Slice[UInt8],
+}
+
+pub struct Range[UInt64] {
+    lo: UInt64,
+    hi: UInt64,
+    /// Include hi when true. Keeping this flag permits inclusive ranges at
+    /// a type's maximum, such as 0..=255 for UInt8, without a larger endpoint.
+    inclusive: Bool,
 }
 
 @(opaque, copyable, derive(Release))
@@ -77,16 +101,52 @@ struct Slice[UInt8] {
     len: UInt64,
 }
 
+@opaque
+struct Buffer[SystemAllocator] {
+    at: UInt64,
+    len: UInt64,
+    /// Reserved bytes to return at disposal; len records the requested bytes.
+    /// Keeping both accounts for allocators that round requests up.
+    allocated: UInt64,
+    allocator: std.mem.SystemAllocator,
+    obligation: std.mem.SystemAllocation,
+}
+
 @copyable
 pub enum Option[Int32] {
     None,
     Some(Int32),
 }
 
+@opaque
+struct Vec[UInt8,SystemAllocator] {
+    storage: std.mem.Storage[UInt8,std.mem.SystemAllocator],
+    len: UInt64,
+}
+
+struct Storage[UInt8,SystemAllocator] {
+    buffer: std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]],
+    allocator: std.mem.SystemAllocator,
+    at: UInt64,
+    len: UInt64,
+}
+
+@copyable
+pub enum Option[Buffer[SystemAllocator]] {
+    None,
+    Some(std.mem.Buffer[std.mem.SystemAllocator]),
+}
+
 @copyable
 pub enum Option[Str] {
     None,
     Some(std.text.Str),
+}
+
+@copyable
+pub enum Option[UInt64] {
+    None,
+    Some(UInt64),
 }
 
 @copyable
@@ -127,6 +187,18 @@ pub enum Option[UInt8] {
 }
 
 @copyable
+pub enum Result[(),Oom] {
+    Ok(()),
+    Err(std.mem.Oom),
+}
+
+@copyable
+pub enum Result[Buffer[SystemAllocator],Oom] {
+    Ok(std.mem.Buffer[std.mem.SystemAllocator]),
+    Err(std.mem.Oom),
+}
+
+@copyable
 pub enum Result[UInt64,WriteFailure[IoError]] {
     Ok(UInt64),
     Err(std.io.core.WriteFailure[std.io.core.IoError]),
@@ -136,6 +208,22 @@ pub enum Result[UInt64,WriteFailure[IoError]] {
 pub enum Result[(),IoError] {
     Ok(()),
     Err(std.io.core.IoError),
+}
+
+@copyable
+pub enum Option[borrow(UInt8)] {
+    None,
+    Some(borrow(UInt8)),
+}
+
+@(opaque, derive(Release))
+struct SliceIter[UInt8] {
+    view: std.mem.Slice[UInt8],
+    at: UInt64,
+}
+
+enum SlotType[UInt8] {
+    Type,
 }
 
 fn ;main() -> std.result.Result[UInt8,std.io.core.IoError] {
@@ -219,15 +307,19 @@ fn std.io.core.IoError;std.convert;From[std.io.core.WriteFailure[std.io.core.IoE
 }
 
 pub fn std.io.core;eprint[std.text.Str](x: std.text.Str) {
-    defer let _guard = std.io.core;acquire_output_lock()
-    var w = std.io.core;stderr()
-    std.io.core;eprint_to[std.text.Str,std.io.core.Descriptor](x, &w)
+    var w = std.io.core;Gathered.into(std.io.core;stderr())
+    std.io.core;eprint_to[std.text.Str,std.io.core.Gathered](x, &w)
+    let _ = std.io.core;Gathered.finish(w) else |_| {
+        return
+    }
 }
 
 pub fn std.io.core;eprintln[std.io.core.IoError](x: std.io.core.IoError) {
-    defer let _guard = std.io.core;acquire_output_lock()
-    var w = std.io.core;stderr()
-    std.io.core;eprintln_to[std.io.core.IoError,std.io.core.Descriptor](x, &w)
+    var w = std.io.core;Gathered.into(std.io.core;stderr())
+    std.io.core;eprintln_to[std.io.core.IoError,std.io.core.Gathered](x, &w)
+    let _ = std.io.core;Gathered.finish(w) else |_| {
+        return
+    }
 }
 
 pub fn std.mem;Slice[UInt8].length(self: std.mem.Slice[UInt8]) -> UInt64 {
@@ -265,27 +357,30 @@ fn std.io.core.Descriptor;std.io.core;ByteWriter.write_some(inout self: std.io.c
     }
 }
 
-fn std.io.core;acquire_output_lock() -> std.io.core.OutputLock {
-    linea_io_output_lock()
-    std.io.core.OutputLock {}
-}
-
 pub fn std.io.core;stderr() -> std.io.core.Descriptor {
     std.io.core;descriptor(2)
 }
 
-fn std.io.core;eprint_to[std.text.Str,std.io.core.Descriptor](x: std.text.Str, inout w: std.io.core.Descriptor) where std.io.core.IoError: Discardable {
-    match std.text.Str;std.fmt;Display.fmt[std.io.core.Descriptor](x, &w) {
+fn std.io.core;Gathered.into(sink target: std.io.core.Descriptor) -> std.io.core.Gathered {
+    .{ bytes = std.mem;Vec[UInt8,std.mem.SystemAllocator].new(), target }
+}
+
+fn std.io.core;eprint_to[std.text.Str,std.io.core.Gathered](x: std.text.Str, inout w: std.io.core.Gathered) where std.io.core.IoError: Discardable {
+    match std.text.Str;std.fmt;Display.fmt[std.io.core.Gathered](x, &w) {
         _ => {},
     }
 }
 
-fn std.io.core.OutputLock;std.release;Release.release(sink _self: std.io.core.OutputLock) {
-    linea_io_output_unlock()
+fn std.io.core;Gathered.finish(sink self: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] {
+    var gathered = self
+    let flushed = std.io.core;Gathered.flush(&gathered)
+    let Gathered { bytes, target: _ } = gathered
+    std.mem.Vec[UInt8,std.mem.SystemAllocator];std.release;Release.release(bytes)
+    flushed
 }
 
-fn std.io.core;eprintln_to[std.io.core.IoError,std.io.core.Descriptor](x: std.io.core.IoError, inout w: std.io.core.Descriptor) where std.io.core.IoError: Discardable {
-    match std.io.core;line[std.io.core.IoError,std.io.core.Descriptor](x, &w) {
+fn std.io.core;eprintln_to[std.io.core.IoError,std.io.core.Gathered](x: std.io.core.IoError, inout w: std.io.core.Gathered) where std.io.core.IoError: Discardable {
+    match std.io.core;line[std.io.core.IoError,std.io.core.Gathered](x, &w) {
         _ => {},
     }
 }
@@ -320,24 +415,88 @@ pub fn std.io.core;IoError.from_os(operation: std.io.core.IoOperation, code: Int
     .{ operation = operation, category = category, code = .Some(code), progress = progress }
 }
 
-extern fn linea_io_output_lock()
-
-fn std.text.Str;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.text.Str, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
-    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, self)
+pub fn std.mem;Vec[UInt8,std.mem.SystemAllocator].new() -> std.mem.Vec[UInt8,std.mem.SystemAllocator] {
+    std.mem;Vec[UInt8,std.mem.SystemAllocator].new_in(std.mem;system())
 }
 
-extern fn linea_io_output_unlock()
+fn std.text.Str;std.fmt;Display.fmt[std.io.core.Gathered](self: std.text.Str, inout w: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] {
+    std.io.core.Gathered;std.io.core;Writer.write_str(&w, self)
+}
 
-pub fn std.io.core;line[std.io.core.IoError,std.io.core.Descriptor](x: std.io.core.IoError, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] where carries(.Err: w) {
-    std.io.core.IoError;std.fmt;Display.fmt[std.io.core.Descriptor](x, &w)?
-    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "\n")
+fn std.io.core;Gathered.flush(inout self: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] {
+    let written = std.io.core;write_all[std.io.core.Descriptor](&self.target, std.mem;Vec[UInt8,std.mem.SystemAllocator].as_slice(self.bytes))
+    std.mem;Vec[UInt8,std.mem.SystemAllocator].clear(&self.bytes)
+    let _ = written else |failure| {
+        return .Err(std.io.core.WriteFailure[std.io.core.IoError];std.convert;Into[std.io.core.IoError].into(failure))
+    }
+    .Ok(())
+}
+
+fn std.mem.Vec[UInt8,std.mem.SystemAllocator];std.release;Release.release(sink self: std.mem.Vec[UInt8,std.mem.SystemAllocator]) {
+    let Vec { storage: owned, len: length } = self
+    var storage = owned
+    std.mem;release_from[UInt8,std.mem.SystemAllocator](&storage, 0, length)
+    std.mem;Storage[UInt8,std.mem.SystemAllocator].dispose(storage)
+}
+
+pub fn std.io.core;line[std.io.core.IoError,std.io.core.Gathered](x: std.io.core.IoError, inout w: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] where carries(.Err: w) {
+    std.io.core.IoError;std.fmt;Display.fmt[std.io.core.Gathered](x, &w)?
+    std.io.core.Gathered;std.io.core;Writer.write_str(&w, "\n")
 }
 
 extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
 
 extern fn linea_io_category(code: Int32) -> UInt8
 
-fn std.io.core.IoError;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.io.core.IoError, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
+pub fn std.mem;system() -> std.mem.SystemAllocator {
+    .System
+}
+
+pub fn std.mem;Vec[UInt8,std.mem.SystemAllocator].new_in(allocator: std.mem.SystemAllocator) -> std.mem.Vec[UInt8,std.mem.SystemAllocator] where carries(allocator) {
+    .{ storage = .{ buffer = .None, allocator = copy(allocator), at = 0, len = 0 }, len = 0 }
+}
+
+fn std.io.core.Gathered;std.io.core;Writer.write_str(inout self: std.io.core.Gathered, s: std.text.Str) -> std.result.Result[(),std.io.core.IoError] where carries() {
+    match std.mem;Vec[UInt8,std.mem.SystemAllocator].append_slice(&self.bytes, std.text;Str.as_bytes(s)) {
+        Ok(_) => .Ok(()),
+        Err(_) => {
+            std.io.core;Gathered.flush(&self)?
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&self.target, s)
+        },
+    }
+}
+
+pub fn std.mem;Vec[UInt8,std.mem.SystemAllocator].as_slice(self: std.mem.Vec[UInt8,std.mem.SystemAllocator]) -> std.mem.Slice[UInt8] where borrows(self) {
+    slot_span(self.storage, self.len, 0, self.len)
+}
+
+pub fn std.mem;Vec[UInt8,std.mem.SystemAllocator].clear(inout self: std.mem.Vec[UInt8,std.mem.SystemAllocator]) {
+    std.mem;Vec[UInt8,std.mem.SystemAllocator].truncate(&self, 0)
+}
+
+fn std.io.core.WriteFailure[std.io.core.IoError];std.convert;Into[std.io.core.IoError].into(sink self: std.io.core.WriteFailure[std.io.core.IoError]) -> std.io.core.IoError {
+    std.io.core.IoError;std.convert;From[std.io.core.WriteFailure[std.io.core.IoError]].from(self)
+}
+
+fn std.mem;release_from[UInt8,std.mem.SystemAllocator](inout storage: std.mem.Storage[UInt8,std.mem.SystemAllocator], kept: UInt64, length: UInt64) {
+    let shape: std.mem.SlotType[UInt8] = .Type
+    let stride = slot_stride(shape)
+    let at = storage.at
+    let extent = storage.len
+    var remaining = length
+    while remaining > kept {
+        remaining = remaining - 1
+        let element: UInt8 = slot_take(&storage, at, extent, remaining * stride)
+        UInt8;std.release;Release.release(element)
+    }
+}
+
+fn std.mem;Storage[UInt8,std.mem.SystemAllocator].dispose(sink self: std.mem.Storage[UInt8,std.mem.SystemAllocator]) {
+    let Storage { buffer, allocator: _, at: _, len: _ } = self
+    std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Release.release(buffer)
+}
+
+fn std.io.core.IoError;std.fmt;Display.fmt[std.io.core.Gathered](self: std.io.core.IoError, inout w: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] {
     "{self.operation} failed ({self.category}) after {self.progress} bytes".fmt(&w)?
     match read self.code {
         Some(code) => "; errno {code}".fmt(&w),
@@ -345,186 +504,224 @@ fn std.io.core.IoError;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.io.
     }
 }
 
-fn std.io.core.IoOperation;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.io.core.IoOperation, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
+pub fn std.mem;Vec[UInt8,std.mem.SystemAllocator].append_slice(inout self: std.mem.Vec[UInt8,std.mem.SystemAllocator], items: std.mem.Slice[UInt8]) -> std.result.Result[(),std.mem.Oom] {
+    std.mem;Vec[UInt8,std.mem.SystemAllocator].reserve(&self, std.mem;Slice[UInt8].length(items))?
+    let shape: std.mem.SlotType[UInt8] = .Type
+    let stride = slot_stride(shape)
+    let at = self.storage.at
+    let extent = self.storage.len
+    for item in copy(items) {
+        slot_put(&self.storage, at, extent, self.len * stride, copy(*item))
+        self.len += 1
+    }
+    .Ok(())
+}
+
+pub fn std.mem;Vec[UInt8,std.mem.SystemAllocator].truncate(inout self: std.mem.Vec[UInt8,std.mem.SystemAllocator], length: UInt64) {
+    if length >= self.len {
+        return
+    }
+    std.mem;release_from[UInt8,std.mem.SystemAllocator](&self.storage, length, self.len)
+    self.len = length
+}
+
+fn UInt8;std.release;Release.release(sink _self: UInt8) {}
+
+fn std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Release.release(sink self: std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]]) {
+    match self {
+        None => {
+            {}
+        },
+        Some(_linea_derive_1548_1_0_0) => {
+            {
+                {
+                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_1548_1_0_0)
+                }
+            }
+        },
+    }
+}
+
+fn std.io.core.IoOperation;std.fmt;Display.fmt[std.io.core.Gathered](self: std.io.core.IoOperation, inout w: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] {
     match read self {
         Read => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Read")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Read")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Write => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Write")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Write")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Flush => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Flush")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Flush")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Close => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Close")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Close")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Open => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Open")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Open")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Metadata => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Metadata")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Metadata")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Permissions => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Permissions")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Permissions")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Publish => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Publish")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Publish")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Remove => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Remove")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Remove")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Random => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Random")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Random")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Listen => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Listen")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Listen")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Accept => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Accept")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Accept")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Connect => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Connect")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Connect")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Configure => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Configure")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Configure")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
@@ -532,277 +729,277 @@ fn std.io.core.IoOperation;std.fmt;Display.fmt[std.io.core.Descriptor](self: std
     }
 }
 
-fn std.io.core.IoCategory;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.io.core.IoCategory, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
+fn std.io.core.IoCategory;std.fmt;Display.fmt[std.io.core.Gathered](self: std.io.core.IoCategory, inout w: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] {
     match read self {
         Other => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Other")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Other")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         NotFound => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "NotFound")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "NotFound")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         PermissionDenied => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "PermissionDenied")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "PermissionDenied")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         AlreadyExists => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "AlreadyExists")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "AlreadyExists")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         WouldBlock => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "WouldBlock")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "WouldBlock")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         BrokenPipe => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "BrokenPipe")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "BrokenPipe")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Interrupted => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Interrupted")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Interrupted")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         InvalidInput => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "InvalidInput")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "InvalidInput")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         NotDirectory => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "NotDirectory")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "NotDirectory")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         IsDirectory => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "IsDirectory")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "IsDirectory")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Unsupported => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Unsupported")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Unsupported")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         NoSpace => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "NoSpace")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "NoSpace")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         ResourceExhausted => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "ResourceExhausted")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "ResourceExhausted")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         Symlink => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Symlink")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Symlink")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         InvalidDescriptor => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "InvalidDescriptor")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "InvalidDescriptor")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         NoProgress => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "NoProgress")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "NoProgress")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         InvalidProgress => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "InvalidProgress")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "InvalidProgress")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         TimedOut => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "TimedOut")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "TimedOut")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         ConnectionReset => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "ConnectionReset")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "ConnectionReset")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         ConnectionRefused => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "ConnectionRefused")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "ConnectionRefused")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
         },
         AddressInUse => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "AddressInUse")?
+            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "AddressInUse")?
             var wrote_component = false
             {}
             if wrote_component {
                 if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
                 } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
                 }
             }
             return .Ok(())
@@ -810,25 +1007,91 @@ fn std.io.core.IoCategory;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.
     }
 }
 
-fn UInt64;std.fmt;Display.fmt[std.io.core.Descriptor](self: UInt64, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
+fn UInt64;std.fmt;Display.fmt[std.io.core.Gathered](self: UInt64, inout w: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] {
     if self < T(0) {
-        std.fmt;format_signed[std.io.core.Descriptor](Int64(self), &w)
+        std.fmt;format_signed[std.io.core.Gathered](Int64(self), &w)
     } else {
-        std.fmt;format_unsigned[std.io.core.Descriptor](UInt64(self), &w)
+        std.fmt;format_unsigned[std.io.core.Gathered](UInt64(self), &w)
     }
 }
 
-fn Int32;std.fmt;Display.fmt[std.io.core.Descriptor](self: Int32, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
+fn Int32;std.fmt;Display.fmt[std.io.core.Gathered](self: Int32, inout w: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] {
     if self < T(0) {
-        std.fmt;format_signed[std.io.core.Descriptor](Int64(self), &w)
+        std.fmt;format_signed[std.io.core.Gathered](Int64(self), &w)
     } else {
-        std.fmt;format_unsigned[std.io.core.Descriptor](UInt64(self), &w)
+        std.fmt;format_unsigned[std.io.core.Gathered](UInt64(self), &w)
     }
 }
 
-fn std.fmt;format_signed[std.io.core.Descriptor](value: Int64, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] where carries(.Err: w) {
+pub fn std.mem;Vec[UInt8,std.mem.SystemAllocator].reserve(inout self: std.mem.Vec[UInt8,std.mem.SystemAllocator], additional: UInt64) -> std.result.Result[(),std.mem.Oom] where carries() {
+    let shape: std.mem.SlotType[UInt8] = .Type
+    let stride = slot_stride(shape)
+    let limit = UInt64.max / stride
+    if additional > limit - self.len {
+        return .Err(Oom.Exhausted)
+    }
+    let required = self.len + additional
+    let capacity = self.storage.len / stride
+    if required <= capacity {
+        return .Ok(())
+    }
+    // Start with four element slots, then double capacity to avoid an
+    // allocation per push. Clamp both choices to the byte-size limit.
+    let doubled = if capacity == 0 {
+        if limit < 4 {
+            limit
+        } else {
+            4
+        }
+    } else {
+        if capacity > limit / 2 {
+            limit
+        } else {
+            capacity * 2
+        }
+    }
+    let grown = if required > doubled {
+        required
+    } else {
+        doubled
+    }
+    let acquired = std.mem.SystemAllocator;std.mem;Allocator.acquire(self.storage.allocator, grown * stride)?
+    let Vec { storage: previous, len: length } = self
+    var storage = previous
+    var next: std.mem.Storage[UInt8,std.mem.SystemAllocator] = std.mem;Storage[UInt8,std.mem.SystemAllocator].from_buffer(acquired)
+    let at = next.at
+    let extent = next.len
+    let previous_at = storage.at
+    let previous_extent = storage.len
+    for i in 0..length {
+        let element: UInt8 = slot_take(&storage, previous_at, previous_extent, i * stride)
+        slot_put(&next, at, extent, i * stride, element)
+    }
+    std.mem;Storage[UInt8,std.mem.SystemAllocator].dispose(storage)
+    self = .{ storage = next, len = length }
+    .Ok(())
+}
+
+fn std.mem.Slice[UInt8];std.iter;Sequence.iterate(sink self: std.mem.Slice[UInt8]) -> std.mem.SliceIter[UInt8] {
+    .{ view = self, at = 0 }
+}
+
+fn std.mem.SliceIter[UInt8];std.iter;Iterator.next(inout self: std.mem.SliceIter[UInt8]) -> std.option.Option[borrow(UInt8)] {
+    if self.at == std.mem;Slice[UInt8].length(self.view) {
+        return .None
+    }
+    let index = self.at
+    self.at += 1
+    std.mem;Slice[UInt8].get(self.view, index)
+}
+
+fn std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(sink self: std.mem.Buffer[std.mem.SystemAllocator]) {
+    std.mem.SystemAllocator;std.mem;Allocator.dispose(self)
+}
+
+fn std.fmt;format_signed[std.io.core.Gathered](value: Int64, inout w: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] where carries(.Err: w) {
     if value < 0 {
-        std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "-")?
+        std.io.core.Gathered;std.io.core;Writer.write_str(&w, "-")?
     }
     var p = std.fmt;scale(value)
     var leading = true
@@ -843,25 +1106,95 @@ fn std.fmt;format_signed[std.io.core.Descriptor](value: Int64, inout w: std.io.c
         } else {
             d
         }
-        std.io.core.Descriptor;std.io.core;Writer.write_str(&w, std.fmt;digits(shown, leading))?
+        std.io.core.Gathered;std.io.core;Writer.write_str(&w, std.fmt;digits(shown, leading))?
         leading = false
         p = p / 100
     }
     .Ok(())
 }
 
-fn std.fmt;format_unsigned[std.io.core.Descriptor](value: UInt64, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] where carries(.Err: w) {
+fn std.fmt;format_unsigned[std.io.core.Gathered](value: UInt64, inout w: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] where carries(.Err: w) {
     var p = std.fmt;scale_unsigned(value)
     var leading = true
     while p > 0 {
         let whole = value / p
         // A remainder modulo 100 selects one pair from decimal_pairs.
         let d = whole % 100
-        std.io.core.Descriptor;std.io.core;Writer.write_str(&w, std.fmt;digits(Int64(d), leading))?
+        std.io.core.Gathered;std.io.core;Writer.write_str(&w, std.fmt;digits(Int64(d), leading))?
         leading = false
         p = p / 100
     }
     .Ok(())
+}
+
+fn std.mem.SystemAllocator;std.mem;Allocator.acquire(self: std.mem.SystemAllocator, size: UInt64) -> std.result.Result[std.mem.Buffer[std.mem.SystemAllocator],std.mem.Oom] where carries() {
+    match read self {
+        System => {
+            let at = linea_alloc(size, Buffer.alignment)
+            if at == 0 {
+                .Err(Oom.Exhausted)
+            } else {
+                // Empty buffers reserve one byte. Retain that size for disposal,
+                // while reporting the requested length to callers.
+                let reserved = if size == 0 {
+                    1
+                } else {
+                    size
+                }
+                std.result.Result[std.mem.Buffer[std.mem.SystemAllocator],std.mem.Oom].Ok(.{ at = at, len = size, allocated = reserved, allocator = self, obligation = .{} })
+            }
+        },
+    }
+}
+
+fn std.mem;Storage[UInt8,std.mem.SystemAllocator].from_buffer(sink buffer: std.mem.Buffer[std.mem.SystemAllocator]) -> std.mem.Storage[UInt8,std.mem.SystemAllocator] where carries(buffer) {
+    let allocator = copy(buffer.allocator)
+    let at = buffer.at
+    let length = buffer.len
+    .{ buffer = .Some(buffer), allocator, at, len = length }
+}
+
+fn std.range.Range[UInt64];std.iter;Sequence.iterate(sink self: std.range.Range[UInt64]) -> std.range.Range[UInt64] where carries(self) {
+    self
+}
+
+fn std.range.Range[UInt64];std.iter;Iterator.next(inout self: std.range.Range[UInt64]) -> std.option.Option[UInt64] {
+    // lo < hi guarantees that a forward step cannot exceed the maximum.
+    if self.lo.less(self.hi) {
+        let out = copy(self.lo)
+        self.lo = self.lo.forward()
+        return .Some(out)
+    }
+
+    // lo > hi guarantees that a backward step cannot pass the minimum.
+    if self.hi.less(self.lo) {
+        let out = copy(self.lo)
+        self.lo = self.lo.backward()
+        return .Some(out)
+    }
+
+    // Yield the included endpoint once, then leave an empty range.
+    if self.inclusive && self.lo.equals(self.hi) {
+        self.inclusive = false
+        return .Some(copy(self.lo))
+    }
+
+    .None
+}
+
+pub fn std.mem;Slice[UInt8].get(self: std.mem.Slice[UInt8], i: UInt64) -> std.option.Option[borrow(UInt8)] where carries(self) {
+    if i >= self.len {
+        .None
+    } else {
+        .Some(borrow self[i])
+    }
+}
+
+fn std.mem.SystemAllocator;std.mem;Allocator.dispose(sink b: std.mem.Buffer[std.mem.SystemAllocator]) {
+    let Buffer { at: at, len: _length, allocated: allocated, allocator: allocator, obligation: SystemAllocation {} } = b
+    match allocator {
+        System => linea_free(at, allocated, Buffer.alignment),
+    }
 }
 
 fn std.fmt;scale(n: Int64) -> Int64 {
@@ -889,6 +1222,10 @@ fn std.fmt;scale_unsigned(n: UInt64) -> UInt64 {
     }
     p
 }
+
+extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64
+
+extern fn linea_free(at: UInt64, size: UInt64, align: UInt64)
 
 pub fn std.text;Str.slice(self: std.text.Str, from: UInt64, to: UInt64) -> std.option.Option[std.text.Str] where carries(.Some: self) {
     if from > to || to > std.text;Str.length(self) {
