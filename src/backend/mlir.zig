@@ -2377,7 +2377,7 @@ test "trap file symbols ignore unreferenced source prefixes and distinguish equa
         functions[0].file = .from(prefix + 1);
         functions[1].file = .from(prefix);
         var output: std.Io.Writer.Allocating = .init(gpa);
-        try testing.expect(try emit(gpa, &output.writer, &module, &table, &sink));
+        try testing.expect(try emit(gpa, &output.writer, &module, &table, &sink, .{}));
         if (prefix == 0) {
             expected = try gpa.dupe(u8, output.written());
             try testing.expectEqual(@as(usize, 2), std.mem.count(u8, expected, "llvm.mlir.global internal constant @linea_file"));
@@ -3134,7 +3134,7 @@ test "allocator zero facts require the exact library producer" {
         var table: FileTable = .{};
         _ = try table.add(gpa, source);
         var out: std.Io.Writer.Allocating = .init(gpa);
-        const emitted = try emit(gpa, &out.writer, &module, &table, &sink);
+        const emitted = try emit(gpa, &out.writer, &module, &table, &sink, .{});
         if (!emitted) {
             std.debug.print("\nallocator fixture: {s}\n", .{case.declaration});
             for (sink.list.items) |diagnostic| std.debug.print("{s}\n", .{diagnostic.message});
