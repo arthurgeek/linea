@@ -219,6 +219,25 @@ static void a_receive_timeout_does_not_read_the_wall_clock(void) {
     linea_chan_close(session);
 }
 
+/* A timed receive whose peer sends after the timeout answers 0 once the
+ * timeout has passed, and the payload is still received afterwards. */
+static void a_receive_from_a_late_peer_times_out(void) {
+    const long task = linea_task_prepare(1UL << 16);
+    assert(task > 0);
+    const unsigned long session = linea_task_start((unsigned long)task, send_after_a_tenth, release_nothing, 0, 0);
+    struct timespec before, after;
+    assert(clock_gettime(CLOCK_MONOTONIC, &before) == 0);
+    unsigned long received = 0;
+    assert(linea_chan_recv_until(session, (unsigned long)&received, sizeof(received), 10UL * 1000000UL) == 0);
+    assert(clock_gettime(CLOCK_MONOTONIC, &after) == 0);
+    const long long waited_ns =
+        (long long)(after.tv_sec - before.tv_sec) * 1000000000LL + (long long)(after.tv_nsec - before.tv_nsec);
+    assert(waited_ns >= 10LL * 1000000LL);
+    linea_chan_recv(session, (unsigned long)&received, sizeof(received));
+    assert(received == 4242);
+    linea_chan_close(session);
+}
+
 int main(void) {
     refuse_record = 1;
     long refused = linea_task_prepare(1UL << 16);
@@ -254,7 +273,8 @@ int main(void) {
     assert((time_t)-1 < 0);
     a_receive_timeout_past_the_last_time_waits_without_a_deadline();
     a_receive_timeout_does_not_read_the_wall_clock();
+    a_receive_from_a_late_peer_times_out();
 
-    puts("native task faults: refused records, mappings, threads and signal stacks leave nothing behind, a wait past the last time has no deadline, and a timeout ignores the wall clock");
+    puts("native task faults: refused records, mappings, threads and signal stacks leave nothing behind, a wait past the last time has no deadline, a timeout ends a wait and ignores the wall clock");
     return 0;
 }

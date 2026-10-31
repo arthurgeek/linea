@@ -140,6 +140,45 @@ impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
             None => .TimedOut(.{ endpoint, body }),
         }
     }
+
+    test fn a_receive_until_hands_the_endpoint_back_when_the_peer_is_late() {
+        let body = sink [] |sink me: Chan[Send[UInt64, End]]| {
+            time.sleep(time.Duration.from_milliseconds(200))
+            me.send(7).close()
+        }
+        let slot = task.prepare(body).unwrap()
+        let late = match slot.start().recv_until(time.Duration.from_milliseconds(10)) {
+            TimedOut(waiting) => {
+                let (value, done) = waiting.recv()
+                done.close()
+                value == 7
+            },
+            Received(_, done) => {
+                done.close()
+                false
+            },
+        }
+        testing.assert(late, "a receive answered before the peer sent")?
+    }
+
+    test fn a_receive_until_answers_what_a_prompt_peer_sent() {
+        let body = sink [] |sink me: Chan[Send[UInt64, End]]| {
+            me.send(7).close()
+        }
+        let slot = task.prepare(body).unwrap()
+        let prompt = match slot.start().recv_until(time.Duration.from_milliseconds(60000)) {
+            Received(value, done) => {
+                done.close()
+                value == 7
+            },
+            TimedOut(waiting) => {
+                let (_, done) = waiting.recv()
+                done.close()
+                false
+            },
+        }
+        testing.assert(prompt, "a receive timed out although the peer sent at once")?
+    }
 }
 
 // TimedRecv is the outcome of `recv_until`: either the message arrived and the
