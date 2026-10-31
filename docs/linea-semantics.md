@@ -3038,10 +3038,14 @@ Declaration attributes form a closed set. `@opaque`, `@linear`, `@copyable`,
 `@carrier`, `@unshareable`, and `@derive(Traits...)` may be written separately or
 as items of one `@(...)` group. Every group precedes the struct, enum, or
 newtype it modifies, before ordinary visibility. An empty group, unknown item,
-a repeated policy, `carrier` or `unshareable`, `linear` combined with `copyable`, an
-attribute before another declaration, or `carrier` on a newtype violates
-[S-Entry]. `@unshareable` marks a type that is not `Shareable` (§5.3); it states
-no ownership policy and is declared only where [M-Extern] grants it. `@carrier`
+a repeated policy, `carrier` or `unshareable`, `linear` combined with `copyable`,
+`unshareable` combined with `copyable`, an attribute before another
+declaration, or `carrier` on a newtype violates [S-Entry]. `@unshareable`
+marks a type that is not `Shareable` (§5.3); it states no ownership policy and
+is declared only where [M-Extern] grants it. It excludes `copyable` because
+copies of a value reach what it reaches: a copyable type reaches shared state
+through a borrow of an `@unshareable` owner, whose observation every copy
+carries, as `mem.Handle` borrows its `mem.Arena`. `@carrier`
 marks a struct or an enum; it states no ownership policy and combines with
 either. What it means is under the callable source clauses
 ([ADR 0216](adr/0216-a-carrier-type-supplies-its-signatures-default-contract.md)).
@@ -5518,17 +5522,18 @@ of it at once, because no read of it writes. A type is not Shareable when it is
 declared `@unshareable`, or when anything reachable through its fields, variant
 payloads, array elements, newtype base, closure environment, type arguments or
 the referent of an observation is not: an observation lets whoever reads it
-read its referent. `mem.Arena` and `mem.Handle` are `@unshareable`, since a
-handle's `acquire` takes it by `read` and advances the arena's cursor, so
-`Vec[UInt8, mem.Handle]` and `borrow mem.Arena` are not Shareable;
+read its referent. `mem.Arena` is `@unshareable`, since a handle's `acquire`
+takes the handle by `read` and advances the arena's cursor; `mem.Handle`
+borrows its arena, so it, `Vec[UInt8, mem.Handle]` and `borrow mem.Arena` are
+not Shareable;
 `mem.AllocationLog` is `@unshareable` too, since its allocator writes the log
 under a `read`. A type
 parameter is not Shareable unless it is bounded `Shareable` or `Integer`, and
 neither is a function value, which may hold anything. Being Shareable is
 independent of being Owned: an arena owns its memory and carries nothing yet
 is not Shareable, and `borrow UInt64` is Shareable and not Owned. It is
-independent of copying too: a `mem.Handle` is copyable, and every copy reaches
-the one cursor. Being unshareable restricts only observation: an unshareable
+independent of copying too: a `mem.Handle` is copyable, and every copy borrows
+the one arena and reaches its cursor. Being unshareable restricts only observation: an unshareable
 value moves, copies and settles as its declaration says.
 
 **Carried dependencies.** `mem.Carried[H]` is a zero-sized field type that
@@ -5947,13 +5952,11 @@ parameter or a function value carries captures the function cannot see, so it
 does not cross. The report is at the capture, names the place, and names the
 part of its type that is not Shareable. An unshareable value itself still
 crosses whole: a `sink` capture of a `mem.Arena` moves the arena, and only the
-task reads it afterwards. A value of a copyable type that is not Shareable does
-not cross by `sink` either: its copies reach one state, as a `mem.Handle`'s
-copies reach one arena, so a copy moved into the task shares that state with
-the copy its creator keeps. For the same reason such a record is not `Owned`
-unless a borrow field already says what it observes: a payload, a call's job
-or anything else an `Owned` bound admits cannot be one. The analysis runs for
-every function that starts a task, whether or not it holds any dependency.
+task reads it afterwards. A copyable value reaches shared state only through a
+borrow of an `@unshareable` owner, since `@copyable` and `@unshareable` are
+exclusive ([S-Entry]): every copy of a `mem.Handle` carries the observation of
+its arena, so a copy moved in by `sink`, held in a record or erased into a
+`mem.Closure` is refused like the handle itself.
 
 ```linea
 fn main() -> UInt8 {

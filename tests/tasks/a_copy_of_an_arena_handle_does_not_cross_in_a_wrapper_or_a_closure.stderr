@@ -1,0 +1,14 @@
+error[O-Cross]: a task cannot take a value observing `arena`, which its creator may read too: a `mem.Arena[mem.SystemAllocator]` is not `Shareable`
+  --> tests/tasks/a_copy_of_an_arena_handle_does_not_cross_in_a_wrapper_or_a_closure.lin:28:27
+   |
+28 |     let body = sink [sink wrapped] |sink me: Chan[End]| {
+   |                           ^^^^^^^ this capture observes it
+   |
+   = help: reading this value may change it; move it into one task, or give the task a value that reading never changes
+error[O-Cross]: a task cannot take a value observing `arena`, which its creator may read too: a `mem.Arena[mem.SystemAllocator]` is not `Shareable`
+  --> tests/tasks/a_copy_of_an_arena_handle_does_not_cross_in_a_wrapper_or_a_closure.lin:42:28
+   |
+42 |     let other = sink [sink erased] |sink me: Chan[End]| {
+   |                            ^^^^^^ this capture observes it
+   |
+   = help: reading this value may change it; move it into one task, or give the task a value that reading never changes

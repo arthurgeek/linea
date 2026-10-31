@@ -11573,8 +11573,6 @@ const Checker = struct {
             "an observation of another value"
         else if (self.builder.view().declOfType(witness.seed) == self.raw_accesses.slice)
             "a view of storage it does not own"
-        else if (self.builder.get(witness.seed) == .struct_ and self.builder.get(witness.seed).struct_.unshareable)
-            "a copyable `unshareable` type, whose copies share what they reach"
         else
             "raw storage another value owns";
 

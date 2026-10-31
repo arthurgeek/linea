@@ -1,10 +1,10 @@
 error[T-Bound]: `T` requires `Shareable`, and `Cursor` is unshareable
-  --> tests/generics/shareable/an_unshareable_type_is_not_shareable/main.lin:19:11
+  --> tests/generics/shareable/an_unshareable_type_is_not_shareable/main.lin:20:11
    |
-19 |     UInt8(share(cursor) + share(reader) + share(reader.cursor.at))
+20 |     UInt8(share(cursor) + share(reader) + share(at))
    |           ^^^^^ `Cursor` is not `Shareable`; pass a value that reading never changes, or drop the bound
 error[T-Bound]: `T` requires `Shareable`, and `Reader` is not `Shareable`: `cursor` is a `Cursor`, which is unshareable
-  --> tests/generics/shareable/an_unshareable_type_is_not_shareable/main.lin:19:27
+  --> tests/generics/shareable/an_unshareable_type_is_not_shareable/main.lin:20:27
    |
-19 |     UInt8(share(cursor) + share(reader) + share(reader.cursor.at))
+20 |     UInt8(share(cursor) + share(reader) + share(at))
    |                           ^^^^^ `Reader` is not `Shareable`; pass a value that reading never changes, or drop the bound
