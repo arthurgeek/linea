@@ -295,12 +295,13 @@ and add its choice bytes to `tests/fuzz/corpus.zig` under `storage` with the
 fix. The step fails when it built or ran fewer programs than it was given, a
 missing tool included.
 
-`-Dsanitize` watches the runtime's C code, every allocation and free through
-the intercepted allocator, leaks at exit, and crashes. It does not watch reads
-or writes in generated Linea code: the IR carries no `sanitize_address`
-attribute, so a stale read in generated code is caught only by
-the compiler refusing the program. `address` is the only sanitizer offered, and
-its leak checker is the only run-time check that ownership abandoned no value.
+`-Dsanitize=address` or `-Dsanitize=thread` watches the runtime's C code and
+the generated Linea code: the emitter marks every function it defines with the
+selected sanitizer's attribute, so a stale read or a data race the compiler
+accepted is reported at run time. It also watches every allocation and free
+through the intercepted allocator, leaks at exit, and crashes. The address
+sanitizer's leak checker is the only run-time check that ownership abandoned
+no value.
 A sanitized walk runs what runs -- the cases recording an exit status, the
 examples and the transcripts that build or run a program -- and generates no
 programs; the corpus-wide frontend and editor properties stay with the

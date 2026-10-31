@@ -749,7 +749,10 @@ run; stages 5 to 7 extend it.
    allocation, each mapping, `pthread_create` and `sigaltstack`. The guide's
    chapter is framed against JavaScript's `async`/`await` and Rust's threads
    and futures, and teaches gathering results (`Promise.all`) and a producer
-   and consumer.
+   and consumer. The thread lane instruments the generated code as well as
+   the runtime: the emitter writes `sanitize_thread` on every function a
+   sanitized module defines, so a race between two tasks' Linea code that the
+   compiler accepted is reported at run time, as a compiler defect.
 
    *Question for this stage.* The library's internal `mem.ReleaseTag` values
    write one shared release log through raw addresses when they are released. Tags moved into two tasks

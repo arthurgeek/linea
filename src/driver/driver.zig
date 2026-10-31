@@ -42,7 +42,8 @@ fn scratchDir(environ: std.process.Environ) []const u8 {
 const mir = @import("../mir/mir.zig");
 
 const dumpMir = @import("../mir/dump.zig").dumpModule;
-const emitMlir = @import("../backend/mlir.zig").emit;
+const mlir_backend = @import("../backend/mlir.zig");
+const emitMlir = mlir_backend.emit;
 const toolchain = @import("toolchain.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
 const loader = @import("loader.zig");
@@ -400,7 +401,9 @@ fn compileToExecutable(
         // A module the backend refuses leaves an empty file rather than half a
         // program: it wrote nothing, and what it wrote nothing about is in the
         // sink for the renderer at the end of the run.
-        if (!try emitMlir(gpa, out.open(io, file), req.mir, req.table, req.sink)) return exit_defect;
+        if (!try emitMlir(gpa, out.open(io, file), req.mir, req.table, req.sink, .{
+            .sanitize = mlir_backend.Sanitizer.named(sanitize),
+        })) return exit_defect;
         try out.flush();
     }
 
@@ -800,7 +803,7 @@ pub fn run(process: std.process.Init) !u8 {
                             };
                             defer file.close(io);
                             var out: Out = .{};
-                            if (!try emitMlir(gpa, out.open(io, file), &lowered, &table, &sink)) return exit_defect;
+                            if (!try emitMlir(gpa, out.open(io, file), &lowered, &table, &sink, .{})) return exit_defect;
                             try out.flush();
                         }
 
@@ -996,7 +999,7 @@ pub fn run(process: std.process.Init) !u8 {
                             const stdout_w = stdout.open(io, stdout_file);
                             defer stdout.flush() catch {};
 
-                            if (!try emitMlir(gpa, stdout_w, &lowered, &table, &sink)) {
+                            if (!try emitMlir(gpa, stdout_w, &lowered, &table, &sink, .{})) {
                                 defect = true;
                             }
                         }
