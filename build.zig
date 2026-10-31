@@ -22,16 +22,16 @@ fn addDecimalProvider(b: *std.Build, module: *std.Build.Module) void {
 /// What a test run's binaries are watched by.
 ///
 /// A sanitizer works by instrumenting code as it is compiled -- redzones
-/// around a frame, shadow memory beside it -- and the address sanitizer
-/// instruments only functions carrying the `sanitize_address` attribute.
-/// Clang's frontend adds that attribute while it lowers C, so
-/// `runtime/linea_rt.c` is instrumented. The generated program
-/// reaches `cc` as printed LLVM IR (`-x ir`), and the emitter writes no such
-/// attribute, so its loads and stores are not watched: a read of freed or
-/// out-of-bounds storage in generated Linea code is not caught. What a
-/// sanitized run does watch is the runtime's own code, every allocation and
-/// free through the intercepted allocator (a double or invalid free), leaks
-/// at exit, and crashes.
+/// around a frame, shadow memory beside it -- and it instruments only
+/// functions carrying its attribute (`sanitize_address`, `sanitize_thread`).
+/// Clang's frontend adds that attribute while it lowers C, so the runtime is
+/// instrumented. The generated program reaches `cc` as printed LLVM IR
+/// (`-x ir`), so the emitter writes the attribute itself on every function the
+/// module defines when the build names a sanitizer (`LINEA_SANITIZE`): a read
+/// of freed or out-of-bounds storage in generated Linea code is caught as one
+/// in the runtime is. A sanitized run also watches every allocation and free
+/// through the intercepted allocator (a double or invalid free), leaks at
+/// exit, and crashes.
 ///
 /// `address` also answers for the language's central promise. Its leak
 /// checker is the only run-time check for a leak: it runs at every clean exit
@@ -58,15 +58,15 @@ fn addDecimalProvider(b: *std.Build, module: *std.Build.Module) void {
 /// generated code is the language: every operation is defined or refused,
 /// and the trap checks are already printed into the module.
 ///
-/// `thread` watches the runtime's C for data races: tasks run on threads the
-/// runtime creates, and every synchronisation between them -- a session's
-/// mutex and condition variable, the start latch, the join, the checking
-/// allocator's lock -- is in that C, which Clang instruments with
-/// `sanitize_thread` as it lowers it. Generated code is not instrumented, for
-/// the reason given for `address`, so a race between two tasks' Linea code is
-/// not seen at run time; the language refuses such a program instead
-/// ([O-Cross], [O-Borrow]). The two sanitizers cannot share a process, so
-/// each is its own run. A type sanitizer
+/// `thread` watches for data races: tasks run on threads the runtime
+/// creates, and every synchronisation between them -- a session's mutex and
+/// condition variable, the owning task's call queue, the join, the checking
+/// allocator's lock -- is in the runtime's C. Generated code is instrumented
+/// as well, so a race between two tasks' Linea code that the compiler
+/// accepted is reported at run time: the language refuses such a program
+/// ([O-Cross], [O-Borrow]), and this run is what catches the compiler when it
+/// does not. The two sanitizers cannot share a process, so each is its own
+/// run. A type sanitizer
 /// stays absent by decision rather than omission: it checks the promises
 /// TBAA metadata makes, and this compiler deliberately emits none -- proofs
 /// are handed to the optimiser, never premises. The data-flow instrumentation
@@ -1218,9 +1218,9 @@ const HeavySteps = struct {
         run.addArg(@tagName(self.sanitize));
         // A sanitized run watches what runs: the cases that record an exit
         // status, the examples, and the transcripts that build or run a program.
-        // The generated code is not instrumented (see `Sanitize`), so what it
-        // watches is the runtime, every allocation and free, and a leak check at
-        // each clean exit. The runner leaves every other case, and the
+        // It watches the generated code and the runtime (see `Sanitize`), every
+        // allocation and free, and a leak check at each clean exit. The runner
+        // leaves every other case, and the
         // corpus-wide frontend and editor properties, to the unsanitized walk.
         // Generated programs are held to the metamorphic properties beside the
         // corpus. The seeds are consecutive from zero, so a run generates the same

@@ -5604,10 +5604,62 @@ test "checked library reuse and fallback preserve emitted MLIR" {
             try testing.expect(!sink.hasErrors());
             try table.buildMaps(gpa);
             var writer: std.Io.Writer.Allocating = .init(gpa);
-            try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink));
+            try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink, .{}));
             output[i] = writer.written();
         }
         try testing.expectEqualStrings(output[0], output[1]);
+    }
+}
+
+test "a sanitized module instruments every function it defines and only then" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var table: FileTable = .empty;
+    var sink = Sink.init(gpa);
+    var names: Interner = .empty;
+    const files = &.{
+        InMemoryFile{ .path = "main.lin", .text =
+        \\fn twice(value: Int64) -> Int64 {
+        \\    value * 2
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    if twice(2) == 4 { 0 } else { 1 }
+        \\}
+        \\
+        },
+        InMemoryFile{ .path = "linea.json", .text = "{}" },
+    };
+    const program = try loadFromMemory(gpa, &table, &sink, &names, "main.lin", files, .program, true, .borrow);
+    var semantics = try checkProgram(gpa, gpa, &program, &names, &sink, .program);
+    defer semantics.deinit(gpa);
+    try testing.expect(!sink.hasErrors());
+    var module = (try @import("../mir/lower.zig").lowerProgram(gpa, &semantics.expanded, &semantics.res, &semantics.typing, &semantics.disposals, &sink, .program)) orelse return error.TestUnexpectedResult;
+    defer module.deinit(gpa);
+    try table.buildMaps(gpa);
+    const mlir = @import("../backend/mlir.zig");
+    for ([_]?mlir.Sanitizer{ null, .address, .thread }) |sanitize| {
+        var writer: std.Io.Writer.Allocating = .init(gpa);
+        try testing.expect(try mlir.emit(gpa, &writer.writer, &module, &table, &sink, .{ .sanitize = sanitize }));
+        const attribute: []const u8 = if (sanitize) |chosen| switch (chosen) {
+            .address => "\"sanitize_address\"",
+            .thread => "\"sanitize_thread\"",
+        } else "\"sanitize_";
+        // A definition is a `func.func` that opens a body; a declaration of
+        // what the runtime defines has none and is instrumented where it is
+        // compiled.
+        var defined: usize = 0;
+        var lines = std.mem.splitScalar(u8, writer.written(), '\n');
+        while (lines.next()) |line| {
+            if (!std.mem.startsWith(u8, std.mem.trimStart(u8, line, " "), "func.func ")) continue;
+            if (!std.mem.endsWith(u8, line, " {")) continue;
+            defined += 1;
+            const marked = std.mem.indexOf(u8, line, attribute) != null;
+            try testing.expectEqual(sanitize != null, marked);
+        }
+        // The entry wrapper C's `main` calls, `main` and `twice`.
+        try testing.expect(defined >= 3);
     }
 }
 
@@ -5731,7 +5783,7 @@ test "checked unused library delegation resumes generic indexing and traversal" 
         try testing.expect(!sink.hasErrors());
         try table.buildMaps(gpa);
         var writer: std.Io.Writer.Allocating = .init(gpa);
-        try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink));
+        try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink, .{}));
         output[mode] = writer.written();
     }
     try testing.expectEqualStrings(output[0], output[1]);
@@ -5840,7 +5892,7 @@ test "checked construction derives survive library reuse and fallback" {
             try testing.expect(!sink.hasErrors());
             try table.buildMaps(gpa);
             var writer: std.Io.Writer.Allocating = .init(gpa);
-            try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink));
+            try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink, .{}));
             output[mode] = writer.written();
         }
         try testing.expectEqualStrings(output[0], output[1]);

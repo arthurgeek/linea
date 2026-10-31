@@ -5291,7 +5291,7 @@ fn costOfFiles(
         // Retaining unread MLIR would add output-sized growth and copying.
         var output_buffer: [4096]u8 = undefined;
         var ir: std.Io.Writer.Discarding = .init(&output_buffer);
-        if (!try emitMlir(a, &ir.writer, &lowered, &table, &sink)) {
+        if (!try emitMlir(a, &ir.writer, &lowered, &table, &sink, .{})) {
             return error.CostModuleRejected;
         }
     }
@@ -5443,7 +5443,7 @@ fn treeCostGrowing(gpa: std.mem.Allocator, io: std.Io, text: []const u8, mode: T
         // Retaining unread MLIR would add output-sized growth and copying.
         var output_buffer: [4096]u8 = undefined;
         var ir: std.Io.Writer.Discarding = .init(&output_buffer);
-        if (!try emitMlir(a, &ir.writer, &lowered, &table, &sink)) {
+        if (!try emitMlir(a, &ir.writer, &lowered, &table, &sink, .{})) {
             return error.CostModuleRejected;
         }
     }
@@ -8515,7 +8515,7 @@ fn checkGeneratedProgram(
 
         const mir = (try lower(scratch, &semantics.expanded, &semantics.res, &semantics.typing, &semantics.disposals, sink, .program)) orelse return error.GeneratedProgramRejected;
         var ir: std.Io.Writer.Allocating = .init(scratch);
-        if (!try emitOrRecord(scratch, &failures, &ir, &mir, table, sink, display_path)) {
+        if (!try emitOrRecord(scratch, &failures, &ir, &mir, table, sink, display_path, settings.env.sanitize)) {
             break :generated;
         }
 
@@ -8616,7 +8616,7 @@ fn checkGeneratedProgram(
             result.err = err;
             break :generated;
         };
-        const walked = checkWalkLoops(scratch, io, settings.cache, settings.library, &failures, .{
+        const walked = checkWalkLoops(scratch, io, settings.cache, settings.library, settings.env.sanitize, &failures, .{
             .display_path = display_path,
             .entry = source.path,
             .files = &.{.{ .path = source.path, .text = source.text }},
@@ -8761,6 +8761,8 @@ fn compileWithLibrary(
     /// The root's `linea.json`, for a program whose root a manifest grants
     /// something, or null for one without.
     manifest: ?[]const u8,
+    /// The sanitizer the program will run under, which instruments its code.
+    sanitize: ?[]const u8,
 ) !LibraryVerdict {
     var table: FileTable = .empty;
     var sink = Sink.init(scratch);
@@ -8784,7 +8786,7 @@ fn compileWithLibrary(
         return .{ .refused = .{ .report = report.written(), .rules = try rulesNamedBy(scratch, &sink) } };
     };
     var ir: std.Io.Writer.Allocating = .init(scratch);
-    if (!try emitOrRecord(scratch, failures, &ir, &module, &table, &sink, display_path)) return .broken;
+    if (!try emitOrRecord(scratch, failures, &ir, &module, &table, &sink, display_path, sanitize)) return .broken;
     return .{ .accepted = ir.written() };
 }
 
@@ -8962,7 +8964,7 @@ fn checkMatrixCell(
         const text = try matrix.render(scratch, cell, liveness);
         const display_path = try std.fmt.allocPrint(scratch, "soundness/{f}/{s}", .{ cell, @tagName(liveness) });
         const name = try std.fmt.allocPrint(scratch, "soundness{d}{s}", .{ ordinal, @tagName(liveness) });
-        switch (try compileWithLibrary(scratch, &failures, settings.library, display_path, text, cell.manifest())) {
+        switch (try compileWithLibrary(scratch, &failures, settings.library, display_path, text, cell.manifest(), settings.env.sanitize)) {
             .broken => {},
             .refused => |refusal| switch (liveness) {
                 .live => {
@@ -9163,7 +9165,7 @@ fn checkStorageProgram(
     const display_path = try std.fmt.allocPrint(scratch, "storage/{s}.lin", .{label});
     const name = try std.fmt.allocPrint(scratch, "storage{s}", .{label});
 
-    switch (try compileWithLibrary(scratch, &failures, settings.library, display_path, generated.text, null)) {
+    switch (try compileWithLibrary(scratch, &failures, settings.library, display_path, generated.text, null, settings.env.sanitize)) {
         .broken => {},
         .refused => |refusal| try failures.append(scratch, .{
             .path = display_path,
@@ -9194,7 +9196,7 @@ fn checkStorageProgram(
         const m = (try storage_gen.mutant(scratch, generated, choices, @intCast(k))) orelse break;
         result.mutants += 1;
         const mutant_path = try std.fmt.allocPrint(scratch, "storage/{s}.mutant{d}.lin", .{ label, k });
-        switch (try compileWithLibrary(scratch, &failures, settings.library, mutant_path, m.text, null)) {
+        switch (try compileWithLibrary(scratch, &failures, settings.library, mutant_path, m.text, null, settings.env.sanitize)) {
             .broken => {},
             .refused => |refusal| {
                 result.mutants_refused += 1;
@@ -15722,6 +15724,8 @@ fn emitOrRecord(
     table: *FileTable,
     sink: *Sink,
     display_path: []const u8,
+    /// The sanitizer the program will run under, which instruments its code.
+    sanitize: ?[]const u8,
 ) !bool {
     // Whether the program was accepted is settled after the composed step,
     // not before it: discovery reports [L-Size] about concrete types the
@@ -15743,7 +15747,7 @@ fn emitOrRecord(
         return false;
     }
 
-    if (try emitMlir(gpa, &ir.writer, module, table, sink)) return true;
+    if (try emitMlir(gpa, &ir.writer, module, table, sink, .{ .sanitize = mlir_backend.Sanitizer.named(sanitize) })) return true;
 
     var why: std.Io.Writer.Allocating = .init(gpa);
     try render.renderAll(&why.writer, table, sink, .{ .color = .never });
@@ -18778,7 +18782,7 @@ fn checkDamage(
         // call is how the verifier answers -- there is no second entry point
         // that skips it, and there must not be one.
         var ir: std.Io.Writer.Allocating = .init(scratch);
-        if (!try emitMlir(scratch, &ir.writer, &module, table, &sink)) {
+        if (!try emitMlir(scratch, &ir.writer, &module, table, &sink, .{ .sanitize = mlir_backend.Sanitizer.named(env.sanitize) })) {
             if (saidDefect(&sink)) continue;
 
             var why: std.Io.Writer.Allocating = .init(scratch);
@@ -18923,7 +18927,7 @@ fn checkMaterializedDerives(
 
     const mir = (try lower(gpa, &settled.expanded, &settled.res, &settled.typing, &settled.disposals, &sink, .program)) orelse return error.SourceRejected;
     var ir: std.Io.Writer.Allocating = .init(gpa);
-    if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, display_path)) return;
+    if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, display_path, env.sanitize)) return;
     if (!try sameCodeIgnoringFunctionOrder(gpa, original_ir, ir.written())) {
         try failures.append(gpa, .{
             .path = display_path,
@@ -19059,7 +19063,7 @@ fn checkRewrites(
 
         const mir = (try lower(scratch, &settled.expanded, res, typing, disposals, &sink, .program)) orelse return error.SourceRejected;
         var ir: std.Io.Writer.Allocating = .init(scratch);
-        if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, program.display_path)) continue;
+        if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, program.display_path, env.sanitize)) continue;
 
         // Writing an operator out as what it is defined to be must reach the
         // same code, not merely the same answer: the semantics says `is`, and
@@ -19287,6 +19291,8 @@ fn checkWalkLoops(
     io: std.Io,
     cache: *const OutcomeCache,
     checked_library: ?*const loader.CheckedLibrary,
+    /// The sanitizer the rewritten programs run under.
+    sanitize: ?[]const u8,
     failures: *std.ArrayList(Failure),
     subject: WalkSubject,
 ) !bool {
@@ -19300,7 +19306,7 @@ fn checkWalkLoops(
         const retained_upto = failures.items.len;
         var semantics = subject.semantics;
         semantics.file = id;
-        if (try compareWalkLoops(gpa, per_rewrite.allocator(), io, cache, checked_library, failures, subject, semantics, k, file)) claimed = true;
+        if (try compareWalkLoops(gpa, per_rewrite.allocator(), io, cache, checked_library, sanitize, failures, subject, semantics, k, file)) claimed = true;
         try retainFrom(gpa, failures, retained_upto);
     }
     return claimed;
@@ -19312,6 +19318,7 @@ fn compareWalkLoops(
     io: std.Io,
     cache: *const OutcomeCache,
     checked_library: ?*const loader.CheckedLibrary,
+    sanitize: ?[]const u8,
     failures: *std.ArrayList(Failure),
     subject: WalkSubject,
     semantics: TransformSemantics,
@@ -19356,7 +19363,7 @@ fn compareWalkLoops(
     const module = mir orelse return true;
     if (sink.hasErrors()) return true;
     var ir: std.Io.Writer.Allocating = .init(scratch);
-    if (!try emitOrRecord(gpa, failures, &ir, &module, table, sink, subject.display_path)) return true;
+    if (!try emitOrRecord(gpa, failures, &ir, &module, table, sink, subject.display_path, sanitize)) return true;
     const suffix = try std.fmt.allocPrint(scratch, "walks{d}", .{k});
     _ = try compareRewrittenRun(gpa, scratch, io, cache, run.env, failures, run.answered, suffix, why, ir.written());
     return true;
@@ -19691,7 +19698,7 @@ test "a program is filed under the bytes it embeds" {
         var settled = try checked.checkProgram(a, a, &loaded, &interner, &sink, .program);
         const module = (try lower(a, &settled.expanded, &settled.res, &settled.typing, &settled.disposals, &sink, .program)).?;
         var written: std.Io.Writer.Allocating = .init(a);
-        try testing.expect(try emitMlir(a, &written.writer, &module, &table, &sink));
+        try testing.expect(try emitMlir(a, &written.writer, &module, &table, &sink, .{}));
         ir.* = written.written();
         try testing.expect(std.mem.indexOf(u8, ir.*, motd) != null);
     }
@@ -21211,7 +21218,7 @@ fn checkCase(
             }
 
             var ir: std.Io.Writer.Allocating = .init(gpa);
-            if (try emitOrRecord(gpa, &w.failures, &ir, &mir, &table, &sink, display_path)) {
+            if (try emitOrRecord(gpa, &w.failures, &ir, &mir, &table, &sink, display_path, env.sanitize)) {
                 const mlir_golden = try std.mem.concat(gpa, u8, &.{ stem, ".mlir" });
                 var matching_mlir = false;
                 var native_verified = false;
@@ -21509,7 +21516,7 @@ fn checkCase(
                 if (std.mem.eql(u8, table.get(part.file).path, cf.path)) break part.file;
             } else null;
         }
-        walks_written_out = try checkWalkLoops(gpa, io, env.cache, env.library, &w.failures, .{
+        walks_written_out = try checkWalkLoops(gpa, io, env.cache, env.library, env.sanitize, &w.failures, .{
             .display_path = display_path,
             .entry = case.entry,
             .files = case.files,
