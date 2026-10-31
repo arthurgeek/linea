@@ -4588,7 +4588,9 @@ is not compared again
 
 **[T-ExternRuntime]** The `linea_` symbol namespace is the runtime's. An `extern`
 naming a `linea_` symbol must have the signature the runtime declares for that
-symbol (the same parameter types, conventions and result) in whatever root
+symbol (the same parameter types, conventions and result, and for a parameter
+the runtime calls back through, a function type taking and answering exactly
+what the runtime passes and expects) in whatever root
 declares it, and a `linea_` symbol the runtime does not declare is refused. The
 standard library's declarations are held to the runtime's signatures exactly as
 any other root's are. The compiler-owned symbols above are [T-Extern]'s instead,

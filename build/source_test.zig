@@ -1114,10 +1114,68 @@ const Declared = struct {
     result: runtime_symbols.Scalar,
 };
 
+/// The function pointer types the runtime's headers declare, by name.
+const Typedefs = std.StringHashMapUnmanaged(*const runtime_symbols.Callback);
+
+/// Every `typedef R (*name)(P, …);` written at the start of a line in `text`,
+/// read into the callback shape a table parameter names. A typedef whose
+/// result or parameters this cannot read is left out, so a prototype naming
+/// it does not read either.
+fn callbackTypedefs(gpa: std.mem.Allocator, text: []const u8, out: *Typedefs) !void {
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        if (!std.mem.startsWith(u8, line, "typedef ")) continue;
+        const pointer = std.mem.indexOf(u8, line, "(*") orelse continue;
+        const name_end = std.mem.indexOfScalarPos(u8, line, pointer, ')') orelse continue;
+        const open = std.mem.indexOfScalarPos(u8, line, name_end, '(') orelse continue;
+        const close = std.mem.lastIndexOfScalar(u8, line, ')') orelse continue;
+        if (close <= open) continue;
+        const result = scalarOf(line["typedef ".len..pointer], out) orelse continue;
+        var parameters: std.ArrayList(runtime_symbols.Scalar) = .empty;
+        var readable = true;
+        var pieces = std.mem.splitScalar(u8, line[open + 1 .. close], ',');
+        while (pieces.next()) |piece| {
+            const trimmed = std.mem.trim(u8, piece, " \t");
+            const cut = std.mem.lastIndexOfScalar(u8, trimmed, ' ') orelse {
+                readable = false;
+                break;
+            };
+            const parameter = scalarOf(trimmed[0..cut], out) orelse {
+                readable = false;
+                break;
+            };
+            try parameters.append(gpa, parameter.scalar);
+        }
+        if (!readable) continue;
+        const shape = try gpa.create(runtime_symbols.Callback);
+        shape.* = .{ .parameters = try parameters.toOwnedSlice(gpa), .result = result.scalar };
+        try out.put(gpa, line[pointer + 2 .. name_end], shape);
+    }
+}
+
+test "a callback typedef is read into the shape a table parameter names" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var typedefs: Typedefs = .empty;
+    try callbackTypedefs(gpa,
+        \\typedef void (*linea_task_release)(unsigned long at, unsigned long len);
+        \\typedef size_t (*linea_unreadable)(unsigned long at);
+    , &typedefs);
+    const release = scalarOf("linea_task_release", &typedefs).?;
+    const two: runtime_symbols.Callback = .{ .parameters = &.{ .u64, .u64 }, .result = .unit };
+    const three: runtime_symbols.Callback = .{ .parameters = &.{ .u64, .u64, .u64 }, .result = .unit };
+    try testing.expect(runtime_symbols.sameParameter(release, .{ .scalar = .callback, .callback = &two }));
+    try testing.expect(!runtime_symbols.sameParameter(release, .{ .scalar = .callback, .callback = &three }));
+    try testing.expect(scalarOf("linea_unreadable", &typedefs) == null);
+}
+
 /// The scalar a C or Zig type spells, and whether it is passed through a
-/// pointer the callee writes. Null for a spelling the table has no scalar for.
-fn scalarOf(written: []const u8) ?runtime_symbols.Parameter {
+/// pointer the callee writes, or the shape of a callback a typedef in
+/// `typedefs` names. Null for a spelling the table has no scalar for.
+fn scalarOf(written: []const u8, typedefs: *const Typedefs) ?runtime_symbols.Parameter {
     const t = std.mem.trim(u8, written, " \t\n");
+    if (typedefs.get(t)) |shape| return .{ .scalar = .callback, .callback = shape };
     const Spelling = struct { []const u8, runtime_symbols.Parameter };
     const spellings = [_]Spelling{
         .{ "uint8_t", .{ .scalar = .u8 } },
@@ -1137,10 +1195,6 @@ fn scalarOf(written: []const u8) ?runtime_symbols.Parameter {
         .{ "*i64", .{ .scalar = .i64, .passing = .inout } },
         .{ "unsigned long *", .{ .scalar = .u64, .passing = .inout } },
         .{ "long *", .{ .scalar = .i64, .passing = .inout } },
-        // The function pointer types `task.h` names.
-        .{ "linea_task_entry", .{ .scalar = .callback } },
-        .{ "linea_task_release", .{ .scalar = .callback } },
-        .{ "linea_task_worker", .{ .scalar = .callback } },
     };
     for (spellings) |s| if (std.mem.eql(u8, s[0], t)) return s[1];
     return null;
@@ -1157,7 +1211,7 @@ const Unread = struct { symbol: []const u8, why: []const u8 };
 /// a declaration whose shape or types this cannot read is returned as
 /// unread rather than skipped: a runtime function the table cannot be held to
 /// is a failure, not an omission.
-fn declaredIn(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(Declared), unread: *std.ArrayList(Unread)) !void {
+fn declaredIn(gpa: std.mem.Allocator, text: []const u8, typedefs: *const Typedefs, out: *std.ArrayList(Declared), unread: *std.ArrayList(Unread)) !void {
     var at: usize = 0;
     while (std.mem.indexOfPos(u8, text, at, "linea_")) |found| {
         at = found + 1;
@@ -1187,7 +1241,7 @@ fn declaredIn(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(Decl
             if (std.mem.startsWith(u8, tail, "callconv(.c)")) tail = std.mem.trim(u8, tail["callconv(.c)".len..], " ");
             break :zig tail;
         } else head;
-        const result = scalarOf(result_spelling) orelse {
+        const result = scalarOf(result_spelling, typedefs) orelse {
             try unread.append(gpa, .{ .symbol = symbol, .why = "its result type is not one the table spells" });
             continue;
         };
@@ -1206,7 +1260,7 @@ fn declaredIn(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(Decl
                     (if (trimmed[cut] == '*') trimmed[0 .. cut + 1] else trimmed[0..cut])
                 else
                     trimmed;
-                const parameter = scalarOf(spelled) orelse {
+                const parameter = scalarOf(spelled, typedefs) orelse {
                     readable = false;
                     break;
                 };
@@ -1227,6 +1281,7 @@ test "a runtime declaration the table cannot read is reported, not skipped" {
     const gpa = arena.allocator();
     var declared: std.ArrayList(Declared) = .empty;
     var unread: std.ArrayList(Unread) = .empty;
+    const no_typedefs: Typedefs = .empty;
     try declaredIn(gpa,
         \\long linea_close(int fd);
         \\size_t linea_measure(int fd);
@@ -1237,7 +1292,7 @@ test "a runtime declaration the table cannot read is reported, not skipped" {
         \\    linea_close(1);
         \\/* linea_commented(int) */
         \\export fn linea_float64_parse(address: u64, length: u64, bits: *u64, offset: *u64) callconv(.c) u64 {
-    , &declared, &unread);
+    , &no_typedefs, &declared, &unread);
     try testing.expectEqual(@as(usize, 3), declared.items.len);
     try testing.expectEqualStrings("linea_close", declared.items[0].symbol);
     // A symbol the compiler owns is read like any other, so its widths are
@@ -1259,7 +1314,11 @@ test "the runtime signature table is the runtime's own sources" {
     var unread: std.ArrayList(Unread) = .empty;
     const sources = @import("runtime_sources").files;
     try testing.expect(sources.len > 0);
-    for (sources) |file| try declaredIn(gpa, file.text, &declared, &unread);
+    // A prototype may name a typedef another header declares, so every
+    // typedef is read before any prototype.
+    var typedefs: Typedefs = .empty;
+    for (sources) |file| try callbackTypedefs(gpa, file.text, &typedefs);
+    for (sources) |file| try declaredIn(gpa, file.text, &typedefs, &declared, &unread);
 
     // Every declaration reads, so nothing the runtime provides escapes the
     // comparison below.
@@ -1276,7 +1335,11 @@ test "the runtime signature table is the runtime's own sources" {
             if (!std.mem.eql(u8, d.symbol, expected.symbol)) continue;
             found = true;
             try testing.expectEqual(expected.result, d.result);
-            try testing.expectEqualSlices(runtime_symbols.Parameter, expected.parameters, d.parameters);
+            try testing.expectEqual(expected.parameters.len, d.parameters.len);
+            for (expected.parameters, d.parameters) |want, got| {
+                if (!runtime_symbols.sameParameter(want, got)) std.debug.print("{s}: a parameter differs from the runtime's\n", .{expected.symbol});
+                try testing.expect(runtime_symbols.sameParameter(want, got));
+            }
         }
         if (!found) std.debug.print("the runtime does not define {s}\n", .{expected.symbol});
         try testing.expect(found);

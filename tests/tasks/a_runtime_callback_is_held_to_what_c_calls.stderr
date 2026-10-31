@@ -1,0 +1,10 @@
+error[T-ExternRuntime]: the runtime gives `linea_task_start` the signature `fn(UInt64, fn(UInt64, UInt64, UInt64), fn(UInt64, UInt64), UInt64, UInt64) -> UInt64`
+ --> tests/tasks/a_runtime_callback_is_held_to_what_c_calls/main.lin:4:11
+  |
+4 | extern fn linea_task_start(task: UInt64, entry: fn(endpoint: UInt8, at: Float64), release: fn(at: UInt64, len: UInt64),  ...
+  |           ^^^^^^^^^^^^^^^^ declare it with the runtime's parameter types, conventions and result
+error[T-ThreadStart]: `linea_task_start` runs Linea code on a thread of its own, and only `task.Slot.start` may hand it a body
+  --> tests/tasks/a_runtime_callback_is_held_to_what_c_calls/main.lin:11:19
+   |
+11 |     let _handle = linea_task_start(0, run, release_nothing, 0, 0)
+   |                   ^^^^^^^^^^^^^^^^ start the task with `task.prepare(body)` and `start()`, whose handle keeps what the body captured until `close` joins it

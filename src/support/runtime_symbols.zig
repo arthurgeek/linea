@@ -94,7 +94,33 @@ pub const Scalar = enum { u8, i32, u32, i64, u64, f32, f64, ptr, callback, unit 
 /// the callee writes, which a Linea declaration spells `inout`.
 pub const Passing = enum { read, inout };
 
-pub const Parameter = struct { scalar: Scalar, passing: Passing = .read };
+/// The function a `callback` parameter's address names, as C calls it: the
+/// scalars it takes, each by value, and the one it answers.
+pub const Callback = struct { parameters: []const Scalar, result: Scalar };
+
+/// A parameter's scalar, how it is passed, and for a `callback` the shape of
+/// the function C calls through it, which [T-ExternRuntime] holds the Linea
+/// declaration's function type to.
+pub const Parameter = struct { scalar: Scalar, passing: Passing = .read, callback: ?*const Callback = null };
+
+/// Whether two parameters are the same, a callback's shape compared by what
+/// it holds rather than by where it is.
+pub fn sameParameter(a: Parameter, b: Parameter) bool {
+    if (a.scalar != b.scalar or a.passing != b.passing) return false;
+    const left = a.callback orelse return b.callback == null;
+    const right = b.callback orelse return false;
+    return left.result == right.result and std.mem.eql(Scalar, left.parameters, right.parameters);
+}
+
+test "parameters are compared by the callback shape they hold" {
+    const three: Callback = .{ .parameters = &.{ .u64, .u64, .u64 }, .result = .unit };
+    const also: Callback = .{ .parameters = &.{ .u64, .u64, .u64 }, .result = .unit };
+    const two: Callback = .{ .parameters = &.{ .u64, .u64 }, .result = .unit };
+    try testing.expect(sameParameter(.{ .scalar = .callback, .callback = &three }, .{ .scalar = .callback, .callback = &also }));
+    try testing.expect(!sameParameter(.{ .scalar = .callback, .callback = &three }, .{ .scalar = .callback, .callback = &two }));
+    try testing.expect(!sameParameter(.{ .scalar = .callback, .callback = &three }, .{ .scalar = .callback }));
+    try testing.expect(sameParameter(.{ .scalar = .u64 }, .{ .scalar = .u64 }));
+}
 
 /// Where a symbol's definition comes from.
 pub const Provider = enum {
@@ -126,6 +152,13 @@ pub const Signature = struct {
 
 fn p(scalar: Scalar) Parameter {
     return .{ .scalar = scalar };
+}
+
+/// A `callback` parameter naming a function C calls with `parameters` and
+/// expects `result` from.
+fn cb(comptime parameters: []const Scalar, comptime result: Scalar) Parameter {
+    const shape = comptime Callback{ .parameters = parameters, .result = result };
+    return .{ .scalar = .callback, .callback = &shape };
 }
 
 const written: Parameter = .{ .scalar = .u64, .passing = .inout };
@@ -264,7 +297,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_owner_done", .parameters = &.{p(.u64)}, .result = .unit },
     .{ .symbol = "linea_owner_close", .parameters = &.{p(.u64)}, .result = .unit },
     .{ .symbol = "linea_owner_free", .parameters = &.{p(.u64)}, .result = .unit },
-    .{ .symbol = "linea_task_start", .parameters = &.{ p(.u64), p(.callback), p(.callback), p(.u64), p(.u64) }, .result = .u64, .starts_thread = true },
+    .{ .symbol = "linea_task_start", .parameters = &.{ p(.u64), cb(&.{ .u64, .u64, .u64 }, .unit), cb(&.{ .u64, .u64 }, .unit), p(.u64), p(.u64) }, .result = .u64, .starts_thread = true },
     .{ .symbol = "linea_task_cancel", .parameters = &.{p(.u64)}, .result = .unit },
     .{ .symbol = "linea_chan_send", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit },
     .{ .symbol = "linea_chan_recv", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit },
