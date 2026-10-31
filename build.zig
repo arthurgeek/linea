@@ -222,15 +222,17 @@ const NativeTests = struct {
     /// With no sanitizer selected, Zig compiles and links it. A sanitizer's
     /// runtime is one only the C toolchain links, so a sanitized test is
     /// compiled and linked by `cc`, as a sanitized program is, with each file
-    /// compiled alone because each takes its own flags.
+    /// compiled alone because each takes its own flags. A report stops the
+    /// test (`-fno-sanitize-recover=all`): an undefined-behaviour check that
+    /// printed and carried on would leave the run's status clean.
     fn add(self: NativeTests, step: *std.Build.Step, name: []const u8, sources: []const Source) void {
         const b = self.b;
         const linux = self.target.result.os.tag == .linux;
         if (self.sanitize.flag()) |sanitizer| {
             const san_arg = b.fmt("-fsanitize={s}", .{sanitizer});
-            const link = b.addSystemCommand(&.{ "cc", san_arg, "-fsanitize=undefined", "-g" });
+            const link = b.addSystemCommand(&.{ "cc", san_arg, "-fsanitize=undefined", "-fno-sanitize-recover=all", "-g" });
             for (sources) |input| {
-                const compile = b.addSystemCommand(&.{ "cc", "-c", "-g", "-O1", san_arg, "-fsanitize=undefined" });
+                const compile = b.addSystemCommand(&.{ "cc", "-c", "-g", "-O1", san_arg, "-fsanitize=undefined", "-fno-sanitize-recover=all" });
                 compile.addPrefixedDirectoryArg("-I", b.path("runtime"));
                 compile.addArgs(input.flags);
                 compile.addFileArg(b.path(input.file));
@@ -242,6 +244,13 @@ const NativeTests = struct {
             if (linux) link.addArgs(&.{ "-lm", "-lpthread" });
             const run = std.Build.Step.Run.create(b, b.fmt("run {s}", .{name}));
             run.addFileArg(binary);
+            // The runtime answers a request the C allocator refuses with null,
+            // and the tests hold it to that; a sanitizer's allocator stops the
+            // program instead unless told to return null as `calloc` does.
+            run.setEnvironmentVariable(
+                if (self.sanitize == .thread) "TSAN_OPTIONS" else "ASAN_OPTIONS",
+                "allocator_may_return_null=1",
+            );
             step.dependOn(&run.step);
             return;
         }
@@ -1690,18 +1699,25 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/task_fault_test.c", .flags = runtime_flags.items },
     });
 
-    // The runtime is compiled for Linux as well as for the host, so a platform
-    // constant that is signed on one and unsigned on the other is a build
-    // error on a macOS checkout and not a trap on the first Linux run.
-    const linux_target = b.resolveTargetQuery(.{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .gnu });
-    for ([_]struct { name: []const u8, file: []const u8, flags: []const []const u8 }{
-        .{ .name = "linea_rt_linux", .file = "runtime/linea_rt.c", .flags = checked_flags.items },
-        .{ .name = "io_linux", .file = "runtime/io.c", .flags = runtime_flags.items },
-        .{ .name = "net_linux", .file = "runtime/net.c", .flags = runtime_flags.items },
-        .{ .name = "clock_linux", .file = "runtime/clock.c", .flags = runtime_flags.items },
-        .{ .name = "task_linux", .file = "runtime/task.c", .flags = runtime_flags.items },
-    }) |input| {
-        native_runtime_step.dependOn(&runtimeObject(b, linux_target, input.name, b.path(input.file), input.flags).step);
+    // The runtime is compiled for Linux and for macOS as well as for the host,
+    // so a platform constant that is signed on one and unsigned on the other,
+    // or a branch only one platform takes, is a build error on either
+    // checkout and not a failure on the first run on the other.
+    for ([_]struct { os: []const u8, query: std.Target.Query }{
+        .{ .os = "linux", .query = .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .gnu } },
+        .{ .os = "macos", .query = .{ .cpu_arch = .aarch64, .os_tag = .macos } },
+    }) |platform| {
+        const platform_target = b.resolveTargetQuery(platform.query);
+        for ([_]struct { name: []const u8, file: []const u8, flags: []const []const u8 }{
+            .{ .name = "linea_rt", .file = "runtime/linea_rt.c", .flags = checked_flags.items },
+            .{ .name = "io", .file = "runtime/io.c", .flags = runtime_flags.items },
+            .{ .name = "net", .file = "runtime/net.c", .flags = runtime_flags.items },
+            .{ .name = "clock", .file = "runtime/clock.c", .flags = runtime_flags.items },
+            .{ .name = "task", .file = "runtime/task.c", .flags = runtime_flags.items },
+        }) |input| {
+            const name = b.fmt("{s}_{s}", .{ input.name, platform.os });
+            native_runtime_step.dependOn(&runtimeObject(b, platform_target, name, b.path(input.file), input.flags).step);
+        }
     }
 
     // The runtime objects are compiled for the baseline CPU of the target

@@ -76,9 +76,17 @@ static struct timespec late_clock;
 static unsigned long untimed_waits = 0;
 
 int linea_test_clock_gettime(clockid_t clock, struct timespec *now);
+/* While `wall_is_set_back` is set, the wall clock reads the start of 1970,
+ * as it does after someone sets the system's time back. */
+static int wall_is_set_back = 0;
+
 int linea_test_clock_gettime(clockid_t clock, struct timespec *now) {
     if (__atomic_load_n(&clock_is_late, __ATOMIC_SEQ_CST)) {
         *now = late_clock;
+        return 0;
+    }
+    if (clock == CLOCK_REALTIME && __atomic_load_n(&wall_is_set_back, __ATOMIC_SEQ_CST)) {
+        *now = (struct timespec){.tv_sec = 0, .tv_nsec = 0};
         return 0;
     }
     return clock_gettime(clock, now);
@@ -185,6 +193,32 @@ static void a_receive_timeout_past_the_last_time_waits_without_a_deadline(void) 
     linea_chan_close(session);
 }
 
+/* The body of a task that sends one payload a tenth of a second after it
+ * starts. */
+static void send_after_a_tenth(unsigned long endpoint, unsigned long at, unsigned long len) {
+    (void)at;
+    (void)len;
+    const struct timespec tenth = {.tv_sec = 0, .tv_nsec = 100000000L};
+    nanosleep(&tenth, 0);
+    unsigned long payload = 4242;
+    linea_chan_send(endpoint, (unsigned long)&payload, sizeof(payload));
+    linea_chan_close(endpoint);
+}
+
+/* A timed receive measures its timeout on the monotonic clock, so setting
+ * the wall clock back neither ends the wait early nor makes it longer. */
+static void a_receive_timeout_does_not_read_the_wall_clock(void) {
+    const long task = linea_task_prepare(1UL << 16);
+    assert(task > 0);
+    __atomic_store_n(&wall_is_set_back, 1, __ATOMIC_SEQ_CST);
+    const unsigned long session = linea_task_start((unsigned long)task, send_after_a_tenth, release_nothing, 0, 0);
+    unsigned long received = 0;
+    assert(linea_chan_recv_until(session, (unsigned long)&received, sizeof(received), 10UL * 1000000000UL) == 1);
+    assert(received == 4242);
+    __atomic_store_n(&wall_is_set_back, 0, __ATOMIC_SEQ_CST);
+    linea_chan_close(session);
+}
+
 int main(void) {
     refuse_record = 1;
     long refused = linea_task_prepare(1UL << 16);
@@ -219,7 +253,8 @@ int main(void) {
 
     assert((time_t)-1 < 0);
     a_receive_timeout_past_the_last_time_waits_without_a_deadline();
+    a_receive_timeout_does_not_read_the_wall_clock();
 
-    puts("native task faults: refused records, mappings, threads and signal stacks leave nothing behind, and a wait past the last time has no deadline");
+    puts("native task faults: refused records, mappings, threads and signal stacks leave nothing behind, a wait past the last time has no deadline, and a timeout ignores the wall clock");
     return 0;
 }

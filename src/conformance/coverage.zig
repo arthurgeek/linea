@@ -492,12 +492,12 @@ pub const Operation = enum {
 
 pub fn reachOfOperation(tag: Operation) Reach {
     return switch (tag) {
-        // A generated program is run, and these need the runtime's threads
-        // and channels. Once it runs them, the generator can start a task
-        // whose body sends a generated value over a protocol it writes, and
-        // print only after `close` has joined the task, so the output does not
-        // depend on scheduling.
-        .start, .send, .recv => .{ .missing = "the runtime that runs a task and its sessions" },
+        // The runtime runs tasks and their sessions; the generator does not
+        // write them yet. A generated task would have a body that sends a
+        // generated value over a protocol the generator writes, and the
+        // program would print only after `close` has joined the task, so the
+        // output does not depend on scheduling.
+        .start, .send, .recv => .{ .missing = "a generator that writes tasks and the sessions between them" },
     };
 }
 
