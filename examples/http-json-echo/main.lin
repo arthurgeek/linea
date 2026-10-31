@@ -17,12 +17,12 @@ import std.mem
 import std.net
 import std.task
 import std.testing
+import std.uuid
 
 // `use` brings a trait's operations into scope, so a test can call
 // `&router.serve_http(&ctx, request)` on a router directly.
 use http.Handler
 use mem.Lender
-use task.Unowned
 
 // `Options` holds what the command line asked for: the port to listen on,
 // and how many requests to answer before stopping, or `.None` to serve until
@@ -243,26 +243,17 @@ fn main() -> UInt8 {
     // client of the task that owns the `App`. `http.with_state` lends the
     // task's `Ctx` to the router on every request; `http.logged` wraps it, logs
     // the address the server listens on, times each request, and logs one line
-    // for it once the response has been written; `http.with_request_ids_from`
-    // wraps that in turn, numbering each request from `ids`, a client of one
-    // count an owning task keeps, so the server numbers every request once
-    // whichever task answers it. Port 0 asks the
-    // operating system for any free port. A logger to standard error owns
-    // nothing, so each `copy(logger)` costs nothing, and the routes were
+    // for it once the response has been written; `http.with_request_ids`
+    // wraps that in turn, giving each request the id its client sent or a new
+    // time-ordered UUID, which every serving task makes on its own. Port 0
+    // asks the operating system for any free port. A logger to standard error
+    // owns nothing, so each `copy(logger)` costs nothing, and the routes were
     // checked above, so registering them again cannot fail.
-    defer let numbers = match task.own(UInt64(0)) {
-        Ok(numbers) => numbers,
-        Err(Unowned { state: _, reason }) => {
-            logger.error("cannot start the task that numbers requests", log.field("reason", reason))
-            return 1
-        },
-    }
-    let ids = numbers.client()
-    let serving = [sink logger = copy(logger), sink ids] |app: task.Client[App]| -> where carries(app, ids) {
+    let serving = [sink logger = copy(logger)] |app: task.Client[App]| -> where carries(app) {
         var router: http.Router[Ctx] = http.Router.new()
         routes(&router).unwrap()
         let ctx = Ctx { app = copy(app), logger = copy(logger) }
-        http.with_request_ids_from(ids, http.logged(copy(logger), http.with_state(ctx, router)))
+        http.with_request_ids(http.logged(copy(logger), http.with_state(ctx, router)))
     }
     // `listen_and_serve_with` opens the listener, keeps `App` in an owning
     // task while serving, joins every serving task and closes the listener
@@ -492,22 +483,24 @@ test fn echo_answers_the_largest_messages_the_default_limits_allow() {
     testing.assert_eq(refused.status(), http.Status.UnprocessableContent, "the status changed")?
 }
 
-// `http.with_request_ids` wraps the whole router, so every response carries the
-// next number. A test lends the context itself, `&ctx`, as `http.with_state`
-// does when serving.
-test fn each_response_carries_its_request_number() {
+// `http.with_request_ids` wraps the whole router, so every response carries
+// the id its client sent, or a new UUID when it sent none. A test lends the
+// context itself, `&ctx`, as `http.with_state` does when serving.
+test fn each_response_carries_its_request_id() {
     var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
-    defer var numbered = http.with_request_ids(router)
+    defer var identified = http.with_request_ids(router)
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let first = http.new_request(arena.handle(), "GET", "/health", body: "").unwrap()
-    let first_answer = &numbered.serve_http(&ctx, first.request()).unwrap()
-    testing.assert_eq(first_answer.header("X-Request-Id"), Option.Some("1"), "the first response was not numbered 1")?
-    let second = http.new_request(arena.handle(), "GET", "/health", body: "").unwrap()
-    let second_answer = &numbered.serve_http(&ctx, second.request()).unwrap()
-    testing.assert_eq(second_answer.header("X-Request-Id"), Option.Some("2"), "the second response was not numbered 2")?
+    var traced = http.new_request(arena.handle(), "GET", "/health", body: "").unwrap()
+    &traced.add_header("X-Request-Id", "checkout-7").unwrap()
+    let traced_answer = &identified.serve_http(&ctx, traced.request()).unwrap()
+    testing.assert_eq(traced_answer.header("X-Request-Id"), Option.Some("checkout-7"), "the client's id was not kept")?
+    let fresh = http.new_request(arena.handle(), "GET", "/health", body: "").unwrap()
+    let fresh_answer = &identified.serve_http(&ctx, fresh.request()).unwrap()
+    let made = uuid.Uuid.parse(fresh_answer.header("X-Request-Id").unwrap())
+    testing.assert(made.is_ok(), "a request with no id was not given a UUID")?
 }
 
 // The router records the path value `greet` reads, so this request goes

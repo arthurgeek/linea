@@ -588,9 +588,10 @@ struct Request[P: Allocator = mem.SystemAllocator] {
     // matches the request.
     matched: Str,
     path_values: Option[mem.Slice[Field]],
-    // `request_id` is the number `with_request_ids` gave the request. Only that
-    // middleware sets it, so unlike a header it is never the client's.
-    request_id: Option[UInt64],
+    // `request_id` is the id `with_request_ids` gave the request. Only that
+    // middleware sets it, so a client's header reaches it only when the
+    // middleware kept it as well formed.
+    request_id: Option[Str],
 }
 
 impl[P: Allocator] Request[P] {

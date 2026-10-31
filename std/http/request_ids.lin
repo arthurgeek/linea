@@ -2,50 +2,57 @@ import std.io
 import std.log
 import std.net
 import std.mem
-import std.task
 import std.testing
 import std.time
+import std.uuid
 
-// `RequestIds` is a middleware that numbers requests. Each request it passes
-// to its handler carries the next number, 1, 2, 3 and so on, in two places:
+// `RequestIds` is a middleware that gives every request an id. The id is the
+// one the client or a proxy in front of the server sent in `X-Request-Id`,
+// when that is well formed, so a request keeps one id across the services it
+// passes through; otherwise it is a new version 7 UUID, such as
+// `0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17`, which sorts by the millisecond it
+// was made. Each serving task makes its ids on its own, so a server that
+// serves on many tasks needs no count they share.
+//
+// An id the client sent is well formed when it is 1 to 128 bytes of visible
+// ASCII, from `!` to `~`, with no space or control byte. The first
+// `X-Request-Id` header the client sent is the one read.
+//
+// The request it passes to its handler carries the id in two places:
 //
 // - a header `X-Request-Id`, which the handler reads with
 //   `request.header("X-Request-Id")`, and which is the first header the
-//   request's `headers()` walk yields. Headers the client sent under that name
-//   are dropped from the request, so the handler never sees a number a client
-//   chose; the rest keep their arrival order.
-// - the request's own number, which `http.logged` prints as `request_id`. It
-//   is a field only this middleware sets, so a header a client sends is never
-//   logged.
+//   request's `headers()` walk yields. Every other header the client sent
+//   under that name is dropped; the rest keep their arrival order.
+// - the request's own id, which `http.logged` prints as `request_id`. It is a
+//   field only this middleware sets, so without it a header a client sends is
+//   never logged, and with it only a well-formed one is. The logger quotes and
+//   escapes a value as it does any other.
 //
 // The answer the handler gives, a response or a refusal, carries the same
 // `X-Request-Id` header, replacing one the handler set itself, so a client can
-// quote the number when reporting a problem. An answer the server writes
-// without the handler, such as a 413, 408 or 503, has no number, and neither
-// has the 500 given when the buffers below cannot grow.
+// quote the id when reporting a problem. An answer the server writes without
+// the handler, such as a 413, 408 or 503, has no id, and neither has the 500
+// given when the buffers below cannot grow.
 //
-// A number identifies a request among those this middleware has seen since it
-// was made. To have the number logged, put `RequestIds` outside `http.logged`:
+// To have the id logged, put `RequestIds` outside `http.logged`:
 //
 //     http.with_request_ids(http.logged(logger, router))
 //
-// Inside `logged`, the handler and the answer still carry the number, but the
-// line has no `request_id` field.
+// Inside `logged`, the handler and the answer still carry the id, but the line
+// has no `request_id` field.
 //
-// The request it hands on is the original with the number added. Its head and
+// The request it hands on is the original with the id added. Its head and
 // header table are rebuilt in buffers the middleware keeps and reuses, valid
 // until the next request. The buffers keep the size of the largest head seen.
 @opaque
 struct RequestIds[H, A: Allocator = mem.SystemAllocator] {
     handler: H,
-    issued: UInt64,
-    // `drawn` is the owning task's count every serving task numbers from, or
-    // `.None` when this middleware numbers from `issued` alone.
-    drawn: Option[task.Client[UInt64]],
-    // `pending` is the number of the request the handler is answering or has
-    // just answered, until the event that reports its exchange takes it. An
-    // event arriving without one belongs to a request the handler never saw.
-    pending: Option[UInt64],
+    // `pending` is where the id of the request the handler is answering or has
+    // just answered lies in the buffers' head, until the event that reports
+    // its exchange takes it. An event arriving without one belongs to a
+    // request the handler never saw.
+    pending: Option[Span],
     buffers: Buffers[A],
 }
 
@@ -53,7 +60,7 @@ struct RequestIds[H, A: Allocator = mem.SystemAllocator] {
 derive[H: Release, A: Allocator] Release for RequestIds[H, A]
 
 // `Buffers` hold the rebuilt request: `head` is the original head followed by
-// the header's name and the number, and `fields` locates the headers in it.
+// the header's name and the id, and `fields` locates the headers in it.
 struct Buffers[A: Allocator] {
     head: Vec[UInt8, A],
     fields: Vec[Field, A],
@@ -61,11 +68,19 @@ struct Buffers[A: Allocator] {
 
 derive[A: Allocator] Release for Buffers[A]
 
-// The name of the header that carries the number.
+// The name of the header that carries the id.
 let request_id_header: Str = "X-Request-Id"
 
+// An id a client sends is kept when it has at most this many bytes.
+let max_sent_id_bytes: UInt64 = 128
+
+// Visible ASCII runs from `!`, byte 33, to `~`, byte 126.
+let first_visible_byte: UInt8 = 33
+
+let last_visible_byte: UInt8 = 126
+
 // `with_request_ids` wraps `handler`, which may be a whole `Router`, so that
-// every request it answers is numbered. The buffers it keeps come from the
+// every request it answers has an id. The buffers it keeps come from the
 // system allocator; `with_request_ids_in` takes them from another.
 pub fn with_request_ids[H](sink handler: H) -> RequestIds[H, mem.SystemAllocator] where carries(handler) {
     with_request_ids_in(mem.system(), handler)
@@ -76,77 +91,68 @@ pub fn with_request_ids[H](sink handler: H) -> RequestIds[H, mem.SystemAllocator
 pub fn with_request_ids_in[H, A: Allocator](allocator: A, sink handler: H) -> RequestIds[H, A] where carries(handler, allocator) {
     .{
         handler,
-        issued = 0,
-        drawn = .None,
         pending = .None,
         buffers = .{ head = Vec.new_in(allocator), fields = Vec.new_in(allocator) },
     }
 }
 
-// `with_request_ids_from` wraps `handler` as `with_request_ids` does, but takes
-// each number from the count the owning task `numbers` reaches keeps. A server
-// whose serving tasks each build their own handler gives every task's
-// middleware a client of one count, so the server numbers each request once,
-// whichever task answers it. The buffers it keeps come from the system
-// allocator; `with_request_ids_from_in` takes them from another.
-pub fn with_request_ids_from[H](numbers: task.Client[UInt64], sink handler: H) -> RequestIds[H, mem.SystemAllocator] where carries(handler, numbers) {
-    with_request_ids_from_in(mem.system(), numbers, handler)
-}
-
-test fn two_middlewares_drawing_from_one_count_number_requests_once() {
-    defer let count = task.own(UInt64(0)).unwrap()
-    defer var first = with_request_ids_from(count.client(), Echoing { served = 0 })
-    defer var second = with_request_ids_from(count.client(), Echoing { served = 0 })
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    var nothing = ()
-    let sent = new_request(arena.handle(), "GET", "/hello", body: "").unwrap()
-    let one = &first.serve_http(&nothing, sent.request()).unwrap()
-    let again = new_request(arena.handle(), "GET", "/hello", body: "").unwrap()
-    let two = &second.serve_http(&nothing, again.request()).unwrap()
-    testing.assert_eq(one.header("X-Request-Id"), Option.Some("1"), "the first request was not numbered 1")?
-    testing.assert_eq(two.header("X-Request-Id"), Option.Some("2"), "the second middleware did not continue the count")?
-}
-
-// `with_request_ids_from_in` is `with_request_ids_from` with the buffers it
-// keeps taken from `allocator`.
-pub fn with_request_ids_from_in[H, A: Allocator](allocator: A, numbers: task.Client[UInt64], sink handler: H) -> RequestIds[H, A] where carries(handler, allocator, numbers) {
-    .{
-        handler,
-        issued = 0,
-        drawn = .Some(copy(numbers)),
-        pending = .None,
-        buffers = .{ head = Vec.new_in(allocator), fields = Vec.new_in(allocator) },
+// Whether `id`, sent by a client, is kept as the request's id: 1 to 128 bytes,
+// each visible ASCII.
+fn well_formed(id: Str) -> Bool {
+    if id.length() == 0 || id.length() > max_sent_id_bytes {
+        return false
     }
+    for at in 0..id.length() {
+        let byte = id.byte(at).unwrap()
+        if byte < first_visible_byte || byte > last_visible_byte {
+            return false
+        }
+    }
+    true
 }
 
-test fn a_middleware_drawing_from_a_count_keeps_its_buffers_in_an_arena() {
-    defer let count = task.own(UInt64(41)).unwrap()
-    defer let buffers = mem.Arena.open(mem.system(), size: 65536)
-    defer var numbered = with_request_ids_from_in(buffers.handle(), count.client(), Echoing { served = 0 })
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    var nothing = ()
-    let sent = new_request(arena.handle(), "GET", "/hello", body: "").unwrap()
-    let answered = &numbered.serve_http(&nothing, sent.request()).unwrap()
-    testing.assert_eq(answered.header("X-Request-Id"), Option.Some("42"), "the number did not come from the count")?
+test fn an_id_is_kept_only_when_it_is_short_visible_ascii() {
+    testing.assert(well_formed("0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17"), "a UUID was refused")?
+    testing.assert(well_formed("a"), "a one-byte id was refused")?
+    testing.assert(!well_formed(""), "an empty id was kept")?
+    testing.assert(!well_formed("two words"), "an id with a space was kept")?
+    testing.assert(!well_formed("tab\tid"), "an id with a control byte was kept")?
+    testing.assert(!well_formed("caf\u{e9}"), "an id with a byte past ASCII was kept")?
+    defer var long = String.new()
+    for _ in 0..max_sent_id_bytes {
+        &long.append("a").unwrap()
+    }
+    testing.assert(well_formed(long.view()), "an id of the longest length was refused")?
+    &long.append("a").unwrap()
+    testing.assert(!well_formed(long.view()), "an id one byte too long was kept")?
 }
 
-// `number_request` returns `request` numbered `number`, rebuilt in `buffers`.
-// It refuses with `Oom` when they cannot grow.
-fn number_request[P: Allocator, A: Allocator](inout buffers: Buffers[A], request: Request[P], number: UInt64) -> Result[Request[P], mem.Oom] where borrows(buffers), carries(request) {
-    var digits = String.new_in(request.allocator())
-    number.fmt(&digits)?
-    let value = digits.view()
+// `identify` rebuilds `request` in `buffers` with its id first among its
+// headers, and returns where the id lies in the rebuilt head. The id is the
+// first `X-Request-Id` the client sent, when that is well formed, or a new
+// version 7 UUID. It refuses with `Oom` when the buffers cannot grow.
+fn identify[P: Allocator, A: Allocator](inout buffers: Buffers[A], request: Request[P]) -> Result[Span, mem.Oom] where carries() {
+    var made = String.new_in(request.allocator())
+    // A request that sent no id is read as having sent an empty one, which
+    // is not well formed.
+    let sent = request.header(request_id_header).unwrap_or("")
+    let id = if well_formed(sent) {
+        sent
+    } else {
+        uuid.Uuid.v7().fmt(&made)?
+        made.view()
+    }
     let held = copy(request.head)
     &buffers.head.clear()
     &buffers.fields.clear()
-    &buffers.head.reserve(held.length() + request_id_header.length() + value.length())?
+    &buffers.head.reserve(held.length() + request_id_header.length() + id.length())?
     &buffers.fields.reserve(request.header_fields.length() + 1)?
     &buffers.head.append_slice(held.as_bytes())?
     let name = push_stored(&buffers.head, request_id_header.as_bytes())?
-    let text = push_stored(&buffers.head, value.as_bytes())?
-    // The number's header comes first; the client's headers follow in arrival
-    // order, except any it sent under the number's name.
-    match &buffers.fields.push(.{ name, value = text }) {
+    let value = push_stored(&buffers.head, id.as_bytes())?
+    // The id's header comes first; the client's headers follow in arrival
+    // order, except any it sent under the id's name.
+    match &buffers.fields.push(.{ name, value = copy(value) }) {
         Ok(_) => {},
         Err(_) => return .Err(.Exhausted),
     }
@@ -159,14 +165,14 @@ fn number_request[P: Allocator, A: Allocator](inout buffers: Buffers[A], request
             Err(_) => return .Err(.Exhausted),
         }
     }
-    .Ok(numbered_view(buffers, request, number))
+    .Ok(value)
 }
 
-// `numbered_view` is `request` as `number_request` left it in `buffers` for
-// `number`.
-fn numbered_view[P: Allocator, A: Allocator](buffers: Buffers[A], request: Request[P], number: UInt64) -> Request[P] where borrows(buffers), carries(request) {
+// `identified_view` is `request` as `identify` left it in `buffers`, with its
+// id at `id`.
+fn identified_view[P: Allocator, A: Allocator](buffers: Buffers[A], request: Request[P], id: Span) -> Request[P] where borrows(buffers), carries(request) {
     let whole = Str.from_bytes(buffers.head.as_slice()).unwrap()
-    Request[P] { head = whole, header_fields = buffers.fields.as_slice(), request_id = .Some(number), ..copy(request) }
+    Request[P] { head = copy(whole), header_fields = buffers.fields.as_slice(), request_id = .Some(stored_part(whole, id)), ..copy(request) }
 }
 
 // Append `bytes` to `stored` and return the range they occupy.
@@ -177,27 +183,16 @@ fn push_stored[A: Allocator](inout stored: Vec[UInt8, A], bytes: mem.Slice[UInt8
 }
 
 // `RequestIds` takes the state its handler takes and passes it on. The handler
-// is given the numbered request, and its answer, a response or a refusal,
-// carries the number.
+// is given the identified request, and its answer, a response or a refusal,
+// carries the id.
 impl[P: Allocator, S, H: Handler[S, P], A: Allocator] Handler[S, P] for RequestIds[H, A] {
     fn serve_http(inout self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
-        let number = match read self.drawn {
-            Some(numbers) => numbers.call(
-                |inout count: UInt64| {
-                    count += 1
-                    count
-                },
-            ),
-            None => {
-                self.issued += 1
-                self.issued
-            },
-        }
         self.pending = .None
-        let numbered = number_request(&self.buffers, request, number)?
-        self.pending = .Some(number)
-        let text = numbered.header(request_id_header).unwrap()
-        match &self.handler.serve_http(&state, numbered) {
+        let id = identify(&self.buffers, request)?
+        self.pending = .Some(copy(id))
+        let identified = identified_view(self.buffers, request, id)
+        let text = identified.header(request_id_header).unwrap()
+        match &self.handler.serve_http(&state, identified) {
             Ok(response) => {
                 var answer = response
                 &answer.set_header(request_id_header, text)?
@@ -205,7 +200,7 @@ impl[P: Allocator, S, H: Handler[S, P], A: Allocator] Handler[S, P] for RequestI
             },
             Err(refusal) => {
                 var answer = refusal
-                &answer.set_header(numbered, request_id_header, text)?
+                &answer.set_header(identified, request_id_header, text)?
                 .Err(answer)
             },
         }
@@ -213,9 +208,9 @@ impl[P: Allocator, S, H: Handler[S, P], A: Allocator] Handler[S, P] for RequestI
 }
 
 // `RequestIds` passes each event on to the handler it holds. The exchange of a
-// request the handler answered reaches it with the numbered request, as
-// `serve_http` left it in the buffers, so a `logged` inside logs the number.
-// An exchange the handler never saw reaches it as it is.
+// request the handler answered reaches it with the identified request, as
+// `serve_http` left it in the buffers, so a `logged` inside logs the id. An
+// exchange the handler never saw reaches it as it is.
 impl[H: Observer, A: Allocator] Observer for RequestIds[H, A] {
     fn observe[P: Allocator](inout self: Self, event: Event[P]) {
         match copy(event) {
@@ -223,8 +218,8 @@ impl[H: Observer, A: Allocator] Observer for RequestIds[H, A] {
                 let waiting = mem.take(&self.pending)
                 match copy(exchange.request) {
                     Some(request) => match waiting {
-                        Some(number) => {
-                            let described: Event[P] = .Exchanged(.{ request = .Some(numbered_view(self.buffers, request, number)), ..exchange })
+                        Some(id) => {
+                            let described: Event[P] = .Exchanged(.{ request = .Some(identified_view(self.buffers, request, id)), ..exchange })
                             &self.handler.observe(described)
                             return
                         },
@@ -244,55 +239,51 @@ struct Echoing {
     served: UInt64,
 }
 
-// `Echoing` answers with the number its request carries, or "none".
+// `Echoing` answers with the id its request carries, or "none".
 impl[P: Allocator, T] Handler[T, P] for Echoing {
     fn serve_http(inout self: Self, inout _state: T, request: Request[P]) -> Result[Response[P], Error[P]] {
         self.served += 1
-        let number = request.header(request_id_header).unwrap_or("none")
-        text(request, number)
+        let id = request.header(request_id_header).unwrap_or("none")
+        text(request, id)
     }
 }
 
-test fn each_request_is_numbered_for_the_handler_and_the_response() {
+test fn a_malformed_id_the_client_sent_is_replaced() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    defer var numbering = with_request_ids(Echoing { served = 0 })
+    defer var identifying = with_request_ids(Echoing { served = 0 })
     var nothing = ()
-    var sent1 = new_request(arena.handle(), "GET", "/a", body: "").unwrap()
-    &sent1.add_header("X-Request-Id", "forged").unwrap()
-    &sent1.add_header("Accept", "text/plain").unwrap()
-    let first: Result[Response, Error] = &numbering.serve_http(&nothing, sent1.request())
-    let first_response = first.unwrap()
-    testing.assert_eq(first_response.header("X-Request-Id"), Option.Some("1"), "the first response was not numbered 1")?
-    testing.assert_ok_eq(first_response.text(), "1", "the handler did not read the number, or a forged one won")?
-    let sent2 = new_request(arena.handle(), "GET", "/b", body: "").unwrap()
-    let second: Result[Response, Error] = &numbering.serve_http(&nothing, sent2.request())
-    let second_response = second.unwrap()
-    testing.assert_eq(second_response.header("x-request-id"), Option.Some("2"), "the second response was not numbered 2")?
-    testing.assert_ok_eq(second_response.text(), "2", "the handler did not read the second number")?
-    testing.assert_eq(numbering.handler.served, UInt64(2), "the handler did not answer both requests")?
+    var sent = new_request(arena.handle(), "GET", "/a", body: "").unwrap()
+    &sent.add_header("X-Request-Id", "1 status=200").unwrap()
+    let answered: Result[Response, Error] = &identifying.serve_http(&nothing, sent.request())
+    let response = answered.unwrap()
+    let id = uuid.Uuid.parse(response.header("X-Request-Id").unwrap())
+    testing.assert(id.is_ok(), "the malformed id was not replaced by a UUID")?
+    testing.assert_ok_eq(response.text(), response.header("X-Request-Id").unwrap(), "the handler saw another id")?
 }
 
-test fn a_numbered_request_keeps_the_rest_of_the_request() {
+test fn an_identified_request_keeps_the_rest_of_the_request() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    defer var numbering = with_request_ids(Echoing { served = 0 })
+    defer var identifying = with_request_ids(Echoing { served = 0 })
     var sent = new_request(arena.handle(), "POST", "/orders?id=7", body: "payload").unwrap()
     &sent.add_header("Accept", "text/plain").unwrap()
-    let numbered = number_request(&numbering.buffers, sent.request(), 41).unwrap()
-    testing.assert_eq(numbered.header("accept"), Option.Some("text/plain"), "the numbered request lost a header")?
-    testing.assert_eq(numbered.header("X-Request-Id"), Option.Some("41"), "the numbered request has no number")?
-    testing.assert_eq(numbered.path(), "/orders", "the path changed")?
-    testing.assert_eq(numbered.query(), Option.Some("id=7"), "the query changed")?
-    testing.assert_eq(numbered.method(), Method.Post, "the method changed")?
-    testing.assert_ok_eq(numbered.text(), "payload", "the body changed")?
+    &sent.add_header("X-Request-Id", "order-41").unwrap()
+    let id = identify(&identifying.buffers, sent.request()).unwrap()
+    let identified = identified_view(identifying.buffers, sent.request(), id)
+    testing.assert_eq(identified.header("accept"), Option.Some("text/plain"), "the identified request lost a header")?
+    testing.assert_eq(identified.header("X-Request-Id"), Option.Some("order-41"), "the identified request has no id")?
+    testing.assert_eq(identified.path(), "/orders", "the path changed")?
+    testing.assert_eq(identified.query(), Option.Some("id=7"), "the query changed")?
+    testing.assert_eq(identified.method(), Method.Post, "the method changed")?
+    testing.assert_ok_eq(identified.text(), "payload", "the body changed")?
 }
 
-// Numbering outside `logged` puts the number in the line the exchange logs,
-// and the router inside answers as it does alone.
-test fn a_numbered_exchange_is_logged_with_its_number() {
+// Ids given outside `logged` are in the line the exchange logs, and the router
+// inside answers as it does alone.
+test fn an_identified_exchange_is_logged_with_its_id() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
-    let found = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\n")
-    let missing = send(bound, "GET /nowhere HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: forged\r\n\r\n")
+    let found = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: health-1\r\n\r\n")
+    let missing = send(bound, "GET /nowhere HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: missing-2\r\n\r\n")
     let file = log.capture()
     var served = with_request_ids(logged(file.logger(minimum: .Info), health_router()))
     let serving = serve_sequentially(listener, &served, limits: serving(2))
@@ -301,33 +292,34 @@ test fn a_numbered_exchange_is_logged_with_its_number() {
     served.release()
     defer let lines = file.finish()
     let expected =
-        \\INFO request method=GET path=/health request_id=1 status=200 bytes=2 duration=D
-        \\WARN request method=GET path=/nowhere request_id=2 status=404 bytes=10 duration=D error="the handler refused the request: not found"
+        \\INFO request method=GET path=/health request_id=health-1 status=200 bytes=2 duration=D
+        \\WARN request method=GET path=/nowhere request_id=missing-2 status=404 bytes=10 duration=D error="the handler refused the request: not found"
         \\
     testing.assert_ok_eq(serving, (), "serving failed")?
-    testing.assert_eq(health.view(), "HTTP/1.1 200 OK\r\nConnection: close\r\nX-Request-Id: 1\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "the response lacked its number")?
-    testing.assert(absent.view().find("X-Request-Id: 2").is_some(), "the refusal lacked its number")?
+    testing.assert_eq(health.view(), "HTTP/1.1 200 OK\r\nConnection: close\r\nX-Request-Id: health-1\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "the response lacked its id")?
+    testing.assert(absent.view().find("X-Request-Id: missing-2").is_some(), "the refusal lacked its id")?
     testing.assert_eq(lines.view(), expected, "the logged lines changed")?
 }
 
 // A buffer that cannot grow answers the request 500 and loses nothing.
-test fn each_allocation_failure_covers_every_buffer_the_numbering_grows() -> Result[(), testing.Failure] {
+test fn each_allocation_failure_covers_every_buffer_identifying_grows() -> Result[(), testing.Failure] {
     defer let backing = mem.Arena.open(mem.system(), size: 65536)
     let checked = testing.each_allocation_failure(
         backing.handle(),
         |allocator| -> Result[(), mem.Oom] {
             defer let arena = mem.Arena.open(mem.system(), size: 4096)
-            var numbering = with_request_ids_in(allocator, Echoing { served = 0 })
-            let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-            let numbered = number_request(&numbering.buffers, sent.request(), 12)
-            let carried = match numbered {
-                Ok(request) => request.header("X-Request-Id").unwrap_or("") == "12",
+            var identifying = with_request_ids_in(allocator, Echoing { served = 0 })
+            var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+            &sent.add_header("X-Request-Id", "id-12").unwrap()
+            let identified = identify(&identifying.buffers, sent.request())
+            let carried = match identified {
+                Ok(id) => identified_view(identifying.buffers, sent.request(), id).header("X-Request-Id").unwrap_or("") == "id-12",
                 Err(oom) => {
-                    numbering.release()
+                    identifying.release()
                     return .Err(oom)
                 },
             }
-            numbering.release()
+            identifying.release()
             if !carried {
                 return .Err(.Exhausted)
             }
@@ -339,9 +331,10 @@ test fn each_allocation_failure_covers_every_buffer_the_numbering_grows() -> Res
     .Ok(())
 }
 
-// `logged` prints the number from the field only `RequestIds` sets, so a header
-// a client sends is never logged, with or without the middleware.
-test fn a_client_sent_number_is_never_logged() {
+// `logged` prints the id from the field only `RequestIds` sets, so a header a
+// client sends is never logged without the middleware, and a malformed one is
+// never logged with it.
+test fn a_malformed_or_unread_client_id_is_never_logged() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let forged = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: 1 status=200\r\n\r\n")
@@ -363,34 +356,48 @@ test fn a_client_sent_number_is_never_logged() {
     testing.assert_ok_eq(serving1, (), "serving a plain logged router failed")?
     testing.assert_ok_eq(serving2, (), "serving a misordered router failed")?
     testing.assert(plain_lines.view().find("request_id").is_none(), "a client's header was logged")?
-    testing.assert(misordered_lines.view().find("request_id").is_none(), "a client's header was logged inside the numbering")?
-    testing.assert(second.view().find("X-Request-Id: 1").is_some(), "the response lacked its number")?
+    testing.assert(misordered_lines.view().find("request_id").is_none(), "a client's header was logged inside the middleware")?
+    testing.assert(second.view().find("X-Request-Id: 42").is_some(), "the response lacked its id")?
+    let listener3 = net.listen(net.loopback(0)).unwrap()
+    let bound3 = listener3.local_address().unwrap()
+    let injected = send(bound3, "GET /health HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: 1 status=500\r\n\r\n")
+    let file3 = log.capture()
+    var outside = with_request_ids(logged(file3.logger(minimum: .Info), health_router()))
+    let serving3 = serve_sequentially(listener3, &outside, limits: serving(1))
+    defer let third = read_to_end(injected)
+    outside.release()
+    defer let outside_lines = file3.finish()
+    testing.assert_ok_eq(serving3, (), "serving an identified router failed")?
+    testing.assert(outside_lines.view().find("status=500").is_none(), "a malformed client id reached the log")?
+    testing.assert(third.view().find("X-Request-Id: 1 status").is_none(), "a malformed client id reached the response")?
 }
 
-// The headers a handler walks are the client's, in arrival order, with the
-// number in place of any the client sent.
-test fn a_walk_of_the_headers_shows_one_number() {
+// The headers a handler walks are the client's, in arrival order, with the id
+// first in place of every one the client sent under its name.
+test fn a_walk_of_the_headers_shows_one_id() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    defer var numbering = with_request_ids(Echoing { served = 0 })
+    defer var identifying = with_request_ids(Echoing { served = 0 })
     var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
     &sent.add_header("Accept", "text/plain").unwrap()
-    &sent.add_header("x-request-id", "forged").unwrap()
+    &sent.add_header("x-request-id", "first").unwrap()
     &sent.add_header("Host", "a").unwrap()
-    let request = number_request(&numbering.buffers, sent.request(), 5).unwrap()
+    &sent.add_header("X-Request-Id", "second").unwrap()
+    let id = identify(&identifying.buffers, sent.request()).unwrap()
+    let request = identified_view(identifying.buffers, sent.request(), id)
     var walked = String.new_in(arena.handle())
     for header in request.headers() {
         "{header.name}={header.value};".fmt(&walked).unwrap()
     }
-    testing.assert_eq(walked.view(), "X-Request-Id=5;Accept=text/plain;Host=a;", "the walk showed a header the client chose")?
+    testing.assert_eq(walked.view(), "X-Request-Id=first;Accept=text/plain;Host=a;", "the walk showed a header the client sent under the id's name")?
 }
 
-// A handler's own `X-Request-Id` on its answer is replaced by the number.
+// A handler's own `X-Request-Id` on its answer is replaced by the id.
 @derive(Release)
-struct SelfNumbering {
+struct SelfIdentifying {
     served: UInt64,
 }
 
-impl[P: Allocator, T] Handler[T, P] for SelfNumbering {
+impl[P: Allocator, T] Handler[T, P] for SelfIdentifying {
     fn serve_http(inout self: Self, inout _state: T, request: Request[P]) -> Result[Response[P], Error[P]] {
         self.served += 1
         var answer = text(request, "x")?
@@ -399,20 +406,20 @@ impl[P: Allocator, T] Handler[T, P] for SelfNumbering {
     }
 }
 
-test fn a_handlers_own_number_is_replaced() {
+test fn a_handlers_own_id_is_replaced() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    defer var own = with_request_ids(SelfNumbering { served = 0 })
+    defer var own = with_request_ids(SelfIdentifying { served = 0 })
     var nothing = ()
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
     let answered: Result[Response, Error] = &own.serve_http(&nothing, sent.request())
-    testing.assert_eq(answered.unwrap().header("X-Request-Id"), Option.Some("1"), "the handler's number was kept")?
+    testing.assert(uuid.Uuid.parse(answered.unwrap().header("X-Request-Id").unwrap()).is_ok(), "the handler's id was kept")?
 }
 
 // A request the server answers without calling the handler is logged without
-// a number, not with the previous request's.
-test fn a_request_the_handler_never_saw_is_logged_without_a_number() {
+// an id, not with the previous request's.
+test fn a_request_the_handler_never_saw_is_logged_without_an_id() {
     var listener = net.listen(net.loopback(0)).unwrap()
-    let first = send(listener.local_address().unwrap(), "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\n")
+    let first = send(listener.local_address().unwrap(), "GET /health HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: seen\r\n\r\n")
     var client = net.connect(listener.local_address().unwrap()).unwrap()
     var request = String.new()
     &request.append("POST /health HTTP/1.1\r\nHost: loopback\r\nContent-Length: 8192\r\n").unwrap()
@@ -447,8 +454,8 @@ test fn a_request_the_handler_never_saw_is_logged_without_a_number() {
     defer let got = read_to_end(client)
     defer let got1 = read_to_end(first)
     defer let lines = file.finish()
-    testing.assert(lines.view().find("path=/health request_id=1 status=200").is_some(), "the numbered request lost its number")?
-    testing.assert(lines.view().find("path=/health status=500").is_some(), "the unseen request was logged with a number")?
+    testing.assert(lines.view().find("path=/health request_id=seen status=200").is_some(), "the identified request lost its id")?
+    testing.assert(lines.view().find("path=/health status=500").is_some(), "the unseen request was logged with an id")?
 }
 
 // A buffer that cannot grow answers 500 without calling the handler, and
@@ -459,18 +466,18 @@ test fn a_refused_buffer_answers_500_before_the_handler() -> Result[(), testing.
         backing.handle(),
         |allocator| -> Result[(), mem.Oom] {
             defer let arena = mem.Arena.open(mem.system(), size: 8192)
-            var numbering = with_request_ids_in(allocator, Echoing { served = 0 })
+            var identifying = with_request_ids_in(allocator, Echoing { served = 0 })
             var nothing = ()
             let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-            let answered: Result[Response, Error] = &numbering.serve_http(&nothing, sent.request())
-            let numbered = match read answered {
-                Ok(response) => response.header("X-Request-Id").unwrap_or("") == "1",
+            let answered: Result[Response, Error] = &identifying.serve_http(&nothing, sent.request())
+            let identified = match read answered {
+                Ok(response) => uuid.Uuid.parse(response.header("X-Request-Id").unwrap_or("")).is_ok(),
                 Err(error) => error.status() == Status.InternalServerError,
             }
             let refused = answered.is_err()
-            let handled = numbering.handler.served
-            numbering.release()
-            if !numbered || (refused && handled != 0) || (!refused && handled != 1) {
+            let handled = identifying.handler.served
+            identifying.release()
+            if !identified || (refused && handled != 0) || (!refused && handled != 1) {
                 return .Err(.Exhausted)
             }
             if refused {
@@ -482,4 +489,32 @@ test fn a_refused_buffer_answers_500_before_the_handler() -> Result[(), testing.
     )
     testing.assert(checked.is_ok(), "a refused buffer was not answered 500 before the handler")?
     .Ok(())
+}
+
+test fn each_request_gets_a_time_ordered_uuid() {
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    defer var identifying = with_request_ids(Echoing { served = 0 })
+    var nothing = ()
+    let sent1 = new_request(arena.handle(), "GET", "/a", body: "").unwrap()
+    let first: Result[Response, Error] = &identifying.serve_http(&nothing, sent1.request())
+    let first_response = first.unwrap()
+    let first_id = uuid.Uuid.parse(first_response.header("X-Request-Id").unwrap()).unwrap()
+    testing.assert_eq(first_id.version(), UInt8(7), "the id is not a version 7 UUID")?
+    testing.assert_ok_eq(first_response.text(), first_response.header("X-Request-Id").unwrap(), "the handler saw another id")?
+    let sent2 = new_request(arena.handle(), "GET", "/b", body: "").unwrap()
+    let second: Result[Response, Error] = &identifying.serve_http(&nothing, sent2.request())
+    let second_id = uuid.Uuid.parse(second.unwrap().header("X-Request-Id").unwrap()).unwrap()
+    testing.assert(first_id != second_id, "two requests got the same id")?
+}
+
+test fn a_well_formed_id_the_client_sent_is_kept() {
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    defer var identifying = with_request_ids(Echoing { served = 0 })
+    var nothing = ()
+    var sent = new_request(arena.handle(), "GET", "/a", body: "").unwrap()
+    &sent.add_header("X-Request-Id", "trace-41.ab@edge").unwrap()
+    let answered: Result[Response, Error] = &identifying.serve_http(&nothing, sent.request())
+    let response = answered.unwrap()
+    testing.assert_eq(response.header("X-Request-Id"), Option.Some("trace-41.ab@edge"), "the client's id was not kept")?
+    testing.assert_ok_eq(response.text(), "trace-41.ab@edge", "the handler did not see the client's id")?
 }
