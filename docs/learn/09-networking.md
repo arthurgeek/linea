@@ -2072,10 +2072,11 @@ arena could not hold the largest request the other limits allow.
 
 ## What `listen_and_serve` and `serve` promise
 
-`listen_and_serve` opens the listener, tells the handler the address it bound
-(`http.logged` logs it), runs `serve`, and releases the handler it took, and
-the state too on a failure. So
-these hold for `serve`, and for `listen_and_serve` with the handler released too:
+`listen_and_serve` opens the listener, tells each handler the address it bound
+(`http.logged` logs it), runs `serve`, and releases every handler it built.
+`listen_and_serve_with` also keeps the state in its owning task until every
+serving task has been joined, and releases it on a failure. So these hold for
+`serve`, and for `listen_and_serve` with the handlers released too:
 
 - It owns the listener it is given and closes it on every exit.
 - It answers one request per connection, on as many tasks at once as its
@@ -2228,7 +2229,7 @@ for a method, query or header that is not UTF-8. A path that is not UTF-8 is
 encoded byte by byte, as a browser would send it. The
 timeouts do not apply, since the web server decides how long a program may
 run. `serve_cgi(handler, state: app, limits: limits)` takes the same
-`state:` and `limits:` as `listen_and_serve`, and `serve_cgi_in(allocator,
+`state:` and `limits:` as `listen_and_serve_sequentially`, and `serve_cgi_in(allocator,
 handler)` carves the request's arena from another allocator. Any other variable, such as one your server sets for the program's
 configuration, is yours to read with `env.variable`, which returns
 `Option[Str]`: `env.variable("PARTY_DATE").unwrap_or("soon")`. The text it
@@ -2298,11 +2299,16 @@ application that runs both ways and stores its entries in SQLite.
   around `logged` puts the number in the line.
 - A closure can be a route, registered with `route_raw`, or a streamed body that carries what its handler
   computed; `body.flush()` sends what has been written.
-- `http.listen_and_serve(address, handler, state:, limits:)` opens the
-  listener, serves, and closes and releases everything on every path; only the
-  address and the handler are required, and `http.serve` is the loop for a
-  program that opens the listener itself. `listen_and_serve_in` and `serve_in`
-  take the allocator each request is carved from first.
+- `http.listen_and_serve(address, make_handler, limits:, policy:)` opens the
+  listener, serves on as many tasks as `policy` allows, each with a handler
+  `make_handler` builds, and closes and releases everything on every path;
+  only the address and `make_handler` are required, and `http.serve` is the
+  loop for a program that opens the listener itself.
+  `listen_and_serve_with(address, make_handler, state)` keeps the state in an
+  owning task and hands each serving task a client of it, and
+  `listen_and_serve_sequentially(address, handler, state:)` serves one
+  connection at a time with one handler. Each `_in` form takes the allocator
+  each request is carved from first.
 - `http.Limits`, passed as `limits:`, bounds what a request may send and how
   many connections are answered.
 - `http.serve_cgi(handler)` answers the one request a web server started the

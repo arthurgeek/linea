@@ -2,10 +2,13 @@ import std.mem
 import std.testing
 
 // The bytes a value renders to, gathered so they reach `target` in one write
-// once the value has rendered: a line two tasks print at once is written
-// whole, and nothing is held while the value's `fmt` runs, so a `fmt` that
-// prints prints too. When the bytes cannot be gathered, those gathered so far
-// are written and the rest goes straight to `target`.
+// once the value has rendered, repeated only for what a short write leaves.
+// No lock is held while the value's `fmt` runs, so a `fmt` that prints
+// writes its own output first, before the value's. A write is not interleaved
+// with another task's when it reaches a pipe in at most `PIPE_BUF` bytes (512
+// or more on every POSIX system); a longer line two tasks print at once may
+// be. When the bytes cannot be gathered, those gathered so far are written
+// and the rest goes straight to `target`.
 struct Gathered {
     bytes: mem.Vec[UInt8, mem.SystemAllocator],
     target: Descriptor,
