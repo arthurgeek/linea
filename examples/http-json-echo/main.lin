@@ -22,6 +22,7 @@ import std.testing
 // `&router.serve_http(&ctx, request)` on a router directly.
 use http.Handler
 use mem.Lender
+use task.Unowned
 
 // `Options` holds what the command line asked for: the port to listen on,
 // and how many requests to answer before stopping, or `.None` to serve until
@@ -242,16 +243,26 @@ fn main() -> UInt8 {
     // client of the task that owns the `App`. `http.with_state` lends the
     // task's `Ctx` to the router on every request; `http.logged` wraps it, logs
     // the address the server listens on, times each request, and logs one line
-    // for it once the response has been written; `http.with_request_ids` wraps
-    // that in turn, numbering each request the task answers. Port 0 asks the
+    // for it once the response has been written; `http.with_request_ids_from`
+    // wraps that in turn, numbering each request from `ids`, a client of one
+    // count an owning task keeps, so the server numbers every request once
+    // whichever task answers it. Port 0 asks the
     // operating system for any free port. A logger to standard error owns
     // nothing, so each `copy(logger)` costs nothing, and the routes were
     // checked above, so registering them again cannot fail.
-    let serving = [sink logger = copy(logger)] |app: task.Client[App]| -> where carries(app) {
+    defer let numbers = match task.own(UInt64(0)) {
+        Ok(numbers) => numbers,
+        Err(Unowned { state: _, reason }) => {
+            logger.error("cannot start the task that numbers requests", log.field("reason", reason))
+            return 1
+        },
+    }
+    let ids = numbers.client()
+    let serving = [sink logger = copy(logger), sink ids] |app: task.Client[App]| -> where carries(app, ids) {
         var router: http.Router[Ctx] = http.Router.new()
         routes(&router).unwrap()
         let ctx = Ctx { app = copy(app), logger = copy(logger) }
-        http.with_request_ids(http.logged(copy(logger), http.with_state(ctx, router)))
+        http.with_request_ids_from(ids, http.logged(copy(logger), http.with_state(ctx, router)))
     }
     // `listen_and_serve_with` opens the listener, keeps `App` in an owning
     // task while serving, joins every serving task and closes the listener

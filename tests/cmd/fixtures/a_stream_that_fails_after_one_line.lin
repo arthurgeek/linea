@@ -43,7 +43,7 @@ fn main() -> UInt8 {
     var server = http.logged(logger, router)
     defer server.release()
     let limits = http.Limits { connections = .Some(1), ..Default.default() }
-    match http.serve(listener, &server, limits: limits) {
+    match http.serve_sequentially(listener, &server, limits: limits) {
         Ok(_) => 0,
         Err(_) => 1,
     }

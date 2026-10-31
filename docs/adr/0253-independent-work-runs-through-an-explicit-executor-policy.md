@@ -1,170 +1,172 @@
-# 253. Independent work runs through an explicit executor policy
+# 253. Independent work runs through an explicit policy, and shared state through an owning task
 
-Status: Proposed — 2026-10-27. Complements
-[0250](0250-tasks-are-structured-through-linear-sessions.md). Once built, it
-would extend [0095](0095-the-system-allocator-is-named-rather-than-received.md)
-(the capability model) and [0154](0154-sockets-and-http-follow-go.md)
-(`http.serve`).
+Status: Proposed — 2026-10-27, rewritten 2026-10-31 to record what is built.
+Complements [0250](0250-tasks-are-structured-through-linear-sessions.md) and
+extends [0154](0154-sockets-and-http-follow-go.md) (`http.serve`).
 
 ## Context
 
-[0250](0250-tasks-are-structured-through-linear-sessions.md) introduces
-concurrency to Linea through `task.fork`, linear session endpoints `Chan[P]`,
-and structured joins on `close`. This provides a rigorous calculus for stateful
-dialogue between concurrently executing tasks.
+[0250](0250-tasks-are-structured-through-linear-sessions.md) introduces tasks:
+`task.prepare` and `task.start` run a body on a thread of its own, and the
+creator's handle is a linear session endpoint `Chan[P, H]` whose `H` carries
+every dependency the body captured until `close` joins the thread. That gives
+dialogue between tasks a calculus, and it is the reason an accepted program
+has no data race: a body's reads and lends last exactly as long as the body
+runs.
 
-However, a large class of parallel workloads requires no inter-task dialogue:
-- Data-parallel maps over collections (`task.map`);
-- Scatter-gather independent calculations (`task.gather`);
-- Request dispatch across workers in an HTTP server (`http.serve`).
+Many parallel workloads need no dialogue:
 
-In these cases, each computation is an independent, value-producing job: it takes
-owned or borrowed inputs, runs to completion without mid-flight back-and-forth
-rendezvous, and yields an owned output.
+- a data-parallel map over a collection;
+- a few independent computations whose results are gathered;
+- answering many HTTP requests at once.
 
-Without an execution abstraction for independent work:
-1. **Library code is forced to hardcode thread creation.** A library function
-   measuring several documents must either spawn dedicated OS threads via
-   `task.start` or execute serially, preventing callers from choosing their own
-   concurrency strategy.
-2. **Testing and debugging suffer.** Debugging concurrent code or testing in
-   constrained single-core environments requires rewrites if concurrency is
-   baked into function bodies.
-3. **`http.serve` faces an API dichotomy.** Making `http.serve` strictly
-   sequential forces high-throughput servers to write custom dispatchers;
-   making it strictly concurrent complicates deterministic unit tests and
-   single-threaded mocks.
+Each is a set of independent, value-producing jobs. Two needs follow. A caller
+must choose how much concurrency a library uses without the library being
+rewritten, as a caller chooses an allocator. And jobs that must share mutable
+state, a server's count of requests or its database, need a way to do it that
+keeps the promise of no data races, no locks and no use of freed memory.
 
-Linea's memory management model already solves this problem for storage:
-functions that allocate take an explicit allocator (`mem.system()`, `Arena`, or
-fixed buffer). Callers choose the allocation strategy without altering library
-logic. Execution strategy should follow the same principle.
+The first implementation of this record answered the second need with an
+unjoined worker pool (`task.dispatch_worker`, `drain_workers`), a worker
+handle that carried nothing (`Slot.start_worker` answering `WorkerTask`), a
+process-wide handler lock, latches and a connection queue handing descriptors
+between workers, and a many-to-one `session.Mailbox`. Review found each one
+broke a promise in a program the compiler accepted: a body started with
+`start_worker` kept running after its lends ended, so two tasks wrote one
+place at once; a latch handle outlived the latch it freed; the handler lock
+was held across user code and deadlocked when re-entered; a task holding its
+own mailbox's sender waited on itself. Every one of those was a compiler bug,
+not a library bug: the compiler trusted an annotation it could not check. This
+record states the decisions that make them unwritable.
 
 ## Decision
 
-### 1. The `Executor` trait
-
-Execution of independent computations is abstracted through a standard trait:
+### 1. `task.Policy` names how much concurrency a computation uses
 
 ```linea
-pub trait Executor {
-    fn map[T, R, F: fn(T) -> R](self, items: Vec[T], f: F) -> Vec[R]
-    fn gather[T1, T2, F1: fn() -> T1, F2: fn() -> T2](self, f1: F1, f2: F2) -> (T1, T2)
-    fn gather3[T1, T2, T3, F1: fn() -> T1, F2: fn() -> T2, F3: fn() -> T3](
-        self, f1: F1, f2: F2, f3: F3
-    ) -> (T1, T2, T3)
+pub enum Policy {
+    Sequential,
+    Threads(UInt64),
 }
 ```
 
-`Executor` represents the capability to schedule independent computations. It
-does not expose general task dispatch or session endpoint creation; session-connected
-tasks are created exclusively via `task.fork`.
+`.Sequential` runs every job in turn on the caller's thread and starts no
+task. `.Threads(max)` runs jobs on tasks of their own: `task.map` and
+`task.all` divide their items among at most `max` tasks, and `task.join`,
+`join3` and `join4` start a task for each job whenever `max` is more than 1.
+`.Threads(1)` runs the jobs in turn on the caller. A `max` of 0 is a
+configuration error: the combinators stop the program, and serving reports
+`ServeError.NoWorkers`.
 
-### 2. The `Policy` value and `ThreadPool` resource
+### 2. Independent work goes through combinators over joined tasks
 
-Two standard implementors provide execution:
+`task.join(policy, f1, f2)`, `join3` and `join4` answer a tuple of their jobs'
+results; `task.all(policy, jobs)` answers a `Vec` of results in job order;
+`task.map(policy, items, f)` applies `f` to every item and keeps their order;
+`task.map_results` does the same for a fallible `f` and answers every result,
+so one failing job drops none of the others' outputs. A job is `Owned`: it
+holds no view of a value the caller keeps, so the jobs and the caller never
+touch one value at once. `map`'s function is also `Shareable` and `Copyable`,
+since every task calls a copy. Every combinator starts its tasks through
+`task.start` and joins them before it returns.
 
-1. **`Policy` (Zero-ceremony copyable value):**
-   ```linea
-   pub enum Policy: Copyable {
-       Sequential,
-       Threads { max: UInt64 },
-   }
-   ```
-   - `.Sequential` executes jobs synchronously inline on the caller's call stack.
-     Zero OS worker threads are spawned. Execution is 100% deterministic.
-   - `.Threads { max }` executes jobs across dedicated worker threads bounded by
-     `max`. `max: 0` is refused as a configuration error. `max: 1` routes work
-     through worker thread machinery with at most one active worker thread.
+### 3. Only the joined start may start a thread ([T-ThreadStart])
 
-2. **`ThreadPool` (Managed linear resource):**
-   ```linea
-   struct ThreadPool: linear {
-       pub fn open(workers: UInt64, max_queued: UInt64) -> Result[ThreadPool, PrepareError]
-       pub fn close(sink self: Self)
-   }
-   ```
-   `&ThreadPool` implements `Executor`. It maintains pre-spawned worker threads
-   and a bounded submission queue, avoiding thread spawn overhead across
-   repeated invocations in long-lived services.
+A runtime function that runs Linea code on a thread of its own may be named,
+as a callee or as a value, only inside `task.Slot.start`, whose handle carries
+the body's dependencies until `close` joins the thread. The runtime symbol
+table marks those functions, and the rule reads the symbol a declaration
+names, so a module granted `extern` is held to it as the standard library is.
+No library can offer an unjoined or detached task: a worker pool, a fire-and-
+forget dispatch or a handle that carries nothing cannot be written.
 
-### 3. Ownership semantics for `task.map`
+### 4. Shared mutable state lives in an owning task
 
-`task.map` provides two distinct distribution contracts:
+`task.own(state)` starts a task that holds `state` and answers its linear
+`Owner[S]`, or `Unowned[S]` holding the state when the task cannot be made.
+`owner.client()` answers a copyable `Client[S]` that borrows the owner.
+`client.call(job)` runs `job`, a function of `inout state: S`, on the owning
+task, one call at a time, and answers what the job answers. `owner.close()`
+joins the task and answers the state; releasing an `Owner` closes it and
+releases the state.
 
-1. **Owned Distribution (`sink items: Vec[T]`):**
-   Each input element moves exclusively into one job invocation (`T: Owned`). No
-   cloning or copying occurs.
-2. **Borrowed Distribution (`read items: Slice[T]`):**
-   Each job receives a read observation of an element. Requires `T: Shareable`.
-   The slice remains borrowed until all jobs join; the caller regains access upon
-   return.
+The promises hold through rules the compiler already enforces:
 
-### 4. Error-path accounting (`task.map_results`)
+- Only the owning task's thread touches the state. A call is a rendezvous on
+  a runtime call queue under one mutex, so everything a caller did before the
+  call happens before the job runs, and the job happens before the call
+  returns.
+- A client borrows its owner, so [O-Borrow] refuses `close` while a client is
+  still used: every task holding one is joined first, and no client outlives
+  the queue it reaches.
+- A job must be `Owned`. A client is a borrow, so a job that holds one is
+  refused, and a job cannot call the task that runs it.
+- The owning task is started through `Slot.start`, so [T-ThreadStart] accepts
+  it.
 
-To prevent linear resource loss when individual jobs fail:
-- The base combinator `task.map` is infallible at the job level (`f: fn(T) -> R`).
-- Fallible computations use `task.map_results`:
-  ```linea
-  task.map_results(exec, sink items, |sink item| -> Result[R, E]) -> Vec[Result[R, E]]
-  ```
-  Every input has an explicit slot in the returned vector. If one job fails,
-  successful linear outputs produced by sibling arms and unprocessed inputs are
-  neither dropped nor leaked; the caller receives all results and settles them.
+The job is erased into a `mem.Closure` whose wrapper writes the job's answer
+into bytes the caller holds while it waits, so every request has one type
+whatever its answer.
 
-Results are always collected in deterministic input order, matching sequential
-execution.
+A client's `Shareable` answer follows the state's: `Shareable` follows every
+type argument, phantom ones included, so that a container that erases what it
+stores is still counted, and a client names its state's type. A client crosses
+into a task only where the state is `Shareable`, although the state never
+leaves the owning task. The answer is sound and stricter than it need be.
 
-### 5. Generic `http.serve`
+### 5. Concurrent HTTP serving builds a handler per serving task
 
-`http.serve` is generic over `Executor`:
+`http.serve(listener, make_handler, limits, policy = .Threads(128))` serves on
+as many tasks as `policy` allows. Each serving task builds its own handler
+with `make_handler`, so no handler is reached by two tasks and a router needs
+no lock. The listener lives in an owning task that each serving task asks for
+its next connection, so a task takes a connection only when it is free and a
+slow client holds up no other. The serving tasks are started as a balanced
+tree, half of each share on a new task, so starting `n` of them takes a depth
+of the logarithm of `n`, and every one is joined before `serve` returns.
 
-```linea
-pub fn serve[E: Executor](
-    exec: E = .Threads { max: 128 },
-    listener: net.TcpListener,
-    handler: fn(http.Request) -> http.Response,
-) -> Result[(), http.ServeError]
-```
-
-- When passed `.Sequential`, handlers run inline on the caller thread. Unit tests
-  and mocks run deterministically without spawning OS threads.
-- When passed `.Threads { max }` or `&pool`, handlers execute concurrently bounded
-  by `max`.
-- **Capture safety:** Because `serve` is capable of concurrent execution, handlers
-  must satisfy concurrent capture rules: read captures require `Shareable`;
-  mutable `inout` captures across requests are refused by `[O-Cross]`. Handlers
-  requiring shared mutable state communicate with an owning task via a mailbox.
-- **Backpressure:** When `max` concurrent handlers are active, `serve` pauses calls
-  to `listener.accept()`. New incoming connections buffer in the OS TCP listen
-  backlog (`SOMAXCONN`).
-
-### 6. The Four Systems Capabilities
-
-Linea structures system interaction into four orthogonal resource capabilities:
-
-| Capability | Governs | Representation | Ambient / Scope Rule |
-| :--- | :--- | :--- | :--- |
-| **`Allocator`** | Memory acquisition | `mem.system()`, `Arena` | Open naming for `mem.system()` (ADR 0095); `Arena` is linear & `@unshareable`. |
-| **`Io`** | Kernel OS waiting | `net.TcpListener`, `File` | Strict capability carried by service handles. |
-| **`Executor`** | CPU scheduling | `Policy`, `&ThreadPool` | Explicit parameter to parallel algorithms and servers. |
-| **`Session`** | Inter-task protocol | `Chan[P]` | Strict linear endpoint created by `task.fork`. |
+`http.listen_and_serve_with(address, make_handler, state)` keeps `state` in an
+owning task, gives `make_handler` a client of it for each serving task, and
+returns the state once every task has been joined. `http.listen_and_serve`
+serves a service that shares nothing. The `_in` forms carve each task's arenas
+from a parent every task reads, so the parent must be `Shareable`.
+`http.serve_sequentially` and `listen_and_serve_sequentially` lend one handler
+to every request, one connection at a time, for a program that reads its
+handler back or serves one that cannot be shared, such as one carving every
+request from one arena.
 
 ## Consequences
 
-1. **One-token execution toggle:** Callers change `.Sequential` to `.Threads { max: 8 }`
-   or `&pool` with a single argument, without modifying library code or job bodies.
-2. **Determinism:** Tests run under `.Sequential` with identical input/output
-   signatures, full stack traces, and zero thread concurrency hazards.
-3. **Sound backpressure:** Servers naturally bound active handlers and delegate
-   connection buffering to kernel socket queues without application-level OOM.
+1. A caller changes `.Sequential` to `.Threads(8)` with one argument, without
+   changing library code or job bodies.
+2. Tests run under `.Sequential`, or through `serve_sequentially`, with one
+   handler they read back.
+3. A server's shared state is written as data in an owning task, and its
+   routes reach it through `call`; a route that needs request data in a call
+   copies it into owned values first.
+4. A request-numbering middleware numbers the requests its own handler sees,
+   so two serving tasks' requests may share a number.
 
 ## Alternatives considered
 
-- **Hardcoded concurrent-by-default server:** Rejected because it prevents
-  deterministic single-threaded testing and hides concurrency configuration.
-- **`dispatch` method on `Executor`:** Rejected because general task creation
-  belongs to `task.fork` and linear sessions. Combining them creates ambiguity
-  around handle types and protocol obligations.
-- **Short-circuiting `task.map` returning `Result[Vec[R], E]`:** Rejected
-  because failing early drops linear resources produced by sibling jobs.
+- **An `Executor` trait implemented by `Policy` and a `ThreadPool`:** rejected
+  because the combinators need only the policy's bound, and a pool of threads
+  kept between calls is a worker pool, which section 3 rules out.
+- **An unjoined worker pool, a connection queue between workers and a global
+  handler lock:** built first and removed. An unjoined task cannot carry its
+  body's dependencies, so the compiler could not keep a creator from writing
+  what a worker read; the lock was held across user code, deadlocked when
+  re-entered and serialised every server; descriptors crossed between workers
+  as integers, minting a second owner of a connection.
+- **A many-to-one `session.Mailbox`:** removed. Senders were cloned and moved
+  freely, so a task could hold a sender of the mailbox it waited on, or wait on
+  a task that waited on it. No user code receives from an owning task, so
+  neither wait can be written.
+- **One handler shared by `read` between serving tasks:** rejected because a
+  router keeps per-request buffers, and a shared handler would have to keep
+  them elsewhere; every shared value would need to be `Shareable`.
+- **A task per connection, joining the oldest when the bound is reached:**
+  rejected because a slow client held up every connection behind it. The
+  owning task over the listener lets any free task take the next connection.
+- **A short-circuiting `task.map_results` answering `Result[Vec[R], E]`:**
+  rejected because failing early drops outputs other jobs produced.

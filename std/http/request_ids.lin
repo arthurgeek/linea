@@ -2,6 +2,7 @@ import std.io
 import std.log
 import std.net
 import std.mem
+import std.task
 import std.testing
 import std.time
 
@@ -38,6 +39,9 @@ import std.time
 struct RequestIds[H, A: Allocator = mem.SystemAllocator] {
     handler: H,
     issued: UInt64,
+    // `drawn` is the owning task's count every serving task numbers from, or
+    // `.None` when this middleware numbers from `issued` alone.
+    drawn: Option[task.Client[UInt64]],
     // `pending` is the number of the request the handler is answering or has
     // just answered, until the event that reports its exchange takes it. An
     // event arriving without one belongs to a request the handler never saw.
@@ -73,9 +77,57 @@ pub fn with_request_ids_in[H, A: Allocator](allocator: A, sink handler: H) -> Re
     .{
         handler,
         issued = 0,
+        drawn = .None,
         pending = .None,
         buffers = .{ head = Vec.new_in(allocator), fields = Vec.new_in(allocator) },
     }
+}
+
+// `with_request_ids_from` wraps `handler` as `with_request_ids` does, but takes
+// each number from the count the owning task `numbers` reaches keeps. A server
+// whose serving tasks each build their own handler gives every task's
+// middleware a client of one count, so the server numbers each request once,
+// whichever task answers it. The buffers it keeps come from the system
+// allocator; `with_request_ids_from_in` takes them from another.
+pub fn with_request_ids_from[H](numbers: task.Client[UInt64], sink handler: H) -> RequestIds[H, mem.SystemAllocator] where carries(handler, numbers) {
+    with_request_ids_from_in(mem.system(), numbers, handler)
+}
+
+test fn two_middlewares_drawing_from_one_count_number_requests_once() {
+    defer let count = task.own(UInt64(0)).unwrap()
+    defer var first = with_request_ids_from(count.client(), Echoing { served = 0 })
+    defer var second = with_request_ids_from(count.client(), Echoing { served = 0 })
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    var nothing = ()
+    let sent = new_request(arena.handle(), "GET", "/hello", body: "").unwrap()
+    let one = &first.serve_http(&nothing, sent.request()).unwrap()
+    let again = new_request(arena.handle(), "GET", "/hello", body: "").unwrap()
+    let two = &second.serve_http(&nothing, again.request()).unwrap()
+    testing.assert_eq(one.header("X-Request-Id"), Option.Some("1"), "the first request was not numbered 1")?
+    testing.assert_eq(two.header("X-Request-Id"), Option.Some("2"), "the second middleware did not continue the count")?
+}
+
+// `with_request_ids_from_in` is `with_request_ids_from` with the buffers it
+// keeps taken from `allocator`.
+pub fn with_request_ids_from_in[H, A: Allocator](allocator: A, numbers: task.Client[UInt64], sink handler: H) -> RequestIds[H, A] where carries(handler, allocator, numbers) {
+    .{
+        handler,
+        issued = 0,
+        drawn = .Some(copy(numbers)),
+        pending = .None,
+        buffers = .{ head = Vec.new_in(allocator), fields = Vec.new_in(allocator) },
+    }
+}
+
+test fn a_middleware_drawing_from_a_count_keeps_its_buffers_in_an_arena() {
+    defer let count = task.own(UInt64(41)).unwrap()
+    defer let buffers = mem.Arena.open(mem.system(), size: 65536)
+    defer var numbered = with_request_ids_from_in(buffers.handle(), count.client(), Echoing { served = 0 })
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    var nothing = ()
+    let sent = new_request(arena.handle(), "GET", "/hello", body: "").unwrap()
+    let answered = &numbered.serve_http(&nothing, sent.request()).unwrap()
+    testing.assert_eq(answered.header("X-Request-Id"), Option.Some("42"), "the number did not come from the count")?
 }
 
 // `number_request` returns `request` numbered `number`, rebuilt in `buffers`.
@@ -129,8 +181,18 @@ fn push_stored[A: Allocator](inout stored: Vec[UInt8, A], bytes: mem.Slice[UInt8
 // carries the number.
 impl[P: Allocator, S, H: Handler[S, P], A: Allocator] Handler[S, P] for RequestIds[H, A] {
     fn serve_http(inout self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
-        self.issued += 1
-        let number = self.issued
+        let number = match read self.drawn {
+            Some(numbers) => numbers.call(
+                |inout count: UInt64| {
+                    count += 1
+                    count
+                },
+            ),
+            None => {
+                self.issued += 1
+                self.issued
+            },
+        }
         self.pending = .None
         let numbered = number_request(&self.buffers, request, number)?
         self.pending = .Some(number)

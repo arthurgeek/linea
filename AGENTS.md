@@ -432,6 +432,31 @@ A case says what the language means and nothing else. It carries no
 "currently", no note about what the compiler does today versus what it should,
 and the same ban on narration as code comments.
 
+### A broken language promise is a compiler bug
+
+The language promises that an accepted program has no undefined behaviour, no
+data race, no use of freed or moved storage, no abandoned linear value, and no
+set of tasks waiting on each other forever. A program that breaks one of them
+and is accepted is a defect in the compiler, whatever library code it calls:
+the compiler trusted something it did not check. Fixing the library alone
+leaves the next library free to write the same hole.
+
+1. Find the rule that should have refused the program, and what it trusted
+   instead: an annotation it took on faith, a capability derived from a
+   representation that hides what it stands for, an entry point it does not
+   model.
+2. Make that class of program unwritable: a rule, or a certificate held to a
+   library declaration, that refuses every program of the class, not the one
+   reported. Its refusal is a corpus case recorded first, as every case is.
+3. Tie the rule to the compiler's own tables, so a declaration added later is
+   covered without anyone remembering it: a runtime symbol marked in
+   `runtime_symbols.zig`, a declaration named in `RawAccesses`, a soundness
+   matrix cell generated from them.
+4. Then migrate the library code the rule now refuses.
+
+A defect that breaks no promise, such as a wrong answer or a slow path, is
+fixed where it is.
+
 ### Golden files
 
 Goldens are generated, never handwritten:

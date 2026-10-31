@@ -25,10 +25,14 @@ thread per task with a rendezvous session and the join of §2 in
 under one lock (§10), stack probes and an alternate signal stack on every
 thread (§11), the runtime's C tests, a thread sanitizer lane, soundness
 matrix cells for an observation a live task holds, corpus cases that run,
-and the guide's concurrency chapter. There is no mailbox. Each remaining
-clause is delivered by a stage of §16, and a stage's change states the
-clauses it builds. The guide and `std/README.md` describe only what is
-built.
+and the guide's concurrency chapter. Stage 6 is built in the form
+[0253](0253-independent-work-runs-through-an-explicit-executor-policy.md)
+records: [T-ThreadStart] makes `Slot.start` the one start of a thread, so no
+task is unjoined; `recv_until` on a session (§7); and shared mutable state in
+an owning task, `task.own`, whose clients reach the state through `call`, in
+place of a many-to-one mailbox, which is not built (§6). Each remaining clause is
+delivered by a stage of §16, and a stage's change states the clauses it
+builds. The guide and `std/README.md` describe only what is built.
 
 ## Context
 
@@ -187,7 +191,7 @@ this order:
 
 Without step 2, a child could close its end and keep writing through an
 `inout` capture while the parent, released by [O-Borrow], read the place. A
-mailbox join (§6) follows the same order.
+
 
 There are no detached tasks: every task is joined by a `close` that cannot be
 omitted.
@@ -363,67 +367,34 @@ Two `inout` captures of disjoint record fields, in two bodies, are two exclusive
 lends of disjoint places, which the overlap relation of [N-Aliased] and
 [O-Lent] already keeps apart.
 
-### 6. The mailbox: many children, one receive end
+### 6. Shared state lives in an owning task
 
-Waiting on several sources is a **mailbox**. A task owns one linear
-`Mailbox[M, E]` receive end. `M` is the program's own enum of messages, and
-waiting on several sources is a `match` on the message, with no syntax added.
-Session channels stay two-party and typed by their protocol; the mailbox is the
-many-to-one channel beside them.
+Many tasks reaching one mutable value is an **owning task**:
+`task.own(state)` starts a task that holds the state, and each other task
+reaches it through a copyable `task.Client` that borrows the task's linear
+`Owner`. `client.call(job)` runs `job`, a function of `inout state`, on the
+owning task, one call at a time, and answers what the job answers; `close`
+joins the task and answers the state. The job is `Owned`, so it holds no
+client: a call never waits on the task that runs it. The client borrows the
+owner, so [O-Borrow] refuses `close` while a client is still used, and every
+task holding one is joined first.
+[0253](0253-independent-work-runs-through-an-explicit-executor-policy.md) §4
+records the decision and how the runtime's call queue keeps the edges of §10.
 
-```linea
-impl[M: Owned, E: Shareable] Mailbox[M, E] {
-    pub fn open(read env: E) -> Self where borrows(env)
-    pub fn recv(sink self: Self) -> Received[M, E] where carries(self)
-    pub fn send_after(inout self: Self, after: time.Duration, sink message: M) -> Timer[M]
-}
+A many-to-one mailbox, in which a task receives messages from many children
+through linear senders, was designed here first and is not built. Its senders
+were moved and cloned freely, so a task could hold a sender of the mailbox it
+received from, or a child could wait on the task that waited for its sender to
+close: two waits §9 must rule out, which no user code can write against an
+owning task, since none receives from one. Waiting on several sources at once
+remains open.
 
-impl[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator] Slot[P, F, A] {
-    pub fn start_into[M: Owned, E: Shareable, G: Owned + sink fn(read env: E, sink out: Sender[M])](sink self: Self, inout mailbox: Mailbox[M, E], sink body: G)
-}
-```
+### 7. Timeouts: `recv_until`
 
-The bounds on `start_into` are the rule; how a slot prepared for a mailbox child
-is typed is the mailbox stage's to fix.
-
-- **The shared environment is fixed at open.** A mailbox's type does not
-  change as children join, so nothing per child can carry one child's captures.
-  `Mailbox.open(read env)` takes one `Shareable` environment and answers a
-  mailbox that observes it. The read lasts until the mailbox is settled, which
-  happens only by `Closed`, after every child has returned. A child's body is
-  `Owned`: it owns its captures, holds no `inout` lend, and receives `env` as a
-  `read` parameter.
-- **Senders are linear.** A child's one endpoint to the mailbox's owner is a
-  stream, `Send[M, …]` repeated, then `End`. A sender is never copied. It moves
-  like any endpoint, as a capture or as a delegated payload. Fan-in from a task
-  that is not a child is a child forked for it, or a sender moved to it.
-- **Receiving.** `recv(sink mb)` waits on any live child and answers
-  `Message(m, mb)`, or `Closed` when the mailbox has no live child and no
-  pending timer. `Closed` settles the mailbox, so nothing can join it
-  afterwards.
-- **Joining.** The mailbox joins a child when its stream has ended and its body
-  has returned, in the four steps of §2. A child leaves the mailbox only then.
-- **Order.** Messages from one child arrive in the order it sent them. There is
-  no order across children.
-- **Payloads** are `M: Owned`, the bound sessions use.
-
-`http.serve` opens its mailbox over its server state, starts a handler into it
-per connection, and joins handlers in the order they complete. Its `max:`
-bounds the live children: while the mailbox is full, it accepts nothing. A slow
-early connection therefore delays no later one, and the number of open
-connections is bounded.
-
-### 7. Timers: `send_after`
-
-`mailbox.send_after(after, message)` posts `message` to the mailbox later, from
-a runtime timer that waits on no task, so a timeout is one more arm of the
-`match`. A pending timer counts as a live child: `recv` does not answer `Closed`
-while one is pending. It answers a linear `Timer[M]`. `timer.cancel()` answers
-`Cancelled(message)`, handing back a message that was never sent, or `Fired`
-when it was delivered, and either answer settles the handle.
-
-Deadlines never propagate implicitly. A program states each one where it waits,
-with `recv_until` on a session or `send_after` on a mailbox.
+`chan.recv_until(timeout)` waits for the peer's send for at most `timeout`,
+and answers the value with the rest of the protocol or the endpoint back
+unchanged, so a timeout is one more arm of the `match`. Deadlines never
+propagate implicitly. A program states each one where it waits.
 
 ### 8. Communication is synchronous rendezvous
 
@@ -442,21 +413,16 @@ another in a cycle, not that the world answers.
 
 **The model.** The state of a program is a set of tasks and a graph `G` whose
 nodes are tasks and whose edges are live sessions. A session is an edge between
-the two tasks holding its two endpoints. A mailbox child's stream is an edge
-between the child and the task holding the mailbox. A timer is not a node: it
-waits on no task. An edge is live until both of its ends are settled. A task
+the two tasks holding its two endpoints. An edge is live until both of its ends
+are settled. A task
 leaves `G` when its body has returned and it has been joined.
 
 **Blocked and enabled.** A task is *blocked on an edge* when its next operation
 there (`send`, `choose`, `recv`, `offer`, or a handle's `close`) has not
-completed. A mailbox receive is blocked on every edge of the mailbox's live
-children at once. `recv_until` and a receive with a pending timer also wait on
-the world, and always complete. Two complementary operations on one edge are
+completed. `recv_until` also waits on the world, and always completes. Two complementary operations on one edge are
 *enabled*: `send` with `recv`, `choose` with `offer`, and a handle's `close`
-with a child whose endpoint is at `End` and whose body has returned. A mailbox
-receive is enabled when any live child's stream has a pending `send`, or when
-the mailbox has no live child and no pending timer, in which case it answers
-`Closed`. A child's `close` of its own end at `End` does not wait.
+with a child whose endpoint is at `End` and whose body has returned. A child's
+`close` of its own end at `End` does not wait.
 
 **The scheduling assumption.** Every enabled operation eventually completes.
 One operating-system thread per task, scheduled by the kernel, gives it.
@@ -469,8 +435,6 @@ It holds initially (one task, no edge), and each step preserves it:
 - *`start`* adds a node, the child, and one edge from it to its creator. A new
   leaf joined by one edge closes no cycle. A **nested start** is the same step
   taken by a child.
-- *Mailbox registration* (`start_into`) adds a child and one edge to the task
-  holding the mailbox: a new leaf again.
 - *Delegation* moves an endpoint of an edge `(A, X)` to another task `B`, either
   sent over an edge `(A, B)` or captured by a body `start` turns into a child
   `B` of `A`. Removing `(A, X)` splits its tree in two, with `X` on one side and
@@ -478,14 +442,12 @@ It holds initially (one task, no edge), and each step preserves it:
   other than `(A, X)`, since `B` is not `X` (the forest holds one edge between
   two tasks, and a new child is neither). Adding `(B, X)` joins two different trees, so `G` stays a
   forest. A task cannot send an endpoint over that endpoint's own session,
-  since `send` consumes the endpoint it sends on. Moving a mailbox moves each of
-  its children's edges, one at a time, by the same argument.
+  since `send` consumes the endpoint it sends on.
 - *Communication* of a payload that holds no endpoint, and *unfolding* a
   recursive protocol with `enter`, change no edge. A payload that holds an
   endpoint is delegation.
-- *Stream end*, *close*, a *mailbox join* and a *task ending* remove an edge or
-  an isolated node. Removing an edge or a node closes no cycle.
-- *A timer firing* posts a message and changes no edge.
+- *Close* and a *task ending* remove an edge or an isolated node. Removing an
+  edge or a node closes no cycle.
 
 **Lemma 2: a stuck edge has at most one stuck end.** The two ends of a session
 have dual types, so at any moment one end's next operation is the complement
@@ -493,13 +455,10 @@ of the other's. If both tasks were blocked on the same edge, the two operations
 would be complementary, hence enabled, hence would complete. A handle's `close`
 waits on a child whose end is at `End`, whose only remaining operation there is
 its own `close`, which does not wait, so the child is not blocked on that edge.
-A mailbox child's stream only sends and ends; a pending send would make the
-receive enabled, so a child of a blocked receive is not blocked on its stream.
 
 **The proof.** Suppose a finite non-empty set `T` of tasks stays blocked
 forever, each waiting only on tasks in `T`. Choose `t₀ ∈ T` and an edge `e₀` it
-is blocked on; a blocked mailbox receive has at least one live child, since one
-with none answers `Closed`. Let `t₁` be the other end of `e₀`. It is in `T`, so
+is blocked on. Let `t₁` be the other end of `e₀`. It is in `T`, so
 it is blocked forever, and by Lemma 2 on some edge `e₁ ≠ e₀`. Repeating gives
 an infinite walk `t₀ e₀ t₁ e₁ t₂ …` that never leaves along the edge it arrived
 by. In a forest such a walk never revisits a node, since a revisit would close a
@@ -513,8 +472,16 @@ entered by, and a leaf in `T` must be blocked on some other edge. So no such
 - that a session completes, or that a program terminates;
 - external progress: a task waiting on a socket may wait forever;
 - lock-freedom, that every pending communication eventually completes;
-- any order across a mailbox's children, or that a child with a pending send is
-  served before another child's later send.
+- any order across the callers of one owning task.
+
+**Owning tasks.** A call to an owning task (§6) is not an edge of `G`, and no
+task waits on one forever. A caller waits only while the owning task runs the
+calls queued before its own, and each of those completes without waiting on
+any task: a job is `Owned`, and the handle of every task that can call the
+owning task carries that task's client, a borrow of the owner, so no job holds
+one. The owning task's own wait for the next call is enabled by any call, and
+by `close`, which its holder may reach only once every task holding a client
+has been joined.
 
 Each later record that adds a blocking operation (a lock, a `select`, a channel
 not created by `start`) must say what it does to this argument.
@@ -528,12 +495,15 @@ edges are:
 - **start:** everything the parent did before `start` is visible to the body;
 - **rendezvous:** everything a task did before a `send` is visible to its peer
   after the matching `recv`;
-- **join:** everything the body did is visible after `close`, or after the
-  mailbox join of that child.
+- **join:** everything the body did is visible after `close`;
+- **call:** everything a caller did before `call` is visible to the job the
+  owning task runs for it, and everything the job did is visible to the caller
+  after `call` returns.
 
 The ownership rules supply the rest. A `read` capture leaves both sides only
 reads until `close`. An `inout` capture leaves the place to the child alone
-until the join. A `sink` capture and a payload are moved. `Shareable` excludes
+until the join. A `sink` capture, a payload and a call's job are moved, and an owning task's
+state is reached only by its own thread. `Shareable` excludes
 the one kind of value whose `read` writes. So every non-shared location is
 reached by one task between two edges, and every accepted program is
 sequentially consistent at every optimisation level.
@@ -541,7 +511,11 @@ sequentially consistent at every optimisation level.
 **The runtime contract** states these edges, so they are a property of the
 contract and not of one C implementation. A channel's mutex guards its slot,
 and the slot goes from empty to full to empty. A channel is freed only after
-both ends have settled. Both runtime archives are thread-safe. In the checked
+both ends have settled. An owning task's call queue keeps one request slot
+under one mutex: a caller fills it and waits until the owner has counted its
+request finished, and the owner copies the request out under the same mutex
+and marks it finished once the job has run, so a call is a rendezvous in both
+directions. Both runtime archives are thread-safe. In the checked
 archive every piece of global checking state, its regions and spill table
 included, is under its lock. Concurrent stress tests cover allocation and free.
 
@@ -787,34 +761,20 @@ run; stages 5 to 7 extend it.
    checked allocator, channel stress, and `prepare` failure under load all pass
    on Linux, and the concurrency chapter says what the runtime guarantees under
    load. The thread sanitizer and the runtime's C tests are stage 4's.
-6. **The standard library** (§6, §7, §13): `split_inout` over `mem.View`, the
-   mailbox with `send_after` and its timers, `recv_until`, and `http.serve`
-   over a mailbox with `max:`. *Exit:* every `pub fn` tested beside its
-   definition, the concurrency chapter extended to the mailbox, timers,
-   `split_inout` and `http.serve` with programs that run, and an example that
-   serves connections concurrently. The chapter gains, each with an example:
-   a race against a timeout (`Promise.race`) through `recv_until` or a
-   mailbox and `send_after`; a bounded worker pool, a mailbox with `max:`;
-   a chat server in the spirit of Tokio's, with `http.serve` or a mailbox
-   owning the room; and a mailbox rewrite of `examples/party_guest_list.lin`
-   where each friend starts into the party's mailbox, the party matches messages
-   until the mailbox reports `Closed`, and guests print in arrival order, with
-   only its `.cmd` test sorting the output to keep the check deterministic.
+6. **The standard library** (§6, §7, §13): `split_inout` over `mem.View`,
+   `recv_until`, the owning task of §6, and concurrent `http.serve`.
+   *Built*, in the form
+   [0253](0253-independent-work-runs-through-an-explicit-executor-policy.md)
+   records: [T-ThreadStart] keeps every thread joined; `task.own` with
+   `Owner`, `Client` and `call` over a runtime call queue; `http.serve` and
+   `listen_and_serve` concurrent by default on `.Threads(128)`, each serving
+   task with a handler of its own built by a factory, the listener in an
+   owning task that free tasks take connections from; `listen_and_serve_with`
+   keeping the routes' shared state in an owning task; and the HTTP examples
+   and the guide migrated with it. *Open:* a race against a timeout beside
+   `recv_until`, a chat server whose room is an owning task, and waiting on
+   several sources at once, which the unbuilt mailbox was to answer.
 
-   *Decided:* `http.serve` becomes concurrent by default.
-   `http.serve(max: n, handler)` runs each handler on a task started into a
-   mailbox, with at most `n` live. Handler bodies are unchanged: there is no
-   `async`, no `await` and no colouring, since tasks are threads and I/O stays
-   blocking. A handler that captures nothing, or reads only `Shareable` state,
-   compiles unchanged. A handler with a mutable capture, such as
-   `inout visitors`, is refused by [O-Cross] at the capture, and the report's
-   help points at the owning-task pattern: the state lives in one task, and
-   handlers send it messages through a mailbox. The stage's exit gains the
-   migration of every handler in the library and the examples in the same
-   change (`std/net/serve.lin`, the HTTP examples, the guide) and that
-   [O-Cross] help for a mutable capture. A sequential `serve` kept beside a
-   separate concurrent entry point lost: the safe concurrent form would then
-   be the one a reader has to find.
 7. **`async_map`** (§14). *Exit:* its own record accepted and built, and the
    concurrency chapter extended to it with an example of a
    concurrency-limited map, the shape JavaScript writes with `for await`.
@@ -903,8 +863,8 @@ source, keeps the forest.
 
 **A `select` expression over endpoints.** New syntax, and every arm must hand
 back every endpoint that did not fire. **A fixed-arity `wait_any(a, b)`**
-serves channels only, with one function per arity. The mailbox does both with a
-`match`.
+serves channels only, with one function per arity. Waiting on several sources
+is left open (§6).
 
 **Deadline scopes and cancellation tokens that propagate implicitly.** Every
 blocking call would have to honour them: hidden control flow, and a colouring by
@@ -915,11 +875,11 @@ configuration. **A scoped `task.mailbox(|inout mb| …)`** needs a new rule
 restricting what a child may capture to the scope's own captures. One shared
 environment fixed at open needs neither.
 
-**A dispatcher that joins handlers in accept order**, or **N workers with
-per-worker state built by a factory.** Joining in accept order lets a slow early
-connection delay joining every later one. Per-worker state partitions what a
-cache or a count would share. The mailbox joins in completion order, and its
-`max:` bounds what is open.
+**A dispatcher that joins handlers in accept order.** It lets a slow early
+connection delay joining every later one. The serving tasks of
+[0253](0253-independent-work-runs-through-an-explicit-executor-policy.md) each
+take the next connection from the listener's owning task when they are free,
+and what they share, a cache or a count, lives in an owning task.
 
 **Deferring parallel `inout` over one container** until writable views exist.
 The callback form needs only a trusted `mem.View[T]`, which the library can
