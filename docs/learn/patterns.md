@@ -169,15 +169,18 @@ errors for a spec the value cannot take.
 task while many requests are answered at once. Each serving task builds its
 own handler around a client of that task, and a route reaches the state
 through the client's `call`. The [JSON echo
-server](../../examples/http-json-echo/main.lin) does both:
+server](../../examples/http-json-echo/main.lin) does both, and numbers its
+requests from a second owning task, so no two serving tasks give out the same
+request id:
 
 <!-- guide: excerpt examples/http-json-echo/main.lin -->
 ```linea
-let serving = [sink logger = copy(logger)] |app: task.Client[App]| -> where carries(app) {
+let ids = numbers.client()
+let serving = [sink logger = copy(logger), sink ids] |app: task.Client[App]| -> where carries(app, ids) {
     var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     let ctx = Ctx { app = copy(app), logger = copy(logger) }
-    http.with_request_ids(http.logged(copy(logger), http.with_state(ctx, router)))
+    http.with_request_ids_from(ids, http.logged(copy(logger), http.with_state(ctx, router)))
 }
 ```
 
