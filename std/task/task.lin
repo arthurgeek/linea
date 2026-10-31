@@ -2,6 +2,7 @@ import std.mem
 import std.release
 import std.session
 import std.testing
+import std.time
 
 use session.Chan
 use session.End
@@ -294,7 +295,8 @@ pub enum Policy {
 }
 
 // Join two independent calculations according to policy and return both results
-// in parameter order once both have finished.
+// in parameter order once both have finished. Under `.Threads(max)` with `max`
+// above 1, `f1` runs on a new task while the caller runs `f2`.
 pub fn join[T1: Owned, T2: Owned, F1: Owned + Discardable + sink fn() -> T1, F2: Owned + Discardable + sink fn() -> T2](sink policy: Policy, sink f1: F1, sink f2: F2) -> (T1, T2) {
     match policy {
         Sequential => (f1(), f2()),
@@ -308,15 +310,10 @@ pub fn join[T1: Owned, T2: Owned, F1: Owned + Discardable + sink fn() -> T1, F2:
             let body1 = sink [sink f1] |sink me: Chan[Send[T1, End]]| {
                 me.send(f1()).close()
             }
-            let body2 = sink [sink f2] |sink me: Chan[Send[T2, End]]| {
-                me.send(f2()).close()
-            }
             let h1 = start(body1).unwrap()
-            let h2 = start(body2).unwrap()
+            let r2 = f2()
             let (r1, done1) = h1.recv()
             done1.close()
-            let (r2, done2) = h2.recv()
-            done2.close()
             (r1, r2)
         },
     }
@@ -335,7 +332,9 @@ test fn join_runs_on_threads() {
 }
 
 // Join three independent calculations according to policy and return all three results
-// in parameter order once all three have finished.
+// in parameter order once all three have finished. Under `.Threads(max)` no
+// more than `max` of them run at once: the first `max - 1` run on new tasks
+// and the caller runs the rest, one after another.
 pub fn join3[T1: Owned, T2: Owned, T3: Owned, F1: Owned + Discardable + sink fn() -> T1, F2: Owned + Discardable + sink fn() -> T2, F3: Owned + Discardable + sink fn() -> T3](sink policy: Policy, sink f1: F1, sink f2: F2, sink f3: F3) -> (T1, T2, T3) {
     match policy {
         Sequential => (f1(), f2(), f3()),
@@ -349,21 +348,23 @@ pub fn join3[T1: Owned, T2: Owned, T3: Owned, F1: Owned + Discardable + sink fn(
             let body1 = sink [sink f1] |sink me: Chan[Send[T1, End]]| {
                 me.send(f1()).close()
             }
+            let h1 = start(body1).unwrap()
+            if max == 2 {
+                let r2 = f2()
+                let r3 = f3()
+                let (r1, done1) = h1.recv()
+                done1.close()
+                return (r1, r2, r3)
+            }
             let body2 = sink [sink f2] |sink me: Chan[Send[T2, End]]| {
                 me.send(f2()).close()
             }
-            let body3 = sink [sink f3] |sink me: Chan[Send[T3, End]]| {
-                me.send(f3()).close()
-            }
-            let h1 = start(body1).unwrap()
             let h2 = start(body2).unwrap()
-            let h3 = start(body3).unwrap()
+            let r3 = f3()
             let (r1, done1) = h1.recv()
             done1.close()
             let (r2, done2) = h2.recv()
             done2.close()
-            let (r3, done3) = h3.recv()
-            done3.close()
             (r1, r2, r3)
         },
     }
@@ -381,8 +382,26 @@ test fn join3_runs_sequentially_and_on_threads() {
     testing.assert_eq(t3, 30, "t3 wrong")?
 }
 
+// Each closure sleeps a tenth of a second, so a join that runs no more than
+// `max` of them at once takes at least a tenth of a second for every `max`
+// closures, rounded up.
+fn napping(value: UInt64) -> UInt64 {
+    time.sleep(time.Duration.from_milliseconds(100))
+    value
+}
+
+test fn join3_runs_no_more_closures_at_once_than_its_bound() {
+    let started = time.Instant.now()
+    let (a, b, c) = join3(Policy.Threads(2), sink [] || napping(1), sink [] || napping(2), sink [] || napping(3))
+    let took = started.elapsed().nanoseconds()
+    testing.assert_eq((a, b, c), (UInt64(1), UInt64(2), UInt64(3)), "the results came back out of order")?
+    testing.assert(took >= 200000000, "three closures ran at once under a bound of two")?
+}
+
 // Join four independent calculations according to policy and return all four results
-// in parameter order once all four have finished.
+// in parameter order once all four have finished. Under `.Threads(max)` no
+// more than `max` of them run at once: the first `max - 1` run on new tasks
+// and the caller runs the rest, one after another.
 pub fn join4[T1: Owned, T2: Owned, T3: Owned, T4: Owned, F1: Owned + Discardable + sink fn() -> T1, F2: Owned + Discardable + sink fn() -> T2, F3: Owned + Discardable + sink fn() -> T3, F4: Owned + Discardable + sink fn() -> T4](sink policy: Policy, sink f1: F1, sink f2: F2, sink f3: F3, sink f4: F4) -> (T1, T2, T3, T4) {
     match policy {
         Sequential => (f1(), f2(), f3(), f4()),
@@ -396,27 +415,39 @@ pub fn join4[T1: Owned, T2: Owned, T3: Owned, T4: Owned, F1: Owned + Discardable
             let body1 = sink [sink f1] |sink me: Chan[Send[T1, End]]| {
                 me.send(f1()).close()
             }
+            let h1 = start(body1).unwrap()
+            if max == 2 {
+                let r2 = f2()
+                let r3 = f3()
+                let r4 = f4()
+                let (r1, done1) = h1.recv()
+                done1.close()
+                return (r1, r2, r3, r4)
+            }
             let body2 = sink [sink f2] |sink me: Chan[Send[T2, End]]| {
                 me.send(f2()).close()
+            }
+            let h2 = start(body2).unwrap()
+            if max == 3 {
+                let r3 = f3()
+                let r4 = f4()
+                let (r1, done1) = h1.recv()
+                done1.close()
+                let (r2, done2) = h2.recv()
+                done2.close()
+                return (r1, r2, r3, r4)
             }
             let body3 = sink [sink f3] |sink me: Chan[Send[T3, End]]| {
                 me.send(f3()).close()
             }
-            let body4 = sink [sink f4] |sink me: Chan[Send[T4, End]]| {
-                me.send(f4()).close()
-            }
-            let h1 = start(body1).unwrap()
-            let h2 = start(body2).unwrap()
             let h3 = start(body3).unwrap()
-            let h4 = start(body4).unwrap()
+            let r4 = f4()
             let (r1, done1) = h1.recv()
             done1.close()
             let (r2, done2) = h2.recv()
             done2.close()
             let (r3, done3) = h3.recv()
             done3.close()
-            let (r4, done4) = h4.recv()
-            done4.close()
             (r1, r2, r3, r4)
         },
     }
@@ -430,6 +461,14 @@ test fn join4_runs_sequentially_and_on_threads() {
     let (t1, _, _, t4) = join4(Policy.Threads(4), sink [] || UInt64(10), sink [] || UInt64(20), sink [] || UInt64(30), sink [] || UInt64(40))
     testing.assert_eq(t1, 10, "t1 wrong")?
     testing.assert_eq(t4, 40, "t4 wrong")?
+}
+
+test fn join4_runs_no_more_closures_at_once_than_its_bound() {
+    let started = time.Instant.now()
+    let (a, _, _, d) = join4(Policy.Threads(3), sink [] || napping(1), sink [] || napping(2), sink [] || napping(3), sink [] || napping(4))
+    let took = started.elapsed().nanoseconds()
+    testing.assert_eq((a, d), (UInt64(1), UInt64(4)), "the results came back out of order")?
+    testing.assert(took >= 200000000, "four closures ran at once under a bound of three")?
 }
 
 // all executes a collection of homogeneous independent jobs according to policy,
