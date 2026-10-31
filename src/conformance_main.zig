@@ -21223,11 +21223,19 @@ fn checkCase(
                 var matching_mlir = false;
                 var native_verified = false;
                 if (try readIfExists(io, gpa, mlir_golden)) |expected| {
-                    if (try compare(gpa, io, &w.failures, display_path, "mlir", mlir_golden, expected, ir.written(), env.update, false)) {
+                    // A golden records the module a build without a sanitizer
+                    // emits. A sanitized walk marks every function with its
+                    // sanitizer, so it emits the module again to compare.
+                    var plain: std.Io.Writer.Allocating = .init(gpa);
+                    const recorded_ir = if (env.sanitize == null) ir.written() else written: {
+                        if (!try emitMlir(gpa, &plain.writer, &mir, &table, &sink, .{})) @panic("a module the emitter wrote once was refused the second time");
+                        break :written plain.written();
+                    };
+                    if (try compare(gpa, io, &w.failures, display_path, "mlir", mlir_golden, expected, recorded_ir, env.update, false)) {
                         std.debug.print("updated {s}\n", .{mlir_golden});
                     }
 
-                    matching_mlir = std.mem.eql(u8, expected, ir.written());
+                    matching_mlir = std.mem.eql(u8, expected, recorded_ir);
                 }
 
                 float_literals_survive = try checkFloatRoundTrip(gpa, &w.failures, display_path, &ast, &table, &case, ir.written());

@@ -358,6 +358,12 @@ fn compileToExecutable(
     // so a checked build linking one without the checking allocator says so.
     // A sanitized runtime leaves the checking to its sanitizer.
     const sanitize = toolchain.findSanitize(environ);
+    // The emitter instruments generated code for the sanitizers it names, so
+    // a build naming another would link it and leave the program unwatched.
+    if (sanitize) |named| if (mlir_backend.Sanitizer.named(named) == null) {
+        try err.print("error: {s}={s} names a sanitizer the compiler cannot instrument for; use address or thread\n", .{ toolchain.sanitize_override, named });
+        return exit_usage;
+    };
     if (req.storage == .checked and sanitize == null) {
         const bytes = std.Io.Dir.cwd().readFileAlloc(io, runtime, gpa, .unlimited) catch "";
         if (!runtime_symbols.holdsStorageChecks(bytes)) try err.print(
