@@ -7475,10 +7475,12 @@ pub const Typing = struct {
     }
 
     /// Whether `t` itself keeps a value of it from being read by two tasks at
-    /// once: a type declared `unshareable`; a callable or open type, which may
-    /// stand for a closure holding anything; or a type parameter whose bounds
-    /// promise neither `Shareable` nor the integer family, all of which is
-    /// shareable.
+    /// once: a type declared `unshareable`; an open type, which may stand for
+    /// a closure holding anything; a closure invoked `inout` or lending a
+    /// capture `inout`, or one whose descriptor is not recorded; or a type
+    /// parameter whose bounds promise neither `Shareable` nor the integer
+    /// family, all of which is shareable. A function value names a function
+    /// and holds nothing, so it is shareable.
     pub fn unshareableSeed(self: *const Typing, t: TypeId) bool {
         return switch (self.get(t)) {
             .parameter => |p| !(p.shareable or p.integer),
