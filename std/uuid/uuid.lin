@@ -62,8 +62,8 @@ test fn a_parse_error_says_where_the_text_went_wrong() {
     testing.assert_eq(length.view(), "a UUID is 36 bytes long, and this text is 12", "the length message changed")?
     defer let digit = fmt.render_owned(ParseError.Digit(3)).unwrap()
     testing.assert_eq(digit.view(), "byte 3 of the UUID is not a hexadecimal digit", "the digit message changed")?
-    defer let hyphen = fmt.render_owned(ParseError.Hyphen(8)).unwrap()
-    testing.assert_eq(hyphen.view(), "byte 8 of the UUID is not a hyphen", "the hyphen message changed")?
+    defer let misplaced = fmt.render_owned(ParseError.Hyphen(8)).unwrap()
+    testing.assert_eq(misplaced.view(), "byte 8 of the UUID is not a hyphen", "the hyphen message changed")?
 }
 
 // Powers of two the layout is built from with arithmetic: a version occupies
@@ -291,7 +291,7 @@ impl Uuid {
         for at in 0..text_length {
             let byte = written.byte(at).unwrap()
             if at == 8 || at == 13 || at == 18 || at == 23 {
-                if byte != 45 {
+                if byte != hyphen {
                     return .Err(.Hyphen(at))
                 }
                 continue
@@ -334,7 +334,8 @@ fn refused_as(written: Str, reason: ParseError, said: Str) -> Result[(), testing
     }, said)
 }
 
-// The offsets at which Display writes a hyphen before the byte: after the
+// The offsets at which `ascii` writes a hyphen before the byte, and `parse`
+// expects one: after the
 // 4th, 6th, 8th and 10th of the 16 bytes.
 fn hyphen_before(byte: UInt64) -> Bool {
     byte == 4 || byte == 6 || byte == 8 || byte == 10
