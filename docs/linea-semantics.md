@@ -5945,7 +5945,13 @@ parameter or a function value carries captures the function cannot see, so it
 does not cross. The report is at the capture, names the place, and names the
 part of its type that is not Shareable. An unshareable value itself still
 crosses whole: a `sink` capture of a `mem.Arena` moves the arena, and only the
-task reads it afterwards.
+task reads it afterwards. A value of a copyable type that is not Shareable does
+not cross by `sink` either: its copies reach one state, as a `mem.Handle`'s
+copies reach one arena, so a copy moved into the task shares that state with
+the copy its creator keeps. For the same reason such a record is not `Owned`
+unless a borrow field already says what it observes: a payload, a call's job
+or anything else an `Owned` bound admits cannot be one. The analysis runs for
+every function that starts a task, whether or not it holds any dependency.
 
 ```linea
 fn main() -> UInt8 {

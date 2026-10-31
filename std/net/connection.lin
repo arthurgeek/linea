@@ -42,14 +42,8 @@ struct Deadline {
 }
 
 // Wrap a connected descriptor with no timeouts and no deadline.
-pub fn adopt(fd: Int32) -> Connection {
+fn adopt(fd: Int32) -> Connection {
     Connection { fd, read_ms = 0, write_ms = 0, deadline = .None }
-}
-
-// Extract the descriptor from a connection, consuming it without closing.
-pub fn into_fd(sink self: Connection) -> Int32 {
-    let Connection { fd, read_ms: _, write_ms: _, deadline: _ } = self
-    fd
 }
 
 // Open a connection and block until the peer accepts it or refuses it.
@@ -248,12 +242,6 @@ impl Connection {
         close_descriptor(fd)
     }
 
-    // Extract the descriptor from a connection, consuming it without closing.
-    pub fn into_fd(sink self: Self) -> Int32 {
-        let Connection { fd, read_ms: _, write_ms: _, deadline: _ } = self
-        fd
-    }
-
     test fn a_connection_close_reports_success() {
         var listener = listen(loopback(0)).unwrap()
         let client = connect(listener.local_address().unwrap()).unwrap()
@@ -263,29 +251,6 @@ impl Connection {
         let listener_closed = listener.close().is_ok()
         testing.assert_ok_eq(client_closed, (), "closing the client failed")?
         testing.assert(server_closed && listener_closed, "a close failed")?
-        .Ok(())
-    }
-
-    test fn a_connection_dismantles_into_its_fd_and_adopts_back() {
-        var listener = listen(loopback(0)).unwrap()
-        let client = connect(listener.local_address().unwrap()).unwrap()
-        let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
-        var server = accepted
-        let raw_fd = client.into_fd()
-        var adopted = adopt(raw_fd)
-        let _sent = io.write_all(&adopted, "x".as_bytes()).unwrap()
-        defer var buffer = mem.system().acquire(8).unwrap()
-        let received = match &server.read_some(&buffer, offset: 0, count: 8) {
-            Ok(count) => count,
-            Err(_) => 0,
-        }
-        let raw_fd_valid = raw_fd >= 0
-        let server_closed = server.close().is_ok()
-        let adopted_closed = adopted.close().is_ok()
-        let listener_closed = listener.close().is_ok()
-        testing.assert(raw_fd_valid, "into_fd produced an invalid descriptor")?
-        testing.assert_eq(received, UInt64(1), "adopted connection failed to write to peer")?
-        testing.assert(server_closed && adopted_closed && listener_closed, "a close failed")?
         .Ok(())
     }
 

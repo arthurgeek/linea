@@ -9,6 +9,13 @@ fn hello[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Res
     http.text(request, "hello\n")
 }
 
+// Each serving task builds its own router.
+fn routes() -> http.Router[()] {
+    var router: http.Router[()] = http.Router.new()
+    &router.route_raw("GET /", hello).unwrap()
+    router
+}
+
 fn main() -> UInt8 {
     let args = env.args()
     let written = match args.at(1) {
@@ -18,16 +25,11 @@ fn main() -> UInt8 {
     let port: UInt16 = written.parse() else |_| {
         return 2
     }
-    var router = http.Router.new()
-    defer router.release()
-    if &router.route_raw("GET /", hello).is_err() {
-        return 3
-    }
     let listener = match net.listen(net.loopback(port)) {
         Ok(listener) => listener,
         Err(_) => return 4,
     }
-    match http.serve(listener, &router) {
+    match http.serve(listener, routes) {
         Ok(_) => 0,
         Err(_) => 5,
     }

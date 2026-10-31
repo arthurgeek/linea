@@ -1,0 +1,25 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+// A copyable `@unshareable` type's copies reach one state, so a copy moved
+// into a task shares that state with the original its creator keeps reading.
+@(copyable, unshareable)
+struct Cursor {
+    at: UInt64,
+}
+
+fn main() -> UInt8 {
+    let cursor = Cursor { at = 1 }
+    let theirs = copy(cursor)
+    let body = sink [sink theirs] |sink me: Chan[End]| {
+        let _seen = theirs.at
+        me.close()
+    }
+    let started = task.prepare(body).unwrap().start()
+    let _mine = cursor.at
+    started.close()
+    0
+}

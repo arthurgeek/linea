@@ -11573,6 +11573,8 @@ const Checker = struct {
             "an observation of another value"
         else if (self.builder.view().declOfType(witness.seed) == self.raw_accesses.slice)
             "a view of storage it does not own"
+        else if (self.builder.get(witness.seed) == .struct_ and self.builder.get(witness.seed).struct_.unshareable)
+            "a copyable `unshareable` type, whose copies share what they reach"
         else
             "raw storage another value owns";
 
@@ -19978,7 +19980,7 @@ const Checker = struct {
         }
         if (raw.closure != .none) {
             const d = raw.closure;
-            if (!self.certifiedClosure(declarations, d)) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Closure certificate requires an opaque affine entry, release, address, length and buffer", "declare Closure[S, A] with entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, and storage: Option[Buffer[A]] fields", null);
+            if (!self.certifiedClosure(declarations, d)) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Closure certificate requires an opaque, affine, unshareable entry, release, address, length and buffer", "declare Closure[S, A] with entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, and storage: Option[Buffer[A]] fields", null);
         }
     }
 
@@ -20003,7 +20005,11 @@ const Checker = struct {
     fn certifiedClosure(self: *Checker, declarations: types_mod.Returns, d: DeclId) bool {
         const raw = self.raw_accesses;
         const ty = declarations.get(d);
+        // A closure erases its callable into bytes no type argument names, so
+        // nothing tells what the callable owns; the declaration must be
+        // unshareable, or a closure owning an arena would cross to a task.
         if (self.ast.declTag(d) != .struct_ or self.ast.declVisibility(d) != .opaque_ or
+            self.ast.declUnshareableToken(d) == .none or
             self.ast.declOwnershipPolicy(d) != .affine or self.ast.declTypeParams(d).len != 2 or
             self.builder.fieldCount(ty) != std.enums.values(ClosureField).len or raw.closure_entry_type == .none or raw.buffer == .none) return false;
         const entry_decl = raw.closure_entry_type;

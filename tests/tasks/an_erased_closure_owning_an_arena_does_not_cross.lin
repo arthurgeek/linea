@@ -1,0 +1,34 @@
+import std.mem
+import std.session
+import std.task
+
+use mem.Lender
+use session.Chan
+use session.End
+use session.Send
+
+// An erased closure may own a value whose read writes, such as an arena, so a
+// task cannot read one its creator calls too.
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 64)
+    let grab = [sink arena] || -> UInt64 {
+        match arena.handle().acquire(8) {
+            Ok(_) => 1,
+            Err(_) => 0,
+        }
+    }
+    let kept = mem.Closure.open(grab).unwrap()
+    let body = sink [read kept] |sink me: Chan[Send[UInt64, End]]| {
+        me.send(kept()).close()
+    }
+    let handle = task.prepare(body).unwrap().start()
+    let mine = kept()
+    let (theirs, done) = handle.recv()
+    done.close()
+    kept.release()
+    if mine + theirs == 2 {
+        0
+    } else {
+        1
+    }
+}

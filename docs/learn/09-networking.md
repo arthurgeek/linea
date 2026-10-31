@@ -345,7 +345,7 @@ error[O-Leak]: `visitor` (a linear `net.Connection`) is still owned when this pa
 33 | }
    | - the block ends here
    |
-   = help: settle it first with `visitor.close()`, `visitor.into_fd()`, `visitor.reset()` or …
+   = help: settle it first with `visitor.release()`, `visitor.close()` or `visitor.reset()`
 ```
 
 - The handler returns `()`. It reports its own failures, as `welcome` does with
