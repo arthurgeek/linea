@@ -404,7 +404,20 @@ pub fn matchesRuntime(typing: *const Typing, declared: types_mod.CallableSignatu
     if (params.len != expected.parameters.len) return false;
     for (params, expected.parameters) |param, want| {
         if (want.scalar == .callback) {
-            if (typing.get(param.ty) != .callable or param.convention != .read) return false;
+            // The function type must be the one C calls through the address:
+            // the same scalars, each by value, and the same result.
+            const shape = want.callback orelse return false;
+            if (param.convention != .read) return false;
+            const called = switch (typing.get(param.ty)) {
+                .callable => |callable| callable,
+                else => return false,
+            };
+            if (called.result != runtimeScalarType(shape.result)) return false;
+            const taken = typing.callableParams(called);
+            if (taken.len != shape.parameters.len) return false;
+            for (taken, shape.parameters) |inner, scalar| {
+                if (inner.ty != runtimeScalarType(scalar) or inner.convention != .read) return false;
+            }
             continue;
         }
         if (param.ty != runtimeScalarType(want.scalar)) return false;

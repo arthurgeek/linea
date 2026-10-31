@@ -19850,7 +19850,19 @@ const Checker = struct {
         for (expected.parameters, 0..) |parameter, i| {
             if (i > 0) try spelled.appendSlice(self.gpa, ", ");
             if (parameter.passing == .inout) try spelled.appendSlice(self.gpa, "inout ");
-            try spelled.appendSlice(self.gpa, runtimeScalarName(parameter.scalar));
+            if (parameter.callback) |shape| {
+                // A callback is spelled as the function C calls through it.
+                try spelled.appendSlice(self.gpa, "fn(");
+                for (shape.parameters, 0..) |scalar, k| {
+                    if (k > 0) try spelled.appendSlice(self.gpa, ", ");
+                    try spelled.appendSlice(self.gpa, runtimeScalarName(scalar));
+                }
+                try spelled.append(self.gpa, ')');
+                if (shape.result != .unit) {
+                    try spelled.appendSlice(self.gpa, " -> ");
+                    try spelled.appendSlice(self.gpa, runtimeScalarName(shape.result));
+                }
+            } else try spelled.appendSlice(self.gpa, runtimeScalarName(parameter.scalar));
         }
         try spelled.append(self.gpa, ')');
         if (expected.result != .unit) {

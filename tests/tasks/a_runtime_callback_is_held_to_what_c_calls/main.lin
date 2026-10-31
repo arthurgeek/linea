@@ -1,0 +1,13 @@
+// The runtime calls a task's entry with three `UInt64`s, so a declaration of
+// `linea_task_start` must name an entry of exactly that shape; one whose entry
+// takes other values would be called with what C passes.
+extern fn linea_task_start(task: UInt64, entry: fn(endpoint: UInt8, at: Float64), release: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64) -> UInt64
+
+fn run(_endpoint: UInt8, _at: Float64) {}
+
+fn release_nothing(_at: UInt64, _len: UInt64) {}
+
+fn main() -> UInt8 {
+    let _handle = linea_task_start(0, run, release_nothing, 0, 0)
+    0
+}
