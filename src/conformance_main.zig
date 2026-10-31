@@ -21469,7 +21469,9 @@ fn checkCase(
                         });
                     }
                 }
-                if (matching_mlir) try verifyRecordedModule(gpa, io, &w.failures, display_path, mlir_golden, native_verified);
+                // A sanitized build ran the instrumented module, not the bytes
+                // the golden records, so its proof does not cover them.
+                if (matching_mlir) try verifyRecordedModule(gpa, io, &w.failures, display_path, mlir_golden, native_verified and env.sanitize == null);
             }
         }
     }

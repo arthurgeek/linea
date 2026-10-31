@@ -5528,8 +5528,10 @@ borrows its arena, so it, `Vec[UInt8, mem.Handle]` and `borrow mem.Arena` are
 not Shareable;
 `mem.AllocationLog` is `@unshareable` too, since its allocator writes the log
 under a `read`. A type
-parameter is not Shareable unless it is bounded `Shareable` or `Integer`, and
-neither is a function value, which may hold anything. Being Shareable is
+parameter is not Shareable unless it is bounded `Shareable` or `Integer`. A
+function value is Shareable, since it names a function and holds nothing a
+closure would capture; a closure is Shareable unless one of its captures is
+not, it is invoked `inout`, or it lends a capture `inout`. Being Shareable is
 independent of being Owned: an arena owns its memory and carries nothing yet
 is not Shareable, and `borrow UInt64` is Shareable and not Owned. It is
 independent of copying too: a `mem.Handle` is copyable, and every copy borrows
