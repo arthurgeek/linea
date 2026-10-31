@@ -421,7 +421,7 @@ test fn serving_by_default_answers_two_requests_at_once() {
     let client2 = send(bound, health_request)
     let owner = task.own(Tally { visits = 0 }).unwrap()
     let counter = owner.client()
-    let made = [sink counter] || -> WithClient[Tally, Router[task.Client[Tally]]] where carries(counter) with_client(meeting_router(), copy(counter))
+    let made = [sink counter] || -> Stated[task.Client[Tally], Router[task.Client[Tally]]] where carries(counter) with_state(copy(counter), meeting_router())
     let served = serve(listener, made, limits: serving(2))
     let tally = owner.close()
     defer let r1 = read_to_end(client1)
@@ -1031,14 +1031,16 @@ test fn listening_in_the_system_allocator_serves_nothing_when_told_to() {
 }
 
 // Listen and serve as `listen_and_serve` does, keeping `state` in an owning
-// task for the routes to share. Every handler `make_handler` builds is lent a
-// client of that task on each request, and reaches the state through
-// `call`, which runs on the owning task one call at a time, so no request
-// changes the state while another reads it and no lock guards it. Once every
-// serving task has been joined, the owning task is closed and the state is
-// returned, so a program reads what its routes changed and releases it. The
-// state is released on every failure.
-pub fn listen_and_serve_with[S: Owned + Shareable + Release, H: Handler[task.Client[S], mem.SystemAllocator] + Observer + Release, M: Shareable + Copyable + fn() -> H](address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128)) -> Result[S, ListenAndServeError] {
+// task for the routes to share. `make_handler` is given a client of that task
+// for each serving task, and builds that task's handler around it, often
+// `http.with_state` lending the routes a context that holds the client. A
+// route reaches the state through the client's `call`, which runs on the
+// owning task one call at a time, so no request changes the state while
+// another reads it and no lock guards it. Once every serving task has been
+// joined, the owning task is closed and the state is returned, so a program
+// reads what its routes changed and releases it. The state is released on
+// every failure.
+pub fn listen_and_serve_with[S: Owned + Shareable + Release, H: Handler[(), mem.SystemAllocator] + Observer + Release, M: Shareable + Copyable + fn(client: task.Client[S]) -> H where carries(client)](address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128)) -> Result[S, ListenAndServeError] {
     listen_and_serve_with_in(mem.system(), address, make_handler, state, limits, policy)
 }
 
@@ -1048,7 +1050,7 @@ test fn the_shared_state_counts_every_request_from_every_task() {
     let clients = [send(bound, health_request), send(bound, health_request), send(bound, health_request), send(bound, health_request)]
     let owner = task.own(Tally { visits = 0 }).unwrap()
     let counter = owner.client()
-    let made = [sink counter] || -> WithClient[Tally, Router[task.Client[Tally]]] where carries(counter) with_client(visits_router(), copy(counter))
+    let made = [sink counter] || -> Stated[task.Client[Tally], Router[task.Client[Tally]]] where carries(counter) with_state(copy(counter), visits_router())
     let served = serve_opened(listener, .Ok(bound), mem.system(), made, serving(4), policy: .Threads(4))
     let tally = owner.close()
     var answered: UInt64 = 0
@@ -1066,7 +1068,7 @@ test fn the_shared_state_counts_every_request_from_every_task() {
 
 // `listen_and_serve_with_in` listens and serves as `listen_and_serve_with`
 // does, carving each task's memory from `parent`.
-pub fn listen_and_serve_with_in[P: Allocator + Shareable, S: Owned + Shareable + Release, H: Handler[task.Client[S], P] + Observer + Release, M: Shareable + Copyable + fn() -> H](parent: P, address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128)) -> Result[S, ListenAndServeError] {
+pub fn listen_and_serve_with_in[P: Allocator + Shareable, S: Owned + Shareable + Release, H: Handler[(), P] + Observer + Release, M: Shareable + Copyable + fn(client: task.Client[S]) -> H where carries(client)](parent: P, address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128)) -> Result[S, ListenAndServeError] {
     let owner = match task.own(state) {
         Ok(owner) => owner,
         Err(Unowned { state: kept, reason }) => {
@@ -1075,7 +1077,7 @@ pub fn listen_and_serve_with_in[P: Allocator + Shareable, S: Owned + Shareable +
         },
     }
     let client = owner.client()
-    let made = [sink make_handler = copy(make_handler), sink client] || -> WithClient[S, H] where carries(client, make_handler) with_client(make_handler(), copy(client))
+    let made = [sink make_handler = copy(make_handler), sink client] || -> H where carries(client, make_handler) make_handler(client)
     let served = listen_and_serve_in(parent, address, made, limits, policy)
     let state = owner.close()
     match served {
@@ -1088,7 +1090,7 @@ pub fn listen_and_serve_with_in[P: Allocator + Shareable, S: Owned + Shareable +
 }
 
 test fn the_state_comes_back_when_serving_with_it_ends() {
-    let served = listen_and_serve_with_in(mem.system(), net.loopback(0), visits_router, Tally { visits = 7 }, limits: serving(0))
+    let served = listen_and_serve_with_in(mem.system(), net.loopback(0), visited, Tally { visits = 7 }, limits: serving(0))
     let kept = match served {
         Ok(tally) => tally.visits,
         Err(_) => 0,
@@ -1966,6 +1968,11 @@ fn health_router() -> Router[()] {
 fn count_visit[P: Allocator](inout tally: task.Client[Tally], request: Request[P]) -> Result[Response[P], Error[P]] {
     tally.call(|inout t: Tally| t.visits += 1)
     text(request, "ok")
+}
+
+// `visited` builds a serving task's handler: a visits router lent `tally`.
+fn visited(tally: task.Client[Tally]) -> Stated[task.Client[Tally], Router[task.Client[Tally]]] where carries(tally) {
+    with_state(copy(tally), visits_router())
 }
 
 // `visits_router` builds a router that counts every `GET /health`.

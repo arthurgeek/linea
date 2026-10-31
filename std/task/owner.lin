@@ -110,11 +110,42 @@ impl[S: Owned] Owner[S] {
     }
 }
 
+// Releasing an owning task closes it and releases its state, so a program
+// that reads the state only through clients may `defer let` the owner.
+impl[S: Owned + Release] Release for Owner[S] {
+    fn release(sink self: Self) {
+        self.close().release()
+    }
+}
+
+test fn releasing_an_owner_joins_its_task() {
+    defer let owner = own(UInt64(5)).unwrap()
+    let answered = owner.client().call(|inout n: UInt64| n + 1)
+    testing.assert_eq(answered, UInt64(6), "the owner did not answer before it was released")?
+}
+
 // How a task reaches an owning task's state. Copies of a client reach the
 // same owner, so each task that calls it takes its own copy.
 @(opaque, copyable)
 struct Client[S: Owned] {
     owner: borrow Owner[S],
+}
+
+// Releasing a client releases nothing: it borrows its owning task and holds
+// nothing of its own.
+impl[S: Owned] Release for Client[S] {
+    fn release(sink self: Self) {
+        let Client { owner: _ } = self
+    }
+}
+
+test fn releasing_a_client_leaves_its_owner_serving() {
+    let owner = own(UInt64(3)).unwrap()
+    owner.client().release()
+    let tripled = owner.client().call(|inout n: UInt64| n * 3)
+    let state = owner.close()
+    testing.assert_eq(tripled, UInt64(9), "the owner stopped serving")?
+    testing.assert_eq(state, UInt64(3), "releasing a client changed the state")?
 }
 
 impl[S: Owned] Client[S] {
