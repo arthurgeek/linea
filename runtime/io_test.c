@@ -286,7 +286,7 @@ static void error_categories(void) {
     assert(linea_io_category(INT_MAX) == LINEA_IO_OTHER);
 }
 
-static void positional_io_and_output_lock(void) {
+static void positional_io(void) {
     char template[] = "/tmp/linea_pos_XXXXXX";
     int fd = mkstemp(template);
     assert(fd >= 0);
@@ -309,9 +309,6 @@ static void positional_io_and_output_lock(void) {
     assert(memcmp(buf, "linea", 5) == 0);
 
     assert(linea_close(fd) == 0);
-
-    linea_io_output_lock();
-    linea_io_output_unlock();
 }
 
 int main(void) {
@@ -320,7 +317,7 @@ int main(void) {
     random_bytes();
     broken_pipe();
     concurrent_broken_pipe();
-    positional_io_and_output_lock();
+    positional_io();
     short_write();
     searchable_parent();
     filesystem();

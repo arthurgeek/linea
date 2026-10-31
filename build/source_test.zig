@@ -1136,6 +1136,13 @@ fn callbackTypedefs(gpa: std.mem.Allocator, text: []const u8, out: *Typedefs) !v
         var pieces = std.mem.splitScalar(u8, line[open + 1 .. close], ',');
         while (pieces.next()) |piece| {
             const trimmed = std.mem.trim(u8, piece, " \t");
+            // A callback's parameters are words the runtime passes by value; a
+            // pointer is a shape the table cannot name, so the typedef is
+            // left unread and every declaration naming it is reported.
+            if (std.mem.indexOfScalar(u8, trimmed, '*') != null) {
+                readable = false;
+                break;
+            }
             const cut = std.mem.lastIndexOfScalar(u8, trimmed, ' ') orelse {
                 readable = false;
                 break;
@@ -1161,6 +1168,7 @@ test "a callback typedef is read into the shape a table parameter names" {
     try callbackTypedefs(gpa,
         \\typedef void (*linea_task_release)(unsigned long at, unsigned long len);
         \\typedef size_t (*linea_unreadable)(unsigned long at);
+        \\typedef void (*linea_by_pointer)(unsigned long at, unsigned long *len);
     , &typedefs);
     const release = scalarOf("linea_task_release", &typedefs).?;
     const two: runtime_symbols.Callback = .{ .parameters = &.{ .u64, .u64 }, .result = .unit };
@@ -1168,6 +1176,7 @@ test "a callback typedef is read into the shape a table parameter names" {
     try testing.expect(runtime_symbols.sameParameter(release, .{ .scalar = .callback, .callback = &two }));
     try testing.expect(!runtime_symbols.sameParameter(release, .{ .scalar = .callback, .callback = &three }));
     try testing.expect(scalarOf("linea_unreadable", &typedefs) == null);
+    try testing.expect(scalarOf("linea_by_pointer", &typedefs) == null);
 }
 
 /// The scalar a C or Zig type spells, and whether it is passed through a
