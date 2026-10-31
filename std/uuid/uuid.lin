@@ -340,17 +340,46 @@ fn hyphen_before(byte: UInt64) -> Bool {
     byte == 4 || byte == 6 || byte == 8 || byte == 10
 }
 
-impl Display for Uuid {
-    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+// The byte Display writes between groups of digits.
+let hyphen: UInt8 = 45
+
+impl Uuid {
+    // `ascii` returns the 36 bytes Display writes: 32 lowercase hexadecimal
+    // digits, two for each byte, with a hyphen after the 4th, 6th, 8th and
+    // 10th byte. It allocates nothing, so a caller can copy the bytes into
+    // storage it already holds.
+    pub fn ascii(self: Self) -> [UInt8; 36] {
+        var written: [UInt8; 36] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         let bytes = self.bytes()
+        var at: UInt64 = 0
         for i in 0..16 {
             if hyphen_before(i) {
-                "-".fmt(&w)?
+                written[at] = hyphen
+                at += 1
             }
-            text.hex_digit(bytes[i] / 16).unwrap().fmt(&w)?
-            text.hex_digit(bytes[i] % 16).unwrap().fmt(&w)?
+            written[at] = digit(bytes[i] / 16)
+            written[at + 1] = digit(bytes[i] % 16)
+            at += 2
         }
-        .Ok(())
+        written
+    }
+
+    test fn ascii_is_the_written_form() {
+        let id = Uuid.parse("0190B3E2-7C1A-7D4E-9F21-3A5C8E0B6D17").unwrap()
+        let written = id.ascii()
+        testing.assert_eq(Str.from_bytes(written.as_slice()), .Ok("0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17"), "the written form changed")?
+    }
+}
+
+// The lowercase hexadecimal digit for `value`, which is below 16.
+fn digit(value: UInt8) -> UInt8 {
+    text.hex_digit(value).unwrap().byte(0).unwrap()
+}
+
+impl Display for Uuid {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        let written = self.ascii()
+        Str.from_bytes(written.as_slice()).unwrap().fmt(&w)
     }
 }
 

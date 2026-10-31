@@ -338,9 +338,12 @@ impl[L: Acceptor] Accepting[L] {
         }
     }
 
+    // Two clients wait, so a listener asked too early accepts one and the
+    // test fails at `early` instead of blocking at `later`.
     test fn next_asks_the_listener_nothing_until_a_retry_has_waited_its_pause() {
         let listener = listen(loopback(0)).unwrap()
         let client = connect(listener.local_address().unwrap()).unwrap()
+        let other = connect(listener.local_address().unwrap()).unwrap()
         let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
         let script = scripted(listener, [.Some(.Io(exhausted)), .None, .None, .None], .None)
         var accepting = Accepting.open(script, limit: .None)
@@ -350,6 +353,7 @@ impl[L: Acceptor] Accepting[L] {
         let later = told(&accepting.next())
         accepting.finish().unwrap()
         client.close().unwrap()
+        other.close().unwrap()
         testing.assert_eq(retried, Told.Retried, "the failed accept was not retried")?
         testing.assert_eq(early, Told.Waited, "the listener was asked again before the pause ended")?
         testing.assert_eq(later, Told.Connected, "the connection was not accepted after the pause")?

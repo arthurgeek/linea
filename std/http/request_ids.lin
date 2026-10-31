@@ -60,13 +60,10 @@ struct RequestIds[H, A: Allocator = mem.SystemAllocator] {
 derive[H: Release, A: Allocator] Release for RequestIds[H, A]
 
 // `Buffers` hold the rebuilt request: `head` is the original head followed by
-// the header's name and the id, and `fields` locates the headers in it. A
-// generated id is written with `allocator`, the one the buffers grow with,
-// so it never draws on the request's own allocator.
+// the header's name and the id, and `fields` locates the headers in it.
 struct Buffers[A: Allocator] {
     head: Vec[UInt8, A],
     fields: Vec[Field, A],
-    allocator: A,
 }
 
 derive[A: Allocator] Release for Buffers[A]
@@ -95,7 +92,7 @@ pub fn with_request_ids_in[H, A: Allocator](allocator: A, sink handler: H) -> Re
     .{
         handler,
         pending = .None,
-        buffers = .{ head = Vec.new_in(allocator), fields = Vec.new_in(allocator), allocator = copy(allocator) },
+        buffers = .{ head = Vec.new_in(allocator), fields = Vec.new_in(allocator) },
     }
 }
 
@@ -135,15 +132,19 @@ test fn an_id_is_kept_only_when_it_is_short_visible_ascii() {
 // first `X-Request-Id` the client sent, when that is well formed, or a new
 // version 7 UUID. It refuses with `Oom` when the buffers cannot grow.
 fn identify[P: Allocator, A: Allocator](inout buffers: Buffers[A], request: Request[P]) -> Result[Span, mem.Oom] where carries() {
-    defer var made = String.new_in(buffers.allocator)
     // A request that sent no id is read as having sent an empty one, which
-    // is not well formed.
+    // is not well formed. A generated id is copied into the buffers like a
+    // sent one, so making it allocates nothing.
     let sent = request.header(request_id_header).unwrap_or("")
-    let id = if well_formed(sent) {
-        sent
+    let kept = well_formed(sent)
+    var generated = uuid.Uuid.nil().ascii()
+    if !kept {
+        generated = uuid.Uuid.v7().ascii()
+    }
+    let id = if kept {
+        sent.as_bytes()
     } else {
-        uuid.Uuid.v7().fmt(&made)?
-        made.view()
+        generated.as_slice()
     }
     let held = copy(request.head)
     &buffers.head.clear()
@@ -152,7 +153,7 @@ fn identify[P: Allocator, A: Allocator](inout buffers: Buffers[A], request: Requ
     &buffers.fields.reserve(request.header_fields.length() + 1)?
     &buffers.head.append_slice(held.as_bytes())?
     let name = push_stored(&buffers.head, request_id_header.as_bytes())?
-    let value = push_stored(&buffers.head, id.as_bytes())?
+    let value = push_stored(&buffers.head, id)?
     // The id's header comes first; the client's headers follow in arrival
     // order, except any it sent under the id's name.
     match &buffers.fields.push(.{ name, value = copy(value) }) {
@@ -280,6 +281,24 @@ test fn a_generated_id_takes_nothing_from_the_request_allocator() {
     }
     let id = identify(&identifying.buffers, sent.request())
     testing.assert(id.is_ok(), "the id was made with the request's allocator")?
+}
+
+// The buffers keep the size of the largest head seen, so a middleware whose
+// allocator is a small arena answers any number of requests it makes ids for.
+test fn buffers_in_an_arena_last_for_any_number_of_requests() {
+    defer let kept = mem.Arena.open(mem.system(), size: 4096)
+    defer var identifying = with_request_ids_in(kept.handle(), Echoing { served = 0 })
+    var nothing = ()
+    var failed: UInt64 = 0
+    for _ in 0..1000 {
+        defer let arena = mem.Arena.open(mem.system(), size: 8192)
+        let sent = new_request(arena.handle(), "GET", "/a", body: "").unwrap()
+        let answered: Result[Response, Error] = &identifying.serve_http(&nothing, sent.request())
+        if answered.is_err() {
+            failed += 1
+        }
+    }
+    testing.assert_eq(failed, UInt64(0), "requests failed once the middleware's arena filled")?
 }
 
 test fn an_identified_request_keeps_the_rest_of_the_request() {
@@ -482,7 +501,7 @@ test fn a_request_the_handler_never_saw_is_logged_without_an_id() {
 // A buffer that cannot grow answers 500 without calling the handler, and
 // nothing is lost.
 test fn a_refused_buffer_answers_500_before_the_handler() -> Result[(), testing.Failure] {
-    defer let backing = mem.Arena.open(mem.system(), size: 262144)
+    defer let backing = mem.Arena.open(mem.system(), size: 65536)
     let checked = testing.each_allocation_failure(
         backing.handle(),
         |allocator| -> Result[(), mem.Oom] {

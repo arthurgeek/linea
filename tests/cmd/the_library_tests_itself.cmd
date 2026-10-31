@@ -550,6 +550,7 @@ The library tests itself.
   ok    http.arena_arithmetic_stops_at_the_largest_integer
   ok    http.bodyless_statuses_are_recognised
   ok    http.bodyless_statuses_emit_no_content_type_and_no_body
+  ok    http.buffers_in_an_arena_last_for_any_number_of_requests
   ok    http.content_length_alone_frames_the_body
   ok    http.content_length_must_be_digits_and_agree
   ok    http.cookie_decodes_the_percent_encoded_value
@@ -1491,6 +1492,7 @@ The library tests itself.
   ok    uuid.a_v4_identifier_has_version_4_and_the_rfc_variant
   ok    uuid.a_v7_identifier_records_when_it_was_made
   ok    uuid.an_identifier_parses_back_to_itself
+  ok    uuid.ascii_is_the_written_form
   ok    uuid.bytes_come_back_as_they_went_in
   ok    uuid.debug_writes_the_identifier_as_display_does
   ok    uuid.equal_identifiers_hash_alike
@@ -1502,4 +1504,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1499 passed, 0 failed
+  1501 passed, 0 failed
