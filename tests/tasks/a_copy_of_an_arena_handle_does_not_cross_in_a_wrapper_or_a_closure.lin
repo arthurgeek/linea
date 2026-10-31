@@ -1,0 +1,54 @@
+import std.mem
+import std.session
+import std.task
+
+use mem.Lender
+use session.Chan
+use session.End
+
+// Every copy of an arena's handle borrows the arena, and allocating through a
+// handle reads the arena and advances its cursor. A copy held in a record, or
+// erased into a `mem.Closure`, still carries that borrow, so neither crosses
+// into a task while the creator keeps allocating from the arena.
+struct Wrap {
+    handle: mem.Handle,
+}
+
+impl Release for Wrap {
+    fn release(sink self: Self) {
+        let Wrap { handle: _ } = self
+    }
+}
+
+fn main() -> UInt8 {
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    let handle = arena.handle()
+
+    let wrapped = Wrap { handle = copy(handle) }
+    let body = sink [sink wrapped] |sink me: Chan[End]| {
+        let Wrap { handle: _ } = wrapped
+        me.close()
+    }
+    let started = task.prepare(body).unwrap().start()
+
+    let theirs = Wrap { handle = copy(handle) }
+    let allocate = [sink theirs] || -> UInt64 {
+        let bytes: mem.Vec[UInt8, mem.Handle] = mem.Vec.new_in(theirs.handle)
+        let length = bytes.length()
+        bytes.release()
+        length
+    }
+    let erased = mem.Closure.open(allocate).unwrap()
+    let other = sink [sink erased] |sink me: Chan[End]| {
+        let _ = erased()
+        erased.release()
+        me.close()
+    }
+    let also = task.prepare(other).unwrap().start()
+
+    let mine: mem.Vec[UInt8, mem.Handle] = mem.Vec.new_in(handle)
+    mine.release()
+    started.close()
+    also.close()
+    0
+}

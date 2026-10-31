@@ -922,6 +922,14 @@ const Parser = struct {
         if (result.saw_linear and result.saw_copyable and !exclusive_reported) {
             try self.reportAt(.s_entry, result.first, "linear and copyable are exclusive", "choose one ownership policy");
         }
+        // Copies of a value reach what it reaches. A copyable type reaches
+        // shared state through a borrow of an `unshareable` owner, which
+        // makes it unshareable and is carried by every copy; declaring the
+        // copyable type itself `unshareable` would let copies share state
+        // that no borrow ties together.
+        if (result.saw_copyable and result.unshareable != .none) {
+            try self.reportAt(.s_entry, result.unshareable, "copyable and unshareable are exclusive", "drop `unshareable` and reach the shared state through a borrow of an `@unshareable` owner");
+        }
         result.groups = .{ .start = group_start, .end = self.builder.attributeGroupMark() };
     }
 
@@ -9686,7 +9694,7 @@ test "an unshareable mark attaches to any type declaration and is written once" 
     const accepted = try parseProgramText(gpa,
         \\@unshareable
         \\struct Cursor { at: UInt64 }
-        \\@(opaque, copyable, unshareable)
+        \\@(opaque, unshareable)
         \\enum Mark { Start, End }
         \\@unshareable
         \\type Offset = UInt64
@@ -9741,6 +9749,11 @@ test "copyable declarations preserve policy and reject conflicting modifiers" {
         \\struct Point { value: UInt8 }
     );
     try testing.expect(refused.errors > 0);
+    const shared = try parseProgramText(gpa,
+        \\@(copyable, unshareable)
+        \\struct Cursor { at: UInt64 }
+    );
+    try testing.expectEqual(@as(u32, 1), shared.errors);
 }
 
 test "a missing attribute comma preserves the remaining group and declaration" {

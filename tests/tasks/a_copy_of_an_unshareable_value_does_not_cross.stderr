@@ -1,7 +1,0 @@
-error[O-Cross]: a task cannot take a copy of a `Cursor`: it is copyable and not `Shareable`, so its copies share what they reach
-  --> tests/tasks/a_copy_of_an_unshareable_value_does_not_cross/main.lin:17:27
-   |
-17 |     let body = sink [sink theirs] |sink me: Chan[End]| {
-   |                           ^^^^^^ this capture moves a copy into the task
-   |
-   = help: give the task a value of its own whose type is not copyable, or one that is `Shareable`

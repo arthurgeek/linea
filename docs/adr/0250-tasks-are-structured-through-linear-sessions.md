@@ -298,11 +298,20 @@ is written as a declaration attribute, in the closed set beside `@linear`,
 `@copyable` and `@carrier`:
 
 ```linea
-@(opaque, copyable, unshareable)
-struct Handle[H: Allocator = SystemAllocator] {
-    owner: borrow Arena[H],
+@(opaque, unshareable)
+struct Arena[H: Allocator] {
+    slab: Option[Buffer[H]],
 }
 ```
+
+`@unshareable` excludes `@copyable`. Copies of a value reach what it reaches,
+so a copyable type declared `@unshareable` would have its copies share state
+that no dependency ties together: a copy moved into a task, held in a record
+or erased into a `mem.Closure` would cross with nothing to refuse it. A
+copyable type reaches shared state through a borrow of an `@unshareable`
+owner instead, as `mem.Handle` borrows its `mem.Arena`: the borrow makes the
+handle not `Shareable` and not `Owned`, and every copy carries its
+observation, which [O-Cross] refuses wherever the copy is taken.
 
 An attribute, because being unshareable is a fact about a type's representation
 that the declaration states, as `@carrier` and `@copyable` are. A trait would

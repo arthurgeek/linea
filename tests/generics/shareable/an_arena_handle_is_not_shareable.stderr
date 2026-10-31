@@ -1,14 +1,14 @@
-error[T-Bound]: `T` requires `Shareable`, and `mem.Handle[mem.SystemAllocator]` is unshareable
+error[T-Bound]: `T` requires `Shareable`, and `mem.Handle[mem.SystemAllocator]` is not `Shareable`: it holds a `mem.Arena[mem.SystemAllocator]`, which is unshareable
   --> tests/generics/shareable/an_arena_handle_is_not_shareable.lin:20:19
    |
 20 |     let counted = share(handle) + share(empty) + share(desk) + share(borrow arena)
    |                   ^^^^^ `mem.Handle[mem.SystemAllocator]` is not `Shareable`; pass a value that reading never changes, or drop the bound
-error[T-Bound]: `T` requires `Shareable`, and `Vec[UInt8, mem.Handle[mem.SystemAllocator]]` is not `Shareable`: it holds a `mem.Handle[mem.SystemAllocator]`, which is unshareable
+error[T-Bound]: `T` requires `Shareable`, and `Vec[UInt8, mem.Handle[mem.SystemAllocator]]` is not `Shareable`: it holds a `mem.Arena[mem.SystemAllocator]`, which is unshareable
   --> tests/generics/shareable/an_arena_handle_is_not_shareable.lin:20:35
    |
 20 |     let counted = share(handle) + share(empty) + share(desk) + share(borrow arena)
    |                                   ^^^^^ `Vec[UInt8, mem.Handle[mem.SystemAllocator]]` is not `Shareable`; pass a value that reading never changes, or drop the bound
-error[T-Bound]: `T` requires `Shareable`, and `Desk` is not `Shareable`: `handle` is a `mem.Handle[mem.SystemAllocator]`, which is unshareable
+error[T-Bound]: `T` requires `Shareable`, and `Desk` is not `Shareable`: `handle` is a `mem.Handle[mem.SystemAllocator]`, which holds a `mem.Arena[mem.SystemAllocator]`, which is unshareable
   --> tests/generics/shareable/an_arena_handle_is_not_shareable.lin:20:50
    |
 20 |     let counted = share(handle) + share(empty) + share(desk) + share(borrow arena)

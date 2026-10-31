@@ -894,9 +894,7 @@ pub fn check(gpa: Allocator, program: *const ExpandedProgram, res: *const Resolu
         const initial: Analysis = .{ .gpa = gpa, .ast = &program.ast, .program = program, .res = res, .typing = typing, .cfg = cfg, .function = function, .cancelled = cancelled, .sink = sink, .store = .{ .gpa = gpa } };
         var analysis = initial;
         defer analysis.deinit();
-        // A function that starts a task is analysed even when it holds no
-        // dependency, so [O-Cross] sees a copy it moves into the task.
-        if (!try analysis.seedsDependencies() and !analysis.startsTask()) continue;
+        if (!try analysis.seedsDependencies()) continue;
         analysis.deinit();
         analysis = initial;
         try analysis.analyze();
@@ -1024,25 +1022,6 @@ const Analysis = struct {
             state.clearRetainingCapacity();
             try self.transfer(&state, index, .probe);
             if (self.store.sets.items.len != 0) return true;
-        }
-        return false;
-    }
-
-    /// Whether the function calls one of the functions whose `body` crosses
-    /// into a task. One walk over the function's operations.
-    fn startsTask(self: *const Analysis) bool {
-        for (self.cfg.blocks[self.function.blocks.start..self.function.blocks.end]) |block| {
-            var ops = self.cfg.opsOf(block);
-            while (ops.next()) |op| {
-                if (self.cfg.opTag(op) != .committed) continue;
-                const at = self.cfg.opAt(op);
-                if (self.ast.exprTag(at) != .call) continue;
-                const normalized = self.typing.call_index.callOf(self.typing, at) orelse continue;
-                switch (normalized.target) {
-                    .declared => |d| if (self.typing.raw_accesses.crossesTask(d)) return true,
-                    else => {},
-                }
-            }
         }
         return false;
     }
@@ -2185,25 +2164,6 @@ const Analysis = struct {
                 if ((try self.crossings_reported.getOrPut(self.gpa, at)).found_existing) continue;
                 try self.crossingObservation(at, own_pass, fact, observed_type);
             };
-            // A copy of a copyable value that is not `Shareable` reaches the
-            // state the creator's copy reaches, as a `mem.Handle`'s copies
-            // reach one arena, so moving one into the task shares that state
-            // with no observation to say so. A capture already reported
-            // through what it observes is not reported again.
-            for (self.res.closureCaptures(closure.?)) |capture| {
-                const captured = self.typing.exprType(capture.source);
-                if (capture.convention != .sink) continue;
-                if (captured == .poison or !self.typing.mayCopy(captured) or self.typing.isShareable(captured)) continue;
-                if ((try self.crossings_reported.getOrPut(self.gpa, capture.source)).found_existing) continue;
-                const name = try writtenTypeName(self.sink.arena, self.ast, self.program, self.res, self.typing, self.functionModule(), captured);
-                try self.sink.add(.{
-                    .severity = .err,
-                    .code = .o_cross,
-                    .message = try std.fmt.allocPrint(self.sink.arena, "a task cannot take a copy of a `{s}`: it is copyable and not `Shareable`, so its copies share what they reach", .{name}),
-                    .labels = try self.sink.arena.dupe(diagnostics.Label, &.{.{ .file = self.ast.fileOfExpr(capture.source), .span = self.ast.exprSpan(capture.source), .message = "this capture moves a copy into the task" }}),
-                    .notes = try self.sink.arena.dupe([]const u8, &.{"give the task a value of its own whose type is not copyable, or one that is `Shareable`"}),
-                });
-            }
         }
     }
 
@@ -2286,10 +2246,18 @@ const Analysis = struct {
         return if (self.function.owner == .none) ModuleId.none else self.program.moduleOf(self.function.owner);
     }
 
+    /// Whether `ty`'s fields are hidden from this function's module: its
+    /// declaration is `opaque` and another module declares it.
+    fn sealedHere(self: *const Analysis, ty: types.TypeId) bool {
+        const d = self.typing.declOfType(ty) orelse return false;
+        return self.ast.declVisibility(d) == .opaque_ and self.program.moduleOf(d) != self.functionModule();
+    }
+
     /// The part of `ty` that is not `Shareable`, named as far as a reader can
     /// select it: down the fields of records while one field's type is
-    /// unshareable. Null where no field explains it, because `ty` is itself
-    /// declared `unshareable`, or is an observation, a callable or a type
+    /// unshareable, stopping at a record whose fields its module hides. Null
+    /// where no field explains it, because `ty` is itself declared
+    /// `unshareable` or sealed, or is an observation, a callable or a type
     /// parameter.
     ///
     /// **Bound:** each step enters a field a record holds by value, and no
@@ -2303,7 +2271,7 @@ const Analysis = struct {
                 if (self.typing.unshareableSeed(at)) break;
                 at = self.typing.get(at).closure.environment;
             }
-            if (self.typing.get(at) != .struct_ or self.typing.unshareableSeed(at)) break;
+            if (self.typing.get(at) != .struct_ or self.typing.unshareableSeed(at) or self.sealedHere(at)) break;
             const count = self.typing.fieldCount(at);
             const index = for (0..count) |i| {
                 if (!self.typing.isShareable(self.typing.fieldType(at, @intCast(i)))) break i;

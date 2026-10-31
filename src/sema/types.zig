@@ -7497,10 +7497,6 @@ pub const Typing = struct {
     fn directDependencySeed(self: *const Typing, t: TypeId) bool {
         switch (self.get(t)) {
             .borrow => return true,
-            // A copyable `unshareable` record's copies reach one state, as a
-            // borrow's do, so a copy is not owned by whoever holds it. One
-            // that holds a borrow field already carries through it.
-            .struct_ => |record| if (record.unshareable and record.ownership_policy == .copyable and !self.holdsBorrowField(t)) return true,
             // An instantiation may supply any type, so a parameter carries
             // unless its bounds admit only types that carry nothing: `Owned`,
             // or the integer family, all of which are Owned.
@@ -7514,14 +7510,6 @@ pub const Typing = struct {
         }
         if (self.raw_accesses.buffer != .none and declaration == self.raw_accesses.buffer) return true;
         return self.raw_accesses.storage != .none and declaration == self.raw_accesses.storage and self.instanceOf(t) == null;
-    }
-
-    /// Whether one of the record `t`'s own fields is a borrow.
-    fn holdsBorrowField(self: *const Typing, t: TypeId) bool {
-        for (0..self.fieldCount(t)) |i| {
-            if (self.get(self.fieldType(t, @intCast(i))) == .borrow) return true;
-        }
-        return false;
     }
 
     /// Whether a value of `t` may hold storage of its own, a buffer somewhere
