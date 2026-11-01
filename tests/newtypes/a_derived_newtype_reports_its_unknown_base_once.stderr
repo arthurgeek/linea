@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `Missing`
+ --> tests/newtypes/a_derived_newtype_reports_its_unknown_base_once.lin:4:19
+  |
+4 | type Wrapped[T] = Missing[T]
+  |                   ^^^^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Missing`
+ --> tests/newtypes/a_derived_newtype_reports_its_unknown_base_once.lin:3:9
+  |
+3 | @derive(Equatable)
+  |         ^^^^^^^^^ no type with this name is declared here

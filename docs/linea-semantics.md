@@ -4635,8 +4635,10 @@ task before the call returns, writes with bytes another task sent, or keeps
 for a task it starts; and as the `at` of a `mem.Closure` construction, the one
 type certified to erase what it holds. Anywhere else, the call, or `raw` named
 as a value, is refused, because a number would stand for values of a type no
-type names. An `extern` whose parameters, result or callbacks name an address
-is refused too, since C could keep it. A function passed for a runtime
+type names. An `extern` or `export` whose parameters, result or callbacks reach
+an address, through a newtype's base or a place lent `inout`, is refused too,
+since C could keep one or write a number where one belongs; a callback's
+context, which C hands back unread, is the one place exempt. A function passed for a runtime
 callback the table marks may declare the marked parameter as an address,
 which crosses as its `UInt64`, so no source form turns a number into an
 address
