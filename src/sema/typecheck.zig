@@ -17225,7 +17225,13 @@ const Checker = struct {
                     self.noteQualifier(c.callee);
                     _ = self.record(c.callee, template);
                     for (c.args) |a| _ = try self.check(a, null);
-                    return self.expect(id, template, expected);
+                    // `Name?(e)` answers an `Option` of the newtype, whatever
+                    // its arguments would have been.
+                    const built = if (self.ast.callFallible(id)) built: {
+                        const opt = self.option_decl orelse break :built template;
+                        break :built try self.builder.instantiate(self.type_of_decl.get(opt), opt, &.{template});
+                    } else template;
+                    return self.expect(id, built, expected);
                 }
             }
             self.noteQualifier(c.callee);
@@ -19827,8 +19833,12 @@ const Checker = struct {
         var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
         defer seen.deinit(self.gpa);
         var names = try self.reachesAddress(&seen, signature.result);
-        for (self.builder.callableParams(signature)) |param| {
-            if (param.convention == .inout) continue;
+        const params = self.builder.callableParams(signature);
+        for (params) |param| {
+            // A callback's context reaches C as an address C hands back
+            // unread ([T-ExternCallback]); any other place lent `inout` is
+            // one C may write a number into.
+            if (param.convention == .inout and self.isCallbackContext(params, param.ty)) continue;
             if (try self.reachesAddress(&seen, param.ty)) names = true;
         }
         if (!names) return;
@@ -19837,15 +19847,29 @@ const Checker = struct {
             self.ast.fileOf(self.ast.declName(d)),
             self.ast.tokenSpan(self.ast.declName(d)),
             "declare a `UInt64` where C takes a number",
-            "`{s}` would hand C an address, which it may keep where no type names what the address holds",
+            "`{s}` would pass an address between C and Linea, and C may keep one where no type names what the address holds",
             .{self.ast.tokenText(self.ast.declName(d))},
         );
+    }
+
+    /// Whether `ty` is the context a callback among `params` takes first,
+    /// `inout`, which the `extern` lends C to hand back on every call.
+    fn isCallbackContext(self: *Checker, params: []const types_mod.CallableParam, ty: TypeId) bool {
+        for (params) |param| switch (self.builder.get(param.ty)) {
+            .callable => |callback| {
+                const taken = self.builder.callableParams(callback);
+                if (taken.len != 0 and taken[0].convention == .inout and taken[0].ty == ty) return true;
+            },
+            else => {},
+        };
+        return false;
     }
 
     /// Whether `t` is or wraps a `mem.address.Address` as C would see it:
     /// what crosses is a scalar, a newtype over one, or a callback, so a
     /// newtype's base and a callback's parameters and result are followed. A
-    /// context lent `inout` reaches C as an address of a value C never reads.
+    /// callback's leading `inout` parameter is its context, which C hands
+    /// back unread.
     ///
     /// **Bound:** each type reachable from `t` is entered once.
     fn reachesAddress(self: *Checker, seen: *std.AutoHashMapUnmanaged(TypeId, void), t: TypeId) std.mem.Allocator.Error!bool {
@@ -19855,8 +19879,8 @@ const Checker = struct {
             .newtype => return self.reachesAddress(seen, try self.builder.baseOf(t)),
             .callable => |callable| {
                 if (try self.reachesAddress(seen, callable.result)) return true;
-                for (self.builder.callableParams(callable)) |param| {
-                    if (param.convention == .inout) continue;
+                for (self.builder.callableParams(callable), 0..) |param, k| {
+                    if (k == 0 and param.convention == .inout) continue;
                     if (try self.reachesAddress(seen, param.ty)) return true;
                 }
                 return false;

@@ -13,9 +13,9 @@ scalar but must be told apart by what it refers to had to be a struct:
 passed by address, so where the value crosses to C or to the runtime as a
 plain integer, a struct cannot stand for it.
 
-A typed raw address is such a value: the runtime hands a task's body an address as a
-`UInt64`, and the function it calls must receive it as an address of the
-body's type. It needs a newtype that names its element type.
+A typed raw address is such a value: the runtime hands a task's body an
+address as a `UInt64`, and the function it calls must receive it as an
+address of the body's type. It needs a newtype that names its element type.
 
 ## Decision
 

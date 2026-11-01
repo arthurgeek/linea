@@ -1,0 +1,17 @@
+// `Rating?(n)` answers an `Option` of a `Rating`, so where an `Option` of
+// something else is expected it is a mismatch, named as what it builds.
+type Rating[phantom T] = UInt8 where it in 1..=5
+
+struct Film {}
+
+fn parse(stars: UInt8) -> Option[UInt8] {
+    Rating?(stars)
+}
+
+fn main() -> UInt8 {
+    let _unrated: Option[Rating[Film]] = .None
+    match parse(3) {
+        Some(stars) => stars,
+        None => 0,
+    }
+}

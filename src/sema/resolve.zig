@@ -4080,6 +4080,11 @@ fn resolveInternal(
                         // A derive header is valid when the type's own header
                         // is: field errors belong to the representation.
                         const header_valid = sink.error_count == errors_before;
+                        // A derive's `where` clause names a newtype's base by
+                        // the parameters it is written with, so the base is
+                        // read before the derive expands, and the parameters
+                        // it uses are kept for the declaration's own check.
+                        if (ast.declTag(d) == .newtype) try r.useRef(ast.declReturnRef(d));
                         if (attached) {
                             const params = ast.declTypeParamRange(d);
                             for (params.start..params.end, 0..) |parameter_index, local_index| {
@@ -4093,11 +4098,6 @@ fn resolveInternal(
                                 for (ast.variantFields(variant)) |field| try r.useRef(field.written);
                             }
                             try r.reportUnusedTypeParams(d);
-                        } else {
-                            // A derive's `where` clause names the base by the
-                            // parameters it is written with, so the base is
-                            // read before the derive is expanded.
-                            try r.useRef(ast.declReturnRef(d));
                         }
                         if (attached) {
                             // A type the parser could not name has already been
@@ -4290,7 +4290,9 @@ fn resolveInternal(
                 try r.useRef(f.written);
             };
             for (ast.declFields(d)) |f| try r.useRef(f.written);
-            try r.useRef(ast.declReturnRef(d));
+            // A derived newtype's base was read before the derive expanded,
+            // and a name it misses was reported then.
+            if (ast.declTag(d) != .newtype or ast.attachedDeriveTraitRange(d).len() == 0) try r.useRef(ast.declReturnRef(d));
             // What an implementation applied its head to. The arguments and
             // not the head itself: an implementation's parameters are written
             // there and nowhere else, so a head left unread leaves every one

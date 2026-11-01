@@ -1,0 +1,12 @@
+import std.mem.address
+
+// An address names the type of the values kept at it, and C keeps no type: an
+// `export` C calls cannot be handed one, whether it takes the address itself or
+// a place C writes it into.
+export fn handed(_at: address.Address[UInt8]) -> UInt8 {
+    0
+}
+
+export fn lent(inout _at: address.Address[UInt8]) -> UInt8 {
+    0
+}

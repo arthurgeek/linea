@@ -1,0 +1,10 @@
+error[T-RawAddress]: `handed` would pass an address between C and Linea, and C may keep one where no type names what the address holds
+ --> tests/library/an_export_cannot_take_an_address_from_c/main.lin:6:11
+  |
+6 | export fn handed(_at: address.Address[UInt8]) -> UInt8 {
+  |           ^^^^^^ declare a `UInt64` where C takes a number
+error[T-RawAddress]: `lent` would pass an address between C and Linea, and C may keep one where no type names what the address holds
+  --> tests/library/an_export_cannot_take_an_address_from_c/main.lin:10:11
+   |
+10 | export fn lent(inout _at: address.Address[UInt8]) -> UInt8 {
+   |           ^^^^ declare a `UInt64` where C takes a number
