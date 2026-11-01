@@ -1374,9 +1374,12 @@ const BorrowContainment = struct {
     /// inference, ownership, storage lowering and the `Owned` bound read.
     /// `writers` answers whether a value of the type may hold something that
     /// can write through a place lent `inout`: a closure, a function value,
-    /// or a type parameter an instantiation could make one. It follows fields,
-    /// observed referents and every type argument, phantom ones included, so
-    /// a container that erases what it stores is still counted.
+    /// or a type parameter an instantiation could make one. It follows what a
+    /// type holds: fields, observed referents, the values an address,
+    /// certified storage or a slice names, what a `mem.Carried` carries and
+    /// the callable a `mem.ClosureEntry` stands for. Any other type argument
+    /// names nothing the value holds, because a value kept in bytes is kept
+    /// behind an address of its own type.
     /// `unshareable` answers whether a value of the type may not be read by two
     /// tasks at once, which is what `Shareable` refuses: whether it reaches,
     /// over the edges `writers` follows, a type declared `unshareable`, a
@@ -1393,22 +1396,19 @@ const BorrowContainment = struct {
     pending: std.ArrayList(PendingEdge) = .empty,
     /// How far the walk over the pool has reached.
     scanned: usize = 0,
-    /// What each type has recorded as edges: nothing, its arguments alone
-    /// (an unwritten instantiation, in `writers` mode), the one edge to its
-    /// representative (an alike instantiation with its parts unwritten, in
-    /// `raw_carriers` mode), or every part.
+    /// What each type has recorded as edges: nothing, the one edge to its
+    /// representative (an alike instantiation with its parts unwritten), or
+    /// every part.
     recorded: std.ArrayList(Recorded) = .empty,
     /// Types whose parts were written after the walk passed them.
     late: std.ArrayList(TypeId) = .empty,
     /// Unwritten instantiations whose answer needs their parts, which the
     /// builder writes before the facts are read.
     unwritten: std.ArrayList(TypeId) = .empty,
-    /// Unwritten instantiations recorded by their arguments alone.
-    by_arguments: std.ArrayList(TypeId) = .empty,
     dirty: bool = false,
     coverage: DependencyCoverage = .{},
 
-    const Recorded = enum(u8) { nothing, arguments, representative, parts };
+    const Recorded = enum(u8) { nothing, representative, parts };
 
     fn invalidate(self: *BorrowContainment, owner: TypeId) void {
         if (owner.index() < self.recorded.items.len and self.recorded.items[owner.index()] != .nothing) {
@@ -1425,10 +1425,9 @@ const BorrowContainment = struct {
 
     /// `t`'s parts were written for the first time. What was recorded of it
     /// is still true, so nothing is invalidated: the walk records the parts
-    /// when it next runs, unless its arguments already settled the answer.
+    /// when it next runs.
     fn noteFilled(self: *BorrowContainment, gpa: std.mem.Allocator, t: TypeId) !void {
         if (t.index() >= self.scanned) return;
-        if (self.recorded.items[t.index()] == .arguments and self.values.items[t.index()]) return;
         try self.late.append(gpa, t);
     }
 
@@ -1455,7 +1454,6 @@ const BorrowContainment = struct {
         self.recorded.deinit(gpa);
         self.late.deinit(gpa);
         self.unwritten.deinit(gpa);
-        self.by_arguments.deinit(gpa);
         self.coverage.deinit(gpa);
         self.* = .{};
     }
@@ -1485,10 +1483,10 @@ const BorrowContainment = struct {
         base,
         /// A closure's environment.
         environment,
-        /// The elements certified storage holds.
+        /// The values certified storage, an address or a slice names.
         stored,
-        /// A type argument: one a writer may be, or the one `mem.Carried`
-        /// carries the dependencies of.
+        /// The type argument `mem.Carried` carries the dependencies of, or
+        /// the callable a `mem.ClosureEntry` stands for.
         argument,
     };
 
@@ -1498,18 +1496,25 @@ const BorrowContainment = struct {
     /// cannot disagree about what a type contains.
     fn eachChild(builder: *Typing.Builder, ty: TypeId, mode: Mode, visit: anytype) std.mem.Allocator.Error!void {
         try eachPart(builder, ty, mode, visit);
+        if (carriedArgument(builder, ty)) |carried| try visit.child(.argument, carried);
         const view = builder.view();
-        if (carriedArgument(builder, ty)) |carried| {
-            if (mode == .raw_carriers or view.instanceOf(ty) == null) try visit.child(.argument, carried);
+        const declaration = view.declOfType(ty) orelse return;
+        const instance = view.instanceOf(ty) orelse return;
+        const arguments = view.argsOf(instance);
+        if (arguments.len == 0) return;
+        if (declaration == builder.certified_storage or declaration == builder.certified_slice)
+            return visit.child(.stored, arguments[0]);
+        // An address is a number, and the storage that owns its bytes
+        // carries the dependencies of what is kept there; what those values
+        // may write through or may not share is the address's as well.
+        if (declaration == builder.certified_address) {
+            if (mode != .raw_carriers) try visit.child(.stored, arguments[0]);
+            return;
         }
-        if (mode != .raw_carriers) {
-            if (view.instanceOf(ty)) |instance| for (view.argsOf(instance)) |argument| try visit.child(.argument, argument);
-        } else if (builder.certified_storage != .none and view.declOfType(ty) == builder.certified_storage) {
-            if (view.instanceOf(ty)) |instance| {
-                const arguments = view.argsOf(instance);
-                if (arguments.len != 0) try visit.child(.stored, arguments[0]);
-            }
-        }
+        // The entry a closure is called through is its callable's signature;
+        // what it may carry is the closure's contract, which `raw_carriers`
+        // reads from there.
+        if (mode != .raw_carriers and declaration == builder.certified_closure_entry) try visit.child(.argument, arguments[0]);
     }
 
     /// The type whose dependencies a `mem.Carried` type holds without holding
@@ -1575,23 +1580,20 @@ const BorrowContainment = struct {
         owner: TypeId,
         mode: Mode,
 
-        /// In `writers` mode an unwritten part records its own arguments,
-        /// which usually settle it without its parts being written.
+        /// An unwritten part that no representative answers for is kept for
+        /// the builder to write.
         fn child(edges: Edges, _: Step, part: TypeId) std.mem.Allocator.Error!void {
             const gpa = edges.builder.gpa;
-            if (edges.mode == .raw_carriers and edges.builder.isShell(part) and edges.builder.alikeSource(part) == null)
+            if (edges.builder.isShell(part) and edges.builder.alikeSource(part) == null)
                 try edges.containment.unwritten.append(gpa, part);
             try edges.containment.edge(gpa, edges.owner, part);
         }
     };
 
-    /// An unwritten instantiation has no parts to record. In `writers` mode
-    /// its arguments are recorded, since every argument is a part there, and
-    /// an argument holding a type parameter settles the answer; in
-    /// `raw_carriers` mode an alike one records its representative. One
-    /// neither settles is left in `unwritten`, as is any unwritten part a
-    /// recorded type holds that is not answered from another, for the builder
-    /// to write and the next walk to record.
+    /// An unwritten instantiation has no parts to record. An alike one records
+    /// its representative; any other unwritten part a recorded type holds is
+    /// left in `unwritten`, for the builder to write and the next walk to
+    /// record.
     fn update(self: *BorrowContainment, builder: *Typing.Builder, mode: Mode) !void {
         if (!self.dirty and self.scanned == builder.pool.items.len and self.late.items.len == 0 and self.pending.items.len == 0) return;
         const gpa = builder.gpa;
@@ -1604,7 +1606,6 @@ const BorrowContainment = struct {
             self.recorded.clearRetainingCapacity();
             self.late.clearRetainingCapacity();
             self.unwritten.clearRetainingCapacity();
-            self.by_arguments.clearRetainingCapacity();
             self.scanned = 0;
             self.dirty = false;
         }
@@ -1631,10 +1632,6 @@ const BorrowContainment = struct {
             }
         }
         self.queue.clearRetainingCapacity();
-        for (self.by_arguments.items) |ty| {
-            if (!self.values.items[@intFromEnum(ty)]) try self.unwritten.append(gpa, ty);
-        }
-        self.by_arguments.clearRetainingCapacity();
     }
 
     /// Records what `ty` holds as edges, as far as its parts are written.
@@ -1643,37 +1640,22 @@ const BorrowContainment = struct {
         const at = @intFromEnum(ty);
         if (builder.isShell(ty)) {
             if (self.recorded.items[at] != .nothing) return;
+            // What an alike instantiation may carry, may write through or
+            // may share is what its representative's parts say: the one edge
+            // is to it. A representative that is an instantiation is written
+            // as any other unwritten part is, so it is recorded too. Any
+            // other unwritten instantiation is recorded once a type holding
+            // it has it written.
+            const representative = builder.alikeSource(ty) orelse return;
+            self.recorded.items[at] = .representative;
             const edges: Edges = .{ .containment = self, .builder = builder, .owner = ty, .mode = mode };
-            if (mode != .writers) {
-                // What an alike instantiation may carry, or whether it is
-                // shareable, is what its representative's parts and
-                // arguments say: the one edge is to it. A representative
-                // that is an instantiation is written as any other unwritten
-                // part is, so it is recorded too.
-                if (builder.alikeSource(ty)) |representative| {
-                    self.recorded.items[at] = .representative;
-                    try edges.child(.argument, representative);
-                    return;
-                }
-                if (mode == .raw_carriers) return;
-            }
-            self.recorded.items[at] = .arguments;
-            const instance = builder.instanceOf(ty).?;
-            for (builder.argsOf(instance)) |argument| try edges.child(.argument, argument);
-            try self.by_arguments.append(gpa, ty);
+            try edges.child(.argument, representative);
             return;
         }
-        // Arguments already recorded stay edges; recording them again would
-        // only add duplicates, so a type that had them reads its parts alone.
         if (self.recorded.items[at] == .parts) return;
-        const had_arguments = self.recorded.items[at] == .arguments;
         self.recorded.items[at] = .parts;
         const view = builder.view();
-        if (had_arguments) {
-            try eachPart(builder, ty, mode, Edges{ .containment = self, .builder = builder, .owner = ty, .mode = mode });
-        } else {
-            try eachChild(builder, ty, mode, Edges{ .containment = self, .builder = builder, .owner = ty, .mode = mode });
-        }
+        try eachChild(builder, ty, mode, Edges{ .containment = self, .builder = builder, .owner = ty, .mode = mode });
         switch (mode) {
             .writers => switch (builder.get(ty)) {
                 .closure, .callable, .parameter, .open_type => try self.mark(gpa, ty),
@@ -8466,6 +8448,9 @@ pub const Typing = struct {
         certified_storage: DeclId = .none,
         certified_buffer: DeclId = .none,
         certified_slice: DeclId = .none,
+        /// `mem.address.Address`: an instance holds what its argument may
+        /// hold, since the values kept at the address are of that type.
+        certified_address: DeclId = .none,
         /// `mem.Carried`: a value of an instance carries what its argument
         /// may carry, though it holds no field.
         certified_carried: DeclId = .none,
@@ -9497,13 +9482,23 @@ pub const Typing = struct {
             return self.alikeSource(t) orelse t;
         }
 
+        /// Whether the containment tables answer an instantiation of `decl`
+        /// from its argument rather than from its parts: certified storage, an
+        /// address, a slice, `mem.Carried` and `mem.ClosureEntry`.
+        fn readsItsArgument(self: *const Builder, decl: DeclId) bool {
+            if (decl == .none) return false;
+            return decl == self.certified_storage or decl == self.certified_address or decl == self.certified_slice or
+                decl == self.certified_carried or decl == self.certified_closure_entry;
+        }
+
         /// Watches the instantiation at `at`, just minted, as an alike
         /// candidate where its arguments are distinct type parameters, none
         /// of them a settled reference, and its declaration's parameters are
         /// interned. It joins the class of its declaration's candidates whose
         /// arguments promise what its own do, position for position, the
-        /// template among them (`shapeOf`). Certified storage is never alike:
-        /// its containment reads its element argument rather than its parts.
+        /// template among them (`shapeOf`). A type `readsItsArgument` names is
+        /// never alike: its containment reads that argument rather than its
+        /// parts.
         ///
         /// What the arguments are never changes, but what they promise does,
         /// so each position is listed under the parameter there, and a
@@ -9513,7 +9508,7 @@ pub const Typing = struct {
         /// they are distinct, and the size of what each promises.
         fn watchAlike(self: *Builder, at: u32) std.mem.Allocator.Error!void {
             const instance = self.instances.items[at];
-            if (self.certified_storage != .none and instance.decl == self.certified_storage) return;
+            if (self.readsItsArgument(instance.decl)) return;
             const decl = instance.decl.index();
             const args = self.argsOf(instance);
             if (args.len == 0) return;
@@ -11785,7 +11780,7 @@ pub const Typing = struct {
         pub fn view(self: *const Builder) Typing {
             return .{
                 .constant_pool = self.constant_pool.*,
-                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .protocol_step = self.certified_protocol_step, .closure_entry_type = self.certified_closure_entry, .foreign_views = self.certified_foreign_views },
+                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .address = self.certified_address, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .protocol_step = self.certified_protocol_step, .closure_entry_type = self.certified_closure_entry, .foreign_views = self.certified_foreign_views },
                 .tuple_decls = self.tuple_decls,
                 .implementation_selections = self.implementation_selections,
                 .closure_release = self.closure_release,
@@ -13602,6 +13597,7 @@ pub const Typing = struct {
             b.certified_storage = t.raw_accesses.storage;
             b.certified_buffer = t.raw_accesses.buffer;
             b.certified_slice = t.raw_accesses.slice;
+            b.certified_address = t.raw_accesses.address;
             b.certified_carried = t.raw_accesses.carried;
             b.certified_protocol_dual = t.raw_accesses.protocol_dual;
             b.certified_protocol_step = t.raw_accesses.protocol_step;

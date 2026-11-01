@@ -74,6 +74,7 @@ struct task {
     linea_task_release release;
     unsigned long at;
     unsigned long len;
+    unsigned long release_at;
 
     /* The session's slot: whether a value waits in it, which endpoint put it
      * there, and where its bytes are. `filled` and `emptied` count the values
@@ -224,13 +225,14 @@ unmap_stack:
 }
 
 unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
-                               unsigned long len) {
+                               unsigned long len, unsigned long release_at) {
     struct task *t = task_of(task);
     must(pthread_mutex_lock(&t->lock));
     t->entry = entry;
     t->release = release;
     t->at = at;
     t->len = len;
+    t->release_at = release_at;
     t->state = started;
     must(pthread_cond_broadcast(&t->changed));
     must(pthread_mutex_unlock(&t->lock));
@@ -294,14 +296,15 @@ void linea_chan_close(unsigned long endpoint) {
     if ((endpoint & 1UL) != 0) return;
     struct task *t = task_of(endpoint);
     if (pthread_join(t->thread, 0) != 0) fail("linea: a task's thread could not be joined\n");
-    t->release(t->at, t->len);
+    t->release(t->release_at, t->len);
     destroy(t);
 }
 
 /* An owning task's call queue. One request slot is filled by a caller and
- * emptied by the owner; `issued` and `finished` count requests, so each
- * caller waits for its own to finish and a later caller cannot take a slot
- * that is still being served. */
+ * emptied by the owner, which copies its answer to the bytes the caller named
+ * beside the request; `issued` and `finished` count requests, so each caller
+ * waits for its own to finish and a later caller cannot take a slot that is
+ * still being served. */
 struct owner_queue {
     pthread_mutex_t lock;
     pthread_cond_t changed;
@@ -309,6 +312,8 @@ struct owner_queue {
     int full;
     unsigned long at;
     unsigned long len;
+    unsigned long answer_at;
+    unsigned long answer_len;
     unsigned long issued;
     unsigned long finished;
 };
@@ -321,15 +326,19 @@ unsigned long linea_owner_open(void) {
     return (unsigned long)q;
 }
 
-void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len) {
+void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len, unsigned long answer_at,
+                      unsigned long answer_len) {
     struct owner_queue *q = (struct owner_queue *)queue;
     linea_storage_extent(at, len);
+    linea_storage_extent(answer_at, answer_len);
     must(pthread_mutex_lock(&q->lock));
     if (q->closed) fail("linea: a call reached an owning task that was closed\n");
     while (q->full) must(pthread_cond_wait(&q->changed, &q->lock));
     q->full = 1;
     q->at = at;
     q->len = len;
+    q->answer_at = answer_at;
+    q->answer_len = answer_len;
     q->issued += 1;
     const unsigned long mine = q->issued;
     must(pthread_cond_broadcast(&q->changed));
@@ -352,9 +361,13 @@ uint8_t linea_owner_next(unsigned long queue, unsigned long at, unsigned long le
     return 1;
 }
 
-void linea_owner_done(unsigned long queue) {
+void linea_owner_done(unsigned long queue, unsigned long at, unsigned long len) {
     struct owner_queue *q = (struct owner_queue *)queue;
+    linea_storage_extent(at, len);
     must(pthread_mutex_lock(&q->lock));
+    if (!q->full) fail("linea: an owning task answered a call it was not serving\n");
+    if (q->answer_len != len) fail("linea: a call and its owning task disagree about an answer's size\n");
+    if (len != 0) memcpy((void *)q->answer_at, (const void *)at, len);
     q->full = 0;
     q->finished += 1;
     must(pthread_cond_broadcast(&q->changed));

@@ -348,12 +348,10 @@ fn sorts_before[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Boo
 fn swap_elements[T, A: Allocator](inout values: Vec[T, A], first: UInt64, second: UInt64) {
     let shape: SlotType[T] = .Type
     let stride = slot_stride(shape)
-    let at = values.storage.at
-    let extent = values.storage.len
-    let earlier: T = slot_take(&values.storage, at, extent, first * stride)
-    let later: T = slot_take(&values.storage, at, extent, second * stride)
-    slot_put(&values.storage, at, extent, first * stride, later)
-    slot_put(&values.storage, at, extent, second * stride, earlier)
+    let earlier: T = slot_take(&values.storage, first * stride)
+    let later: T = slot_take(&values.storage, second * stride)
+    slot_put(&values.storage, first * stride, later)
+    slot_put(&values.storage, second * stride, earlier)
 }
 
 // Build a vector of the given integers, in order.

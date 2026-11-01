@@ -85,6 +85,13 @@ pub const RawAccesses = struct {
     storage: DeclId = .none,
     buffer: DeclId = .none,
     slice: DeclId = .none,
+    /// `mem.address.Address`, the newtype over a `UInt64` that names the type
+    /// of the values kept at it; `address.raw`, the one function that reads
+    /// the number in one ([T-RawAddress]); and `mem.address_in`, the address
+    /// of slots at an offset into a buffer, which lowering computes.
+    address: DeclId = .none,
+    address_raw: DeclId = .none,
+    address_in: DeclId = .none,
     /// `mem.Carried`, the zero-sized field type that carries its argument's
     /// dependencies.
     carried: DeclId = .none,
@@ -163,6 +170,9 @@ pub const RawAccesses = struct {
             .storage = program.libraryDeclIn("mem", "Storage") orelse .none,
             .buffer = program.libraryDeclIn("mem", "Buffer") orelse .none,
             .slice = program.libraryDeclIn("mem", "Slice") orelse .none,
+            .address = program.libraryDeclIn("address", "Address") orelse .none,
+            .address_raw = moduleFunction(program, ast, "address", "raw"),
+            .address_in = rawAccessDecl(program, ast, "address_in", 2),
             .carried = program.libraryDeclIn("mem", "Carried") orelse .none,
             .span = rawAccessDecl(program, ast, "slot_span", 4),
             .buffer_span = rawAccessDecl(program, ast, "buffer_span", 3),
@@ -171,9 +181,9 @@ pub const RawAccesses = struct {
             .argument_span = rawAccessDecl(program, ast, "argument_span", 1),
             .environment_span = rawAccessDecl(program, ast, "environment_span", 1),
             .stride = rawAccessDecl(program, ast, "slot_stride", 1),
-            .take = rawAccessDecl(program, ast, "slot_take", 4),
-            .put = rawAccessDecl(program, ast, "slot_put", 5),
-            .place = rawAccessDecl(program, ast, "slot_place", 5),
+            .take = rawAccessDecl(program, ast, "slot_take", 2),
+            .put = rawAccessDecl(program, ast, "slot_put", 3),
+            .place = rawAccessDecl(program, ast, "slot_place", 3),
             .closure = program.libraryDeclIn("mem", "Closure") orelse .none,
             .closure_entry_type = program.libraryDeclIn("mem", "ClosureEntry") orelse .none,
             .closure_open_in = memberOf(program, ast, "mem", "Closure", "open_in"),
@@ -294,7 +304,7 @@ pub const RawAccesses = struct {
     }
 
     pub fn typed(self: RawAccesses, d: DeclId) bool {
-        return d != DeclId.none and (d == self.stride or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or self.processText(d) != null or self.erasure(d));
+        return d != DeclId.none and (d == self.stride or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.address_in or self.processText(d) != null or self.erasure(d));
     }
 
     /// The runtime declarations a process-text span reads: how many entries

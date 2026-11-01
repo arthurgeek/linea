@@ -1,3 +1,5 @@
+import std.mem.address
+
 // A session payload moves between two tasks as bytes. The sender moves the
 // value into bytes the system allocator lends, the runtime copies them into
 // the receiver's bytes once both ends have met, and the receiver moves the
@@ -19,10 +21,9 @@ extern fn linea_chan_recv_until(endpoint: UInt64, at: UInt64, len: UInt64, timeo
 internal fn send_payload[T](endpoint: UInt64, sink value: T) {
     let shape: SlotType[T] = .Type
     var storage: Storage[T, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
-    let at = storage.at
     let len = storage.len
-    slot_put(&storage, at, len, 0, value)
-    linea_chan_send(endpoint, at, len)
+    slot_put(&storage, 0, value)
+    linea_chan_send(endpoint, address.raw(storage.at), len)
     storage.dispose()
 }
 
@@ -32,10 +33,9 @@ internal fn send_payload[T](endpoint: UInt64, sink value: T) {
 internal fn receive_payload[T](endpoint: UInt64) -> T {
     let shape: SlotType[T] = .Type
     var storage: Storage[T, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
-    let at = storage.at
     let len = storage.len
-    linea_chan_recv(endpoint, at, len)
-    let value: T = slot_take(&storage, at, len, 0)
+    linea_chan_recv(endpoint, address.raw(storage.at), len)
+    let value: T = slot_take(&storage, 0)
     storage.dispose()
     value
 }
@@ -44,11 +44,10 @@ internal fn receive_payload[T](endpoint: UInt64) -> T {
 internal fn receive_payload_until[T](endpoint: UInt64, timeout_ns: UInt64) -> Option[T] {
     let shape: SlotType[T] = .Type
     var storage: Storage[T, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
-    let at = storage.at
     let len = storage.len
-    let rc = linea_chan_recv_until(endpoint, at, len, timeout_ns)
+    let rc = linea_chan_recv_until(endpoint, address.raw(storage.at), len, timeout_ns)
     if rc == 1 {
-        let value: T = slot_take(&storage, at, len, 0)
+        let value: T = slot_take(&storage, 0)
         storage.dispose()
         .Some(value)
     } else {

@@ -150,7 +150,7 @@ static void nothing_is_left_and_the_body_still_runs(long refused, long expected)
     assert(maps == unmaps && creates == joins && ran == 0);
     const long task = linea_task_prepare(1UL << 16);
     assert(task > 0);
-    linea_chan_close(linea_task_start((unsigned long)task, entry, release, 0, 0));
+    linea_chan_close(linea_task_start((unsigned long)task, entry, release, 0, 0, 0));
     assert(ran == 1 && released == 1 && maps == unmaps && creates == joins);
     ran = 0;
     released = 0;
@@ -184,7 +184,7 @@ static void release_nothing(unsigned long at, unsigned long len) {
 static void a_receive_timeout_past_the_last_time_waits_without_a_deadline(void) {
     const long task = linea_task_prepare(1UL << 16);
     assert(task > 0);
-    const unsigned long session = linea_task_start((unsigned long)task, send_once_awaited, release_nothing, 0, 0);
+    const unsigned long session = linea_task_start((unsigned long)task, send_once_awaited, release_nothing, 0, 0, 0);
     make_the_clock_late(latest_time);
     unsigned long received = 0;
     assert(linea_chan_recv_until(session, (unsigned long)&received, sizeof(received), three_days_ns) == 1);
@@ -211,7 +211,7 @@ static void a_receive_timeout_does_not_read_the_wall_clock(void) {
     const long task = linea_task_prepare(1UL << 16);
     assert(task > 0);
     __atomic_store_n(&wall_is_set_back, 1, __ATOMIC_SEQ_CST);
-    const unsigned long session = linea_task_start((unsigned long)task, send_after_a_tenth, release_nothing, 0, 0);
+    const unsigned long session = linea_task_start((unsigned long)task, send_after_a_tenth, release_nothing, 0, 0, 0);
     unsigned long received = 0;
     assert(linea_chan_recv_until(session, (unsigned long)&received, sizeof(received), 10UL * 1000000000UL) == 1);
     assert(received == 4242);
@@ -224,7 +224,7 @@ static void a_receive_timeout_does_not_read_the_wall_clock(void) {
 static void a_receive_from_a_late_peer_times_out(void) {
     const long task = linea_task_prepare(1UL << 16);
     assert(task > 0);
-    const unsigned long session = linea_task_start((unsigned long)task, send_after_a_tenth, release_nothing, 0, 0);
+    const unsigned long session = linea_task_start((unsigned long)task, send_after_a_tenth, release_nothing, 0, 0, 0);
     struct timespec before, after;
     assert(clock_gettime(CLOCK_MONOTONIC, &before) == 0);
     unsigned long received = 0;

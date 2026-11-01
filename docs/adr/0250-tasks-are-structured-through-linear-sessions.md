@@ -8,7 +8,9 @@ come from its fields, and a `mem.Carried` field carries its argument's),
 [0193](0193-a-closure-may-hold-a-place-lent-inout.md) (a lend reaches a value
 whose type can hold the writer, a `Carried` field for a closure type included)
 and [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) (`Carried[H]` is
-`Owned` exactly when `H` is).
+`Owned` exactly when `H` is). The clause that has the `Shareable` table follow every
+type argument is superseded by
+[0255](0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md).
 
 **What is built.** Stages 0 to 4 of §16 exist: `mem.Carried[H]` (§12), which
 every other clause rests on; the `Protocol` trait with its combinators in

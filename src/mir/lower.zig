@@ -5201,12 +5201,16 @@ const Lowerer = struct {
             }
             // C calls a callback through an entry in its own convention, so an
             // `extern`'s callback argument is that entry's address. The checker
-            // gave every such argument a fixed target ([T-ExternCallback]).
+            // gave every such argument a fixed target ([T-ExternCallback]). The
+            // address has the type the `extern` declares: a function given for
+            // a runtime callback may take a `mem.address.Address` where C
+            // passes the `UInt64` it stands for, and its entry is the same.
             if (self.ast.declIsExtern(named) and self.typing.get(param.ty) == .callable) {
                 const value = self.calls.functionValueOf(self.typing, self.ast.withoutGroups(a)) orelse
                     @panic("compiler defect: a callback passed to C has no fixed target");
                 const target = try self.functionTarget(value);
-                try args.append(self.gpa, try self.b.addForeignFunctionAddr(self.block, try self.substituted(value.signature), self.ast.exprSpan(a), target));
+                const declared = self.typing.callableParams(self.typing.get(self.typing.declSignature(named)).callable)[at].ty;
+                try args.append(self.gpa, try self.b.addForeignFunctionAddr(self.block, declared, self.ast.exprSpan(a), target));
                 continue;
             }
             if (try self.appendCallArgument(&args, a, param)) |stopped| return stopped;
@@ -5267,6 +5271,19 @@ const Lowerer = struct {
         }
         if (d == self.library.raw.closure_size)
             return self.emit(.constant, .u64, span, .{ .constant = self.types().layoutOf(settled[0]).size });
+        // The address of slots `offset` bytes into a buffer: the buffer's
+        // own address plus the offset, which may reach its end and no further.
+        if (d == self.library.raw.address_in) {
+            const buffer = args.items[0];
+            const buffer_ty = self.b.insts.items(.ty)[buffer.index()];
+            const start = try self.fieldValue(buffer, buffer_ty, "at", span);
+            const len = try self.fieldValue(buffer, buffer_ty, "len", span);
+            const fits = try self.emit(.cmp_le, .bool_, span, .{ .binary = .{ .lhs = args.items[1], .rhs = len } });
+            _ = try self.check(fits, .bool_, span, .index_out_of_bounds);
+            const at = try self.emit(.add, ty, span, .{ .binary = .{ .lhs = start, .rhs = args.items[1] } });
+            _ = try self.check(at, ty, span, .overflow);
+            return at;
+        }
         if (self.library.raw.erasedBody(d, settled)) |body| {
             const generated = self.mono.instances.lookupBody(body, &.{}, .poison, &.{}) orelse
                 @panic("compiler defect: an erased closure's generated body was never discovered");
@@ -5276,17 +5293,23 @@ const Lowerer = struct {
             return self.spanIntrinsic(d, ty, settled, args.items, span);
         if (d == self.library.raw.take or d == self.library.raw.put or d == self.library.raw.place) {
             const element = settled[0];
+            // The slots are the storage's own: its address and extent are
+            // read from it, so no slot outside them can be named.
+            const owner = args.items[0];
+            const owner_ty = self.b.insts.items(.ty)[owner.index()];
+            const at = try self.fieldValue(owner, owner_ty, "at", span);
+            const extent = try self.fieldValue(owner, owner_ty, "len", span);
             const storage = if (d == self.library.raw.place) blk: {
-                const fits = try self.emit(.cmp_lt, .bool_, span, .{ .binary = .{ .lhs = args.items[4], .rhs = args.items[3] } });
+                const fits = try self.emit(.cmp_lt, .bool_, span, .{ .binary = .{ .lhs = args.items[2], .rhs = args.items[1] } });
                 _ = try self.check(fits, .bool_, span, .index_out_of_bounds);
                 const stride = try self.emit(.constant, .u64, span, .{ .constant = self.types().layoutOf(element).size });
-                const offset = try self.emit(.mul, .u64, span, .{ .binary = .{ .lhs = args.items[4], .rhs = stride } });
+                const offset = try self.emit(.mul, .u64, span, .{ .binary = .{ .lhs = args.items[2], .rhs = stride } });
                 _ = try self.check(offset, .u64, span, .overflow);
-                break :blk try self.checkedStorageAddress(element, .{ args.items[1], args.items[2], offset }, span);
-            } else try self.checkedStorageAddress(element, args.items[1..4].*, span);
+                break :blk try self.checkedStorageAddress(element, .{ at, extent, offset }, span);
+            } else try self.checkedStorageAddress(element, .{ at, extent, args.items[1] }, span);
             if (d == self.library.raw.place) return storage;
             if (d == self.library.raw.put) {
-                try self.writeThrough(storage, element, args.items[4], span);
+                try self.writeThrough(storage, element, args.items[2], span);
                 return self.nothing(.unit, span);
             }
             const value = try self.readThrough(storage, element, span);

@@ -364,6 +364,11 @@ pub const Code = enum {
     /// own, anywhere but the one start whose handle keeps the body's
     /// dependencies until the thread is joined.
     t_thread_start,
+    /// The number in a `mem.address.Address` read anywhere but as the
+    /// argument for a runtime parameter that copies, receives or keeps the
+    /// bytes, or as the `at` of a `mem.Closure`; or an `extern` that names an
+    /// address, which would hand C one it may keep.
+    t_raw_address,
     /// An `export` whose signature holds a type that may not cross.
     t_export,
     /// A type parameter whose declaration says the wrong thing about what it
@@ -536,6 +541,7 @@ pub const Code = enum {
             .t_extern_handle => "T-ExternHandle",
             .t_extern_runtime => "T-ExternRuntime",
             .t_thread_start => "T-ThreadStart",
+            .t_raw_address => "T-RawAddress",
             .t_export => "T-Export",
             .t_phantom => "T-Phantom",
             .t_projection => "T-Projection",

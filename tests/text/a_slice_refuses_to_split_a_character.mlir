@@ -26,12 +26,13 @@ module {
   llvm.mlir.global internal constant @linea_file10("std/convert/into.lin\00") : !llvm.array<21 x i8>
   llvm.mlir.global internal constant @linea_file11("std/mem/slots.lin\00") : !llvm.array<18 x i8>
   llvm.mlir.global internal constant @linea_file12("std/io/core/error.lin\00") : !llvm.array<22 x i8>
-  llvm.mlir.global internal constant @linea_file13("std/release/release.lin\00") : !llvm.array<24 x i8>
-  llvm.mlir.global internal constant @linea_file14("std/fmt/decimal.lin\00") : !llvm.array<20 x i8>
-  llvm.mlir.global internal constant @linea_file15("std/mem/fd.lin\00") : !llvm.array<15 x i8>
-  llvm.mlir.global internal constant @linea_file16("std/mem/buffer.lin\00") : !llvm.array<19 x i8>
-  llvm.mlir.global internal constant @linea_file17("std/iter/iter.lin\00") : !llvm.array<18 x i8>
-  llvm.mlir.global internal constant @linea_file18("std/range/range.lin\00") : !llvm.array<20 x i8>
+  llvm.mlir.global internal constant @linea_file13("std/mem/address/address.lin\00") : !llvm.array<28 x i8>
+  llvm.mlir.global internal constant @linea_file14("std/release/release.lin\00") : !llvm.array<24 x i8>
+  llvm.mlir.global internal constant @linea_file15("std/fmt/decimal.lin\00") : !llvm.array<20 x i8>
+  llvm.mlir.global internal constant @linea_file16("std/mem/fd.lin\00") : !llvm.array<15 x i8>
+  llvm.mlir.global internal constant @linea_file17("std/mem/buffer.lin\00") : !llvm.array<19 x i8>
+  llvm.mlir.global internal constant @linea_file18("std/iter/iter.lin\00") : !llvm.array<18 x i8>
+  llvm.mlir.global internal constant @linea_file19("std/range/range.lin\00") : !llvm.array<20 x i8>
   llvm.mlir.global internal constant @linea_str0("Ol\C3\A1!") : !llvm.array<5 x i8>
   llvm.mlir.global internal constant @linea_str1("error: ") : !llvm.array<7 x i8>
   llvm.mlir.global internal constant @linea_str2("called Option.unwrap on None") : !llvm.array<28 x i8>
@@ -1400,7 +1401,7 @@ module {
     llvm.store %v9, %v8 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
     %v11 = arith.constant 48 : i64 loc("std/mem/vec.lin":L:C)
     %v12 = llvm.getelementptr %s1[%v11] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v13 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v13 = func.call @"lin.std.mem.address;nowhere[UInt8]"() : () -> i64 loc("std/mem/vec.lin":L:C)
     llvm.store %v13, %v12 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
     %v15 = arith.constant 56 : i64 loc("std/mem/vec.lin":L:C)
     %v16 = llvm.getelementptr %s1[%v15] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
@@ -1916,11 +1917,7 @@ module {
     %z5 = arith.constant 1 : i64
     %s5 = llvm.alloca %z5 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z6 = arith.constant 1 : i64
-    %s6 = llvm.alloca %z6 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z7 = arith.constant 1 : i64
-    %s7 = llvm.alloca %z7 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z8 = arith.constant 1 : i64
-    %s8 = llvm.alloca %z8 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
+    %s6 = llvm.alloca %z6 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     llvm.store %a0, %s0 : !llvm.ptr, !llvm.ptr
     llvm.store %a1, %s1 : i64, !llvm.ptr
     llvm.store %a2, %s2 : i64, !llvm.ptr
@@ -1931,29 +1928,19 @@ module {
     %v2 = llvm.load %s3 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
     %v3 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
     llvm.store %v3, %s4 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v5 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v6 = arith.constant 48 : i64 loc("std/mem/vec.lin":L:C)
-    %v7 = llvm.getelementptr %v5[%v6] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v8 = llvm.load %v7 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v8, %s5 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v10 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v11 = arith.constant 56 : i64 loc("std/mem/vec.lin":L:C)
-    %v12 = llvm.getelementptr %v10[%v11] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v13 = llvm.load %v12 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v13, %s6 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v15 = llvm.load %s2 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v15, %s7 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v5 = llvm.load %s2 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    llvm.store %v5, %s5 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
     cf.br ^b1 loc("std/mem/vec.lin":L:C)
   ^b1:
-    %v18 = llvm.load %s7 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v19 = llvm.load %s1 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v20 = arith.cmpi ugt, %v18, %v19 : i64 loc("std/mem/vec.lin":L:C)
-    cf.cond_br %v20, ^b2, ^b3 loc("std/mem/vec.lin":L:C)
+    %v8 = llvm.load %s5 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v9 = llvm.load %s1 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v10 = arith.cmpi ugt, %v8, %v9 : i64 loc("std/mem/vec.lin":L:C)
+    cf.cond_br %v10, ^b2, ^b3 loc("std/mem/vec.lin":L:C)
   ^b2:
-    %v22 = llvm.load %s7 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v23 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
-    %v24 = arith.subi %v22, %v23 : i64 loc("std/mem/vec.lin":L:C)
-    %k1 = arith.cmpi ult, %v22, %v23 : i64 loc("std/mem/vec.lin":L:C)
+    %v12 = llvm.load %s5 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v13 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
+    %v14 = arith.subi %v12, %v13 : i64 loc("std/mem/vec.lin":L:C)
+    %k1 = arith.cmpi ult, %v12, %v13 : i64 loc("std/mem/vec.lin":L:C)
     cf.cond_br %k1, ^t1, ^c1 loc("std/mem/vec.lin":L:C)
   ^t1:
     %tk1 = arith.constant 0 : i32 loc("std/mem/vec.lin":L:C)
@@ -1963,18 +1950,16 @@ module {
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c1:
-    %p25 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v25 = arith.addi %v24, %p25 : i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v25, %s7 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v27 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v28 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v29 = llvm.load %s5 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v30 = llvm.load %s6 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v31 = llvm.load %s7 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v32 = llvm.load %s4 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %m33 = "llvm.intr.umul.with.overflow"(%v31, %v32) : (i64, i64) -> !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
-    %v33 = llvm.extractvalue %m33[0] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
-    %k2 = llvm.extractvalue %m33[1] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
+    %p15 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v15 = arith.addi %v14, %p15 : i64 loc("std/mem/vec.lin":L:C)
+    llvm.store %v15, %s5 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v17 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v18 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v19 = llvm.load %s5 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v20 = llvm.load %s4 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %m21 = "llvm.intr.umul.with.overflow"(%v19, %v20) : (i64, i64) -> !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
+    %v21 = llvm.extractvalue %m21[0] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
+    %k2 = llvm.extractvalue %m21[1] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
     cf.cond_br %k2, ^t2, ^c2 loc("std/mem/vec.lin":L:C)
   ^t2:
     %tk2 = arith.constant 0 : i32 loc("std/mem/vec.lin":L:C)
@@ -1984,11 +1969,17 @@ module {
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c2:
-    %p34 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v34 = arith.addi %v33, %p34 : i64 loc("std/mem/vec.lin":L:C)
-    %v35 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
-    %v36 = arith.addi %v34, %v35 : i64 loc("std/mem/vec.lin":L:C)
-    %k3 = arith.cmpi ult, %v36, %v34 : i64 loc("std/mem/vec.lin":L:C)
+    %p22 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v22 = arith.addi %v21, %p22 : i64 loc("std/mem/vec.lin":L:C)
+    %v23 = arith.constant 48 : i64 loc("std/mem/vec.lin":L:C)
+    %v24 = llvm.getelementptr %v18[%v23] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v25 = llvm.load %v24 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v26 = arith.constant 56 : i64 loc("std/mem/vec.lin":L:C)
+    %v27 = llvm.getelementptr %v18[%v26] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v28 = llvm.load %v27 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v29 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
+    %v30 = arith.addi %v22, %v29 : i64 loc("std/mem/vec.lin":L:C)
+    %k3 = arith.cmpi ult, %v30, %v22 : i64 loc("std/mem/vec.lin":L:C)
     cf.cond_br %k3, ^t3, ^c3 loc("std/mem/vec.lin":L:C)
   ^t3:
     %tk3 = arith.constant 0 : i32 loc("std/mem/vec.lin":L:C)
@@ -1998,11 +1989,11 @@ module {
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c3:
-    %p37 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v37 = arith.addi %v36, %p37 : i64 loc("std/mem/vec.lin":L:C)
-    %v38 = arith.cmpi ule, %v36, %v30 : i64 loc("std/mem/vec.lin":L:C)
+    %p31 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v31 = arith.addi %v30, %p31 : i64 loc("std/mem/vec.lin":L:C)
+    %v32 = arith.cmpi ule, %v30, %v28 : i64 loc("std/mem/vec.lin":L:C)
     %k4z = arith.constant true loc("std/mem/vec.lin":L:C)
-    %k4 = arith.xori %v38, %k4z : i1 loc("std/mem/vec.lin":L:C)
+    %k4 = arith.xori %v32, %k4z : i1 loc("std/mem/vec.lin":L:C)
     cf.cond_br %k4, ^t4, ^c4 loc("std/mem/vec.lin":L:C)
   ^t4:
     %tk4 = arith.constant 6 : i32 loc("std/mem/vec.lin":L:C)
@@ -2012,20 +2003,20 @@ module {
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c4:
-    %v39 = arith.ori %v38, %v38 : i1 loc("std/mem/vec.lin":L:C)
-    %v40 = arith.addi %v29, %v34 : i64 loc("std/mem/vec.lin":L:C)
-    %v41 = llvm.inttoptr %v40 : i64 to !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %iw42 = llvm.load %v41 : !llvm.ptr -> i8 loc("std/mem/vec.lin":L:C)
-    %v42 = arith.extui %iw42 : i8 to i64 loc("std/mem/vec.lin":L:C)
-    %sw43 = arith.trunci %v42 : i64 to i8 loc("std/mem/vec.lin":L:C)
-    llvm.store %sw43, %s8 : i8, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %lw44 = llvm.load %s8 : !llvm.ptr -> i8 loc("std/mem/vec.lin":L:C)
-    %v44 = arith.extui %lw44 : i8 to i64 loc("std/mem/vec.lin":L:C)
-    %v45 = func.call @"lin.UInt8;std.release;Release.release"(%v44) : (i64) -> i64 loc("std/mem/vec.lin":L:C)
+    %v33 = arith.ori %v32, %v32 : i1 loc("std/mem/vec.lin":L:C)
+    %v34 = arith.addi %v25, %v22 : i64 loc("std/mem/vec.lin":L:C)
+    %v35 = llvm.inttoptr %v34 : i64 to !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %iw36 = llvm.load %v35 : !llvm.ptr -> i8 loc("std/mem/vec.lin":L:C)
+    %v36 = arith.extui %iw36 : i8 to i64 loc("std/mem/vec.lin":L:C)
+    %sw37 = arith.trunci %v36 : i64 to i8 loc("std/mem/vec.lin":L:C)
+    llvm.store %sw37, %s6 : i8, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %lw38 = llvm.load %s6 : !llvm.ptr -> i8 loc("std/mem/vec.lin":L:C)
+    %v38 = arith.extui %lw38 : i8 to i64 loc("std/mem/vec.lin":L:C)
+    %v39 = func.call @"lin.UInt8;std.release;Release.release"(%v38) : (i64) -> i64 loc("std/mem/vec.lin":L:C)
     cf.br ^b1 loc("std/mem/vec.lin":L:C)
   ^b3:
-    %v47 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    func.return %v47 : i64 loc("std/mem/vec.lin":L:C)
+    %v41 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    func.return %v41 : i64 loc("std/mem/vec.lin":L:C)
   }
   func.func private @"lin.std.mem;Storage[UInt8,std.mem.SystemAllocator].dispose"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 64 : i64
@@ -2383,6 +2374,12 @@ module {
     %v244 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     cf.br ^b18 loc("std/io/core/error.lin":L:C)
   }
+  func.func private @"lin.std.mem.address;nowhere[UInt8]"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
+    cf.br ^b0
+  ^b0:
+    %v0 = arith.constant 0 : i64 loc("std/mem/address/address.lin":L:C)
+    func.return %v0 : i64 loc("std/mem/address/address.lin":L:C)
+  }
   func.func private @"lin.std.text;Str.as_bytes"(%sret: !llvm.ptr, %a0: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
@@ -2410,26 +2407,22 @@ module {
     %s3 = llvm.alloca %z3 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z4 = arith.constant 1 : i64
     %s4 = llvm.alloca %z4 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z5 = arith.constant 1 : i64
-    %s5 = llvm.alloca %z5 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z6 = arith.constant 1 : i64
-    %s6 = llvm.alloca %z6 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z7 = arith.constant 16 : i64
-    %s7 = llvm.alloca %z7 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z8 = arith.constant 24 : i64
+    %z5 = arith.constant 16 : i64
+    %s5 = llvm.alloca %z5 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %z6 = arith.constant 24 : i64
+    %s6 = llvm.alloca %z6 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %z7 = arith.constant 1 : i64
+    %s7 = llvm.alloca %z7 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %z8 = arith.constant 16 : i64
     %s8 = llvm.alloca %z8 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z9 = arith.constant 1 : i64
-    %s9 = llvm.alloca %z9 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z10 = arith.constant 16 : i64
-    %s10 = llvm.alloca %z10 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     llvm.store %a0, %s0 : !llvm.ptr, !llvm.ptr
     llvm.store %a1, %s1 : !llvm.ptr, !llvm.ptr
     %rz3 = arith.constant 16 : i64
     %rs3 = llvm.alloca %rz3 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %rz44 = arith.constant 24 : i64
-    %rs44 = llvm.alloca %rz44 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %rz49 = arith.constant 16 : i64
-    %rs49 = llvm.alloca %rz49 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %rz30 = arith.constant 24 : i64
+    %rs30 = llvm.alloca %rz30 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %rz35 = arith.constant 16 : i64
+    %rs35 = llvm.alloca %rz35 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     cf.br ^b0
   ^b0:
     %v0 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
@@ -2449,24 +2442,12 @@ module {
     %v23 = llvm.load %s3 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
     %v24 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
     llvm.store %v24, %s4 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v26 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v27 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v29 = arith.constant 48 : i64 loc("std/mem/vec.lin":L:C)
-    %v30 = llvm.getelementptr %v26[%v29] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v31 = llvm.load %v30 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v31, %s5 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v33 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v34 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v36 = arith.constant 56 : i64 loc("std/mem/vec.lin":L:C)
-    %v37 = llvm.getelementptr %v33[%v36] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v38 = llvm.load %v37 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v38, %s6 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v40 = llvm.load %s1 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %cl42 = arith.constant 16 : i64 loc("std/mem/vec.lin":L:C)
-    "llvm.intr.memcpy"(%s7, %v40, %cl42) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
-    func.call @"lin.std.mem.Slice[UInt8];std.iter;Sequence.iterate"(%rs44, %s7) : (!llvm.ptr, !llvm.ptr) -> () loc("std/mem/vec.lin":L:C)
-    %cl46 = arith.constant 24 : i64 loc("std/mem/vec.lin":L:C)
-    "llvm.intr.memcpy"(%s8, %rs44, %cl46) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
+    %v26 = llvm.load %s1 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %cl28 = arith.constant 16 : i64 loc("std/mem/vec.lin":L:C)
+    "llvm.intr.memcpy"(%s5, %v26, %cl28) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
+    func.call @"lin.std.mem.Slice[UInt8];std.iter;Sequence.iterate"(%rs30, %s5) : (!llvm.ptr, !llvm.ptr) -> () loc("std/mem/vec.lin":L:C)
+    %cl32 = arith.constant 24 : i64 loc("std/mem/vec.lin":L:C)
+    "llvm.intr.memcpy"(%s6, %rs30, %cl32) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
     cf.br ^b3 loc("std/mem/vec.lin":L:C)
   ^b2:
     %v8 = arith.constant 8 : i64 loc("std/mem/vec.lin":L:C)
@@ -2481,38 +2462,36 @@ module {
     "llvm.intr.memcpy"(%sret, %s2, %rl17) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
     func.return loc("std/mem/vec.lin":L:C)
   ^b3:
-    func.call @"lin.std.mem.SliceIter[UInt8];std.iter;Iterator.next"(%rs49, %s8) : (!llvm.ptr, !llvm.ptr) -> () loc("std/mem/vec.lin":L:C)
-    %v50 = llvm.load %rs49 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v51 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
-    %v52 = arith.cmpi eq, %v50, %v51 : i64 loc("std/mem/vec.lin":L:C)
-    cf.cond_br %v52, ^b5, ^b6 loc("std/mem/vec.lin":L:C)
+    func.call @"lin.std.mem.SliceIter[UInt8];std.iter;Iterator.next"(%rs35, %s6) : (!llvm.ptr, !llvm.ptr) -> () loc("std/mem/vec.lin":L:C)
+    %v36 = llvm.load %rs35 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v37 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
+    %v38 = arith.cmpi eq, %v36, %v37 : i64 loc("std/mem/vec.lin":L:C)
+    cf.cond_br %v38, ^b5, ^b6 loc("std/mem/vec.lin":L:C)
   ^b4:
-    %v93 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v94 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v94, %s10 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v97 = arith.constant 8 : i64 loc("std/mem/vec.lin":L:C)
-    %v98 = llvm.getelementptr %s10[%v97] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v99 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %rl100 = arith.constant 16 : i64 loc("std/mem/vec.lin":L:C)
-    "llvm.intr.memcpy"(%sret, %s10, %rl100) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
+    %v83 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v84 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    llvm.store %v84, %s8 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v87 = arith.constant 8 : i64 loc("std/mem/vec.lin":L:C)
+    %v88 = llvm.getelementptr %s8[%v87] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v89 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %rl90 = arith.constant 16 : i64 loc("std/mem/vec.lin":L:C)
+    "llvm.intr.memcpy"(%sret, %s8, %rl90) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
     func.return loc("std/mem/vec.lin":L:C)
   ^b5:
-    %v55 = arith.constant 8 : i64 loc("std/mem/vec.lin":L:C)
-    %v56 = llvm.getelementptr %rs49[%v55] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v57 = llvm.load %v56 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
-    llvm.store %v57, %s9 : !llvm.ptr, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v59 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v60 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v62 = llvm.load %s5 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v63 = llvm.load %s6 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v64 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v65 = arith.constant 64 : i64 loc("std/mem/vec.lin":L:C)
-    %v66 = llvm.getelementptr %v64[%v65] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v67 = llvm.load %v66 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v68 = llvm.load %s4 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %m69 = "llvm.intr.umul.with.overflow"(%v67, %v68) : (i64, i64) -> !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
-    %v69 = llvm.extractvalue %m69[0] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
-    %k1 = llvm.extractvalue %m69[1] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
+    %v41 = arith.constant 8 : i64 loc("std/mem/vec.lin":L:C)
+    %v42 = llvm.getelementptr %rs35[%v41] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v43 = llvm.load %v42 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
+    llvm.store %v43, %s7 : !llvm.ptr, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v45 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v46 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v48 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v49 = arith.constant 64 : i64 loc("std/mem/vec.lin":L:C)
+    %v50 = llvm.getelementptr %v48[%v49] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v51 = llvm.load %v50 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v52 = llvm.load %s4 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %m53 = "llvm.intr.umul.with.overflow"(%v51, %v52) : (i64, i64) -> !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
+    %v53 = llvm.extractvalue %m53[0] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
+    %k1 = llvm.extractvalue %m53[1] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
     cf.cond_br %k1, ^t1, ^c1 loc("std/mem/vec.lin":L:C)
   ^t1:
     %tk1 = arith.constant 0 : i32 loc("std/mem/vec.lin":L:C)
@@ -2522,14 +2501,20 @@ module {
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c1:
-    %p70 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v70 = arith.addi %v69, %p70 : i64 loc("std/mem/vec.lin":L:C)
-    %v71 = llvm.load %s9 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %iw73 = llvm.load %v71 : !llvm.ptr -> i8 loc("std/mem/vec.lin":L:C)
-    %v73 = arith.extui %iw73 : i8 to i64 loc("std/mem/vec.lin":L:C)
-    %v74 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
-    %v75 = arith.addi %v70, %v74 : i64 loc("std/mem/vec.lin":L:C)
-    %k2 = arith.cmpi ult, %v75, %v70 : i64 loc("std/mem/vec.lin":L:C)
+    %p54 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v54 = arith.addi %v53, %p54 : i64 loc("std/mem/vec.lin":L:C)
+    %v55 = llvm.load %s7 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %iw57 = llvm.load %v55 : !llvm.ptr -> i8 loc("std/mem/vec.lin":L:C)
+    %v57 = arith.extui %iw57 : i8 to i64 loc("std/mem/vec.lin":L:C)
+    %v58 = arith.constant 48 : i64 loc("std/mem/vec.lin":L:C)
+    %v59 = llvm.getelementptr %v45[%v58] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v60 = llvm.load %v59 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v61 = arith.constant 56 : i64 loc("std/mem/vec.lin":L:C)
+    %v62 = llvm.getelementptr %v45[%v61] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v63 = llvm.load %v62 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v64 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
+    %v65 = arith.addi %v54, %v64 : i64 loc("std/mem/vec.lin":L:C)
+    %k2 = arith.cmpi ult, %v65, %v54 : i64 loc("std/mem/vec.lin":L:C)
     cf.cond_br %k2, ^t2, ^c2 loc("std/mem/vec.lin":L:C)
   ^t2:
     %tk2 = arith.constant 0 : i32 loc("std/mem/vec.lin":L:C)
@@ -2539,11 +2524,11 @@ module {
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c2:
-    %p76 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v76 = arith.addi %v75, %p76 : i64 loc("std/mem/vec.lin":L:C)
-    %v77 = arith.cmpi ule, %v75, %v63 : i64 loc("std/mem/vec.lin":L:C)
+    %p66 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v66 = arith.addi %v65, %p66 : i64 loc("std/mem/vec.lin":L:C)
+    %v67 = arith.cmpi ule, %v65, %v63 : i64 loc("std/mem/vec.lin":L:C)
     %k3z = arith.constant true loc("std/mem/vec.lin":L:C)
-    %k3 = arith.xori %v77, %k3z : i1 loc("std/mem/vec.lin":L:C)
+    %k3 = arith.xori %v67, %k3z : i1 loc("std/mem/vec.lin":L:C)
     cf.cond_br %k3, ^t3, ^c3 loc("std/mem/vec.lin":L:C)
   ^t3:
     %tk3 = arith.constant 6 : i32 loc("std/mem/vec.lin":L:C)
@@ -2553,19 +2538,19 @@ module {
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c3:
-    %v78 = arith.ori %v77, %v77 : i1 loc("std/mem/vec.lin":L:C)
-    %v79 = arith.addi %v62, %v70 : i64 loc("std/mem/vec.lin":L:C)
-    %v80 = llvm.inttoptr %v79 : i64 to !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %iw81 = arith.trunci %v73 : i64 to i8 loc("std/mem/vec.lin":L:C)
-    llvm.store %iw81, %v80 : i8, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v82 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v83 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
-    %v84 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v85 = arith.constant 64 : i64 loc("std/mem/vec.lin":L:C)
-    %v86 = llvm.getelementptr %v84[%v85] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v87 = llvm.load %v86 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v88 = arith.addi %v87, %v83 : i64 loc("std/mem/vec.lin":L:C)
-    %k4 = arith.cmpi ult, %v88, %v87 : i64 loc("std/mem/vec.lin":L:C)
+    %v68 = arith.ori %v67, %v67 : i1 loc("std/mem/vec.lin":L:C)
+    %v69 = arith.addi %v60, %v54 : i64 loc("std/mem/vec.lin":L:C)
+    %v70 = llvm.inttoptr %v69 : i64 to !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %iw71 = arith.trunci %v57 : i64 to i8 loc("std/mem/vec.lin":L:C)
+    llvm.store %iw71, %v70 : i8, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v72 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v73 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
+    %v74 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v75 = arith.constant 64 : i64 loc("std/mem/vec.lin":L:C)
+    %v76 = llvm.getelementptr %v74[%v75] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v77 = llvm.load %v76 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v78 = arith.addi %v77, %v73 : i64 loc("std/mem/vec.lin":L:C)
+    %k4 = arith.cmpi ult, %v78, %v77 : i64 loc("std/mem/vec.lin":L:C)
     cf.cond_br %k4, ^t4, ^c4 loc("std/mem/vec.lin":L:C)
   ^t4:
     %tk4 = arith.constant 0 : i32 loc("std/mem/vec.lin":L:C)
@@ -2575,10 +2560,10 @@ module {
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c4:
-    %p89 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v89 = arith.addi %v88, %p89 : i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v89, %v86 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v91 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %p79 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v79 = arith.addi %v78, %p79 : i64 loc("std/mem/vec.lin":L:C)
+    llvm.store %v79, %v76 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v81 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
     cf.br ^b3 loc("std/mem/vec.lin":L:C)
   ^b6:
     cf.br ^b4 loc("std/mem/vec.lin":L:C)
@@ -8191,7 +8176,7 @@ module {
     cf.cond_br %k1, ^t1, ^c1 loc("std/fmt/decimal.lin":L:C)
   ^t1:
     %tk1 = arith.constant 2 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf1 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf1 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -8208,7 +8193,7 @@ module {
     cf.cond_br %k2, ^t2, ^c2 loc("std/fmt/decimal.lin":L:C)
   ^t2:
     %tk2 = arith.constant 2 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf2 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf2 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -8247,7 +8232,7 @@ module {
     cf.cond_br %k1, ^t1, ^c1 loc("std/fmt/decimal.lin":L:C)
   ^t1:
     %tk1 = arith.constant 2 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf1 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf1 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -8258,7 +8243,7 @@ module {
     cf.cond_br %k2, ^t2, ^c2 loc("std/fmt/decimal.lin":L:C)
   ^t2:
     %tk2 = arith.constant 2 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf2 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf2 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -8284,7 +8269,7 @@ module {
     cf.cond_br %k3, ^t3, ^c3 loc("std/fmt/decimal.lin":L:C)
   ^t3:
     %tk3 = arith.constant 2 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf3 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf3 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -8339,36 +8324,28 @@ module {
     %s19 = llvm.alloca %z19 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z20 = arith.constant 64 : i64
     %s20 = llvm.alloca %z20 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z21 = arith.constant 1 : i64
-    %s21 = llvm.alloca %z21 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z22 = arith.constant 1 : i64
-    %s22 = llvm.alloca %z22 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %z21 = arith.constant 24 : i64
+    %s21 = llvm.alloca %z21 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %z22 = arith.constant 24 : i64
+    %s22 = llvm.alloca %z22 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z23 = arith.constant 1 : i64
     %s23 = llvm.alloca %z23 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z24 = arith.constant 1 : i64
-    %s24 = llvm.alloca %z24 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z25 = arith.constant 24 : i64
+    %s24 = llvm.alloca %z24 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
+    %z25 = arith.constant 72 : i64
     %s25 = llvm.alloca %z25 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z26 = arith.constant 24 : i64
+    %z26 = arith.constant 16 : i64
     %s26 = llvm.alloca %z26 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z27 = arith.constant 1 : i64
-    %s27 = llvm.alloca %z27 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z28 = arith.constant 1 : i64
-    %s28 = llvm.alloca %z28 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
-    %z29 = arith.constant 72 : i64
-    %s29 = llvm.alloca %z29 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z30 = arith.constant 16 : i64
-    %s30 = llvm.alloca %z30 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     llvm.store %a0, %s0 : !llvm.ptr, !llvm.ptr
     llvm.store %a1, %s1 : i64, !llvm.ptr
     %rz129 = arith.constant 40 : i64
     %rs129 = llvm.alloca %rz129 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %rz161 = arith.constant 64 : i64
     %rs161 = llvm.alloca %rz161 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %rz196 = arith.constant 24 : i64
-    %rs196 = llvm.alloca %rz196 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %rz201 = arith.constant 16 : i64
-    %rs201 = llvm.alloca %rz201 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %rz176 = arith.constant 24 : i64
+    %rs176 = llvm.alloca %rz176 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %rz181 = arith.constant 16 : i64
+    %rs181 = llvm.alloca %rz181 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     cf.br ^b0
   ^b0:
     %v0 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
@@ -8621,37 +8598,21 @@ module {
     func.call @"lin.std.mem;Storage[UInt8,std.mem.SystemAllocator].from_buffer"(%rs161, %s15) : (!llvm.ptr, !llvm.ptr) -> () loc("std/mem/vec.lin":L:C)
     %cl162 = arith.constant 64 : i64 loc("std/mem/vec.lin":L:C)
     "llvm.intr.memcpy"(%s20, %rs161, %cl162) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
-    %v164 = arith.constant 48 : i64 loc("std/mem/vec.lin":L:C)
-    %v165 = llvm.getelementptr %s20[%v164] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v166 = llvm.load %v165 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v164 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v166 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
     llvm.store %v166, %s21 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v169 = arith.constant 56 : i64 loc("std/mem/vec.lin":L:C)
-    %v170 = llvm.getelementptr %s20[%v169] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v171 = llvm.load %v170 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v171, %s22 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v174 = arith.constant 48 : i64 loc("std/mem/vec.lin":L:C)
-    %v175 = llvm.getelementptr %s19[%v174] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v176 = llvm.load %v175 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v176, %s23 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v179 = arith.constant 56 : i64 loc("std/mem/vec.lin":L:C)
-    %v180 = llvm.getelementptr %s19[%v179] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v181 = llvm.load %v180 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v181, %s24 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v184 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v186 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v186, %s25 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v188 = arith.constant 8 : i64 loc("std/mem/vec.lin":L:C)
-    %v189 = llvm.getelementptr %s25[%v188] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v190 = llvm.load %s18 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v190, %v189 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v192 = arith.constant 16 : i64 loc("std/mem/vec.lin":L:C)
-    %v193 = llvm.getelementptr %s25[%v192] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v194 = arith.constant 0 : i1 loc("std/mem/vec.lin":L:C)
-    %iw195 = arith.extui %v194 : i1 to i8 loc("std/mem/vec.lin":L:C)
-    llvm.store %iw195, %v193 : i8, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    func.call @"lin.std.range.Range[UInt64];std.iter;Sequence.iterate"(%rs196, %s25) : (!llvm.ptr, !llvm.ptr) -> () loc("std/mem/vec.lin":L:C)
-    %cl198 = arith.constant 24 : i64 loc("std/mem/vec.lin":L:C)
-    "llvm.intr.memcpy"(%s26, %rs196, %cl198) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
+    %v168 = arith.constant 8 : i64 loc("std/mem/vec.lin":L:C)
+    %v169 = llvm.getelementptr %s21[%v168] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v170 = llvm.load %s18 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    llvm.store %v170, %v169 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v172 = arith.constant 16 : i64 loc("std/mem/vec.lin":L:C)
+    %v173 = llvm.getelementptr %s21[%v172] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v174 = arith.constant 0 : i1 loc("std/mem/vec.lin":L:C)
+    %iw175 = arith.extui %v174 : i1 to i8 loc("std/mem/vec.lin":L:C)
+    llvm.store %iw175, %v173 : i8, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    func.call @"lin.std.range.Range[UInt64];std.iter;Sequence.iterate"(%rs176, %s21) : (!llvm.ptr, !llvm.ptr) -> () loc("std/mem/vec.lin":L:C)
+    %cl178 = arith.constant 24 : i64 loc("std/mem/vec.lin":L:C)
+    "llvm.intr.memcpy"(%s22, %rs176, %cl178) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
     cf.br ^b23 loc("std/mem/vec.lin":L:C)
   ^b22:
     %v134 = arith.constant 8 : i64 loc("std/mem/vec.lin":L:C)
@@ -8666,45 +8627,43 @@ module {
     "llvm.intr.memcpy"(%sret, %s16, %rl143) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
     func.return loc("std/mem/vec.lin":L:C)
   ^b23:
-    func.call @"lin.std.range.Range[UInt64];std.iter;Iterator.next"(%rs201, %s26) : (!llvm.ptr, !llvm.ptr) -> () loc("std/mem/vec.lin":L:C)
-    %v202 = llvm.load %rs201 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v203 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
-    %v204 = arith.cmpi eq, %v202, %v203 : i64 loc("std/mem/vec.lin":L:C)
-    cf.cond_br %v204, ^b25, ^b26 loc("std/mem/vec.lin":L:C)
+    func.call @"lin.std.range.Range[UInt64];std.iter;Iterator.next"(%rs181, %s22) : (!llvm.ptr, !llvm.ptr) -> () loc("std/mem/vec.lin":L:C)
+    %v182 = llvm.load %rs181 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v183 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
+    %v184 = arith.cmpi eq, %v182, %v183 : i64 loc("std/mem/vec.lin":L:C)
+    cf.cond_br %v184, ^b25, ^b26 loc("std/mem/vec.lin":L:C)
   ^b24:
-    %v245 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v247 = func.call @"lin.std.mem;Storage[UInt8,std.mem.SystemAllocator].dispose"(%s19) : (!llvm.ptr) -> i64 loc("std/mem/vec.lin":L:C)
-    %v249 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %cl252 = arith.constant 64 : i64 loc("std/mem/vec.lin":L:C)
-    "llvm.intr.memcpy"(%s29, %s20, %cl252) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
-    %v253 = arith.constant 64 : i64 loc("std/mem/vec.lin":L:C)
-    %v254 = llvm.getelementptr %s29[%v253] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v255 = llvm.load %s18 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v255, %v254 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v257 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %cl258 = arith.constant 72 : i64 loc("std/mem/vec.lin":L:C)
-    "llvm.intr.memcpy"(%v257, %s29, %cl258) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
-    %v259 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v260 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v260, %s30 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v263 = arith.constant 8 : i64 loc("std/mem/vec.lin":L:C)
-    %v264 = llvm.getelementptr %s30[%v263] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v265 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %rl266 = arith.constant 16 : i64 loc("std/mem/vec.lin":L:C)
-    "llvm.intr.memcpy"(%sret, %s30, %rl266) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
+    %v233 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v235 = func.call @"lin.std.mem;Storage[UInt8,std.mem.SystemAllocator].dispose"(%s19) : (!llvm.ptr) -> i64 loc("std/mem/vec.lin":L:C)
+    %v237 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %cl240 = arith.constant 64 : i64 loc("std/mem/vec.lin":L:C)
+    "llvm.intr.memcpy"(%s25, %s20, %cl240) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
+    %v241 = arith.constant 64 : i64 loc("std/mem/vec.lin":L:C)
+    %v242 = llvm.getelementptr %s25[%v241] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v243 = llvm.load %s18 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    llvm.store %v243, %v242 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v245 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %cl246 = arith.constant 72 : i64 loc("std/mem/vec.lin":L:C)
+    "llvm.intr.memcpy"(%v245, %s25, %cl246) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
+    %v247 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v248 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    llvm.store %v248, %s26 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v251 = arith.constant 8 : i64 loc("std/mem/vec.lin":L:C)
+    %v252 = llvm.getelementptr %s26[%v251] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v253 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %rl254 = arith.constant 16 : i64 loc("std/mem/vec.lin":L:C)
+    "llvm.intr.memcpy"(%sret, %s26, %rl254) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/vec.lin":L:C)
     func.return loc("std/mem/vec.lin":L:C)
   ^b25:
-    %v207 = arith.constant 8 : i64 loc("std/mem/vec.lin":L:C)
-    %v208 = llvm.getelementptr %rs201[%v207] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
-    %v209 = llvm.load %v208 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    llvm.store %v209, %s27 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v212 = llvm.load %s23 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v213 = llvm.load %s24 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v214 = llvm.load %s27 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v215 = llvm.load %s3 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %m216 = "llvm.intr.umul.with.overflow"(%v214, %v215) : (i64, i64) -> !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
-    %v216 = llvm.extractvalue %m216[0] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
-    %k8 = llvm.extractvalue %m216[1] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
+    %v187 = arith.constant 8 : i64 loc("std/mem/vec.lin":L:C)
+    %v188 = llvm.getelementptr %rs181[%v187] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v189 = llvm.load %v188 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    llvm.store %v189, %s23 : i64, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v192 = llvm.load %s23 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v193 = llvm.load %s3 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %m194 = "llvm.intr.umul.with.overflow"(%v192, %v193) : (i64, i64) -> !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
+    %v194 = llvm.extractvalue %m194[0] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
+    %k8 = llvm.extractvalue %m194[1] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
     cf.cond_br %k8, ^t8, ^c8 loc("std/mem/vec.lin":L:C)
   ^t8:
     %tk8 = arith.constant 0 : i32 loc("std/mem/vec.lin":L:C)
@@ -8714,11 +8673,17 @@ module {
     func.call @linea_trap(%tk8, %tf8, %tl8, %tc8) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c8:
-    %p217 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v217 = arith.addi %v216, %p217 : i64 loc("std/mem/vec.lin":L:C)
-    %v218 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
-    %v219 = arith.addi %v217, %v218 : i64 loc("std/mem/vec.lin":L:C)
-    %k9 = arith.cmpi ult, %v219, %v217 : i64 loc("std/mem/vec.lin":L:C)
+    %p195 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v195 = arith.addi %v194, %p195 : i64 loc("std/mem/vec.lin":L:C)
+    %v196 = arith.constant 48 : i64 loc("std/mem/vec.lin":L:C)
+    %v197 = llvm.getelementptr %s19[%v196] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v198 = llvm.load %v197 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v199 = arith.constant 56 : i64 loc("std/mem/vec.lin":L:C)
+    %v200 = llvm.getelementptr %s19[%v199] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v201 = llvm.load %v200 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v202 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
+    %v203 = arith.addi %v195, %v202 : i64 loc("std/mem/vec.lin":L:C)
+    %k9 = arith.cmpi ult, %v203, %v195 : i64 loc("std/mem/vec.lin":L:C)
     cf.cond_br %k9, ^t9, ^c9 loc("std/mem/vec.lin":L:C)
   ^t9:
     %tk9 = arith.constant 0 : i32 loc("std/mem/vec.lin":L:C)
@@ -8728,11 +8693,11 @@ module {
     func.call @linea_trap(%tk9, %tf9, %tl9, %tc9) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c9:
-    %p220 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v220 = arith.addi %v219, %p220 : i64 loc("std/mem/vec.lin":L:C)
-    %v221 = arith.cmpi ule, %v219, %v213 : i64 loc("std/mem/vec.lin":L:C)
+    %p204 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v204 = arith.addi %v203, %p204 : i64 loc("std/mem/vec.lin":L:C)
+    %v205 = arith.cmpi ule, %v203, %v201 : i64 loc("std/mem/vec.lin":L:C)
     %k10z = arith.constant true loc("std/mem/vec.lin":L:C)
-    %k10 = arith.xori %v221, %k10z : i1 loc("std/mem/vec.lin":L:C)
+    %k10 = arith.xori %v205, %k10z : i1 loc("std/mem/vec.lin":L:C)
     cf.cond_br %k10, ^t10, ^c10 loc("std/mem/vec.lin":L:C)
   ^t10:
     %tk10 = arith.constant 6 : i32 loc("std/mem/vec.lin":L:C)
@@ -8742,20 +8707,18 @@ module {
     func.call @linea_trap(%tk10, %tf10, %tl10, %tc10) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c10:
-    %v222 = arith.ori %v221, %v221 : i1 loc("std/mem/vec.lin":L:C)
-    %v223 = arith.addi %v212, %v217 : i64 loc("std/mem/vec.lin":L:C)
-    %v224 = llvm.inttoptr %v223 : i64 to !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %iw225 = llvm.load %v224 : !llvm.ptr -> i8 loc("std/mem/vec.lin":L:C)
-    %v225 = arith.extui %iw225 : i8 to i64 loc("std/mem/vec.lin":L:C)
-    %sw226 = arith.trunci %v225 : i64 to i8 loc("std/mem/vec.lin":L:C)
-    llvm.store %sw226, %s28 : i8, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v228 = llvm.load %s21 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v229 = llvm.load %s22 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v230 = llvm.load %s27 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %v231 = llvm.load %s3 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
-    %m232 = "llvm.intr.umul.with.overflow"(%v230, %v231) : (i64, i64) -> !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
-    %v232 = llvm.extractvalue %m232[0] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
-    %k11 = llvm.extractvalue %m232[1] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
+    %v206 = arith.ori %v205, %v205 : i1 loc("std/mem/vec.lin":L:C)
+    %v207 = arith.addi %v198, %v195 : i64 loc("std/mem/vec.lin":L:C)
+    %v208 = llvm.inttoptr %v207 : i64 to !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %iw209 = llvm.load %v208 : !llvm.ptr -> i8 loc("std/mem/vec.lin":L:C)
+    %v209 = arith.extui %iw209 : i8 to i64 loc("std/mem/vec.lin":L:C)
+    %sw210 = arith.trunci %v209 : i64 to i8 loc("std/mem/vec.lin":L:C)
+    llvm.store %sw210, %s24 : i8, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v212 = llvm.load %s23 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v213 = llvm.load %s3 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %m214 = "llvm.intr.umul.with.overflow"(%v212, %v213) : (i64, i64) -> !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
+    %v214 = llvm.extractvalue %m214[0] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
+    %k11 = llvm.extractvalue %m214[1] : !llvm.struct<(i64, i1)> loc("std/mem/vec.lin":L:C)
     cf.cond_br %k11, ^t11, ^c11 loc("std/mem/vec.lin":L:C)
   ^t11:
     %tk11 = arith.constant 0 : i32 loc("std/mem/vec.lin":L:C)
@@ -8765,13 +8728,19 @@ module {
     func.call @linea_trap(%tk11, %tf11, %tl11, %tc11) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c11:
-    %p233 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v233 = arith.addi %v232, %p233 : i64 loc("std/mem/vec.lin":L:C)
-    %lw234 = llvm.load %s28 : !llvm.ptr -> i8 loc("std/mem/vec.lin":L:C)
-    %v234 = arith.extui %lw234 : i8 to i64 loc("std/mem/vec.lin":L:C)
-    %v235 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
-    %v236 = arith.addi %v233, %v235 : i64 loc("std/mem/vec.lin":L:C)
-    %k12 = arith.cmpi ult, %v236, %v233 : i64 loc("std/mem/vec.lin":L:C)
+    %p215 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v215 = arith.addi %v214, %p215 : i64 loc("std/mem/vec.lin":L:C)
+    %lw216 = llvm.load %s24 : !llvm.ptr -> i8 loc("std/mem/vec.lin":L:C)
+    %v216 = arith.extui %lw216 : i8 to i64 loc("std/mem/vec.lin":L:C)
+    %v217 = arith.constant 48 : i64 loc("std/mem/vec.lin":L:C)
+    %v218 = llvm.getelementptr %s20[%v217] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v219 = llvm.load %v218 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v220 = arith.constant 56 : i64 loc("std/mem/vec.lin":L:C)
+    %v221 = llvm.getelementptr %s20[%v220] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/vec.lin":L:C)
+    %v222 = llvm.load %v221 : !llvm.ptr -> i64 loc("std/mem/vec.lin":L:C)
+    %v223 = arith.constant 1 : i64 loc("std/mem/vec.lin":L:C)
+    %v224 = arith.addi %v215, %v223 : i64 loc("std/mem/vec.lin":L:C)
+    %k12 = arith.cmpi ult, %v224, %v215 : i64 loc("std/mem/vec.lin":L:C)
     cf.cond_br %k12, ^t12, ^c12 loc("std/mem/vec.lin":L:C)
   ^t12:
     %tk12 = arith.constant 0 : i32 loc("std/mem/vec.lin":L:C)
@@ -8781,11 +8750,11 @@ module {
     func.call @linea_trap(%tk12, %tf12, %tl12, %tc12) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c12:
-    %p237 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
-    %v237 = arith.addi %v236, %p237 : i64 loc("std/mem/vec.lin":L:C)
-    %v238 = arith.cmpi ule, %v236, %v229 : i64 loc("std/mem/vec.lin":L:C)
+    %p225 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v225 = arith.addi %v224, %p225 : i64 loc("std/mem/vec.lin":L:C)
+    %v226 = arith.cmpi ule, %v224, %v222 : i64 loc("std/mem/vec.lin":L:C)
     %k13z = arith.constant true loc("std/mem/vec.lin":L:C)
-    %k13 = arith.xori %v238, %k13z : i1 loc("std/mem/vec.lin":L:C)
+    %k13 = arith.xori %v226, %k13z : i1 loc("std/mem/vec.lin":L:C)
     cf.cond_br %k13, ^t13, ^c13 loc("std/mem/vec.lin":L:C)
   ^t13:
     %tk13 = arith.constant 6 : i32 loc("std/mem/vec.lin":L:C)
@@ -8795,12 +8764,12 @@ module {
     func.call @linea_trap(%tk13, %tf13, %tl13, %tc13) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/vec.lin":L:C)
     llvm.unreachable loc("std/mem/vec.lin":L:C)
   ^c13:
-    %v239 = arith.ori %v238, %v238 : i1 loc("std/mem/vec.lin":L:C)
-    %v240 = arith.addi %v228, %v233 : i64 loc("std/mem/vec.lin":L:C)
-    %v241 = llvm.inttoptr %v240 : i64 to !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %iw242 = arith.trunci %v234 : i64 to i8 loc("std/mem/vec.lin":L:C)
-    llvm.store %iw242, %v241 : i8, !llvm.ptr loc("std/mem/vec.lin":L:C)
-    %v243 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
+    %v227 = arith.ori %v226, %v226 : i1 loc("std/mem/vec.lin":L:C)
+    %v228 = arith.addi %v219, %v215 : i64 loc("std/mem/vec.lin":L:C)
+    %v229 = llvm.inttoptr %v228 : i64 to !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %iw230 = arith.trunci %v216 : i64 to i8 loc("std/mem/vec.lin":L:C)
+    llvm.store %iw230, %v229 : i8, !llvm.ptr loc("std/mem/vec.lin":L:C)
+    %v231 = arith.constant 0 : i64 loc("std/mem/vec.lin":L:C)
     cf.br ^b23 loc("std/mem/vec.lin":L:C)
   ^b26:
     cf.br ^b24 loc("std/mem/vec.lin":L:C)
@@ -9212,7 +9181,7 @@ module {
     cf.cond_br %k1, ^t1, ^c1 loc("std/fmt/decimal.lin":L:C)
   ^t1:
     %tk1 = arith.constant 1 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf1 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf1 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -9228,7 +9197,7 @@ module {
     cf.cond_br %k2, ^t2, ^c2 loc("std/fmt/decimal.lin":L:C)
   ^t2:
     %tk2 = arith.constant 0 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf2 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf2 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -9245,7 +9214,7 @@ module {
     cf.cond_br %k3, ^t3, ^c3 loc("std/fmt/decimal.lin":L:C)
   ^t3:
     %tk3 = arith.constant 1 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf3 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf3 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -9261,7 +9230,7 @@ module {
     cf.cond_br %k4, ^t4, ^c4 loc("std/fmt/decimal.lin":L:C)
   ^t4:
     %tk4 = arith.constant 0 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf4 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf4 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl4 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc4 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -9297,7 +9266,7 @@ module {
     cf.cond_br %k5, ^t5, ^c5 loc("std/fmt/decimal.lin":L:C)
   ^t5:
     %tk5 = arith.constant 0 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf5 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf5 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl5 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc5 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk5, %tf5, %tl5, %tc5) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -9340,7 +9309,7 @@ module {
     cf.cond_br %k6, ^t6, ^c6 loc("std/fmt/decimal.lin":L:C)
   ^t6:
     %tk6 = arith.constant 1 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf6 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf6 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl6 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc6 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk6, %tf6, %tl6, %tc6) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -9356,7 +9325,7 @@ module {
     cf.cond_br %k7, ^t7, ^c7 loc("std/fmt/decimal.lin":L:C)
   ^t7:
     %tk7 = arith.constant 0 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf7 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf7 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl7 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc7 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk7, %tf7, %tl7, %tc7) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -9426,7 +9395,7 @@ module {
     cf.cond_br %k1, ^t1, ^c1 loc("std/fmt/decimal.lin":L:C)
   ^t1:
     %tk1 = arith.constant 1 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf1 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf1 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -9445,7 +9414,7 @@ module {
     cf.cond_br %k2, ^t2, ^c2 loc("std/fmt/decimal.lin":L:C)
   ^t2:
     %tk2 = arith.constant 1 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf2 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf2 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -9464,7 +9433,7 @@ module {
     cf.cond_br %k3, ^t3, ^c3 loc("std/fmt/decimal.lin":L:C)
   ^t3:
     %tk3 = arith.constant 2 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf3 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf3 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -9506,7 +9475,7 @@ module {
     cf.cond_br %k4, ^t4, ^c4 loc("std/fmt/decimal.lin":L:C)
   ^t4:
     %tk4 = arith.constant 1 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf4 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf4 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl4 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc4 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -9760,33 +9729,63 @@ module {
     %v3 = llvm.load %v2 : !llvm.ptr -> i64 loc("std/mem/slots.lin":L:C)
     llvm.store %v3, %s1 : i64, !llvm.ptr loc("std/mem/slots.lin":L:C)
     %v6 = arith.constant 0 : i64 loc("std/mem/slots.lin":L:C)
-    %v8 = llvm.load %s0 : !llvm.ptr -> i64 loc("std/mem/slots.lin":L:C)
-    llvm.store %v8, %s2 : i64, !llvm.ptr loc("std/mem/slots.lin":L:C)
-    %v11 = arith.constant 8 : i64 loc("std/mem/slots.lin":L:C)
-    %v12 = llvm.getelementptr %s0[%v11] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/slots.lin":L:C)
-    %v13 = llvm.load %v12 : !llvm.ptr -> i64 loc("std/mem/slots.lin":L:C)
-    llvm.store %v13, %s3 : i64, !llvm.ptr loc("std/mem/slots.lin":L:C)
-    %v16 = arith.constant 0 : i64 loc("std/mem/slots.lin":L:C)
-    %v18 = arith.constant 1 : i64 loc("std/mem/slots.lin":L:C)
-    llvm.store %v18, %s4 : i64, !llvm.ptr loc("std/mem/slots.lin":L:C)
-    %v20 = arith.constant 8 : i64 loc("std/mem/slots.lin":L:C)
-    %v21 = llvm.getelementptr %s4[%v20] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/slots.lin":L:C)
-    %cl23 = arith.constant 32 : i64 loc("std/mem/slots.lin":L:C)
-    "llvm.intr.memcpy"(%v21, %s0, %cl23) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/slots.lin":L:C)
-    %v24 = arith.constant 40 : i64 loc("std/mem/slots.lin":L:C)
-    %v25 = llvm.getelementptr %s4[%v24] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/slots.lin":L:C)
-    %v26 = llvm.load %s1 : !llvm.ptr -> i64 loc("std/mem/slots.lin":L:C)
-    llvm.store %v26, %v25 : i64, !llvm.ptr loc("std/mem/slots.lin":L:C)
-    %v28 = arith.constant 48 : i64 loc("std/mem/slots.lin":L:C)
+    %v7 = arith.constant 0 : i64 loc("std/mem/slots.lin":L:C)
+    %v9 = llvm.load %s0 : !llvm.ptr -> i64 loc("std/mem/slots.lin":L:C)
+    %v10 = arith.constant 8 : i64 loc("std/mem/slots.lin":L:C)
+    %v11 = llvm.getelementptr %s0[%v10] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/slots.lin":L:C)
+    %v12 = llvm.load %v11 : !llvm.ptr -> i64 loc("std/mem/slots.lin":L:C)
+    %v13 = arith.cmpi ule, %v6, %v12 : i64 loc("std/mem/slots.lin":L:C)
+    %k1z = arith.constant true loc("std/mem/slots.lin":L:C)
+    %k1 = arith.xori %v13, %k1z : i1 loc("std/mem/slots.lin":L:C)
+    cf.cond_br %k1, ^t1, ^c1 loc("std/mem/slots.lin":L:C)
+  ^t1:
+    %tk1 = arith.constant 6 : i32 loc("std/mem/slots.lin":L:C)
+    %tf1 = llvm.mlir.addressof @linea_file11 : !llvm.ptr loc("std/mem/slots.lin":L:C)
+    %tl1 = arith.constant L : i32 loc("std/mem/slots.lin":L:C)
+    %tc1 = arith.constant C : i32 loc("std/mem/slots.lin":L:C)
+    func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/slots.lin":L:C)
+    llvm.unreachable loc("std/mem/slots.lin":L:C)
+  ^c1:
+    %v14 = arith.ori %v13, %v13 : i1 loc("std/mem/slots.lin":L:C)
+    %v15 = arith.addi %v9, %v6 : i64 loc("std/mem/slots.lin":L:C)
+    %k2 = arith.cmpi ult, %v15, %v9 : i64 loc("std/mem/slots.lin":L:C)
+    cf.cond_br %k2, ^t2, ^c2 loc("std/mem/slots.lin":L:C)
+  ^t2:
+    %tk2 = arith.constant 0 : i32 loc("std/mem/slots.lin":L:C)
+    %tf2 = llvm.mlir.addressof @linea_file11 : !llvm.ptr loc("std/mem/slots.lin":L:C)
+    %tl2 = arith.constant L : i32 loc("std/mem/slots.lin":L:C)
+    %tc2 = arith.constant C : i32 loc("std/mem/slots.lin":L:C)
+    func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/slots.lin":L:C)
+    llvm.unreachable loc("std/mem/slots.lin":L:C)
+  ^c2:
+    %p16 = arith.constant 0 : i64 loc("std/mem/slots.lin":L:C)
+    %v16 = arith.addi %v15, %p16 : i64 loc("std/mem/slots.lin":L:C)
+    llvm.store %v15, %s2 : i64, !llvm.ptr loc("std/mem/slots.lin":L:C)
+    %v19 = arith.constant 8 : i64 loc("std/mem/slots.lin":L:C)
+    %v20 = llvm.getelementptr %s0[%v19] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/slots.lin":L:C)
+    %v21 = llvm.load %v20 : !llvm.ptr -> i64 loc("std/mem/slots.lin":L:C)
+    llvm.store %v21, %s3 : i64, !llvm.ptr loc("std/mem/slots.lin":L:C)
+    %v24 = arith.constant 0 : i64 loc("std/mem/slots.lin":L:C)
+    %v26 = arith.constant 1 : i64 loc("std/mem/slots.lin":L:C)
+    llvm.store %v26, %s4 : i64, !llvm.ptr loc("std/mem/slots.lin":L:C)
+    %v28 = arith.constant 8 : i64 loc("std/mem/slots.lin":L:C)
     %v29 = llvm.getelementptr %s4[%v28] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/slots.lin":L:C)
-    %v30 = llvm.load %s2 : !llvm.ptr -> i64 loc("std/mem/slots.lin":L:C)
-    llvm.store %v30, %v29 : i64, !llvm.ptr loc("std/mem/slots.lin":L:C)
-    %v32 = arith.constant 56 : i64 loc("std/mem/slots.lin":L:C)
+    %cl31 = arith.constant 32 : i64 loc("std/mem/slots.lin":L:C)
+    "llvm.intr.memcpy"(%v29, %s0, %cl31) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/slots.lin":L:C)
+    %v32 = arith.constant 40 : i64 loc("std/mem/slots.lin":L:C)
     %v33 = llvm.getelementptr %s4[%v32] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/slots.lin":L:C)
-    %v34 = llvm.load %s3 : !llvm.ptr -> i64 loc("std/mem/slots.lin":L:C)
+    %v34 = llvm.load %s1 : !llvm.ptr -> i64 loc("std/mem/slots.lin":L:C)
     llvm.store %v34, %v33 : i64, !llvm.ptr loc("std/mem/slots.lin":L:C)
-    %rl36 = arith.constant 64 : i64 loc("std/mem/slots.lin":L:C)
-    "llvm.intr.memcpy"(%sret, %s4, %rl36) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/slots.lin":L:C)
+    %v36 = arith.constant 48 : i64 loc("std/mem/slots.lin":L:C)
+    %v37 = llvm.getelementptr %s4[%v36] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/slots.lin":L:C)
+    %v38 = llvm.load %s2 : !llvm.ptr -> i64 loc("std/mem/slots.lin":L:C)
+    llvm.store %v38, %v37 : i64, !llvm.ptr loc("std/mem/slots.lin":L:C)
+    %v40 = arith.constant 56 : i64 loc("std/mem/slots.lin":L:C)
+    %v41 = llvm.getelementptr %s4[%v40] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/slots.lin":L:C)
+    %v42 = llvm.load %s3 : !llvm.ptr -> i64 loc("std/mem/slots.lin":L:C)
+    llvm.store %v42, %v41 : i64, !llvm.ptr loc("std/mem/slots.lin":L:C)
+    %rl44 = arith.constant 64 : i64 loc("std/mem/slots.lin":L:C)
+    "llvm.intr.memcpy"(%sret, %s4, %rl44) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/slots.lin":L:C)
     func.return loc("std/mem/slots.lin":L:C)
   }
   func.func private @"lin.std.range.Range[UInt64];std.iter;Sequence.iterate"(%sret: !llvm.ptr, %a0: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -9843,7 +9842,7 @@ module {
     cf.cond_br %k1, ^t1, ^c1 loc("std/range/range.lin":L:C)
   ^t1:
     %tk1 = arith.constant 0 : i32 loc("std/range/range.lin":L:C)
-    %tf1 = llvm.mlir.addressof @linea_file18 : !llvm.ptr loc("std/range/range.lin":L:C)
+    %tf1 = llvm.mlir.addressof @linea_file19 : !llvm.ptr loc("std/range/range.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/range/range.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/range/range.lin":L:C)
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/range/range.lin":L:C)
@@ -9891,7 +9890,7 @@ module {
     cf.cond_br %k2, ^t2, ^c2 loc("std/range/range.lin":L:C)
   ^t2:
     %tk2 = arith.constant 0 : i32 loc("std/range/range.lin":L:C)
-    %tf2 = llvm.mlir.addressof @linea_file18 : !llvm.ptr loc("std/range/range.lin":L:C)
+    %tf2 = llvm.mlir.addressof @linea_file19 : !llvm.ptr loc("std/range/range.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/range/range.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/range/range.lin":L:C)
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/range/range.lin":L:C)
@@ -10159,7 +10158,7 @@ module {
     cf.cond_br %k1, ^t1, ^c1 loc("std/fmt/decimal.lin":L:C)
   ^t1:
     %tk1 = arith.constant 1 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf1 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf1 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -10175,7 +10174,7 @@ module {
     cf.cond_br %k2, ^t2, ^c2 loc("std/fmt/decimal.lin":L:C)
   ^t2:
     %tk2 = arith.constant 0 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf2 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf2 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -10190,7 +10189,7 @@ module {
     cf.cond_br %k3, ^t3, ^c3 loc("std/fmt/decimal.lin":L:C)
   ^t3:
     %tk3 = arith.constant 1 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf3 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf3 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -10206,7 +10205,7 @@ module {
     cf.cond_br %k4, ^t4, ^c4 loc("std/fmt/decimal.lin":L:C)
   ^t4:
     %tk4 = arith.constant 0 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf4 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf4 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl4 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc4 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -10227,7 +10226,7 @@ module {
     cf.cond_br %k5, ^t5, ^c5 loc("std/fmt/decimal.lin":L:C)
   ^t5:
     %tk5 = arith.constant 0 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf5 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf5 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl5 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc5 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk5, %tf5, %tl5, %tc5) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -10271,7 +10270,7 @@ module {
     cf.cond_br %k1, ^t1, ^c1 loc("std/fmt/decimal.lin":L:C)
   ^t1:
     %tk1 = arith.constant 2 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf1 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf1 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -10286,7 +10285,7 @@ module {
     cf.cond_br %k2, ^t2, ^c2 loc("std/fmt/decimal.lin":L:C)
   ^t2:
     %tk2 = arith.constant 0 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf2 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf2 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -10324,7 +10323,7 @@ module {
     cf.cond_br %k3, ^t3, ^c3 loc("std/fmt/decimal.lin":L:C)
   ^t3:
     %tk3 = arith.constant 0 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf3 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf3 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -10350,7 +10349,7 @@ module {
     cf.cond_br %k4, ^t4, ^c4 loc("std/fmt/decimal.lin":L:C)
   ^t4:
     %tk4 = arith.constant 0 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf4 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf4 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl4 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc4 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -10389,7 +10388,7 @@ module {
     cf.cond_br %k1, ^t1, ^c1 loc("std/fmt/decimal.lin":L:C)
   ^t1:
     %tk1 = arith.constant 1 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf1 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf1 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -10406,7 +10405,7 @@ module {
     cf.cond_br %k2, ^t2, ^c2 loc("std/fmt/decimal.lin":L:C)
   ^t2:
     %tk2 = arith.constant 1 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf2 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf2 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
@@ -10429,7 +10428,7 @@ module {
     cf.cond_br %k3, ^t3, ^c3 loc("std/fmt/decimal.lin":L:C)
   ^t3:
     %tk3 = arith.constant 0 : i32 loc("std/fmt/decimal.lin":L:C)
-    %tf3 = llvm.mlir.addressof @linea_file14 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %tf3 = llvm.mlir.addressof @linea_file15 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)

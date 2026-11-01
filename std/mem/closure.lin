@@ -1,3 +1,4 @@
+import std.mem.address
 import std.testing
 
 // A Closure keeps any callable behind one type. Closures with different
@@ -81,7 +82,7 @@ impl[S, A: Allocator] Closure[S, A] {
         let shape: SlotType[F] = .Type
         let size = closure_size(shape)
         var storage: Storage[F, A] = if size == 0 {
-            .{ buffer = .None, allocator = copy(allocator), at = 0, len = 0 }
+            .{ buffer = .None, allocator = copy(allocator), at = address.nowhere(), len = 0 }
         } else {
             match allocator.acquire(size) {
                 Ok(buffer) => Storage.from_buffer(buffer),
@@ -91,11 +92,9 @@ impl[S, A: Allocator] Closure[S, A] {
                 },
             }
         }
-        let at = storage.at
-        let len = storage.len
-        slot_put(&storage, at, len, 0, callback)
-        let Storage { buffer, allocator: _, at: _, len: _ } = storage
-        .Ok(.{ entry = closure_entry(shape), settle = closure_settle(shape), at, len, storage = buffer })
+        slot_put(&storage, 0, callback)
+        let Storage { buffer, allocator: _, at, len } = storage
+        .Ok(.{ entry = closure_entry(shape), settle = closure_settle(shape), at = address.raw(at), len, storage = buffer })
     }
 
     test fn a_closure_calls_what_it_captured() {
