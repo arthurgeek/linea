@@ -4545,11 +4545,14 @@ fields `value: R` and `code: Int32`, in that order; a declaration of any other
 shape is [T-Extern] at the declaration, and an `extern` answering it is not
 checked further.
 
-The private `std.mem` declarations `slot_stride`, `slot_take`, `slot_put`, and
-`slot_place` are typed storage primitives, not foreign calls. A recognized
-primitive must retain its compiler-defined private signature; violations are
-[T-Extern]. Another module's declaration of the same spelling receives no
-exemption.
+The private `std.mem` declarations `slot_stride`, `slot_take`, `slot_put`,
+`slot_place` and `address_in` are typed storage primitives, not foreign calls.
+A recognized primitive must retain its compiler-defined private signature;
+violations are [T-Extern]. Another module's declaration of the same spelling
+receives no exemption. A slot primitive reads the slots' address and extent
+from the storage it is given, whose address names the element type, so a
+value kept in bytes is always held by a type that names its own
+([ADR 0255](adr/0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md)).
 
 The private `std.scalar` declarations `linea_math_sqrt`, `linea_math_floor`,
 `linea_math_ceil`, `linea_math_trunc`, `linea_math_round`, `linea_math_sin`,
@@ -4653,6 +4656,22 @@ start a thread with it, and no library can offer an unjoined or detached task.
 The rule reads the symbol a declaration names, so every root's declaration of
 it is held to the rule as the standard library's is
 ([ADR 0250](adr/0250-tasks-are-structured-through-linear-sessions.md)).
+
+**[T-RawAddress]** `std.mem.address.Address[T]`, the address of values of `T`
+kept in bytes, is an opaque newtype over `UInt64` whose module offers only the
+address of no bytes and `raw`, the number in an address. A call of `raw` is
+accepted in two places: as the argument for a runtime parameter the compiler's
+table marks as the address of typed bytes, which the runtime copies to another
+task before the call returns, writes with bytes another task sent, or keeps
+for a task it starts; and as the `at` of a `mem.Closure` construction, the one
+type certified to erase what it holds. Anywhere else, the call, or `raw` named
+as a value, is refused, because a number would stand for values of a type no
+type names. An `extern` whose parameters, result or callbacks name an address
+is refused too, since C could keep it. A function passed for a runtime
+callback the table marks may declare the marked parameter as an address,
+which crosses as its `UInt64`, so no source form turns a number into an
+address
+([ADR 0255](adr/0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md)).
 
 **[T-Export]** An `export`'s parameters and result cross the foreign boundary
 as an `extern`'s do, and the result may also be Unit. It applies the same
@@ -5558,9 +5577,13 @@ parameter unseeded correct.
 **Shareable values.** A type is **Shareable** when two tasks may read one value
 of it at once, because no read of it writes. A type is not Shareable when it is
 declared `@unshareable`, or when anything reachable through its fields, variant
-payloads, array elements, newtype base, closure environment, type arguments or
-the referent of an observation is not: an observation lets whoever reads it
-read its referent. `mem.Arena` is `@unshareable`, since a handle's `acquire`
+payloads, array elements, newtype base, closure environment, the referent of an
+observation, or the values an address, storage or slice names, is not: an
+observation lets whoever reads it read its referent. A type argument that names
+nothing the value holds, a phantom one such as a session's protocol, is not
+followed, so a `task.Client[S]` of an owning task is Shareable whatever `S` is:
+the state lives on the owning task's thread, and a client holds only a borrow
+of its queue. `mem.Arena` is `@unshareable`, since a handle's `acquire`
 takes the handle by `read` and advances the arena's cursor; `mem.Handle`
 borrows its arena, so it, `Vec[UInt8, mem.Handle]` and `borrow mem.Arena` are
 not Shareable;

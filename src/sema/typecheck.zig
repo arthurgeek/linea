@@ -475,6 +475,7 @@ fn typecheckInternal(
     c.builder.certified_storage = c.raw_accesses.storage;
     c.builder.certified_buffer = c.raw_accesses.buffer;
     c.builder.certified_slice = c.raw_accesses.slice;
+    c.builder.certified_address = c.raw_accesses.address;
     c.builder.certified_carried = c.raw_accesses.carried;
     c.builder.certified_foreign_views = c.raw_accesses.foreign_views;
     c.builder.certified_closure_entry = c.raw_accesses.closure_entry_type;
@@ -1486,6 +1487,7 @@ fn typecheckInternal(
     try c.checkEntryAnswer();
     try c.checkTestAnswers();
     try c.checkForeignCallbacks();
+    try c.checkRawAddresses();
     try c.checkHandleChanges();
     try c.checkForeignUses(foreign_module);
 
@@ -19790,7 +19792,120 @@ const Checker = struct {
             if (try self.validStorageSignature(d)) return;
             return self.sink.addError(.t_extern, self.ast.fileOf(self.ast.declName(d)), self.ast.tokenSpan(self.ast.declName(d)), "a typed storage primitive must have its compiler-defined signature", "restore the private storage declaration's parameter and result types");
         }
+        try self.refuseForeignAddress(d);
         try self.checkForeignSignature(d, .t_extern);
+    }
+
+    /// [T-RawAddress] at a declaration: an `extern` whose parameters, result
+    /// or callbacks name a `mem.address.Address` would hand C a number that
+    /// names a type, which C may keep where no type names it. A runtime
+    /// callback's function may take one, because the entry C calls is the
+    /// compiler's; the `extern` itself declares the `UInt64`.
+    fn refuseForeignAddress(self: *Checker, d: node.DeclId) std.mem.Allocator.Error!void {
+        if (self.raw_accesses.address == .none) return;
+        const signature = self.checkedExternSignature(d) orelse return;
+        var names = self.addressOf(signature.result) != null;
+        for (self.builder.callableParams(signature)) |param| {
+            if (self.addressOf(param.ty) != null) names = true;
+            switch (self.builder.get(param.ty)) {
+                .callable => |callback| {
+                    if (self.addressOf(callback.result) != null) names = true;
+                    for (self.builder.callableParams(callback)) |inner| if (self.addressOf(inner.ty) != null) {
+                        names = true;
+                    };
+                },
+                else => {},
+            }
+        }
+        if (!names) return;
+        try self.sink.addErrorFmt(
+            .t_raw_address,
+            self.ast.fileOf(self.ast.declName(d)),
+            self.ast.tokenSpan(self.ast.declName(d)),
+            "declare a `UInt64` where C takes a number",
+            "`{s}` would hand C an address, which it may keep where no type names what the address holds",
+            .{self.ast.tokenText(self.ast.declName(d))},
+        );
+    }
+
+    /// [T-RawAddress] at a use: the number in a `mem.address.Address` is read
+    /// by `address.raw` only as the argument for a runtime parameter
+    /// `runtime_symbols` marks, where the runtime copies the bytes to another
+    /// task, writes bytes another task sent, or keeps them for a task it
+    /// starts, or as the `at` of a `mem.Closure` construction, the one type
+    /// certified to erase what it holds. Anywhere else a number would stand
+    /// for values of a type no type names. One walk over the calls and the
+    /// structure literals to find the places allowed, and one over the
+    /// expressions naming `raw`.
+    fn checkRawAddresses(self: *Checker) std.mem.Allocator.Error!void {
+        const raw_fn = self.raw_accesses.address_raw;
+        if (raw_fn == .none) return;
+        var allowed: std.AutoHashMapUnmanaged(ExprId, void) = .empty;
+        defer allowed.deinit(self.gpa);
+        for (self.calls.items) |call| {
+            const callee = switch (call.target) {
+                .declared => |decl| decl,
+                else => continue,
+            };
+            if (!self.ast.declIsExtern(callee)) continue;
+            const signature = runtime_symbols.signatureOf(self.ast.tokenText(self.ast.declName(callee))) orelse continue;
+            for (call.args, 0..) |arg, i| {
+                if (arg == ExprId.none or i >= signature.parameters.len or !signature.parameters[i].address) continue;
+                try allowed.put(self.gpa, self.ast.withoutGroups(arg), {});
+            }
+        }
+        var callees: std.AutoHashMapUnmanaged(ExprId, void) = .empty;
+        defer callees.deinit(self.gpa);
+        for (0..self.ast.exprCount()) |i| {
+            const id = ExprId.at(@intCast(i));
+            switch (self.ast.exprTag(id)) {
+                .struct_literal => {
+                    const closure = self.raw_accesses.closure;
+                    const built = self.builder.construction_types.items;
+                    if (closure == .none or id.index() >= built.len or self.builder.view().declOfType(built[id.index()]) != closure) continue;
+                    const c = self.ast.call(id);
+                    var at: usize = 0;
+                    while (at + 1 < c.args.len) : (at += 2) {
+                        if (self.ast.exprTag(c.args[at]) == .err) continue;
+                        if (std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(c.args[at])), "at"))
+                            try allowed.put(self.gpa, self.ast.withoutGroups(c.args[at + 1]), {});
+                    }
+                },
+                else => {},
+            }
+        }
+        for (0..self.ast.exprCount()) |i| {
+            const id = ExprId.at(@intCast(i));
+            if (self.ast.exprTag(id) != .call) continue;
+            const callee = self.ast.withoutGroups(self.ast.call(id).callee);
+            if (!self.namesFunction(callee, raw_fn)) continue;
+            try callees.put(self.gpa, callee, {});
+            if (allowed.contains(id)) continue;
+            _ = self.report(
+                .t_raw_address,
+                id,
+                "an address becomes a number only where the runtime is told what to do with its bytes",
+                .{},
+                "pass `raw(at)` straight to a runtime parameter that copies, receives or keeps them, or keep the address",
+            );
+        }
+        for (0..self.ast.exprCount()) |i| {
+            const id = ExprId.at(@intCast(i));
+            if (callees.contains(id) or !self.namesFunction(id, raw_fn)) continue;
+            _ = self.report(
+                .t_raw_address,
+                id,
+                "an address becomes a number only where the runtime is told what to do with its bytes",
+                .{},
+                "call `raw` where the number is passed to the runtime",
+            );
+        }
+    }
+
+    /// Whether `id` names the function `d`, as a callee or a value.
+    fn namesFunction(self: *const Checker, id: ExprId, d: node.DeclId) bool {
+        const b = self.res.targetOf(id);
+        return b != .none and self.res.kindOf(b) == .function and self.res.declaredBy(b) == d;
     }
 
     /// Refuses every expression naming a runtime function that starts a
@@ -19958,6 +20073,37 @@ const Checker = struct {
         return true;
     }
 
+    /// The `T` of `t` where `t` is a `mem.address.Address[T]`, or null.
+    fn addressOf(self: *Checker, t: TypeId) ?TypeId {
+        if (self.raw_accesses.address == .none or t == .poison) return null;
+        if (self.builder.view().declOfType(t) != self.raw_accesses.address) return null;
+        const applied = self.builder.appliedTo(t);
+        return if (applied.len == 1) applied[0] else null;
+    }
+
+    /// `mem.address.Address[phantom T]` is an opaque, copyable newtype over
+    /// `UInt64`, and the module declaring it declares nothing else but
+    /// `nowhere`, the address of no bytes, `raw`, the number in an address,
+    /// and tests. Its seal is what keeps a number from becoming an address:
+    /// a function added beside it could build one, so nothing else is.
+    fn checkAddressCertificate(self: *Checker, declarations: types_mod.Returns, d: DeclId) !void {
+        const ty = declarations.get(d);
+        const params = self.ast.declTypeParams(d);
+        const valid = self.ast.declTag(d) == .newtype and self.ast.declVisibility(d) == .opaque_ and
+            self.ast.declOwnershipPolicy(d) == .copyable and params.len == 1 and params[0].phantom and
+            (try self.builder.baseOf(ty)) == .u64 and self.raw_accesses.address_raw != .none;
+        if (!valid) return self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Address certificate requires an opaque copyable newtype over a number", "declare `@(opaque, copyable) type Address[phantom T] = UInt64` beside `nowhere` and `raw`", null);
+        for (self.program.declsOf(self.program.moduleOf(d))) |member| {
+            if (member == d or self.ast.declIsTest(member) or self.ast.declTag(member) == .import_) continue;
+            const named = self.ast.declName(member);
+            if (named != .none and self.ast.declTag(member) == .function) {
+                const name = self.ast.tokenText(named);
+                if (std.mem.eql(u8, name, "nowhere") or std.mem.eql(u8, name, "raw")) continue;
+            }
+            self.reportAtToken(.t_borrow_contract, if (named != .none) named else self.ast.declMain(member), "the Address certificate requires its module to declare nothing but `Address`, `nowhere` and `raw`", "declare this in another module, where an address cannot be built from its parts", null);
+        }
+    }
+
     fn checkedExternSignature(self: *Checker, d: node.DeclId) ?types_mod.CallableSignature {
         const signature = switch (self.builder.get(self.decl_signatures.get(d))) {
             .callable => |callable| callable,
@@ -19993,7 +20139,8 @@ const Checker = struct {
                 valid = std.mem.eql(u8, self.builder.fieldName(ty, 0), "buffer") and self.option_decl != null and
                     self.builder.view().declOfType(optional) == self.option_decl and optional_args.len == 1 and
                     std.mem.eql(u8, self.builder.fieldName(ty, 1), "allocator") and (try self.builder.fieldType(ty, 1)) == allocator and
-                    std.mem.eql(u8, self.builder.fieldName(ty, 2), "at") and (try self.builder.fieldType(ty, 2)) == .u64 and
+                    std.mem.eql(u8, self.builder.fieldName(ty, 2), "at") and
+                    self.addressOf(try self.builder.fieldType(ty, 2)) == self.param_types[d.index()][0] and
                     std.mem.eql(u8, self.builder.fieldName(ty, 3), "len") and (try self.builder.fieldType(ty, 3)) == .u64;
                 if (valid) {
                     const buffer = optional_args[0];
@@ -20002,8 +20149,9 @@ const Checker = struct {
                         args.len == 1 and args[0] == allocator;
                 }
             }
-            if (!valid) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Storage certificate requires private move-only typed buffer containment", "declare Storage[T, A] with buffer: Option[Buffer[A]], allocator: A, at: UInt64, and len: UInt64 fields", null);
+            if (!valid) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Storage certificate requires private move-only typed buffer containment", "declare Storage[T, A] with buffer: Option[Buffer[A]], allocator: A, at: address.Address[T], and len: UInt64 fields", null);
         }
+        if (raw.address != .none) try self.checkAddressCertificate(declarations, raw.address);
         if (raw.errno != .none) {
             const d = raw.errno;
             if (!self.certifiedErrno(declarations, d)) {
@@ -20092,11 +20240,11 @@ const Checker = struct {
         if (signature != .callable) return false;
         const raw = self.raw_accesses;
         const contracts = signature.callable.contracts;
-        if (d == raw.stride or raw.processText(d) != null) return contracts.len == 0;
+        if (d == raw.stride or d == raw.address_in or raw.processText(d) != null) return contracts.len == 0;
         if (contracts.len != 1) return false;
         const effect = contracts[0];
         if (effect.target.len != 0 or effect.source.fields.len != 0 or effect.borrows_source) return false;
-        if (d == raw.put) return effect.kind == .retains and effect.source.root == .parameter and effect.source.root.parameter == 4 and
+        if (d == raw.put) return effect.kind == .retains and effect.source.root == .parameter and effect.source.root.parameter == 2 and
             effect.destination != null and effect.destination.?.root == .parameter and effect.destination.?.root.parameter == 0 and effect.destination.?.fields.len == 0;
         return effect.destination == null and effect.source.root == .parameter and effect.source.root.parameter == 0 and
             effect.kind == (if (d == raw.span or d == raw.buffer_span) @as(@FieldType(types_mod.CallableContract, "kind"), .borrows) else .carries);
@@ -20112,6 +20260,14 @@ const Checker = struct {
         if (tps.len != count or self.ast.declVisibility(d) != .private) return false;
         const result = try self.declaredResultType(d);
         const ps = self.ast.declParams(d);
+        if (d == raw.address_in) {
+            const buffer = try self.declaredParamType(d, 0);
+            const buffer_args = self.builder.appliedTo(buffer);
+            return self.addressOf(result) == self.param_types[d.index()][0] and ps[0].convention == .read and
+                raw.buffer != .none and self.builder.view().declOfType(buffer) == raw.buffer and
+                buffer_args.len == 1 and buffer_args[0] == self.param_types[d.index()][1] and
+                try self.declaredParamType(d, 1) == .u64 and ps[1].convention == .read;
+        }
         if (d == raw.stride) {
             const shape = try self.declaredParamType(d, 0);
             const declared = self.program.libraryDeclIn("mem", "SlotType") orelse return false;
@@ -20126,12 +20282,14 @@ const Checker = struct {
         if (raw.storage == .none or self.builder.view().declOfType(owner) != raw.storage or
             applied.len != 2 or applied[0] != element or applied[1] != allocator or
             ps[0].convention != (if (d == raw.place) node.Convention.read else .inout)) return false;
-        const scalar_end: usize = if (d == raw.place) 5 else 4;
+        // The slots' address and extent are the storage's own; what follows
+        // it is a slot's offset, and for a place the live extent before it.
+        const scalar_end: usize = if (d == raw.place) 3 else 2;
         for (ps[1..scalar_end], 1..) |p, k| {
             if (try self.declaredParamType(d, k) != .u64 or p.convention != .read) return false;
         }
-        if (d == raw.put) return result == .unit and ps[4].convention == .sink and
-            try self.declaredParamType(d, 4) == element;
+        if (d == raw.put) return result == .unit and ps[2].convention == .sink and
+            try self.declaredParamType(d, 2) == element;
         return result == element;
     }
 
@@ -23135,6 +23293,44 @@ const Checker = struct {
     /// The two spellings differ in how the callee and the arguments are found
     /// and in nothing after that, so they are found above and everything the
     /// language says about a call is said once, here.
+    /// The type a runtime symbol's callback argument is held to. C calls the
+    /// callback at parameter `j` of `d` with the address the call was given
+    /// for it, at the position `runtime_symbols` marks; the function passed
+    /// may declare that parameter as a `mem.address.Address[T]`, which
+    /// crosses as its `UInt64`, so the entry C calls hands the number to it
+    /// unchanged and no source form turns a number into an address. Where
+    /// the argument's own type is the declared callback type but for that
+    /// one parameter, it is the type the argument is held to; otherwise the
+    /// declared type is, and a mismatch is reported against it.
+    fn adoptedCallback(self: *Checker, d: DeclId, j: usize, argument: ExprId, declared: TypeId, walked: *bool) std.mem.Allocator.Error!TypeId {
+        if (!self.ast.declIsExtern(d) or self.raw_accesses.address == .none) return declared;
+        const signature = runtime_symbols.signatureOf(self.ast.tokenText(self.ast.declName(d))) orelse return declared;
+        if (j >= signature.parameters.len) return declared;
+        const callback = signature.parameters[j].callback orelse return declared;
+        const position = callback.address orelse return declared;
+        const wanted = switch (self.builder.get(declared)) {
+            .callable => |wanted| wanted,
+            else => return declared,
+        };
+        const value = self.ast.withoutGroups(argument);
+        const got = if (walked.*) self.builder.exprType(value) else try self.check(value, null);
+        walked.* = true;
+        const given = switch (self.builder.get(got)) {
+            .callable => |given| given,
+            else => return declared,
+        };
+        const wanted_params = self.builder.callableParams(wanted);
+        const given_params = self.builder.callableParams(given);
+        if (wanted_params.len != given_params.len or wanted.result != given.result or
+            wanted.invocation != given.invocation or given.contracts.len != wanted.contracts.len) return declared;
+        for (wanted_params, given_params, 0..) |w, g, k| {
+            if (w.convention != g.convention) return declared;
+            if (w.ty == g.ty) continue;
+            if (k != position or w.ty != .u64 or self.addressOf(g.ty) == null) return declared;
+        }
+        return got;
+    }
+
     fn checkCallOf(
         self: *Checker,
         id: ExprId,
@@ -23341,11 +23537,12 @@ const Checker = struct {
         var observations_owned = true;
         defer if (observations_owned) self.gpa.free(receiver_adjustments);
         for (args, params, 0..) |a, p, j| {
-            const parameter_ty = try self.throughTrait(
+            const declared_ty = try self.throughTrait(
                 try self.throughCall(try paramType(self, d, j), d, over, settled),
                 trait_decl,
                 trait_args,
             );
+            const parameter_ty = if (a == ExprId.none) declared_ty else try self.adoptedCallback(d, j, a, declared_ty, &walked[j]);
             var default: types_mod.CallableDefault = .absent;
             if (hasDefault(p)) {
                 if (self.defaults.get(@intCast(d.index()), @intCast(j))) |value| {
@@ -30227,7 +30424,7 @@ const Checker = struct {
         const tail = self.ast.withoutGroups(held.tail);
         if (self.storagePlaceCall(tail)) {
             const args = self.ast.call(tail).args;
-            if ((args.len == 5 or args.len == 2) and self.ast.exprTag(self.ast.placePath(args[0]).root) == .name_ref) {
+            if ((args.len == 3 or args.len == 2) and self.ast.exprTag(self.ast.placePath(args[0]).root) == .name_ref) {
                 const root = self.res.targetOf(self.ast.placePath(args[0]).root);
                 if (root != .none and self.res.kindOf(root) == .parameter and
                     std.meta.eql(self.res.parameterOwner(root), resolve_mod.ParameterOwner{ .declaration = d }) and
@@ -30235,9 +30432,11 @@ const Checker = struct {
                 {
                     for (args[1..], 1..) |arg, arg_index| {
                         if (self.somethingRun(arg) != null) return self.sink.addError(.t_projection, self.ast.fileOfExpr(arg), self.ast.exprSpan(arg), "a storage place argument cannot run code", reach_it);
-                        if (args.len == 5 and arg_index < 4) {
+                        // A slot's address and extent are its storage's own;
+                        // how many slots are live is the receiver's to say.
+                        if (args.len == 3 and arg_index == 1) {
                             const field_root = self.ast.placePath(arg).root;
-                            if (self.res.targetOf(field_root) != root) return self.sink.addError(.t_projection, self.ast.fileOfExpr(arg), self.ast.exprSpan(arg), "a storage place reads its address and lengths from its owner", reach_it);
+                            if (self.res.targetOf(field_root) != root) return self.sink.addError(.t_projection, self.ast.fileOfExpr(arg), self.ast.exprSpan(arg), "a storage place reads how many slots are live from its owner", reach_it);
                         }
                     }
                     return;
@@ -39433,6 +39632,44 @@ test "an implementation the compiler provides names no declaration to call" {
     // caller handed one would index the tree by a number no declaration has.
     try testing.expect(try index.any(gpa, &impls, &pool, trait.index(), .u8, .none, .forward));
     try testing.expect((try pool.implementationRow(trait, &.{}, .u8)).?.isAmbient());
+}
+
+test "an address becomes a number only where the runtime is told what to do with its bytes" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var sink = Sink.init(gpa);
+    const source: Source = .{ .path = "address.lin", .text =
+        \\@(opaque, copyable)
+        \\type Address[phantom T] = UInt64
+        \\fn nowhere[T]() -> Address[T] { Address(0) }
+        \\fn raw[T](at: Address[T]) -> UInt64 { let Address(number) = copy(at); number }
+        \\extern fn linea_chan_send(endpoint: UInt64, at: UInt64, len: UInt64)
+        \\extern fn keep(at: Address[UInt8])
+        \\fn main() -> UInt8 {
+        \\    let at: Address[UInt8] = nowhere()
+        \\    linea_chan_send(0, raw(copy(at)), 1)
+        \\    linea_chan_send(raw(copy(at)), 0, 1)
+        \\    let number = raw(at)
+        \\    UInt8(number - number)
+        \\}
+    };
+    var interner: Interner = .empty;
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    var resolved = try resolveTree(gpa, &ast, &sink);
+    resolved.modules[0].name = "address";
+    resolved.modules[0].library = true;
+    resolved.modules[0].externs = true;
+    _ = try typecheckTree(gpa, &resolved, &sink);
+    var refused: usize = 0;
+    for (sink.items()) |diagnostic| {
+        if (diagnostic.code == .t_raw_address) refused += 1;
+    }
+    // The endpoint is not an address, the binding is no runtime call, and
+    // `keep` would hand C an address it may keep.
+    try testing.expectEqual(@as(usize, 3), refused);
+    try testing.expect(diagnosticSays(&sink, .t_raw_address, "`keep`"));
 }
 
 test "typed storage intrinsics reject a scalar replacement signature" {

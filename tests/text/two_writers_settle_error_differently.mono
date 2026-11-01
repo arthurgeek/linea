@@ -127,7 +127,7 @@ struct Vec[UInt8,SystemAllocator] {
 struct Storage[UInt8,SystemAllocator] {
     buffer: std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]],
     allocator: std.mem.SystemAllocator,
-    at: UInt64,
+    at: std.mem.address.Address[UInt8],
     len: UInt64,
 }
 
@@ -136,6 +136,9 @@ pub enum Option[Buffer[SystemAllocator]] {
     None,
     Some(std.mem.Buffer[std.mem.SystemAllocator]),
 }
+
+@(opaque, copyable)
+type Address[UInt8] = UInt64
 
 @copyable
 pub enum Option[Str] {
@@ -453,7 +456,7 @@ pub fn std.mem;system() -> std.mem.SystemAllocator {
 }
 
 pub fn std.mem;Vec[UInt8,std.mem.SystemAllocator].new_in(allocator: std.mem.SystemAllocator) -> std.mem.Vec[UInt8,std.mem.SystemAllocator] where carries(allocator) {
-    .{ storage = .{ buffer = .None, allocator = copy(allocator), at = 0, len = 0 }, len = 0 }
+    .{ storage = .{ buffer = .None, allocator = copy(allocator), at = std.mem.address;nowhere[UInt8](), len = 0 }, len = 0 }
 }
 
 fn std.io.core.Gathered;std.io.core;Writer.write_str(inout self: std.io.core.Gathered, s: std.text.Str) -> std.result.Result[(),std.io.core.IoError] where carries() {
@@ -481,12 +484,10 @@ fn std.io.core.WriteFailure[std.io.core.IoError];std.convert;Into[std.io.core.Io
 fn std.mem;release_from[UInt8,std.mem.SystemAllocator](inout storage: std.mem.Storage[UInt8,std.mem.SystemAllocator], kept: UInt64, length: UInt64) {
     let shape: std.mem.SlotType[UInt8] = .Type
     let stride = slot_stride(shape)
-    let at = storage.at
-    let extent = storage.len
     var remaining = length
     while remaining > kept {
         remaining = remaining - 1
-        let element: UInt8 = slot_take(&storage, at, extent, remaining * stride)
+        let element: UInt8 = slot_take(&storage, remaining * stride)
         UInt8;std.release;Release.release(element)
     }
 }
@@ -504,14 +505,16 @@ fn std.io.core.IoError;std.fmt;Display.fmt[std.io.core.Gathered](self: std.io.co
     }
 }
 
+internal fn std.mem.address;nowhere[UInt8]() -> std.mem.address.Address[UInt8] {
+    Address(0)
+}
+
 pub fn std.mem;Vec[UInt8,std.mem.SystemAllocator].append_slice(inout self: std.mem.Vec[UInt8,std.mem.SystemAllocator], items: std.mem.Slice[UInt8]) -> std.result.Result[(),std.mem.Oom] {
     std.mem;Vec[UInt8,std.mem.SystemAllocator].reserve(&self, std.mem;Slice[UInt8].length(items))?
     let shape: std.mem.SlotType[UInt8] = .Type
     let stride = slot_stride(shape)
-    let at = self.storage.at
-    let extent = self.storage.len
     for item in copy(items) {
-        slot_put(&self.storage, at, extent, self.len * stride, copy(*item))
+        slot_put(&self.storage, self.len * stride, copy(*item))
         self.len += 1
     }
     .Ok(())
@@ -532,10 +535,10 @@ fn std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Releas
         None => {
             {}
         },
-        Some(_linea_derive_1552_1_0_0) => {
+        Some(_linea_derive_1567_1_0_0) => {
             {
                 {
-                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_1552_1_0_0)
+                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_1567_1_0_0)
                 }
             }
         },
@@ -1059,13 +1062,9 @@ pub fn std.mem;Vec[UInt8,std.mem.SystemAllocator].reserve(inout self: std.mem.Ve
     let Vec { storage: previous, len: length } = self
     var storage = previous
     var next: std.mem.Storage[UInt8,std.mem.SystemAllocator] = std.mem;Storage[UInt8,std.mem.SystemAllocator].from_buffer(acquired)
-    let at = next.at
-    let extent = next.len
-    let previous_at = storage.at
-    let previous_extent = storage.len
     for i in 0..length {
-        let element: UInt8 = slot_take(&storage, previous_at, previous_extent, i * stride)
-        slot_put(&next, at, extent, i * stride, element)
+        let element: UInt8 = slot_take(&storage, i * stride)
+        slot_put(&next, i * stride, element)
     }
     std.mem;Storage[UInt8,std.mem.SystemAllocator].dispose(storage)
     self = .{ storage = next, len = length }
@@ -1149,7 +1148,7 @@ fn std.mem.SystemAllocator;std.mem;Allocator.acquire(self: std.mem.SystemAllocat
 
 fn std.mem;Storage[UInt8,std.mem.SystemAllocator].from_buffer(sink buffer: std.mem.Buffer[std.mem.SystemAllocator]) -> std.mem.Storage[UInt8,std.mem.SystemAllocator] where carries(buffer) {
     let allocator = copy(buffer.allocator)
-    let at = buffer.at
+    let at: std.mem.address.Address[UInt8] = address_in(buffer, 0)
     let length = buffer.len
     .{ buffer = .Some(buffer), allocator, at, len = length }
 }

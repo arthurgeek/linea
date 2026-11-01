@@ -18,8 +18,8 @@
  * address and length of the bytes its body is kept in. */
 typedef void (*linea_task_entry)(unsigned long endpoint, unsigned long at, unsigned long len);
 
-/* What the thread that joins a task calls with the same address and length,
- * to release those bytes. */
+/* What the thread that joins a task calls with the address `linea_task_start`
+ * was given for it and the bytes' length, to release those bytes. */
 typedef void (*linea_task_release)(unsigned long at, unsigned long len);
 
 /* Create a thread with a stack of `stack_bytes`, parked on a start latch
@@ -28,10 +28,12 @@ typedef void (*linea_task_release)(unsigned long at, unsigned long len);
  * nothing behind. */
 long linea_task_prepare(unsigned long stack_bytes);
 
-/* Release a parked task's latch: its thread calls `entry` and returns. The
- * call cannot fail. The result is the creator's endpoint, the task's handle. */
+/* Release a parked task's latch: its thread calls `entry` with `at` and
+ * `len`, and returns, and the thread that joins it calls `release` with
+ * `release_at` and `len`. The call cannot fail. The result is the creator's
+ * endpoint, the task's handle. */
 unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
-                               unsigned long len);
+                               unsigned long len, unsigned long release_at);
 
 /* Release a parked task's latch with nothing to run, join its thread and
  * free what `linea_task_prepare` made. */
@@ -62,17 +64,19 @@ void linea_chan_close(unsigned long endpoint);
 uint8_t linea_chan_recv_until(unsigned long endpoint, unsigned long at, unsigned long len, unsigned long timeout_ns);
 
 /* An owning task's call queue: many callers, one owner. A call hands the
- * owner the `len` bytes at `at` and returns once the owner has finished with
- * them, so everything the caller did before the call happens before the
- * owner's work on it, and that work happens before the call returns. Calls
- * are served one at a time. */
+ * owner the `len` bytes at `at` and returns once the owner has answered it
+ * with `answer_len` bytes, copied to `answer_at`, so everything the caller did
+ * before the call happens before the owner's work on it, and that work
+ * happens before the call returns. Calls are served one at a time. */
 unsigned long linea_owner_open(void);
-void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len);
+void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len, unsigned long answer_at,
+                      unsigned long answer_len);
 /* Wait for the next call and copy its `len` bytes to `at`, answering 1, or
  * answer 0 once the queue is closed and no call waits. */
 uint8_t linea_owner_next(unsigned long queue, unsigned long at, unsigned long len);
-/* Finish the call `linea_owner_next` answered, releasing its caller. */
-void linea_owner_done(unsigned long queue);
+/* Answer the call `linea_owner_next` answered with the `len` bytes at `at`,
+ * copied to the caller's answer bytes, and release its caller. */
+void linea_owner_done(unsigned long queue, unsigned long at, unsigned long len);
 /* Accept no further calls; the owner's next wait answers 0. */
 void linea_owner_close(unsigned long queue);
 void linea_owner_free(unsigned long queue);

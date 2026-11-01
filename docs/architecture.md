@@ -1059,7 +1059,11 @@ representation is an integer, because the address bits of an array are one.
 
 A third table, the builder's `unshareable_facts`, answers `Shareable` over the
 same walk in `unshareable` mode, which follows the edges the writer table
-follows: fields, observed referents and every type argument. Its seeds are a
+follows: fields, observed referents, the values an address, certified storage
+or a slice names, what a `mem.Carried` carries and the callable a
+`mem.ClosureEntry` stands for, and no other type argument. A value kept in
+bytes is held through a `mem.address.Address` of its own type, so no argument
+the walk passes over names something the value holds. Its seeds are a
 declared type whose record says it is marked `@unshareable`, a callable or open
 type, and a type parameter whose record says neither `Shareable` nor `Integer`.
 A `Shareable` promise on a parameter or on a settled reference read through

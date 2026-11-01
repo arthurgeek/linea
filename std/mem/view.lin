@@ -1,10 +1,13 @@
 import std.mem
+import std.mem.address
 
-// A View observes a mutable contiguous extent of elements without owning its storage.
+// A View observes a mutable contiguous extent of elements without owning its storage:
+// the `len` elements from `start` on, in the slots at `at`.
 // It is neither Copyable nor Owned, so it cannot be sent across tasks or escaped.
 @(opaque)
 struct View[T] {
-    at: UInt64,
+    at: address.Address[T],
+    start: UInt64,
     len: UInt64,
     carried: mem.Carried[T],
 }

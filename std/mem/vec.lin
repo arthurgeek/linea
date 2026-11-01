@@ -1,3 +1,4 @@
+import std.mem.address
 import std.release
 import std.testing
 
@@ -318,7 +319,7 @@ impl[T, A: Allocator] Vec[T, A] {
     // `Allocator.acquire(0)` still requests a buffer under its ordinary
     // allocation contract.
     pub fn new_in(allocator: A) -> Self where carries(allocator) {
-        .{ storage = .{ buffer = .None, allocator = copy(allocator), at = 0, len = 0 }, len = 0 }
+        .{ storage = .{ buffer = .None, allocator = copy(allocator), at = address.nowhere(), len = 0 }, len = 0 }
     }
 
     test fn vec_new_in_starts_empty() {
@@ -480,10 +481,8 @@ impl[T, A: Allocator] Vec[T, A] {
         var values = allocated?
         let shape: SlotType[T] = .Type
         let stride = slot_stride(shape)
-        let at = values.storage.at
-        let extent = values.storage.len
         for index in 0..count {
-            slot_put(&values.storage, at, extent, index * stride, &initializer(index))
+            slot_put(&values.storage, index * stride, &initializer(index))
             values.len += 1
         }
         .Ok(values)
@@ -640,13 +639,9 @@ impl[T, A: Allocator] Vec[T, A] {
         let Vec { storage: previous, len: length } = self
         var storage = previous
         var next: Storage[T, A] = Storage.from_buffer(acquired)
-        let at = next.at
-        let extent = next.len
-        let previous_at = storage.at
-        let previous_extent = storage.len
         for i in 0..length {
-            let element: T = slot_take(&storage, previous_at, previous_extent, i * stride)
-            slot_put(&next, at, extent, i * stride, element)
+            let element: T = slot_take(&storage, i * stride)
+            slot_put(&next, i * stride, element)
         }
         storage.dispose()
         self = .{ storage = next, len = length }
@@ -685,9 +680,7 @@ impl[T, A: Allocator] Vec[T, A] {
         }
         let shape: SlotType[T] = .Type
         let stride = slot_stride(shape)
-        let at = self.storage.at
-        let extent = self.storage.len
-        slot_put(&self.storage, at, extent, self.len * stride, value)
+        slot_put(&self.storage, self.len * stride, value)
         self.len += 1
         .Ok(())
     }
@@ -800,13 +793,11 @@ impl[T, A: Allocator] Vec[T, A] {
         }
         let shape: SlotType[T] = .Type
         let stride = slot_stride(shape)
-        let at = self.storage.at
-        let extent = self.storage.len
-        let taken: T = slot_take(&self.storage, at, extent, i * stride)
+        let taken: T = slot_take(&self.storage, i * stride)
         self.len = self.len - 1
         for position in i..self.len {
-            let element: T = slot_take(&self.storage, at, extent, (position + 1) * stride)
-            slot_put(&self.storage, at, extent, position * stride, element)
+            let element: T = slot_take(&self.storage, (position + 1) * stride)
+            slot_put(&self.storage, position * stride, element)
         }
         .Some(taken)
     }
@@ -833,10 +824,8 @@ impl[T, A: Allocator] Vec[T, A] {
         }
         let shape: SlotType[T] = .Type
         let stride = slot_stride(shape)
-        let at = self.storage.at
-        let extent = self.storage.len
         self.len = self.len - 1
-        let taken: T = slot_take(&self.storage, at, extent, self.len * stride)
+        let taken: T = slot_take(&self.storage, self.len * stride)
         .Some(taken)
     }
 
@@ -845,11 +834,8 @@ impl[T, A: Allocator] Vec[T, A] {
         if at > self.len {
             panic("split_inout: split index out of bounds")
         }
-        let shape: SlotType[T] = .Type
-        let stride = slot_stride(shape)
-        let storage_at = self.storage.at
-        var left: View[T] = .{ at = storage_at, len = at, carried = .{} }
-        var right: View[T] = .{ at = storage_at + at * stride, len = self.len - at, carried = .{} }
+        var left: View[T] = .{ at = copy(self.storage.at), start = 0, len = at, carried = .{} }
+        var right: View[T] = .{ at = copy(self.storage.at), start = at, len = self.len - at, carried = .{} }
         &body(&left, &right)
     }
 
@@ -1037,10 +1023,8 @@ impl[T: Copyable + Owned, A: Allocator] Vec[T, A] {
         &self.reserve(items.length())?
         let shape: SlotType[T] = .Type
         let stride = slot_stride(shape)
-        let at = self.storage.at
-        let extent = self.storage.len
         for item in copy(items) {
-            slot_put(&self.storage, at, extent, self.len * stride, copy(*item))
+            slot_put(&self.storage, self.len * stride, copy(*item))
             self.len += 1
         }
         .Ok(())
@@ -1113,10 +1097,8 @@ impl[T: Copyable, A: Allocator] Vec[T, A] {
         var values = allocated?
         let shape: SlotType[T] = .Type
         let stride = slot_stride(shape)
-        let at = values.storage.at
-        let extent = values.storage.len
         for index in 0..count {
-            slot_put(&values.storage, at, extent, index * stride, copy(value))
+            slot_put(&values.storage, index * stride, copy(value))
             values.len += 1
         }
         .Ok(values)
@@ -1171,7 +1153,7 @@ impl[T, A: Allocator] Index[UInt64] for Vec[T, A] {
     type Elem = T
 
     proj at(inout self: Self, i: UInt64) -> T where carries(self) {
-        slot_place(self.storage, self.storage.at, self.storage.len, self.len, i)
+        slot_place(self.storage, self.len, i)
     }
 }
 
@@ -1250,12 +1232,10 @@ impl[T: Release, A: Allocator] Release for Vec[T, A] {
 fn release_from[T: Release, A: Allocator](inout storage: Storage[T, A], kept: UInt64, length: UInt64) {
     let shape: SlotType[T] = .Type
     let stride = slot_stride(shape)
-    let at = storage.at
-    let extent = storage.len
     var remaining = length
     while remaining > kept {
         remaining = remaining - 1
-        let element: T = slot_take(&storage, at, extent, remaining * stride)
+        let element: T = slot_take(&storage, remaining * stride)
         element.release()
     }
 }
@@ -1371,9 +1351,7 @@ impl[T, A: Allocator] Iterator for Drain[T, A] {
         }
         let shape: SlotType[T] = .Type
         let stride = slot_stride(shape)
-        let at = self.storage.at
-        let extent = self.storage.len
-        let taken: T = slot_take(&self.storage, at, extent, self.next * stride)
+        let taken: T = slot_take(&self.storage, self.next * stride)
         self.next += 1
         .Some(taken)
     }

@@ -9,8 +9,6 @@ import std.testing
 // happens before it returns.
 extern fn linea_owner_open() -> UInt64
 
-extern fn linea_owner_done(queue: UInt64)
-
 extern fn linea_owner_close(queue: UInt64)
 
 extern fn linea_owner_free(queue: UInt64)
@@ -27,7 +25,6 @@ fn run_owner[S: Owned](sink me: Chan[Recv[(S, UInt64), Send[S, End]]]) {
             Some(job) => {
                 job(&held)
                 job.release()
-                linea_owner_done(queue)
             },
             None => serving = false,
         }

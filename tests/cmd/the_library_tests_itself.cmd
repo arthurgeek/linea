@@ -1054,6 +1054,7 @@ The library tests itself.
   ok    mem.a_vec_written_without_an_allocator_is_the_system_vec
   ok    mem.a_walk_lent_a_drain_may_stop_early_and_leave_the_rest_with_its_owner
   ok    mem.acquired_counts_only_successful_acquisitions
+  ok    mem.address.nowhere_is_the_address_of_no_bytes
   ok    mem.all_disposed_is_false_while_an_allocation_is_live
   ok    mem.allocating_again_preserves_a_live_buffer_view
   ok    mem.allocator_hands_out_buffers_the_log_records
@@ -1504,4 +1505,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1501 passed, 0 failed
+  1502 passed, 0 failed

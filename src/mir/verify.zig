@@ -1202,7 +1202,10 @@ const Function = struct {
                     try self.report(span, "%{d} does not produce a code pointer", .{id.index()});
                     return false;
                 }
-                if (!self.module.types.callableConverts(self.module.functionOf(function).signature, mir.typeOf(id))) {
+                const target = self.module.functionOf(function).signature;
+                const fits = self.module.types.callableConverts(target, mir.typeOf(id)) or
+                    (mir.tagOf(id) == .foreign_function_addr and sameForeignEntry(&self.module.types, target, mir.typeOf(id)));
+                if (!fits) {
                     try self.report(span, "%{d} signature differs from function {d}", .{ id.index(), function.index() });
                     return false;
                 }
@@ -2884,6 +2887,29 @@ pub const Harness = struct {
 
     const Diagnostic = diagnostic.Diagnostic;
 };
+
+/// Whether C calls a body of signature `target` through the same entry as one
+/// of `declared`: the same parameters and result once each newtype is its
+/// base, which is what crosses. A runtime callback may take a
+/// `mem.address.Address` where the runtime's declaration passes the `UInt64`
+/// it stands for.
+fn sameForeignEntry(types: *const types_mod.Typing, target: TypeId, declared: TypeId) bool {
+    const a = switch (types.get(target)) {
+        .callable => |a| a,
+        else => return false,
+    };
+    const b = switch (types.get(declared)) {
+        .callable => |b| b,
+        else => return false,
+    };
+    const a_params = types.callableParams(a);
+    const b_params = types.callableParams(b);
+    if (a_params.len != b_params.len or types.erased(a.result) != types.erased(b.result)) return false;
+    for (a_params, b_params) |x, y| {
+        if (x.convention != y.convention or types.erased(x.ty) != types.erased(y.ty)) return false;
+    }
+    return true;
+}
 
 test "emission requires external flags for every function" {
     const gpa = testing.allocator;

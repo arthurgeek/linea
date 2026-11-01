@@ -1,8 +1,12 @@
+import std.mem.address
+
+use address.Address
+
 // A task's body waits for its thread in bytes the task owns. The bytes hold
 // the body, then the buffer that owns them, so whichever thread releases them
-// needs only their address and length. The body starts at the first byte and
-// the buffer at the next multiple of eight after it, the largest alignment a
-// value has.
+// needs only the buffer's address. The body starts at the first byte and the
+// buffer at the next multiple of eight after it, the largest alignment a value
+// has.
 
 // The offset of the buffer in the bytes a body of `body_stride` bytes is kept
 // in.
@@ -17,49 +21,48 @@ internal fn kept_bytes[F, A: Allocator](_body: F, _allocator: A) -> UInt64 {
     kept_buffer_offset(slot_stride(body_shape)) + slot_stride(buffer_shape)
 }
 
+// Where `keep_body` put a body and the buffer that owns its bytes.
+internal struct Kept[F, A: Allocator] {
+    body: Address[F],
+    buffer: Address[Buffer[A]],
+}
+
 // Move `body` into the bytes `storage` owns, then move `storage` in after it,
-// and answer the bytes' address. Whoever holds the address owns both.
-internal fn keep_body[F, A: Allocator](sink storage: Buffer[A], sink body: F) -> UInt64 {
-    let at = storage.at
+// and answer where each is. Whoever holds the addresses owns both.
+internal fn keep_body[F, A: Allocator](sink storage: Buffer[A], sink body: F) -> Kept[F, A] where carries(storage, body) {
     let len = storage.len
     let body_shape: SlotType[F] = .Type
     let offset = kept_buffer_offset(slot_stride(body_shape))
-    var body_slot: Storage[F, SystemAllocator] = .{ buffer = .None, allocator = system(), at, len = offset }
-    slot_put(&body_slot, at, offset, 0, body)
+    let body_at: Address[F] = address_in(storage, 0)
+    let buffer_at: Address[Buffer[A]] = address_in(storage, offset)
+    var body_slot: Storage[F, SystemAllocator] = .{ buffer = .None, allocator = system(), at = copy(body_at), len = offset }
+    slot_put(&body_slot, 0, body)
     body_slot.dispose()
-    var buffer_slot: Storage[Buffer[A], SystemAllocator] = .{ buffer = .None, allocator = system(), at = at + offset, len = len - offset }
-    slot_put(&buffer_slot, at + offset, len - offset, 0, storage)
+    var buffer_slot: Storage[Buffer[A], SystemAllocator] = .{ buffer = .None, allocator = system(), at = copy(buffer_at), len = len - offset }
+    slot_put(&buffer_slot, 0, storage)
     buffer_slot.dispose()
-    at
+    .{ body = body_at, buffer = buffer_at }
 }
 
 // Move the body out of the bytes at `at`, which `keep_body` filled. The
 // buffer stays in them.
-internal fn take_kept_body[F](at: UInt64) -> F {
+internal fn take_kept_body[F](at: Address[F]) -> F {
     let body_shape: SlotType[F] = .Type
     let offset = kept_buffer_offset(slot_stride(body_shape))
-    var body_slot: Storage[F, SystemAllocator] = .{ buffer = .None, allocator = system(), at, len = offset }
-    let body: F = slot_take(&body_slot, at, offset, 0)
+    var body_slot: Storage[F, SystemAllocator] = .{ buffer = .None, allocator = system(), at = copy(at), len = offset }
+    let body: F = slot_take(&body_slot, 0)
     body_slot.dispose()
     body
 }
 
-// Move the buffer out of the `len` bytes at `at`, which `keep_body` filled
-// with a body of type `_F` and a buffer from an `_A`, and whose body was
-// taken, and release it, which returns the bytes. Neither type is named by a
-// parameter, since the runtime calls this with the address alone; the caller
-// names both.
-internal fn release_kept_bytes[_F, _A: Allocator](at: UInt64, len: UInt64) {
-    let body_shape: SlotType[_F] = .Type
-    let buffer_shape: SlotType[Buffer[_A]] = .Type
-    let offset = kept_buffer_offset(slot_stride(body_shape))
-    let actual_len = if len == 0 {
-        offset + slot_stride(buffer_shape)
-    } else {
-        len
-    }
-    var buffer_slot: Storage[Buffer[_A], SystemAllocator] = .{ buffer = .None, allocator = system(), at = at + offset, len = actual_len - offset }
-    let storage: Buffer[_A] = slot_take(&buffer_slot, at + offset, actual_len - offset, 0)
+// Move the buffer out of the bytes `keep_body` filled, whose body was taken,
+// and release it, which returns the bytes. `at` is the buffer's own address,
+// which the runtime hands back as `keep_body` answered it.
+internal fn release_kept_bytes[A: Allocator](at: Address[Buffer[A]], _len: UInt64) {
+    let buffer_shape: SlotType[Buffer[A]] = .Type
+    let extent = slot_stride(buffer_shape)
+    var buffer_slot: Storage[Buffer[A], SystemAllocator] = .{ buffer = .None, allocator = system(), at = copy(at), len = extent }
+    let storage: Buffer[A] = slot_take(&buffer_slot, 0)
     buffer_slot.dispose()
     storage.release()
 }

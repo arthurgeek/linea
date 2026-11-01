@@ -95,21 +95,28 @@ pub const Scalar = enum { u8, i32, u32, i64, u64, f32, f64, ptr, callback, unit 
 pub const Passing = enum { read, inout };
 
 /// The function a `callback` parameter's address names, as C calls it: the
-/// scalars it takes, each by value, and the one it answers.
-pub const Callback = struct { parameters: []const Scalar, result: Scalar };
+/// scalars it takes, each by value, and the one it answers. `address` is the
+/// position of a parameter C passes an address of typed bytes in, the one the
+/// call that took the callback was given; the function a program passes may
+/// declare that parameter as a `mem.Address`, which crosses as its `UInt64`.
+pub const Callback = struct { parameters: []const Scalar, result: Scalar, address: ?u8 = null };
 
 /// A parameter's scalar, how it is passed, and for a `callback` the shape of
 /// the function C calls through it, which [T-ExternRuntime] holds the Linea
-/// declaration's function type to.
-pub const Parameter = struct { scalar: Scalar, passing: Passing = .read, callback: ?*const Callback = null };
+/// declaration's function type to. `address` marks a `u64` that is the
+/// address of typed bytes the runtime copies to another task before the call
+/// returns, writes with bytes another task sent, or keeps for a task it
+/// starts: the one place [T-RawAddress] lets `mem.raw` turn an address into a
+/// number.
+pub const Parameter = struct { scalar: Scalar, passing: Passing = .read, callback: ?*const Callback = null, address: bool = false };
 
 /// Whether two parameters are the same, a callback's shape compared by what
 /// it holds rather than by where it is.
 pub fn sameParameter(a: Parameter, b: Parameter) bool {
-    if (a.scalar != b.scalar or a.passing != b.passing) return false;
+    if (a.scalar != b.scalar or a.passing != b.passing or a.address != b.address) return false;
     const left = a.callback orelse return b.callback == null;
     const right = b.callback orelse return false;
-    return left.result == right.result and std.mem.eql(Scalar, left.parameters, right.parameters);
+    return left.result == right.result and std.mem.eql(Scalar, left.parameters, right.parameters) and left.address == right.address;
 }
 
 test "parameters are compared by the callback shape they hold" {
@@ -154,10 +161,15 @@ fn p(scalar: Scalar) Parameter {
     return .{ .scalar = scalar };
 }
 
+/// The address of typed bytes another task reads or writes; see
+/// `Parameter.address`.
+const typed_bytes: Parameter = .{ .scalar = .u64, .address = true };
+
 /// A `callback` parameter naming a function C calls with `parameters` and
-/// expects `result` from.
-fn cb(comptime parameters: []const Scalar, comptime result: Scalar) Parameter {
-    const shape = comptime Callback{ .parameters = parameters, .result = result };
+/// expects `result` from, whose parameter at `address` is the address the
+/// call was given for it.
+fn cb(comptime parameters: []const Scalar, comptime result: Scalar, comptime address: u8) Parameter {
+    const shape = comptime Callback{ .parameters = parameters, .result = result, .address = address };
     return .{ .scalar = .callback, .callback = &shape };
 }
 
@@ -291,19 +303,19 @@ pub const runtime_functions = [_]Signature{
     // A task's thread and the rendezvous channel of its session.
     .{ .symbol = "linea_task_prepare", .parameters = &.{p(.u64)}, .result = .i64 },
     .{ .symbol = "linea_owner_open", .parameters = &.{}, .result = .u64 },
-    .{ .symbol = "linea_owner_call", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit },
-    .{ .symbol = "linea_owner_next", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .u8 },
-    .{ .symbol = "linea_owner_done", .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_owner_call", .parameters = &.{ p(.u64), typed_bytes, p(.u64), typed_bytes, p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_owner_next", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .u8 },
+    .{ .symbol = "linea_owner_done", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit },
     .{ .symbol = "linea_owner_close", .parameters = &.{p(.u64)}, .result = .unit },
     .{ .symbol = "linea_owner_free", .parameters = &.{p(.u64)}, .result = .unit },
-    .{ .symbol = "linea_task_start", .parameters = &.{ p(.u64), cb(&.{ .u64, .u64, .u64 }, .unit), cb(&.{ .u64, .u64 }, .unit), p(.u64), p(.u64) }, .result = .u64, .starts_thread = true },
+    .{ .symbol = "linea_task_start", .parameters = &.{ p(.u64), cb(&.{ .u64, .u64, .u64 }, .unit, 1), cb(&.{ .u64, .u64 }, .unit, 0), typed_bytes, p(.u64), typed_bytes }, .result = .u64, .starts_thread = true },
     .{ .symbol = "linea_task_cancel", .parameters = &.{p(.u64)}, .result = .unit },
-    .{ .symbol = "linea_chan_send", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit },
-    .{ .symbol = "linea_chan_recv", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_chan_send", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_chan_recv", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit },
     .{ .symbol = "linea_chan_choose", .parameters = &.{ p(.u64), p(.u8) }, .result = .unit },
     .{ .symbol = "linea_chan_offer", .parameters = &.{p(.u64)}, .result = .u8 },
     .{ .symbol = "linea_chan_close", .parameters = &.{p(.u64)}, .result = .unit },
-    .{ .symbol = "linea_chan_recv_until", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64) }, .result = .u8 },
+    .{ .symbol = "linea_chan_recv_until", .parameters = &.{ p(.u64), typed_bytes, p(.u64), p(.u64) }, .result = .u8 },
     .{ .symbol = "linea_float64_parse", .parameters = &.{ p(.u64), p(.u64), written, written }, .result = .u64 },
     .{ .symbol = "linea_float64_debug", .parameters = &.{ p(.u64), written, written, written, written }, .result = .u64 },
     .{ .symbol = "linea_float64_shortest", .parameters = &.{ p(.u64), .{ .scalar = .i64, .passing = .inout } }, .result = .u64 },

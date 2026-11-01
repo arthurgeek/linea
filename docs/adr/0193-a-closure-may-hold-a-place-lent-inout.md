@@ -7,6 +7,9 @@ Status: Accepted — 2026-09-28. Supersedes the clause of
 [0124](0124-copyability-and-settlement-are-independent-capabilities.md),
 [0130](0130-explicit-captures-use-inline-environments.md) and
 [0173](0173-a-capturing-closure-is-erased-into-allocator-owned-storage.md).
+The clause that has writer containment follow every type argument is
+superseded by
+[0255](0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md).
 
 ## Context
 

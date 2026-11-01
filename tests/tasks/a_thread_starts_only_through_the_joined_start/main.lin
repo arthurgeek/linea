@@ -3,7 +3,7 @@
 // keeps what the body captured until the thread is joined.
 extern fn linea_task_prepare(stack_bytes: UInt64) -> Int64
 
-extern fn linea_task_start(task: UInt64, entry: fn(endpoint: UInt64, at: UInt64, len: UInt64), release: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64) -> UInt64
+extern fn linea_task_start(task: UInt64, entry: fn(endpoint: UInt64, at: UInt64, len: UInt64), release: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, release_at: UInt64) -> UInt64
 
 extern fn linea_chan_close(endpoint: UInt64)
 
@@ -18,7 +18,7 @@ fn main() -> UInt8 {
     if prepared < 0 {
         return 1
     }
-    let handle = linea_task_start(UInt64(prepared), run, release_nothing, 0, 0)
+    let handle = linea_task_start(UInt64(prepared), run, release_nothing, 0, 0, 0)
     linea_chan_close(handle)
     0
 }

@@ -134,7 +134,7 @@ static void release(unsigned long at, unsigned long len) {
 static unsigned long started(struct body *b, unsigned long stack) {
     const long task = linea_task_prepare(stack);
     assert(task > 0);
-    return linea_task_start((unsigned long)task, entry, release, (unsigned long)b, sizeof *b);
+    return linea_task_start((unsigned long)task, entry, release, (unsigned long)b, sizeof *b, (unsigned long)b);
 }
 
 /* `close` on the handle returns only once the body has returned and its
@@ -155,7 +155,7 @@ static void a_body_never_runs_before_start(void) {
     assert(task > 0);
     sleep_ms(50);
     assert(b.ran == 0);
-    const unsigned long handle = linea_task_start((unsigned long)task, entry, release, (unsigned long)&b, sizeof b);
+    const unsigned long handle = linea_task_start((unsigned long)task, entry, release, (unsigned long)&b, sizeof b, (unsigned long)&b);
     linea_chan_close(handle);
     assert(b.ran == 1 && b.released == 1);
 }
@@ -343,16 +343,22 @@ static void *owner_thread(void *arg) {
     unsigned long request = 0;
     while (linea_owner_next(queue, (unsigned long)&request, sizeof request) == 1) {
         owner_total += request;
-        linea_owner_done(queue);
+        unsigned long answer = owner_total;
+        linea_owner_done(queue, (unsigned long)&answer, sizeof answer);
     }
     return 0;
 }
 
 static void *caller_thread(void *arg) {
     const unsigned long queue = *(unsigned long *)arg;
+    unsigned long last = 0;
     for (int i = 0; i < calls_each; i += 1) {
         unsigned long one = 1;
-        linea_owner_call(queue, (unsigned long)&one, sizeof one);
+        unsigned long total = 0;
+        linea_owner_call(queue, (unsigned long)&one, sizeof one, (unsigned long)&total, sizeof total);
+        /* Each answer is the total after this call, so it only grows. */
+        assert(total > last);
+        last = total;
     }
     return 0;
 }

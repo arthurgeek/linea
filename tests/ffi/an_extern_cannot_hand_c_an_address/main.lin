@@ -1,0 +1,13 @@
+import std.mem.address
+
+// An address names the type of the values kept at it, and C keeps no type: an
+// `extern` that would hand C one is refused, even in a module trusted with C.
+extern fn keep(at: address.Address[UInt8])
+
+fn _hand(at: address.Address[UInt8]) {
+    keep(at)
+}
+
+fn main() -> UInt8 {
+    0
+}

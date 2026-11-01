@@ -1,4 +1,5 @@
 import std.mem
+import std.mem.address
 import std.release
 import std.session
 import std.testing
@@ -8,6 +9,7 @@ use session.Chan
 use session.End
 use session.Recv
 use session.Send
+use address.Address
 
 // The stack size `prepare` gives a task, in bytes: two mebibytes. The
 // deepest path through the library, parsing and rendering a JSON document as
@@ -88,19 +90,17 @@ extern fn linea_task_prepare(stack_bytes: UInt64) -> Int64
 extern fn linea_task_cancel(task: UInt64)
 
 // Let the parked thread of `task` run: it calls `entry` with the task's end
-// of the session and the address and length of the bytes its body is kept
-// in, and the thread that closes the handle calls `release` with the same
-// address and length once the task has been joined. The runtime calls both
-// after this call returns, and neither after the join. It answers the
-// creator's endpoint.
-extern fn linea_task_start(task: UInt64, entry: fn(endpoint: UInt64, at: UInt64, len: UInt64), release: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64) -> UInt64
+// of the session, `at` and `len`, the address and length of the bytes its
+// body is kept in, and the thread that closes the handle calls `release` with
+// `release_at`, the address of the buffer kept after the body, and `len` once
+// the task has been joined. The runtime calls both after this call returns,
+// and neither after the join. It answers the creator's endpoint.
+extern fn linea_task_start(task: UInt64, entry: fn(endpoint: UInt64, at: UInt64, len: UInt64), release: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, release_at: UInt64) -> UInt64
 
-// What a task's thread runs: move the body, of type `_F`, out of the bytes it
-// is kept in and call it with the task's end of the session. The runtime
-// calls it with the bytes' address alone, so no parameter names `_F`;
-// `start` names it.
-fn run_body[P: Protocol, _F: sink fn(sink me: Chan[P])](endpoint: UInt64, at: UInt64, _len: UInt64) {
-    let body: _F = mem.take_kept_body(at)
+// What a task's thread runs: move the body out of the bytes at `at`, which
+// name its type, and call it with the task's end of the session.
+fn run_body[P: Protocol, F: sink fn(sink me: Chan[P])](endpoint: UInt64, at: Address[F], _len: UInt64) {
+    let body: F = mem.take_kept_body(at)
     body(Chan.opened(endpoint))
 }
 
@@ -236,8 +236,8 @@ impl[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator] Slot[P, F, A] {
     pub fn start(sink self: Self) -> Chan[P.Dual, (F, A)] where carries(self) {
         let Slot { task, storage, body } = self
         let len = storage.length()
-        let at = mem.keep_body(storage, body)
-        Chan.opened(linea_task_start(task, run_body[P, F], mem.release_kept_bytes[F, A], at, len))
+        let kept = mem.keep_body(storage, body)
+        Chan.opened(linea_task_start(task, run_body[P, F], mem.release_kept_bytes[A], address.raw(kept.body), len, address.raw(kept.buffer)))
     }
 
     test fn a_started_task_answers_its_handle() {

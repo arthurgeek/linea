@@ -1,0 +1,5 @@
+error[T-RawAddress]: `keep` would hand C an address, which it may keep where no type names what the address holds
+ --> tests/ffi/an_extern_cannot_hand_c_an_address/main.lin:5:11
+  |
+5 | extern fn keep(at: address.Address[UInt8])
+  |           ^^^^ declare a `UInt64` where C takes a number

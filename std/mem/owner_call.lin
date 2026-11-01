@@ -1,45 +1,54 @@
-// A call to an owning task moves its request through bytes, as a session
-// payload does: the caller moves the request into bytes the system allocator
-// lends, the runtime copies them into the owner's bytes, and the owner moves
-// the request out. The caller waits until the owner has finished, so an
-// answer the owner writes into bytes the caller holds is there when the call
-// returns. A request and an answer are `Owned`, so their bytes name nothing
-// either task observes.
+import std.mem.address
+
+// A call to an owning task moves its request and its answer through bytes, as
+// a session payload does. The caller moves the request into bytes the system
+// allocator lends and names bytes for the answer; the runtime copies the
+// request into the owner's bytes, and the owner moves it out. The owner moves
+// the answer into bytes of its own, and the runtime copies them into the
+// caller's before the call returns. A request and an answer are `Owned`, so
+// their bytes name nothing either task observes.
 
 // Hand the `len` bytes at `at` to the owning task whose call queue is
-// `queue`, and return once the owner has finished with them.
-extern fn linea_owner_call(queue: UInt64, at: UInt64, len: UInt64)
+// `queue`, and return once the owner has answered with the `answer_len` bytes
+// copied to `answer_at`.
+extern fn linea_owner_call(queue: UInt64, at: UInt64, len: UInt64, answer_at: UInt64, answer_len: UInt64)
 
 // Wait for the next call on `queue` and copy its `len` bytes to `at`. It
 // answers 0 once the queue is closed and no call waits.
 extern fn linea_owner_next(queue: UInt64, at: UInt64, len: UInt64) -> UInt8
 
+// Answer the call `linea_owner_next` answered on `queue` with the `len` bytes
+// at `at`, which the runtime copies to the caller's answer bytes, and release
+// the caller.
+extern fn linea_owner_done(queue: UInt64, at: UInt64, len: UInt64)
+
 // Run `job` on the owning task whose call queue is `queue`, against the state
 // it owns, and answer what `job` answers. The job is erased into a `Closure`
-// that writes its answer into bytes this call holds; the call returns once the
-// owner has finished, so the answer is there to move out. Running out of
-// memory for the bytes a call moves through is a trap, since a call cannot
-// fail.
+// that hands its answer back through the runtime; the call returns once the
+// owner has done so, so the answer is in this call's bytes to move out.
+// Running out of memory for the bytes a call moves through is a trap, since a
+// call cannot fail.
 internal fn call_owner[S, R, F: Release + fn(inout state: S) -> R](queue: UInt64, sink job: F) -> R {
-    let answer_shape: SlotType[R] = .Type
-    var answer: Storage[R, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(answer_shape)).unwrap())
-    let answer_at = answer.at
-    let answer_len = answer.len
-    let request = [sink job, answer_at, answer_len] |inout state: S| {
+    let request = [sink job, queue] |inout state: S| {
         let value = job(&state)
-        var slot: Storage[R, SystemAllocator] = .{ buffer = .None, allocator = system(), at = answer_at, len = answer_len }
-        slot_put(&slot, answer_at, answer_len, 0, value)
-        slot.dispose()
+        let shape: SlotType[R] = .Type
+        var answer: Storage[R, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
+        let len = answer.len
+        slot_put(&answer, 0, value)
+        linea_owner_done(queue, address.raw(answer.at), len)
+        answer.dispose()
     }
     let erased: Closure[fn(inout state: S)] = Closure.open(request).unwrap()
     let request_shape: SlotType[Closure[fn(inout state: S)]] = .Type
     var storage: Storage[Closure[fn(inout state: S)], SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(request_shape)).unwrap())
-    let at = storage.at
     let len = storage.len
-    slot_put(&storage, at, len, 0, erased)
-    linea_owner_call(queue, at, len)
+    slot_put(&storage, 0, erased)
+    let answer_shape: SlotType[R] = .Type
+    var answer: Storage[R, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(answer_shape)).unwrap())
+    let answer_len = answer.len
+    linea_owner_call(queue, address.raw(storage.at), len, address.raw(answer.at), answer_len)
     storage.dispose()
-    let value: R = slot_take(&answer, answer_at, answer_len, 0)
+    let value: R = slot_take(&answer, 0)
     answer.dispose()
     value
 }
@@ -48,10 +57,9 @@ internal fn call_owner[S, R, F: Release + fn(inout state: S) -> R](queue: UInt64
 internal fn next_owner_request[S](queue: UInt64) -> Option[Closure[fn(inout state: S)]] {
     let shape: SlotType[Closure[fn(inout state: S)]] = .Type
     var storage: Storage[Closure[fn(inout state: S)], SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
-    let at = storage.at
     let len = storage.len
-    if linea_owner_next(queue, at, len) == 1 {
-        let request: Closure[fn(inout state: S)] = slot_take(&storage, at, len, 0)
+    if linea_owner_next(queue, address.raw(storage.at), len) == 1 {
+        let request: Closure[fn(inout state: S)] = slot_take(&storage, 0)
         storage.dispose()
         .Some(request)
     } else {

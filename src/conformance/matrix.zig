@@ -372,6 +372,13 @@ pub const Observation = enum {
     /// `task_scalar_inout` prepared by `task.prepare_in` and started by its
     /// slot.
     task_prepared_in_scalar_inout,
+    /// A vector holding a closure that holds a scalar lent `inout`. The
+    /// vector's type names the closure only as the element its storage
+    /// holds, so the lend lasts until the vector is settled.
+    stored_scalar_inout,
+    /// The same closure erased into a `mem.Closure`, whose type names it not
+    /// at all; the closure it erased keeps the lend until it is released.
+    erased_scalar_inout,
 
     /// Whether the observation can be made of the storage. A vector held in
     /// a field and a fixed array are observed as a vector is, through their
@@ -383,7 +390,7 @@ pub const Observation = enum {
             .bare_slice, .bare_iterator, .bare_mapped => storage == .vec or storage == .field or storage == .array or storage == .walked,
             .inout_capture, .carried_inout, .task_inout => storage == .vec or storage == .walked,
             .value_view, .entries, .map_inout_capture, .bare_entries, .task_map_read => storage == .map,
-            .scalar_inout_capture, .scalar_read_capture, .scalar_carried_inout, .task_scalar_read, .task_scalar_inout => storage == .scalar,
+            .scalar_inout_capture, .scalar_read_capture, .scalar_carried_inout, .task_scalar_read, .task_scalar_inout, .stored_scalar_inout, .erased_scalar_inout => storage == .scalar,
             // Each other way of starting a task meets the vector or scalar
             // operations once; the storages a slice or a lend reaches are
             // met through `task.prepare`.
@@ -502,6 +509,18 @@ pub const Observation = enum {
             \\}
             \\let seen = task.prepare_in(mem.system(), body, stack: task.default_stack_bytes).unwrap().start()
             ,
+            .stored_scalar_inout =>
+            \\let seen = stored(inout [inout owner] || {
+            \\    owner += 1
+            \\    owner
+            \\})
+            ,
+            .erased_scalar_inout =>
+            \\let seen = mem.Closure.open(inout [inout owner] || {
+            \\    owner += 1
+            \\    owner
+            \\}).unwrap()
+            ,
             // The walk is opened by the loop that walks it, and the owner is
             // lent by the call it is an argument of.
             .bare_slice, .bare_iterator, .bare_mapped, .bare_entries, .argument => "",
@@ -535,6 +554,7 @@ pub const Observation = enum {
             .text => "seen.length()",
             .carried_read, .carried_inout, .scalar_carried_inout => "redeem(seen)",
             .task_read, .task_inout, .task_map_read, .task_scalar_read, .task_scalar_inout, .task_started_read, .task_started_in_inout, .task_prepared_in_scalar_inout => "joined(seen)",
+            .stored_scalar_inout, .erased_scalar_inout => "settled(seen)",
             // A bare walk is used only by walking it, inside a `for` meeting,
             // and a lent owner only by the call it is lent to.
             .bare_slice, .bare_iterator, .bare_mapped, .bare_entries, .argument => unreachable,
@@ -544,9 +564,22 @@ pub const Observation = enum {
     /// Whether making the observation lends the owner `inout`.
     fn lendsInout(self: Observation) bool {
         return switch (self) {
-            .inout_capture, .map_inout_capture, .scalar_inout_capture, .carried_inout, .scalar_carried_inout, .task_inout, .task_scalar_inout, .task_started_in_inout, .task_prepared_in_scalar_inout => true,
+            .inout_capture, .map_inout_capture, .scalar_inout_capture, .carried_inout, .scalar_carried_inout, .task_inout, .task_scalar_inout, .task_started_in_inout, .task_prepared_in_scalar_inout, .stored_scalar_inout, .erased_scalar_inout => true,
             else => false,
         };
+    }
+
+    /// Whether the observation is used once, by a call that takes it: a
+    /// task's handle, joined, and a value that keeps a closure behind its
+    /// storage, settled.
+    fn usedOnce(self: Observation) bool {
+        return self.task() or self.keepsClosure();
+    }
+
+    /// Whether the observation keeps a closure where its type names it only
+    /// through storage, or not at all.
+    fn keepsClosure(self: Observation) bool {
+        return self == .stored_scalar_inout or self == .erased_scalar_inout;
     }
 
     /// Whether the observation is a task's handle, which is linear: it is
@@ -591,6 +624,7 @@ pub const Observation = enum {
             .element, .wrapped, .read_capture, .inout_capture, .value_view, .map_inout_capture, .scalar_inout_capture, .scalar_read_capture => null,
             .carried_read, .carried_inout, .scalar_carried_inout => null,
             .task_read, .task_inout, .task_map_read, .task_scalar_read, .task_scalar_inout, .task_started_read, .task_started_in_inout, .task_prepared_in_scalar_inout => null,
+            .stored_scalar_inout, .erased_scalar_inout => null,
             .bare_slice, .bare_iterator, .bare_mapped, .bare_entries, .text, .argument => null,
         };
     }
@@ -652,10 +686,11 @@ pub const Cell = struct {
         if (self.observation == .argument) return self.meeting == .one_call and self.operation.consumes();
         // A walk is used by walking it, which no call does.
         if (self.meeting == .one_call and self.observation == .lent_walk) return false;
-        // A task's handle is used once, by its join, so it meets no
-        // operation in a loop that would use it on every pass, nor in a
-        // call that would lend it and leave it unjoined.
-        if (self.observation.task() and (self.meeting.loops() or self.meeting == .one_call)) return false;
+        // A task's handle is used once, by its join, and a kept closure by
+        // the call that settles it, so neither meets an operation in a loop
+        // that would use it on every pass, nor in a call that would lend it
+        // and leave it unsettled.
+        if (self.observation.usedOnce() and (self.meeting.loops() or self.meeting == .one_call)) return false;
         return true;
     }
 
@@ -760,7 +795,10 @@ test "the matrix holds every applicable cell of the three axes" {
     // scalar.
     const entry_tasks = (10 * 5 - 1) + (10 * 4 - 1) + 2 * 3;
     const tasks = vec_tasks + map_tasks + scalar_tasks + field_tasks + array_tasks + walked_tasks + entry_tasks;
-    try testing.expectEqual(@as(usize, vec + map + scalar + field + array + walked + handle + tasks), all.len);
+    // A closure holding a scalar lent `inout`, kept in a vector and erased
+    // into a `mem.Closure`, meets the two assignments as a task's lend does.
+    const kept = 2 * (2 * 3);
+    try testing.expectEqual(@as(usize, vec + map + scalar + field + array + walked + handle + tasks + kept), all.len);
     for (all) |cell| try testing.expect(cell.applies());
     // The shape the matrix exists for is one of its cells.
     var motivating = false;
@@ -787,6 +825,10 @@ test "the matrix holds every applicable cell of the three axes" {
     var task_read = false;
     for (all) |cell| task_read = task_read or (cell.operation == .push and cell.observation == .task_read and cell.meeting == .straight);
     try testing.expect(task_read);
+    // So is a lend a vector keeps in its element storage.
+    var stored = false;
+    for (all) |cell| stored = stored or (cell.operation == .assign and cell.observation == .stored_scalar_inout and cell.meeting == .straight);
+    try testing.expect(stored);
     var handle_text = false;
     for (all) |cell| handle_text = handle_text or (cell.operation == .handle_change and cell.observation == .text and cell.meeting == .straight);
     try testing.expect(handle_text);
@@ -965,6 +1007,26 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
             \\    let (value, done) = handle.recv()
             \\    done.close()
             \\    value
+            \\}
+            \\
+            \\
+        );
+    }
+    if (observation.keepsClosure()) {
+        if (observation == .erased_scalar_inout) try w.raw("import std.mem\n\n");
+        try w.raw(
+            \\fn settled[K: Release](sink kept: K) -> UInt64 {
+            \\    kept.release()
+            \\    1
+            \\}
+            \\
+            \\
+        );
+        if (observation == .stored_scalar_inout) try w.raw(
+            \\fn stored[F](sink callback: F) -> Vec[F] where carries(callback) {
+            \\    var kept: Vec[F] = Vec.new()
+            \\    &kept.push(callback).unwrap()
+            \\    kept
             \\}
             \\
             \\

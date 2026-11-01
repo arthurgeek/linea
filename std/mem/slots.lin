@@ -9,10 +9,11 @@ enum SlotType[phantom T] {
 
 // Storage owns out-of-line T slots. Typed storage operations preserve the
 // observations contained in those slots when the backing buffer moves or grows.
-struct Storage[phantom T, A: Allocator] {
+// `at` names `T`, so a value kept in the slots is held by a type that says so.
+struct Storage[T, A: Allocator] {
     buffer: Option[Buffer[A]],
     allocator: A,
-    at: UInt64,
+    at: Address[T],
     len: UInt64,
 }
 
@@ -27,7 +28,7 @@ impl[T, A: Allocator] Storage[T, A] {
     // Take a buffer's bytes as slot storage.
     fn from_buffer(sink buffer: Buffer[A]) -> Self where carries(buffer) {
         let allocator = copy(buffer.allocator)
-        let at = buffer.at
+        let at: Address[T] = address_in(buffer, 0)
         let length = buffer.len
         .{ buffer = .Some(buffer), allocator, at, len = length }
     }
@@ -46,14 +47,12 @@ impl[T, A: Allocator] Storage[T, A] {
             Err(_) => testing.assert(false, "slot allocation failed")?,
             Ok(acquired) => {
                 var storage: Storage[SlotTestPair, SystemAllocator] = Storage.from_buffer(acquired)
-                let at = storage.at
-                let extent = storage.len
                 let initial = SlotTestPair { first = 7, second = 900 }
-                slot_put(&storage, at, extent, 0, initial)
-                let first: SlotTestPair = slot_take(&storage, at, extent, 0)
+                slot_put(&storage, 0, initial)
+                let first: SlotTestPair = slot_take(&storage, 0)
                 let replacement = SlotTestPair { first = 8, second = 901 }
-                slot_put(&storage, at, extent, 0, replacement)
-                let second: SlotTestPair = slot_take(&storage, at, extent, 0)
+                slot_put(&storage, 0, replacement)
+                let second: SlotTestPair = slot_take(&storage, 0)
                 storage.dispose()
                 let SlotTestPair { first: a, second: b } = first
                 let SlotTestPair { first: c, second: d } = second
@@ -65,15 +64,22 @@ impl[T, A: Allocator] Storage[T, A] {
 }
 
 // The compiler replaces these declarations: `slot_stride` is the bytes one T
-// occupies, `slot_take` moves the value out of slot `i`, and `slot_put` moves
-// one in.
+// occupies, `slot_take` moves the value out of the slot `i` bytes into the
+// storage's bytes, and `slot_put` moves one in. Each reads the slots' address
+// and extent from the storage it is given, and checks the slot lies within
+// them and is aligned.
 extern fn slot_stride[T](shape: SlotType[T]) -> UInt64
 
-extern fn slot_take[T, A: Allocator](inout owner: Storage[T, A], at: UInt64, len: UInt64, i: UInt64) -> T where carries(owner)
+extern fn slot_take[T, A: Allocator](inout owner: Storage[T, A], i: UInt64) -> T where carries(owner)
 
-extern fn slot_put[T, A: Allocator](inout owner: Storage[T, A], at: UInt64, len: UInt64, i: UInt64, sink v: T) where retains(owner: v)
+extern fn slot_put[T, A: Allocator](inout owner: Storage[T, A], i: UInt64, sink v: T) where retains(owner: v)
 
-// Borrow an occupied slot through its owner, checking bounds and alignment.
-extern fn slot_place[T, A: Allocator](owner: Storage[T, A], at: UInt64, len: UInt64, live: UInt64, i: UInt64) -> T
+// Borrow the occupied slot `i` of the `live` slots of its owner, checking
+// bounds and alignment.
+extern fn slot_place[T, A: Allocator](owner: Storage[T, A], live: UInt64, i: UInt64) -> T
+
+// The address of `T` slots `offset` bytes into `buffer`, checking that the
+// offset lies within it. The compiler replaces this declaration.
+extern fn address_in[T, A: Allocator](buffer: Buffer[A], offset: UInt64) -> Address[T]
 
 extern fn slot_span[T, A: Allocator](owner: Storage[T, A], live: UInt64, start: UInt64, count: UInt64) -> Slice[T] where borrows(owner)
