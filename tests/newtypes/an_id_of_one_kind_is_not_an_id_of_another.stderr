@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Id[Customer]`, found `Id[Order]`
+  --> tests/newtypes/an_id_of_one_kind_is_not_an_id_of_another.lin:16:24
+   |
+9  | fn customer_number(sink id: Id[Customer]) -> UInt64 {
+   |                         -- expected because of this parameter
+16 |     if customer_number(order) == 9 {
+   |                        ^^^^^ expected `Id[Customer]`, found `Id[Order]`

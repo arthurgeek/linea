@@ -219,7 +219,8 @@ module.exports = grammar({
       field('type', $._type),
     ),
 
-    // `type Name = Base`, and `type Name = Base where it in lo..=hi`. A
+    // `type Name = Base`, `type Name[T] = Base`, and `type Name = Base where
+    // it in lo..=hi`. A
     // distinct nominal type over one base, with the attributes and visibility
     // a struct or an enum takes -- and `type` is not a
     // reserved word here either: a name follows it at the top of a file
@@ -229,6 +230,7 @@ module.exports = grammar({
       ...modifiers($),
       'type',
       field('name', alias($.identifier, $.type_identifier)),
+      optional(field('type_parameters', $.type_parameters)),
       '=',
       field('base', $._type),
       optional($.refinement_clause),

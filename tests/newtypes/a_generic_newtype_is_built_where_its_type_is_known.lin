@@ -1,0 +1,14 @@
+// A construction of a generic newtype takes its type arguments from where the
+// value goes. Nothing here says what `Id(3)` numbers, so it is refused; the
+// annotation on `known` says it numbers a `Customer`.
+type Id[phantom T] = UInt64
+
+struct Customer {}
+
+fn main() -> UInt8 {
+    let unknown = Id(3)
+    let known: Id[Customer] = Id(4)
+    let Id(number) = known
+    let Id(other) = unknown
+    UInt8(number + other)
+}

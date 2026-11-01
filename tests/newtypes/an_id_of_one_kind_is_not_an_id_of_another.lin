@@ -1,0 +1,21 @@
+// A newtype's type arguments are part of its type: an `Id[Order]` is refused
+// where an `Id[Customer]` is expected, though both are a `UInt64`.
+type Id[phantom T] = UInt64
+
+struct Customer {}
+
+struct Order {}
+
+fn customer_number(sink id: Id[Customer]) -> UInt64 {
+    let Id(number) = id
+    number
+}
+
+fn main() -> UInt8 {
+    let order: Id[Order] = Id(9)
+    if customer_number(order) == 9 {
+        0
+    } else {
+        1
+    }
+}

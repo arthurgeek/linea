@@ -2267,7 +2267,8 @@ const Parser = struct {
         return self.cursor.peekAt(1) == .identifier;
     }
 
-    /// `type Name = Base`, and `type Name = Base where it in lo..=hi`.
+    /// `type Name = Base`, `type Name[T] = Base` and `type Name = Base where
+    /// it in lo..=hi`.
     ///
     /// A distinct nominal type over one base: same representation, a
     /// different contract. No braces, because nothing new is represented --
@@ -2279,6 +2280,7 @@ const Parser = struct {
 
         // `atNewtype` already confirmed an identifier sits here.
         const name = self.cursor.advance();
+        const type_params = try self.parseTypeParams(.admitted);
 
         if (self.cursor.eat(.equal) == null) {
             try self.reportAt(.s_equals, self.cursor.current(), "expected `=`", "a newtype is declared over a base type");
@@ -2301,6 +2303,7 @@ const Parser = struct {
             .token_range = self.rangeFrom(start),
             .name = name,
             .params = .{ .start = 0, .end = 0 },
+            .type_params = type_params,
             .returns = base,
             .body = .none,
             .variants = .{ .start = 0, .end = 0 },

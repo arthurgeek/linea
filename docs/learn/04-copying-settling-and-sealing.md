@@ -503,6 +503,58 @@ error[N-Unused]: `Of` is never used
 **What you can do now:** tag a shared shape with a `phantom` parameter when
 two uses of it must never mix.
 
+### A phantom tag on a newtype
+
+A newtype takes type parameters as a struct does. When the shared shape is one
+value, such as a number, `type Id[phantom Of] = UInt64` tags the number
+itself, and an `Id[Customer]` is held exactly as a `UInt64` is:
+
+```linea
+import std.io
+
+struct Customer {}
+
+struct Invoice {}
+
+// `Of` is never stored: an `Id[Customer]` is a `UInt64` with a tag.
+@copyable
+type Id[phantom Of] = UInt64
+
+// `number` reads the `UInt64` inside an `Id` of any tag.
+fn number[Of](id: Id[Of]) -> UInt64 {
+    let Id(value) = copy(id)
+    value
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let customer: Id[Customer] = Id(42)
+    let invoice: Id[Invoice] = Id(1007)
+    io.println("Customer {number(customer)} owes invoice {number(invoice)}.")?
+    .Ok(0)
+}
+```
+
+```
+Customer 42 owes invoice 1007.
+```
+
+`Id(42)` takes its tag from where the value goes, here the annotation on
+`customer`. The number alone cannot say which tag it is, so where nothing
+around a construction says either, the compiler asks you to:
+
+<!-- guide: edit after 19 let invoice: Id[Invoice] = Id(1007) -->
+```linea
+    let _draft = Id(7)
+```
+
+```
+error[T-Infer]: the type arguments of `Id` cannot be determined
+  --> main.lin:20:18
+   |
+20 |     let _draft = Id(7)
+   |                  ^^^^^ give the binding a type
+```
+
 ### Protocols: tags that name each other
 
 A tag can say more than which kind of record a value belongs to. It can say
@@ -1937,6 +1989,7 @@ be the only place that can both create a value and end it.
 | an ordinary record that moves and may be dropped | nothing; affine is the default |
 | to allow copies | `@copyable`, then `copy(value)` |
 | a type tag that stores nothing | `struct Id[phantom Of] { ... }` |
+| a tag on one value, held as that value | `type Id[phantom Of] = UInt64` |
 | two sides of a conversation that mirror each other | `impl Protocol for Worker` with `type Dual = Boss` and a `type Step`, and the same for `Boss` |
 | operations only a value at one protocol step has | `impl[T, N: Protocol] Chan[Send[T, N]] { fn send … }`, one block per step |
 | a value only your module can make | `@opaque type Email = Str` or `@opaque struct Account { … }`, with a `pub fn` that checks |

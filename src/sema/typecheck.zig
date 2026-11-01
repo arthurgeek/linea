@@ -13002,7 +13002,7 @@ const Checker = struct {
 
         switch (self.builder.get(last)) {
             .newtype => {
-                if (self.builder.partsSource(self.builder.baseOf(last)) == back) try self.builder.setNewtypeBase(last, .poison);
+                if (self.builder.partsSource(try self.builder.baseOf(last)) == back) try self.builder.setNewtypeBase(last, .poison);
                 return;
             },
             else => {},
@@ -15227,7 +15227,7 @@ const Checker = struct {
         }
 
         const base = written.first().?.node;
-        const base_check = try self.checkPart(base, self.builder.baseOf(of), at, .base, .{ .field = self.ast.tokenName(head_tok) });
+        const base_check = try self.checkPart(base, try self.builder.baseOf(of), at, .base, .{ .field = self.ast.tokenName(head_tok) });
         if (base_check != .matches) return base_check;
 
         // A literal or range outside the refinement names a value the base
@@ -15252,7 +15252,11 @@ const Checker = struct {
     /// of the base's values -- since a judgement then would repeat the
     /// declaration's mistake at every pattern.
     fn refinedValues(self: *const Checker, t: TypeId) ?usefulness.Interval {
-        const base = self.builder.baseOf(t).bounds() orelse return null;
+        // A refinement is held to an integer base, which no type parameter
+        // can stand for, so the declaration's own base answers for every
+        // instantiation, written or not.
+        const declared = if (self.builder.view().declOfType(t)) |d| self.type_of_decl.get(d) else t;
+        const base = self.builder.view().baseOf(declared).bounds() orelse return null;
         const r = self.builder.refinementOf(t);
         const lo = @max(r.lo, base.min);
         const hi = @min(r.hi, base.max);
@@ -15449,7 +15453,7 @@ const Checker = struct {
             const t = self.settled(ty);
             return switch (c) {
                 .variant => |k| try self.checker.builder.variantFieldType(t, k, i),
-                .product => if (self.checker.builder.get(t) == .newtype) self.checker.builder.baseOf(t) else (try self.checker.builder.fieldType(t, i)),
+                .product => if (self.checker.builder.get(t) == .newtype) try self.checker.builder.baseOf(t) else (try self.checker.builder.fieldType(t, i)),
                 .integers => .poison,
             };
         }
@@ -16128,7 +16132,7 @@ const Checker = struct {
         // base's plan.
         if (self.builder.get(ty) == .newtype) {
             if (try self.builder.capabilityOf(ty) != .copyable) return .{ .uncopyable = ty };
-            return self.planConstant(id, self.builder.baseOf(ty));
+            return self.planConstant(id, try self.builder.baseOf(ty));
         }
         const stored = self.folded.pool.get(id);
         if (stored != .variant and try self.builder.capabilityOf(ty) != .copyable) return .{ .uncopyable = ty };
@@ -17199,7 +17203,26 @@ const Checker = struct {
         expected: ?Expected,
     ) std.mem.Allocator.Error!TypeId {
         const c = self.ast.call(id);
-        const newtype = self.type_of_decl.get(decl);
+        const template = self.type_of_decl.get(decl);
+        // A generic newtype's arguments come from what the construction is
+        // expected to be: a phantom parameter appears in no operand, so the
+        // value alone cannot say which instantiation it builds.
+        const newtype = if (self.ast.declTypeParams(decl).len == 0) template else expected_instance: {
+            if (Expected.typeOf(expected)) |want| {
+                if (want != .poison and self.builder.view().declOfType(want) == decl and self.builder.view().instanceOf(want) != null)
+                    break :expected_instance want;
+            }
+            self.noteQualifier(c.callee);
+            _ = self.record(c.callee, template);
+            for (c.args) |a| _ = try self.check(a, null);
+            return self.report(
+                .t_infer,
+                id,
+                "the type arguments of `{s}` cannot be determined",
+                .{self.ast.tokenText(self.ast.declName(decl))},
+                "give the binding a type",
+            );
+        };
         // The callee names the type rather than a value, and every
         // expression must have one -- the same bookkeeping a conversion's
         // callee gets. What qualifies it is named the same way, for the same
@@ -17227,7 +17250,7 @@ const Checker = struct {
             );
         }
         const operand = c.args[0];
-        const base = self.builder.baseOf(newtype);
+        const base = try self.builder.baseOf(newtype);
         const from = try self.check(operand, .{
             .ty = base,
             .at = .{ .file = self.ast.fileOfExpr(c.callee), .span = self.ast.exprSpan(c.callee) },

@@ -1100,6 +1100,7 @@ const CapabilityFacts = struct {
         const policy = switch (builder.get(ty)) {
             .struct_ => |record_type| record_type.ownership_policy,
             .enum_ => |sum| sum.ownership_policy,
+            .newtype => |nominal| nominal.ownership_policy,
             else => unreachable,
         };
         try self.seed(gpa, ty, policyCapability(policy));
@@ -9434,6 +9435,11 @@ pub const Typing = struct {
                     if (e.unshareable) self.markUnshareable(made);
                     break :blk made;
                 },
+                .newtype => |n| blk: {
+                    const made = try self.addNewtype(name, n.ownership_policy, .poison, n.refined, n.lo, n.hi);
+                    if (n.unshareable) self.markUnshareable(made);
+                    break :blk made;
+                },
                 else => return template,
             };
 
@@ -10689,6 +10695,14 @@ pub const Typing = struct {
                         }
                     }
                 },
+                .newtype => |n| {
+                    const to = try self.substitute(n.base, decl, args);
+                    if (rewrite) {
+                        try self.setNewtypeBase(made, to);
+                    } else {
+                        self.pool.items[@intFromEnum(made)].newtype.base = to;
+                    }
+                },
                 else => {},
             }
         }
@@ -10973,7 +10987,11 @@ pub const Typing = struct {
             self.pool.items[@intFromEnum(t)].newtype.base = base;
         }
 
-        pub fn baseOf(self: *const Builder, t: TypeId) TypeId {
+        /// A newtype's base, written first where `t` is an instantiation
+        /// whose parts nothing has read yet, as `fieldType` writes a
+        /// structure's.
+        pub fn baseOf(self: *Builder, t: TypeId) std.mem.Allocator.Error!TypeId {
+            try self.ensureFilled(t);
             return self.view().baseOf(t);
         }
 

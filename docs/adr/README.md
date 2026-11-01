@@ -95,7 +95,7 @@ true of a different implementation.
 | [0053](0053-exclusivity-is-triggered-by-mutation.md) | Exclusivity is triggered by mutation, not by the marker | Accepted; supersedes the exclusivity clause of 0025 |
 | [0054](0054-the-bound-is-on-height-and-covers-written-types.md) | The nesting bound is on height, and a written type answers to it | Accepted; supersedes 0042 |
 | [0056](0056-a-modifier-is-refused-where-it-says-nothing.md) | A modifier is refused where it says nothing | Accepted; extended by 0145 |
-| [0065](0065-a-phantom-type-parameter-is-declared.md) | A phantom type parameter is declared, not inferred from disuse | Accepted; its bound clause superseded by 0099 |
+| [0065](0065-a-phantom-type-parameter-is-declared.md) | A phantom type parameter is declared, not inferred from disuse | Accepted; its bound clause superseded by 0099; extended by 0254 |
 | [0066](0066-a-blocks-state-is-its-dominators-plus-what-it-changed.md) | A block's state is its dominator's, plus what it changed | Accepted; refined by 0073 |
 | [0067](0067-a-place-is-updated-through-itself.md) | A compound assignment updates a place through itself | Accepted |
 | [0068](0068-a-declaration-may-name-a-symbol-the-runtime-provides.md) | A declaration may name a symbol the runtime provides | Accepted; extended by 0150 and 0156; `std/` clause superseded by 0171; integer-only, linear and callable clauses superseded by 0228 |
@@ -268,7 +268,8 @@ ones most likely to be superseded as the compiler grows.
 | [0213](0213-a-trait-may-be-implemented-for-a-callable-type.md) | A trait may be implemented for a callable type, keyed by its shape | Accepted; extends 0081, 0093 and 0148 |
 | [0214](0214-a-route-takes-a-function-whose-parameters-name-its-inputs.md) | A route is a function whose parameters name its inputs | Accepted; refines 0185; extends 0180; `where carries(request)` clause superseded by 0216 |
 | [0216](0216-a-carrier-type-supplies-its-signatures-default-contract.md) | A carrier type supplies its signatures' default contract | Accepted; supersedes the `where carries(request)` clause of 0214 |
-| [0099](0099-a-phantom-parameter-carries-its-bound.md) | A phantom parameter carries its bound | Accepted; supersedes the bound clause of 0065 |
+| [0099](0099-a-phantom-parameter-carries-its-bound.md) | A phantom parameter carries its bound | Accepted; supersedes the bound clause of 0065; extended by 0254 |
+| [0254](0254-a-newtype-takes-type-parameters.md) | A newtype takes type parameters | Accepted; extends 0065 and 0099 |
 | [0102](0102-computation-and-storage-representations-are-separate.md) | Computation and storage representations are separate | Accepted; extends 0028; partially supersedes 0031 and 0052 |
 | [0104](0104-release-is-optional-and-never-scheduled.md) | Release is optional and never scheduled | Accepted; supersedes 0097, extends 0063; extended by 0103, 0158, 0184 and 0208 |
 | [0184](0184-a-failure-holding-an-owned-value-settles-to-its-reason.md) | A failure holding an owned value settles to its reason | Accepted; extends 0104 and 0162; `http.Error` settling clause superseded by 0218 |

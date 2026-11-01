@@ -1,0 +1,17 @@
+// A Readings holds what its base holds: a newtype's parameter stands for a type
+// its base is written with, so `Readings[UInt8]` is an `Option[UInt8]` under
+// another name.
+type Readings[T] = Option[T]
+
+fn latest(sink readings: Readings[UInt8]) -> UInt8 {
+    let Readings(held) = readings
+    match held {
+        Some(value) => value,
+        None => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let none: Readings[UInt8] = Readings(.None)
+    latest(Readings(.Some(4))) - 4 + latest(none)
+}
