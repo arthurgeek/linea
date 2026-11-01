@@ -314,6 +314,7 @@ struct owner_queue {
     unsigned long len;
     unsigned long answer_at;
     unsigned long answer_len;
+    int answered;
     unsigned long issued;
     unsigned long finished;
 };
@@ -361,13 +362,22 @@ uint8_t linea_owner_next(unsigned long queue, unsigned long at, unsigned long le
     return 1;
 }
 
-void linea_owner_done(unsigned long queue, unsigned long at, unsigned long len) {
+void linea_owner_answer(unsigned long queue, unsigned long at, unsigned long len) {
     struct owner_queue *q = (struct owner_queue *)queue;
     linea_storage_extent(at, len);
     must(pthread_mutex_lock(&q->lock));
-    if (!q->full) fail("linea: an owning task answered a call it was not serving\n");
+    if (!q->full || q->answered) fail("linea: an owning task answered a call it was not serving\n");
     if (q->answer_len != len) fail("linea: a call and its owning task disagree about an answer's size\n");
     if (len != 0) memcpy((void *)q->answer_at, (const void *)at, len);
+    q->answered = 1;
+    must(pthread_mutex_unlock(&q->lock));
+}
+
+void linea_owner_done(unsigned long queue) {
+    struct owner_queue *q = (struct owner_queue *)queue;
+    must(pthread_mutex_lock(&q->lock));
+    if (!q->answered) fail("linea: an owning task finished a call it did not answer\n");
+    q->answered = 0;
     q->full = 0;
     q->finished += 1;
     must(pthread_cond_broadcast(&q->changed));

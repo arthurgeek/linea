@@ -98,7 +98,8 @@ pub const Passing = enum { read, inout };
 /// scalars it takes, each by value, and the one it answers. `address` is the
 /// position of a parameter C passes an address of typed bytes in, the one the
 /// call that took the callback was given; the function a program passes may
-/// declare that parameter as a `mem.Address`, which crosses as its `UInt64`.
+/// declare that parameter as a `mem.address.Address`, which crosses as its
+/// `UInt64`.
 pub const Callback = struct { parameters: []const Scalar, result: Scalar, address: ?u8 = null };
 
 /// A parameter's scalar, how it is passed, and for a `callback` the shape of
@@ -106,17 +107,19 @@ pub const Callback = struct { parameters: []const Scalar, result: Scalar, addres
 /// declaration's function type to. `address` marks a `u64` that is the
 /// address of typed bytes the runtime copies to another task before the call
 /// returns, writes with bytes another task sent, or keeps for a task it
-/// starts: the one place [T-RawAddress] lets `mem.raw` turn an address into a
+/// starts: the one place [T-RawAddress] lets `address.raw` turn an address into a
 /// number.
 pub const Parameter = struct { scalar: Scalar, passing: Passing = .read, callback: ?*const Callback = null, address: bool = false };
 
-/// Whether two parameters are the same, a callback's shape compared by what
-/// it holds rather than by where it is.
+/// Whether two parameters are the same as C declares them, a callback's shape
+/// compared by what it holds rather than by where it is. Which parameter is an
+/// address of typed bytes is the table's to say, and C's prototype says
+/// nothing of it, so the mark is not compared.
 pub fn sameParameter(a: Parameter, b: Parameter) bool {
-    if (a.scalar != b.scalar or a.passing != b.passing or a.address != b.address) return false;
+    if (a.scalar != b.scalar or a.passing != b.passing) return false;
     const left = a.callback orelse return b.callback == null;
     const right = b.callback orelse return false;
-    return left.result == right.result and std.mem.eql(Scalar, left.parameters, right.parameters) and left.address == right.address;
+    return left.result == right.result and std.mem.eql(Scalar, left.parameters, right.parameters);
 }
 
 test "parameters are compared by the callback shape they hold" {
@@ -305,7 +308,8 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_owner_open", .parameters = &.{}, .result = .u64 },
     .{ .symbol = "linea_owner_call", .parameters = &.{ p(.u64), typed_bytes, p(.u64), typed_bytes, p(.u64) }, .result = .unit },
     .{ .symbol = "linea_owner_next", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .u8 },
-    .{ .symbol = "linea_owner_done", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_owner_answer", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_owner_done", .parameters = &.{p(.u64)}, .result = .unit },
     .{ .symbol = "linea_owner_close", .parameters = &.{p(.u64)}, .result = .unit },
     .{ .symbol = "linea_owner_free", .parameters = &.{p(.u64)}, .result = .unit },
     .{ .symbol = "linea_task_start", .parameters = &.{ p(.u64), cb(&.{ .u64, .u64, .u64 }, .unit, 1), cb(&.{ .u64, .u64 }, .unit, 0), typed_bytes, p(.u64), typed_bytes }, .result = .u64, .starts_thread = true },

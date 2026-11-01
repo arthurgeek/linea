@@ -344,7 +344,8 @@ static void *owner_thread(void *arg) {
     while (linea_owner_next(queue, (unsigned long)&request, sizeof request) == 1) {
         owner_total += request;
         unsigned long answer = owner_total;
-        linea_owner_done(queue, (unsigned long)&answer, sizeof answer);
+        linea_owner_answer(queue, (unsigned long)&answer, sizeof answer);
+        linea_owner_done(queue);
     }
     return 0;
 }

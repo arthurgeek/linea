@@ -1,0 +1,13 @@
+import std.testing
+
+// A derived implementation of a generic newtype holds where its base's does:
+// `Readings[T]` compares and prints as the `Option[T]` it wraps.
+@derive(Equatable, Debug)
+type Readings[T] = Option[T]
+
+fn main() -> Result[UInt8, testing.Failure] {
+    let latest: Readings[UInt8] = Readings(.Some(4))
+    let again: Readings[UInt8] = Readings(.Some(4))
+    testing.assert_eq(latest, again, "two readings of 4 differ")?
+    .Ok(0)
+}

@@ -2889,10 +2889,10 @@ pub const Harness = struct {
 };
 
 /// Whether C calls a body of signature `target` through the same entry as one
-/// of `declared`: the same parameters and result once each newtype is its
-/// base, which is what crosses. A runtime callback may take a
-/// `mem.address.Address` where the runtime's declaration passes the `UInt64`
-/// it stands for.
+/// of `declared`: the same parameters and result, but that a parameter the
+/// body takes as a `mem.address.Address` is the `UInt64` the declaration
+/// passes. A runtime callback takes the address it was given that way, and
+/// an address is its number.
 fn sameForeignEntry(types: *const types_mod.Typing, target: TypeId, declared: TypeId) bool {
     const a = switch (types.get(target)) {
         .callable => |a| a,
@@ -2904,9 +2904,12 @@ fn sameForeignEntry(types: *const types_mod.Typing, target: TypeId, declared: Ty
     };
     const a_params = types.callableParams(a);
     const b_params = types.callableParams(b);
-    if (a_params.len != b_params.len or types.erased(a.result) != types.erased(b.result)) return false;
+    if (a_params.len != b_params.len or a.result != b.result) return false;
+    const address = types.raw_accesses.address;
     for (a_params, b_params) |x, y| {
-        if (x.convention != y.convention or types.erased(x.ty) != types.erased(y.ty)) return false;
+        if (x.convention != y.convention) return false;
+        if (x.ty == y.ty) continue;
+        if (address == .none or y.ty != .u64 or types.declOfType(x.ty) != address) return false;
     }
     return true;
 }

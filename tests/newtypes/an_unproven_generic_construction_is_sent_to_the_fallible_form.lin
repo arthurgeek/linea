@@ -1,0 +1,16 @@
+// A value known only when the program runs is not proven to lie in a
+// refinement, so the plain construction is refused and the help writes the
+// fallible form under the newtype's own name.
+type Rating[phantom T] = UInt8 where it in 1..=5
+
+struct Film {}
+
+fn rate(stars: UInt8) -> UInt8 {
+    let rating: Rating[Film] = Rating(stars)
+    let Rating(kept) = rating
+    kept
+}
+
+fn main() -> UInt8 {
+    rate(4)
+}

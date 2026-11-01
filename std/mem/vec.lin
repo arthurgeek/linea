@@ -834,8 +834,8 @@ impl[T, A: Allocator] Vec[T, A] {
         if at > self.len {
             panic("split_inout: split index out of bounds")
         }
-        var left: View[T] = .{ at = copy(self.storage.at), start = 0, len = at, carried = .{} }
-        var right: View[T] = .{ at = copy(self.storage.at), start = at, len = self.len - at, carried = .{} }
+        var left: View[T] = .{ at = copy(self.storage.at), len = at, carried = .{} }
+        var right: View[T] = .{ at = copy(self.storage.at), len = self.len - at, carried = .{} }
         &body(&left, &right)
     }
 
