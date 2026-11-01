@@ -11804,7 +11804,7 @@ const Resolver = struct {
                     // in. Everything else is refused by default, so a
                     // declaration kind added later cannot accept a modifier
                     // it silently ignores.
-                    .struct_, .enum_, .trait_ => {},
+                    .struct_, .enum_, .newtype, .trait_ => {},
                     // An alias is the type it names, so no identity of its
                     // own is there for a parameter to be read for.
                     .alias => {
@@ -11865,7 +11865,7 @@ const Resolver = struct {
 
             if (used) continue;
             const on_type = switch (self.ast.declTag(d)) {
-                .struct_, .enum_, .trait_ => true,
+                .struct_, .enum_, .newtype, .trait_ => true,
                 else => false,
             };
             if (std.mem.startsWith(u8, text, "_")) {

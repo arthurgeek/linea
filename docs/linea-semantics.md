@@ -122,7 +122,7 @@ traversal    ::= "trav" name ("(" parameters? ")")? "=" expression
               | "trav" name "via" name
 typedecl     ::= "struct" name generics? where_clause? "{" fields? "}"
                | "enum" name generics? where_clause? "{" variants? "}"
-               | "type" name "=" type_name refinement?
+               | "type" name generics? "=" type_name refinement?
 refinement   ::= "where" "it" "in" litbound rangeop litbound
 litbound     ::= "-"? integer
 trait        ::= "trait" name generics? (":" type_bound ("+" type_bound)*)? where_clause? "{" (signature | projsig | declared)* "}"
@@ -369,7 +369,9 @@ describe, and `impl` contains only the member declarations listed in the
 grammar.
 
 A newtype uses its base's representation and inherits its base's settlement
-obligation. `opaque` restricts access to that representation to the declaring
+obligation. A generic newtype, `type Id[phantom T] = UInt64`, is instantiated as
+a generic struct is: its base is written with its arguments, and each
+instantiation is a distinct type with that base's representation. `opaque` restricts access to that representation to the declaring
 module. Its default policy is affine; an explicit copyable policy must satisfy
 [O-Universe], as for a struct or enum ([§4](#4-types)).
 
@@ -1955,7 +1957,11 @@ trait declarations, which are accessed through the trait's namespace.
 
 A newtype construction is a call naming that newtype. Qualified forms
 `a.Score(9)` and `a.Score?(9)` construct the same type as the bare forms made
-available by `use`, with the same `opaque` restrictions. Pattern heads cannot
+available by `use`, with the same `opaque` restrictions. A generic newtype's
+construction takes its type arguments from the type its context expects, as
+`.{ ... }` takes a struct's: a phantom parameter appears in no operand, so the
+operand cannot supply them. A construction no context gives an instantiation
+of the newtype is refused by [T-Infer]. Pattern heads cannot
 be qualified: the matched value determines the type being destructured.
 
 A module name is visible only as a qualifier, never as a value. Using a bare
@@ -4477,8 +4483,8 @@ allocator a generic parameter to preserve allocator polymorphism." A type a
 trait implementation settles cannot take an allocator parameter, so there the
 help offers `mem.SystemAllocator` alone.
 
-**[T-Phantom]** A type parameter absent from every struct field, enum variant and
-trait signature must be declared `phantom`. It contributes to type identity
+**[T-Phantom]** A type parameter absent from every struct field, enum variant,
+newtype base and trait signature must be declared `phantom`. It contributes to type identity
 without appearing in the stored representation. An unused-name spelling,
 including a leading underscore, does not express this role. Conversely, a
 parameter that does occur in those positions cannot be `phantom`. Phantom

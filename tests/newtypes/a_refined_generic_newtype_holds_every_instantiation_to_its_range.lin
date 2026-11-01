@@ -1,0 +1,16 @@
+// A refinement on a generic newtype bounds every instantiation alike: a
+// `Rating[Film]` and a `Rating[Book]` both hold 1 to 5, so 6 is refused for
+// either.
+type Rating[phantom T] = UInt8 where it in 1..=5
+
+struct Film {}
+
+struct Book {}
+
+fn main() -> UInt8 {
+    let film: Rating[Film] = Rating(5)
+    let book: Rating[Book] = Rating(6)
+    let Rating(stars) = film
+    let Rating(other) = book
+    stars - other
+}

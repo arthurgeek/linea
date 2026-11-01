@@ -1,0 +1,23 @@
+// An Id is a number, and its parameter says what it numbers. Both kinds are a
+// `UInt64` underneath, and an `Id[Order]` is still not an `Id[Customer]`.
+type Id[phantom T] = UInt64
+
+struct Customer {}
+
+struct Order {}
+
+fn customer_number(sink id: Id[Customer]) -> UInt64 {
+    let Id(number) = id
+    number
+}
+
+fn main() -> UInt8 {
+    let customer: Id[Customer] = Id(7)
+    let order: Id[Order] = Id(9)
+    let Id(placed) = order
+    if customer_number(customer) == 7 && placed == 9 {
+        0
+    } else {
+        1
+    }
+}

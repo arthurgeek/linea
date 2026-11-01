@@ -1621,7 +1621,8 @@ const Printer = struct {
         try self.newline();
     }
 
-    /// `type Name = Base`, and `type Name = Base where it in lo..=hi`.
+    /// `type Name = Base`, `type Name[T] = Base`, and `type Name = Base where
+    /// it in lo..=hi`.
     ///
     /// The clause is its own unit: written on the head's line it takes one
     /// space on each side of `where`, and written on its own line it stays
@@ -1632,6 +1633,7 @@ const Printer = struct {
         try self.writeModifiers(d);
         try self.write("type ");
         try self.write(self.declName(d));
+        try self.writeTypeParams(d);
         try self.write(" = ");
         try self.writeReturnType(d);
 
