@@ -1,0 +1,13 @@
+// A generic newtype's construction where another type is expected is a
+// mismatch, named as the context expects it.
+type Id[phantom T] = UInt64
+
+type Key[phantom T] = UInt64
+
+struct Customer {}
+
+fn main() -> UInt8 {
+    let key: Key[Customer] = Id(4)
+    let Key(number) = key
+    UInt8(number - 4)
+}

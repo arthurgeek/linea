@@ -552,7 +552,7 @@ error[T-Infer]: the type arguments of `Id` cannot be determined
   --> main.lin:20:18
    |
 20 |     let _draft = Id(7)
-   |                  ^^^^^ give the binding a type
+   |                  ^^^^^ say what it builds where the value goes, as with an annotation
 ```
 
 ### Protocols: tags that name each other

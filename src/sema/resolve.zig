@@ -4093,6 +4093,11 @@ fn resolveInternal(
                                 for (ast.variantFields(variant)) |field| try r.useRef(field.written);
                             }
                             try r.reportUnusedTypeParams(d);
+                        } else {
+                            // A derive's `where` clause names the base by the
+                            // parameters it is written with, so the base is
+                            // read before the derive is expanded.
+                            try r.useRef(ast.declReturnRef(d));
                         }
                         if (attached) {
                             // A type the parser could not name has already been
@@ -10222,6 +10227,16 @@ const Resolver = struct {
         try text.appendSlice(self.gpa, derived_predicates);
     }
 
+    /// The last token of a newtype's base: the one before its refinement, or
+    /// the declaration's last before any `;` and the trivia after it.
+    fn newtypeBaseEnd(ast: *const Ast, d: DeclId) TokenId {
+        if (ast.newtypeRefinement(d)) |r| return TokenId.at(r.at.index() - 1);
+        var at = ast.declTokens(d).end.index() - 1;
+        while (at > ast.declReturnRef(d).at.index() and
+            (ast.tokenTag(TokenId.at(at)).isTrivia() or ast.tokenTag(TokenId.at(at)) == .semicolon)) at -= 1;
+        return TokenId.at(at);
+    }
+
     /// Says whether a template requires anything of its target's components.
     fn templateBoundsComponents(ast: *const Ast, template: DeclId) bool {
         for (ast.templateRequirements(template)) |requirement| {
@@ -10551,6 +10566,12 @@ const Resolver = struct {
                         for (fields) |field| {
                             if (self.namesTargetParameter(target, field.written)) try predicate_fields.append(self.gpa, field);
                         }
+                    }
+                    // A newtype's one component is its base.
+                    if (target_tag == .newtype) {
+                        const base = self.program.ast.declReturnRef(target);
+                        if (self.namesTargetParameter(target, base))
+                            try predicate_fields.append(self.gpa, .{ .written = base, .type_end = newtypeBaseEnd(&self.program.ast, target) });
                     }
                 }
                 for (component_fields.items) |field| try copied_ranges.append(self.gpa, .{

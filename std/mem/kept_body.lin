@@ -29,7 +29,7 @@ internal struct Kept[F, A: Allocator] {
 
 // Move `body` into the bytes `storage` owns, then move `storage` in after it,
 // and answer where each is. Whoever holds the addresses owns both.
-internal fn keep_body[F, A: Allocator](sink storage: Buffer[A], sink body: F) -> Kept[F, A] where carries(storage, body) {
+internal fn keep_body[F, A: Allocator](sink storage: Buffer[A], sink body: F) -> Kept[F, A] {
     let len = storage.len
     let body_shape: SlotType[F] = .Type
     let offset = kept_buffer_offset(slot_stride(body_shape))

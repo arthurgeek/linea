@@ -1,11 +1,21 @@
 import std.mem.address
 
 // An address names the type of the values kept at it, and C keeps no type: an
-// `extern` that would hand C one is refused, even in a module trusted with C.
+// `extern` that would hand C one is refused, even in a module trusted with C,
+// and so is one that would take one back from C inside a newtype.
+@copyable
+type Wrapped = address.Address[UInt8]
+
 extern fn keep(at: address.Address[UInt8])
+
+extern fn find() -> Wrapped
 
 fn _hand(at: address.Address[UInt8]) {
     keep(at)
+}
+
+fn _found() -> Wrapped {
+    find()
 }
 
 fn main() -> UInt8 {

@@ -75,8 +75,10 @@ void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len, 
  * answer 0 once the queue is closed and no call waits. */
 uint8_t linea_owner_next(unsigned long queue, unsigned long at, unsigned long len);
 /* Answer the call `linea_owner_next` answered with the `len` bytes at `at`,
- * copied to the caller's answer bytes, and release its caller. */
-void linea_owner_done(unsigned long queue, unsigned long at, unsigned long len);
+ * copied to the caller's answer bytes. */
+void linea_owner_answer(unsigned long queue, unsigned long at, unsigned long len);
+/* Finish the call `linea_owner_answer` answered, releasing its caller. */
+void linea_owner_done(unsigned long queue);
 /* Accept no further calls; the owner's next wait answers 0. */
 void linea_owner_close(unsigned long queue);
 void linea_owner_free(unsigned long queue);

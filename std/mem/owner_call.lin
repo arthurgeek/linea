@@ -10,7 +10,7 @@ import std.mem.address
 
 // Hand the `len` bytes at `at` to the owning task whose call queue is
 // `queue`, and return once the owner has answered with the `answer_len` bytes
-// copied to `answer_at`.
+// copied to `answer_at` and finished with the request.
 extern fn linea_owner_call(queue: UInt64, at: UInt64, len: UInt64, answer_at: UInt64, answer_len: UInt64)
 
 // Wait for the next call on `queue` and copy its `len` bytes to `at`. It
@@ -18,14 +18,15 @@ extern fn linea_owner_call(queue: UInt64, at: UInt64, len: UInt64, answer_at: UI
 extern fn linea_owner_next(queue: UInt64, at: UInt64, len: UInt64) -> UInt8
 
 // Answer the call `linea_owner_next` answered on `queue` with the `len` bytes
-// at `at`, which the runtime copies to the caller's answer bytes, and release
-// the caller.
-extern fn linea_owner_done(queue: UInt64, at: UInt64, len: UInt64)
+// at `at`, which the runtime copies to the caller's answer bytes. The owner
+// releases the caller with `linea_owner_done` once the job is released too.
+extern fn linea_owner_answer(queue: UInt64, at: UInt64, len: UInt64)
 
 // Run `job` on the owning task whose call queue is `queue`, against the state
 // it owns, and answer what `job` answers. The job is erased into a `Closure`
 // that hands its answer back through the runtime; the call returns once the
-// owner has done so, so the answer is in this call's bytes to move out.
+// owner has done so and released the job, so the answer is in this call's
+// bytes to move out and nothing the job captured is still being released.
 // Running out of memory for the bytes a call moves through is a trap, since a
 // call cannot fail.
 internal fn call_owner[S, R, F: Release + fn(inout state: S) -> R](queue: UInt64, sink job: F) -> R {
@@ -35,7 +36,7 @@ internal fn call_owner[S, R, F: Release + fn(inout state: S) -> R](queue: UInt64
         var answer: Storage[R, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
         let len = answer.len
         slot_put(&answer, 0, value)
-        linea_owner_done(queue, address.raw(answer.at), len)
+        linea_owner_answer(queue, address.raw(answer.at), len)
         answer.dispose()
     }
     let erased: Closure[fn(inout state: S)] = Closure.open(request).unwrap()

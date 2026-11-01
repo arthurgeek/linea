@@ -10613,8 +10613,8 @@ pub const Typing = struct {
         /// from another, or, with
         /// `through_wrappers`, where it reaches one as an element, an
         /// environment or a referent: the steps a place or a pattern takes
-        /// into a value. A newtype is a declared type whose base is written
-        /// from source, so it is not followed; `writeHeldParts` and the
+        /// into a value. A newtype is not stepped through: one that is an
+        /// instantiation is queued itself, and `writeHeldParts` and the
         /// builder's accessors answer for its base.
         ///
         /// **Bound:** the nesting height of `part`'s elements and referents.
@@ -13495,6 +13495,9 @@ pub const Typing = struct {
 
             return .{
                 .constant_pool = constant_pool,
+                // The certified declarations, as `view` answers them, so a pass
+                // reading the finished pool asks what the builder answered.
+                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .address = self.certified_address, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .protocol_step = self.certified_protocol_step, .closure_entry_type = self.certified_closure_entry, .foreign_views = self.certified_foreign_views },
                 .implementation_selections = implementation_selections,
                 .closure_release = self.closure_release,
                 .tuple_decls = self.tuple_decls,

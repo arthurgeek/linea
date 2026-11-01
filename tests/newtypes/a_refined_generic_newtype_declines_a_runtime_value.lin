@@ -1,0 +1,26 @@
+// `Rating?(n)` builds a `Rating` from a value known only when the program
+// runs, and declines one outside the range. Its type arguments come from the
+// `Option` the context expects, as a plain construction's come from the
+// newtype it expects.
+type Rating[phantom T] = UInt8 where it in 1..=5
+
+struct Film {}
+
+fn parse(stars: UInt8) -> Option[Rating[Film]] {
+    Rating?(stars)
+}
+
+fn main() -> UInt8 {
+    let kept = match parse(4) {
+        Some(rating) => {
+            let Rating(stars) = rating
+            stars
+        },
+        None => 0,
+    }
+    let declined = match parse(9) {
+        Some(_) => 1,
+        None => 0,
+    }
+    kept - 4 + declined
+}

@@ -17207,12 +17207,26 @@ const Checker = struct {
         const c = self.ast.call(id);
         const template = self.type_of_decl.get(decl);
         // A generic newtype's arguments come from what the construction is
-        // expected to be: a phantom parameter appears in no operand, so the
-        // value alone cannot say which instantiation it builds.
+        // expected to be, or for `Name?(e)` from the `Option` it is expected
+        // to answer: a phantom parameter appears in no operand, so the value
+        // alone cannot say which instantiation it builds.
         const newtype = if (self.ast.declTypeParams(decl).len == 0) template else expected_instance: {
-            if (Expected.typeOf(expected)) |want| {
-                if (want != .poison and self.builder.view().declOfType(want) == decl and self.builder.view().instanceOf(want) != null)
+            const pool = self.builder.view();
+            if (Expected.typeOf(expected)) |written| {
+                var want = written;
+                if (self.ast.callFallible(id) and self.option_decl != null and want != .poison and
+                    pool.declOfType(want) == self.option_decl and pool.instanceOf(want) != null)
+                    want = self.builder.appliedTo(want)[0];
+                if (want != .poison and pool.declOfType(want) == decl and pool.instanceOf(want) != null)
                     break :expected_instance want;
+                // Another type is expected: the construction builds none of
+                // it, whatever its arguments, and is a mismatch.
+                if (want != .poison and self.builder.get(want) != .open_type and self.builder.get(want) != .parameter) {
+                    self.noteQualifier(c.callee);
+                    _ = self.record(c.callee, template);
+                    for (c.args) |a| _ = try self.check(a, null);
+                    return self.expect(id, template, expected);
+                }
             }
             self.noteQualifier(c.callee);
             _ = self.record(c.callee, template);
@@ -17222,7 +17236,7 @@ const Checker = struct {
                 id,
                 "the type arguments of `{s}` cannot be determined",
                 .{self.ast.tokenText(self.ast.declName(decl))},
-                "give the binding a type",
+                "say what it builds where the value goes, as with an annotation",
             );
         };
         // The callee names the type rather than a value, and every
@@ -17335,7 +17349,7 @@ const Checker = struct {
                 const fix = std.fmt.allocPrint(
                     self.gpa,
                     "make it fallible: `{s}?({s})`",
-                    .{ (try self.typeName(newtype)), spelling },
+                    .{ self.ast.exprText(c.callee), spelling },
                 ) catch return self.record(id, .poison);
                 return self.report(
                     .t_refine,
@@ -19596,6 +19610,7 @@ const Checker = struct {
         // What crosses is decided by the boundary and not by the direction, so
         // this is the routine `extern` asks; only the rule it is reported
         // under differs.
+        try self.refuseForeignAddress(d);
         try self.checkForeignSignature(d, .t_export);
     }
 
@@ -19796,26 +19811,25 @@ const Checker = struct {
         try self.checkForeignSignature(d, .t_extern);
     }
 
-    /// [T-RawAddress] at a declaration: an `extern` whose parameters, result
-    /// or callbacks name a `mem.address.Address` would hand C a number that
-    /// names a type, which C may keep where no type names it. A runtime
-    /// callback's function may take one, because the entry C calls is the
-    /// compiler's; the `extern` itself declares the `UInt64`.
+    /// [T-RawAddress] at a declaration: an `extern` or `export` whose
+    /// signature reaches a `mem.address.Address`, itself, through a newtype's
+    /// base or through a callback, would hand C a
+    /// number that names a type, or take one from it, and C may keep it where
+    /// no type names what the address holds. A runtime callback's function may
+    /// take one, because the entry C calls is the compiler's; the `extern`
+    /// itself declares the `UInt64`.
     fn refuseForeignAddress(self: *Checker, d: node.DeclId) std.mem.Allocator.Error!void {
         if (self.raw_accesses.address == .none) return;
-        const signature = self.checkedExternSignature(d) orelse return;
-        var names = self.addressOf(signature.result) != null;
+        const signature = switch (self.builder.get(self.decl_signatures.get(d))) {
+            .callable => |callable| callable,
+            else => return,
+        };
+        var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer seen.deinit(self.gpa);
+        var names = try self.reachesAddress(&seen, signature.result);
         for (self.builder.callableParams(signature)) |param| {
-            if (self.addressOf(param.ty) != null) names = true;
-            switch (self.builder.get(param.ty)) {
-                .callable => |callback| {
-                    if (self.addressOf(callback.result) != null) names = true;
-                    for (self.builder.callableParams(callback)) |inner| if (self.addressOf(inner.ty) != null) {
-                        names = true;
-                    };
-                },
-                else => {},
-            }
+            if (param.convention == .inout) continue;
+            if (try self.reachesAddress(&seen, param.ty)) names = true;
         }
         if (!names) return;
         try self.sink.addErrorFmt(
@@ -19826,6 +19840,29 @@ const Checker = struct {
             "`{s}` would hand C an address, which it may keep where no type names what the address holds",
             .{self.ast.tokenText(self.ast.declName(d))},
         );
+    }
+
+    /// Whether `t` is or wraps a `mem.address.Address` as C would see it:
+    /// what crosses is a scalar, a newtype over one, or a callback, so a
+    /// newtype's base and a callback's parameters and result are followed. A
+    /// context lent `inout` reaches C as an address of a value C never reads.
+    ///
+    /// **Bound:** each type reachable from `t` is entered once.
+    fn reachesAddress(self: *Checker, seen: *std.AutoHashMapUnmanaged(TypeId, void), t: TypeId) std.mem.Allocator.Error!bool {
+        if (t == .poison or (try seen.getOrPut(self.gpa, t)).found_existing) return false;
+        if (self.addressOf(t) != null) return true;
+        switch (self.builder.get(t)) {
+            .newtype => return self.reachesAddress(seen, try self.builder.baseOf(t)),
+            .callable => |callable| {
+                if (try self.reachesAddress(seen, callable.result)) return true;
+                for (self.builder.callableParams(callable)) |param| {
+                    if (param.convention == .inout) continue;
+                    if (try self.reachesAddress(seen, param.ty)) return true;
+                }
+                return false;
+            },
+            else => return false,
+        }
     }
 
     /// [T-RawAddress] at a use: the number in a `mem.address.Address` is read
@@ -19840,6 +19877,16 @@ const Checker = struct {
     fn checkRawAddresses(self: *Checker) std.mem.Allocator.Error!void {
         const raw_fn = self.raw_accesses.address_raw;
         if (raw_fn == .none) return;
+        // The two operations beside `Address` are held to the one signature
+        // each is for, once their signatures are checked.
+        for (self.program.declsOf(self.program.moduleOf(raw_fn))) |member| {
+            const named = self.ast.declName(member);
+            if (named == .none or self.ast.declTag(member) != .function or self.ast.memberOwner(member) != .none) continue;
+            const name = self.ast.tokenText(named);
+            const reads = std.mem.eql(u8, name, "raw");
+            if (!reads and !std.mem.eql(u8, name, "nowhere")) continue;
+            if (!try self.certifiedAddressOperation(member, reads)) self.reportAtToken(.t_borrow_contract, named, "the Address certificate requires `nowhere[T]() -> Address[T]` and `raw[T](at: Address[T]) -> UInt64`", "restore the signature, so neither turns a number into an address", null);
+        }
         var allowed: std.AutoHashMapUnmanaged(ExprId, void) = .empty;
         defer allowed.deinit(self.gpa);
         for (self.calls.items) |call| {
@@ -20079,6 +20126,21 @@ const Checker = struct {
         if (self.builder.view().declOfType(t) != self.raw_accesses.address) return null;
         const applied = self.builder.appliedTo(t);
         return if (applied.len == 1) applied[0] else null;
+    }
+
+    /// Whether `d` has the one signature its name allows: `raw[T](at:
+    /// Address[T]) -> UInt64` reads an address, and `nowhere[T]() ->
+    /// Address[T]` takes nothing to build one from.
+    fn certifiedAddressOperation(self: *Checker, d: DeclId, reads: bool) !bool {
+        const signature = switch (self.builder.get(self.decl_signatures.get(d))) {
+            .callable => |callable| callable,
+            else => return false,
+        };
+        if (self.ast.declTypeParams(d).len != 1) return false;
+        const element = self.param_types[d.index()][0];
+        const params = self.builder.callableParams(signature);
+        if (!reads) return params.len == 0 and self.addressOf(signature.result) == element;
+        return params.len == 1 and params[0].convention == .read and self.addressOf(params[0].ty) == element and signature.result == .u64;
     }
 
     /// `mem.address.Address[phantom T]` is an opaque, copyable newtype over
@@ -33350,6 +33412,11 @@ const Checker = struct {
             .field => !self.namesAGenericEnum(id),
             .call => blk: {
                 const callee = self.ast.withoutGroups(self.ast.call(id).callee);
+                // A generic newtype's construction takes its arguments from
+                // where it goes, as a contextual literal does.
+                if (resolve_mod.constructionOf(self.ast, self.res, id)) |decl| {
+                    if (self.ast.declTypeParams(decl).len != 0) break :blk false;
+                }
                 break :blk !(self.ast.exprTag(callee) == .variant_ref and self.ast.unaryOperand(callee) == ExprId.none);
             },
 
@@ -39672,6 +39739,31 @@ test "an address becomes a number only where the runtime is told what to do with
     try testing.expect(diagnosticSays(&sink, .t_raw_address, "`keep`"));
 }
 
+test "the operations beside an address keep the one signature each is for" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var sink = Sink.init(gpa);
+    const source: Source = .{ .path = "address.lin", .text =
+        \\@(opaque, copyable)
+        \\type Address[phantom T] = UInt64
+        \\fn nowhere[T](number: UInt64) -> Address[T] { Address(number) }
+        \\fn raw[T](at: Address[T]) -> UInt64 { let Address(number) = copy(at); number }
+        \\fn main() -> UInt8 {
+        \\    let _at: Address[UInt8] = nowhere(7)
+        \\    0
+        \\}
+    };
+    var interner: Interner = .empty;
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    var resolved = try resolveTree(gpa, &ast, &sink);
+    resolved.modules[0].name = "address";
+    resolved.modules[0].library = true;
+    _ = try typecheckTree(gpa, &resolved, &sink);
+    try testing.expect(diagnosticSays(&sink, .t_borrow_contract, "the Address certificate requires `nowhere[T]() -> Address[T]`"));
+}
+
 test "typed storage intrinsics reject a scalar replacement signature" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -40031,9 +40123,13 @@ test "borrow storage certificates require their declared representation and effe
     }
 }
 
-test "borrow storage certificates accept optional allocation and reject mismatched containment" {
+// The library's own `Storage`, whose `at` is a `mem.address.Address[T]` from a
+// module of its own, is the shape every compile certifies; a one-module
+// library has no address module, so each shape here is refused, and the first
+// for its `at` alone: a number names no element type.
+test "borrow storage certificates reject an untyped address and mismatched containment" {
     const cases = [_]struct { fields: []const u8, valid: bool }{
-        .{ .fields = "buffer: Option[Buffer[A]], allocator: A, at: UInt64, len: UInt64", .valid = true },
+        .{ .fields = "buffer: Option[Buffer[A]], allocator: A, at: UInt64, len: UInt64", .valid = false },
         .{ .fields = "buffer: _Other[Buffer[A]], allocator: A, at: UInt64, len: UInt64", .valid = false },
         .{ .fields = "buffer: Option[Buffer[UInt8]], allocator: A, at: UInt64, len: UInt64", .valid = false },
         .{ .fields = "buffer: Option[Buffer[A]], allocator: UInt8, at: UInt64, len: UInt64", .valid = false },

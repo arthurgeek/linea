@@ -76,7 +76,7 @@ it: a field of type `Address[T]` or `Storage[T, A]`.
 A runtime symbol's parameter that is the address of typed bytes is marked in
 `runtime_symbols.zig`. The marked parameters are where the runtime copies the
 bytes to another task before the call returns (`linea_chan_send`,
-`linea_owner_call`'s request, `linea_owner_done`), writes bytes another task
+`linea_owner_call`'s request, `linea_owner_answer`), writes bytes another task
 sent (`linea_chan_recv`, `linea_chan_recv_until`, `linea_owner_next`,
 `linea_owner_call`'s answer), or keeps them for a task it starts
 (`linea_task_start`, whose body crossing is held to [O-Cross] by the
@@ -97,8 +97,10 @@ holds the entry to the `extern`'s callback type with each newtype read as its
 base, so no source form turns a `UInt64` into an `Address`.
 
 `call_owner`'s answer stops travelling as a captured address. The job the
-owner runs hands its answer to `linea_owner_done`, which copies it into the
-answer bytes the caller named in `linea_owner_call`. A task's release callback
+owner runs hands its answer to `linea_owner_answer`, which copies it into the
+answer bytes the caller named in `linea_owner_call`; the owner calls
+`linea_owner_done` once the job is released, so a call still returns after
+everything the job captured is released. A task's release callback
 is given the address of the buffer kept after its body, so it takes an
 `Address[Buffer[A]]` rather than computing one from the body's.
 
@@ -123,15 +125,24 @@ number and its body's `Carried[H]`. Neither holds an `S`, so `Client[S]` is
   declaration added later is covered without anyone remembering it, because a
   `UInt64` cannot reach a slot.
 - Every runtime symbol that takes an address of typed bytes carries a mark.
+- What stays trusted to `std.mem`: which `T` an address of a buffer names
+  (`address_in` gives one for any `T`), that the storage a slot is reached
+  through is the one that owns its bytes, that a callback names the `T` the
+  address handed to it was made with, and that a closure's `at` is its
+  storage's. Each is reachable only from the library's raw layer, which no
+  other module can call, and an address a mistake there forges still names
+  the type its holder is counted for.
 - `std.mem`'s raw layer is written over `Address[T]`, and the slot primitives
-  lose their address and extent arguments. The runtime's `linea_task_start`,
-  `linea_owner_call` and `linea_owner_done` take the addresses they hand on.
+  lose their address and extent arguments. The runtime's `linea_task_start`
+  and `linea_owner_call` take the addresses they hand on, and
+  `linea_owner_answer` copies an answer apart from `linea_owner_done`.
 - [T-RawAddress] at a use binds only code that can name `address.raw`, which
   is internal to the standard library, so its cases are the checker's own; at
   a declaration it binds any module granted `extern`, and the corpus holds
   that case.
-- The soundness matrix gains cells that share a client of an owning task over
-  unshareable state while the state is read.
+- The soundness matrix meets a scalar's assignments with a closure lent
+  `inout` kept in a vector, whose type names it only through its storage, and
+  erased into a `mem.Closure`, whose type names it not at all.
 
 ## Alternatives considered
 

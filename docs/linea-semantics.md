@@ -369,11 +369,12 @@ describe, and `impl` contains only the member declarations listed in the
 grammar.
 
 A newtype uses its base's representation and inherits its base's settlement
-obligation. A generic newtype, `type Id[phantom T] = UInt64`, is instantiated as
-a generic struct is: its base is written with its arguments, and each
-instantiation is a distinct type with that base's representation. `opaque` restricts access to that representation to the declaring
-module. Its default policy is affine; an explicit copyable policy must satisfy
-[O-Universe], as for a struct or enum ([§4](#4-types)).
+obligation. A generic newtype, `type Id[phantom T] = UInt64`, is instantiated
+as a generic struct is: its base is written with its arguments, and each
+instantiation is a distinct type with that base's representation. `opaque`
+restricts access to that representation to the declaring module. Its default
+policy is affine; an explicit copyable policy must satisfy [O-Universe], as for
+a struct or enum ([§4](#4-types)).
 
 Explicit `read` on a function or lambda parameter is redundant and violates
 [S-Entry]: omitting the convention already means `read`. This includes trait
@@ -4484,8 +4485,8 @@ trait implementation settles cannot take an allocator parameter, so there the
 help offers `mem.SystemAllocator` alone.
 
 **[T-Phantom]** A type parameter absent from every struct field, enum variant,
-newtype base and trait signature must be declared `phantom`. It contributes to type identity
-without appearing in the stored representation. An unused-name spelling,
+newtype base and trait signature must be declared `phantom`. It contributes to
+type identity without appearing in the stored representation. An unused-name spelling,
 including a leading underscore, does not express this role. Conversely, a
 parameter that does occur in those positions cannot be `phantom`. Phantom
 parameters carry ordinary bounds, checked on their arguments
@@ -5578,8 +5579,9 @@ parameter unseeded correct.
 of it at once, because no read of it writes. A type is not Shareable when it is
 declared `@unshareable`, or when anything reachable through its fields, variant
 payloads, array elements, newtype base, closure environment, the referent of an
-observation, or the values an address, storage or slice names, is not: an
-observation lets whoever reads it read its referent. A type argument that names
+observation, the values an address, storage or slice names, what a
+`mem.Carried` carries, or the callable a `mem.ClosureEntry` stands for, is
+not: an observation lets whoever reads it read its referent. A type argument that names
 nothing the value holds, a phantom one such as a session's protocol, is not
 followed, so a `task.Client[S]` of an owning task is Shareable whatever `S` is:
 the state lives on the owning task's thread, and a client holds only a borrow
