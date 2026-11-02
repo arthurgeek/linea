@@ -1673,6 +1673,13 @@ pub fn build(b: *std.Build) void {
             .{ .file = "runtime/linea_rt_test.c", .flags = flags },
         });
     }
+    var busy_table_flags: std.ArrayList([]const u8) = .empty;
+    busy_table_flags.appendSlice(b.allocator, checked_flags.items) catch @panic("OOM");
+    busy_table_flags.append(b.allocator, "-Dmprotect=linea_test_mprotect") catch @panic("OOM");
+    native.add(native_runtime_step, "native-storage-busy-tests", &.{
+        .{ .file = "runtime/linea_rt.c", .flags = busy_table_flags.items },
+        .{ .file = "runtime/storage_busy_test.c", .flags = runtime_flags.items },
+    });
 
     const native_task_step = b.step("test-native-task", "Check native task threads, rendezvous sessions, joins, stack overflow reports and concurrent allocation");
     var refused_task_flags: std.ArrayList([]const u8) = .empty;

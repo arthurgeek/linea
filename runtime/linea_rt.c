@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 
 /* A sanitizer installs a fault handler of its own, which reports a stack
@@ -403,18 +404,26 @@ static pthread_mutex_t storage_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Set while a thread reads or changes the state above. A thread that holds
  * `storage_lock` also holds this flag, so threads wait for each other on the
- * mutex and never spin on the flag; the only thread that spins is a fault
- * handler, which cannot take a mutex, since no pthread mutex call is
- * async-signal-safe, and takes the flag alone with lock-free atomic
- * operations, which are. */
+ * mutex. A fault handler cannot take a mutex, since no pthread mutex call is
+ * async-signal-safe, so it takes the flag alone with lock-free atomic
+ * operations, which are; the mutex holder waits on the flag only while a
+ * fault handler is waiting for it. */
 static int table_busy = 0;
 
 /* Whether the calling thread holds `storage_lock`, so the fault handler does
  * not wait for a flag its own thread holds. */
 static __thread int holding_lock = 0;
 
+/* How many fault handlers are waiting for `table_busy`. A thread taking the
+ * flag on the allocator's path waits until none is, so a thread that takes
+ * and releases the table in a loop cannot keep a fault handler from it. */
+static int faults_waiting = 0;
+
 static void take_table(void) {
-    while (__atomic_exchange_n(&table_busy, 1, __ATOMIC_ACQUIRE) != 0) {
+    for (;;) {
+        while (__atomic_load_n(&faults_waiting, __ATOMIC_ACQUIRE) != 0) {
+        }
+        if (__atomic_exchange_n(&table_busy, 1, __ATOMIC_ACQUIRE) == 0) return;
     }
 }
 
@@ -487,16 +496,46 @@ static void check_extent_locked(unsigned long at, unsigned long len) {
     if (at < e->at || last - e->at >= e->size) fail(storage_reports[reached_outside]);
 }
 
+/* How many times the fault handler tries to take `table_busy`, a millisecond
+ * apart, before it reports the fault without reading the table: about one
+ * second. */
+static const int fault_table_attempts = 1000;
+
+/* What the fault handler reports when it could not take `table_busy` in
+ * time. It says that the fault is not explained, so it is never read as one
+ * of the storage reports above. */
+static const char *const storage_busy_report =
+    "linea: a memory access faulted while storage checking was busy, so what it reached is not known\n";
+
+/* Takes `table_busy` for the fault handler, waiting at most
+ * `fault_table_attempts` milliseconds, and counts itself in `faults_waiting`
+ * meanwhile so the allocator's path gives way. Answers whether it took it.
+ * Waits with `nanosleep`, which is async-signal-safe. */
+static int take_table_in_time(void) {
+    (void)__atomic_add_fetch(&faults_waiting, 1, __ATOMIC_ACQ_REL);
+    int taken = 0;
+    for (int attempt = 0; attempt < fault_table_attempts && !taken; attempt += 1) {
+        taken = __atomic_exchange_n(&table_busy, 1, __ATOMIC_ACQUIRE) == 0;
+        if (!taken) {
+            struct timespec pause_for = {0, 1000000};
+            (void)nanosleep(&pause_for, 0);
+        }
+    }
+    (void)__atomic_sub_fetch(&faults_waiting, 1, __ATOMIC_ACQ_REL);
+    return taken;
+}
+
 /* Explains a fault at `address` where it lies inside a region: an abort
  * naming what the access reached. Called by the fault handler on the
- * faulting thread, which waits for `table_busy` unless that thread already
- * holds it, as it does when the fault is inside this allocator. A thread
- * holding the flag is changing the table and releases it without waiting on
- * the faulting one, unless the fault is inside the C allocator while that
- * thread waits for the C allocator's own lock. */
+ * faulting thread, which takes `table_busy` unless that thread already
+ * holds it, as it does when the fault is inside this allocator. The thread
+ * holding the flag may never release it: it may be stopped inside the C
+ * allocator, waiting for a lock the faulting thread holds. So the handler
+ * waits a bounded time and then aborts with `storage_busy_report`, so that a
+ * failure is always reported. */
 static void storage_fault(unsigned long address) {
     const int held = holding_lock;
-    if (!held) take_table();
+    if (!held && !take_table_in_time()) fail(storage_busy_report);
     const struct region *r = region_holding(address);
     const char *message = r == 0 ? 0 : verdict(r, address);
     if (message != 0) fail(message);
