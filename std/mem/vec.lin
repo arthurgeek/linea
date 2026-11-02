@@ -829,13 +829,22 @@ impl[T, A: Allocator] Vec[T, A] {
         .Some(taken)
     }
 
-    // Split the vector at `at` into two disjoint views lent to `body`.
+    // Split the vector at `at` and lend `body` the two sides as views: `left`
+    // holds the first `at` elements and `right` the rest. An `at` past the
+    // vector's length traps.
     pub fn split_inout[F: inout fn(inout left: View[T], inout right: View[T])](inout self: Self, at: UInt64, inout body: F) {
         if at > self.len {
             panic("split_inout: split index out of bounds")
         }
+        // A vector that never allocated has no buffer, and both sides of it
+        // are empty and start where it does.
+        let shape: SlotType[T] = .Type
+        let start: address.Address[T] = match read self.storage.buffer {
+            Some(buffer) => address_in(buffer, at * slot_stride(shape)),
+            None => copy(self.storage.at),
+        }
         var left: View[T] = .{ at = copy(self.storage.at), len = at, carried = .{} }
-        var right: View[T] = .{ at = copy(self.storage.at), len = self.len - at, carried = .{} }
+        var right: View[T] = .{ at = start, len = self.len - at, carried = .{} }
         &body(&left, &right)
     }
 
@@ -852,6 +861,22 @@ impl[T, A: Allocator] Vec[T, A] {
         }
         &values.split_inout(4, &check)
         testing.assert(verified, "split_inout callback did not run")?
+    }
+
+    test fn split_inout_lends_the_elements_on_each_side_of_the_split() {
+        defer var values: Vec[UInt64] = Vec.new()
+        for i in 0..6 {
+            &values.push(i).unwrap()
+        }
+        var firsts = (UInt64(99), UInt64(99))
+        var mark = inout [inout firsts] |inout left: View[UInt64], inout right: View[UInt64]| {
+            firsts = (left[0], right[0])
+            left[0] = 10
+            right[1] = 30
+        }
+        &values.split_inout(2, &mark)
+        testing.assert_eq(firsts, (UInt64(0), UInt64(2)), "a view did not start where its side of the split starts")?
+        testing.assert_eq(values.as_slice(), [UInt64(10), 1, 2, 30, 4, 5].as_slice(), "a write through a view reached the wrong element")?
     }
 
     test fn vec_pop_takes_elements_last_first_and_keeps_capacity() {

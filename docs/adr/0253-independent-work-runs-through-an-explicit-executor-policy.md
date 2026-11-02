@@ -124,6 +124,10 @@ its next connection, so a task takes a connection only when it is free and a
 slow client holds up no other. The serving tasks are started as a balanced
 tree, half of each share on a new task, so starting `n` of them takes a depth
 of the logarithm of `n`, and every one is joined before `serve` returns.
+Each started task sends back what its share answered, so a serving task that
+cannot take its buffers makes `serve` answer `ServeError.Memory` whichever
+task it was. A task that cannot be made leaves its share unstarted: fewer
+tasks serve, and the calling thread still serves its own share.
 
 `http.listen_and_serve_with(address, make_handler, state)` keeps `state` in an
 owning task, gives `make_handler` a client of it for each serving task, and

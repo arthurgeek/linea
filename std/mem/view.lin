@@ -1,8 +1,9 @@
 import std.mem
 import std.mem.address
 
-// A View observes a mutable contiguous extent of elements without owning its storage.
-// It is neither Copyable nor Owned, so it cannot be sent across tasks or escaped.
+// A View is a writable run of `len` elements, starting at `at`, that another
+// value owns, such as one side of a vector `Vec.split_inout` lends. It is
+// neither Copyable nor Owned, so it cannot be sent across tasks or escaped.
 @(opaque)
 struct View[T] {
     at: address.Address[T],
@@ -17,5 +18,21 @@ impl[T] View[T] {
 
     pub fn is_empty(self: Self) -> Bool {
         self.len == 0
+    }
+}
+
+// Name element `i` of `owner` in place, checking that `i` is below its length.
+// The compiler replaces this declaration.
+extern fn view_place[T](owner: View[T], i: UInt64) -> T where carries(owner)
+
+// Indexing a view names element `i` in place, to read or to assign; an index
+// past the end traps. Only an `Owned` element is reached, since a value
+// assigned through a view is kept by the vector the view was lent from, and
+// what that value borrows would not be counted against the vector.
+impl[T: Owned] Index[UInt64] for View[T] {
+    type Elem = T
+
+    proj at(inout self: Self, i: UInt64) -> T where carries(self) {
+        view_place(self, i)
     }
 }

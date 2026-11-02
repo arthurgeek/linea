@@ -564,6 +564,7 @@ The library tests itself.
   ok    http.each_limit_answers_its_status_at_one_past_the_bound
   ok    http.each_request_gets_a_time_ordered_uuid
   ok    http.each_task_routes_path_parameters_through_its_own_router
+  ok    http.either_refused_keeps_a_refusal_from_either_share
   ok    http.every_connection_is_answered_503_while_the_parent_refuses_the_arena
   ok    http.every_exchange_returns_its_arena_to_the_parent
   ok    http.every_shape_releases_its_extractors_last_first_and_stops_at_a_refusal
@@ -1114,6 +1115,7 @@ The library tests itself.
   ok    mem.sort_orders_text_and_derived_orders
   ok    mem.sorting_allocates_nothing
   ok    mem.sorting_an_empty_or_one_element_vector_compares_nothing
+  ok    mem.split_inout_lends_the_elements_on_each_side_of_the_split
   ok    mem.store_byte_traps_past_the_end
   ok    mem.store_traps_at_a_misaligned_offset
   ok    mem.store_traps_past_the_end
@@ -1197,6 +1199,7 @@ The library tests itself.
   ok    net.listen_queues_the_default_backlog_or_the_one_given
   ok    net.loopback_names_this_host
   ok    net.next_asks_the_listener_nothing_until_a_retry_has_waited_its_pause
+  ok    net.on_tasks_answers_what_every_task_answered
   ok    net.serve_runs_the_handler_once_for_each_connection_and_returns
   ok    net.serve_workers_handles_connections_concurrently
   ok    net.serve_workers_sequential_policy
@@ -1501,4 +1504,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1498 passed, 0 failed
+  1501 passed, 0 failed

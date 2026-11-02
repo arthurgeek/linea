@@ -104,6 +104,11 @@ pub const RawAccesses = struct {
     buffer_span: DeclId = .none,
     subspan: DeclId = .none,
     slice_place: DeclId = .none,
+    /// `mem.View`, a writable view of a contiguous run of elements another
+    /// value owns, and `view_place`, which names one of its elements in place
+    /// as `slice_place` does a slice's.
+    view: DeclId = .none,
+    view_place: DeclId = .none,
     /// `argument_span` and `environment_span` view text the process was
     /// started with; each lowers to the runtime's count, address and length
     /// for its source, which `processText` names.
@@ -178,6 +183,8 @@ pub const RawAccesses = struct {
             .buffer_span = rawAccessDecl(program, ast, "buffer_span", 3),
             .subspan = rawAccessDecl(program, ast, "slice_subspan", 3),
             .slice_place = rawAccessDecl(program, ast, "slice_place", 2),
+            .view = program.libraryDeclIn("mem", "View") orelse .none,
+            .view_place = rawAccessDecl(program, ast, "view_place", 2),
             .argument_span = rawAccessDecl(program, ast, "argument_span", 1),
             .environment_span = rawAccessDecl(program, ast, "environment_span", 1),
             .stride = rawAccessDecl(program, ast, "slot_stride", 1),
@@ -304,7 +311,7 @@ pub const RawAccesses = struct {
     }
 
     pub fn typed(self: RawAccesses, d: DeclId) bool {
-        return d != DeclId.none and (d == self.stride or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.address_in or self.processText(d) != null or self.erasure(d));
+        return d != DeclId.none and (d == self.stride or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.view_place or d == self.address_in or self.processText(d) != null or self.erasure(d));
     }
 
     /// The runtime declarations a process-text span reads: how many entries

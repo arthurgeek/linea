@@ -203,7 +203,8 @@ struct Serving[P, M] {
 // allows. The listener is kept by an owning task, which each serving task asks
 // for its next connection, so a task takes a connection only once it is free
 // and a slow client holds up no other. When the owning task cannot be made,
-// this thread serves alone.
+// this thread serves alone. A serving task whose 503 buffer `parent` refuses
+// makes serving end with `Memory`, whichever task it was.
 fn serve_made[L: net.Acceptor + io.Close + Owned + Shareable, P: Allocator + Shareable, H: Handler[(), P] + Observer + Release, M: Shareable + Copyable + fn() -> H](sink listener: L, parent: P, make_handler: M, limits: Limits, policy: task.Policy, announce: Option[net.Address]) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
     let workers = match copy(policy) {
         Sequential => 1,
@@ -243,7 +244,7 @@ fn serve_made[L: net.Acceptor + io.Close + Owned + Shareable, P: Allocator + Sha
         None => {},
     }
     let serving: Serving[P, M] = .{ parent = copy(parent), make_handler = copy(make_handler), limits = copy(limits) }
-    let refused = net.on_tasks(workers, owner.client(), serving, serve_worker[L, P, H, M])
+    let refused = net.on_tasks(workers, owner.client(), serving, serve_worker[L, P, H, M], either_refused)
     let finished: Result[(), ServeError] = match owner.close().finish() {
         Ok(_) => .Ok(()),
         Err(error) => .Err(ServeError.of(error)),
@@ -252,6 +253,21 @@ fn serve_made[L: net.Acceptor + io.Close + Owned + Shareable, P: Allocator + Sha
         Some(reason) => .Err(.Memory(reason)),
         None => finished,
     }
+}
+
+// What two shares of serving tasks answered together: a refusal when either
+// was refused, the first share's when both were.
+fn either_refused(sink first: Option[mem.Oom], sink second: Option[mem.Oom]) -> Option[mem.Oom] {
+    match first {
+        Some(reason) => .Some(reason),
+        None => second,
+    }
+}
+
+test fn either_refused_keeps_a_refusal_from_either_share() {
+    testing.assert_eq(either_refused(.None, .Some(.Exhausted)), Option.Some(mem.Oom.Exhausted), "the second share's refusal was dropped")?
+    testing.assert_eq(either_refused(.Some(.Exhausted), .None), Option.Some(mem.Oom.Exhausted), "the first share's refusal was dropped")?
+    testing.assert(either_refused(.None, .None).is_none(), "a refusal appeared from nowhere")?
 }
 
 // One serving task: build a handler, then serve each connection the

@@ -5289,7 +5289,7 @@ const Lowerer = struct {
                 @panic("compiler defect: an erased closure's generated body was never discovered");
             return self.b.addFunctionAddr(self.block, ty, span, FunctionId.at(generated.index()));
         }
-        if (d == self.library.raw.span or d == self.library.raw.buffer_span or d == self.library.raw.subspan or d == self.library.raw.slice_place or self.library.raw.processText(d) != null)
+        if (d == self.library.raw.span or d == self.library.raw.buffer_span or d == self.library.raw.subspan or d == self.library.raw.slice_place or d == self.library.raw.view_place or self.library.raw.processText(d) != null)
             return self.spanIntrinsic(d, ty, settled, args.items, span);
         if (d == self.library.raw.take or d == self.library.raw.put or d == self.library.raw.place) {
             const element = settled[0];
@@ -5403,7 +5403,7 @@ const Lowerer = struct {
         const physical_len = try self.fieldValue(owner, owner_ty, "len", span);
         const live = if (d == raw.span) args[1] else physical_len;
         const start = if (d == raw.span) args[2] else args[1];
-        if (d == raw.slice_place) {
+        if (d == raw.slice_place or d == raw.view_place) {
             const fits = try self.emit(.cmp_lt, .bool_, span, .{ .binary = .{ .lhs = start, .rhs = live } });
             _ = try self.check(fits, .bool_, span, .index_out_of_bounds);
             const extent = try self.emit(.mul, .u64, span, .{ .binary = .{ .lhs = live, .rhs = stride } });

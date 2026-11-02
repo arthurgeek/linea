@@ -234,9 +234,13 @@ pub fn serve_workers[L: Acceptor + io.Close + Owned + Shareable, H: Owned + Shar
             return serve(state.close_alone(), &alone, connections)
         },
     }
-    on_tasks(workers, owner.client(), handler, serve_connections[L, H])
+    on_tasks(workers, owner.client(), handler, serve_connections[L, H], both_served)
     owner.close().finish()
 }
+
+// What two shares of `serve_workers`' tasks answered together: nothing, since
+// a worker reports each failure to its handler.
+fn both_served(sink _first: (), sink _second: ()) {}
 
 // One worker of `serve_workers`: hand each connection the listener's owning
 // task gives out to `handler`, until it says to stop.
@@ -376,33 +380,65 @@ impl[L: Acceptor + io.Close] Accepting[L] {
     }
 }
 
-// Run `work(context, acceptor)` on `count` tasks: half of them are started on
-// a new task, which divides them again, and this thread runs the rest, so
-// starting them takes a depth of the logarithm of `count`. Every task started
-// is joined before this returns. A task that cannot be made leaves its share
-// to this thread. It answers what this thread's own `work` answered; what the
-// other tasks answer is dropped.
-internal fn on_tasks[L: Acceptor + Owned + Shareable, C: Shareable + Copyable, R: Owned + Discardable, W: Shareable + Copyable + fn(context: C, acceptor: task.Client[Accepting[L]]) -> R](count: UInt64, acceptor: task.Client[Accepting[L]], context: C, work: W) -> R {
+// Run `work(context, acceptor)` on `count` tasks and answer what they
+// answered, joined pairwise by `combine`: half of them are started on a new
+// task, which divides them again and sends back what its share answered, and
+// this thread runs the rest, so starting them takes a depth of the logarithm
+// of `count`. Every task started is joined before this returns. When a task
+// cannot be made, the share it would have run is not run and this thread
+// runs its own share alone, so fewer than `count` tasks run, but at least
+// one does.
+internal fn on_tasks[L: Acceptor + Owned + Shareable, C: Shareable + Copyable, R: Owned, W: Shareable + Copyable + fn(context: C, acceptor: task.Client[Accepting[L]]) -> R, J: Shareable + Copyable + fn(sink first: R, sink second: R) -> R](count: UInt64, acceptor: task.Client[Accepting[L]], context: C, work: W, combine: J) -> R {
     if count <= 1 {
         return work(context, acceptor)
     }
     let half = count / 2
-    let body = sink [half, sink acceptor = copy(acceptor), sink context = copy(context), sink work = copy(work)] |sink me: session.Chan[session.End]| {
-        let _answered = on_tasks[L, C, R, W](half, acceptor, context, work)
-        me.close()
+    let body = sink [half, sink acceptor = copy(acceptor), sink context = copy(context), sink work = copy(work), sink combine = copy(combine)] |sink me: session.Chan[session.Send[R, session.End]]| {
+        me.send(on_tasks[L, C, R, W, J](half, acceptor, context, work, combine)).close()
     }
     match task.prepare(body) {
         Ok(slot) => {
             let started = slot.start()
-            let answered = on_tasks[L, C, R, W](count - half, acceptor, context, work)
-            started.close()
-            answered
+            let mine = on_tasks[L, C, R, W, J](count - half, acceptor, context, work, combine)
+            let (theirs, done) = started.recv()
+            done.close()
+            combine(theirs, mine)
         },
         Err(unstarted) => {
             let Unstarted { body: _, reason: _ } = unstarted
-            on_tasks[L, C, R, W](count - half, acceptor, context, work)
+            on_tasks[L, C, R, W, J](count - half, acceptor, context, work, combine)
         },
     }
+}
+
+// `take_ticket` numbers the tasks that call it, one to however many there are.
+fn take_ticket[L: Acceptor + Owned + Shareable](_context: (), acceptor: task.Client[Accepting[L]]) -> UInt64 {
+    acceptor.call(
+        |inout accepting: Accepting[L]| {
+            accepting.served += 1
+            accepting.served
+        },
+    )
+}
+
+fn add_tickets(sink first: UInt64, sink second: UInt64) -> UInt64 {
+    first + second
+}
+
+// Each of four tasks takes a ticket and answers it, so the answers summed are
+// 1 + 2 + 3 + 4 whichever task took which.
+test fn on_tasks_answers_what_every_task_answered() {
+    let listener = listen(loopback(0)).unwrap()
+    let owner = match task.own(Accepting.open(listener, limit: .None)) {
+        Ok(owner) => owner,
+        Err(Unowned { state, reason: _ }) => {
+            state.finish().unwrap()
+            panic("the listener's owning task could not be made")
+        },
+    }
+    let total = on_tasks(4, owner.client(), (), take_ticket[Listener], add_tickets)
+    owner.close().finish().unwrap()
+    testing.assert_eq(total, UInt64(10), "a task's answer was dropped")?
 }
 
 test fn serve_workers_handles_connections_concurrently() {

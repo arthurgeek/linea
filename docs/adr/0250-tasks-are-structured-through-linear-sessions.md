@@ -648,7 +648,13 @@ pub fn split_inout[F: inout fn(inout left: mem.View[T], inout right: mem.View[T]
 
 `mem.View[T]` is a trusted writable view, written over raw access as
 `mem.Slice` is. `at` lies in `0..=len`; a larger `at` is the same trap as an
-index out of range. The two views cover the vector without overlap.
+index out of range. The two views cover the vector without overlap: `left`
+starts at the vector's first element and `right` at element `at`. Indexing a
+view names one of its elements in place, to read or to assign, through the
+compiler's `view_place`, which checks the index against the view's length; it
+is offered for `Owned` elements only, since a value assigned through a view is
+kept by the vector, and what such a value borrowed would not be counted
+against the vector.
 
 Two exclusive lends of disjoint parts of one owner are represented as two
 distinct `inout` parameters of the callback. The vector itself is lent `inout`

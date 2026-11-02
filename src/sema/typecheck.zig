@@ -20290,6 +20290,21 @@ const Checker = struct {
             }
             if (!valid) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Storage certificate requires private move-only typed buffer containment", "declare Storage[T, A] with buffer: Option[Buffer[A]], allocator: A, at: address.Address[T], and len: UInt64 fields", null);
         }
+        if (raw.view != .none) {
+            // `view_place` reads a view's address and length and trusts that
+            // the elements between them are live, so only the library's own
+            // module builds one: it is opaque, and it cannot be copied, so two
+            // writers of one element never both hold it.
+            const d = raw.view;
+            const ty = declarations.get(d);
+            const valid = self.ast.declTag(d) == .struct_ and
+                self.ast.declVisibility(d) == .opaque_ and self.ast.declOwnershipPolicy(d) != .copyable and
+                self.ast.declTypeParams(d).len == 1 and self.builder.fieldCount(ty) == 3 and
+                std.mem.eql(u8, self.builder.fieldName(ty, 0), "at") and
+                self.addressOf(try self.builder.fieldType(ty, 0)) == self.param_types[d.index()][0] and
+                std.mem.eql(u8, self.builder.fieldName(ty, 1), "len") and (try self.builder.fieldType(ty, 1)) == .u64;
+            if (!valid) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the View certificate requires an opaque move-only address-and-length descriptor", "declare View[T] with at: address.Address[T] and len: UInt64 fields, then the carried dependencies", null);
+        }
         if (raw.address != .none) try self.checkAddressCertificate(declarations, raw.address);
         if (raw.errno != .none) {
             const d = raw.errno;
@@ -20393,7 +20408,7 @@ const Checker = struct {
         if (self.raw_accesses.erasure(d)) return self.validErasureSignature(d);
         if (!self.validStorageEffects(d)) return false;
         const raw = self.raw_accesses;
-        if (d == raw.span or d == raw.buffer_span or d == raw.subspan or d == raw.slice_place or raw.processText(d) != null) return self.validSpanSignature(d);
+        if (d == raw.span or d == raw.buffer_span or d == raw.subspan or d == raw.slice_place or d == raw.view_place or raw.processText(d) != null) return self.validSpanSignature(d);
         const count: usize = if (d == raw.stride) 1 else 2;
         const tps = self.ast.declTypeParams(d);
         if (tps.len != count or self.ast.declVisibility(d) != .private) return false;
@@ -20475,7 +20490,7 @@ const Checker = struct {
         for (ps) |param| if (param.convention != .read or param.default != .none) return false;
         const element = if (d == raw.buffer_span or process_text) TypeId.u8 else self.param_types[d.index()][0];
         const result = try self.declaredResultType(d);
-        if (d == raw.slice_place) {
+        if (d == raw.slice_place or d == raw.view_place) {
             if (result != element) return false;
         } else {
             const result_args = self.builder.appliedTo(result);
@@ -20484,7 +20499,8 @@ const Checker = struct {
         if (process_text) return try self.declaredParamType(d, 0) == .u64;
         const owner = try self.declaredParamType(d, 0);
         const owner_args = self.builder.appliedTo(owner);
-        const owner_decl = if (d == raw.span) raw.storage else if (d == raw.buffer_span) self.program.libraryDeclIn("mem", "Buffer") orelse return false else raw.slice;
+        const owner_decl = if (d == raw.span) raw.storage else if (d == raw.buffer_span) self.program.libraryDeclIn("mem", "Buffer") orelse return false else if (d == raw.view_place) raw.view else raw.slice;
+        if (owner_decl == .none) return false;
         if (self.builder.view().declOfType(owner) != owner_decl) return false;
         if (d == raw.span) {
             if (owner_args.len != 2 or owner_args[0] != element or owner_args[1] != self.param_types[d.index()][1]) return false;
@@ -21356,7 +21372,7 @@ const Checker = struct {
             );
         }
 
-        if (self.res.declaredBy(target) == self.raw_accesses.place or self.res.declaredBy(target) == self.raw_accesses.slice_place) {
+        if (self.res.declaredBy(target) == self.raw_accesses.place or self.res.declaredBy(target) == self.raw_accesses.slice_place or self.res.declaredBy(target) == self.raw_accesses.view_place) {
             const body = if (self.generic != .none) self.ast.declBody(self.generic) else ExprId.none;
             const permitted = self.generic != .none and self.ast.declTag(self.generic) == .projection and
                 body != .none and self.ast.exprTag(body) == .block and self.ast.withoutGroups(self.ast.blockOf(body).tail) == id;
@@ -30656,7 +30672,7 @@ const Checker = struct {
         if (self.ast.exprTag(id) != .call) return false;
         const target = self.res.targetOf(self.ast.call(id).callee);
         return target != .none and self.res.kindOf(target) == .function and
-            (self.res.declaredBy(target) == self.raw_accesses.place or self.res.declaredBy(target) == self.raw_accesses.slice_place);
+            (self.res.declaredBy(target) == self.raw_accesses.place or self.res.declaredBy(target) == self.raw_accesses.slice_place or self.res.declaredBy(target) == self.raw_accesses.view_place);
     }
 
     /// The first thing inside an expression that runs code or chooses a path,
@@ -40183,6 +40199,10 @@ test "borrow storage certificates require their declared representation and effe
         \\struct Buffer[phantom A] { at: UInt64, len: UInt64, allocated: UInt64 }
         \\@linear
         \\struct Storage[phantom T, phantom A] { bytes: UInt64 }
+        \\fn main() -> UInt8 { 0 }
+        ,
+        \\@(opaque, copyable)
+        \\struct View[phantom T] { at: UInt64, len: UInt64, carried: UInt64 }
         \\fn main() -> UInt8 { 0 }
     };
     for (cases) |text| {
