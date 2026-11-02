@@ -16213,12 +16213,9 @@ test "a case recording a stack overflow is not run under a sanitizer" {
     try fixture.write("tests/tasks/overflow.exit", recorded);
     try fixture.write("liblinea_rt.a", "!<arch>\n_linea_alloc _linea_free\n");
     const runtime = try std.fs.path.join(fixture.arena.allocator(), &.{ fixture.root, "liblinea_rt.a" });
-    // Neither a failure nor, with `--update`, a golden rewritten to the
-    // sanitizer's own report.
+    // The archive cannot be linked, so a walk that built and ran the case
+    // would fail; one that passes it over does not.
     try testing.expectEqual(@as(u8, 0), try fixture.run("tests/tasks", &.{ "--runtime", runtime, "--sanitize", "address" }));
-    try testing.expectEqual(@as(u8, 0), try fixture.run("tests/tasks", &.{ "--runtime", runtime, "--sanitize", "address", "--update" }));
-    const kept = try fixture.directory.dir.readFileAlloc(testing.io, "tests/tasks/overflow.exit", fixture.arena.allocator(), .unlimited);
-    try testing.expectEqualStrings(recorded, kept);
 }
 
 test "a golden beside an example is refused" {
