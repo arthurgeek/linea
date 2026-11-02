@@ -763,6 +763,9 @@ static void storage_fault(unsigned long address) {
  * that lock as on any lock a vanished thread held. */
 static void forget_other_threads(void) {
     __atomic_store_n(&faults_waiting, 0, __ATOMIC_RELEASE);
+#if defined(__APPLE__) && !defined(LINEA_SANITIZED)
+    for (int i = 0; i < repeated_fault_slots; i += 1) __atomic_store_n(&repeated_faults[i].busy, 0, __ATOMIC_RELEASE);
+#endif
     if (__atomic_load_n(&table_owned, __ATOMIC_ACQUIRE) == 0) release_table();
 }
 

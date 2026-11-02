@@ -652,7 +652,12 @@ int main(void) {
     ends_by_memory_fault(host_resethand_handler_ends);
     exits_cleanly(host_repairs_in_two_steps);
     exits_cleanly(host_polls);
+    /* Only macOS hides `SA_RESETHAND`, so only there does the runtime end a
+     * fault that its host's handler leaves unrepaired; elsewhere the kernel
+     * repeats it as it would without the runtime. */
+#if defined(__APPLE__)
     ends_by_memory_fault(unrepaired_faults_on_many_threads);
+#endif
     exits_cleanly(a_tiny_signal_stack_is_refused);
 #if !defined(LINEA_SANITIZED)
     ends_by_fault(ignored_fault_ends_the_process);

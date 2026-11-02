@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "io.h"
+#include "pipe_signal.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -84,29 +85,15 @@ long linea_read_some(int fd, unsigned long at, unsigned long len) {
 
 #if defined(__APPLE__)
 /* Writes without raising SIGPIPE, answering the count or a negated errno.
- *
  * macOS raises the SIGPIPE of a write to a pipe or socket with no reader on
  * the process, which hands it to any thread that does not block it, so
  * blocking it on the writing thread, as on Linux, does not keep it from
- * ending the process. So the write raises nothing: the open file gets
- * `F_SETNOSIGPIPE` before the write, as `pipe_signal.h` describes, and keeps
- * it. A socket whose peer has gone refuses the setting with EINVAL and is
- * written with `send` and `MSG_NOSIGNAL` instead. Once the setting is in
- * place the cost is one `fcntl` per write. */
+ * ending the process; `write_without_pipe_signal` keeps the write from
+ * raising it at all. */
 static long write_quietly(int fd, const void *bytes, size_t len) {
-    const int set = fcntl(fd, F_GETNOSIGPIPE);
-    if (set < 0) return -(long)errno;
     ssize_t written;
-    if (set == 0 && fcntl(fd, F_SETNOSIGPIPE, 1) != 0) {
-        if (errno != EINVAL) return -(long)errno;
-        do {
-            written = send(fd, bytes, len, MSG_NOSIGNAL);
-        } while (written < 0 && errno == EINTR);
-        if (written < 0 && errno == ENOTSOCK) return -(long)EINVAL;
-        return written < 0 ? -(long)errno : (long)written;
-    }
     do {
-        written = write(fd, bytes, len);
+        written = write_without_pipe_signal(fd, bytes, len);
     } while (written < 0 && errno == EINTR);
     return written < 0 ? -(long)errno : (long)written;
 }

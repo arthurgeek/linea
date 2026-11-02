@@ -31,17 +31,34 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if defined(__APPLE__)
+/* One write of the `len` bytes at `bytes` to `fd` that raises no SIGPIPE,
+ * answering as `write` does. The open file gets `F_SETNOSIGPIPE` before the
+ * write and keeps it; a socket whose peer has gone refuses the setting with
+ * EINVAL and is written with `send` and `MSG_NOSIGNAL` instead. Uses only
+ * async-signal-safe calls. */
+static inline ssize_t write_without_pipe_signal(int fd, const void *bytes, size_t len) {
+    const int set = fcntl(fd, F_GETNOSIGPIPE);
+    if (set < 0) return -1;
+    if (set == 0 && fcntl(fd, F_SETNOSIGPIPE, 1) != 0) {
+        if (errno != EINVAL) return -1;
+        const ssize_t sent = send(fd, bytes, len, MSG_NOSIGNAL);
+        if (sent < 0 && errno == ENOTSOCK) errno = EINVAL;
+        return sent;
+    }
+    return write(fd, bytes, len);
+}
+#endif
+
 /* Writes the `len` bytes at `bytes` to standard error for a failure report,
  * without raising SIGPIPE, so a process whose standard error has no reader
  * still ends by the abort that follows the report. A write that fails ends
  * the report: nothing better is left to do on the way to an abort. Uses only
- * async-signal-safe calls (`fcntl`, `send` and `write` on macOS;
+ * async-signal-safe calls (`write_without_pipe_signal` on macOS;
  * `sigemptyset`, `sigaddset`, `pthread_sigmask` and `write` elsewhere), since
  * the fault handler reports through it. */
 static inline void report_bytes(const char *bytes, size_t len) {
-#if defined(__APPLE__)
-    const int refused = fcntl(2, F_GETNOSIGPIPE) == 0 && fcntl(2, F_SETNOSIGPIPE, 1) != 0;
-#else
+#if !defined(__APPLE__)
     sigset_t pipe_signal;
     if (sigemptyset(&pipe_signal) == 0 && sigaddset(&pipe_signal, SIGPIPE) == 0) {
         (void)pthread_sigmask(SIG_BLOCK, &pipe_signal, 0);
@@ -49,7 +66,7 @@ static inline void report_bytes(const char *bytes, size_t len) {
 #endif
     while (len > 0) {
 #if defined(__APPLE__)
-        const ssize_t written = refused ? send(2, bytes, len, MSG_NOSIGNAL) : write(2, bytes, len);
+        const ssize_t written = write_without_pipe_signal(2, bytes, len);
 #else
         const ssize_t written = write(2, bytes, len);
 #endif
