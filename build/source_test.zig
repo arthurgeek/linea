@@ -1114,8 +1114,21 @@ const Declared = struct {
     result: runtime_symbols.Scalar,
 };
 
-/// The function pointer types the runtime's headers declare, by name.
-const Typedefs = std.StringHashMapUnmanaged(*const runtime_symbols.Callback);
+/// The function pointer types the runtime's headers declare, by name, and
+/// the names of those declared inside a conditional block, whose shape
+/// depends on a branch these gates do not evaluate.
+const Typedefs = struct {
+    shapes: std.StringHashMapUnmanaged(*const runtime_symbols.Callback) = .empty,
+    conditional: std.StringHashMapUnmanaged(void) = .empty,
+
+    const empty: Typedefs = .{};
+
+    /// Whether `written` names a callback typedef declared inside a
+    /// conditional block.
+    fn isConditional(self: *const Typedefs, written: []const u8) bool {
+        return self.conditional.contains(std.mem.trim(u8, written, " \t\n"));
+    }
+};
 
 /// `text` with every comment replaced by spaces and its newlines kept, so a
 /// declaration written inside a comment is not read as one. String and
@@ -1182,8 +1195,9 @@ const Conditionals = struct {
 /// Every `typedef R (*name)(P, …);` written at the start of a line in `text`,
 /// outside comments, read into the callback shape a table parameter names. A
 /// typedef whose result or parameters this cannot read is left out, so a
-/// prototype naming it does not read either, and one inside a conditional
-/// block is refused with `error.ConditionalDeclaration`.
+/// prototype naming it does not read either. One inside a conditional block
+/// is recorded only by name, so a declaration naming it is reported unread
+/// and a typedef no declaration names is no failure.
 fn callbackTypedefs(gpa: std.mem.Allocator, written: []const u8, out: *Typedefs) !void {
     const text = try withoutComments(gpa, written);
     var conditionals: Conditionals = .{};
@@ -1194,9 +1208,12 @@ fn callbackTypedefs(gpa: std.mem.Allocator, written: []const u8, out: *Typedefs)
         const line_start = start;
         start = end + 1;
         if (!std.mem.startsWith(u8, line, "typedef ")) continue;
-        if (conditionals.inside(text, line_start)) return error.ConditionalDeclaration;
         const pointer = std.mem.indexOf(u8, line, "(*") orelse continue;
         const name_end = std.mem.indexOfScalarPos(u8, line, pointer, ')') orelse continue;
+        if (conditionals.inside(text, line_start)) {
+            try out.conditional.put(gpa, line[pointer + 2 .. name_end], {});
+            continue;
+        }
         const open = std.mem.indexOfScalarPos(u8, line, name_end, '(') orelse continue;
         const close = std.mem.lastIndexOfScalar(u8, line, ')') orelse continue;
         if (close <= open) continue;
@@ -1226,7 +1243,7 @@ fn callbackTypedefs(gpa: std.mem.Allocator, written: []const u8, out: *Typedefs)
         if (!readable) continue;
         const shape = try gpa.create(runtime_symbols.Callback);
         shape.* = .{ .parameters = try parameters.toOwnedSlice(gpa), .result = result.scalar };
-        try out.put(gpa, line[pointer + 2 .. name_end], shape);
+        try out.shapes.put(gpa, line[pointer + 2 .. name_end], shape);
     }
 }
 
@@ -1254,7 +1271,7 @@ test "a callback typedef is read into the shape a table parameter names" {
 /// `typedefs` names. Null for a spelling the table has no scalar for.
 fn scalarOf(written: []const u8, typedefs: *const Typedefs) ?runtime_symbols.Parameter {
     const t = std.mem.trim(u8, written, " \t\n");
-    if (typedefs.get(t)) |shape| return .{ .scalar = .callback, .callback = shape };
+    if (typedefs.shapes.get(t)) |shape| return .{ .scalar = .callback, .callback = shape };
     const Spelling = struct { []const u8, runtime_symbols.Parameter };
     const spellings = [_]Spelling{
         .{ "uint8_t", .{ .scalar = .u8 } },
@@ -1278,6 +1295,10 @@ fn scalarOf(written: []const u8, typedefs: *const Typedefs) ?runtime_symbols.Par
     for (spellings) |s| if (std.mem.eql(u8, s[0], t)) return s[1];
     return null;
 }
+
+/// Why a declaration naming a callback typedef declared inside a conditional
+/// block is unread: which shape it has depends on the platform.
+const conditional_callback = "it names a callback typedef declared inside a conditional block";
 
 /// Why a runtime source could not be read as declarations, naming the symbol.
 const Unread = struct { symbol: []const u8, why: []const u8 };
@@ -1328,11 +1349,12 @@ fn declaredIn(gpa: std.mem.Allocator, written: []const u8, typedefs: *const Type
             break :zig tail;
         } else head;
         const result = scalarOf(result_spelling, typedefs) orelse {
-            try unread.append(gpa, .{ .symbol = symbol, .why = "its result type is not one the table spells" });
+            const why = if (typedefs.isConditional(result_spelling)) conditional_callback else "its result type is not one the table spells";
+            try unread.append(gpa, .{ .symbol = symbol, .why = why });
             continue;
         };
         var parameters: std.ArrayList(runtime_symbols.Parameter) = .empty;
-        var readable = true;
+        var unreadable: ?[]const u8 = null;
         const inner = std.mem.trim(u8, text[end + 1 .. close], " \n");
         if (inner.len > 0 and !std.mem.eql(u8, inner, "void")) {
             var pieces = std.mem.splitScalar(u8, inner, ',');
@@ -1347,21 +1369,21 @@ fn declaredIn(gpa: std.mem.Allocator, written: []const u8, typedefs: *const Type
                 else
                     trimmed;
                 const parameter = scalarOf(spelled, typedefs) orelse {
-                    readable = false;
+                    unreadable = if (typedefs.isConditional(spelled)) conditional_callback else "a parameter type is not one the table spells";
                     break;
                 };
                 try parameters.append(gpa, parameter);
             }
         }
-        if (!readable) {
-            try unread.append(gpa, .{ .symbol = symbol, .why = "a parameter type is not one the table spells" });
+        if (unreadable) |why| {
+            try unread.append(gpa, .{ .symbol = symbol, .why = why });
             continue;
         }
         try out.append(gpa, .{ .symbol = symbol, .parameters = try parameters.toOwnedSlice(gpa), .result = result.scalar });
     }
 }
 
-test "a runtime typedef inside a comment is not read, and one inside a conditional is refused" {
+test "a runtime typedef inside a comment is not read" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
@@ -1377,13 +1399,56 @@ test "a runtime typedef inside a comment is not read, and one inside a condition
     , &typedefs);
     try testing.expect(scalarOf("linea_commented", &typedefs) == null);
     try testing.expect(scalarOf("linea_read", &typedefs) != null);
-    try testing.expectError(error.ConditionalDeclaration, callbackTypedefs(gpa,
+}
+
+test "a declaration naming a callback typedef declared inside a conditional is unread" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const text =
         \\#if defined(__APPLE__)
         \\typedef void (*linea_task_release)(unsigned long at);
         \\#else
         \\typedef void (*linea_task_release)(unsigned long at, unsigned long len);
         \\#endif
-    , &typedefs));
+        \\void linea_task_hand(unsigned long at, linea_task_release release);
+        \\linea_task_release linea_task_releaser(void);
+    ;
+    var typedefs: Typedefs = .empty;
+    try callbackTypedefs(gpa, text, &typedefs);
+    try testing.expect(scalarOf("linea_task_release", &typedefs) == null);
+    var declared: std.ArrayList(Declared) = .empty;
+    var unread: std.ArrayList(Unread) = .empty;
+    try declaredIn(gpa, text, &typedefs, &declared, &unread);
+    try testing.expectEqual(@as(usize, 0), declared.items.len);
+    try testing.expectEqual(@as(usize, 2), unread.items.len);
+    try testing.expectEqualStrings("linea_task_hand", unread.items[0].symbol);
+    try testing.expectEqualStrings(conditional_callback, unread.items[0].why);
+    try testing.expectEqualStrings("linea_task_releaser", unread.items[1].symbol);
+    try testing.expectEqualStrings(conditional_callback, unread.items[1].why);
+}
+
+test "a typedef inside a conditional that no declaration names is no failure" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const text =
+        \\#if defined(SOME_PLATFORM)
+        \\typedef unsigned long platform_word;
+        \\typedef void (*platform_hook)(unsigned long at);
+        \\#endif
+        \\typedef void (*linea_read)(unsigned long at);
+        \\void linea_hand(unsigned long at, linea_read read);
+    ;
+    var typedefs: Typedefs = .empty;
+    try callbackTypedefs(gpa, text, &typedefs);
+    try testing.expect(scalarOf("linea_read", &typedefs) != null);
+    var declared: std.ArrayList(Declared) = .empty;
+    var unread: std.ArrayList(Unread) = .empty;
+    try declaredIn(gpa, text, &typedefs, &declared, &unread);
+    try testing.expectEqual(@as(usize, 0), unread.items.len);
+    try testing.expectEqual(@as(usize, 1), declared.items.len);
+    try testing.expectEqualStrings("linea_hand", declared.items[0].symbol);
 }
 
 test "a runtime declaration inside a comment is not read, and one inside a conditional is unread" {

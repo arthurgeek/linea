@@ -34,6 +34,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "pipe_signal.h"
 #include "task.h"
 
 /* Defined in `linea_rt.c`: install and remove the calling thread's
@@ -95,6 +96,7 @@ struct task {
 
 /* Writes a runtime failure and aborts. */
 static void fail(const char *message) {
+    report_without_pipe_signal();
     if (write(2, message, strlen(message)) < 0) {
     }
     abort();

@@ -104,6 +104,39 @@ static void concurrent_broken_pipe(void) {
     assert(sigaction(SIGPIPE, &old_sa, NULL) == 0);
 }
 
+/* A write to a pipe with no reader answers EPIPE while another thread, which
+ * does not block SIGPIPE, waits for it: the process is not ended by the
+ * signal, whichever thread the system would deliver it to. */
+static void *write_to_broken_pipe(void *ptr) {
+    struct broken_pipe_arg *arg = ptr;
+    arg->result = linea_write_some(arg->fd, ADDRESS("x"), 1);
+    return NULL;
+}
+
+static void broken_pipe_beside_another_thread(void) {
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        struct sigaction action;
+        memset(&action, 0, sizeof action);
+        action.sa_handler = SIG_DFL;
+        assert(sigemptyset(&action.sa_mask) == 0);
+        assert(sigaction(SIGPIPE, &action, NULL) == 0);
+        int pipe_fds[2];
+        assert(pipe(pipe_fds) == 0);
+        assert(close(pipe_fds[0]) == 0);
+        struct broken_pipe_arg arg = {pipe_fds[1], 0};
+        pthread_t writer;
+        assert(pthread_create(&writer, NULL, write_to_broken_pipe, &arg) == 0);
+        assert(pthread_join(writer, NULL) == 0);
+        _exit(arg.result == -EPIPE ? 0 : 1);
+    }
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    if (WIFSIGNALED(status)) fprintf(stderr, "the writing process ended by signal %d\n", WTERMSIG(status));
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
 static void random_bytes(void) {
     unsigned char bytes[300];
     memset(bytes, 0x55, sizeof(bytes));
@@ -323,6 +356,7 @@ int main(void) {
     random_bytes();
     broken_pipe();
     concurrent_broken_pipe();
+    broken_pipe_beside_another_thread();
     positional_io();
     short_write();
     searchable_parent();

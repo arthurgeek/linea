@@ -109,6 +109,128 @@ static void host_handlers_survive(void) {
     assert(host_faults == 1);
 }
 
+/* Installs `handler` for SIGSEGV and SIGBUS with `flags` and with SIGUSR1 in
+ * its mask, starts the runtime, and loads from a fresh inaccessible page of
+ * the host's own. */
+static void host_fault_with(void (*handler)(int, siginfo_t *, void *), unsigned flags) {
+    struct sigaction fault;
+    memset(&fault, 0, sizeof fault);
+    fault.sa_sigaction = handler;
+    fault.sa_flags = (int)(flags | (unsigned)SA_SIGINFO);
+    assert(sigemptyset(&fault.sa_mask) == 0 && sigaddset(&fault.sa_mask, SIGUSR1) == 0);
+    assert(sigaction(SIGSEGV, &fault, 0) == 0 && sigaction(SIGBUS, &fault, 0) == 0);
+    char name[] = "host";
+    char *argv[] = {name, NULL};
+    linea_set_args(1, argv);
+    host_page_bytes = (unsigned long)sysconf(_SC_PAGESIZE);
+    host_page = mmap(0, host_page_bytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    assert(host_page != MAP_FAILED);
+    (void)*(volatile char *)host_page;
+}
+
+/* What the host's handler found blocked while it ran: SIGUSR1, which its
+ * mask names, and the fault's own signal. */
+static volatile sig_atomic_t usr1_blocked = 0;
+static volatile sig_atomic_t fault_blocked = 0;
+
+static void host_on_fault_noting_mask(int signal, siginfo_t *info, void *context) {
+    sigset_t now;
+    if (pthread_sigmask(SIG_BLOCK, 0, &now) != 0) _exit(6);
+    usr1_blocked = sigismember(&now, SIGUSR1) == 1;
+    fault_blocked = sigismember(&now, signal) == 1;
+    host_on_fault(signal, info, context);
+}
+
+/* The host's handler runs with its mask blocked and, without `SA_NODEFER`,
+ * the fault's signal too. */
+static void host_mask_is_blocked(void) {
+    host_fault_with(host_on_fault_noting_mask, 0);
+    assert(host_faults == 1 && usr1_blocked && fault_blocked);
+}
+
+/* With `SA_NODEFER`, the host's handler runs with the fault's signal
+ * unblocked, so a fault inside it reaches it again. */
+static void host_nodefer_leaves_the_fault_unblocked(void) {
+    host_fault_with(host_on_fault_noting_mask, (unsigned)SA_NODEFER);
+    assert(host_faults == 1 && usr1_blocked && !fault_blocked);
+}
+
+/* A host handler that notes a fault and returns without repairing it. */
+static void host_on_fault_returning(int signal, siginfo_t *info, void *context) {
+    (void)signal;
+    (void)info;
+    (void)context;
+    host_faults += 1;
+    if (host_faults > 1) _exit(5);
+}
+
+/* A handler installed with `SA_RESETHAND` runs once: the access it returns
+ * to faults again and takes the default action. */
+static void host_resethand_runs_once(void) {
+    host_fault_with(host_on_fault_returning, (unsigned)SA_RESETHAND);
+}
+
+/* Whether `sigaction` reports `SA_RESETHAND` back. macOS does not, so there
+ * no program, this runtime included, can tell a handler asked for it. */
+static int resethand_is_reported(void) {
+    struct sigaction probe, previous, read_back;
+    memset(&probe, 0, sizeof probe);
+    probe.sa_handler = host_on_pipe;
+    probe.sa_flags = (int)(unsigned)SA_RESETHAND;
+    assert(sigemptyset(&probe.sa_mask) == 0);
+    assert(sigaction(SIGUSR2, &probe, &previous) == 0);
+    assert(sigaction(SIGUSR2, &previous, &read_back) == 0);
+    return ((unsigned)read_back.sa_flags & (unsigned)SA_RESETHAND) != 0;
+}
+
+/* Runs `body` in a child and checks it was ended by the default action of a
+ * memory fault, SIGSEGV or SIGBUS. */
+static void ends_by_memory_fault(void (*body)(void)) {
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        body();
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    if (!WIFSIGNALED(status)) fprintf(stderr, "the faulting process exited with %d\n", WEXITSTATUS(status));
+    assert(WIFSIGNALED(status) && (WTERMSIG(status) == SIGSEGV || WTERMSIG(status) == SIGBUS));
+}
+
+static void *park(void *arg) {
+    (void)arg;
+    for (;;) pause();
+    return 0;
+}
+
+/* Runs `body` in a child whose standard error is a pipe nobody reads, beside
+ * a second thread that does not block SIGPIPE, and checks it still ended by
+ * SIGABRT: a failure report is never cut short by SIGPIPE. */
+static void aborts_into_closed_pipe(void (*body)(void)) {
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        struct sigaction action;
+        memset(&action, 0, sizeof action);
+        action.sa_handler = SIG_DFL;
+        assert(sigemptyset(&action.sa_mask) == 0);
+        assert(sigaction(SIGPIPE, &action, 0) == 0);
+        int err_pipe[2];
+        assert(pipe(err_pipe) == 0);
+        assert(close(err_pipe[0]) == 0);
+        assert(dup2(err_pipe[1], 2) == 2);
+        pthread_t parked;
+        assert(pthread_create(&parked, 0, park, 0) == 0);
+        body();
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    if (WIFSIGNALED(status) && WTERMSIG(status) != SIGABRT) fprintf(stderr, "the failing process ended by signal %d\n", WTERMSIG(status));
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
+}
+
 /* A sanitized runtime leaves faults to the sanitizer, which reports a wild
  * load in its own words and exits rather than ending by the signal. */
 #if !defined(LINEA_SANITIZED)
@@ -413,6 +535,9 @@ int main(void) {
     /* First, so the host's handlers are in place before the runtime installs
      * its own in that child. */
     exits_cleanly(host_handlers_survive);
+    exits_cleanly(host_mask_is_blocked);
+    exits_cleanly(host_nodefer_leaves_the_fault_unblocked);
+    if (resethand_is_reported()) ends_by_memory_fault(host_resethand_runs_once);
 #if !defined(LINEA_SANITIZED)
     ends_by_fault(ignored_fault_ends_the_process);
     ends_by_fault(default_with_siginfo_ends_the_process);
@@ -446,6 +571,9 @@ int main(void) {
     aborts_saying(free_nothing, "linea: a disposal named no extent to release\n");
     aborts_saying(trap_overflow, "linea: integer overflow at t.lin:3:7\n");
     aborts_saying(panic_message, "linea: panic: boom at t.lin:1:2\n");
+    aborts_into_closed_pipe(over_aligned);
+    aborts_into_closed_pipe(trap_overflow);
+    aborts_into_closed_pipe(panic_message);
 #if defined(LINEA_CHECK_STORAGE) && LINEA_CHECK_STORAGE
     puts("native runtime: checked allocation, arguments, environment and aborts passed");
 #else

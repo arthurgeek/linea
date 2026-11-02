@@ -578,14 +578,34 @@ a measurement shows the allocation matters.
   that may have installed handlers of its own, so the runtime takes over only
   what it must. Its `SIGSEGV` and `SIGBUS` handler keeps the action installed
   before it and hands every fault that is neither an overflow nor the checking
-  allocator's to that action; a default or ignored action is reinstalled and
-  the access runs again, so the process ends as it would without the runtime.
-  The handler calls only async-signal-safe functions: it reads the checking
-  allocator's table under a flag taken with lock-free atomics, not a mutex.
-  `SIGPIPE` is left as the process set it, since every write the runtime makes
-  blocks it on its own thread and consumes one it raises, so a closed pipe is
-  `EPIPE` whatever the disposition. This replaces the restoring of the
-  default action that
+  allocator's to that action. A previous handler is called with the same
+  arguments, with its `sa_mask` blocked and the fault's signal blocked unless
+  it set `SA_NODEFER`; one installed with `SA_RESETHAND` runs for the first
+  such fault only, and later ones take the default action, where the system
+  reports the flag (Linux does; macOS does not report it through
+  `sigaction`, so there such a handler runs for every fault). What is not
+  reproduced: the previous handler runs on the stack the runtime's handler
+  runs on, the thread's alternate signal stack where it has one, whether or
+  not it asked for `SA_ONSTACK`; and after an `SA_RESETHAND` handler has run,
+  `sigaction` still reports the runtime's handler. A default or ignored
+  action is reinstalled and the access runs again, so the process ends as it
+  would without the runtime.
+  The handler calls only async-signal-safe functions, and `pthread_getspecific`,
+  which POSIX does not list but which allocates and locks nothing on Linux
+  and macOS: it finds a thread's guard pages through a thread-specific
+  pointer to a record at the low end of the thread's signal stack, never
+  through a `__thread` variable, which macOS allocates with `malloc` on a
+  thread's first access. It reads the checking allocator's table under a
+  flag taken with lock-free atomics, not a mutex, and a fault on the thread
+  that owns the table reports that storage checking was busy without reading
+  it.
+  `SIGPIPE` is left as the process set it. A closed pipe answers `EPIPE` to
+  every write the runtime makes whatever the disposition: on Linux, which
+  raises the signal on the writing thread, the write blocks it on that thread
+  and consumes one it raises; on macOS, which raises it on the process, the
+  write first sets `F_SETNOSIGPIPE` on the descriptor's open file, which stays
+  set. A failure report to a standard error with no reader ends by its abort,
+  not by `SIGPIPE`. This replaces the restoring of the default action that
   [0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md)
   describes.
 
