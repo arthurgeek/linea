@@ -11,6 +11,7 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 unsigned long linea_alloc(unsigned long size, unsigned long align);
@@ -63,6 +64,8 @@ static void exits_cleanly(void (*body)(void)) {
     }
     int status = 0;
     assert(waitpid(pid, &status, 0) == pid);
+    if (WIFSIGNALED(status)) fprintf(stderr, "the process ended by signal %d\n", WTERMSIG(status));
+    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) fprintf(stderr, "the process exited with %d\n", WEXITSTATUS(status));
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 
@@ -116,9 +119,9 @@ static void host_handlers_survive(void) {
 }
 
 /* Installs `handler` for SIGSEGV and SIGBUS with `flags` and with SIGUSR1 in
- * its mask, starts the runtime, and loads from a fresh inaccessible page of
- * the host's own. */
-static void host_fault_with(void (*handler)(int, siginfo_t *, void *), unsigned flags) {
+ * its mask, starts the runtime, and maps a fresh inaccessible page of the
+ * host's own; `host_fault_with` then loads from it. */
+static void install_host_handler(void (*handler)(int, siginfo_t *, void *), unsigned flags) {
     struct sigaction fault;
     memset(&fault, 0, sizeof fault);
     fault.sa_sigaction = handler;
@@ -131,6 +134,10 @@ static void host_fault_with(void (*handler)(int, siginfo_t *, void *), unsigned 
     host_page_bytes = (unsigned long)sysconf(_SC_PAGESIZE);
     host_page = mmap(0, host_page_bytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
     assert(host_page != MAP_FAILED);
+}
+
+static void host_fault_with(void (*handler)(int, siginfo_t *, void *), unsigned flags) {
+    install_host_handler(handler, flags);
     (void)*(volatile char *)host_page;
 }
 
@@ -167,13 +174,75 @@ static void host_on_fault_returning(int signal, siginfo_t *info, void *context) 
     (void)info;
     (void)context;
     host_faults += 1;
-    if (host_faults > 1) _exit(5);
+    if (host_faults > 64) _exit(5);
 }
 
-/* A handler installed with `SA_RESETHAND` runs once: the access it returns
- * to faults again and takes the default action. */
-static void host_resethand_runs_once(void) {
+/* A handler installed with `SA_RESETHAND` that returns without repairing the
+ * access ends the process by the fault: at once where the system reports the
+ * flag, and on macOS, which does not, after the access has faulted the same
+ * way 64 times in quick succession. */
+static void host_resethand_handler_ends(void) {
     host_fault_with(host_on_fault_returning, (unsigned)SA_RESETHAND);
+}
+
+/* The host's handler repairs a store in two steps: the first fault makes the
+ * page readable, the second, from the same store, writable. */
+static void host_on_fault_in_two_steps(int signal, siginfo_t *info, void *context) {
+    (void)signal;
+    (void)info;
+    (void)context;
+    host_faults += 1;
+    const int access = host_faults == 1 ? PROT_READ : PROT_READ | PROT_WRITE;
+    if (mprotect(host_page, host_page_bytes, access) != 0) _exit(4);
+}
+
+static void host_repairs_in_two_steps(void) {
+    install_host_handler(host_on_fault_in_two_steps, 0);
+    *(volatile char *)host_page = 1;
+    assert(host_faults == 2 && host_page[0] == 1);
+}
+
+/* A host that polls by protecting a page and touching it later, as a runtime
+ * stops its threads at a safepoint, repairs each fault, and every poll
+ * survives. */
+static void host_polls(void) {
+    install_host_handler(host_on_fault, 0);
+    for (int poll = 0; poll < 5; poll += 1) {
+        assert(mprotect(host_page, host_page_bytes, PROT_NONE) == 0);
+        struct timespec pause_for = {0, 20000000};
+        nanosleep(&pause_for, 0);
+        (void)*(volatile char *)host_page;
+    }
+    assert(host_faults == 5);
+}
+
+/* A host handler that returns without repairing anything. */
+static void host_on_fault_ignoring(int signal, siginfo_t *info, void *context) {
+    (void)signal;
+    (void)info;
+    (void)context;
+}
+
+static void *load_from(void *page) {
+    (void)*(volatile char *)page;
+    return 0;
+}
+
+/* Sixteen threads each fault without end on a page of their own, and the
+ * host's handler repairs nothing: each thread's faults are counted apart from
+ * the others', so a thread's run of identical faults is not broken by the
+ * others' and the process ends by the fault. */
+enum { faulting_threads = 16 };
+
+static void unrepaired_faults_on_many_threads(void) {
+    install_host_handler(host_on_fault_ignoring, 0);
+    pthread_t threads[faulting_threads];
+    for (int i = 0; i < faulting_threads; i += 1) {
+        void *page = mmap(0, host_page_bytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        assert(page != MAP_FAILED);
+        assert(pthread_create(&threads[i], 0, load_from, page) == 0);
+    }
+    for (int i = 0; i < faulting_threads; i += 1) assert(pthread_join(threads[i], 0) == 0);
 }
 
 /* Runs `body` in a child and checks it was ended by the default action of a
@@ -186,7 +255,20 @@ static void ends_by_memory_fault(void (*body)(void)) {
         _exit(0);
     }
     int status = 0;
-    assert(waitpid(pid, &status, 0) == pid);
+    pid_t ended = 0;
+    for (int tenth = 0; tenth < 100 && ended == 0; tenth += 1) {
+        ended = waitpid(pid, &status, WNOHANG);
+        if (ended == 0) {
+            struct timespec pause_for = {0, 100000000};
+            nanosleep(&pause_for, 0);
+        }
+    }
+    if (ended == 0) {
+        kill(pid, SIGKILL);
+        assert(waitpid(pid, &status, 0) == pid);
+        fprintf(stderr, "the faulting process still ran after ten seconds\n");
+        abort();
+    }
     if (!WIFSIGNALED(status)) fprintf(stderr, "the faulting process exited with %d\n", WEXITSTATUS(status));
     assert(WIFSIGNALED(status) && (WTERMSIG(status) == SIGSEGV || WTERMSIG(status) == SIGBUS));
 }
@@ -567,7 +649,10 @@ int main(void) {
     exits_cleanly(host_handlers_survive);
     exits_cleanly(host_mask_is_blocked);
     exits_cleanly(host_nodefer_leaves_the_fault_unblocked);
-    ends_by_memory_fault(host_resethand_runs_once);
+    ends_by_memory_fault(host_resethand_handler_ends);
+    exits_cleanly(host_repairs_in_two_steps);
+    exits_cleanly(host_polls);
+    ends_by_memory_fault(unrepaired_faults_on_many_threads);
     exits_cleanly(a_tiny_signal_stack_is_refused);
 #if !defined(LINEA_SANITIZED)
     ends_by_fault(ignored_fault_ends_the_process);

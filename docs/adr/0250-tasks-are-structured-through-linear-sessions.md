@@ -583,9 +583,10 @@ a measurement shows the allocation matters.
   it set `SA_NODEFER`; one installed with `SA_RESETHAND` runs for the first
   such fault only, and later ones take the default action, where the system
   reports the flag. macOS does not report it through `sigaction`; there a
-  fault that comes straight back after a previous handler returned, on the
-  same thread, signal and address with every register unchanged, takes the
-  default action, since the handler did not repair it. What is not
+  fault that repeats 64 times in a row on one thread, signal and address with
+  every register unchanged, each within 10 ms of the last, takes the default
+  action, since no handler is repairing it. A repair in a few steps or a page
+  polled after other work never reaches the count. What is not
   reproduced: the previous handler runs on the stack the runtime's handler
   runs on, the thread's alternate signal stack where it has one, whether or
   not it asked for `SA_ONSTACK`; and after an `SA_RESETHAND` handler has run,
@@ -608,13 +609,18 @@ a measurement shows the allocation matters.
   every write the runtime makes whatever the disposition: on Linux, which
   raises the signal on the writing thread, the write blocks it on that thread
   and consumes one it raises. macOS raises it on the process, so there the
-  write raises nothing: a socket is written with `send` and `MSG_NOSIGNAL`,
-  and a pipe's open file has `F_SETNOSIGPIPE` set for the write when it was
-  clear and cleared once no write of the runtime's to that pipe is in
-  progress, so another process sharing the pipe gets `SIGPIPE` again
-  afterwards. A failure report to a standard error with no reader, pipe or
-  socket, ends by its abort, not by `SIGPIPE`; on macOS it leaves the pipe's
-  setting in place, since the process ends right after. This replaces the restoring of the default action that
+  write raises nothing: the descriptor's open file gets `F_SETNOSIGPIPE`
+  before the write and keeps it, and a socket whose peer has gone, which
+  refuses the setting, is written with `send` and `MSG_NOSIGNAL`. The
+  setting belongs to the open file, so every holder of it, a process that
+  inherited it included, gets `EPIPE` instead of `SIGPIPE` from then on.
+  Restoring it after the write is not sound: a forked process shares the open
+  file but not the runtime's record of writes in progress, so its restore
+  can clear the setting under this process's waiting write, which then
+  raises `SIGPIPE`; and a pipe opened twice by name is two open files with
+  one inode, which no record by inode tells apart. A failure report to a
+  standard error with no reader, pipe or socket, ends by its abort, not by
+  `SIGPIPE`. This replaces the restoring of the default action that
   [0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md)
   describes.
 

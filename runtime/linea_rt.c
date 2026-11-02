@@ -125,65 +125,83 @@ static int previous_segv_spent = 0;
 static int previous_bus_spent = 0;
 
 #if defined(__APPLE__)
-/* A fault on macOS that a previous handler returned from, recorded so the
- * same fault coming straight back can be told apart.
+/* The faults on macOS a previous handler is handed, recorded so an
+ * unrepaired fault repeating without end can be told apart.
  *
  * macOS does not report `SA_RESETHAND` through `sigaction`, so the runtime
  * cannot tell that a previous handler asked to run once. A handler that
  * returns without repairing the access would then run for every repetition
  * of the fault, without end, where the system would have taken the default
- * action on the second. So a fault is taken as unrepaired when the same
- * thread faults again on the same signal and address with the interrupted
- * thread state, every register the program sees, unchanged since the handler
- * returned: the instruction ran again with nothing in between. That fault
- * takes the default action. A program that re-protects a page and touches it
- * again with every register as it was would be ended the same way; nothing a
- * handler can read tells that apart.
+ * action on the second. So a fault is taken as unrepaired once the same
+ * thread has faulted `unrepaired_repeats` times in a row on the same signal
+ * and address with the same interrupted thread state, every register the
+ * program sees, each within `unrepaired_gap_ns` of the one before: an
+ * access no handler repairs faults again within microseconds. That fault
+ * takes the default action. A repair in a few steps faults a few times, and
+ * a program that re-protects a page to poll it touches it again only after
+ * other work, so neither reaches the count.
  *
- * The records are slots chosen by the faulting thread. A slot another thread
- * holds at that moment is passed over, so a fault on two threads in one slot
- * at once only loses the record, and the repeated fault runs the handler
- * once more before it is caught. */
+ * The records are slots chosen by a hash of the faulting thread. A slot
+ * another thread holds at that moment is passed over, and two threads that
+ * share a slot overwrite each other's count, so an unrepaired fault on one
+ * of them is caught only once it repeats `unrepaired_repeats` times between
+ * the other's faults. */
 typedef __typeof__(((ucontext_t *)0)->uc_mcontext->__ss) interrupted_state;
 
-struct returned_fault {
+enum { unrepaired_repeats = 64 };
+static const long unrepaired_gap_ns = 10000000;
+
+struct repeated_fault {
     int busy;
     int signal;
+    int repeats;
     pthread_t thread;
     unsigned long address;
+    struct timespec at;
     interrupted_state state;
 };
 
-enum { returned_fault_slots = 64 };
-static struct returned_fault returned_faults[returned_fault_slots];
-typedef char linea_returned_fault_claim_is_lock_free[__atomic_always_lock_free(sizeof(int), 0) ? 1 : -1];
+enum { repeated_fault_slot_bits = 6, repeated_fault_slots = 1 << repeated_fault_slot_bits };
+static struct repeated_fault repeated_faults[repeated_fault_slots];
+typedef char linea_repeated_fault_claim_is_lock_free[__atomic_always_lock_free(sizeof(int), 0) ? 1 : -1];
 
-static struct returned_fault *returned_fault_slot(pthread_t thread) {
-    return &returned_faults[((unsigned long)(uintptr_t)thread >> 4) % returned_fault_slots];
+/* The slot for `thread`. A `pthread_t` on macOS is the address of a
+ * page-aligned record, so the page offset is shifted out and the rest mixed
+ * by the 64-bit golden-ratio multiplier, whose top bits spread consecutive
+ * page numbers over the slots. The product wraps, which is what mixes it. */
+static struct repeated_fault *repeated_fault_slot(pthread_t thread) {
+    const unsigned long page = (unsigned long)(uintptr_t)thread >> 12;
+    unsigned long mixed;
+    (void)__builtin_mul_overflow(page, 0x9E3779B97F4A7C15UL, &mixed);
+    return &repeated_faults[mixed >> (64 - repeated_fault_slot_bits)];
 }
 
-/* Records a fault the previous handler returned from. */
-static void note_returned_fault(int signal, unsigned long address, const void *context) {
-    struct returned_fault *slot = returned_fault_slot(pthread_self());
-    if (__atomic_exchange_n(&slot->busy, 1, __ATOMIC_ACQUIRE) != 0) return;
-    slot->signal = signal;
-    slot->thread = pthread_self();
-    slot->address = address;
-    slot->state = ((const ucontext_t *)context)->uc_mcontext->__ss;
-    __atomic_store_n(&slot->busy, 0, __ATOMIC_RELEASE);
-}
-
-/* Whether this fault is the one the previous handler last returned from on
- * this thread, unchanged. Forgets the record either way. */
-static int fault_came_straight_back(int signal, unsigned long address, const void *context) {
-    struct returned_fault *slot = returned_fault_slot(pthread_self());
+/* Records this fault, and answers whether it is the `unrepaired_repeats`th
+ * of a run of identical faults on this thread, each soon after the last. */
+static int fault_left_unrepaired(int signal, unsigned long address, const void *context) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
+    struct repeated_fault *slot = repeated_fault_slot(pthread_self());
     if (__atomic_exchange_n(&slot->busy, 1, __ATOMIC_ACQUIRE) != 0) return 0;
-    const interrupted_state *now = &((const ucontext_t *)context)->uc_mcontext->__ss;
-    const int same = slot->signal == signal && pthread_equal(slot->thread, pthread_self()) != 0 &&
-                     slot->address == address && memcmp(&slot->state, now, sizeof *now) == 0;
-    slot->signal = 0;
+    const interrupted_state *state = &((const ucontext_t *)context)->uc_mcontext->__ss;
+    const time_t seconds = now.tv_sec - slot->at.tv_sec;
+    const int soon = seconds >= 0 && seconds < 2 && seconds * 1000000000L + (now.tv_nsec - slot->at.tv_nsec) < unrepaired_gap_ns;
+    const int same = slot->repeats > 0 && soon && slot->signal == signal && pthread_equal(slot->thread, pthread_self()) != 0 &&
+                     slot->address == address && memcmp(&slot->state, state, sizeof *state) == 0;
+    if (same) {
+        slot->repeats += 1;
+    } else {
+        slot->repeats = 1;
+        slot->signal = signal;
+        slot->thread = pthread_self();
+        slot->address = address;
+        slot->state = *state;
+    }
+    slot->at = now;
+    const int unrepaired = slot->repeats >= unrepaired_repeats;
+    if (unrepaired) slot->repeats = 0;
     __atomic_store_n(&slot->busy, 0, __ATOMIC_RELEASE);
-    return same;
+    return unrepaired;
 }
 #endif
 
@@ -198,9 +216,9 @@ static int fault_came_straight_back(int signal, unsigned long address, const voi
  * call. A handler installed with `SA_RESETHAND` runs for the first such fault
  * only, and every later one takes the default action, which the system would
  * have reset it to. macOS does not report `SA_RESETHAND` through
- * `sigaction`; there a fault that comes straight back unrepaired after a
- * handler returned takes the default action instead, as `struct
- * returned_fault` describes.
+ * `sigaction`; there a fault that repeats unrepaired many times in quick
+ * succession takes the default action instead, as `struct repeated_fault`
+ * describes.
  *
  * Not reproduced: a handler always runs on the stack the runtime's own
  * handler runs on, the thread's alternate signal stack where it has one,
@@ -230,7 +248,7 @@ static void pass_on(int signal, siginfo_t *info, void *context) {
         handled = __atomic_exchange_n(spent, 1, __ATOMIC_ACQ_REL) == 0;
     }
 #if defined(__APPLE__)
-    if (handled && fault_came_straight_back(signal, (unsigned long)info->si_addr, context)) handled = 0;
+    if (handled && fault_left_unrepaired(signal, (unsigned long)info->si_addr, context)) handled = 0;
 #endif
     if (handled) {
         /* The fault's signal is blocked already: the runtime's own action
@@ -249,9 +267,6 @@ static void pass_on(int signal, siginfo_t *info, void *context) {
             previous->sa_handler(signal);
         }
         if (pthread_sigmask(SIG_SETMASK, &before, 0) != 0) fail("linea: the runtime cannot hand a fault on\n");
-#if defined(__APPLE__)
-        note_returned_fault(signal, (unsigned long)info->si_addr, context);
-#endif
         return;
     }
     struct sigaction fallback;
