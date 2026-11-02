@@ -706,8 +706,12 @@ const Members = struct {
         var at = lo;
         while (at > 0) {
             at -= 1;
-            // No part up to here reaches the access.
-            if (index.reach[at] <= off and !(index.parts[at].start == off)) break;
+            // No part up to here reaches the access. A part ending where an
+            // access of no width begins still holds it: a field of no width
+            // may close that part.
+            const reach = index.reach[at];
+            const short = reach < off or (reach == off and width != 0);
+            if (short and index.parts[at].start != off) break;
             const part = index.parts[at];
             if (try self.partHolds(part.ty, part.start, off, width)) return true;
         }
@@ -766,7 +770,10 @@ const Members = struct {
         if (!coversType(self.module, part)) return false;
         const l = self.module.layoutOf(part);
         if (off == at and width == l.size) return true;
-        if (off < at or off - at >= l.size) return false;
+        if (off < at or off - at > l.size) return false;
+        // An access of no width at the part's end is held only by a field of
+        // no width that closes the part.
+        if (off - at == l.size and width != 0) return false;
         return self.isMember(part, off - at, width);
     }
 };

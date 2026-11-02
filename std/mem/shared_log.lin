@@ -1,0 +1,421 @@
+import std.session
+import std.task
+import std.testing
+
+use session.Chan
+use session.End
+use task.Unowned
+
+// The counts and refusal rules of a shared allocation log. An owning task
+// keeps them, so every task that allocates through the log reaches them by a
+// call the owning task runs, one at a time, and none is written by two
+// threads at once.
+internal struct SharedLogState {
+    attempts: UInt64,
+    acquired: UInt64,
+    disposed: UInt64,
+    live_bytes: UInt64,
+    peak_bytes: UInt64,
+    refuse_at: UInt64,
+    refuse_from: UInt64,
+    // The rule about one size: whether there is one, the size, how many
+    // acquisitions of that size were attempted since it was set, the one of
+    // them to refuse and the one to refuse from on, numbered from one, where
+    // zero names none.
+    size_rule: Bool,
+    refused_size: UInt64,
+    size_seen: UInt64,
+    size_at: UInt64,
+    size_from: UInt64,
+    // One entry per acquisition, true while that allocation is live.
+    live: Vec[Bool, SystemAllocator],
+}
+
+impl SharedLogState {
+    // Count an attempt to acquire `size` bytes, and answer whether a rule
+    // refuses it.
+    fn attempt(inout self: Self, size: UInt64) -> Bool {
+        self.attempts += 1
+        let attempt = self.attempts
+        var sized = false
+        if self.size_rule && self.refused_size == size {
+            self.size_seen += 1
+            sized = self.size_seen == self.size_at || (self.size_from != 0 && self.size_seen >= self.size_from)
+        }
+        attempt == self.refuse_at || (self.refuse_from != 0 && attempt >= self.refuse_from) || sized
+    }
+
+    // Replace the rule about sizes: refuse the acquisition of `size` bytes
+    // numbered `at` and every one from the one numbered `from` on, counting
+    // from the next.
+    fn refuse_size(inout self: Self, size: UInt64, at: UInt64, from: UInt64) {
+        self.size_rule = true
+        self.refused_size = size
+        self.size_seen = 0
+        self.size_at = at
+        self.size_from = from
+    }
+
+    // Record an acquisition of `allocated` bytes and answer its index, or
+    // `.None` when the log has no room to record it.
+    fn record(inout self: Self, allocated: UInt64) -> Option[UInt64] {
+        let index = self.acquired
+        match &self.live.push(true) {
+            Ok(_) => {},
+            Err(failure) => {
+                failure.release()
+                return .None
+            },
+        }
+        self.acquired += 1
+        self.live_bytes += allocated
+        if self.live_bytes > self.peak_bytes {
+            self.peak_bytes = self.live_bytes
+        }
+        .Some(index)
+    }
+
+    // Record the disposal of the allocation numbered `index`, of `allocated`
+    // bytes, and answer whether it was live.
+    fn dispose(inout self: Self, index: UInt64, allocated: UInt64) -> Bool {
+        if index >= self.live.length() || !self.live[index] {
+            return false
+        }
+        self.live[index] = false
+        self.disposed += 1
+        self.live_bytes -= allocated
+        true
+    }
+
+    // Answer whether every acquisition was disposed exactly once and no bytes
+    // remain live.
+    fn all_disposed(self: Self) -> Bool {
+        if self.disposed != self.acquired || self.live_bytes != 0 {
+            return false
+        }
+        for index in UInt64(0)..self.live.length() {
+            if self.live[index] {
+                return false
+            }
+        }
+        true
+    }
+}
+
+impl Release for SharedLogState {
+    fn release(sink self: Self) {
+        let SharedLogState { attempts: _, acquired: _, disposed: _, live_bytes: _, peak_bytes: _, refuse_at: _, refuse_from: _, size_rule: _, refused_size: _, size_seen: _, size_at: _, size_from: _, live } = self
+        live.release()
+    }
+}
+
+// Record every acquisition made through its allocator, from any number of
+// tasks at once, refuse the ones its rules name, and check afterwards that
+// each allocation was disposed exactly once. An owning task keeps the log's
+// counts, so its allocator is `Shareable` whenever its backing allocator is:
+// a test can hand it to `http.serve_in` or to tasks it starts, and refuse an
+// acquisition whichever task makes it. `mem.AllocationLog` does the same for
+// one task, without a thread of its own.
+@(opaque, linear)
+struct SharedAllocationLog[H: Allocator] {
+    owner: task.Owner[SharedLogState],
+    backing: H,
+}
+
+impl[H: Allocator] SharedAllocationLog[H] {
+    // Refuse the acquisition numbered `refuse_at`, counting from one. Zero
+    // refuses none. Every allocation the log records comes from `backing`;
+    // the log's own records come from the system allocator. It fails when the
+    // owning task that keeps the records cannot be started.
+    pub fn open(backing: H, refuse_at: UInt64) -> Result[SharedAllocationLog[H], task.PrepareError] where carries(.Ok: backing) {
+        let state = SharedLogState {
+            attempts = 0,
+            acquired = 0,
+            disposed = 0,
+            live_bytes = 0,
+            peak_bytes = 0,
+            refuse_at,
+            refuse_from = 0,
+            size_rule = false,
+            refused_size = 0,
+            size_seen = 0,
+            size_at = 0,
+            size_from = 0,
+            live = Vec.new(),
+        }
+        match task.own(state) {
+            Ok(owner) => .Ok(.{ owner, backing = copy(backing) }),
+            Err(Unowned { state, reason }) => {
+                state.release()
+                .Err(reason)
+            },
+        }
+    }
+
+    test fn a_shared_log_refuses_the_acquisition_open_names() {
+        defer let log = SharedAllocationLog.open(system(), 2).unwrap()
+        let first = log.allocator().acquire(16)
+        let accepted = first.is_ok()
+        first.release()
+        let second = log.allocator().acquire(8)
+        let refused = second.is_err()
+        second.release()
+        testing.assert(accepted, "the first attempt was refused")?
+        testing.assert(refused, "the second attempt was not refused")?
+    }
+
+    // Return a handle that allocates through the log's backing allocator and
+    // records in this log. It borrows the log, so the log outlives every
+    // handle and every buffer the handle acquired.
+    pub fn allocator(self: Self) -> SharedRefusingAllocator[H] where borrows(self) {
+        .{ log = self.owner.client(), backing = copy(self.backing) }
+    }
+
+    test fn a_shared_log_allocator_is_shared_by_tasks_that_allocate_at_once() {
+        defer let log = SharedAllocationLog.open(system(), 0).unwrap()
+        allocate_on_two_tasks(log.allocator(), 200)
+        testing.assert_eq(log.attempts(), UInt64(400), "an attempt from one of the tasks was lost")?
+        testing.assert_eq(log.acquired(), UInt64(400), "an acquisition from one of the tasks was lost")?
+        testing.assert(log.all_disposed(), "a release from one of the tasks was lost")?
+    }
+
+    // Return how many acquisitions were requested, including refused ones.
+    pub fn attempts(self: Self) -> UInt64 {
+        self.owner.client().call(|inout state: SharedLogState| state.attempts)
+    }
+
+    test fn a_shared_log_counts_refused_attempts_too() {
+        defer let log = SharedAllocationLog.open(system(), 1).unwrap()
+        let refused = log.allocator().acquire(8)
+        refused.release()
+        let accepted = log.allocator().acquire(8)
+        accepted.release()
+        testing.assert_eq(log.attempts(), UInt64(2), "a refused attempt was not counted")?
+    }
+
+    // Return how many acquisitions succeeded.
+    pub fn acquired(self: Self) -> UInt64 {
+        self.owner.client().call(|inout state: SharedLogState| state.acquired)
+    }
+
+    test fn a_shared_log_counts_only_successful_acquisitions() {
+        defer let log = SharedAllocationLog.open(system(), 2).unwrap()
+        let first = log.allocator().acquire(16).unwrap()
+        let second = log.allocator().acquire(8)
+        second.release()
+        first.release()
+        testing.assert_eq(log.acquired(), UInt64(1), "a refused attempt was recorded as acquired")?
+    }
+
+    // Return the most bytes live at once.
+    pub fn peak_bytes(self: Self) -> UInt64 {
+        self.owner.client().call(|inout state: SharedLogState| state.peak_bytes)
+    }
+
+    test fn a_shared_log_remembers_the_most_bytes_live_at_once() {
+        defer let log = SharedAllocationLog.open(system(), 0).unwrap()
+        let first = log.allocator().acquire(16).unwrap()
+        let second = log.allocator().acquire(8).unwrap()
+        second.release()
+        first.release()
+        let third = log.allocator().acquire(8).unwrap()
+        third.release()
+        testing.assert_eq(log.peak_bytes(), UInt64(24), "the peak lost the two live allocations")?
+    }
+
+    // Refuse the acquisition numbered `attempt`, counting from the log's
+    // first, in place of the one `open` named. Zero refuses none. Handles may
+    // be live and in use by other tasks.
+    pub fn refuse_attempt(self: Self, attempt: UInt64) {
+        self.owner.client().call([sink attempt] |inout state: SharedLogState| state.refuse_at = attempt)
+    }
+
+    test fn a_shared_log_refuses_a_later_attempt_through_live_handles() {
+        defer let log = SharedAllocationLog.open(system(), 0).unwrap()
+        let allocator = log.allocator()
+        allocator.acquire(8).unwrap().release()
+        log.refuse_attempt(3)
+        let second = allocator.acquire(8)
+        let accepted = second.is_ok()
+        second.release()
+        let third = allocator.acquire(8)
+        let refused = third.is_err()
+        third.release()
+        testing.assert(accepted, "an attempt before the refused one was refused")?
+        testing.assert(refused, "a later refusal was not applied")?
+    }
+
+    // Refuse every acquisition from the one numbered `attempt` on, counting
+    // from the log's first. Zero refuses none.
+    pub fn refuse_from(self: Self, attempt: UInt64) {
+        self.owner.client().call([sink attempt] |inout state: SharedLogState| state.refuse_from = attempt)
+    }
+
+    test fn a_shared_log_refuses_every_attempt_from_the_one_named() {
+        defer let log = SharedAllocationLog.open(system(), 0).unwrap()
+        log.refuse_from(2)
+        let first = log.allocator().acquire(8)
+        let accepted = first.is_ok()
+        first.release()
+        var refused: UInt64 = 0
+        for _ in 0..3 {
+            let later = log.allocator().acquire(8)
+            if later.is_err() {
+                refused += 1
+            }
+            later.release()
+        }
+        testing.assert(accepted, "an attempt before the first refused one was refused")?
+        testing.assert_eq(refused, UInt64(3), "an attempt after the first refused one was accepted")?
+        testing.assert(log.all_disposed(), "the accepted allocation was not recorded as released")?
+    }
+
+    // Refuse the acquisition numbered `attempt` among those of exactly `size`
+    // bytes made after this call, counting from one, whichever attempt it is
+    // overall. It replaces any earlier rule about sizes; the rules about
+    // attempts still hold.
+    pub fn refuse_size_attempt(self: Self, size: UInt64, attempt: UInt64) {
+        self.owner.client().call([sink size, sink attempt] |inout state: SharedLogState| &state.refuse_size(size, at: attempt, from: 0))
+    }
+
+    test fn a_shared_log_refuses_one_acquisition_of_the_named_size() {
+        defer let log = SharedAllocationLog.open(system(), 0).unwrap()
+        log.refuse_size_attempt(4096, 2)
+        let small = log.allocator().acquire(16)
+        let other_size = small.is_ok()
+        small.release()
+        let first = log.allocator().acquire(4096)
+        let accepted = first.is_ok()
+        first.release()
+        let second = log.allocator().acquire(4096)
+        let refused = second.is_err()
+        second.release()
+        let third = log.allocator().acquire(4096)
+        let accepted_after = third.is_ok()
+        third.release()
+        testing.assert(other_size, "an acquisition of another size was refused")?
+        testing.assert(accepted, "the acquisition of the size before the named one was refused")?
+        testing.assert(refused, "the named acquisition of the size was accepted")?
+        testing.assert(accepted_after, "an acquisition of the size after the named one was refused")?
+        testing.assert(log.all_disposed(), "an accepted allocation was not recorded as released")?
+    }
+
+    // Refuse every acquisition of exactly `size` bytes from the one numbered
+    // `attempt` on, counting from one among those made after this call. One
+    // refuses them all. It replaces any earlier rule about sizes; the rules
+    // about attempts still hold.
+    pub fn refuse_size_from(self: Self, size: UInt64, attempt: UInt64) {
+        self.owner.client().call([sink size, sink attempt] |inout state: SharedLogState| &state.refuse_size(size, at: 0, from: attempt))
+    }
+
+    test fn a_shared_log_refuses_every_acquisition_of_the_named_size_from_one_on() {
+        defer let log = SharedAllocationLog.open(system(), 0).unwrap()
+        log.refuse_size_from(4096, 2)
+        let first = log.allocator().acquire(4096)
+        let accepted = first.is_ok()
+        first.release()
+        let small = log.allocator().acquire(16)
+        let other_size = small.is_ok()
+        small.release()
+        var refused: UInt64 = 0
+        for _ in 0..3 {
+            let later = log.allocator().acquire(4096)
+            if later.is_err() {
+                refused += 1
+            }
+            later.release()
+        }
+        testing.assert(accepted, "the acquisition of the size before the named one was refused")?
+        testing.assert(other_size, "an acquisition of another size was refused")?
+        testing.assert_eq(refused, UInt64(3), "an acquisition of the size after the named one was accepted")?
+        testing.assert_eq(log.attempts(), UInt64(5), "a refused acquisition was not counted as an attempt")?
+    }
+
+    // Return whether every successful acquisition was disposed exactly once
+    // and no bytes remain live.
+    pub fn all_disposed(self: Self) -> Bool {
+        self.owner.client().call(|inout state: SharedLogState| state.all_disposed())
+    }
+
+    test fn a_shared_log_is_not_all_disposed_while_an_allocation_is_live() {
+        defer let log = SharedAllocationLog.open(system(), 0).unwrap()
+        let buffer = log.allocator().acquire(16).unwrap()
+        let settled_while_live = log.all_disposed()
+        buffer.release()
+        testing.assert(!settled_while_live, "a live allocation reads as settled")?
+        testing.assert(log.all_disposed(), "a disposed allocation stayed live")?
+    }
+}
+
+impl[H: Allocator] Release for SharedAllocationLog[H] {
+    fn release(sink self: Self) {
+        let SharedAllocationLog { owner, backing: _ } = self
+        owner.release()
+    }
+}
+
+// Acquire and release `count` buffers through `allocator` on a task of its
+// own while this task does the same. Its bound states that the allocator may
+// be read by two tasks at once.
+fn allocate_on_two_tasks[P: Allocator + Shareable](allocator: P, count: UInt64) {
+    let other = task.prepare(
+        sink [sink allocator = copy(allocator), sink count] |sink me: Chan[End]| {
+            for _ in 0..count {
+                allocator.acquire(8).unwrap().release()
+            }
+            me.close()
+        },
+    ).unwrap().start()
+    for _ in 0..count {
+        allocator.acquire(8).unwrap().release()
+    }
+    other.close()
+}
+
+// A SharedRefusingAllocator is a handle to a shared allocation log: a client
+// of the task that keeps the log's counts, and the backing allocator. It owns
+// nothing, so it can be copied freely while the log is live, and it is
+// `Shareable` exactly when the backing allocator is.
+@(opaque, copyable)
+struct SharedRefusingAllocator[H: Allocator] {
+    log: task.Client[SharedLogState],
+    backing: H,
+}
+
+// A SharedRefusingAllocation is the obligation a logged buffer carries: the
+// backing allocator's obligation and the buffer's index among the log's
+// acquisitions.
+@linear
+struct SharedRefusingAllocation[H: Allocator] {
+    backing: H.Obligation,
+    index: UInt64,
+}
+
+impl[H: Allocator] Allocator for SharedRefusingAllocator[H] {
+    type Obligation = SharedRefusingAllocation[H]
+
+    fn acquire(self: Self, size: UInt64) -> Result[Buffer[Self], Oom] {
+        if self.log.call([sink size] |inout state: SharedLogState| &state.attempt(size)) {
+            return .Err(.Exhausted)
+        }
+        let Buffer { at, len, allocated, allocator, obligation: backing } = self.backing.acquire(size)?
+        match self.log.call([sink allocated] |inout state: SharedLogState| &state.record(allocated)) {
+            Some(index) => .Ok(.{ at, len, allocated, allocator = copy(self), obligation = .{ backing, index } }),
+            None => {
+                // A log with no room to record the allocation refuses it.
+                let unrecorded: Buffer[H] = .{ at, len, allocated, allocator, obligation = backing }
+                unrecorded.release()
+                .Err(.Exhausted)
+            },
+        }
+    }
+
+    fn dispose(sink b: Buffer[Self]) {
+        let Buffer { at, len, allocated, allocator, obligation: SharedRefusingAllocation { backing, index } } = b
+        if !allocator.log.call([sink index, sink allocated] |inout state: SharedLogState| &state.dispose(index, allocated)) {
+            panic("an allocation was disposed more than once")
+        }
+        let buffer: Buffer[H] = .{ at, len, allocated, allocator = copy(allocator.backing), obligation = backing }
+        buffer.release()
+    }
+}

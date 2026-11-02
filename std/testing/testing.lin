@@ -7,9 +7,12 @@ use mem.Oom
 use mem.Lender
 
 // Tests that walk every allocation-failure path reach the refusing allocator
-// through testing, without importing mem.
+// through testing, without importing mem. The shared log and its allocator do
+// the same for code that hands its allocator to other tasks.
 pub use mem.AllocationLog
 pub use mem.RefusingAllocator
+pub use mem.SharedAllocationLog
+pub use mem.SharedRefusingAllocator
 
 // A Failure is a failed assertion carrying the caller's message, or a
 // refused allocation a test reports with `refused`. Its representation is

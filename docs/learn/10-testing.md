@@ -515,6 +515,71 @@ The log is linear, so it is released like any other owner, and the result of
 `banner_in` is matched rather than tested with `is_err()`, because on success it
 holds a `String` that must be released.
 
+### Allocations from more than one task
+
+A log from `mem.AllocationLog` counts through a plain read of the log, so two
+tasks allocating through it at once would race on its counts. Linea refuses
+that: the log is `@unshareable`, and so is its allocator. Code that hands its
+allocator to other tasks, such as `http.serve_in`, asks for an allocator that
+is `Shareable`, and `testing.SharedAllocationLog` gives you one. It keeps its
+counts in an owning task of its own, which every task reaches one call at a
+time, so its allocator is `Shareable` whenever the allocator under it is.
+
+It answers `attempts()`, `acquired()` and `all_disposed()` like the other log,
+and refuses on request: `refuse_attempt(n)` refuses the `n`th attempt,
+`refuse_from(n)` every attempt from the `n`th on, `refuse_size_attempt(size, n)`
+the `n`th acquisition of exactly `size` bytes made after the call, and
+`refuse_size_from(size, n)` every such acquisition from the `n`th on.
+
+Each task a server runs takes a 4 KiB buffer from its parent allocator before it
+accepts anything, to answer 503 with when it runs out of memory later. This
+test refuses every one of those buffers to a server with four tasks, and checks
+that serving stops with `Memory` and gives back everything it took. Save it as
+`refused_server.lin`:
+
+```linea
+import std.http
+import std.mem
+import std.net
+import std.testing
+
+// A router whose tables and answers come from the log's allocator.
+alias Routes = http.Router[(), testing.SharedRefusingAllocator[mem.SystemAllocator]]
+
+fn hello[P: mem.Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    http.text(request, "hello")
+}
+
+test fn a_server_refused_its_buffers_stops_and_gives_everything_back() {
+    defer let log = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    log.refuse_size_from(4096, 1)
+    let parent = log.allocator()
+    // Each serving task calls `made` to build its own router. The closure
+    // keeps its own copy of the allocator, which every task may read at once.
+    let made = [sink routes = copy(parent)] || -> Routes where carries(routes) {
+        var router = http.Router.new_in(routes)
+        &router.route_raw("GET /", hello).unwrap()
+        router
+    }
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let served = http.serve_in(parent, listener, made, policy: .Threads(4))
+    testing.assert_eq(served, .Err(.Memory(.Exhausted)), "serving went on without its buffers")?
+    testing.assert(log.all_disposed(), "serving kept memory it took")?
+}
+```
+
+```
+ok    a_server_refused_its_buffers_stops_and_gives_everything_back
+
+1 passed, 0 failed
+```
+
+Opening the log starts its task, so `open` answers a `Result`, which fails with
+`task.PrepareError` when the task cannot be started. Give the log an allocator
+`mem.AllocationLog` could not share, such as an arena's handle, and the log
+still works, but its allocator is not `Shareable`, and `http.serve_in` refuses
+it.
+
 ## Testing a server
 
 A router is a handler, so a test sends it a request. `http.new_request` builds a
@@ -634,6 +699,8 @@ it.
 - `test trap fn` marks a test that must stop the program.
 - `testing.each_allocation_failure(allocator, body, is_refusal)` refuses each
   allocation in turn and checks that every one is handled.
+- `testing.SharedAllocationLog` counts and refuses allocations made from many
+  tasks at once, so a server under test can be refused the memory it asks for.
 - A handler is tested by calling it with a request from `http.new_request`,
   or through the router with `&router.serve_http`.
 

@@ -1,0 +1,28 @@
+// `Pair` ends in a field that occupies no storage, so that field sits at the
+// end of the `Result` holding the pair. Destructuring the answer of `?` reads
+// each field where it lies in the result.
+@linear
+struct Empty {}
+
+@linear
+struct Pair {
+    at: UInt64,
+    tag: Empty,
+}
+
+fn make() -> Result[Pair, UInt8] {
+    .Ok(.{ at = 7, tag = .{} })
+}
+
+fn take() -> Result[UInt64, UInt8] {
+    let Pair { at, tag } = make()?
+    let Empty {} = tag
+    .Ok(at)
+}
+
+fn main() -> UInt8 {
+    match take() {
+        Ok(at) => UInt8(at),
+        Err(code) => code,
+    }
+}

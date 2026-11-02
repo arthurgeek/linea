@@ -485,6 +485,7 @@ The library tests itself.
   ok    http.a_segment_ends_at_the_next_slash
   ok    http.a_segment_is_a_literal_a_parameter_or_a_remainder
   ok    http.a_serve_error_displays_its_cause
+  ok    http.a_serving_task_refused_its_discard_buffer_ends_serving_with_memory
   ok    http.a_short_header_after_a_long_line_is_answered_in_the_smallest_arena
   ok    http.a_silent_client_times_out_and_the_next_is_served
   ok    http.a_silent_close_is_closed_not_an_error
@@ -1043,6 +1044,16 @@ The library tests itself.
   ok    mem.a_refused_overflowing_reservation_keeps_the_cursor
   ok    mem.a_release_log_holds_its_codes_in_release_order
   ok    mem.a_rewound_arena_hands_out_its_slab_again_zeroed
+  ok    mem.a_shared_log_allocator_is_shared_by_tasks_that_allocate_at_once
+  ok    mem.a_shared_log_counts_only_successful_acquisitions
+  ok    mem.a_shared_log_counts_refused_attempts_too
+  ok    mem.a_shared_log_is_not_all_disposed_while_an_allocation_is_live
+  ok    mem.a_shared_log_refuses_a_later_attempt_through_live_handles
+  ok    mem.a_shared_log_refuses_every_acquisition_of_the_named_size_from_one_on
+  ok    mem.a_shared_log_refuses_every_attempt_from_the_one_named
+  ok    mem.a_shared_log_refuses_one_acquisition_of_the_named_size
+  ok    mem.a_shared_log_refuses_the_acquisition_open_names
+  ok    mem.a_shared_log_remembers_the_most_bytes_live_at_once
   ok    mem.a_slice_debugs_as_its_elements_in_brackets
   ok    mem.a_slice_observes_only_its_initialized_extent
   ok    mem.a_system_drain_stopped_early_is_returned_by_finish_with_its_storage
@@ -1504,4 +1515,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1501 passed, 0 failed
+  1512 passed, 0 failed
