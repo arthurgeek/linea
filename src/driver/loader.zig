@@ -5790,6 +5790,54 @@ test "checked unused library delegation resumes generic indexing and traversal" 
     try testing.expectEqualDeep(saved_positions, prefix.checked.typing.traversal_positions.get(delegated_traversal).?);
 }
 
+// `view_place` trusts a view's `carried` field to hold the dependencies of
+// its elements, so the View certificate holds that field to
+// `carried: mem.Carried[T]` as it holds `at` and `len`. The library is
+// checked with that line of `std/mem/view.lin` replaced, once as written and
+// once for each changed shape.
+test "the View certificate holds its carried field to mem.Carried of its element" {
+    const written = "    carried: mem.Carried[T],\n";
+    const cases = [_]struct { carried: []const u8, valid: bool }{
+        .{ .carried = "    carried: mem.Carried[T],\n", .valid = true },
+        .{ .carried = "    carried: mem.SystemAllocator,\n", .valid = false },
+        .{ .carried = "    carried: mem.Carried[UInt8],\n", .valid = false },
+        .{ .carried = "    kept: mem.Carried[T],\n", .valid = false },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        const files = try gpa.dupe(InMemoryFile, &library.files);
+        var replaced = false;
+        for (files) |*file| {
+            if (!std.mem.eql(u8, file.path, "std/mem/view.lin")) continue;
+            const at = std.mem.indexOf(u8, file.text, written) orelse return error.TestUnexpectedResult;
+            file.text = try std.mem.concat(gpa, u8, &.{ file.text[0..at], case.carried, file.text[at + written.len ..] });
+            replaced = true;
+        }
+        try testing.expect(replaced);
+        var table: FileTable = .empty;
+        var interner: Interner = .empty;
+        var sink = Sink.init(gpa);
+        var program = try loadFromMemory(gpa, &table, &sink, &interner, library.prelude_dir, files, .program, false, .borrow);
+        program.kind = .library;
+        var resolved = try @import("../sema/resolve.zig").resolveLibraryPrefix(gpa, &program, &interner, &sink);
+        defer resolved.deinit();
+        // A changed shape also leaves the library's own uses of `View` wrong,
+        // so checking ends with an error and the sink is read for the
+        // certificate's.
+        if (@import("../sema/typecheck.zig").typecheckLibraryPrefix(gpa, &resolved.result.expanded, &resolved.result.resolution, &sink)) |checked| {
+            var held = checked;
+            held.deinit();
+        } else |err| if (err != error.InvalidLibraryPrefix) return err;
+        var refused = false;
+        for (sink.items()) |d| {
+            if (std.mem.indexOf(u8, d.message, "View certificate") != null) refused = true;
+        }
+        try testing.expectEqual(!case.valid, refused);
+    }
+}
+
 test "checked construction derives survive library reuse and fallback" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();

@@ -20294,16 +20294,25 @@ const Checker = struct {
             // `view_place` reads a view's address and length and trusts that
             // the elements between them are live, so only the library's own
             // module builds one: it is opaque, and it cannot be copied, so two
-            // writers of one element never both hold it.
+            // writers of one element never both hold it. Its third field
+            // carries the dependencies of its elements, so it must be a
+            // `mem.Carried` of the view's own element.
             const d = raw.view;
             const ty = declarations.get(d);
-            const valid = self.ast.declTag(d) == .struct_ and
+            var valid = self.ast.declTag(d) == .struct_ and
                 self.ast.declVisibility(d) == .opaque_ and self.ast.declOwnershipPolicy(d) != .copyable and
                 self.ast.declTypeParams(d).len == 1 and self.builder.fieldCount(ty) == 3 and
                 std.mem.eql(u8, self.builder.fieldName(ty, 0), "at") and
                 self.addressOf(try self.builder.fieldType(ty, 0)) == self.param_types[d.index()][0] and
-                std.mem.eql(u8, self.builder.fieldName(ty, 1), "len") and (try self.builder.fieldType(ty, 1)) == .u64;
-            if (!valid) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the View certificate requires an opaque move-only address-and-length descriptor", "declare View[T] with at: address.Address[T] and len: UInt64 fields, then the carried dependencies", null);
+                std.mem.eql(u8, self.builder.fieldName(ty, 1), "len") and (try self.builder.fieldType(ty, 1)) == .u64 and
+                std.mem.eql(u8, self.builder.fieldName(ty, 2), "carried");
+            if (valid) {
+                const carried = try self.builder.fieldType(ty, 2);
+                const args = self.builder.appliedTo(carried);
+                valid = raw.carried != .none and self.builder.view().declOfType(carried) == raw.carried and
+                    args.len == 1 and args[0] == self.param_types[d.index()][0];
+            }
+            if (!valid) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the View certificate requires an opaque move-only address-and-length descriptor that carries its elements' dependencies", "declare View[T] with at: address.Address[T], len: UInt64 and carried: mem.Carried[T] fields", null);
         }
         if (raw.address != .none) try self.checkAddressCertificate(declarations, raw.address);
         if (raw.errno != .none) {
