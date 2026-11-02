@@ -83,7 +83,9 @@ forget dispatch or a handle that carries nothing cannot be written.
 ### 4. Shared mutable state lives in an owning task
 
 `task.own(state)` starts a task that holds `state` and answers its linear
-`Owner[S]`, or `Unowned[S]` holding the state when the task cannot be made.
+`Owner[S]`, or `Unowned[S]` holding the state when the task or its call
+queue cannot be made: the runtime answers zero for a queue whose record it
+cannot allocate, and `own` opens the queue before it prepares the thread.
 `owner.client()` answers a copyable `Client[S]` that borrows the owner.
 `client.call(job)` runs `job`, a function of `inout state: S`, on the owning
 task, one call at a time, and answers what the job answers. `owner.close()`
@@ -95,7 +97,9 @@ The promises hold through rules the compiler already enforces:
 - Only the owning task's thread touches the state. A call is a rendezvous on
   a runtime call queue under one mutex, so everything a caller did before the
   call happens before the job runs, and the job happens before the call
-  returns.
+  returns. The request names a flag on the caller's own stack, which the
+  owner sets when it finishes the call, so each caller waits for its own
+  call and no count of calls can wrap.
 - A client borrows its owner, so [O-Borrow] refuses `close` while a client is
   still used: every task holding one is joined first, and no client outlives
   the queue it reaches.

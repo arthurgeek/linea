@@ -302,9 +302,10 @@ void linea_chan_close(unsigned long endpoint) {
 
 /* An owning task's call queue. One request slot is filled by a caller and
  * emptied by the owner, which copies its answer to the bytes the caller named
- * beside the request; `issued` and `finished` count requests, so each caller
- * waits for its own to finish and a later caller cannot take a slot that is
- * still being served. */
+ * beside the request. The slot also names the caller's `finished` flag, which
+ * the owner sets when it empties the slot, so each caller waits for its own
+ * request to finish however many requests other callers make before it next
+ * runs, and a later caller cannot take a slot that is still being served. */
 struct owner_queue {
     pthread_mutex_t lock;
     pthread_cond_t changed;
@@ -315,15 +316,21 @@ struct owner_queue {
     unsigned long answer_at;
     unsigned long answer_len;
     int answered;
-    unsigned long issued;
-    unsigned long finished;
+    int *finished;
 };
 
 unsigned long linea_owner_open(void) {
     struct owner_queue *q = calloc(1, sizeof *q);
-    if (q == 0) fail("linea: an owning task's queue could not be allocated\n");
-    must(pthread_mutex_init(&q->lock, 0));
-    must(pthread_cond_init(&q->changed, 0));
+    if (q == 0) return 0;
+    if (pthread_mutex_init(&q->lock, 0) != 0) {
+        free(q);
+        return 0;
+    }
+    if (pthread_cond_init(&q->changed, 0) != 0) {
+        must(pthread_mutex_destroy(&q->lock));
+        free(q);
+        return 0;
+    }
     return (unsigned long)q;
 }
 
@@ -340,10 +347,10 @@ void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len, 
     q->len = len;
     q->answer_at = answer_at;
     q->answer_len = answer_len;
-    q->issued += 1;
-    const unsigned long mine = q->issued;
+    int finished = 0;
+    q->finished = &finished;
     must(pthread_cond_broadcast(&q->changed));
-    while (q->finished < mine) must(pthread_cond_wait(&q->changed, &q->lock));
+    while (!finished) must(pthread_cond_wait(&q->changed, &q->lock));
     must(pthread_mutex_unlock(&q->lock));
 }
 
@@ -379,7 +386,8 @@ void linea_owner_done(unsigned long queue) {
     if (!q->answered) fail("linea: an owning task finished a call it did not answer\n");
     q->answered = 0;
     q->full = 0;
-    q->finished += 1;
+    *q->finished = 1;
+    q->finished = 0;
     must(pthread_cond_broadcast(&q->changed));
     must(pthread_mutex_unlock(&q->lock));
 }

@@ -2,10 +2,12 @@
 /* Assertions execute test setup, checks, and cleanup in every build mode. */
 #undef NDEBUG
 #include <assert.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -44,6 +46,109 @@ static void aborts_saying(void (*body)(void), const char *expected) {
     assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
     assert(strcmp(said, expected) == 0);
 }
+
+/* Runs `body` in a child and checks it exited cleanly. */
+static void exits_cleanly(void (*body)(void)) {
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        body();
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+/* A page of the host's own, inaccessible until the host's fault handler
+ * makes it readable, and how many faults that handler took in it. */
+static char *host_page = 0;
+static unsigned long host_page_bytes = 0;
+static volatile sig_atomic_t host_faults = 0;
+
+/* The host's fault handler: it answers a fault in its own page by making the
+ * page readable, so the faulting load runs again and succeeds. */
+static void host_on_fault(int signal, siginfo_t *info, void *context) {
+    (void)signal;
+    (void)context;
+    char *address = info->si_addr;
+    if (address < host_page || address >= host_page + host_page_bytes) _exit(3);
+    host_faults += 1;
+    if (mprotect(host_page, host_page_bytes, PROT_READ) != 0) _exit(4);
+}
+
+static void host_on_pipe(int signal) { (void)signal; }
+
+/* A process that runs Linea code beside its own, as a host calling an
+ * exported function does, keeps the handlers it installed: the runtime leaves
+ * SIGPIPE as the host set it, and hands a fault that is not Linea's to the
+ * host's handler. */
+static void host_handlers_survive(void) {
+    struct sigaction fault;
+    memset(&fault, 0, sizeof fault);
+    fault.sa_sigaction = host_on_fault;
+    fault.sa_flags = SA_SIGINFO;
+    assert(sigemptyset(&fault.sa_mask) == 0);
+    assert(sigaction(SIGSEGV, &fault, 0) == 0 && sigaction(SIGBUS, &fault, 0) == 0);
+    struct sigaction pipe_action;
+    memset(&pipe_action, 0, sizeof pipe_action);
+    pipe_action.sa_handler = host_on_pipe;
+    assert(sigemptyset(&pipe_action.sa_mask) == 0);
+    assert(sigaction(SIGPIPE, &pipe_action, 0) == 0);
+
+    char name[] = "host";
+    char *argv[] = {name, NULL};
+    linea_set_args(1, argv);
+
+    struct sigaction now;
+    assert(sigaction(SIGPIPE, 0, &now) == 0 && now.sa_handler == host_on_pipe);
+    host_page_bytes = (unsigned long)sysconf(_SC_PAGESIZE);
+    host_page = mmap(0, host_page_bytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    assert(host_page != MAP_FAILED);
+    assert(*(volatile char *)host_page == 0);
+    assert(host_faults == 1);
+}
+
+/* A sanitized runtime leaves faults to the sanitizer, which reports a wild
+ * load in its own words and exits rather than ending by the signal. */
+#if !defined(LINEA_SANITIZED)
+/* Sets SIGSEGV and SIGBUS to `handler` with `flags`, starts the runtime, and
+ * loads from address 16, which lies in the unmapped low pages both Linux and
+ * macOS keep. */
+static void wild_load_after(void (*handler)(int), int flags) {
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = handler;
+    action.sa_flags = flags;
+    assert(sigemptyset(&action.sa_mask) == 0);
+    assert(sigaction(SIGSEGV, &action, 0) == 0 && sigaction(SIGBUS, &action, 0) == 0);
+    char name[] = "wild";
+    char *argv[] = {name, NULL};
+    linea_set_args(1, argv);
+    (void)*(volatile char *)16;
+}
+
+/* A wild load in a process that inherited SIGSEGV and SIGBUS ignored still
+ * ends it with the fault's signal, as it does where they were never set. */
+static void ignored_fault_ends_the_process(void) { wild_load_after(SIG_IGN, 0); }
+
+/* A shell can leave `SA_SIGINFO` set beside the default action; the fault
+ * still takes the default action. */
+static void default_with_siginfo_ends_the_process(void) { wild_load_after(SIG_DFL, SA_SIGINFO); }
+
+/* Runs `body` in a child and checks it was ended by SIGSEGV. */
+static void ends_by_fault(void (*body)(void)) {
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        body();
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGSEGV);
+}
+#endif
 
 static void over_aligned(void) { (void)linea_alloc(8, 16); }
 static void free_nothing(void) { linea_free(linea_alloc(8, 8), 0, 8); }
@@ -129,6 +234,31 @@ static void read_after_free(void) {
 static void write_after_free(void) {
     unsigned long at = linea_alloc(16, 8);
     linea_free(at, 16, 8);
+    store(at + 15, 1);
+}
+
+/* Allocates and frees until the process ends, so the checking allocator's
+ * table is being changed when another thread faults. */
+static int churning = 0;
+
+static void *churn(void *arg) {
+    (void)arg;
+    for (;;) {
+        linea_free(linea_alloc(64, 8), 64, 8);
+        __atomic_store_n(&churning, 1, __ATOMIC_SEQ_CST);
+    }
+    return 0;
+}
+
+/* A fault on freed storage is reported while another thread is changing the
+ * allocator's table, not lost to the default action. */
+static void write_after_free_beside_allocation(void) {
+    unsigned long at = linea_alloc(16, 8);
+    linea_free(at, 16, 8);
+    pthread_t other;
+    assert(pthread_create(&other, 0, churn, 0) == 0);
+    while (__atomic_load_n(&churning, __ATOMIC_SEQ_CST) == 0) {
+    }
     store(at + 15, 1);
 }
 
@@ -264,35 +394,41 @@ static void checked_allocation(void) {
     linea_free(large, 100000, 8);
 }
 
-/* The fault handler reports the faulting address and restores the default
- * action once it has run. `SA_RESETHAND` does not fit an `int` on Linux, so
- * installing the handler must not trip the implicit-conversion check. */
-static void fault_handler_is_one_shot_and_informative(void) {
+/* The fault handler is told the faulting address, and stays installed after
+ * a fault it passes on, so it is not reset to the default action.
+ * `SA_RESETHAND` does not fit an `int` on Linux, so the flags are compared
+ * unsigned. */
+static void fault_handler_stays_and_is_informative(void) {
     static const int faults[] = {SIGSEGV, SIGBUS};
     for (unsigned long i = 0; i < sizeof faults / sizeof *faults; i += 1) {
         struct sigaction installed;
         assert(sigaction(faults[i], 0, &installed) == 0);
         assert((installed.sa_flags & SA_SIGINFO) != 0);
-#if defined(__linux__)
-        /* Only Linux reports the one-shot flag back. */
-        assert(((unsigned)installed.sa_flags & (unsigned)SA_RESETHAND) != 0);
-#endif
+        assert(((unsigned)installed.sa_flags & (unsigned)SA_RESETHAND) == 0);
     }
 }
 #endif
 
 int main(void) {
+    /* First, so the host's handlers are in place before the runtime installs
+     * its own in that child. */
+    exits_cleanly(host_handlers_survive);
+#if !defined(LINEA_SANITIZED)
+    ends_by_fault(ignored_fault_ends_the_process);
+    ends_by_fault(default_with_siginfo_ends_the_process);
+#endif
     allocation();
     arguments();
     environment();
 #if defined(LINEA_CHECK_STORAGE) && LINEA_CHECK_STORAGE
     checked_allocation();
-    fault_handler_is_one_shot_and_informative();
+    fault_handler_stays_and_is_informative();
 #if defined(__linux__)
     mappings_follow_live_allocations();
 #endif
     aborts_saying(read_after_free, "linea: storage was used after it was freed\n");
     aborts_saying(write_after_free, "linea: storage was used after it was freed\n");
+    for (int i = 0; i < 32; i += 1) aborts_saying(write_after_free_beside_allocation, "linea: storage was used after it was freed\n");
     aborts_saying(view_across_growth, "linea: storage was used after it was freed\n");
     aborts_saying(system_call_on_freed, "linea: storage was used after it was freed\n");
     aborts_saying(system_call_past_end, "linea: an access reached outside its storage\n");

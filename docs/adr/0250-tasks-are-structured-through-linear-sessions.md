@@ -572,7 +572,22 @@ a measurement shows the allocation matters.
   *Built:* every generated body carries `"probe-stack"="inline-asm"`, and
   the report is `linea: a stack overflowed`. A thread installs its signal
   stack before it parks, so a failure there is `prepare`'s to report. A
-  sanitized runtime leaves faults to the sanitizer's own handler.
+  sanitized runtime, which the build compiles with `LINEA_SANITIZED`, leaves
+  faults to the sanitizer's own handler.
+- **Signals in a host process.** Exported Linea functions run inside a process
+  that may have installed handlers of its own, so the runtime takes over only
+  what it must. Its `SIGSEGV` and `SIGBUS` handler keeps the action installed
+  before it and hands every fault that is neither an overflow nor the checking
+  allocator's to that action; a default or ignored action is reinstalled and
+  the access runs again, so the process ends as it would without the runtime.
+  The handler calls only async-signal-safe functions: it reads the checking
+  allocator's table under a flag taken with lock-free atomics, not a mutex.
+  `SIGPIPE` is left as the process set it, since every write the runtime makes
+  blocks it on its own thread and consumes one it raises, so a closed pipe is
+  `EPIPE` whatever the disposition. This replaces the restoring of the
+  default action that
+  [0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md)
+  describes.
 
 ### 12. `mem.Carried[H]`: a field that carries without owning
 

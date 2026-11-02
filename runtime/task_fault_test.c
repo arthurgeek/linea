@@ -238,7 +238,24 @@ static void a_receive_from_a_late_peer_times_out(void) {
     linea_chan_close(session);
 }
 
+/* An owning task's queue whose record cannot be allocated is refused with
+ * zero, and the next one opens and serves. */
+static void a_refused_owner_queue_answers_zero(void) {
+    refuse_record = 1;
+    const unsigned long refused = linea_owner_open();
+    refuse_record = 0;
+    assert(refused == 0);
+    const unsigned long queue = linea_owner_open();
+    assert(queue != 0);
+    linea_owner_close(queue);
+    unsigned long request = 0;
+    assert(linea_owner_next(queue, (unsigned long)&request, sizeof request) == 0);
+    linea_owner_free(queue);
+}
+
 int main(void) {
+    a_refused_owner_queue_answers_zero();
+
     refuse_record = 1;
     long refused = linea_task_prepare(1UL << 16);
     refuse_record = 0;
@@ -275,6 +292,6 @@ int main(void) {
     a_receive_timeout_does_not_read_the_wall_clock();
     a_receive_from_a_late_peer_times_out();
 
-    puts("native task faults: refused records, mappings, threads and signal stacks leave nothing behind, a wait past the last time has no deadline, a timeout ends a wait and ignores the wall clock");
+    puts("native task faults: refused records, owner queues, mappings, threads and signal stacks leave nothing behind, a wait past the last time has no deadline, a timeout ends a wait and ignores the wall clock");
     return 0;
 }

@@ -1117,14 +1117,84 @@ const Declared = struct {
 /// The function pointer types the runtime's headers declare, by name.
 const Typedefs = std.StringHashMapUnmanaged(*const runtime_symbols.Callback);
 
+/// `text` with every comment replaced by spaces and its newlines kept, so a
+/// declaration written inside a comment is not read as one. String and
+/// character literals are passed over, so a `/*` inside one opens nothing.
+fn withoutComments(gpa: std.mem.Allocator, text: []const u8) ![]u8 {
+    const out = try gpa.dupe(u8, text);
+    var i: usize = 0;
+    while (i < out.len) {
+        const c = out[i];
+        if (c == '"' or c == '\'') {
+            i += 1;
+            while (i < out.len and out[i] != c and out[i] != '\n') i += if (out[i] == '\\') 2 else 1;
+            i += 1;
+        } else if (c == '/' and i + 1 < out.len and (out[i + 1] == '/' or out[i + 1] == '*')) {
+            const end = if (out[i + 1] == '/')
+                std.mem.indexOfScalarPos(u8, out, i, '\n') orelse out.len
+            else if (std.mem.indexOfPos(u8, out, i + 2, "*/")) |close| close + 2 else out.len;
+            for (out[i..end]) |*byte| {
+                if (byte.* != '\n') byte.* = ' ';
+            }
+            i = end;
+        } else i += 1;
+    }
+    return out;
+}
+
+/// Walks a C source's lines in order and says whether a line lies inside a
+/// conditional block. Which branch of a conditional is compiled depends on the
+/// platform and the build's definitions, which these gates do not evaluate,
+/// so a declaration inside one could be read from a branch never compiled. A
+/// header's include guard, `#ifndef NAME` followed by `#define NAME`, holds
+/// the whole header and is not counted.
+const Conditionals = struct {
+    at: usize = 0,
+    depth: usize = 0,
+
+    /// Whether the line starting at `line_start` lies inside a conditional
+    /// block. Lines are asked about in increasing order, so the walk is one
+    /// pass over the text.
+    fn inside(self: *Conditionals, text: []const u8, line_start: usize) bool {
+        while (self.at < line_start) {
+            const end = std.mem.indexOfScalarPos(u8, text, self.at, '\n') orelse text.len;
+            const line = std.mem.trimStart(u8, text[self.at..end], " \t");
+            const next = @min(end + 1, text.len);
+            if (std.mem.startsWith(u8, line, "#if")) {
+                if (!isIncludeGuard(line, text[next..])) self.depth += 1;
+            } else if (std.mem.startsWith(u8, line, "#endif")) {
+                if (self.depth > 0) self.depth -= 1;
+            }
+            self.at = next;
+        }
+        return self.depth > 0;
+    }
+
+    fn isIncludeGuard(line: []const u8, rest: []const u8) bool {
+        if (!std.mem.startsWith(u8, line, "#ifndef ")) return false;
+        const name = std.mem.trim(u8, line["#ifndef ".len..], " \t\r");
+        const following = rest[0 .. std.mem.indexOfScalar(u8, rest, '\n') orelse rest.len];
+        if (!std.mem.startsWith(u8, following, "#define ")) return false;
+        return std.mem.eql(u8, std.mem.trim(u8, following["#define ".len..], " \t\r"), name);
+    }
+};
+
 /// Every `typedef R (*name)(P, …);` written at the start of a line in `text`,
-/// read into the callback shape a table parameter names. A typedef whose
-/// result or parameters this cannot read is left out, so a prototype naming
-/// it does not read either.
-fn callbackTypedefs(gpa: std.mem.Allocator, text: []const u8, out: *Typedefs) !void {
-    var lines = std.mem.splitScalar(u8, text, '\n');
-    while (lines.next()) |line| {
+/// outside comments, read into the callback shape a table parameter names. A
+/// typedef whose result or parameters this cannot read is left out, so a
+/// prototype naming it does not read either, and one inside a conditional
+/// block is refused with `error.ConditionalDeclaration`.
+fn callbackTypedefs(gpa: std.mem.Allocator, written: []const u8, out: *Typedefs) !void {
+    const text = try withoutComments(gpa, written);
+    var conditionals: Conditionals = .{};
+    var start: usize = 0;
+    while (start < text.len) {
+        const end = std.mem.indexOfScalarPos(u8, text, start, '\n') orelse text.len;
+        const line = text[start..end];
+        const line_start = start;
+        start = end + 1;
         if (!std.mem.startsWith(u8, line, "typedef ")) continue;
+        if (conditionals.inside(text, line_start)) return error.ConditionalDeclaration;
         const pointer = std.mem.indexOf(u8, line, "(*") orelse continue;
         const name_end = std.mem.indexOfScalarPos(u8, line, pointer, ')') orelse continue;
         const open = std.mem.indexOfScalarPos(u8, line, name_end, '(') orelse continue;
@@ -1214,13 +1284,16 @@ const Unread = struct { symbol: []const u8, why: []const u8 };
 
 /// Every `linea_` function a runtime source defines or declares: C
 /// prototypes and definitions and Zig `export fn`s, written at the start of a
-/// line. A `static` C function is private to its file and is not one. A
+/// line outside comments. A `static` C function is private to its file and is
+/// not one; one declared inside a conditional block is returned as unread. A
 /// declaration of a function the compiler owns is read like any other and
 /// held to `owned_functions`. Any `linea_` name at the start of
 /// a declaration whose shape or types this cannot read is returned as
 /// unread rather than skipped: a runtime function the table cannot be held to
 /// is a failure, not an omission.
-fn declaredIn(gpa: std.mem.Allocator, text: []const u8, typedefs: *const Typedefs, out: *std.ArrayList(Declared), unread: *std.ArrayList(Unread)) !void {
+fn declaredIn(gpa: std.mem.Allocator, written: []const u8, typedefs: *const Typedefs, out: *std.ArrayList(Declared), unread: *std.ArrayList(Unread)) !void {
+    const text = try withoutComments(gpa, written);
+    var conditionals: Conditionals = .{};
     var at: usize = 0;
     while (std.mem.indexOfPos(u8, text, at, "linea_")) |found| {
         at = found + 1;
@@ -1235,6 +1308,10 @@ fn declaredIn(gpa: std.mem.Allocator, text: []const u8, typedefs: *const Typedef
         const symbol = text[found..end];
         if (end >= text.len or text[end] != '(') continue;
         if (std.mem.startsWith(u8, head, "static")) continue;
+        if (conditionals.inside(text, line_start)) {
+            try unread.append(gpa, .{ .symbol = symbol, .why = "it is declared inside a conditional block" });
+            continue;
+        }
         const close = std.mem.indexOfScalarPos(u8, text, end, ')') orelse {
             try unread.append(gpa, .{ .symbol = symbol, .why = "its parameter list does not close" });
             continue;
@@ -1282,6 +1359,53 @@ fn declaredIn(gpa: std.mem.Allocator, text: []const u8, typedefs: *const Typedef
         }
         try out.append(gpa, .{ .symbol = symbol, .parameters = try parameters.toOwnedSlice(gpa), .result = result.scalar });
     }
+}
+
+test "a runtime typedef inside a comment is not read, and one inside a conditional is refused" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var typedefs: Typedefs = .empty;
+    try callbackTypedefs(gpa,
+        \\#ifndef LINEA_FIXTURE_H
+        \\#define LINEA_FIXTURE_H
+        \\/*
+        \\typedef void (*linea_commented)(unsigned long at);
+        \\*/
+        \\typedef void (*linea_read)(unsigned long at);
+        \\#endif
+    , &typedefs);
+    try testing.expect(scalarOf("linea_commented", &typedefs) == null);
+    try testing.expect(scalarOf("linea_read", &typedefs) != null);
+    try testing.expectError(error.ConditionalDeclaration, callbackTypedefs(gpa,
+        \\#if defined(__APPLE__)
+        \\typedef void (*linea_task_release)(unsigned long at);
+        \\#else
+        \\typedef void (*linea_task_release)(unsigned long at, unsigned long len);
+        \\#endif
+    , &typedefs));
+}
+
+test "a runtime declaration inside a comment is not read, and one inside a conditional is unread" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var declared: std.ArrayList(Declared) = .empty;
+    var unread: std.ArrayList(Unread) = .empty;
+    const no_typedefs: Typedefs = .empty;
+    try declaredIn(gpa,
+        \\/*
+        \\long linea_commented(int fd);
+        \\*/
+        \\#if LINEA_CHECK_STORAGE
+        \\long linea_checked(int fd);
+        \\#endif
+        \\long linea_close(int fd);
+    , &no_typedefs, &declared, &unread);
+    try testing.expectEqual(@as(usize, 1), declared.items.len);
+    try testing.expectEqualStrings("linea_close", declared.items[0].symbol);
+    try testing.expectEqual(@as(usize, 1), unread.items.len);
+    try testing.expectEqualStrings("linea_checked", unread.items[0].symbol);
 }
 
 test "a runtime declaration the table cannot read is reported, not skipped" {

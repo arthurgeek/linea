@@ -50,19 +50,25 @@ pub struct Unowned[S] {
     reason: PrepareError,
 }
 
-// Start a task that owns `state`. It fails when the task's thread or stack
-// cannot be made, and hands the state back then.
+// Start a task that owns `state`. It fails when the task's call queue, its
+// thread or its stack cannot be made, and hands the state back then.
 pub fn own[S: Owned](sink state: S) -> Result[Owner[S], Unowned[S]] {
+    // `linea_owner_open` answers zero where the queue's record cannot be
+    // allocated, before any thread exists.
+    let queue = linea_owner_open()
+    if queue == 0 {
+        return .Err(.{ state, reason = .Allocation })
+    }
     // The body captures nothing, so its handle carries no dependency and is
     // detached to a type `Owner` can name; it is still joined by `close`.
     let body = sink [] |sink me: Chan[Recv[(S, UInt64), Send[S, End]]]| run_owner[S](me)
     match prepare(body) {
         Ok(slot) => {
-            let queue = linea_owner_open()
             let handle = slot.start().detach().send((state, queue))
             .Ok(.{ queue, handle })
         },
         Err(unstarted) => {
+            linea_owner_free(queue)
             let Unstarted { body: _, reason } = unstarted
             .Err(.{ state, reason })
         },

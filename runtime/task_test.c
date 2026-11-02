@@ -15,12 +15,6 @@
 
 #include "task.h"
 
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
-#define LINEA_SANITIZED 1
-#endif
-#endif
-
 unsigned long linea_alloc(unsigned long size, unsigned long align);
 void linea_free(unsigned long at, unsigned long size, unsigned long align);
 void linea_set_args(int argc, char **argv);

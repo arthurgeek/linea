@@ -67,7 +67,9 @@ uint8_t linea_chan_recv_until(unsigned long endpoint, unsigned long at, unsigned
  * owner the `len` bytes at `at` and returns once the owner has answered it
  * with `answer_len` bytes, copied to `answer_at`, so everything the caller did
  * before the call happens before the owner's work on it, and that work
- * happens before the call returns. Calls are served one at a time. */
+ * happens before the call returns. Calls are served one at a time. Opening
+ * answers the queue, or zero where its record cannot be allocated or its lock
+ * initialised. */
 unsigned long linea_owner_open(void);
 void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len, unsigned long answer_at,
                       unsigned long answer_len);

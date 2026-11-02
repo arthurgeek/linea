@@ -21,12 +21,8 @@
 
 /* A sanitizer installs a fault handler of its own, which reports a stack
  * overflow and a wild access with more than this one can say, so a
- * sanitized runtime leaves the faults to it. */
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
-#define LINEA_SANITIZED 1
-#endif
-#endif
+ * sanitized runtime, which the build compiles with `LINEA_SANITIZED`
+ * defined, leaves the faults to it. */
 
 /* The interface between generated code and this file, versioned so the two
  * cannot silently disagree.
@@ -69,7 +65,8 @@ static const char *const what[] = {
 };
 
 /* Writes a runtime failure and aborts. Written with `write` rather than
- * stdio, so the fault handler can report through it too. */
+ * stdio, so the fault handler can report through it too: `strlen`, `write`
+ * and `abort` are all async-signal-safe. */
 static void fail(const char *message) {
     if (write(2, message, strlen(message)) < 0) {
     }
@@ -91,21 +88,51 @@ static const char *const overflow_report = "linea: a stack overflowed\n";
 static void storage_fault(unsigned long address);
 #endif
 
+/* The SIGSEGV and SIGBUS actions in place when the runtime installed its
+ * handler. A process that calls exported Linea functions may have installed
+ * its own, and a fault that is not Linea's is handed to it. */
+static struct sigaction previous_segv;
+static struct sigaction previous_bus;
+
+/* Hands a fault that is not Linea's to the action installed before the
+ * runtime's. A handler is called as the kernel would have called it.
+ * Otherwise the default action is reinstalled, so returning runs the access
+ * again and the process ends as it would have ended without this runtime. An
+ * ignored fault gets the default action too: a process can inherit an ignored
+ * SIGSEGV across `exec`, and the access would then fault forever on macOS,
+ * where Linux ends the process with the default action. */
+static void pass_on(int signal, siginfo_t *info, void *context) {
+    const struct sigaction *previous = signal == SIGBUS ? &previous_bus : &previous_segv;
+    /* The two handler fields share storage, and a process can carry
+     * `SA_SIGINFO` beside the default action, so the default and ignored
+     * actions are recognised before the flag is read. */
+    if (previous->sa_handler != SIG_DFL && previous->sa_handler != SIG_IGN) {
+        if ((previous->sa_flags & SA_SIGINFO) != 0) {
+            previous->sa_sigaction(signal, info, context);
+        } else {
+            previous->sa_handler(signal);
+        }
+        return;
+    }
+    struct sigaction fallback;
+    memset(&fallback, 0, sizeof fallback);
+    fallback.sa_handler = SIG_DFL;
+    sigemptyset(&fallback.sa_mask);
+    if (sigaction(signal, &fallback, 0) != 0) fail("linea: the runtime cannot restore a fault's default action\n");
+}
+
 /* Runs on a fault, on the faulting thread's alternate signal stack, so an
  * overflow, which leaves no stack to run on, is still reported. A fault in
  * the guard pages is an overflow, and an address inside a region of the
- * checking allocator is that allocator's to explain. Any other fault is left
- * to the default action, which `SA_RESETHAND` has already restored, so
- * returning re-executes the access and ends the process as it would have
- * ended without this handler. */
+ * checking allocator is that allocator's to explain. Any other fault is
+ * passed on. Everything it calls is async-signal-safe. */
 static void on_fault(int signal, siginfo_t *info, void *context) {
-    (void)signal;
-    (void)context;
     const unsigned long address = (unsigned long)info->si_addr;
     if (address >= guard_low && address < guard_high) fail(overflow_report);
 #if LINEA_CHECK_STORAGE
     storage_fault(address);
 #endif
+    pass_on(signal, info, context);
 }
 
 static void install_fault_handler(void) {
@@ -113,12 +140,8 @@ static void install_fault_handler(void) {
     memset(&action, 0, sizeof action);
     action.sa_sigaction = on_fault;
     sigemptyset(&action.sa_mask);
-    /* Linux spells `SA_RESETHAND` as 0x80000000, an unsigned value that does
-     * not fit the `int` of `sa_flags`. The conversion is made explicitly so
-     * the implicit-conversion check does not trap on it. */
-    const unsigned flags = (unsigned)SA_SIGINFO | (unsigned)SA_RESETHAND | (unsigned)SA_ONSTACK;
-    action.sa_flags = (int)flags;
-    if (sigaction(SIGSEGV, &action, 0) != 0 || sigaction(SIGBUS, &action, 0) != 0) {
+    action.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    if (sigaction(SIGSEGV, &action, &previous_segv) != 0 || sigaction(SIGBUS, &action, &previous_bus) != 0) {
         fail("linea: the runtime cannot install its fault handler\n");
     }
 }
@@ -126,19 +149,11 @@ static void install_fault_handler(void) {
 static pthread_once_t fault_handler_once = PTHREAD_ONCE_INIT;
 #endif
 
-static void install_pipe_handler(void) {
-    struct sigaction action;
-    memset(&action, 0, sizeof action);
-    action.sa_handler = SIG_IGN;
-    (void)sigaction(SIGPIPE, &action, 0);
-}
-
-static pthread_once_t pipe_handler_once = PTHREAD_ONCE_INIT;
-
 /* Installs the fault handler once per process, from whichever thread asks
- * first. */
+ * first. SIGPIPE is left as the process set it: a write the runtime makes
+ * blocks SIGPIPE on its own thread and consumes any it raises, so a closed
+ * pipe answers EPIPE whatever the disposition. */
 static void ensure_fault_handler(void) {
-    (void)pthread_once(&pipe_handler_once, install_pipe_handler);
 #if !defined(LINEA_SANITIZED)
     if (pthread_once(&fault_handler_once, install_fault_handler) != 0) {
         fail("linea: the runtime cannot install its fault handler\n");
@@ -341,7 +356,8 @@ void linea_storage_extent(unsigned long at, unsigned long len) {
  *
  * Tasks allocate and free from their own threads, so every piece of the
  * state below, the regions, their extents and the spill table, is read and
- * written only with `storage_lock` held. */
+ * written only with `storage_lock` held, or, by the fault handler, with
+ * `table_busy` alone. */
 
 enum { canary = 0xA5 };
 
@@ -385,17 +401,36 @@ static unsigned long spilled_used = 0;
 
 static pthread_mutex_t storage_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* Set while a thread reads or changes the state above. A thread that holds
+ * `storage_lock` also holds this flag, so threads wait for each other on the
+ * mutex and never spin on the flag; the only thread that spins is a fault
+ * handler, which cannot take a mutex, since no pthread mutex call is
+ * async-signal-safe, and takes the flag alone with lock-free atomic
+ * operations, which are. */
+static int table_busy = 0;
+
 /* Whether the calling thread holds `storage_lock`, so the fault handler does
- * not wait for a lock its own thread holds. */
+ * not wait for a flag its own thread holds. */
 static __thread int holding_lock = 0;
+
+static void take_table(void) {
+    while (__atomic_exchange_n(&table_busy, 1, __ATOMIC_ACQUIRE) != 0) {
+    }
+}
+
+static void release_table(void) {
+    __atomic_store_n(&table_busy, 0, __ATOMIC_RELEASE);
+}
 
 static void lock_storage(void) {
     if (pthread_mutex_lock(&storage_lock) != 0) fail("linea: storage checking cannot take its lock\n");
+    take_table();
     holding_lock = 1;
 }
 
 static void unlock_storage(void) {
     holding_lock = 0;
+    release_table();
     if (pthread_mutex_unlock(&storage_lock) != 0) fail("linea: storage checking cannot release its lock\n");
 }
 
@@ -454,15 +489,18 @@ static void check_extent_locked(unsigned long at, unsigned long len) {
 
 /* Explains a fault at `address` where it lies inside a region: an abort
  * naming what the access reached. Called by the fault handler on the
- * faulting thread, which takes the lock unless that thread already holds it,
- * as it does when the fault is inside this allocator. */
+ * faulting thread, which waits for `table_busy` unless that thread already
+ * holds it, as it does when the fault is inside this allocator. A thread
+ * holding the flag is changing the table and releases it without waiting on
+ * the faulting one, unless the fault is inside the C allocator while that
+ * thread waits for the C allocator's own lock. */
 static void storage_fault(unsigned long address) {
     const int held = holding_lock;
-    if (!held && pthread_mutex_trylock(&storage_lock) != 0) return;
+    if (!held) take_table();
     const struct region *r = region_holding(address);
     const char *message = r == 0 ? 0 : verdict(r, address);
-    if (!held) pthread_mutex_unlock(&storage_lock);
     if (message != 0) fail(message);
+    if (!held) release_table();
 }
 
 /* Sets up the allocator once; called with the lock held. */

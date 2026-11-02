@@ -1574,11 +1574,14 @@ pub fn build(b: *std.Build) void {
     if (sanitize.flag()) |name| {
         // A sanitizer that reports has to be able to reach its reporting
         // routine, so trapping is off wherever one is selected. A trap would
-        // abort with no account of what it found.
-        runtime_flags.append(
-            b.allocator,
+        // abort with no account of what it found. `LINEA_SANITIZED` tells the
+        // runtime and its tests to leave faults to the sanitizer's own
+        // handler; the build defines it because it is the one place that knows
+        // a sanitizer was selected, whichever C compiler builds the file.
+        runtime_flags.appendSlice(b.allocator, &.{
             b.fmt("-fsanitize={s}", .{name}),
-        ) catch @panic("OOM");
+            "-DLINEA_SANITIZED=1",
+        }) catch @panic("OOM");
     } else {
         runtime_flags.append(b.allocator, "-fsanitize-trap=all") catch @panic("OOM");
     }
