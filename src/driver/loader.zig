@@ -555,6 +555,26 @@ fn loadInputs(
     };
 }
 
+/// The text the compiler carries for a file of the standard library, by its
+/// path relative to the library's root, or null where it carries none. The
+/// carried files are sorted by path, so one lookup is a binary search.
+fn carriedText(relative: []const u8) ?[]const u8 {
+    const prefix = library.prelude_dir ++ "/";
+    const at = std.sort.binarySearch(InMemoryFile, &library.files, relative, struct {
+        fn order(wanted: []const u8, file: InMemoryFile) std.math.Order {
+            return std.mem.order(u8, wanted, file.path[prefix.len..]);
+        }
+    }.order) orelse return null;
+    return library.files[at].text;
+}
+
+test "the carried standard library is found by its relative paths" {
+    try testing.expect(carriedText("linea.json") != null);
+    try testing.expect(carriedText("mem/buffer.lin") != null);
+    try testing.expect(carriedText("mem/forged.lin") == null);
+    try testing.expect(carriedText("") == null);
+}
+
 /// Whether the root's manifest among `files` names it the standard library.
 fn isStandard(gpa: std.mem.Allocator, files: []const InMemoryFile, root_dir: ?[]const u8) std.mem.Allocator.Error!bool {
     const declared = try declaredGiven(gpa, files, root_dir);
@@ -2224,6 +2244,35 @@ const Loader = struct {
         return .{ .path = path, .text = text };
     }
 
+    /// Refuses a file of a root named `std` whose text is not the one the
+    /// compiler carries at the same path ([M-Standard]). Such a root is
+    /// compiled as the standard library, whose modules alone may declare the
+    /// runtime functions that hand out allocations, descriptors, threads and
+    /// queues, and whose types the checker certifies. The name is anyone's to
+    /// write in a manifest; the carried text is not. Held where the root is
+    /// read from disk, which is what a command builds from; an editor's
+    /// in-memory root, and a test assembling a library from the carried files
+    /// and its own, keep loading.
+    fn holdToCarried(self: *Loader, id: FileId, source: Source) LoadError!void {
+        const spelled = try canonical(self.gpa, source.path);
+        defer self.gpa.free(spelled);
+        const relative = if (self.bound.len == 0)
+            spelled
+        else if (std.mem.startsWith(u8, spelled, self.bound) and spelled.len > self.bound.len and spelled[self.bound.len] == '/')
+            spelled[self.bound.len + 1 ..]
+        else
+            spelled;
+        if (carriedText(relative)) |text| if (std.mem.eql(u8, text, source.text)) return;
+        try self.sink.addErrorFmt(
+            .m_standard,
+            id,
+            .empty,
+            "give the library another name, or build the compiler from this source",
+            "`{s}` is not the standard library this compiler carries, and only that library may be named `std`",
+            .{source.path},
+        );
+    }
+
     /// Loads the module in `dir`, or returns the one already there.
     /// `only` names a single entry file; null takes every `.lin` file in `dir`.
     fn load(self: *Loader, dir: []const u8, only: ?[]const u8, root: RootId) LoadError!ModuleId {
@@ -2245,6 +2294,7 @@ const Loader = struct {
                 if (!std.mem.eql(u8, f.path, one)) continue;
                 const source = try self.sourceFor(f);
                 const id = try self.table.add(self.gpa, source);
+                if (self.program_is_library and root == .primary and self.input == .disk) try self.holdToCarried(id, source);
                 try ids.append(self.gpa, id);
                 try parsed.append(self.gpa, .{ .file = id, .source = source });
             }
@@ -2255,6 +2305,7 @@ const Loader = struct {
                     const f = self.files[i];
                     const source = try self.sourceFor(f);
                     const id = try self.table.add(self.gpa, source);
+                    if (self.program_is_library and root == .primary and self.input == .disk) try self.holdToCarried(id, source);
                     try ids.append(self.gpa, id);
                     try parsed.append(self.gpa, .{ .file = id, .source = source });
                 }

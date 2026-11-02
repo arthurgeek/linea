@@ -1,10 +1,10 @@
 error[M-Extern]: an `extern` is declared only in a module its root's manifest grants, and linea.json does not list "."
- --> tests/library/one_runtime_symbol_has_one_signature.lin:5:11
+ --> tests/library/one_runtime_symbol_has_one_signature.lin:6:11
   |
-5 | extern fn linea_close(fd: Int64) -> Int64
-  |           ^^^^^^^^^^^ list this module under "extern" in linea.json to trust it with C, or call a module that is granted
-error[T-ExternRuntime]: the runtime gives `linea_close` the signature `fn(Int32) -> Int64`
- --> tests/library/one_runtime_symbol_has_one_signature.lin:5:11
+6 | extern fn linea_clock_sleep(nanoseconds: Int64) -> Int64
+  |           ^^^^^^^^^^^^^^^^^ list this module under "extern" in linea.json to trust it with C, or call a module that is granted
+error[T-ExternRuntime]: the runtime gives `linea_clock_sleep` the signature `fn(UInt64) -> Int64`
+ --> tests/library/one_runtime_symbol_has_one_signature.lin:6:11
   |
-5 | extern fn linea_close(fd: Int64) -> Int64
-  |           ^^^^^^^^^^^ declare it with the runtime's parameter types, conventions and result
+6 | extern fn linea_clock_sleep(nanoseconds: Int64) -> Int64
+  |           ^^^^^^^^^^^^^^^^^ declare it with the runtime's parameter types, conventions and result

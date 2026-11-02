@@ -1,10 +1,10 @@
-import descriptors
+import clock
 
-// Descriptor -1 is never open, so closing it fails.
+// A wait of no time does not fail.
 fn main() -> UInt8 {
-    if descriptors.close_quietly(-1) {
-        0
-    } else {
+    if clock.pause_failed(0) {
         1
+    } else {
+        0
     }
 }

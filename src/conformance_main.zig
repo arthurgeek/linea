@@ -16188,19 +16188,21 @@ test "an example's goldens are read from tests/examples under its own name" {
     try testing.expectError(error.FileNotFound, fixture.directory.dir.access(testing.io, "examples/value.fmt", .{}));
 }
 
-test "a case recording a storage report is not run against a runtime without the checking allocator" {
+test "a case recording a storage report fails unrun, and an update keeps its golden" {
     var fixture: LayoutFixture = try .init();
     defer fixture.deinit();
     const recorded = "trap\nlinea: storage was freed twice\n";
     try fixture.write("tests/storage/freed_twice.lin", fixture.text);
     try fixture.write("tests/storage/freed_twice.exit", recorded);
-    // An archive that does not name the checking allocator's marker.
+    // An archive that cannot be linked, so a walk that built the case would
+    // fail for another reason; this one fails before building it.
     try fixture.write("liblinea_rt.a", "!<arch>\n_linea_alloc _linea_free\n");
     const runtime = try std.fs.path.join(fixture.arena.allocator(), &.{ fixture.root, "liblinea_rt.a" });
-    // Neither a failure nor, with `--update`, a golden rewritten to what an
-    // unchecked runtime does.
-    try testing.expectEqual(@as(u8, 0), try fixture.run("tests/storage", &.{ "--runtime", runtime }));
-    try testing.expectEqual(@as(u8, 0), try fixture.run("tests/storage", &.{ "--runtime", runtime, "--update" }));
+    // No accepted program reaches a report of the checking allocator, so a
+    // golden recording one is a defect recorded, and `--update` does not
+    // replace it with another outcome either.
+    try testing.expectEqual(@as(u8, 1), try fixture.run("tests/storage", &.{ "--runtime", runtime }));
+    try testing.expectEqual(@as(u8, 1), try fixture.run("tests/storage", &.{ "--runtime", runtime, "--update" }));
     const kept = try fixture.directory.dir.readFileAlloc(testing.io, "tests/storage/freed_twice.exit", fixture.arena.allocator(), .unlimited);
     try testing.expectEqualStrings(recorded, kept);
 }
@@ -16722,7 +16724,6 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         "conformance: the runtime {s} holds no checking allocator, so storage is not checked; {s} holds one\n",
         .{ rt, runtime_symbols.checked_archive_name },
     );
-    var unchecked_skips: std.atomic.Value(u32) = .init(0);
     var sanitized_skips: std.atomic.Value(u32) = .init(0);
     const settings: Settings = .{
         .library = checked_library,
@@ -16735,8 +16736,6 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         .sanitize = sanitize,
         .runtime_path = runtime_path,
         .scratch_dir = scratch_dir,
-        .checks_storage = checks_storage,
-        .unchecked_skips = &unchecked_skips,
         .sanitized_skips = &sanitized_skips,
     };
     discovery_zone.end();
@@ -17684,11 +17683,6 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
 
     const report_zone = tracy.beginZone(@src(), "report");
     defer report_zone.end();
-    const skipped_unchecked = unchecked_skips.load(.monotonic);
-    if (skipped_unchecked != 0) std.debug.print(
-        "conformance: {d} case(s) record a report of the checking allocator and were not run; run them with {s}\n",
-        .{ skipped_unchecked, runtime_symbols.checked_archive_name },
-    );
     const skipped_sanitized = sanitized_skips.load(.monotonic);
     if (skipped_sanitized != 0) std.debug.print(
         "conformance: {d} case(s) record the runtime's stack overflow report, which a sanitizer replaces, and were not run; the unsanitized walk runs them\n",
@@ -20484,7 +20478,7 @@ fn showStderrOfMismatches(gpa: std.mem.Allocator, failures: []Failure, errors: [
     if (errors.len == 0) return;
     for (failures) |*f| {
         const is_run = std.mem.eql(u8, f.what, "exit") or std.mem.eql(u8, f.what, "out");
-        if (!is_run or recordsStorageReport(f.expected)) continue;
+        if (!is_run) continue;
         if (std.mem.indexOf(u8, f.actual, errors) != null) continue;
         f.actual = try std.fmt.allocPrint(gpa, "{s}\n--- stderr ---\n{s}", .{ f.actual, errors });
     }
@@ -20496,12 +20490,10 @@ test "a mismatching run reports what it said on standard error" {
     var failures = [_]Failure{
         .{ .path = "a.lin", .what = "exit", .expected = "exit 0\n", .actual = "trap\n" },
         .{ .path = "a.lin", .what = "mlir", .expected = "x", .actual = "y" },
-        .{ .path = "b.lin", .what = "exit", .expected = "trap\nlinea: storage was freed twice\n", .actual = "exit 0\n" },
     };
     try showStderrOfMismatches(arena.allocator(), &failures, "linea: oops\n");
     try testing.expectEqualStrings("trap\n\n--- stderr ---\nlinea: oops\n", failures[0].actual);
     try testing.expectEqualStrings("y", failures[1].actual);
-    try testing.expectEqualStrings("exit 0\n", failures[2].actual);
     var said_already = [_]Failure{.{ .path = "c.lin", .what = "exit", .expected = "exit 0\n", .actual = "trap\nlinea: oops\n" }};
     try showStderrOfMismatches(arena.allocator(), &said_already, "linea: oops\n");
     try testing.expectEqualStrings("trap\nlinea: oops\n", said_already[0].actual);
@@ -20624,11 +20616,6 @@ const Settings = struct {
     sanitize: ?[]const u8,
     runtime_path: ?[]const u8,
     scratch_dir: []const u8,
-    /// Whether the runtime holds the checking allocator, read from the archive.
-    checks_storage: bool = false,
-    /// Counts the cases recording a checking-allocator report that were not
-    /// run, because the runtime holds no checking allocator.
-    unchecked_skips: ?*std.atomic.Value(u32) = null,
     /// Counts the cases recording the runtime's overflow report that were not
     /// run, because a sanitizer takes that fault instead.
     sanitized_skips: ?*std.atomic.Value(u32) = null,
@@ -20668,8 +20655,8 @@ test "the checking allocator's reports are read from the runtime" {
 }
 
 /// Whether a recorded outcome is an abort the checking allocator reported.
-/// Only a runtime holding that allocator can produce one, so such a case is
-/// not run against any other.
+/// The language promises that no accepted program reaches one, so such an
+/// outcome is never a golden.
 fn recordsStorageReport(recorded: []const u8) bool {
     if (!std.mem.startsWith(u8, recorded, trap_answer)) return false;
     var lines = std.mem.splitScalar(u8, recorded[trap_answer.len..], '\n');
@@ -21516,21 +21503,23 @@ fn checkCase(
                 // is narrowed to what a sanitizer can see, when the case
                 // reaches the runtime at all. It reaches it by printing,
                 // which a `.out` golden records, or by trapping, which the
-                // exit status records. A case recording a report of the
-                // checking allocator is not run against a runtime that holds
-                // none: it would differ from its golden, and accepting that
-                // difference would record the defect the report is about.
+                // exit status records. No accepted program uses storage it
+                // does not own, so a report of the checking allocator is a
+                // compiler or runtime defect: a case recording one fails
+                // unrun, and a run answering one is never recorded.
                 // A case recording the runtime's overflow report is not run
                 // under a sanitizer, which takes that fault itself.
-                const needs_checks = want_exit != null and !env.checks_storage and recordsStorageReport(want_exit.?);
-                if (needs_checks) {
-                    if (env.unchecked_skips) |count| _ = count.fetchAdd(1, .monotonic);
-                }
+                if (want_exit) |recorded_exit| if (recordsStorageReport(recorded_exit)) try w.failures.append(gpa, .{
+                    .path = display_path,
+                    .what = "records a report of the checking allocator",
+                    .expected = "an outcome an accepted program can have",
+                    .actual = recorded_exit,
+                });
                 const needs_handler = want_exit != null and env.sanitize != null and recordsOverflowReport(want_exit.?);
                 if (needs_handler) {
                     if (env.sanitized_skips) |count| _ = count.fetchAdd(1, .monotonic);
                 }
-                if (want_exit != null and !needs_checks and !needs_handler) {
+                if (want_exit != null and !recordsStorageReport(want_exit.?) and !needs_handler) {
                     if (env.runtime_path) |rt| {
                         const case_name = try scratchName(gpa, stem);
                         const outcome_zone = tracy.beginZone(@src(), "case.outcome");
@@ -21582,7 +21571,7 @@ fn checkCase(
                                 golden_of[k],
                                 expected,
                                 s.of(ran),
-                                env.update and !ran.tool_failed,
+                                env.update and !ran.tool_failed and !recordsStorageReport(s.of(ran)),
                                 s.empty_is_an_answer,
                             )) {
                                 std.debug.print("updated {s}\n", .{golden_of[k]});

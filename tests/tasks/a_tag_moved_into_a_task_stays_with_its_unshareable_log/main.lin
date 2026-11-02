@@ -1,0 +1,50 @@
+// A log counts the tags released into it through a `read` of the log, so it
+// is `@unshareable`: two tasks releasing tags of one log would race on its
+// count. A tag observes its log, so moving a tag into a task is refused,
+// since the task's creator could read the log while the task wrote it.
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+@(linear, unshareable)
+struct Log {
+    count: UInt64,
+}
+
+@linear
+struct Tag {
+    log: borrow Log,
+    code: UInt64,
+}
+
+impl Log {
+    fn tag(self: Self, code: UInt64) -> Tag where borrows(self) {
+        .{ log = borrow self, code }
+    }
+
+    fn close(sink self: Self) -> UInt64 {
+        let Log { count } = self
+        count
+    }
+}
+
+impl Tag {
+    fn close(sink self: Self) -> UInt64 {
+        let Tag { log: _log, code } = self
+        code
+    }
+}
+
+fn main() -> UInt8 {
+    let log = Log { count = 0 }
+    let tag = log.tag(1)
+    let body = sink [sink tag] |sink me: Chan[End]| {
+        let _code = tag.close()
+        me.close()
+    }
+    let slot = task.prepare(body).unwrap()
+    slot.start().close()
+    UInt8(log.close())
+}

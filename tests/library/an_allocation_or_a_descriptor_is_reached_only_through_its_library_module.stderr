@@ -1,0 +1,20 @@
+error[T-ExternRuntime]: `linea_alloc` takes or answers what only the standard library's `mem` keeps in a type, so only that module declares it
+ --> tests/library/an_allocation_or_a_descriptor_is_reached_only_through_its_library_module/main.lin:8:11
+  |
+8 | extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64
+  |           ^^^^^^^^^^^ reach it through `acquire` on an allocator
+error[T-ExternRuntime]: `linea_free` takes or answers what only the standard library's `mem` keeps in a type, so only that module declares it
+  --> tests/library/an_allocation_or_a_descriptor_is_reached_only_through_its_library_module/main.lin:10:11
+   |
+10 | extern fn linea_free(at: UInt64, size: UInt64, align: UInt64)
+   |           ^^^^^^^^^^ reach it through `release` on a `mem.Buffer`
+error[T-ExternRuntime]: `linea_close` takes or answers what only the standard library's `mem` keeps in a type, so only that module declares it
+  --> tests/library/an_allocation_or_a_descriptor_is_reached_only_through_its_library_module/main.lin:12:11
+   |
+12 | extern fn linea_close(fd: Int32) -> Int64
+   |           ^^^^^^^^^^^ reach it through `close` on an `fs.File`, a `net.Connection` or a `net.Listener`
+error[T-ExternRuntime]: `linea_float64_parse` takes or answers what only the standard library's `mem` keeps in a type, so only that module declares it
+  --> tests/library/an_allocation_or_a_descriptor_is_reached_only_through_its_library_module/main.lin:14:11
+   |
+14 | extern fn linea_float64_parse(address: UInt64, length: UInt64, inout bits: UInt64, inout offset: UInt64) -> UInt64
+   |           ^^^^^^^^^^^^^^^^^^^ reach it through parsing a `Float64` or a `Float32` from text

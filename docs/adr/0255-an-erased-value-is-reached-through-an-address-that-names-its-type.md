@@ -2,10 +2,15 @@
 
 Status: Accepted — 2026-11-01. Supersedes the clause of
 [0193](0193-a-closure-may-hold-a-place-lent-inout.md) that has writer
-containment follow every type argument, and the clause of
+containment follow every type argument, the clause of
 [0250](0250-tasks-are-structured-through-linear-sessions.md) that has the
-`Shareable` table do the same; extends
-[0254](0254-a-newtype-takes-type-parameters.md).
+`Shareable` table do the same, the clause of
+[0171](0171-the-standard-library-is-an-ordinary-library.md) that lets a
+granted root call the runtime's functions directly, and the clauses of
+[0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md) that let
+a root granted `extern` hold an address, keep corpus cases that reach freed
+storage through the runtime, and pass over a case recording a storage report;
+extends [0254](0254-a-newtype-takes-type-parameters.md).
 
 ## Context
 
@@ -91,19 +96,55 @@ call of `raw` and nothing else, so the runtime never reads or writes values
 at a number no type names; a default the declaration gives the parameter is
 such a number too.
 
-The runtime functions of tasks, owning tasks and sessions are declared only
-by the standard library module whose types keep what they hand out and take
-in ([T-ExternRuntime]): `task` declares the parked thread's and the call
-queue's, `session` an endpoint's choice and close, and `mem` the ones that
-copy typed bytes. Each row of `runtime_symbols.zig` states which declarations
-may name its symbol, as a field with no default, so a symbol added later is
-confined or opened by a decision. A row that takes the address of typed bytes
-or a callback, or starts a thread, must be confined, which the table's own
-test holds. Without this, a module granted `extern` in any root could declare
-`linea_owner_free` and free a queue twice, discard what `linea_task_prepare`
-answers and leave a parked thread, or close an endpoint it made up: each
-number is safe only inside the linear type that holds it. A symbol lowering
-replaces is confined to `mem` by the same field.
+A runtime function that takes or answers a number something must own is
+declared only by the standard library module whose types keep that number
+([T-ExternRuntime]). `task` declares the parked thread's and the call queue's,
+`session` an endpoint's choice and close, and `mem` the ones that copy typed
+bytes. The same holds for the allocator and every descriptor and byte the
+runtime is handed: `mem` declares `linea_alloc` and `linea_free`, whose
+allocation a linear `Buffer` owns; `linea_close` and every call that reads,
+writes, opens or names a file through a descriptor or an address of bytes
+(`linea_read_some`, `linea_write_some`, `linea_read_at`, `linea_write_at`,
+`linea_open_parent`, `linea_open_at`, `linea_mode_at`, `linea_publish_at`,
+`linea_unlink_at`, `linea_random_bytes`); the decimal parsers
+`linea_float64_parse` and `linea_float32_parse`, which read bytes at an
+address; and `linea_arg_at` and `linea_env_at`, which answer one. `fs`
+declares `linea_set_mode`, and `net` the socket calls, each of which answers or
+takes a descriptor a linear `Listener` or `Connection` owns. What stays open to
+any granted module neither takes nor answers such a number: argument and
+environment counts and lengths, the errno and its category, two random words,
+the clocks, and float formatting from bits.
+
+Each row of `runtime_symbols.zig` states which declarations may name its
+symbol, as a field with no default, so a symbol added later is confined or
+opened by a decision. A parameter is marked as the address of typed bytes, the
+address of bytes a buffer or a slice holds, a descriptor or an allocation, and
+a result as one of the last three, and a row with any mark, a callback or a
+thread start must be confined, which the table's own test holds. Without
+this, a module granted `extern` in any root could declare `linea_free` and
+free an allocation twice, `linea_close` and close a descriptor the standard
+library still owns, `linea_float64_parse` and have the runtime read at a
+number no value holds, `linea_owner_free` and free a queue twice, or discard
+what `linea_task_prepare` answers and leave a parked thread: each number is
+safe only inside the linear type that holds it. A symbol lowering replaces is
+confined to `mem` by the same field.
+
+The addresses of bytes are not typed, as the addresses a task hands on are:
+a buffer keeps its address as a `UInt64`, and a parameter taking one accepts
+that number. Confining the declaration is what bounds it, because only `mem`'s
+own functions, which check an extent against the buffer before the call, can
+pass one.
+
+**The standard library is the source the compiler carries ([M-Standard]).**
+Confinement names a module of the library, and a root whose manifest names it
+`std` is compiled as the library. The name is anyone's to write, so a library
+calling itself `std` would be trusted to declare every confined symbol, and
+with them to free twice. A root named `std` is therefore the library only
+where each file it loads is, byte for byte, the carried copy's file at the
+same path; any other file is refused wherever a root is read from disk to be
+compiled. A copy of the library's directory
+compiles as the library wherever it sits, and an edited copy compiles once
+the compiler is built from it.
 
 The other direction is written only by the compiler. A callback the runtime
 calls with an address it was given, a task's entry and release, is marked at
@@ -141,8 +182,29 @@ number and its body's `Carried[H]`. Neither holds an `S`, so `Client[S]` is
   `Storage[T, A]` naming it, and the tables count it from that field. A
   declaration added later is covered without anyone remembering it, because a
   `UInt64` cannot reach a slot.
-- Every runtime symbol that takes an address of typed bytes carries a mark,
-  and every symbol states which declarations may name it.
+- Every runtime symbol that takes an address of typed bytes or of a buffer's
+  bytes, a descriptor or an allocation carries a mark, every symbol states
+  which declarations may name it, and every marked symbol is confined. A
+  granted module calls the runtime for counts, errno, the clocks and float
+  formatting only; anything else goes through the standard library's types.
+- No accepted program reaches one of the checking allocator's reports, so no
+  corpus case records one. The cases that freed twice and read or wrote freed
+  storage through `linea_alloc`, `linea_free`, `linea_write_some` and
+  `linea_float64_parse` cannot be written, and the native runtime test holds
+  every report instead: a second disposal, a disposal at another size or of no
+  allocation, a store beside an allocation, an access past one, a load or
+  store of freed storage, and `linea_write_some`, `linea_read_some` and
+  `linea_random_bytes` handed freed or overlong bytes. The conformance runner
+  fails a case whose golden records such a report and never records one under
+  `--update`.
+- A standard library edited in place is refused on the command line by a
+  compiler built before the edit, until the compiler is built again. An
+  editor's in-memory root keeps loading, as it does past a grant naming no
+  module, since nothing it holds is built. The transcripts that edited a copy of the library to reach its
+  internals are unit tests over library modules built in memory: a storage
+  primitive recognised by its signature, and a primitive's methods split
+  across inherent blocks. The case of a tag moved into a task beside its
+  unshareable log is a program's own types.
 - What stays trusted to `std.mem`: which `T` an address of a buffer names
   (`address_in` gives one for any `T`), that the storage a slot is reached
   through is the one that owns its bytes, that a callback names the `T` the
@@ -177,6 +239,14 @@ number and its body's `Carried[H]`. Neither holds an `S`, so `Client[S]` is
   storage, live and dead, so fullness is not a property of the storage, and
   the hand-off inside `call_owner` crosses a closure the analysis cannot
   follow.
+- **Typing a buffer's address as an `Address[UInt8]`,** so a parameter
+  taking bytes accepts only `address.raw`: `Buffer` and `Slice` keep their
+  address as a `UInt64` that every storage primitive takes, so the whole raw
+  layer would change for a check confinement already makes, since no module
+  but `mem` can pass the number.
+- **Recognising the standard library by where it sits or by an option:** a
+  path is the user's to choose and an option is anyone's to pass, while the
+  carried text is fixed when the compiler is built.
 - **`Address[T]` as a one-field struct:** a struct is passed by address, so a
   callback the runtime calls with a number could not declare one; a generic
   newtype is the number.

@@ -23,6 +23,9 @@ unsigned long linea_env_len(unsigned long i);
 void linea_trap(int kind, const char *file, int line, int col);
 void linea_panic(unsigned long at, unsigned long len, const char *file, int line, int col);
 void linea_storage_extent(unsigned long at, unsigned long len);
+long linea_read_some(int fd, unsigned long at, unsigned long len);
+long linea_write_some(int fd, unsigned long at, unsigned long len);
+long linea_random_bytes(unsigned long at, unsigned long len);
 
 /* Runs `body` in a child and checks it aborted after writing `expected` to stderr. */
 static void aborts_saying(void (*body)(void), const char *expected) {
@@ -435,6 +438,32 @@ static void system_call_on_freed(void) {
     linea_storage_extent(at, 64);
 }
 
+/* The runtime's I/O entries hand the bytes they are given to the allocator
+ * before the system call, so freed storage is never written out, read into
+ * or filled. */
+static void write_from_freed(void) {
+    unsigned long at = linea_alloc(8, 8);
+    linea_free(at, 8, 8);
+    (void)linea_write_some(1, at, 8);
+}
+
+static void read_into_freed(void) {
+    unsigned long at = linea_alloc(8, 8);
+    linea_free(at, 8, 8);
+    (void)linea_read_some(0, at, 8);
+}
+
+static void random_into_freed(void) {
+    unsigned long at = linea_alloc(16, 8);
+    linea_free(at, 16, 8);
+    (void)linea_random_bytes(at, 16);
+}
+
+static void write_past_end(void) {
+    unsigned long at = linea_alloc(8, 8);
+    (void)linea_write_some(1, at, 9);
+}
+
 /* A system call handed more bytes than the allocation holds is stopped
  * before it runs, even where the excess would stay in mapped pages. */
 static void system_call_past_end(void) {
@@ -558,6 +587,10 @@ int main(void) {
     aborts_saying(system_call_on_freed, "linea: storage was used after it was freed\n");
     aborts_saying(system_call_past_end, "linea: an access reached outside its storage\n");
     aborts_saying(system_call_before_start, "linea: an access reached outside its storage\n");
+    aborts_saying(write_from_freed, "linea: storage was used after it was freed\n");
+    aborts_saying(read_into_freed, "linea: storage was used after it was freed\n");
+    aborts_saying(random_into_freed, "linea: storage was used after it was freed\n");
+    aborts_saying(write_past_end, "linea: an access reached outside its storage\n");
     aborts_saying(freed_twice, "linea: storage was freed twice\n");
     aborts_saying(freed_inside, "linea: a disposal named storage that is not allocated\n");
     aborts_saying(freed_short, "linea: a disposal named the wrong size: 8 bytes of a 16-byte allocation\n");

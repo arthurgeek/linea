@@ -1665,11 +1665,12 @@ pub fn build(b: *std.Build) void {
         });
     }
 
-    const native_runtime_step = b.step("test-native-runtime", "Check the generated-code runtime's allocation, arguments, environment and aborts");
+    const native_runtime_step = b.step("test-native-runtime", "Check the generated-code runtime's allocation, arguments, environment, aborts, and the storage its I/O entries are handed");
     inline for (.{ false, true }) |checked| {
         const flags = if (checked) checked_flags.items else runtime_flags.items;
         native.add(native_runtime_step, if (checked) "native-checked-runtime-tests" else "native-runtime-tests", &.{
             .{ .file = "runtime/linea_rt.c", .flags = flags },
+            .{ .file = "runtime/io.c", .flags = runtime_flags.items },
             .{ .file = "runtime/linea_rt_test.c", .flags = flags },
         });
     }

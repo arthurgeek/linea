@@ -3086,12 +3086,19 @@ test "allocator zero facts require the exact library producer" {
     const program_mod = @import("../syntax/program.zig");
     // A declaration whose types or conventions are not the runtime's is
     // refused before anything is emitted ([T-ExternRuntime]).
-    const cases = [_]struct { module: []const u8 = "mem", declaration: []const u8, facts: bool = false, refused: bool = false }{
+    const raw_load = "extern fn linea_raw_load(at: UInt64, len: UInt64, i: UInt64) -> UInt64";
+    const cases = [_]struct { module: []const u8 = "mem", declaration: []const u8, load: []const u8 = raw_load, facts: bool = false, refused: bool = false }{
         .{ .declaration = "extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64", .facts = true },
-        .{ .module = "text", .declaration = "extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64" },
+        // Only `mem` declares the allocator; another module's declaration is
+        // refused before it could produce anything.
+        .{ .module = "text", .declaration = "extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64", .refused = true },
         .{ .declaration = "fn linea_alloc(size: UInt64, align: UInt64) -> UInt64 { size + align }" },
         // A parameter's name is a label, so a renamed one is still the producer.
         .{ .declaration = "extern fn linea_alloc(bytes: UInt64, align: UInt64) -> UInt64", .facts = true },
+        // So is a storage primitive: a renamed parameter still lowers every
+        // call to a checked access, and another signature is refused.
+        .{ .declaration = "extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64", .load = "extern fn linea_raw_load(address: UInt64, len: UInt64, i: UInt64) -> UInt64", .facts = true },
+        .{ .declaration = "extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64", .load = "extern fn linea_raw_load(at: UInt64, len: UInt64, i: UInt64) -> UInt32", .facts = true, .refused = true },
         .{ .declaration = "extern fn linea_alloc(size: UInt32, align: UInt64) -> UInt64", .refused = true },
         .{ .declaration = "extern fn linea_alloc(sink size: UInt64, align: UInt64) -> UInt64", .refused = true },
         .{ .declaration = "extern fn linea_alloc(size: UInt64, align: UInt64 = 8) -> UInt64" },
@@ -3102,8 +3109,8 @@ test "allocator zero facts require the exact library producer" {
         defer arena.deinit();
         const gpa = arena.allocator();
         const text = if (case.facts)
-            try std.fmt.allocPrint(gpa, "{s}\nextern fn linea_raw_load(at: UInt64, len: UInt64, i: UInt64) -> UInt64\n" ++
-                "fn main() -> UInt8 {{ let at = linea_alloc(64, 8); UInt8(linea_raw_load(at, 64, 8)) }}", .{case.declaration})
+            try std.fmt.allocPrint(gpa, "{s}\n{s}\n" ++
+                "fn main() -> UInt8 {{ let at = linea_alloc(64, 8); UInt8(linea_raw_load(at, 64, 8)) }}", .{ case.declaration, case.load })
         else
             try std.fmt.allocPrint(gpa, "{s}\nfn main() -> UInt8 {{ UInt8(linea_alloc(64, 8)) }}", .{case.declaration});
         const source: source_mod.Source = .{ .path = "allocator.lin", .text = text };

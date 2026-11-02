@@ -1,0 +1,25 @@
+// The runtime hands out allocations and descriptors as plain numbers, takes
+// them back the same way, and reads or writes bytes at any address it is
+// given. Only the standard library's modules that keep each number in a
+// linear type, and each address in a buffer or a slice, may declare those
+// functions, so a module granted `extern` cannot free an allocation twice,
+// close a descriptor the standard library still owns, or have the runtime
+// read bytes at a number no value holds.
+extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64
+
+extern fn linea_free(at: UInt64, size: UInt64, align: UInt64)
+
+extern fn linea_close(fd: Int32) -> Int64
+
+extern fn linea_float64_parse(address: UInt64, length: UInt64, inout bits: UInt64, inout offset: UInt64) -> UInt64
+
+fn main() -> UInt8 {
+    let at = linea_alloc(16, 8)
+    linea_free(at, 16, 8)
+    linea_free(at, 16, 8)
+    let _closed = linea_close(1)
+    var bits: UInt64 = 0
+    var offset: UInt64 = 0
+    let _parsed = linea_float64_parse(4096, 8, &bits, &offset)
+    0
+}

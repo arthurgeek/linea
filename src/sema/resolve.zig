@@ -18640,3 +18640,63 @@ test "construction skips malformed derive receiver shapes" {
     try testing.expectEqual(@as(u32, 1), sink.error_count);
     try testing.expectEqual(@as(usize, 0), tree.expanded.generated_sources.buffers.len);
 }
+
+/// Resolves a program whose library is a prelude and one module beneath it,
+/// each holding `prelude` and `scalar`, and answers what the sink reported.
+fn resolveLibraryImpls(gpa: std.mem.Allocator, prelude: []const u8, scalar: []const u8) !*Sink {
+    const app_source: Source = .{ .path = "app/main.lin", .text = "fn main() -> UInt8 { 0 }\n" };
+    const prelude_source: Source = .{ .path = "std/main.lin", .text = prelude };
+    const scalar_source: Source = .{ .path = "std/scalar/float.lin", .text = scalar };
+    const sink = try gpa.create(Sink);
+    sink.* = Sink.init(gpa);
+    const interner = try gpa.create(Interner);
+    interner.* = .empty;
+    var trees = Modules.init(gpa, sink, interner);
+    const app_decls = try trees.add(&.{.{ .file = .from(0), .source = app_source }});
+    const prelude_decls = try trees.add(&.{.{ .file = .from(1), .source = prelude_source }});
+    const scalar_decls = try trees.add(&.{.{ .file = .from(2), .source = scalar_source }});
+    const ast = try trees.finish();
+    const modules = try gpa.dupe(program_mod.Module, &.{
+        .{ .name = "app", .dir = "app", .files = &.{}, .decls = app_decls, .imports = &.{} },
+        .{ .name = "std", .dir = "std", .files = &.{}, .decls = prelude_decls, .imports = &.{}, .library = true },
+        .{ .name = "scalar", .dir = "std/scalar", .files = &.{}, .decls = scalar_decls, .imports = &.{}, .library = true },
+    });
+    const program: Program = .{ .modules = modules, .prelude = .from(1), .ast = ast };
+    _ = try resolve(gpa, &program, interner, sink, .program);
+    return sink;
+}
+
+test "the library gives a primitive its methods in more than one inherent impl" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    // An inherent block implements no trait, so a second one for the same
+    // primitive, in the same module or another, is not a second
+    // implementation of anything.
+    const split = try resolveLibraryImpls(gpa,
+        \\impl Float64 {
+        \\    pub fn doubled(self: Self) -> Float64 { self * 2.0 }
+        \\}
+    ,
+        \\impl Float64 {
+        \\    pub fn halved(self: Self) -> Float64 { self / 2.0 }
+        \\}
+        \\impl Float64 {
+        \\    pub fn negated(self: Self) -> Float64 { 0.0 - self }
+        \\}
+    );
+    try testing.expectEqual(@as(u32, 0), split.error_count);
+
+    // A method name is still declared once across every inherent block of
+    // every library module, whether the second sits beside the first or in
+    // another module, for every primitive.
+    for ([_][2][]const u8{
+        .{ "", "impl Float64 {\n    pub fn same(self: Self) -> Float64 { self }\n}\nimpl Float64 {\n    pub fn same(self: Self) -> Float64 { self }\n}\n" },
+        .{ "impl Float64 {\n    pub fn same(self: Self) -> Float64 { self }\n}\n", "impl Float64 {\n    pub fn same(self: Self) -> Float64 { self }\n}\n" },
+        .{ "impl UInt8 {\n    pub fn halved(self: Self) -> UInt8 { self / 2 }\n}\n", "impl UInt8 {\n    pub fn halved(self: Self) -> UInt8 { self / 2 }\n}\n" },
+    }) |texts| {
+        const duplicated = try resolveLibraryImpls(gpa, texts[0], texts[1]);
+        try testing.expectEqual(@as(u32, 1), duplicated.error_count);
+        try testing.expectEqual(Code.n_duplicate, duplicated.list.items[0].code.?);
+    }
+}

@@ -1845,6 +1845,19 @@ Whether a
 root is the standard library is read from its manifest and never from its
 directory's name or location.
 
+**[M-Standard]** A root whose manifest names it `std` is the standard library
+only where its source is the one the compiler carries: each file it loads must
+hold, byte for byte, the text of the carried library's file at the same path
+relative to the root, and a file that differs or that the carried library does
+not hold is refused where the root is read from disk; an editor's in-memory
+root keeps loading. The standard library alone may declare the runtime
+functions that hand out allocations, descriptors, threads and call queues
+([T-ExternRuntime]), and the checker certifies its types, so a library taking
+the name with source of its own would be trusted as the standard library is.
+A copy of the library's directory compiles as the library wherever it sits;
+an edited copy compiles once the compiler is built from it
+([ADR 0255](adr/0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md)).
+
 A type's braces contain only its representation: struct fields or enum
 variants. Behaviour is declared in `impl` blocks, which may appear anywhere in
 the declaring module, with no limit on their number.
@@ -4625,8 +4638,8 @@ handle moves what the call still lends, which is [O-Move].
 
 **[T-ExternAgreement]** Every `extern` declaration of one symbol names the one
 function the runtime provides under that symbol, so each module may declare the
-runtime functions it calls: `std.fs` and `std.net` each declare `linea_close`, and
-both call the same function. The declarations must agree on every parameter's
+runtime functions it calls: `std.time` and a program granted `extern` may each
+declare `linea_clock_sleep`, and both call the same function. The declarations must agree on every parameter's
 type and convention and on the result. Parameter names and defaults belong to each
 declaration and need not agree. A declaration whose signature was already refused
 is not compared again
@@ -4641,17 +4654,29 @@ declares it, and a `linea_` symbol the runtime does not declare is refused. The
 standard library's declarations are held to the runtime's signatures exactly as
 any other root's are. The compiler-owned symbols above are [T-Extern]'s instead,
 and the typed storage primitives have no runtime definition and are refused
-wherever else they are declared. The runtime's task, owning-task and session
-functions are declared only by the standard library module whose types keep
-what they hand out and take in: `task` for a parked thread and an owning
-task's call queue, `session` for an endpoint's choice and close, and `mem` for
-the functions that copy typed bytes between tasks. Each number such a function
-answers is held by a linear value and each address it takes is the address of
-values of a type, so a declaration anywhere else, in any root, is refused: it
-could free a queue twice, leave a parked thread unjoined, close an endpoint it
-made up or hand the runtime bytes no type names. The compiler's table states
-for every symbol which declarations may name it, so a symbol added to the
-runtime is confined or opened by a decision, not by omission. A declaration
+wherever else they are declared. A runtime function that takes or answers a
+number something must own is declared only by the standard library module
+whose types keep that number: `task` for a parked thread and an owning task's
+call queue; `session` for an endpoint's choice and close; `mem` for the
+functions that copy typed bytes between tasks, the allocator's `linea_alloc`
+and `linea_free`, `linea_close` and every call that reads, writes, opens or
+names a file through a descriptor or the address of a buffer's bytes, the
+decimal parsers that read bytes at an address, and the argument and
+environment entries that answer one; `fs` for `linea_set_mode`; and `net` for
+the socket calls, each of which takes or answers a descriptor. Each such
+number is held by a linear value and each such address by a buffer or a
+slice, so a declaration anywhere else, in any root, is refused: it could free
+an allocation or a queue twice, close a descriptor the standard library still
+owns, have the runtime read or write bytes at a number no value holds, leave
+a parked thread unjoined or close an endpoint it made up. A module granted
+`extern` may still declare the functions that take and answer no such number:
+argument and environment counts and lengths, `linea_errno` and
+`linea_io_category`, `linea_random_words`, the clocks, and the float
+formatting that reads only a float's bits. The compiler's table states for
+every symbol which declarations may name it, and marks every parameter or
+result that is such a number, so a symbol added to the runtime is confined or
+opened by a decision, not by omission. Which root is the standard library is
+[M-Standard]'s to say. A declaration
 agreeing with the runtime's
 signature agrees with every other declaration of the symbol, so
 [T-ExternAgreement] does not also report a `linea_` symbol

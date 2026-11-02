@@ -142,6 +142,10 @@ pub const Code = enum {
     /// answering both through one name would make the rule mean "the entry
     /// point is wrong" without saying which way.
     m_entry,
+    /// A root naming itself `std` whose source is not the standard library the
+    /// compiler carries. That root is trusted as the standard library is, so a
+    /// library taking the name with other source would gain that trust.
+    m_standard,
     /// A sealed type's representation reached from outside the module that
     /// declares it: built, taken apart, or read into.
     m_opaque,
@@ -458,6 +462,7 @@ pub const Code = enum {
             .m_unused => "M-Unused",
             .m_vis => "M-Vis",
             .m_entry => "M-Entry",
+            .m_standard => "M-Standard",
             .m_opaque => "M-Opaque",
             .m_extern => "M-Extern",
             .m_foreign => "M-Foreign",

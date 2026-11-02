@@ -1,6 +1,6 @@
 {
     "dependencies": {
-        "descriptors": { "path": "descriptors" },
+        "clock": { "path": "clock" },
         "plain": { "path": "plain", "extern": true }
     }
 }
