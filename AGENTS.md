@@ -305,7 +305,9 @@ no value.
 A sanitized walk runs what runs -- the cases recording an exit status, the
 examples and the transcripts that build or run a program -- and generates no
 programs; the corpus-wide frontend and editor properties stay with the
-unsanitized walk.
+unsanitized walk. A case recording the runtime's stack overflow report is not
+run under a sanitizer: the sanitized runtime installs no fault handler and
+leaves that fault to the sanitizer, which reports it in its own words.
 
 `-Dopt-levels=true` builds every corpus case that runs at every optimisation
 level and holds it to the same exit and output. Pass it locally when changing

@@ -16205,6 +16205,22 @@ test "a case recording a storage report is not run against a runtime without the
     try testing.expectEqualStrings(recorded, kept);
 }
 
+test "a case recording a stack overflow is not run under a sanitizer" {
+    var fixture: LayoutFixture = try .init();
+    defer fixture.deinit();
+    const recorded = "trap\nlinea: a stack overflowed\n";
+    try fixture.write("tests/tasks/overflow.lin", fixture.text);
+    try fixture.write("tests/tasks/overflow.exit", recorded);
+    try fixture.write("liblinea_rt.a", "!<arch>\n_linea_alloc _linea_free\n");
+    const runtime = try std.fs.path.join(fixture.arena.allocator(), &.{ fixture.root, "liblinea_rt.a" });
+    // Neither a failure nor, with `--update`, a golden rewritten to the
+    // sanitizer's own report.
+    try testing.expectEqual(@as(u8, 0), try fixture.run("tests/tasks", &.{ "--runtime", runtime, "--sanitize", "address" }));
+    try testing.expectEqual(@as(u8, 0), try fixture.run("tests/tasks", &.{ "--runtime", runtime, "--sanitize", "address", "--update" }));
+    const kept = try fixture.directory.dir.readFileAlloc(testing.io, "tests/tasks/overflow.exit", fixture.arena.allocator(), .unlimited);
+    try testing.expectEqualStrings(recorded, kept);
+}
+
 test "a golden beside an example is refused" {
     var fixture: LayoutFixture = try .init();
     defer fixture.deinit();
@@ -16710,6 +16726,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         .{ rt, runtime_symbols.checked_archive_name },
     );
     var unchecked_skips: std.atomic.Value(u32) = .init(0);
+    var sanitized_skips: std.atomic.Value(u32) = .init(0);
     const settings: Settings = .{
         .library = checked_library,
         .properties = options.properties,
@@ -16723,6 +16740,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         .scratch_dir = scratch_dir,
         .checks_storage = checks_storage,
         .unchecked_skips = &unchecked_skips,
+        .sanitized_skips = &sanitized_skips,
     };
     discovery_zone.end();
 
@@ -17673,6 +17691,11 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
     if (skipped_unchecked != 0) std.debug.print(
         "conformance: {d} case(s) record a report of the checking allocator and were not run; run them with {s}\n",
         .{ skipped_unchecked, runtime_symbols.checked_archive_name },
+    );
+    const skipped_sanitized = sanitized_skips.load(.monotonic);
+    if (skipped_sanitized != 0) std.debug.print(
+        "conformance: {d} case(s) record the runtime's stack overflow report, which a sanitizer replaces, and were not run; the unsanitized walk runs them\n",
+        .{skipped_sanitized},
     );
     if (failures.items.len == 0) {
         std.debug.print("conformance: {d} case(s) and {d} transcript(s) OK in {d}s\n", .{
@@ -20609,6 +20632,9 @@ const Settings = struct {
     /// Counts the cases recording a checking-allocator report that were not
     /// run, because the runtime holds no checking allocator.
     unchecked_skips: ?*std.atomic.Value(u32) = null,
+    /// Counts the cases recording the runtime's overflow report that were not
+    /// run, because a sanitizer takes that fault instead.
+    sanitized_skips: ?*std.atomic.Value(u32) = null,
 };
 
 /// The reports the checking allocator makes, read from the runtime's own
@@ -20653,6 +20679,40 @@ fn recordsStorageReport(recorded: []const u8) bool {
     while (lines.next()) |line| {
         for (storageReports()) |report| if (std.mem.startsWith(u8, line, report)) return true;
     }
+    return false;
+}
+
+/// The report the runtime's fault handler makes when a stack overflows into
+/// its guard pages, read from the runtime's `overflow_report`: the text before
+/// its newline.
+fn overflowReport() []const u8 {
+    const source = @embedFile("runtime_source");
+    const report = comptime blk: {
+        @setEvalBranchQuota(1_000_000);
+        const marker = "static const char *const overflow_report = \"";
+        const start = (std.mem.indexOf(u8, source, marker) orelse
+            @compileError("runtime/linea_rt.c no longer declares overflow_report")) + marker.len;
+        const end = std.mem.indexOfAnyPos(u8, source, start, "\\\"").?;
+        break :blk source[start..end];
+    };
+    return report;
+}
+
+test "the overflow report is read from the runtime" {
+    try testing.expectEqualStrings("linea: a stack overflowed", overflowReport());
+    try testing.expect(recordsOverflowReport("trap\nlinea: a stack overflowed\n"));
+    try testing.expect(!recordsOverflowReport("trap\nlinea: index out of bounds at t.lin:1:2\n"));
+    try testing.expect(!recordsOverflowReport("exit 0\n"));
+}
+
+/// Whether a recorded outcome is an abort the runtime's fault handler reported
+/// for a stack overflow. A sanitized runtime installs no fault handler and
+/// leaves the fault to the sanitizer, which reports it in its own words, so
+/// such a case is not run under a sanitizer.
+fn recordsOverflowReport(recorded: []const u8) bool {
+    if (!std.mem.startsWith(u8, recorded, trap_answer)) return false;
+    var lines = std.mem.splitScalar(u8, recorded[trap_answer.len..], '\n');
+    while (lines.next()) |line| if (std.mem.eql(u8, line, overflowReport())) return true;
     return false;
 }
 
@@ -21463,11 +21523,17 @@ fn checkCase(
                 // checking allocator is not run against a runtime that holds
                 // none: it would differ from its golden, and accepting that
                 // difference would record the defect the report is about.
+                // A case recording the runtime's overflow report is not run
+                // under a sanitizer, which takes that fault itself.
                 const needs_checks = want_exit != null and !env.checks_storage and recordsStorageReport(want_exit.?);
                 if (needs_checks) {
                     if (env.unchecked_skips) |count| _ = count.fetchAdd(1, .monotonic);
                 }
-                if (want_exit != null and !needs_checks) {
+                const needs_handler = want_exit != null and env.sanitize != null and recordsOverflowReport(want_exit.?);
+                if (needs_handler) {
+                    if (env.sanitized_skips) |count| _ = count.fetchAdd(1, .monotonic);
+                }
+                if (want_exit != null and !needs_checks and !needs_handler) {
                     if (env.runtime_path) |rt| {
                         const case_name = try scratchName(gpa, stem);
                         const outcome_zone = tracy.beginZone(@src(), "case.outcome");
