@@ -16959,9 +16959,6 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
     std.mem.sort(Failure, failures.items, {}, failureLess);
 
     try checkLibrary(gpa, io, &failures);
-    // Asked of the corpus only, like the coverage floors: the examples are
-    // programs that work, so every rule is unreached there and should be.
-    if (enforce_floors) try checkEveryRuleIsReached(gpa, &failures, &rules_reached);
     merge_zone.end();
 
     // The corpus supplies programs someone chose to write, which is a supply
@@ -17208,6 +17205,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
                     tally(&properties, &passed_over, .command, false);
                     continue;
                 }
+                markRulesTranscriptRecords(text, &rules_reached);
                 try commands.append(gpa, .{
                     .text = text,
                     .stem = stem,
@@ -17315,6 +17313,12 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         for (0..corpus.commands) |_| tally(&properties, &passed_over, .command, false);
     }
     commands_zone.end();
+
+    // Asked of the corpus only, like the coverage floors: the examples are
+    // programs that work, so every rule is unreached there and should be.
+    // After the command cases, which reach the rules about roots read from
+    // disk.
+    if (enforce_floors) try checkEveryRuleIsReached(gpa, &failures, &rules_reached);
 
     // LSP session cases: a directory holding `session.jsonl` is a script of
     // JSON-RPC requests, replayed in-process against a server rooted at that
@@ -20235,6 +20239,40 @@ fn checkEveryRuleIsReached(
         .expected = "a case for each",
         .actual = try std.fmt.allocPrint(gpa, "{d} unreached: {s}", .{ count, missing.items }),
     });
+}
+
+/// Marks every rule a transcript's recorded output names in an `error[...]`
+/// header as reached. A transcript runs the compiler as a user does, so it
+/// reaches rules a case checked from memory cannot, such as one about a root
+/// read from disk; a transcript whose output differs from what it records
+/// already fails the walk, so what it records is what the compiler printed.
+fn markRulesTranscriptRecords(text: []const u8, reached: *std.EnumMap(diagnostic.Code, void)) void {
+    var rest = text;
+    while (std.mem.indexOf(u8, rest, "error[")) |at| {
+        rest = rest[at + "error[".len ..];
+        const close = std.mem.indexOfScalar(u8, rest, ']') orelse return;
+        const name = rest[0..close];
+        for (std.enums.values(diagnostic.Code)) |c| {
+            if (std.mem.eql(u8, c.ruleName(), name)) reached.put(c, {});
+        }
+        rest = rest[close..];
+    }
+}
+
+test "a transcript reaches every rule its recorded output names" {
+    var reached: std.EnumMap(diagnostic.Code, void) = .{};
+    markRulesTranscriptRecords(
+        \\  $ linea check forged
+        \\  error[M-Standard]: `forged/std.lin` is not the standard library this compiler carries
+        \\  error[NOT-A-RULE]: ignored
+        \\  [1]
+    , &reached);
+    try testing.expect(reached.contains(.m_standard));
+    var count: usize = 0;
+    for (std.enums.values(diagnostic.Code)) |c| {
+        if (reached.contains(c)) count += 1;
+    }
+    try testing.expectEqual(@as(usize, 1), count);
 }
 
 /// The library the compiler carries is the directory on disk.

@@ -138,15 +138,15 @@ pub enum Option[Buffer[SystemAllocator]] {
 type Address[UInt8] = UInt64
 
 @copyable
-pub enum Option[Str] {
-    None,
-    Some(std.text.Str),
-}
-
-@copyable
 pub enum Option[UInt64] {
     None,
     Some(UInt64),
+}
+
+@copyable
+pub enum Option[Str] {
+    None,
+    Some(std.text.Str),
 }
 
 @copyable
@@ -601,10 +601,10 @@ fn std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Releas
         None => {
             {}
         },
-        Some(_linea_derive_1565_1_0_0) => {
+        Some(_linea_derive_2047_1_0_0) => {
             {
                 {
-                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_1565_1_0_0)
+                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2047_1_0_0)
                 }
             }
         },
