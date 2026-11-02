@@ -1096,9 +1096,9 @@ the program; the combinators answer only the results.
 `http.serve` answers many requests at once, on up to 128 serving tasks unless
 its `policy:` says otherwise. No handler is reached by two tasks: each serving
 task builds its own, so `serve` takes a function that builds one rather than
-one handler. `http.serve_sequentially` lends the one handler it is given to
-every request, one connection at a time, so the caller reads the handler back
-once serving stops:
+one handler. Given `policy: .Sequential`, the same call builds one handler with
+that function and answers one connection at a time with it, on the thread
+that called `serve`:
 
 ```linea
 import std.http
@@ -1114,9 +1114,9 @@ fn serve_concurrently(sink listener: net.Listener) -> Result[(), http.ServeError
     http.serve(listener, routes)
 }
 
-// Serve one connection at a time through the one router the caller keeps.
-fn serve_in_turn(sink listener: net.Listener, inout router: http.Router[()]) -> Result[(), http.ServeError] {
-    http.serve_sequentially(listener, &router)
+// Serve one connection at a time through one router.
+fn serve_in_turn(sink listener: net.Listener) -> Result[(), http.ServeError] {
+    http.serve(listener, routes, policy: .Sequential)
 }
 ```
 

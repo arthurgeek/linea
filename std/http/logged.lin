@@ -198,14 +198,11 @@ test fn a_logged_router_logs_each_exchange_it_serves() {
     let missing = send(bound, "GET /nowhere HTTP/1.1\r\nHost: loopback\r\n\r\n")
     let malformed = send(bound, "garbage\r\n\r\n")
     let file = log.capture()
-    var served = logged(file.logger(minimum: .Info), health_router())
-    let serving = serve_sequentially(listener, &served, limits: serving(3))
+    let made = [file] || logged(file.logger(minimum: .Info), health_router())
+    let serving = serve(listener, made, limits: serving(3), policy: .Sequential)
     defer let health = read_to_end(found)
     defer let absent = read_to_end(missing)
     defer let refused = read_to_end(malformed)
-    let Logged { handler, logger } = served
-    handler.release()
-    logger.release()
     defer let lines = file.finish()
     let expected =
         \\INFO request method=GET path=/health status=200 bytes=2 duration=D

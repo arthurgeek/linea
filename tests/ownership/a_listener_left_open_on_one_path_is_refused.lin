@@ -5,14 +5,18 @@ fn health[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Re
     http.text(request, "ok")
 }
 
+fn routes() -> http.Router[()] {
+    var router = http.Router.new()
+    http.Router.route_raw(&router, "GET /health", health).unwrap()
+    router
+}
+
 fn main() -> Result[UInt8, http.ServeError] {
     let listener = net.listen(net.loopback(0)).map_err(|sink error| http.ServeError.Accept(error))?
-    var router = http.Router.new()
-    defer router.release()
-    match http.Router.route_raw(&router, "GET /health", health) {
+    match listener.local_address() {
         Ok(_) => {},
         Err(_) => return .Ok(1),
     }
-    http.serve_sequentially(listener, &router)?
+    http.serve(listener, routes)?
     return .Ok(0)
 }

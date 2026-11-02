@@ -1852,11 +1852,10 @@ serving ends normally `listen_and_serve_with` joins every serving task, closes
 the owning task and returns the state, as the last lines of `main` do to log a
 final count, and the program releases it. A service that shares nothing calls
 `http.listen_and_serve` with a function that builds each task's handler, as
-the first server does. A program that must read one handler back after
-serving, or serve a handler that cannot be shared between tasks, serves one
-connection at a time with `http.serve_sequentially` or
-`http.listen_and_serve_sequentially`, which lend the one handler they are
-given.
+the first server does. Either one serves one connection at a time when it is
+given `policy: .Sequential`: a single serving task builds one handler with the
+same function and answers every connection in turn, on the thread that called
+it.
 
 A route can be a closure instead of a named function, registered with
 `route_raw`, which takes a function of the state and the request: `GET /` is
@@ -2053,11 +2052,10 @@ Each request is served from an arena carved from the system allocator. To
 carve it from another one, call `http.listen_and_serve_in` (or
 `http.serve_in`) with that allocator first; every serving task carves from it,
 so it must be `Shareable`. An arena's handle is not, since taking memory from
-it moves the arena's cursor, so a program that carves every request from one
-arena serves one connection at a time through
-`http.serve_sequentially_in(arena.handle(), listener, &handler, limits: limits)`;
-code that is generic over an allocator calls the `_in` form, so the allocator
-it was given reaches every request.
+it moves the arena's cursor, so a server cannot carve its requests from an
+arena it was handed, even with `policy: .Sequential`. Code that is generic
+over an allocator calls the `_in` form, so the allocator it was given reaches
+every request.
 
 | Field | Default | What it bounds |
 | --- | --- | --- |
@@ -2087,8 +2085,8 @@ serving task has been joined, and releases it on a failure. So these hold for
 - It owns the listener it is given and closes it on every exit.
 - It answers one request per connection, on as many tasks at once as its
   policy allows (`.Threads(128)` unless it is given another), each with a
-  handler of its own; `serve_sequentially` and `listen_and_serve_sequentially`
-  answer one connection at a time.
+  handler of its own; with `policy: .Sequential` it answers one connection at
+  a time.
 - A failed connection — a client that disconnects, a malformed request, a
   timeout — is answered or dropped, and never stops the server.
 - It returns only when accepting fails in a way retrying cannot fix, when the
@@ -2234,8 +2232,9 @@ above, 431 for too many headers, 400 for a malformed method or length, and 400
 for a method, query or header that is not UTF-8. A path that is not UTF-8 is
 encoded byte by byte, as a browser would send it. The
 timeouts do not apply, since the web server decides how long a program may
-run. `serve_cgi(handler, state: app, limits: limits)` takes the same
-`state:` and `limits:` as `listen_and_serve_sequentially`, and `serve_cgi_in(allocator,
+run. `serve_cgi(handler, state: app, limits: limits)` lends `state:` to the
+handler as `http.with_state` does and returns it once the request is answered,
+takes the same `limits:` as `listen_and_serve`, and `serve_cgi_in(allocator,
 handler)` carves the request's arena from another allocator. Any other variable, such as one your server sets for the program's
 configuration, is yours to read with `env.variable`, which returns
 `Option[Str]`: `env.variable("PARTY_DATE").unwrap_or("soon")`. The text it
@@ -2312,9 +2311,8 @@ application that runs both ways and stores its entries in SQLite.
   loop for a program that opens the listener itself.
   `listen_and_serve_with(address, make_handler, state)` keeps the state in an
   owning task and hands each serving task a client of it, and
-  `listen_and_serve_sequentially(address, handler, state:)` serves one
-  connection at a time with one handler. Each `_in` form takes the allocator
-  each request is carved from first.
+  `policy: .Sequential` serves one connection at a time with one handler.
+  Each `_in` form takes the allocator each request is carved from first.
 - `http.Limits`, passed as `limits:`, bounds what a request may send and how
   many connections are answered.
 - `http.serve_cgi(handler)` answers the one request a web server started the

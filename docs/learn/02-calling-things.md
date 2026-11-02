@@ -969,9 +969,9 @@ parameters, `pair[UInt8]()` is refused as `T-Bound`, since a default fills a
 type a call leaves out, not one it half wrote. A defaulted `sink` parameter is
 allowed because a default owes nothing; an `inout` parameter has no default,
 since it needs the place the caller changes. This is how
-`http.listen_and_serve_sequentially(address, handler)` and
-`http.listen_and_serve_sequentially(address, handler, state: app)` are one function
-([Networking](09-networking.md#shared-state)).
+`http.serve_cgi(handler)` and `http.serve_cgi(handler, state: app)` are one
+function
+([Networking](09-networking.md#running-a-handler-as-a-cgi-program)).
 
 ## Functions as values
 

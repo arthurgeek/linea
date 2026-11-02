@@ -129,18 +129,20 @@ of the logarithm of `n`, and every one is joined before `serve` returns.
 owning task, gives `make_handler` a client of it for each serving task, and
 returns the state once every task has been joined. `http.listen_and_serve`
 serves a service that shares nothing. The `_in` forms carve each task's arenas
-from a parent every task reads, so the parent must be `Shareable`.
-`http.serve_sequentially` and `listen_and_serve_sequentially` lend one handler
-to every request, one connection at a time, for a program that reads its
-handler back or serves one that cannot be shared, such as one carving every
-request from one arena.
+from a parent every task reads, so the parent must be `Shareable`. Under
+`.Sequential` the same functions build one handler with `make_handler` and
+answer one connection at a time on the calling thread, so serving one
+connection at a time is a policy, not a second set of functions. A handler is
+never lent to serving and read back: a program that reads what its routes
+changed keeps it in the state `listen_and_serve_with` returns, and a server
+cannot carve its requests from one arena, whose handle is not `Shareable`.
 
 ## Consequences
 
 1. A caller changes `.Sequential` to `.Threads(8)` with one argument, without
    changing library code or job bodies.
-2. Tests run under `.Sequential`, or through `serve_sequentially`, with one
-   handler they read back.
+2. Tests run under `.Sequential` and check what the client received, or read
+   back the state `listen_and_serve_with` returns.
 3. A server's shared state is written as data in an owning task, and its
    routes reach it through `call`; a route that needs request data in a call
    copies it into owned values first.
@@ -168,5 +170,12 @@ request from one arena.
 - **A task per connection, joining the oldest when the bound is reached:**
   rejected because a slow client held up every connection behind it. The
   owning task over the listener lets any free task take the next connection.
+- **Sequential serving functions that lend one handler:** removed. A
+  sequential form beside `serve` answered the question `policy:` already
+  answers, through a second signature that took a handler instead of a
+  function that builds one, so every server had two ways to say one thing.
+  What it alone allowed, reading the handler back and carving requests from an
+  arena, is served by the state `listen_and_serve_with` returns and by a
+  `Shareable` parent.
 - **A short-circuiting `task.map_results` answering `Result[Vec[R], E]`:**
   rejected because failing early drops outputs other jobs produced.

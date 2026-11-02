@@ -342,7 +342,7 @@ The library tests itself.
   ok    http.a_body_shorter_than_its_length_is_malformed
   ok    http.a_body_that_is_not_json_answers_400
   ok    http.a_body_that_is_not_utf8_answers_400
-  ok    http.a_bound_address_that_cannot_be_read_closes_the_listener_and_releases_the_handler
+  ok    http.a_bound_address_that_cannot_be_read_closes_the_listener
   ok    http.a_bytes_response_holds_its_body_as_built
   ok    http.a_cgi_error_displays_its_cause
   ok    http.a_cgi_head_request_is_answered_with_the_head_alone
@@ -429,7 +429,7 @@ The library tests itself.
   ok    http.a_pattern_splits_into_its_method_and_path
   ok    http.a_percent_error_displays_its_reason
   ok    http.a_policy_of_no_threads_is_refused_and_closes_the_listener
-  ok    http.a_port_that_is_taken_is_a_listen_failure_and_the_handler_is_released
+  ok    http.a_port_that_is_taken_is_a_listen_failure
   ok    http.a_prefixed_cookie_is_cleared_with_secure
   ok    http.a_prefixed_cookie_keeps_the_rules_its_prefix_names
   ok    http.a_query_answers_a_refusal_of_a_params_of_its_own
@@ -485,7 +485,6 @@ The library tests itself.
   ok    http.a_segment_ends_at_the_next_slash
   ok    http.a_segment_is_a_literal_a_parameter_or_a_remainder
   ok    http.a_serve_error_displays_its_cause
-  ok    http.a_server_that_serves_nothing_ends_and_releases_its_handler
   ok    http.a_short_header_after_a_long_line_is_answered_in_the_smallest_arena
   ok    http.a_silent_client_times_out_and_the_next_is_served
   ok    http.a_silent_close_is_closed_not_an_error
@@ -518,7 +517,6 @@ The library tests itself.
   ok    http.adding_a_header_keeps_earlier_values
   ok    http.an_announced_server_answers_the_connection_queued_for_it
   ok    http.an_arena_below_the_body_limit_is_refused_before_serving
-  ok    http.an_arena_parent_serves_every_exchange_from_one_request_arena
   ok    http.an_arena_too_small_for_the_limits_is_refused
   ok    http.an_arena_too_small_for_the_limits_is_refused_with_a_parent
   ok    http.an_authority_is_a_host_and_an_optional_port
@@ -583,7 +581,6 @@ The library tests itself.
   ok    http.json_is_named_by_its_media_type
   ok    http.json_refuses_a_body_that_is_not_utf8
   ok    http.limits_beyond_every_arena_are_refused_without_overflowing
-  ok    http.listening_in_an_arena_carves_the_exchanges_from_it
   ok    http.listening_in_the_system_allocator_serves_nothing_when_told_to
   ok    http.no_match_is_404
   ok    http.non_ascii_values_without_escapes_read_as_sent
@@ -606,9 +603,9 @@ The library tests itself.
   ok    http.serve_opened_defaults_to_concurrent_worker_execution
   ok    http.serving_answers_each_client_on_its_own_task
   ok    http.serving_by_default_answers_two_requests_at_once
-  ok    http.serving_in_an_arena_carves_the_exchanges_from_it
+  ok    http.serving_in_the_system_allocator_answers_a_request
   ok    http.serving_reports_an_accept_failure_when_closing_the_listener_fails_too
-  ok    http.serving_that_cannot_begin_announces_nothing_and_releases_the_handler
+  ok    http.serving_that_cannot_begin_announces_nothing
   ok    http.set_header_replaces_every_value_of_a_name
   ok    http.setting_a_header_replaces_every_value
   ok    http.status_returns_the_status_the_error_answers_with
@@ -624,7 +621,6 @@ The library tests itself.
   ok    http.the_root_pattern_matches_the_root_alone
   ok    http.the_shared_state_counts_every_request_from_every_task
   ok    http.the_state_comes_back_when_serving_with_it_ends
-  ok    http.the_state_is_returned_when_serving_ends
   ok    http.the_unreserved_bytes_are_letters_digits_and_four_marks
   ok    http.transfer_encoding_is_not_implemented
   ok    http.transient_accept_failures_are_retried_until_a_connection_is_served
@@ -1505,4 +1501,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1502 passed, 0 failed
+  1498 passed, 0 failed
