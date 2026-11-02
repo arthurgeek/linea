@@ -76,8 +76,11 @@ until it is green.
   Intermediates go to `.zig-cache/conformance-scratch` unless `--scratch` names
   another directory. Pass
   `--runtime zig-out/lib/liblinea_rt_checked.a`, the runtime `zig build
-  conformance` uses: it checks storage, and a case recording one of its reports
-  is not run against `liblinea_rt.a`. Run narrowed walks serially. A narrowed
+  conformance` uses: it checks storage, so a case whose program reaches freed or
+  unallocated storage fails. A golden recording one of the checking allocator's
+  reports fails without being run, since no accepted program may reach one; the
+  reports themselves are tested by the runtime's native tests. Run narrowed
+  walks serially. A narrowed
   walk runs that directory's cases and every transcript beneath it, without
   coverage floors, generated programs or examples. A root that is one case (a
   `.lin` file, a `.cmd` transcript, or a directory holding `main.lin`) runs that
