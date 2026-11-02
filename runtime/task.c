@@ -96,9 +96,7 @@ struct task {
 
 /* Writes a runtime failure and aborts. */
 static void fail(const char *message) {
-    report_without_pipe_signal();
-    if (write(2, message, strlen(message)) < 0) {
-    }
+    report_bytes(message, strlen(message));
     abort();
 }
 

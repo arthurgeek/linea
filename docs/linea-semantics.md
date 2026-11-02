@@ -4665,10 +4665,16 @@ decimal parsers that read bytes at an address, and the argument and
 environment entries that answer one; `fs` for `linea_set_mode`; and `net` for
 the socket calls, each of which takes or answers a descriptor. Each such
 number is held by a linear value and each such address by a buffer or a
-slice, so a declaration anywhere else, in any root, is refused: it could free
-an allocation or a queue twice, close a descriptor the standard library still
-owns, have the runtime read or write bytes at a number no value holds, leave
-a parked thread unjoined or close an endpoint it made up. A module granted
+slice, so a declaration anywhere else, in any root, is refused: through the
+runtime's own entry points it could free an allocation or a queue twice,
+close a descriptor the standard library still owns, have the runtime read or
+write bytes at a number no value holds, leave a parked thread unjoined or
+close an endpoint it made up. The rule reaches only the runtime's `linea_`
+symbols, so it is defence in depth and not a guarantee: a module granted
+`extern` may declare a C library function such as `close` or `free` itself
+and misuse a number through it, which no rule refuses. What the rule gives is
+that the runtime's entry points taking or answering such a number are
+reached only through the standard library's checked wrappers. A module granted
 `extern` may still declare the functions that take and answer no such number:
 argument and environment counts and lengths, `linea_errno` and
 `linea_io_category`, `linea_random_words`, the clocks, and the float

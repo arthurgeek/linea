@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -104,16 +105,23 @@ static void concurrent_broken_pipe(void) {
     assert(sigaction(SIGPIPE, &old_sa, NULL) == 0);
 }
 
-/* A write to a pipe with no reader answers EPIPE while another thread, which
- * does not block SIGPIPE, waits for it: the process is not ended by the
- * signal, whichever thread the system would deliver it to. */
+/* A write to a pipe or a socket with no reader answers EPIPE while another
+ * thread, which does not block SIGPIPE, waits for it: the process is not
+ * ended by the signal, whichever thread the system would deliver it to. */
 static void *write_to_broken_pipe(void *ptr) {
     struct broken_pipe_arg *arg = ptr;
     arg->result = linea_write_some(arg->fd, ADDRESS("x"), 1);
     return NULL;
 }
 
-static void broken_pipe_beside_another_thread(void) {
+/* Fills `fds` with a pipe's two ends, reading end first. */
+static int open_pipe(int fds[2]) { return pipe(fds); }
+
+/* Fills `fds` with a connected pair of sockets, as a parent process hands a
+ * child for its standard streams. */
+static int open_socket_pair(int fds[2]) { return socketpair(AF_UNIX, SOCK_STREAM, 0, fds); }
+
+static void broken_channel_beside_another_thread(int (*open_channel)(int fds[2])) {
     const pid_t pid = fork();
     assert(pid >= 0);
     if (pid == 0) {
@@ -122,13 +130,14 @@ static void broken_pipe_beside_another_thread(void) {
         action.sa_handler = SIG_DFL;
         assert(sigemptyset(&action.sa_mask) == 0);
         assert(sigaction(SIGPIPE, &action, NULL) == 0);
-        int pipe_fds[2];
-        assert(pipe(pipe_fds) == 0);
-        assert(close(pipe_fds[0]) == 0);
-        struct broken_pipe_arg arg = {pipe_fds[1], 0};
+        int fds[2];
+        assert(open_channel(fds) == 0);
+        assert(close(fds[0]) == 0);
+        struct broken_pipe_arg arg = {fds[1], 0};
         pthread_t writer;
         assert(pthread_create(&writer, NULL, write_to_broken_pipe, &arg) == 0);
         assert(pthread_join(writer, NULL) == 0);
+        if (arg.result != -EPIPE) fprintf(stderr, "the write answered %ld\n", arg.result);
         _exit(arg.result == -EPIPE ? 0 : 1);
     }
     int status = 0;
@@ -136,6 +145,28 @@ static void broken_pipe_beside_another_thread(void) {
     if (WIFSIGNALED(status)) fprintf(stderr, "the writing process ended by signal %d\n", WTERMSIG(status));
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
+
+static void broken_pipe_beside_another_thread(void) { broken_channel_beside_another_thread(open_pipe); }
+static void broken_socket_beside_another_thread(void) { broken_channel_beside_another_thread(open_socket_pair); }
+
+#if defined(F_GETNOSIGPIPE)
+/* A write leaves the open file's `F_SETNOSIGPIPE` setting as it found it, so
+ * another process sharing the file still gets SIGPIPE from its own writes. */
+static void pipe_setting_is_restored(void) {
+    int fds[2];
+    assert(pipe(fds) == 0);
+    assert(fcntl(fds[1], F_GETNOSIGPIPE) == 0);
+    assert(linea_write_some(fds[1], ADDRESS("x"), 1) == 1);
+    assert(fcntl(fds[1], F_GETNOSIGPIPE) == 0);
+    assert(close(fds[0]) == 0);
+    assert(linea_write_some(fds[1], ADDRESS("x"), 1) == -EPIPE);
+    assert(fcntl(fds[1], F_GETNOSIGPIPE) == 0);
+    assert(fcntl(fds[1], F_SETNOSIGPIPE, 1) == 0);
+    assert(linea_write_some(fds[1], ADDRESS("x"), 1) == -EPIPE);
+    assert(fcntl(fds[1], F_GETNOSIGPIPE) == 1);
+    assert(close(fds[1]) == 0);
+}
+#endif
 
 static void random_bytes(void) {
     unsigned char bytes[300];
@@ -357,6 +388,10 @@ int main(void) {
     broken_pipe();
     concurrent_broken_pipe();
     broken_pipe_beside_another_thread();
+    broken_socket_beside_another_thread();
+#if defined(F_GETNOSIGPIPE)
+    pipe_setting_is_restored();
+#endif
     positional_io();
     short_write();
     searchable_parent();

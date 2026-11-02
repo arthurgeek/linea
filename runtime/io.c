@@ -1,6 +1,5 @@
 #define _GNU_SOURCE
 #include "io.h"
-#include "pipe_signal.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -12,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/random.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #if defined(__linux__)
@@ -82,24 +82,139 @@ long linea_read_some(int fd, unsigned long at, unsigned long len) {
     return count < 0 ? -(long)errno : (long)count;
 }
 
+#if defined(F_SETNOSIGPIPE)
+/* macOS raises the SIGPIPE of a write to a pipe or socket with no reader on
+ * the process, which hands it to any thread that does not block it, so
+ * blocking it on the writing thread, as Linux allows, does not keep it from
+ * ending the process. A write there raises nothing in the first place.
+ *
+ * A socket is written with `send` and `MSG_NOSIGNAL`, which changes nothing
+ * another writer sees. A pipe has no such call: its open file's
+ * `F_SETNOSIGPIPE` setting is set for the write, if it was clear, and cleared
+ * again after. The setting belongs to the open file, so while the write runs
+ * a write by another process sharing the file, or by host code on another
+ * thread, answers EPIPE without SIGPIPE too.
+ *
+ * Writes this runtime has in progress on a pipe are recorded below, by the
+ * pipe's device and inode, so overlapping writes to one pipe, through one
+ * descriptor or several sharing its open file, leave the setting set until
+ * the last of them ends; clearing it after the first would let another's
+ * write raise SIGPIPE. A pipe opened twice by name, as two open files with one
+ * inode, is taken as one: the last write to end clears the setting through
+ * its own descriptor. The table holds one entry per write in progress, so
+ * its length is bounded by the threads writing at once.
+ *
+ * The cost is an `fstat` per write, and on a pipe three `fcntl` calls and
+ * two lock operations: a 64-byte pipe write takes about 1.4 us this way
+ * against 0.3 us for `write` alone on an Apple M-series machine. */
+struct pipe_write {
+    dev_t device;
+    ino_t inode;
+    /* Whether this write is one of those that keep the setting this runtime
+     * made, rather than one that found it set by someone else. */
+    int keeps_setting;
+};
+
+static pthread_mutex_t pipe_writes_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct pipe_write *pipe_writes = 0;
+static size_t pipe_write_count = 0;
+static size_t pipe_write_capacity = 0;
+
+/* Whether a recorded write to the pipe `device`/`inode` keeps a setting this
+ * runtime made. Called with `pipe_writes_lock` held. */
+static int setting_kept(dev_t device, ino_t inode) {
+    for (size_t i = 0; i < pipe_write_count; i += 1) {
+        if (pipe_writes[i].device == device && pipe_writes[i].inode == inode && pipe_writes[i].keeps_setting) return 1;
+    }
+    return 0;
+}
+
+static void must_lock(int status) {
+    if (status != 0) abort();
+}
+
+/* Records a write to `fd`, the pipe `device`/`inode`, setting its
+ * `F_SETNOSIGPIPE` if it is clear, and stores in `keeps` whether the write
+ * keeps a setting this runtime made. Answers zero, or the errno that kept the
+ * write from being made quiet. */
+static int begin_pipe_write(int fd, dev_t device, ino_t inode, int *keeps) {
+    must_lock(pthread_mutex_lock(&pipe_writes_lock));
+    int error = 0;
+    if (pipe_write_count == pipe_write_capacity) {
+        const size_t capacity = pipe_write_capacity == 0 ? 8 : pipe_write_capacity * 2;
+        struct pipe_write *grown = realloc(pipe_writes, capacity * sizeof *grown);
+        if (grown == 0) {
+            error = ENOMEM;
+        } else {
+            pipe_writes = grown;
+            pipe_write_capacity = capacity;
+        }
+    }
+    *keeps = 0;
+    if (error == 0) {
+        const int set = fcntl(fd, F_GETNOSIGPIPE);
+        if (set < 0) {
+            error = errno;
+        } else if (set == 0) {
+            if (fcntl(fd, F_SETNOSIGPIPE, 1) != 0) error = errno;
+            *keeps = 1;
+        } else {
+            *keeps = setting_kept(device, inode);
+        }
+    }
+    if (error == 0) pipe_writes[pipe_write_count++] = (struct pipe_write){device, inode, *keeps};
+    must_lock(pthread_mutex_unlock(&pipe_writes_lock));
+    return error;
+}
+
+/* Removes a write `begin_pipe_write` recorded, and clears the setting this
+ * runtime made once no other write keeps it. A clear that fails leaves the
+ * setting in place, which only spares later writes their SIGPIPE. */
+static void end_pipe_write(int fd, dev_t device, ino_t inode, int keeps) {
+    must_lock(pthread_mutex_lock(&pipe_writes_lock));
+    for (size_t i = 0; i < pipe_write_count; i += 1) {
+        const struct pipe_write *w = &pipe_writes[i];
+        if (w->device != device || w->inode != inode || w->keeps_setting != keeps) continue;
+        pipe_writes[i] = pipe_writes[--pipe_write_count];
+        break;
+    }
+    if (keeps && !setting_kept(device, inode)) (void)fcntl(fd, F_SETNOSIGPIPE, 0);
+    must_lock(pthread_mutex_unlock(&pipe_writes_lock));
+}
+
+/* Writes without raising SIGPIPE, answering the count or a negated errno. */
+static long write_quietly(int fd, const void *bytes, size_t len) {
+    struct stat status;
+    if (fstat(fd, &status) != 0) return -(long)errno;
+    ssize_t written;
+    if (S_ISSOCK(status.st_mode)) {
+        do {
+            written = send(fd, bytes, len, MSG_NOSIGNAL);
+        } while (written < 0 && errno == EINTR);
+        return written < 0 ? -(long)errno : (long)written;
+    }
+    const int is_pipe = S_ISFIFO(status.st_mode);
+    int keeps = 0;
+    if (is_pipe) {
+        const int error = begin_pipe_write(fd, status.st_dev, status.st_ino, &keeps);
+        if (error != 0) return -(long)error;
+    }
+    do {
+        written = write(fd, bytes, len);
+    } while (written < 0 && errno == EINTR);
+    const long answer = written < 0 ? -(long)errno : (long)written;
+    if (is_pipe) end_pipe_write(fd, status.st_dev, status.st_ino, keeps);
+    return answer;
+}
+#endif
+
 long linea_write_some(int fd, unsigned long at, unsigned long len) {
     const int invalid = byte_range(at, len);
     if (invalid != 0) return -(long)invalid;
     if (len == 0) return 0;
 
 #if defined(F_SETNOSIGPIPE)
-    /* Checked before every write rather than once per descriptor: a
-     * descriptor number is reused for another file once closed, and a file
-     * can be reached through a descriptor this runtime did not open. Once the
-     * setting is in place the check is one `fcntl`, about 150 ns beside the
-     * 320 ns of a 64-byte pipe write on an Apple M-series machine. */
-    const int quiet_error = write_without_pipe_signal(fd);
-    if (quiet_error != 0) return -(long)quiet_error;
-    ssize_t written;
-    do {
-        written = write(fd, (const void *)(uintptr_t)at, (size_t)len);
-    } while (written < 0 && errno == EINTR);
-    return written < 0 ? -(long)errno : (long)written;
+    return write_quietly(fd, (const void *)(uintptr_t)at, (size_t)len);
 #else
     struct sigaction action;
     if (sigaction(SIGPIPE, NULL, &action) == 0 && action.sa_handler == SIG_IGN) {

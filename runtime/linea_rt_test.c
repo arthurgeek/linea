@@ -2,12 +2,14 @@
 /* Assertions execute test setup, checks, and cleanup in every build mode. */
 #undef NDEBUG
 #include <assert.h>
+#include <errno.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -23,6 +25,7 @@ unsigned long linea_env_len(unsigned long i);
 void linea_trap(int kind, const char *file, int line, int col);
 void linea_panic(unsigned long at, unsigned long len, const char *file, int line, int col);
 void linea_storage_extent(unsigned long at, unsigned long len);
+int linea_thread_begin(unsigned long at, unsigned long bytes, unsigned long low, unsigned long high);
 long linea_read_some(int fd, unsigned long at, unsigned long len);
 long linea_write_some(int fd, unsigned long at, unsigned long len);
 long linea_random_bytes(unsigned long at, unsigned long len);
@@ -173,19 +176,6 @@ static void host_resethand_runs_once(void) {
     host_fault_with(host_on_fault_returning, (unsigned)SA_RESETHAND);
 }
 
-/* Whether `sigaction` reports `SA_RESETHAND` back. macOS does not, so there
- * no program, this runtime included, can tell a handler asked for it. */
-static int resethand_is_reported(void) {
-    struct sigaction probe, previous, read_back;
-    memset(&probe, 0, sizeof probe);
-    probe.sa_handler = host_on_pipe;
-    probe.sa_flags = (int)(unsigned)SA_RESETHAND;
-    assert(sigemptyset(&probe.sa_mask) == 0);
-    assert(sigaction(SIGUSR2, &probe, &previous) == 0);
-    assert(sigaction(SIGUSR2, &previous, &read_back) == 0);
-    return ((unsigned)read_back.sa_flags & (unsigned)SA_RESETHAND) != 0;
-}
-
 /* Runs `body` in a child and checks it was ended by the default action of a
  * memory fault, SIGSEGV or SIGBUS. */
 static void ends_by_memory_fault(void (*body)(void)) {
@@ -201,16 +191,27 @@ static void ends_by_memory_fault(void (*body)(void)) {
     assert(WIFSIGNALED(status) && (WTERMSIG(status) == SIGSEGV || WTERMSIG(status) == SIGBUS));
 }
 
+/* A signal stack too small to hold the thread's record is refused, and
+ * leaves the thread's alternate signal stack as it was. */
+static void a_tiny_signal_stack_is_refused(void) {
+    static unsigned long tiny[2] __attribute__((aligned(16)));
+    stack_t before, after;
+    assert(sigaltstack(0, &before) == 0);
+    assert(linea_thread_begin((unsigned long)tiny, sizeof tiny, 0, 0) == EINVAL);
+    assert(sigaltstack(0, &after) == 0);
+    assert(after.ss_sp == before.ss_sp && after.ss_flags == before.ss_flags);
+}
+
 static void *park(void *arg) {
     (void)arg;
     for (;;) pause();
     return 0;
 }
 
-/* Runs `body` in a child whose standard error is a pipe nobody reads, beside
- * a second thread that does not block SIGPIPE, and checks it still ended by
- * SIGABRT: a failure report is never cut short by SIGPIPE. */
-static void aborts_into_closed_pipe(void (*body)(void)) {
+/* Runs `body` in a child whose standard error is a pipe or a socket nobody
+ * reads, beside a second thread that does not block SIGPIPE, and checks it
+ * still ended by SIGABRT: a failure report is never cut short by SIGPIPE. */
+static void aborts_into_closed_channel(void (*body)(void), int socket) {
     pid_t pid = fork();
     assert(pid >= 0);
     if (pid == 0) {
@@ -219,10 +220,10 @@ static void aborts_into_closed_pipe(void (*body)(void)) {
         action.sa_handler = SIG_DFL;
         assert(sigemptyset(&action.sa_mask) == 0);
         assert(sigaction(SIGPIPE, &action, 0) == 0);
-        int err_pipe[2];
-        assert(pipe(err_pipe) == 0);
-        assert(close(err_pipe[0]) == 0);
-        assert(dup2(err_pipe[1], 2) == 2);
+        int err_channel[2];
+        assert((socket ? socketpair(AF_UNIX, SOCK_STREAM, 0, err_channel) : pipe(err_channel)) == 0);
+        assert(close(err_channel[0]) == 0);
+        assert(dup2(err_channel[1], 2) == 2);
         pthread_t parked;
         assert(pthread_create(&parked, 0, park, 0) == 0);
         body();
@@ -566,7 +567,8 @@ int main(void) {
     exits_cleanly(host_handlers_survive);
     exits_cleanly(host_mask_is_blocked);
     exits_cleanly(host_nodefer_leaves_the_fault_unblocked);
-    if (resethand_is_reported()) ends_by_memory_fault(host_resethand_runs_once);
+    ends_by_memory_fault(host_resethand_runs_once);
+    exits_cleanly(a_tiny_signal_stack_is_refused);
 #if !defined(LINEA_SANITIZED)
     ends_by_fault(ignored_fault_ends_the_process);
     ends_by_fault(default_with_siginfo_ends_the_process);
@@ -604,9 +606,11 @@ int main(void) {
     aborts_saying(free_nothing, "linea: a disposal named no extent to release\n");
     aborts_saying(trap_overflow, "linea: integer overflow at t.lin:3:7\n");
     aborts_saying(panic_message, "linea: panic: boom at t.lin:1:2\n");
-    aborts_into_closed_pipe(over_aligned);
-    aborts_into_closed_pipe(trap_overflow);
-    aborts_into_closed_pipe(panic_message);
+    for (int socket = 0; socket < 2; socket += 1) {
+        aborts_into_closed_channel(over_aligned, socket);
+        aborts_into_closed_channel(trap_overflow, socket);
+        aborts_into_closed_channel(panic_message, socket);
+    }
 #if defined(LINEA_CHECK_STORAGE) && LINEA_CHECK_STORAGE
     puts("native runtime: checked allocation, arguments, environment and aborts passed");
 #else

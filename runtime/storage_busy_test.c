@@ -48,6 +48,24 @@ int linea_test_mprotect(void *at, size_t len, int prot) {
     return mprotect(at, len, prot);
 }
 
+/* The checking allocator is also built with `nanosleep` replaced by the
+ * function below, so a test can hold a fault handler in its pause while it
+ * waits for the storage table. Set `hold_in_pause`, and the next pause
+ * writes to `pausing` and waits until something is written to `go_on`. */
+static volatile int hold_in_pause = 0;
+static int pausing[2];
+static int go_on[2];
+
+int linea_test_nanosleep(const struct timespec *duration, struct timespec *left);
+int linea_test_nanosleep(const struct timespec *duration, struct timespec *left) {
+    if (__atomic_exchange_n(&hold_in_pause, 0, __ATOMIC_ACQ_REL) != 0) {
+        char byte = 1;
+        if (write(pausing[1], &byte, 1) != 1) _exit(3);
+        if (read(go_on[0], &byte, 1) != 1) _exit(3);
+    }
+    return nanosleep(duration, left);
+}
+
 static void *allocate(void *unused) {
     (void)unused;
     (void)linea_alloc(16, 8);
@@ -126,6 +144,66 @@ static void two_faults_at_once_while_the_table_is_held(void) {
     for (;;) pause();
 }
 
+/* Forks while a fault handler on another thread is pausing between two
+ * attempts to take the storage table. The child, where that thread does not
+ * exist, still allocates: nothing in it waits for a handler that is gone.
+ * Exits zero when the child allocated within five seconds. */
+static void fork_while_a_fault_handler_waits(void) {
+    freed_storage = linea_alloc(16, 8);
+    linea_free(freed_storage, 16, 8);
+    assert(pipe(stopped) == 0 && pipe(pausing) == 0 && pipe(go_on) == 0);
+    __atomic_store_n(&stop_in_mprotect, stop_until_resumed, __ATOMIC_RELEASE);
+    pthread_t holder;
+    assert(pthread_create(&holder, 0, allocate, 0) == 0);
+    char byte = 0;
+    assert(read(stopped[0], &byte, 1) == 1);
+    __atomic_store_n(&hold_in_pause, 1, __ATOMIC_RELEASE);
+    pthread_t reader;
+    assert(pthread_create(&reader, 0, read_freed_storage, 0) == 0);
+    assert(read(pausing[0], &byte, 1) == 1);
+    __atomic_store_n(&resume, 1, __ATOMIC_RELEASE);
+    assert(pthread_join(holder, 0) == 0);
+    const pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        (void)linea_alloc(16, 8);
+        _exit(0);
+    }
+    int status = 0;
+    pid_t ended = 0;
+    for (int tenth = 0; tenth < 50 && ended == 0; tenth += 1) {
+        ended = waitpid(child, &status, WNOHANG);
+        if (ended == 0) {
+            struct timespec pause_for = {0, 100000000};
+            nanosleep(&pause_for, 0);
+        }
+    }
+    if (ended == 0) {
+        kill(child, SIGKILL);
+        (void)waitpid(child, &status, 0);
+        _exit(1);
+    }
+    _exit(WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : 2);
+}
+
+/* Runs `body` in a child and checks it exited cleanly. */
+static void exits_cleanly(void (*body)(void)) {
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        body();
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        static const char failed[] = "a child forked beside a waiting fault handler did not allocate\n";
+        if (write(2, failed, sizeof failed - 1) < 0) {
+        }
+    }
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
 /* Runs `body` in a child, and checks it aborted within ten seconds after
  * writing `expected` to stderr. A child still running then is killed and the
  * check fails, since it is waiting for something that will not happen. */
@@ -178,6 +256,7 @@ int main(void) {
         fault_while_this_thread_holds_the_table,
         "linea: a memory access faulted while storage checking was busy, so what it reached is not known\n"
     );
+    exits_cleanly(fork_while_a_fault_handler_waits);
     aborts_in_time_saying(two_faults_at_once, "linea: storage was used after it was freed\n");
     aborts_in_time_saying(two_faults_at_once_while_the_table_is_held, "linea: storage was used after it was freed\n");
 #endif

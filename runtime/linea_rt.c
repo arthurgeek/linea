@@ -13,6 +13,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,15 +68,12 @@ static const char *const what[] = {
     "not a number",
 };
 
-/* Writes a runtime failure and aborts. Written with `write` rather than
- * stdio, so the fault handler can report through it too: the whole path is
- * `report_without_pipe_signal` (`fcntl` on macOS, `sigemptyset`,
- * `sigaddset` and `pthread_sigmask` elsewhere), `strlen`, `write` and
- * `abort`, all async-signal-safe. */
+/* Writes a runtime failure and aborts. Written through `report_bytes` rather
+ * than stdio, so the fault handler can report through it too: the whole path
+ * is `strlen`, what `report_bytes` calls, and `abort`, all
+ * async-signal-safe. */
 static void fail(const char *message) {
-    report_without_pipe_signal();
-    if (write(2, message, strlen(message)) < 0) {
-    }
+    report_bytes(message, strlen(message));
     abort();
 }
 
@@ -126,6 +124,69 @@ static struct sigaction previous_bus;
 static int previous_segv_spent = 0;
 static int previous_bus_spent = 0;
 
+#if defined(__APPLE__)
+/* A fault on macOS that a previous handler returned from, recorded so the
+ * same fault coming straight back can be told apart.
+ *
+ * macOS does not report `SA_RESETHAND` through `sigaction`, so the runtime
+ * cannot tell that a previous handler asked to run once. A handler that
+ * returns without repairing the access would then run for every repetition
+ * of the fault, without end, where the system would have taken the default
+ * action on the second. So a fault is taken as unrepaired when the same
+ * thread faults again on the same signal and address with the interrupted
+ * thread state, every register the program sees, unchanged since the handler
+ * returned: the instruction ran again with nothing in between. That fault
+ * takes the default action. A program that re-protects a page and touches it
+ * again with every register as it was would be ended the same way; nothing a
+ * handler can read tells that apart.
+ *
+ * The records are slots chosen by the faulting thread. A slot another thread
+ * holds at that moment is passed over, so a fault on two threads in one slot
+ * at once only loses the record, and the repeated fault runs the handler
+ * once more before it is caught. */
+typedef __typeof__(((ucontext_t *)0)->uc_mcontext->__ss) interrupted_state;
+
+struct returned_fault {
+    int busy;
+    int signal;
+    pthread_t thread;
+    unsigned long address;
+    interrupted_state state;
+};
+
+enum { returned_fault_slots = 64 };
+static struct returned_fault returned_faults[returned_fault_slots];
+typedef char linea_returned_fault_claim_is_lock_free[__atomic_always_lock_free(sizeof(int), 0) ? 1 : -1];
+
+static struct returned_fault *returned_fault_slot(pthread_t thread) {
+    return &returned_faults[((unsigned long)(uintptr_t)thread >> 4) % returned_fault_slots];
+}
+
+/* Records a fault the previous handler returned from. */
+static void note_returned_fault(int signal, unsigned long address, const void *context) {
+    struct returned_fault *slot = returned_fault_slot(pthread_self());
+    if (__atomic_exchange_n(&slot->busy, 1, __ATOMIC_ACQUIRE) != 0) return;
+    slot->signal = signal;
+    slot->thread = pthread_self();
+    slot->address = address;
+    slot->state = ((const ucontext_t *)context)->uc_mcontext->__ss;
+    __atomic_store_n(&slot->busy, 0, __ATOMIC_RELEASE);
+}
+
+/* Whether this fault is the one the previous handler last returned from on
+ * this thread, unchanged. Forgets the record either way. */
+static int fault_came_straight_back(int signal, unsigned long address, const void *context) {
+    struct returned_fault *slot = returned_fault_slot(pthread_self());
+    if (__atomic_exchange_n(&slot->busy, 1, __ATOMIC_ACQUIRE) != 0) return 0;
+    const interrupted_state *now = &((const ucontext_t *)context)->uc_mcontext->__ss;
+    const int same = slot->signal == signal && pthread_equal(slot->thread, pthread_self()) != 0 &&
+                     slot->address == address && memcmp(&slot->state, now, sizeof *now) == 0;
+    slot->signal = 0;
+    __atomic_store_n(&slot->busy, 0, __ATOMIC_RELEASE);
+    return same;
+}
+#endif
+
 /* Hands a fault that is not Linea's to the action installed before the
  * runtime's.
  *
@@ -136,8 +197,10 @@ static int previous_bus_spent = 0;
  * and the signal outside its `sa_mask`, the signal is unblocked during the
  * call. A handler installed with `SA_RESETHAND` runs for the first such fault
  * only, and every later one takes the default action, which the system would
- * have reset it to; macOS does not report `SA_RESETHAND` through
- * `sigaction`, so there such a handler runs for every fault.
+ * have reset it to. macOS does not report `SA_RESETHAND` through
+ * `sigaction`; there a fault that comes straight back unrepaired after a
+ * handler returned takes the default action instead, as `struct
+ * returned_fault` describes.
  *
  * Not reproduced: a handler always runs on the stack the runtime's own
  * handler runs on, the thread's alternate signal stack where it has one,
@@ -166,6 +229,9 @@ static void pass_on(int signal, siginfo_t *info, void *context) {
     if (handled && (flags & (unsigned)SA_RESETHAND) != 0) {
         handled = __atomic_exchange_n(spent, 1, __ATOMIC_ACQ_REL) == 0;
     }
+#if defined(__APPLE__)
+    if (handled && fault_came_straight_back(signal, (unsigned long)info->si_addr, context)) handled = 0;
+#endif
     if (handled) {
         /* The fault's signal is blocked already: the runtime's own action
          * does not set `SA_NODEFER`. */
@@ -183,6 +249,9 @@ static void pass_on(int signal, siginfo_t *info, void *context) {
             previous->sa_handler(signal);
         }
         if (pthread_sigmask(SIG_SETMASK, &before, 0) != 0) fail("linea: the runtime cannot hand a fault on\n");
+#if defined(__APPLE__)
+        note_returned_fault(signal, (unsigned long)info->si_addr, context);
+#endif
         return;
     }
     struct sigaction fallback;
@@ -246,9 +315,11 @@ static void ensure_fault_handler(void) {
 /* Installs the `bytes` at `at` as the calling thread's alternate signal
  * stack, less the thread's record at its low end, and records `[low, high)`
  * as the guard pages below its stack. Every thread a task runs on calls it
- * before running Linea code. `at` is aligned to 16 bytes. Answers zero, or
+ * before running Linea code. `at` must be aligned to 16 bytes and `bytes`
+ * must exceed the record, or the answer is EINVAL. Answers zero, or
  * the errno that kept the signal stack from being installed. */
 int linea_thread_begin(unsigned long at, unsigned long bytes, unsigned long low, unsigned long high) {
+    if (bytes <= thread_record_bytes || at % 16 != 0) return EINVAL;
     ensure_fault_handler();
     struct thread_record *record = (struct thread_record *)at;
     record->guard_low = low;
@@ -650,13 +721,34 @@ static int owns_table(void) {
  * it may never release it: it may be stopped inside the C allocator, waiting
  * for a lock the faulting thread holds. So the handler waits a bounded time
  * and then aborts with `storage_busy_report`, so that a failure is always
- * reported. */
+ * reported.
+ *
+ * Whether the address lies inside a region is known only from the table, so
+ * every fault comes here first, a fault that is not Linea's included. While
+ * the table is busy past the bounded wait, or owned by the faulting thread,
+ * such a fault ends with `storage_busy_report` and never reaches a host's
+ * handler: the checking runtime prefers a bounded wait followed by a generic
+ * report to reading a table that may be changing. */
 static void storage_fault(unsigned long address) {
     if (owns_table() || !take_table_in_time()) fail(storage_busy_report);
     const struct region *r = region_holding(address);
     const char *message = r == 0 ? 0 : verdict(r, address);
     if (message != 0) fail(message);
     release_table();
+}
+
+/* Runs in the child of a `fork`, where only the forking thread exists.
+ * Fault handlers that were waiting on other threads are gone, so
+ * `faults_waiting` is cleared, or every later allocation would wait for them
+ * forever. A `table_busy` taken with no owner recorded was taken by such a
+ * handler, which only reads the table, so it is released too. One taken by
+ * an owner is left as it is: the owner also held `storage_lock`, which stays
+ * locked in the child, so the table it was changing is never read; the
+ * child's own fault handler reports it as busy, and its allocator waits on
+ * that lock as on any lock a vanished thread held. */
+static void forget_other_threads(void) {
+    __atomic_store_n(&faults_waiting, 0, __ATOMIC_RELEASE);
+    if (__atomic_load_n(&table_owned, __ATOMIC_ACQUIRE) == 0) release_table();
 }
 
 /* Sets up the allocator once; called with the lock held. */
@@ -666,6 +758,7 @@ static void set_up(void) {
     if (page <= 0) fail("linea: the system reports no page size\n");
     page_bytes = (unsigned long)page;
     ensure_fault_handler();
+    if (pthread_atfork(0, 0, forget_other_threads) != 0) fail("linea: storage checking cannot prepare for fork\n");
 }
 
 /* Reserves a region able to hold `need` bytes after its leading guard page,
@@ -950,23 +1043,31 @@ unsigned long linea_env_len(unsigned long i) {
     return n;
 }
 
+/* Reports where a trap or a panic happened, " at FILE:LINE:COL" and a
+ * newline, through `report_bytes`. */
+static void report_location(const char *file, int line, int col) {
+    char numbers[48];
+    const int written = snprintf(numbers, sizeof numbers, ":%d:%d\n", line, col);
+    report_bytes(" at ", 4);
+    report_bytes(file, strlen(file));
+    if (written > 0) report_bytes(numbers, (size_t)written);
+}
+
 void linea_trap(int kind, const char *file, int line, int col) {
     const char *msg = "unknown failure";
     if (kind >= 0 && (unsigned)kind < sizeof what / sizeof *what) {
         msg = what[kind];
     }
-    report_without_pipe_signal();
-    fprintf(stderr, "linea: %s at %s:%d:%d\n", msg, file, line, col);
-    fflush(stderr);
+    report_bytes("linea: ", 7);
+    report_bytes(msg, strlen(msg));
+    report_location(file, line, col);
     abort();
 }
 
 void linea_panic(unsigned long at, unsigned long len,
                  const char *file, int line, int col) {
-    report_without_pipe_signal();
-    fputs("linea: panic: ", stderr);
-    fwrite((const void *)at, 1, len, stderr);
-    fprintf(stderr, " at %s:%d:%d\n", file, line, col);
-    fflush(stderr);
+    report_bytes("linea: panic: ", 14);
+    report_bytes((const char *)at, (size_t)len);
+    report_location(file, line, col);
     abort();
 }

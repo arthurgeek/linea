@@ -1,16 +1,18 @@
-/* How the runtime writes to a pipe whose reader has gone without SIGPIPE
- * ending the process, while leaving the process's SIGPIPE disposition as the
- * host set it.
+/* How a failure report reaches standard error without SIGPIPE ending the
+ * process first, while leaving the process's SIGPIPE disposition as the host
+ * set it, so a process whose standard error has no reader still ends by the
+ * abort that follows the report.
  *
- * Linux raises the SIGPIPE of such a write on the writing thread, so blocking
- * it on that thread keeps it from any other. macOS raises it on the process,
- * which hands it to any thread that does not block it, so blocking it on the
- * writing thread does not stop it ending the process. There the write is kept
- * from raising it at all: `F_SETNOSIGPIPE` makes every write on that open file
- * answer EPIPE without the signal. The setting belongs to the open file, so it
- * stays set after the write, for every descriptor that shares the file,
- * including ones another process inherited; clearing it again would race
- * with another thread writing to the same file. */
+ * Linux raises the SIGPIPE of a write to a pipe or socket with no reader on
+ * the writing thread, so blocking it on that thread keeps it from any other.
+ * macOS raises it on the process, which hands it to any thread that does not
+ * block it. There a socket is written with `send` and `MSG_NOSIGNAL`, which
+ * raises nothing, and a pipe's open file gets `F_SETNOSIGPIPE`. The report
+ * leaves that setting in place, for every descriptor that shares the open
+ * file, other processes' included: the process aborts right after, and
+ * clearing it could let another thread's write that relies on it raise
+ * SIGPIPE first. `linea_write_some` restores the setting after an ordinary
+ * write. */
 
 #ifndef LINEA_PIPE_SIGNAL_H
 #define LINEA_PIPE_SIGNAL_H
@@ -19,35 +21,40 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stddef.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
+/* Writes the `len` bytes at `bytes` to standard error for a failure report,
+ * without raising SIGPIPE. A write that fails ends the report: nothing
+ * better is left to do on the way to an abort. Uses only async-signal-safe
+ * calls (`fstat`, `fcntl`, `send` and `write` on macOS; `sigemptyset`,
+ * `sigaddset`, `pthread_sigmask` and `write` elsewhere), since the fault
+ * handler reports through it. */
+static inline void report_bytes(const char *bytes, size_t len) {
 #if defined(F_SETNOSIGPIPE)
-/* Makes a write to `fd` answer EPIPE without raising SIGPIPE. Answers zero,
- * or the errno that kept the setting from taking. The setting is read before
- * it is written: a socket whose peer reset the connection refuses
- * `F_SETNOSIGPIPE` with EINVAL, while it reports the `SO_NOSIGPIPE` the
- * runtime set when it opened the socket. */
-static inline int write_without_pipe_signal(int fd) {
-    const int set = fcntl(fd, F_GETNOSIGPIPE);
-    if (set < 0) return errno;
-    if (set != 0) return 0;
-    return fcntl(fd, F_SETNOSIGPIPE, 1) == 0 ? 0 : errno;
-}
-#endif
-
-/* Keeps a failure report written to standard error from raising SIGPIPE, so
- * a process whose standard error has no reader still ends by the abort that
- * follows the report. Uses only async-signal-safe calls, since the fault
- * handler reports through it. Where it cannot take, the report goes ahead
- * anyway: nothing better is left to do on the way to an abort. */
-static inline void report_without_pipe_signal(void) {
-#if defined(F_SETNOSIGPIPE)
-    (void)write_without_pipe_signal(2);
+    struct stat status;
+    const int socket = fstat(2, &status) == 0 && S_ISSOCK(status.st_mode);
+    if (!socket && fcntl(2, F_GETNOSIGPIPE) == 0) (void)fcntl(2, F_SETNOSIGPIPE, 1);
 #else
     sigset_t pipe_signal;
     if (sigemptyset(&pipe_signal) == 0 && sigaddset(&pipe_signal, SIGPIPE) == 0) {
         (void)pthread_sigmask(SIG_BLOCK, &pipe_signal, 0);
     }
 #endif
+    while (len > 0) {
+#if defined(F_SETNOSIGPIPE)
+        const ssize_t written = socket ? send(2, bytes, len, MSG_NOSIGNAL) : write(2, bytes, len);
+#else
+        const ssize_t written = write(2, bytes, len);
+#endif
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) return;
+        bytes += written;
+        len -= (size_t)written;
+    }
 }
 
 #endif

@@ -582,8 +582,10 @@ a measurement shows the allocation matters.
   arguments, with its `sa_mask` blocked and the fault's signal blocked unless
   it set `SA_NODEFER`; one installed with `SA_RESETHAND` runs for the first
   such fault only, and later ones take the default action, where the system
-  reports the flag (Linux does; macOS does not report it through
-  `sigaction`, so there such a handler runs for every fault). What is not
+  reports the flag. macOS does not report it through `sigaction`; there a
+  fault that comes straight back after a previous handler returned, on the
+  same thread, signal and address with every register unchanged, takes the
+  default action, since the handler did not repair it. What is not
   reproduced: the previous handler runs on the stack the runtime's handler
   runs on, the thread's alternate signal stack where it has one, whether or
   not it asked for `SA_ONSTACK`; and after an `SA_RESETHAND` handler has run,
@@ -598,14 +600,21 @@ a measurement shows the allocation matters.
   thread's first access. It reads the checking allocator's table under a
   flag taken with lock-free atomics, not a mutex, and a fault on the thread
   that owns the table reports that storage checking was busy without reading
-  it.
+  it. In the checking runtime every fault consults that table first, so a
+  fault that is not Linea's, met while the table stays busy past a bounded
+  wait of about a second, ends with that generic report rather than reaching
+  the host's handler.
   `SIGPIPE` is left as the process set it. A closed pipe answers `EPIPE` to
   every write the runtime makes whatever the disposition: on Linux, which
   raises the signal on the writing thread, the write blocks it on that thread
-  and consumes one it raises; on macOS, which raises it on the process, the
-  write first sets `F_SETNOSIGPIPE` on the descriptor's open file, which stays
-  set. A failure report to a standard error with no reader ends by its abort,
-  not by `SIGPIPE`. This replaces the restoring of the default action that
+  and consumes one it raises. macOS raises it on the process, so there the
+  write raises nothing: a socket is written with `send` and `MSG_NOSIGNAL`,
+  and a pipe's open file has `F_SETNOSIGPIPE` set for the write when it was
+  clear and cleared once no write of the runtime's to that pipe is in
+  progress, so another process sharing the pipe gets `SIGPIPE` again
+  afterwards. A failure report to a standard error with no reader, pipe or
+  socket, ends by its abort, not by `SIGPIPE`; on macOS it leaves the pipe's
+  setting in place, since the process ends right after. This replaces the restoring of the default action that
   [0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md)
   describes.
 

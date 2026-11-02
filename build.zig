@@ -1676,7 +1676,7 @@ pub fn build(b: *std.Build) void {
     }
     var busy_table_flags: std.ArrayList([]const u8) = .empty;
     busy_table_flags.appendSlice(b.allocator, checked_flags.items) catch @panic("OOM");
-    busy_table_flags.append(b.allocator, "-Dmprotect=linea_test_mprotect") catch @panic("OOM");
+    busy_table_flags.appendSlice(b.allocator, &.{ "-Dmprotect=linea_test_mprotect", "-Dnanosleep=linea_test_nanosleep" }) catch @panic("OOM");
     native.add(native_runtime_step, "native-storage-busy-tests", &.{
         .{ .file = "runtime/linea_rt.c", .flags = busy_table_flags.items },
         .{ .file = "runtime/storage_busy_test.c", .flags = runtime_flags.items },

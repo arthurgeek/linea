@@ -126,7 +126,13 @@ free an allocation twice, `linea_close` and close a descriptor the standard
 library still owns, `linea_float64_parse` and have the runtime read at a
 number no value holds, `linea_owner_free` and free a queue twice, or discard
 what `linea_task_prepare` answers and leave a parked thread: each number is
-safe only inside the linear type that holds it. A symbol lowering replaces is
+safe only inside the linear type that holds it. Confinement covers the
+runtime's own symbols and nothing else, so it is defence in depth rather than
+a guarantee: a module granted `extern` can declare the C library's `close` or
+`free` itself and misuse a number through it, and no rule refuses that
+declaration. What confinement gives is that the runtime's entry points
+taking or answering such a number are reached only through the standard
+library's checked wrappers. A symbol lowering replaces is
 confined to `mem` by the same field.
 
 The addresses of bytes are not typed, as the addresses a task hands on are:
@@ -243,7 +249,7 @@ number and its body's `Carried[H]`. Neither holds an `S`, so `Client[S]` is
   taking bytes accepts only `address.raw`: `Buffer` and `Slice` keep their
   address as a `UInt64` that every storage primitive takes, so the whole raw
   layer would change for a check confinement already makes, since no module
-  but `mem` can pass the number.
+  but `mem` can pass the number to a runtime entry point.
 - **Recognising the standard library by where it sits or by an option:** a
   path is the user's to choose and an option is anyone's to pass, while the
   carried text is fixed when the compiler is built.
