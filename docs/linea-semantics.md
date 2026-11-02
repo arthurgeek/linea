@@ -4641,10 +4641,22 @@ declares it, and a `linea_` symbol the runtime does not declare is refused. The
 standard library's declarations are held to the runtime's signatures exactly as
 any other root's are. The compiler-owned symbols above are [T-Extern]'s instead,
 and the typed storage primitives have no runtime definition and are refused
-wherever else they are declared. A declaration agreeing with the runtime's
+wherever else they are declared. The runtime's task, owning-task and session
+functions are declared only by the standard library module whose types keep
+what they hand out and take in: `task` for a parked thread and an owning
+task's call queue, `session` for an endpoint's choice and close, and `mem` for
+the functions that copy typed bytes between tasks. Each number such a function
+answers is held by a linear value and each address it takes is the address of
+values of a type, so a declaration anywhere else, in any root, is refused: it
+could free a queue twice, leave a parked thread unjoined, close an endpoint it
+made up or hand the runtime bytes no type names. The compiler's table states
+for every symbol which declarations may name it, so a symbol added to the
+runtime is confined or opened by a decision, not by omission. A declaration
+agreeing with the runtime's
 signature agrees with every other declaration of the symbol, so
 [T-ExternAgreement] does not also report a `linea_` symbol
-([ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md)).
+([ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md),
+[ADR 0255](adr/0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md)).
 
 **[T-ThreadStart]** A runtime function that runs Linea code on a thread of its
 own, `linea_task_start`, may be named, as a callee or as a value, only inside
@@ -4652,10 +4664,11 @@ own, `linea_task_start`, may be named, as a callee or as a value, only inside
 call returns, and `Slot.start` alone answers a handle that carries what the
 body captured until `close` joins the thread, so the body's reads and lends
 last as long as it runs ([O-Cross]). Anywhere else they would end while the
-body still ran, so a module granted `extern` that declares the symbol cannot
-start a thread with it, and no library can offer an unjoined or detached task.
-The rule reads the symbol a declaration names, so every root's declaration of
-it is held to the rule as the standard library's is
+body still ran, so no other function of the standard library's `task`, which
+alone declares the symbol ([T-ExternRuntime]), can start a thread with it, and
+no library can offer an unjoined or detached task. The rule reads the symbol a
+declaration names, so a declaration [T-ExternRuntime] refuses is held to it
+too
 ([ADR 0250](adr/0250-tasks-are-structured-through-linear-sessions.md)).
 
 **[T-RawAddress]** `std.mem.address.Address[T]`, the address of values of `T`
@@ -4667,7 +4680,10 @@ task before the call returns, writes with bytes another task sent, or keeps
 for a task it starts; and as the `at` of a `mem.Closure` construction, the one
 type certified to erase what it holds. Anywhere else, the call, or `raw` named
 as a value, is refused, because a number would stand for values of a type no
-type names. An `extern` or `export` whose parameters, result or callbacks reach
+type names. The argument for a marked parameter is a call of `raw` and nothing
+else: any other number, or a default the declaration gives the parameter, is
+refused, since the runtime would read or write values at an address no type
+names. An `extern` or `export` whose parameters, result or callbacks reach
 an address, through a newtype's base or a place lent `inout`, is refused too,
 since C could keep one or write a number where one belongs; a callback's
 context, which C hands back unread, is the one place exempt. A function passed for a runtime

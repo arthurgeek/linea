@@ -19897,9 +19897,11 @@ const Checker = struct {
     /// certified to erase what it holds. Anywhere else a number would stand
     /// for values of a type no type names. One walk over the calls and the
     /// structure literals to find the places allowed, and one over the
-    /// expressions naming `raw`.
+    /// expressions naming `raw`. The argument for a marked parameter is
+    /// itself a call of `raw`: any other number names bytes of no type.
     fn checkRawAddresses(self: *Checker) std.mem.Allocator.Error!void {
         const raw_fn = self.raw_accesses.address_raw;
+        try self.checkTypedBytesArguments(raw_fn);
         if (raw_fn == .none) return;
         // The two operations beside `Address` are held to the one signature
         // each is for, once their signatures are checked.
@@ -19973,6 +19975,39 @@ const Checker = struct {
         }
     }
 
+    /// [T-RawAddress] at a runtime call: each argument for a parameter
+    /// `runtime_symbols` marks as the address of typed bytes is a call of
+    /// `raw`, whose `Address[T]` names the type of the bytes the runtime
+    /// copies, receives or keeps. An `extern` is never a value, so every call
+    /// of one is a direct call this walk sees. One walk over the calls.
+    fn checkTypedBytesArguments(self: *Checker, raw_fn: node.DeclId) std.mem.Allocator.Error!void {
+        for (self.calls.items) |call| {
+            const callee = switch (call.target) {
+                .declared => |decl| decl,
+                else => continue,
+            };
+            if (!self.ast.declIsExtern(callee)) continue;
+            const signature = runtime_symbols.signatureOf(self.ast.tokenText(self.ast.declName(callee))) orelse continue;
+            for (call.args, 0..) |arg, i| {
+                if (i >= signature.parameters.len or !signature.parameters[i].address) continue;
+                // A default the declaration supplies is a number too.
+                const given = if (arg == ExprId.none) call.at else self.ast.withoutGroups(arg);
+                if (arg != ExprId.none and raw_fn != .none and self.ast.exprTag(given) == .call and
+                    self.namesFunction(self.ast.withoutGroups(self.ast.call(given).callee), raw_fn)) continue;
+                _ = self.report(
+                    .t_raw_address,
+                    given,
+                    "the runtime reads or writes values at this address, so it takes only the number in a `mem.address.Address`",
+                    .{},
+                    if (arg == ExprId.none)
+                        try std.fmt.allocPrint(self.sink.arena, "pass `address.raw(at)` for `{s}`, in place of the declaration's default", .{self.ast.tokenText(self.ast.declParams(callee)[i].name)})
+                    else
+                        "pass `address.raw(at)`, whose address names the type of the values kept there",
+                );
+            }
+        }
+    }
+
     /// Whether `id` names the function `d`, as a callee or a value.
     fn namesFunction(self: *const Checker, id: ExprId, d: node.DeclId) bool {
         const b = self.res.targetOf(id);
@@ -20018,9 +20053,11 @@ const Checker = struct {
 
     /// Holds an `extern` naming a `linea_` symbol to the signature the runtime
     /// gives it ([T-ExternRuntime]). The namespace is the runtime's, so the
-    /// rule reads the symbol and never which root declared it: the standard
-    /// library's declarations answer to the table as anyone's do. The symbols
-    /// the compiler owns outright are [T-Extern]'s.
+    /// signature is read from the symbol and never from which root declared
+    /// it: the standard library's declarations answer to the table as
+    /// anyone's do. Where the table confines a symbol to one module of the
+    /// standard library, every other declaration of it is refused. The
+    /// symbols the compiler owns outright are [T-Extern]'s.
     fn checkRuntimeSymbol(self: *Checker, d: node.DeclId, library: bool) std.mem.Allocator.Error!void {
         const name = self.ast.tokenText(self.ast.declName(d));
         if (!std.mem.startsWith(u8, name, runtime_symbols.namespace) or runtime_symbols.holds(name)) return;
@@ -20036,18 +20073,34 @@ const Checker = struct {
                 .{name},
             );
         };
-        // Lowering replaces the standard library's own `mem` declaration and
-        // no other, so that declaration is held to the table like any other
-        // and every other one has nothing to link against.
-        if (expected.provider == .lowering and !(library and self.program.libraryDeclIn("mem", name) == d)) {
-            return self.sink.addErrorFmt(
-                .t_extern_runtime,
-                file,
-                span,
-                try std.fmt.allocPrint(self.sink.arena, "reach it through {s}", .{expected.reached_through}),
-                "`{s}` is replaced by the compiler where the standard library declares it, so the runtime defines nothing to link against",
-                .{name},
-            );
+        // A symbol the table confines to one module of the standard library
+        // is declared there and nowhere else. Lowering replaces that
+        // declaration of a lowered symbol and no other, so every other one has
+        // nothing to link against. The runtime trusts each call of any other
+        // confined symbol with a number only that module's types keep, so
+        // another declaration could free a queue twice, leave a parked thread
+        // unjoined or hand the runtime an address that names no type.
+        switch (expected.declared_by) {
+            .library => |home| if (!(library and self.program.libraryDeclIn(home.module, name) == d)) {
+                const help = try std.fmt.allocPrint(self.sink.arena, "reach it through {s}", .{home.reached_through});
+                if (expected.provider == .lowering) return self.sink.addErrorFmt(
+                    .t_extern_runtime,
+                    file,
+                    span,
+                    help,
+                    "`{s}` is replaced by the compiler where the standard library declares it, so the runtime defines nothing to link against",
+                    .{name},
+                );
+                try self.sink.addErrorFmt(
+                    .t_extern_runtime,
+                    file,
+                    span,
+                    help,
+                    "`{s}` takes or answers what only the standard library's `{s}` keeps in a type, so only that module declares it",
+                    .{ name, home.module },
+                );
+            },
+            .granted, .compiler => {},
         }
         const declared = self.checkedExternSignature(d) orelse return;
         if (intrinsics.matchesRuntime(&self.builder.view(), declared, expected.*)) return;
@@ -39741,6 +39794,7 @@ test "an address becomes a number only where the runtime is told what to do with
         \\    let at: Address[UInt8] = nowhere()
         \\    linea_chan_send(0, raw(copy(at)), 1)
         \\    linea_chan_send(raw(copy(at)), 0, 1)
+        \\    linea_chan_send(0, (raw(copy(at))), 1)
         \\    let number = raw(at)
         \\    UInt8(number - number)
         \\}
@@ -39757,9 +39811,11 @@ test "an address becomes a number only where the runtime is told what to do with
     for (sink.items()) |diagnostic| {
         if (diagnostic.code == .t_raw_address) refused += 1;
     }
-    // The endpoint is not an address, the binding is no runtime call, and
-    // `keep` would hand C an address it may keep.
-    try testing.expectEqual(@as(usize, 3), refused);
+    // The endpoint is not an address, the `0` at the address names no type,
+    // the binding is no runtime call, and `keep` would hand C an address it
+    // may keep. A grouped `raw` is still `raw`.
+    try testing.expectEqual(@as(usize, 4), refused);
+    try testing.expect(diagnosticSays(&sink, .t_raw_address, "takes only the number in a `mem.address.Address`"));
     try testing.expect(diagnosticSays(&sink, .t_raw_address, "`keep`"));
 }
 

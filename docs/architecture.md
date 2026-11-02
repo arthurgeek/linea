@@ -716,7 +716,9 @@ The signatures the runtime declares for its `linea_` symbols are one table in
 `support/runtime_symbols.zig`, checked against the runtime's own sources so the
 two cannot drift. `checkRuntimeSymbol` holds every `extern` of a `linea_`
 symbol to that table ([T-ExternRuntime]), in the standard library and any other
-root alike, which is why such a symbol needs no separate agreement check.
+root alike, which is why such a symbol needs no separate agreement check. Each
+row also states which declarations may name its symbol: any module granted
+`extern`, or one module of the standard library, found by `libraryDeclIn`.
 
 `seedProvidedImplementations` registers compiler-provided primitive and array
 implementations in the same relation as written implementations. Coherence

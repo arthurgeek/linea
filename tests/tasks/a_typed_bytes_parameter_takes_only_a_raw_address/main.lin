@@ -1,0 +1,13 @@
+// The runtime copies the bytes at `at` to the peer of `endpoint`, so `at` must
+// be the address of values of a type, which only `address.raw` gives: a
+// number written anywhere else names no type, and neither does a default the
+// declaration gives.
+extern fn linea_chan_send(endpoint: UInt64, at: UInt64, len: UInt64)
+
+extern fn linea_owner_call(queue: UInt64, at: UInt64, len: UInt64, answer_at: UInt64 = 1, answer_len: UInt64 = 8)
+
+fn main() -> UInt8 {
+    linea_chan_send(0, 1, 8)
+    linea_owner_call(0, 1, 8)
+    0
+}

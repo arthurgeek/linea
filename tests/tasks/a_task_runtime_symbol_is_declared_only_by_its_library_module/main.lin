@@ -1,0 +1,21 @@
+// The runtime's task, owning-task and session functions hand out and take
+// numbers that name a parked thread, a call queue or an endpoint. Only the
+// standard library's modules that keep each number in a linear type may
+// declare them, so a module granted `extern` cannot free a queue twice, leave
+// a parked thread behind or close an endpoint it made up.
+extern fn linea_owner_open() -> UInt64
+
+extern fn linea_owner_free(queue: UInt64)
+
+extern fn linea_task_prepare(stack_bytes: UInt64) -> Int64
+
+extern fn linea_chan_close(endpoint: UInt64)
+
+fn main() -> UInt8 {
+    let queue = linea_owner_open()
+    linea_owner_free(queue)
+    linea_owner_free(queue)
+    let _parked = linea_task_prepare(65536)
+    linea_chan_close(12345)
+    0
+}

@@ -1,6 +1,6 @@
-// A module granted `extern` may declare the runtime's task symbols, but it
-// cannot start a thread itself: only `task.Slot.start` answers a handle that
-// keeps what the body captured until the thread is joined.
+// Only the standard library's `task` and `session` declare the runtime's task
+// symbols, and only `task.Slot.start` starts a thread, since it alone answers
+// a handle that keeps what the body captured until the thread is joined.
 extern fn linea_task_prepare(stack_bytes: UInt64) -> Int64
 
 extern fn linea_task_start(task: UInt64, entry: fn(endpoint: UInt64, at: UInt64, len: UInt64), release: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, release_at: UInt64) -> UInt64

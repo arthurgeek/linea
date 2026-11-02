@@ -86,7 +86,24 @@ certified `Slot.start`).
 for a marked parameter, and as the `at` of a `mem.Closure` construction, the
 one type certified to erase what it holds. It refuses one anywhere else, and
 it refuses an `extern` whose signature names an `Address`, so no address
-reaches C as an integer it may keep.
+reaches C as an integer it may keep. The argument for a marked parameter is a
+call of `raw` and nothing else, so the runtime never reads or writes values
+at a number no type names; a default the declaration gives the parameter is
+such a number too.
+
+The runtime functions of tasks, owning tasks and sessions are declared only
+by the standard library module whose types keep what they hand out and take
+in ([T-ExternRuntime]): `task` declares the parked thread's and the call
+queue's, `session` an endpoint's choice and close, and `mem` the ones that
+copy typed bytes. Each row of `runtime_symbols.zig` states which declarations
+may name its symbol, as a field with no default, so a symbol added later is
+confined or opened by a decision. A row that takes the address of typed bytes
+or a callback, or starts a thread, must be confined, which the table's own
+test holds. Without this, a module granted `extern` in any root could declare
+`linea_owner_free` and free a queue twice, discard what `linea_task_prepare`
+answers and leave a parked thread, or close an endpoint it made up: each
+number is safe only inside the linear type that holds it. A symbol lowering
+replaces is confined to `mem` by the same field.
 
 The other direction is written only by the compiler. A callback the runtime
 calls with an address it was given, a task's entry and release, is marked at
@@ -124,7 +141,8 @@ number and its body's `Carried[H]`. Neither holds an `S`, so `Client[S]` is
   `Storage[T, A]` naming it, and the tables count it from that field. A
   declaration added later is covered without anyone remembering it, because a
   `UInt64` cannot reach a slot.
-- Every runtime symbol that takes an address of typed bytes carries a mark.
+- Every runtime symbol that takes an address of typed bytes carries a mark,
+  and every symbol states which declarations may name it.
 - What stays trusted to `std.mem`: which `T` an address of a buffer names
   (`address_in` gives one for any `T`), that the storage a slot is reached
   through is the one that owns its bytes, that a callback names the `T` the
@@ -148,6 +166,10 @@ number and its body's `Carried[H]`. Neither holds an `S`, so `Client[S]` is
 
 - **A certificate for `task.Owner` and `Client` alone:** fixes one type and
   leaves every other erasing declaration trusted.
+- **Restricting who calls a task symbol rather than who declares it**, as
+  [T-ThreadStart] does for `linea_task_start`: it needs a certified caller per
+  symbol, while the module that declares an `extern` already bounds who calls
+  it, since an `extern` is private to its module.
 - **Parameters marked `erased`:** the leak is an address flowing as a number,
   which a parameter mark does not see, so the mark would be trusted rather
   than checked.
