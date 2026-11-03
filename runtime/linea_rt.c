@@ -20,6 +20,9 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
 
 #include "pipe_signal.h"
 
@@ -76,6 +79,29 @@ static void fail(const char *message) {
     report_bytes(message, strlen(message));
     abort();
 }
+
+/* A number naming the calling thread, never zero, compared with plain
+ * integer equality. The fault handler compares it with one a thread stored
+ * that may have ended since, which a `pthread_t` cannot be: `pthread_equal`
+ * on a thread that no longer exists is not defined. macOS's
+ * `pthread_threadid_np` reads the 64-bit id from the calling thread's own
+ * record, without a lock, and the system never gives an id to a second
+ * thread. Linux's `gettid` is a system call, async-signal-safe; the kernel
+ * can give an ended thread's id to a new one, so a stale id may name a live
+ * thread there, which callers treat as the cautious answer. */
+#if LINEA_CHECK_STORAGE || (defined(__APPLE__) && !defined(LINEA_SANITIZED))
+static unsigned long current_thread_id(void) {
+#if defined(__APPLE__)
+    uint64_t id = 0;
+    if (pthread_threadid_np(0, &id) != 0 || id == 0) fail("linea: the runtime cannot name the calling thread\n");
+    return (unsigned long)id;
+#else
+    const long id = syscall(SYS_gettid);
+    if (id <= 0) fail("linea: the runtime cannot name the calling thread\n");
+    return (unsigned long)id;
+#endif
+}
+#endif
 
 /* Where a thread's stack guard pages lie: an access in `[guard_low,
  * guard_high)` is an overflow. Every thread that runs Linea code keeps one at
@@ -170,8 +196,8 @@ static const long fault_run_stuck_ns = 60000000000L;
 struct fault_run {
     /* Held while the fields below `last_ns` are read or written. */
     int busy;
-    /* The owning thread, as a number; zero for a record never used. */
-    uintptr_t owner;
+    /* The owning thread's `current_thread_id`; zero for a record never used. */
+    unsigned long owner;
     /* Whether the owner's handler is running, and when the owner last
      * entered or left it, in nanoseconds of `CLOCK_MONOTONIC`. */
     int in_handler;
@@ -187,7 +213,7 @@ struct fault_run {
 enum { fault_run_slot_bits = 8, fault_run_slots = 1 << fault_run_slot_bits };
 static struct fault_run fault_runs[fault_run_slots];
 typedef char linea_fault_run_flag_is_lock_free[__atomic_always_lock_free(sizeof(int), 0) ? 1 : -1];
-typedef char linea_fault_run_owner_is_lock_free[__atomic_always_lock_free(sizeof(uintptr_t), 0) ? 1 : -1];
+typedef char linea_fault_run_owner_is_lock_free[__atomic_always_lock_free(sizeof(unsigned long), 0) ? 1 : -1];
 typedef char linea_fault_run_time_is_lock_free[__atomic_always_lock_free(sizeof(long), 0) ? 1 : -1];
 
 /* Nanoseconds on `clock`, or -1 where it cannot be read. `clock_gettime` is
@@ -198,14 +224,13 @@ static long clock_ns(clockid_t clock) {
     return (long)now.tv_sec * 1000000000L + now.tv_nsec;
 }
 
-/* Where the probe for `thread` starts. A `pthread_t` on macOS is the address
- * of a page-aligned record, so the page offset is shifted out and the rest
- * mixed by the 64-bit golden-ratio multiplier, whose top bits spread
- * consecutive page numbers over the table. The product wraps, which is what
- * mixes it. */
-static unsigned long fault_run_start(uintptr_t thread) {
+/* Where the probe for `thread`, a `current_thread_id`, starts. Thread ids
+ * are handed out in sequence, so they are mixed by the 64-bit golden-ratio
+ * multiplier, whose top bits spread consecutive numbers over the table. The
+ * product wraps, which is what mixes it. */
+static unsigned long fault_run_start(unsigned long thread) {
     unsigned long mixed;
-    (void)__builtin_mul_overflow((unsigned long)thread >> 12, 0x9E3779B97F4A7C15UL, &mixed);
+    (void)__builtin_mul_overflow(thread, 0x9E3779B97F4A7C15UL, &mixed);
     return mixed >> (64 - fault_run_slot_bits);
 }
 
@@ -219,12 +244,12 @@ static int fault_run_abandoned(const struct fault_run *run, long now) {
  * is held by a thread taking it over. A thread's own record is never past a
  * record no thread has used, since it took the first free one on its probe. */
 static struct fault_run *hold_fault_run(long now) {
-    const uintptr_t self = (uintptr_t)pthread_self();
+    const unsigned long self = current_thread_id();
     const unsigned long start = fault_run_start(self);
     struct fault_run *free_run = 0;
     for (unsigned long i = 0; i < fault_run_slots; i += 1) {
         struct fault_run *run = &fault_runs[(start + i) % fault_run_slots];
-        const uintptr_t owner = __atomic_load_n(&run->owner, __ATOMIC_ACQUIRE);
+        const unsigned long owner = __atomic_load_n(&run->owner, __ATOMIC_ACQUIRE);
         if (owner == self) {
             if (__atomic_exchange_n(&run->busy, 1, __ATOMIC_ACQUIRE) != 0) return 0;
             if (__atomic_load_n(&run->owner, __ATOMIC_ACQUIRE) == self) return run;
@@ -235,7 +260,7 @@ static struct fault_run *hold_fault_run(long now) {
         if (owner == 0) break;
     }
     if (free_run == 0 || __atomic_exchange_n(&free_run->busy, 1, __ATOMIC_ACQUIRE) != 0) return 0;
-    const uintptr_t owner = __atomic_load_n(&free_run->owner, __ATOMIC_ACQUIRE);
+    const unsigned long owner = __atomic_load_n(&free_run->owner, __ATOMIC_ACQUIRE);
     if (owner != 0 && !fault_run_abandoned(free_run, now)) {
         __atomic_store_n(&free_run->busy, 0, __ATOMIC_RELEASE);
         return 0;
@@ -692,14 +717,16 @@ static pthread_mutex_t storage_lock = PTHREAD_MUTEX_INITIALIZER;
  * fault handler is waiting for it. */
 static int table_busy = 0;
 
-/* The thread holding `storage_lock`, valid while `table_owned` is set, so
+/* The `current_thread_id` of the thread holding `storage_lock`, or zero, so
  * the fault handler can tell a fault on that thread. It is set before the
  * thread takes `table_busy` and cleared after it releases it, so a fault on
- * that thread anywhere between finds it the owner. Kept in shared variables
- * rather than a thread-local one, which the handler cannot read without
- * allocating on macOS, as `struct thread_record` explains. */
-static pthread_t table_owner;
-static int table_owned = 0;
+ * that thread anywhere between finds it the owner. A thread that ends holding
+ * the lock leaves it set, and so does a `fork` child, where the owner no
+ * longer exists: it is a number, compared as one, never a thread handle.
+ * Kept in a shared variable rather than a thread-local one, which the
+ * handler cannot read without allocating on macOS, as `struct
+ * thread_record` explains. */
+static unsigned long table_owner = 0;
 
 /* How many fault handlers are waiting for `table_busy`. A thread taking the
  * flag on the allocator's path waits until none is, so a thread that takes
@@ -710,7 +737,6 @@ static int faults_waiting = 0;
  * operation is async-signal-safe. */
 typedef char linea_table_flag_is_lock_free[__atomic_always_lock_free(sizeof table_busy, 0) ? 1 : -1];
 typedef char linea_waiting_count_is_lock_free[__atomic_always_lock_free(sizeof faults_waiting, 0) ? 1 : -1];
-typedef char linea_owner_flag_is_lock_free[__atomic_always_lock_free(sizeof table_owned, 0) ? 1 : -1];
 typedef char linea_owner_is_lock_free[__atomic_always_lock_free(sizeof table_owner, 0) ? 1 : -1];
 
 static void take_table(void) {
@@ -727,14 +753,13 @@ static void release_table(void) {
 
 static void lock_storage(void) {
     if (pthread_mutex_lock(&storage_lock) != 0) fail("linea: storage checking cannot take its lock\n");
-    __atomic_store_n(&table_owner, pthread_self(), __ATOMIC_RELAXED);
-    __atomic_store_n(&table_owned, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&table_owner, current_thread_id(), __ATOMIC_RELEASE);
     take_table();
 }
 
 static void unlock_storage(void) {
     release_table();
-    __atomic_store_n(&table_owned, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&table_owner, 0, __ATOMIC_RELEASE);
     if (pthread_mutex_unlock(&storage_lock) != 0) fail("linea: storage checking cannot release its lock\n");
 }
 
@@ -826,11 +851,10 @@ static int take_table_in_time(void) {
     return taken;
 }
 
-/* Whether the calling thread holds `storage_lock`. `pthread_self` is
- * async-signal-safe. */
+/* Whether the calling thread holds `storage_lock`, by integer equality of
+ * thread ids, which `current_thread_id` reads safely in a handler. */
 static int owns_table(void) {
-    return __atomic_load_n(&table_owned, __ATOMIC_ACQUIRE) != 0 &&
-           pthread_equal(__atomic_load_n(&table_owner, __ATOMIC_RELAXED), pthread_self()) != 0;
+    return __atomic_load_n(&table_owner, __ATOMIC_ACQUIRE) == current_thread_id();
 }
 
 /* Explains a fault at `address` where it lies inside a region: an abort
@@ -874,7 +898,7 @@ static void forget_other_threads(void) {
 #if defined(__APPLE__) && !defined(LINEA_SANITIZED)
     for (int i = 0; i < fault_run_slots; i += 1) __atomic_store_n(&fault_runs[i].busy, 0, __ATOMIC_RELEASE);
 #endif
-    if (__atomic_load_n(&table_owned, __ATOMIC_ACQUIRE) == 0) release_table();
+    if (__atomic_load_n(&table_owner, __ATOMIC_ACQUIRE) == 0) release_table();
 }
 
 /* Sets up the allocator once; called with the lock held. */

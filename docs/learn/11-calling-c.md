@@ -1586,6 +1586,54 @@ name=Ada visits=1
 name=Grace visits=3
 ```
 
+## Linea inside a C program: signals
+
+A library built with `export` functions can be linked into a program written
+in C, which then calls Linea code from its own threads. The Linea runtime
+shares that process's signals with its host, so here is exactly what it does
+with them.
+
+What the runtime installs. Its own handler for `SIGSEGV` and `SIGBUS`, so it
+can report a stack overflow and, in the checking runtime, a use of freed
+storage. It installs it the first time a thread starts Linea work: at a Linea
+program's entry, when a task starts a thread, or when the checking runtime
+first allocates. A fault that is not Linea's goes on to the handler the host
+had installed before.
+
+What it never changes: the process-wide disposition of `SIGPIPE`. A write to a
+pipe or socket whose reader has gone answers an error, never a signal,
+without the runtime setting `SIGPIPE` to ignored for the whole process. How
+that works depends on where the write runs:
+
+1. Sockets and ordinary Linea writes, on every system. A socket is written
+   with a flag that raises no `SIGPIPE` for that one call. Any other write
+   blocks `SIGPIPE` on the writing thread for the length of the write. On
+   Linux, which raises the signal on the writing thread, that is enough.
+2. A standalone Linea program on macOS, which raises a write's `SIGPIPE` on
+   the whole process. The program's entry blocks `SIGPIPE` on the main
+   thread, and every thread created afterwards with `pthread_create`
+   inherits that. Threads Linea does not create that way keep their own
+   mask: libdispatch (GCD) worker threads, and a thread a C constructor
+   started before the entry ran. While such a thread is alive and does not
+   block `SIGPIPE`, a write's signal can reach it.
+3. Linea embedded in a C host. The host's threads keep the host's signal
+   policy. On macOS, a host thread that does not block `SIGPIPE` can take the
+   signal from a Linea write and end the process, as it would for the host's
+   own write. If your host needs protection, block `SIGPIPE` on its threads
+   yourself with `pthread_sigmask`.
+
+How a fault reaches the host's handler. The runtime calls the host's previous
+handler as a function, so the kernel's delivery is emulated, not repeated.
+The handler is called with the same arguments, with its `sa_mask` blocked and
+the fault's signal blocked unless it asked for `SA_NODEFER`, and a handler
+installed with `SA_RESETHAND` runs once where the system reports that flag.
+macOS does not report it, so there an access that keeps faulting the same way
+for a second, with no repair coming, takes the default action instead. Two
+things are not reproduced: the handler runs on the stack the runtime's own
+handler runs on, the thread's alternate signal stack when it has one,
+whatever `SA_ONSTACK` said; and a host that calls `sigaction` afterwards sees
+the runtime's handler, not its own.
+
 ## What the compiler believes
 
 A wrapper module is the one place a mistake becomes undefined behaviour,

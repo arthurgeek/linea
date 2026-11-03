@@ -19,8 +19,9 @@ unsigned long linea_alloc(unsigned long size, unsigned long align);
 void linea_free(unsigned long at, unsigned long size, unsigned long align);
 
 /* Set once the next `mprotect` is to stop its caller: `stop_for_good`, or
- * `stop_until_resumed`, until `resume` is set. */
-enum { stop_for_good = 1, stop_until_resumed = 2 };
+ * `stop_until_resumed`, until `resume` is set, or `exit_thread`, which ends
+ * the calling thread with the table still held. */
+enum { stop_for_good = 1, stop_until_resumed = 2, exit_thread = 3 };
 static volatile int stop_in_mprotect = 0;
 static volatile int resume = 0;
 /* Written by the stopped thread once it is inside `mprotect`. */
@@ -37,6 +38,7 @@ int linea_test_mprotect(void *at, size_t len, int prot) {
     if (stop != 0) {
         char byte = 1;
         if (write(stopped[1], &byte, 1) != 1) _exit(3);
+        if (stop == exit_thread) pthread_exit(0);
         if (stop == stop_for_good) {
             for (;;) pause();
         }
@@ -204,6 +206,53 @@ static void exits_cleanly(void (*body)(void)) {
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 
+/* Ends a thread inside the allocator while it holds the storage table, and
+ * joins it, so the system may hand its thread record to the next thread. */
+static void end_a_thread_holding_the_table(void) {
+    assert(pipe(stopped) == 0);
+    __atomic_store_n(&stop_in_mprotect, exit_thread, __ATOMIC_RELEASE);
+    pthread_t holder;
+    assert(pthread_create(&holder, 0, allocate, 0) == 0);
+    char byte = 0;
+    assert(read(stopped[0], &byte, 1) == 1);
+    assert(pthread_join(holder, 0) == 0);
+}
+
+/* A thread ended while it held the storage table, and a thread started
+ * after it, which may reuse its thread record, reads freed storage. The fault
+ * handler does not take the new thread for the table's owner: it waits its
+ * bounded time for the table and reports the fault without naming what the
+ * access reached. */
+static void fault_after_the_owner_ended(void) {
+    freed_storage = linea_alloc(16, 8);
+    linea_free(freed_storage, 16, 8);
+    end_a_thread_holding_the_table();
+    pthread_t reader;
+    assert(pthread_create(&reader, 0, read_freed_storage, 0) == 0);
+    for (;;) pause();
+}
+
+/* The same in the child of a `fork` made after the owner ended, where the
+ * table stays as the owner left it. */
+static void fault_in_a_child_after_the_owner_ended(void) {
+    freed_storage = linea_alloc(16, 8);
+    linea_free(freed_storage, 16, 8);
+    end_a_thread_holding_the_table();
+    const pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        (void)*(volatile unsigned char *)freed_storage;
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(child, &status, 0) == child);
+    if (WIFSIGNALED(status)) {
+        signal(WTERMSIG(status), SIG_DFL);
+        raise(WTERMSIG(status));
+    }
+    _exit(1);
+}
+
 /* Runs `body` in a child, and checks it aborted within ten seconds after
  * writing `expected` to stderr. A child still running then is killed and the
  * check fails, since it is waiting for something that will not happen. */
@@ -257,6 +306,14 @@ int main(void) {
         "linea: a memory access faulted while storage checking was busy, so what it reached is not known\n"
     );
     exits_cleanly(fork_while_a_fault_handler_waits);
+    aborts_in_time_saying(
+        fault_after_the_owner_ended,
+        "linea: a memory access faulted while storage checking was busy, so what it reached is not known\n"
+    );
+    aborts_in_time_saying(
+        fault_in_a_child_after_the_owner_ended,
+        "linea: a memory access faulted while storage checking was busy, so what it reached is not known\n"
+    );
     aborts_in_time_saying(two_faults_at_once, "linea: storage was used after it was freed\n");
     aborts_in_time_saying(two_faults_at_once_while_the_table_is_held, "linea: storage was used after it was freed\n");
 #endif
