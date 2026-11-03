@@ -3,7 +3,8 @@ const test_roots = @import("build/test_roots.zig");
 
 // Copy the pinned provider unchanged: Zig forbids sharing its source files
 // between the standard-library module and this integer-only entry point.
-fn addDecimalProvider(b: *std.Build, module: *std.Build.Module) void {
+// Returns the copy of `convert_slow.zig`, the provider's root.
+fn decimalProvider(b: *std.Build) std.Build.LazyPath {
     const lib_directory = b.graph.zig_lib_directory.path orelse @panic("Zig library directory is required");
     const files = b.addWriteFiles();
     const directory = b.pathJoin(&.{ lib_directory, "std", "fmt", "parse_float" });
@@ -12,11 +13,7 @@ fn addDecimalProvider(b: *std.Build, module: *std.Build.Module) void {
         _ = files.addCopyFile(.{ .cwd_relative = b.pathJoin(&.{ directory, name }) }, name);
     }
     _ = files.addCopyFile(b.path("runtime/zig-float-LICENSE"), "LICENSE");
-    module.addImport("decimal_provider", b.createModule(.{
-        .root_source_file = root,
-        .target = module.resolved_target,
-        .optimize = module.optimize,
-    }));
+    return root;
 }
 
 /// What a test run's binaries are watched by.
@@ -1788,17 +1785,27 @@ pub fn build(b: *std.Build) void {
     // Compile Zig's Ryu formatter through C so ASan and MSan instrument its
     // memory accesses too. Passing Zig LLVM IR to Clang would not add the
     // function attributes that enable those checks.
-    var float_target_query = runtime_target.query;
-    float_target_query.ofmt = .c;
-    const float_source = b.addObject(.{
-        .name = "linea_float",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("runtime/float.zig"),
-            .target = b.resolveTargetQuery(float_target_query),
-            .optimize = .ReleaseSmall,
-        }),
+    //
+    // The C is emitted with one job. Zig's C backend names each generic
+    // instance after its index in the compiler's intern pool, and with several
+    // jobs that index depends on how the threads were scheduled, so a busy
+    // machine writes different static names into the object. The outcome
+    // cache hashes the archive's bytes, and those names alone would discard
+    // every recorded outcome on each build. `Step.Compile` cannot pass `-j`,
+    // so this runs the compiler directly.
+    const float_source = b.addSystemCommand(&.{ b.graph.zig_exe, "build-obj", "-ofmt=c", "-OReleaseSmall", "-j1" });
+    float_source.addArgs(&.{
+        "-target",
+        runtime_target.query.zigTriple(b.allocator) catch @panic("OOM"),
+        "-mcpu",
+        runtime_target.query.serializeCpuAlloc(b.allocator) catch @panic("OOM"),
+        "--dep",
+        "decimal_provider",
     });
-    addDecimalProvider(b, float_source.root_module);
+    float_source.addPrefixedFileArg("-Mroot=", b.path("runtime/float.zig"));
+    float_source.addPrefixedFileArg("-Mdecimal_provider=", decimalProvider(b));
+    float_source.addArgs(&.{ "--cache-dir", b.cache_root.path orelse ".", "--global-cache-dir", b.graph.global_cache_root.path orelse "." });
+    const float_c = float_source.addPrefixedOutputFileArg("-femit-bin=", "linea_float.c");
     var float_flags: std.ArrayList([]const u8) = .empty;
     float_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
     float_flags.appendSlice(b.allocator, &.{
@@ -1826,7 +1833,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "net", .file = b.path("runtime/net.c"), .flags = runtime_flags.items },
         .{ .name = "clock", .file = b.path("runtime/clock.c"), .flags = runtime_flags.items },
         .{ .name = "task", .file = b.path("runtime/task.c"), .flags = runtime_flags.items },
-        .{ .name = "linea_float", .file = float_source.getEmittedBin(), .flags = float_flags.items },
+        .{ .name = "linea_float", .file = float_c, .flags = float_flags.items },
         .{ .name = "math", .file = b.path("runtime/math.c"), .flags = math_flags.items },
     }) |input| {
         const object = runtimeObject(b, runtime_target, input.name, input.file, input.flags);
@@ -2257,7 +2264,11 @@ pub fn build(b: *std.Build) void {
         }),
         .filters = test_filters,
     });
-    addDecimalProvider(b, runtime_tests.root_module);
+    runtime_tests.root_module.addImport("decimal_provider", b.createModule(.{
+        .root_source_file = decimalProvider(b),
+        .target = target,
+        .optimize = optimize,
+    }));
     runtime_tests.root_module.link_libc = true;
     if (target.result.os.tag == .linux) runtime_tests.root_module.linkSystemLibrary("m", .{});
     const run_runtime_tests = b.addRunArtifact(runtime_tests);
