@@ -492,10 +492,10 @@ test fn a_silent_client_times_out_and_the_next_is_served() {
 }
 
 // A connection that sends no byte within `first_byte_timeout_ms` is closed
-// without an exchange; a request that has arrived by the time the server
-// first reads is answered however late that read is; once the first byte
-// arrives, the rest of the request is bounded by `read_timeout_ms` from
-// accept.
+// without an exchange. A request waiting when the server first reads is
+// answered however late that read is, since the server cannot tell when its
+// bytes arrived. Once the first byte arrives, the rest of the request is
+// bounded by `read_timeout_ms` from accept.
 test fn a_request_read_after_its_deadline_from_accept_times_out() {
     var listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
@@ -509,8 +509,8 @@ test fn a_request_read_after_its_deadline_from_accept_times_out() {
     &arena.rewind()
     defer let idle_answer = read_to_end(idle_client)
     let idle_exchanges = recorded.exchanges
-    // Sent at once, but first read after `first_byte_timeout_ms` has passed
-    // since accept: the server was late, not the client, so it is answered.
+    // First read after `first_byte_timeout_ms` has passed since accept, with
+    // the request already waiting: it is read and answered.
     let prompt_client = send(bound, health_request)
     let Accepted { connection: prompt_conn, address: _ } = &listener.accept().unwrap()
     let prompt_accepted = time.Instant.now()
@@ -1432,7 +1432,8 @@ test fn limits_beyond_every_arena_are_refused_without_overflowing() {
 // `RequestReader` reads a request from `connection`, waiting at most
 // `first_wait_ms` from `accepted` for the first read and `read_timeout_ms`
 // from `accepted` once the first bytes have arrived. A first read that starts
-// after `first_wait_ms` still takes the bytes that arrived before it.
+// after `first_wait_ms` still takes the bytes already waiting, whenever they
+// arrived, and waits for none.
 @linear
 struct RequestReader {
     connection: net.Connection,
@@ -1456,10 +1457,11 @@ impl io.Reader for RequestReader {
 
     fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
         if !self.started && self.first_wait_ms != 0 && self.accepted.elapsed() >= time.Duration.from_milliseconds(self.first_wait_ms) {
-            // The first-byte window passed before the server read at all, so
-            // bytes the client sent in time may be waiting. The read takes
-            // what has arrived and waits at most a millisecond for more, the
-            // shortest bound a socket takes, since zero waits forever.
+            // The first-byte window passed before the server read at all. The
+            // read takes the bytes already waiting and waits at most a
+            // millisecond for more, the shortest bound a socket takes, since
+            // zero waits forever. It cannot tell bytes sent before the window
+            // closed from bytes sent after, so it takes both.
             &self.connection.set_timeouts(1, self.write_timeout_ms)?
         }
         if self.started && !self.extended {

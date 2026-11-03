@@ -107,13 +107,25 @@ static pthread_once_t thread_record_once = PTHREAD_ONCE_INIT;
  * with plain integer equality, against one a thread stored that may have
  * ended since: a new thread starts with every slot empty, so it never
  * carries the token of a thread that ran before it, however the system
- * reuses thread ids or thread records. The handler reads the slot with
- * `pthread_getspecific`, as it reads the thread record, and claims one with
- * `pthread_setspecific`; neither is on POSIX's async-signal-safe list, and
- * on Linux and macOS each reads or writes the calling thread's own slot
- * without allocating or locking. The count is 64 bits wide on the platforms
- * the runtime builds for, so it does not wrap. Only the checking runtime and
- * macOS's fault handler compare threads, so only they keep tokens. */
+ * reuses thread ids or thread records. The count is 64 bits wide on the
+ * platforms the runtime builds for, so it does not wrap. Only the checking
+ * runtime and macOS's fault handler compare threads, so only they keep
+ * tokens.
+ *
+ * A thread claims its token outside any signal handler when it starts Linea
+ * work, in `linea_thread_begin`, which runs on the main thread at entry and
+ * on every thread a task starts, and when it takes the storage lock. The
+ * handler reads the slot with `pthread_getspecific`, as it reads the thread
+ * record. The one claim a handler makes is on macOS, for a host's thread that
+ * never started Linea work and faults with a handler of the host's installed
+ * before the runtime's: its faults are kept in runs too, so the handler claims
+ * it a token with `pthread_setspecific`, with every signal blocked. Neither
+ * call is on POSIX's async-signal-safe list. Each reads or writes the calling
+ * thread's own slot: libpthread's `pthread_getspecific` loads it, and its
+ * `pthread_setspecific` checks the key in a table it reads without a lock and
+ * stores into the thread's fixed array of slots, allocating nothing. The
+ * runtime depends on that implementation, on macOS, for a host thread's first
+ * fault. */
 #if LINEA_CHECK_STORAGE || (defined(__APPLE__) && !defined(LINEA_SANITIZED))
 #define LINEA_THREAD_TOKENS 1
 static pthread_key_t thread_token_key;
@@ -260,7 +272,11 @@ static int fault_run_abandoned(const struct fault_run *run, long now) {
  * Every signal is blocked from here until `release_fault_run`, the thread's
  * mask kept in `before`, so no handler of another signal can jump out of the
  * fault handler, or end the thread, while it holds a record: a record held
- * by a thread that is gone would never be released. */
+ * by a thread that is gone would never be released. A signal raised meanwhile
+ * is delivered once `release_fault_run` restores the mask, after the record is
+ * released and before the fault handler returns. `pthread_sigmask` is
+ * async-signal-safe; `sigprocmask`, also listed, has an unspecified effect in
+ * a process with threads. */
 static struct fault_run *hold_fault_run(long now, sigset_t *before) {
     sigset_t every;
     if (sigfillset(&every) != 0 || pthread_sigmask(SIG_SETMASK, &every, before) != 0) return 0;
@@ -489,6 +505,9 @@ static void ensure_fault_handler(void) {
 int linea_thread_begin(unsigned long at, unsigned long bytes, unsigned long low, unsigned long high) {
     if (bytes <= thread_record_bytes || at % 16 != 0) return EINVAL;
     ensure_fault_handler();
+#if defined(LINEA_THREAD_TOKENS)
+    (void)claim_thread_token();
+#endif
     struct thread_record *record = (struct thread_record *)at;
     record->guard_low = low;
     record->guard_high = high;

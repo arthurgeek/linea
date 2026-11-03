@@ -1605,6 +1605,19 @@ test "a runtime declaration after a literal left open on its line is unread" {
     try testing.expectEqualStrings("linea_close", unread.items[1].symbol);
 }
 
+test "a literal left open at the end of the text, with no newline after it, is found" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const text = "long linea_close(int fd);\nstatic const char *text = \"linea_ghost(int fd);";
+    const scanned = try scannable(gpa, text);
+    try testing.expectEqual(@as(?usize, std.mem.indexOfScalar(u8, text, '"')), scanned.open);
+    try testing.expectEqual(text.len, scanned.text.len);
+    try testing.expect(std.mem.indexOf(u8, scanned.text, "linea_ghost") == null);
+    const closed = try scannable(gpa, "long linea_close(int fd);\nstatic const char *text = \"done\";");
+    try testing.expectEqual(@as(?usize, null), closed.open);
+}
+
 test "a directive is read with whitespace before and after its hash" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();

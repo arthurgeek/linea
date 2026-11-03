@@ -901,7 +901,7 @@ and a silent client times out in a tenth of a second:
 | `max_body_bytes` | 1048576 (1 MiB) | 413 | 4 to 16384 |
 | `request_arena_bytes` | 50331648 (48 MiB) | `serve` refuses to start below what the other limits need; a request that fills it is 500 | 98304, or the least the other limits need |
 | `read_timeout_ms` | 5000 | 408 once the whole request, head and body, has taken this long from accept | 100 |
-| `first_byte_timeout_ms` | 500 | closes the connection silently without 408 when an accepted connection sends no byte within this duration | 100 |
+| `first_byte_timeout_ms` | 500 | closes the connection silently without 408 when no byte has arrived within this duration of accepting it; a first read that starts later takes the bytes already waiting, whenever they arrived | 100 |
 | `write_timeout_ms` | 5000 | one write waits no longer; a stalled write fails and the exchange ends | the default |
 | `connections` | `.None`: serve until stopped | `serve` returns | `.Some(n)` for the n connections a test sends |
 
