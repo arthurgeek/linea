@@ -135,11 +135,25 @@ taking or answering such a number are reached only through the standard
 library's checked wrappers. A symbol lowering replaces is
 confined to `mem` by the same field.
 
-The addresses of bytes are not typed, as the addresses a task hands on are:
-a buffer keeps its address as a `UInt64`, and a parameter taking one accepts
-that number. Confining the declaration is what bounds it, because only `mem`'s
-own functions, which check an extent against the buffer before the call, can
-pass one.
+The addresses of bytes are typed, as the addresses a task hands on are. Every
+runtime parameter that is the address of bytes the runtime reads, writes or
+frees is marked: `linea_read_some`, `linea_write_some`, `linea_read_at` and
+`linea_write_at`'s bytes, `linea_random_bytes`'s, the paths of
+`linea_open_parent`, `linea_open_at`, `linea_mode_at`, `linea_unlink_at` and
+both of `linea_publish_at`'s, the text of `linea_float64_parse` and
+`linea_float32_parse`, and the allocation `linea_free` takes. [T-RawAddress]
+then accepts only `address.raw` there, so confinement is not the only bound:
+inside `mem`, a number computed beside a buffer cannot reach the runtime
+either. The library makes each address from what owns the bytes:
+`address_in[UInt8]` from a buffer at an offset it checks against the buffer,
+and `slice_address`, a new primitive lowering reads from the slice, from a
+slice. `Buffer.at` and `Slice.at` stay `UInt64` fields: the storage primitives
+lowering replaces take them, and `std.ffi` lends a slice's address to C and
+reads bytes at an address C handed back, which no `Address` names; each of
+those accesses is checked against an extent instead. The runtime's sources
+name each marked parameter `at`, `from`, `to` or `…_at`, and a test of the
+table holds every such name to a mark and every mark to such a name, so a
+function added to the runtime cannot take a plain address.
 
 **The standard library is the source the compiler carries ([M-Standard]).**
 Confinement names a module of the library, and a root whose manifest names it
@@ -245,11 +259,14 @@ number and its body's `Carried[H]`. Neither holds an `S`, so `Client[S]` is
   storage, live and dead, so fullness is not a property of the storage, and
   the hand-off inside `call_owner` crosses a closure the analysis cannot
   follow.
-- **Typing a buffer's address as an `Address[UInt8]`,** so a parameter
-  taking bytes accepts only `address.raw`: `Buffer` and `Slice` keep their
-  address as a `UInt64` that every storage primitive takes, so the whole raw
-  layer would change for a check confinement already makes, since no module
-  but `mem` can pass the number to a runtime entry point.
+- **Confinement alone for the addresses of bytes:** only `mem` could pass
+  one, but `mem` could still pass any number it computed, so a mistake in the
+  library would reach the runtime unchecked.
+- **`Buffer.at` and `Slice.at` as `Address` fields:** the storage primitives
+  take a plain address, because `std.ffi` reads bytes at addresses C hands
+  over, and an arena carves a buffer out of another by arithmetic on its
+  address; every one of those would need a primitive of its own, for no check
+  the two address-making primitives do not already give.
 - **Recognising the standard library by where it sits or by an option:** a
   path is the user's to choose and an option is anyone's to pass, while the
   carried text is fixed when the compiler is built.

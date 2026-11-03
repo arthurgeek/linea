@@ -88,10 +88,12 @@ pub const RawAccesses = struct {
     /// `mem.address.Address`, the newtype over a `UInt64` that names the type
     /// of the values kept at it; `address.raw`, the one function that reads
     /// the number in one ([T-RawAddress]); and `mem.address_in`, the address
-    /// of slots at an offset into a buffer, which lowering computes.
+    /// of slots at an offset into a buffer, which lowering computes; and
+    /// `mem.slice_address`, the address of a slice's first element.
     address: DeclId = .none,
     address_raw: DeclId = .none,
     address_in: DeclId = .none,
+    slice_address: DeclId = .none,
     /// `mem.Carried`, the zero-sized field type that carries its argument's
     /// dependencies.
     carried: DeclId = .none,
@@ -178,6 +180,7 @@ pub const RawAccesses = struct {
             .address = program.libraryDeclIn("address", "Address") orelse .none,
             .address_raw = moduleFunction(program, ast, "address", "raw"),
             .address_in = rawAccessDecl(program, ast, "address_in", 2),
+            .slice_address = rawAccessDecl(program, ast, "slice_address", 1),
             .carried = program.libraryDeclIn("mem", "Carried") orelse .none,
             .span = rawAccessDecl(program, ast, "slot_span", 4),
             .buffer_span = rawAccessDecl(program, ast, "buffer_span", 3),
@@ -311,7 +314,7 @@ pub const RawAccesses = struct {
     }
 
     pub fn typed(self: RawAccesses, d: DeclId) bool {
-        return d != DeclId.none and (d == self.stride or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.view_place or d == self.address_in or self.processText(d) != null or self.erasure(d));
+        return d != DeclId.none and (d == self.stride or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.view_place or d == self.address_in or d == self.slice_address or self.processText(d) != null or self.erasure(d));
     }
 
     /// The runtime declarations a process-text span reads: how many entries

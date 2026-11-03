@@ -105,10 +105,12 @@ pub const Callback = struct { parameters: []const Scalar, result: Scalar, addres
 /// A parameter's scalar, how it is passed, and for a `callback` the shape of
 /// the function C calls through it, which [T-ExternRuntime] holds the Linea
 /// declaration's function type to. `address` marks a `u64` that is the
-/// address of typed bytes the runtime copies to another task before the call
-/// returns, writes with bytes another task sent, or keeps for a task it
-/// starts: the one place [T-RawAddress] lets `address.raw` turn an address into a
-/// number.
+/// address of bytes the runtime reads, writes or frees: typed bytes it copies
+/// to another task before the call returns, writes with bytes another task
+/// sent, or keeps for a task it starts, and a buffer's or a slice's bytes it
+/// hands a system call, parses or frees. It is the one place [T-RawAddress]
+/// lets `address.raw` turn an address into a number, so the argument there
+/// is an `Address` the standard library made from what owns the bytes.
 pub const Parameter = struct { scalar: Scalar, passing: Passing = .read, callback: ?*const Callback = null, address: bool = false, held: Held = .none };
 
 /// What a number crossing to or from the runtime stands for, where a value
@@ -216,12 +218,18 @@ fn cb(comptime parameters: []const Scalar, comptime result: Scalar, comptime add
 const written: Parameter = .{ .scalar = .u64, .passing = .inout };
 
 /// The address of bytes a buffer or a slice holds, which the runtime reads or
-/// writes.
-const bytes_at: Parameter = .{ .scalar = .u64, .held = .bytes };
+/// writes. Passed as `address.raw` of an `Address[UInt8]` the standard
+/// library made from the buffer or slice.
+const bytes_at: Parameter = .{ .scalar = .u64, .held = .bytes, .address = true };
+/// The address of bytes a storage primitive reads or writes. Lowering replaces
+/// the call with an access it checks against the extent beside it, so no
+/// runtime is handed it; the number may be one C handed over, which no
+/// `Address` names.
+const checked_at: Parameter = .{ .scalar = .u64, .held = .bytes };
 /// A descriptor a linear value owns.
 const descriptor: Parameter = .{ .scalar = .i32, .held = .descriptor };
-/// The address of an allocation a buffer owns.
-const allocation: Parameter = .{ .scalar = .u64, .held = .allocation };
+/// The address of an allocation a buffer owns, which the runtime frees.
+const allocation: Parameter = .{ .scalar = .u64, .held = .allocation, .address = true };
 
 /// What C's startup calls: the wrapper the emitted module defines around the
 /// program's entry. The runtime's `linea_set_args` receives what it is passed.
@@ -405,10 +413,10 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_float32_parse", .parameters = &.{ bytes_at, p(.u64), written, written }, .result = .u64, .declared_by = mem_parse },
     .{ .symbol = "linea_float32_debug", .parameters = &.{ p(.u64), written, written, written, written }, .result = .u64, .declared_by = .granted },
     .{ .symbol = "linea_float32_shortest", .parameters = &.{ p(.u64), .{ .scalar = .i64, .passing = .inout } }, .result = .u64, .declared_by = .granted },
-    .{ .symbol = "linea_raw_load", .parameters = &.{ bytes_at, p(.u64), p(.u64) }, .result = .u64, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
-    .{ .symbol = "linea_raw_load8", .parameters = &.{ bytes_at, p(.u64), p(.u64) }, .result = .u8, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
-    .{ .symbol = "linea_raw_store", .parameters = &.{ bytes_at, p(.u64), p(.u64), p(.u64) }, .result = .unit, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
-    .{ .symbol = "linea_raw_store8", .parameters = &.{ bytes_at, p(.u64), p(.u64), p(.u8) }, .result = .unit, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
+    .{ .symbol = "linea_raw_load", .parameters = &.{ checked_at, p(.u64), p(.u64) }, .result = .u64, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
+    .{ .symbol = "linea_raw_load8", .parameters = &.{ checked_at, p(.u64), p(.u64) }, .result = .u8, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
+    .{ .symbol = "linea_raw_store", .parameters = &.{ checked_at, p(.u64), p(.u64), p(.u64) }, .result = .unit, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
+    .{ .symbol = "linea_raw_store8", .parameters = &.{ checked_at, p(.u64), p(.u64), p(.u8) }, .result = .unit, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
     // A float's IEEE 754 bits as the unsigned integer of its width, and back.
     // Lowering replaces each with a bit-for-bit reinterpretation.
     .{ .symbol = "linea_float64_to_bits", .parameters = &.{p(.f64)}, .result = .u64, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`Float64.to_bits`" } } },
@@ -454,6 +462,12 @@ test "a runtime function is found by its whole symbol" {
                 if (parameter.address or parameter.callback != null or parameter.held != .none) break true;
             } else false;
         if (confined) try testing.expect(signature.declared_by.home() != null);
+        // A runtime the program calls reads, writes or frees bytes only at
+        // the number in an `Address`, so every parameter naming them is
+        // typed. Only a call lowering replaces checks a plain number.
+        if (signature.provider == .runtime) for (signature.parameters) |parameter| {
+            if (parameter.held == .bytes or parameter.held == .allocation) try testing.expect(parameter.address);
+        };
         if (signature.declared_by.home() != null) try testing.expect(signature.declared_by.library.reached_through.len > 0);
     }
     for (owned_functions) |signature| try testing.expect(signature.declared_by == .compiler);

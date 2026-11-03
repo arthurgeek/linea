@@ -20403,7 +20403,7 @@ const Checker = struct {
         if (signature != .callable) return false;
         const raw = self.raw_accesses;
         const contracts = signature.callable.contracts;
-        if (d == raw.stride or d == raw.address_in or raw.processText(d) != null) return contracts.len == 0;
+        if (d == raw.stride or d == raw.address_in or d == raw.slice_address or raw.processText(d) != null) return contracts.len == 0;
         if (contracts.len != 1) return false;
         const effect = contracts[0];
         if (effect.target.len != 0 or effect.source.fields.len != 0 or effect.borrows_source) return false;
@@ -20418,11 +20418,18 @@ const Checker = struct {
         if (!self.validStorageEffects(d)) return false;
         const raw = self.raw_accesses;
         if (d == raw.span or d == raw.buffer_span or d == raw.subspan or d == raw.slice_place or d == raw.view_place or raw.processText(d) != null) return self.validSpanSignature(d);
-        const count: usize = if (d == raw.stride) 1 else 2;
+        const count: usize = if (d == raw.stride or d == raw.slice_address) 1 else 2;
         const tps = self.ast.declTypeParams(d);
         if (tps.len != count or self.ast.declVisibility(d) != .private) return false;
         const result = try self.declaredResultType(d);
         const ps = self.ast.declParams(d);
+        if (d == raw.slice_address) {
+            const slice = try self.declaredParamType(d, 0);
+            const slice_args = self.builder.appliedTo(slice);
+            return ps.len == 1 and self.addressOf(result) == self.param_types[d.index()][0] and ps[0].convention == .read and
+                raw.slice != .none and self.builder.view().declOfType(slice) == raw.slice and
+                slice_args.len == 1 and slice_args[0] == self.param_types[d.index()][0];
+        }
         if (d == raw.address_in) {
             const buffer = try self.declaredParamType(d, 0);
             const buffer_args = self.builder.appliedTo(buffer);
@@ -39842,6 +39849,48 @@ test "an address becomes a number only where the runtime is told what to do with
     try testing.expectEqual(@as(usize, 4), refused);
     try testing.expect(diagnosticSays(&sink, .t_raw_address, "takes only the number in a `mem.address.Address`"));
     try testing.expect(diagnosticSays(&sink, .t_raw_address, "`keep`"));
+}
+
+test "the runtime reads or writes a buffer's bytes only at a typed address" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var sink = Sink.init(gpa);
+    // Inside the standard library's own `mem`, which alone declares these, a
+    // plain number at a byte address is refused as it is for typed bytes a
+    // task sends: the runtime would read or write wherever it points.
+    const source: Source = .{ .path = "mem.lin", .text =
+        \\extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
+        \\extern fn linea_read_at(fd: Int32, at: UInt64, len: UInt64, offset: UInt64) -> Int64
+        \\extern fn linea_random_bytes(at: UInt64, len: UInt64) -> Int64
+        \\extern fn linea_publish_at(parent: Int32, from: UInt64, from_extent: UInt64, to: UInt64, to_extent: UInt64, replace: UInt8) -> Int64
+        \\extern fn linea_float64_parse(at: UInt64, length: UInt64, inout bits: UInt64, inout offset: UInt64) -> UInt64
+        \\extern fn linea_free(at: UInt64, size: UInt64, align: UInt64)
+        \\fn main() -> UInt8 {
+        \\    let _written = linea_write_some(1, 4096, 8)
+        \\    let _read = linea_read_at(0, 4096, 8, 0)
+        \\    let _filled = linea_random_bytes(4096, 16)
+        \\    let _renamed = linea_publish_at(3, 4096, 2, 8192, 2, 0)
+        \\    var bits: UInt64 = 0
+        \\    var offset: UInt64 = 0
+        \\    let _parsed = linea_float64_parse(4096, 8, &bits, &offset)
+        \\    linea_free(4096, 16, 8)
+        \\    0
+        \\}
+    };
+    var interner: Interner = .empty;
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    var resolved = try resolveTree(gpa, &ast, &sink);
+    resolved.modules[0].name = "mem";
+    resolved.modules[0].library = true;
+    resolved.modules[0].externs = true;
+    _ = try typecheckTree(gpa, &resolved, &sink);
+    var refused: usize = 0;
+    for (sink.items()) |diagnostic| {
+        if (diagnostic.code == .t_raw_address) refused += 1;
+    }
+    try testing.expectEqual(@as(usize, 7), refused);
 }
 
 test "the operations beside an address keep the one signature each is for" {

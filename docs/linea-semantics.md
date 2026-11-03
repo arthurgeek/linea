@@ -4706,10 +4706,19 @@ too
 kept in bytes, is an opaque newtype over `UInt64` whose module offers only the
 address of no bytes and `raw`, the number in an address. A call of `raw` is
 accepted in two places: as the argument for a runtime parameter the compiler's
-table marks as the address of typed bytes, which the runtime copies to another
-task before the call returns, writes with bytes another task sent, or keeps
-for a task it starts; and as the `at` of a `mem.Closure` construction, the one
-type certified to erase what it holds. Anywhere else, the call, or `raw` named
+table marks as an address of bytes, which the runtime copies to another task
+before the call returns, writes with bytes another task sent, keeps for a task
+it starts, hands a system call, parses or frees; and as the `at` of a
+`mem.Closure` construction, the one type certified to erase what it holds.
+The standard library makes the address of a buffer's bytes with `address_in`,
+which checks the offset against the buffer, and of a slice's with
+`slice_address`, so a runtime call that reads, writes or frees bytes is handed
+only an address made from what owns them. Every runtime parameter the
+runtime's sources name as an address (`at`, `from`, `to`, or a name ending in
+`_at`) is marked, which a test of the table holds, so one added later cannot
+take a plain number. The storage primitives lowering replaces are the
+exception: each access is checked against the extent passed beside it, and
+the address may be one C handed over. Anywhere else, the call, or `raw` named
 as a value, is refused, because a number would stand for values of a type no
 type names. The argument for a marked parameter is a call of `raw` and nothing
 else: any other number, or a default the declaration gives the parameter, is

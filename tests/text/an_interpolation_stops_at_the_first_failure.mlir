@@ -21,6 +21,7 @@ module {
   llvm.mlir.global internal constant @linea_file7("std/mem/slice.lin\00") : !llvm.array<18 x i8>
   llvm.mlir.global internal constant @linea_file8("std/option/option.lin\00") : !llvm.array<22 x i8>
   llvm.mlir.global internal constant @linea_file9("std/mem/fd.lin\00") : !llvm.array<15 x i8>
+  llvm.mlir.global internal constant @linea_file10("std/mem/address/address.lin\00") : !llvm.array<28 x i8>
   llvm.mlir.global internal constant @linea_str0("") : !llvm.array<0 x i8>
   llvm.mlir.global internal constant @linea_str1("-") : !llvm.array<1 x i8>
   llvm.mlir.global internal constant @linea_str2("00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899") : !llvm.array<200 x i8>
@@ -2050,13 +2051,14 @@ module {
     %v1 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/fd.lin":L:C)
     %v2 = arith.constant 0 : i64 loc("std/mem/fd.lin":L:C)
     %v4 = llvm.load %v1 : !llvm.ptr -> i64 loc("std/mem/fd.lin":L:C)
-    %v5 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/fd.lin":L:C)
-    %v6 = arith.constant 8 : i64 loc("std/mem/fd.lin":L:C)
-    %v7 = llvm.getelementptr %v5[%v6] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/fd.lin":L:C)
-    %v8 = llvm.load %v7 : !llvm.ptr -> i64 loc("std/mem/fd.lin":L:C)
-    %va9_0 = arith.trunci %v0 : i64 to i32 loc("std/mem/fd.lin":L:C)
-    %v9 = func.call @linea_write_some(%va9_0, %v4, %v8) : (i32, i64, i64) -> i64 loc("std/mem/fd.lin":L:C)
-    func.return %v9 : i64 loc("std/mem/fd.lin":L:C)
+    %v5 = func.call @"lin.std.mem.address;raw[UInt8]"(%v4) : (i64) -> i64 loc("std/mem/fd.lin":L:C)
+    %v6 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/fd.lin":L:C)
+    %v7 = arith.constant 8 : i64 loc("std/mem/fd.lin":L:C)
+    %v8 = llvm.getelementptr %v6[%v7] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/fd.lin":L:C)
+    %v9 = llvm.load %v8 : !llvm.ptr -> i64 loc("std/mem/fd.lin":L:C)
+    %va10_0 = arith.trunci %v0 : i64 to i32 loc("std/mem/fd.lin":L:C)
+    %v10 = func.call @linea_write_some(%va10_0, %v5, %v9) : (i32, i64, i64) -> i64 loc("std/mem/fd.lin":L:C)
+    func.return %v10 : i64 loc("std/mem/fd.lin":L:C)
   }
   func.func private @"lin.std.io.core;IoError.from_os"(%sret: !llvm.ptr, %a0: i64, %a1: i64, %a2: i64) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
@@ -2369,6 +2371,19 @@ module {
     %sw42 = arith.extui %v41 : i1 to i8 loc("std/text/str.lin":L:C)
     llvm.store %sw42, %s3 : i8, !llvm.ptr loc("std/text/str.lin":L:C)
     cf.br ^b4 loc("std/text/str.lin":L:C)
+  }
+  func.func private @"lin.std.mem.address;raw[UInt8]"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
+    %z0 = arith.constant 1 : i64
+    %s0 = llvm.alloca %z0 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %z1 = arith.constant 1 : i64
+    %s1 = llvm.alloca %z1 x i64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    llvm.store %a0, %s0 : i64, !llvm.ptr
+    cf.br ^b0
+  ^b0:
+    %v0 = llvm.load %s0 : !llvm.ptr -> i64 loc("std/mem/address/address.lin":L:C)
+    llvm.store %v0, %s1 : i64, !llvm.ptr loc("std/mem/address/address.lin":L:C)
+    %v2 = llvm.load %s1 : !llvm.ptr -> i64 loc("std/mem/address/address.lin":L:C)
+    func.return %v2 : i64 loc("std/mem/address/address.lin":L:C)
   }
   func.func private @"lin.std.text;Str.byte"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: i64) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64

@@ -389,7 +389,7 @@ fn std.io.core;eprintln_to[std.io.core.IoError,std.io.core.Gathered](x: std.io.c
 }
 
 internal fn std.mem;write_slice_fd(bytes: std.mem.Slice[UInt8], fd: Int32) -> Int64 {
-    linea_write_some(fd, bytes.at, bytes.len)
+    linea_write_some(fd, std.mem.address;raw[UInt8](slice_address(bytes)), bytes.len)
 }
 
 pub fn std.io.core;IoError.from_os(operation: std.io.core.IoOperation, code: Int32, progress: UInt64 = 0) -> std.io.core.IoError {
@@ -445,6 +445,11 @@ fn std.mem.Vec[UInt8,std.mem.SystemAllocator];std.release;Release.release(sink s
 pub fn std.io.core;line[std.io.core.IoError,std.io.core.Gathered](x: std.io.core.IoError, inout w: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] where carries(.Err: w) {
     std.io.core.IoError;std.fmt;Display.fmt[std.io.core.Gathered](x, &w)?
     std.io.core.Gathered;std.io.core;Writer.write_str(&w, "\n")
+}
+
+internal fn std.mem.address;raw[UInt8](at: std.mem.address.Address[UInt8]) -> UInt64 {
+    let Address(number) = copy(at)
+    number
 }
 
 extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
@@ -535,10 +540,10 @@ fn std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Releas
         None => {
             {}
         },
-        Some(_linea_derive_2049_1_0_0) => {
+        Some(_linea_derive_2054_1_0_0) => {
             {
                 {
-                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2049_1_0_0)
+                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2054_1_0_0)
                 }
             }
         },
@@ -1190,9 +1195,11 @@ pub fn std.mem;Slice[UInt8].get(self: std.mem.Slice[UInt8], i: UInt64) -> std.op
 }
 
 fn std.mem.SystemAllocator;std.mem;Allocator.dispose(sink b: std.mem.Buffer[std.mem.SystemAllocator]) {
-    let Buffer { at: at, len: _length, allocated: allocated, allocator: allocator, obligation: SystemAllocation {} } = b
+    // The runtime frees the number in an address made from the buffer.
+    let at: std.mem.address.Address[UInt8] = address_in(b, 0)
+    let Buffer { at: _, len: _length, allocated: allocated, allocator: allocator, obligation: SystemAllocation {} } = b
     match allocator {
-        System => linea_free(at, allocated, Buffer.alignment),
+        System => linea_free(std.mem.address;raw[UInt8](at), allocated, Buffer.alignment),
     }
 }
 

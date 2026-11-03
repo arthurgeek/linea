@@ -1112,7 +1112,27 @@ const Declared = struct {
     symbol: []const u8,
     parameters: []const runtime_symbols.Parameter,
     result: runtime_symbols.Scalar,
+    /// Each parameter's name as the source spells it.
+    names: []const []const u8 = &.{},
 };
+
+/// Whether a runtime parameter's name says it is the address of bytes the
+/// runtime reads, writes or frees: `at`, `from`, `to`, or a name ending in
+/// `_at`. The runtime's sources name every such parameter so, which is what
+/// lets the table's `address` marks be held to them.
+fn namesAddress(name: []const u8) bool {
+    return std.mem.eql(u8, name, "at") or std.mem.eql(u8, name, "from") or std.mem.eql(u8, name, "to") or
+        std.mem.endsWith(u8, name, "_at");
+}
+
+test "an address parameter is named as one" {
+    try testing.expect(namesAddress("at"));
+    try testing.expect(namesAddress("answer_at"));
+    try testing.expect(namesAddress("from"));
+    try testing.expect(!namesAddress("address"));
+    try testing.expect(!namesAddress("attempts"));
+    try testing.expect(!namesAddress("len"));
+}
 
 /// The function pointer types the runtime's headers declare, by name, and
 /// the names of those declared inside a conditional block, whose shape
@@ -1354,6 +1374,7 @@ fn declaredIn(gpa: std.mem.Allocator, written: []const u8, typedefs: *const Type
             continue;
         };
         var parameters: std.ArrayList(runtime_symbols.Parameter) = .empty;
+        var names: std.ArrayList([]const u8) = .empty;
         var unreadable: ?[]const u8 = null;
         const inner = std.mem.trim(u8, text[end + 1 .. close], " \n");
         if (inner.len > 0 and !std.mem.eql(u8, inner, "void")) {
@@ -1373,13 +1394,20 @@ fn declaredIn(gpa: std.mem.Allocator, written: []const u8, typedefs: *const Type
                     break;
                 };
                 try parameters.append(gpa, parameter);
+                const name = if (std.mem.indexOfScalar(u8, trimmed, ':')) |colon|
+                    std.mem.trim(u8, trimmed[0..colon], " ")
+                else if (std.mem.lastIndexOfAny(u8, trimmed, " *")) |cut|
+                    trimmed[cut + 1 ..]
+                else
+                    "";
+                try names.append(gpa, name);
             }
         }
         if (unreadable) |why| {
             try unread.append(gpa, .{ .symbol = symbol, .why = why });
             continue;
         }
-        try out.append(gpa, .{ .symbol = symbol, .parameters = try parameters.toOwnedSlice(gpa), .result = result.scalar });
+        try out.append(gpa, .{ .symbol = symbol, .parameters = try parameters.toOwnedSlice(gpa), .result = result.scalar, .names = try names.toOwnedSlice(gpa) });
     }
 }
 
@@ -1534,9 +1562,15 @@ test "the runtime signature table is the runtime's own sources" {
             found = true;
             try testing.expectEqual(expected.result, d.result);
             try testing.expectEqual(expected.parameters.len, d.parameters.len);
-            for (expected.parameters, d.parameters) |want, got| {
+            for (expected.parameters, d.parameters, d.names) |want, got, name| {
                 if (!runtime_symbols.sameParameter(want, got)) std.debug.print("{s}: a parameter differs from the runtime's\n", .{expected.symbol});
                 try testing.expect(runtime_symbols.sameParameter(want, got));
+                // A parameter the runtime names as an address takes only the
+                // number in an `Address` ([T-RawAddress]), so a function
+                // added later cannot take a plain one.
+                if (expected.declared_by == .compiler or want.scalar != .u64) continue;
+                if (namesAddress(name) != want.address) std.debug.print("{s}: `{s}` is an address in one of the runtime and the table and not the other\n", .{ expected.symbol, name });
+                try testing.expectEqual(namesAddress(name), want.address);
             }
         }
         if (!found) std.debug.print("the runtime does not define {s}\n", .{expected.symbol});

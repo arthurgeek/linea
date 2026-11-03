@@ -18,3 +18,18 @@ error[T-ExternRuntime]: `linea_float64_parse` takes or answers what only the sta
    |
 14 | extern fn linea_float64_parse(address: UInt64, length: UInt64, inout bits: UInt64, inout offset: UInt64) -> UInt64
    |           ^^^^^^^^^^^^^^^^^^^ reach it through parsing a `Float64` or a `Float32` from text
+error[T-RawAddress]: the runtime reads or writes values at this address, so it takes only the number in a `mem.address.Address`
+  --> tests/library/an_allocation_or_a_descriptor_is_reached_only_through_its_library_module/main.lin:18:16
+   |
+18 |     linea_free(at, 16, 8)
+   |                ^^ pass `address.raw(at)`, whose address names the type of the values kept there
+error[T-RawAddress]: the runtime reads or writes values at this address, so it takes only the number in a `mem.address.Address`
+  --> tests/library/an_allocation_or_a_descriptor_is_reached_only_through_its_library_module/main.lin:19:16
+   |
+19 |     linea_free(at, 16, 8)
+   |                ^^ pass `address.raw(at)`, whose address names the type of the values kept there
+error[T-RawAddress]: the runtime reads or writes values at this address, so it takes only the number in a `mem.address.Address`
+  --> tests/library/an_allocation_or_a_descriptor_is_reached_only_through_its_library_module/main.lin:23:39
+   |
+23 |     let _parsed = linea_float64_parse(4096, 8, &bits, &offset)
+   |                                       ^^^^ pass `address.raw(at)`, whose address names the type of the values kept there

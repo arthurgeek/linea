@@ -1,3 +1,4 @@
+import std.mem.address
 import std.testing
 
 // The runtime reads or writes a descriptor at a raw address and returns the
@@ -12,18 +13,23 @@ extern fn linea_write_at(fd: Int32, at: UInt64, len: UInt64, offset: UInt64) -> 
 
 // Read up to `count` bytes from `fd` into `buffer` at `offset`, checking the
 // range first, and return the runtime's count or negated errno. Transport holds
-// the owner for the complete call. Bounds precede address arithmetic; only the
-// private runtime declaration receives an address.
+// the owner for the complete call. The runtime is handed the number in an
+// `Address[UInt8]` made from the buffer, never a number computed beside it.
 internal fn read_fd[A: Allocator](inout buffer: Buffer[A], fd: Int32, offset: UInt64, count: UInt64) -> Int64 {
     if offset > buffer.len || count > buffer.len - offset {
         panic("buffer I/O range is out of bounds")
     }
-    linea_read_some(fd, buffer.at + offset, count)
+    linea_read_some(fd, address.raw(bytes_in(buffer, offset)), count)
+}
+
+// The address of the bytes `offset` into `buffer`, which may be its end.
+fn bytes_in[A: Allocator](buffer: Buffer[A], offset: UInt64) -> Address[UInt8] {
+    address_in(buffer, offset)
 }
 
 // Write `bytes` to `fd` and return the count written or a negated errno.
 internal fn write_slice_fd(bytes: Slice[UInt8], fd: Int32) -> Int64 {
-    linea_write_some(fd, bytes.at, bytes.len)
+    linea_write_some(fd, address.raw(slice_address(bytes)), bytes.len)
 }
 
 // Read up to `count` bytes from `fd` into `buffer` at `buffer_offset` starting at
@@ -32,12 +38,12 @@ internal fn read_fd_at[A: Allocator](inout buffer: Buffer[A], fd: Int32, buffer_
     if buffer_offset > buffer.len || count > buffer.len - buffer_offset {
         panic("buffer I/O range is out of bounds")
     }
-    linea_read_at(fd, buffer.at + buffer_offset, count, file_offset)
+    linea_read_at(fd, address.raw(bytes_in(buffer, buffer_offset)), count, file_offset)
 }
 
 // Write `bytes` to `fd` starting at `file_offset` in the file.
 internal fn write_slice_fd_at(bytes: Slice[UInt8], fd: Int32, file_offset: UInt64) -> Int64 {
-    linea_write_at(fd, bytes.at, bytes.len, file_offset)
+    linea_write_at(fd, address.raw(slice_address(bytes)), bytes.len, file_offset)
 }
 
 test fn empty_fd_requests_do_not_access_a_descriptor() {
@@ -102,7 +108,7 @@ internal fn _random_bytes[A: Allocator](inout buffer: Buffer[A], offset: UInt64,
     if offset > buffer.len || count > buffer.len - offset {
         panic("random byte range is out of bounds")
     }
-    linea_random_bytes(buffer.at + offset, count)
+    linea_random_bytes(address.raw(bytes_in(buffer, offset)), count)
 }
 
 // Write 128 random bits to `high` and `low`, from the operating system's
@@ -124,7 +130,7 @@ test fn random_words_differ_between_reads() {
 
 // Open the directory named by the NUL-terminated `path`.
 internal fn _open_parent_fd[A: Allocator](path: Buffer[A]) -> Int64 {
-    linea_open_parent(path.at, path.len)
+    linea_open_parent(address.raw(bytes_in(path, 0)), path.len)
 }
 
 // An OpenPolicy says how `_open_at_fd` opens a name: read an existing file,
@@ -155,23 +161,23 @@ test fn open_policies_have_the_runtimes_codes() {
 // Open `name` in the directory `parent` under `policy`, giving a created file
 // `mode`; a policy that creates nothing ignores the mode.
 internal fn _open_at_fd[A: Allocator](name: Buffer[A], parent: Int32, policy: OpenPolicy, mode: UInt64) -> Int64 {
-    linea_open_at(parent, name.at, name.len, open_policy_code(policy), mode)
+    linea_open_at(parent, address.raw(bytes_in(name, 0)), name.len, open_policy_code(policy), mode)
 }
 
 // Return the permission bits of `name` in the directory `parent`.
 internal fn _mode_at_fd[A: Allocator](name: Buffer[A], parent: Int32) -> Int64 {
-    linea_mode_at(parent, name.at, name.len)
+    linea_mode_at(parent, address.raw(bytes_in(name, 0)), name.len)
 }
 
 // Rename `from` to `to` within `parent`, replacing an existing `to` only when
 // `replace` is set.
 internal fn _publish_at_fd[A: Allocator, B: Allocator](from: Buffer[A], to: Buffer[B], parent: Int32, replace: UInt8) -> Int64 {
-    linea_publish_at(parent, from.at, from.len, to.at, to.len, replace)
+    linea_publish_at(parent, address.raw(bytes_in(from, 0)), from.len, address.raw(bytes_in(to, 0)), to.len, replace)
 }
 
 // Remove `name` from the directory `parent`.
 internal fn _unlink_at_fd[A: Allocator](name: Buffer[A], parent: Int32) -> Int64 {
-    linea_unlink_at(parent, name.at, name.len)
+    linea_unlink_at(parent, address.raw(bytes_in(name, 0)), name.len)
 }
 
 // The runtime closes a descriptor and returns zero or a negated errno.
