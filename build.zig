@@ -1681,6 +1681,13 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/linea_rt.c", .flags = busy_table_flags.items },
         .{ .file = "runtime/storage_busy_test.c", .flags = runtime_flags.items },
     });
+    var preempted_flags: std.ArrayList([]const u8) = .empty;
+    preempted_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    preempted_flags.append(b.allocator, "-Dclock_gettime=linea_test_clock_gettime") catch @panic("OOM");
+    native.add(native_runtime_step, "native-preempted-fault-tests", &.{
+        .{ .file = "runtime/linea_rt.c", .flags = preempted_flags.items },
+        .{ .file = "runtime/preempted_fault_test.c", .flags = runtime_flags.items },
+    });
 
     const native_task_step = b.step("test-native-task", "Check native task threads, rendezvous sessions, joins, stack overflow reports and concurrent allocation");
     var refused_task_flags: std.ArrayList([]const u8) = .empty;

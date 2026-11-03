@@ -584,12 +584,16 @@ a measurement shows the allocation matters.
   such fault only, and later ones take the default action, where the system
   reports the flag. macOS does not report it through `sigaction`; there a
   run of identical faults (one thread, signal and address, every register
-  unchanged, each arriving within 100 ms of the previous handler's return)
-  that has lasted a second takes the default action, since no repair is
-  coming. A repair from the handler or another thread may take up to that
-  second however many faults it costs and however slow the handler; a
-  repair in a few steps, or a page polled again after other work, is never
-  ended. Each faulting thread keeps a record of its own, so threads do not
+  unchanged, each arriving within 10 ms of the thread's own CPU time after
+  the previous handler's return) that has lasted a second of wall-clock
+  time takes the default action, since no repair is coming. The gap is
+  measured on the thread's CPU clock so that waiting for a processor on a
+  loaded machine does not restart a run. A repair from the handler or
+  another thread may take up to that second however many faults it costs
+  and however slow the handler; a repair in a few steps, or a page polled
+  again after 10 ms of the thread's own work, is never ended, while one
+  polled again with no work in between, with every register unchanged, for
+  a second, is ended like an unrepaired access. Each faulting thread keeps a record of its own, so threads do not
   slow each other's detection. What is not
   reproduced: the previous handler runs on the stack the runtime's handler
   runs on, the thread's alternate signal stack where it has one, whether or
@@ -609,28 +613,40 @@ a measurement shows the allocation matters.
   fault that is not Linea's, met while the table stays busy past a bounded
   wait of about a second, ends with that generic report rather than reaching
   the host's handler.
-  `SIGPIPE` is left as the process set it, and so is every open file. A
-  closed pipe or socket answers `EPIPE` to every write the runtime makes: a
-  socket is written with `send` and `MSG_NOSIGNAL`, which raises nothing for
-  that call, and any other descriptor with `SIGPIPE` blocked on the writing
-  thread, taking a `SIGPIPE` the write left pending on that thread before the
-  mask is restored, and leaving one that was pending before the write. Linux
-  raises the signal on the writing thread, so that is complete there. macOS
-  raises it on the process, hands it to a thread that does not block it, and
-  leaves it pending on some thread, not necessarily the writer, where all
-  block it. So a Linea program's entry blocks `SIGPIPE` on the main thread
-  before any other thread exists, every thread inherits the block, and a
-  `SIGPIPE` raised there stays pending on a thread that never takes it. The
-  mask is inherited across `exec`, so a program a Linea program starts
-  through C begins with `SIGPIPE` blocked unless the caller sets its mask.
+  `SIGPIPE`'s disposition is left as the process set it, and so is every
+  open file; nothing here changes the process-wide disposition. Linux raises
+  a write's `SIGPIPE` on the writing thread; macOS raises it on the process,
+  hands it to a thread that does not block it, and, where all block it,
+  leaves it pending on some thread, not necessarily the writer. Three cases:
+  1. Sockets and ordinary Linea writes, on either system: a socket is
+     written with `send` and `MSG_NOSIGNAL`, which raises nothing for that
+     call; any other descriptor with `SIGPIPE` blocked on the writing
+     thread, taking a `SIGPIPE` the write left pending on that thread before
+     the mask is restored, and leaving one that was pending before the
+     write. On Linux this is complete.
+  2. A standalone Linea program on macOS: its entry blocks `SIGPIPE` on the
+     main thread, and threads created afterwards with `pthread_create`
+     inherit the mask, so a `SIGPIPE` stays pending on a thread that never
+     takes it and the write answers `EPIPE`. Linea does not control the mask
+     of libdispatch (GCD) workqueue threads, which do not inherit main's, nor
+     of a thread a C constructor started before the entry; while one of them
+     lives without blocking `SIGPIPE`, a write's `SIGPIPE` can reach it. The
+     mask and a pending signal survive `exec`: a program started through C
+     begins with `SIGPIPE` blocked unless the caller sets its mask, and a
+     program the process becomes by `exec` in place keeps the `SIGPIPE` left
+     pending on main and dies of it once it unblocks it. No path of the
+     runtime or the standard library calls `exec`.
+  3. Linea embedded in a host process: threads the host creates keep the
+     host's signal policy. On macOS a host thread that does not block
+     `SIGPIPE` can take a Linea write's `SIGPIPE` under the host's
+     disposition, as it would the host's own write's. An embedder that needs
+     protection blocks `SIGPIPE` on its own threads.
   Setting `F_SETNOSIGPIPE` on the open file is rejected: kept, it changes
   what every other holder of the file, other processes included, sees; and
   restoring it after the write cannot be done soundly, since a forked
-  process shares the open file but not a record of writes in progress. What remains, on macOS only: a process that runs Linea code
-  without a Linea entry, as a host calling exported functions does, with a
-  host thread that does not block `SIGPIPE`, takes a Linea write's `SIGPIPE`
-  on that thread under the host's disposition, as the host's own write
-  would. A failure report to a standard error with no reader, pipe or
+  process shares the open file but not a record of writes in progress.
+  Ignoring `SIGPIPE` process-wide is rejected because the disposition is the
+  host's. A failure report to a standard error with no reader, pipe or
   socket, ends by its abort, not by
   `SIGPIPE`. This replaces the restoring of the default action that
   [0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md)

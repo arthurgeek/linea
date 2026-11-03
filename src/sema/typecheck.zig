@@ -20255,6 +20255,16 @@ const Checker = struct {
 
     fn checkStorageCertificates(self: *Checker, declarations: types_mod.Returns) !void {
         const raw = self.raw_accesses;
+        if (raw.buffer != .none) {
+            // A buffer keeps its bytes' address as a plain `UInt64` the
+            // storage primitives read, an address carrier and not a claim of
+            // type safety, so only the library may name its fields: it is
+            // opaque. It settles one allocation, so it cannot be copied.
+            const d = raw.buffer;
+            const valid = self.ast.declTag(d) == .struct_ and self.ast.declVisibility(d) == .opaque_ and
+                self.ast.declOwnershipPolicy(d) != .copyable and self.ast.declTypeParams(d).len == 1;
+            if (!valid) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Buffer certificate requires an opaque move-only allocation descriptor", "declare `@opaque struct Buffer[A: Allocator]`, so no code outside the library names its address", null);
+        }
         if (raw.slice != .none) {
             const d = raw.slice;
             const ty = declarations.get(d);
@@ -40324,6 +40334,39 @@ test "borrow storage certificates reject an untyped address and mismatched conta
         } else {
             try testing.expect(diagnosticSays(&sink, .t_borrow_contract, "Storage certificate"));
         }
+    }
+}
+
+// `Buffer.at` is a plain `UInt64` the storage primitives read: only the
+// library may name it, so `Buffer` must be opaque, and a copy would duplicate
+// the allocation it settles, so it must be move-only.
+test "the Buffer certificate accepts an opaque move-only buffer and rejects one user code could open or copy" {
+    const cases = [_]struct { head: []const u8, valid: bool }{
+        .{ .head = "@opaque", .valid = true },
+        .{ .head = "@(opaque, linear)", .valid = true },
+        .{ .head = "", .valid = false },
+        .{ .head = "@(opaque, copyable)", .valid = false },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var sink = Sink.init(gpa);
+        const source: Source = .{ .path = "buffer.lin", .text = try std.fmt.allocPrint(gpa,
+            \\{s}
+            \\struct Buffer[A] {{ at: UInt64, len: UInt64, allocator: A }}
+            \\fn _observe(_buffer: Buffer[UInt8]) -> UInt8 {{ 0 }}
+            \\fn main() -> UInt8 {{ 0 }}
+        , .{case.head}) };
+        var interner: Interner = .empty;
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+        var resolved = try resolveTree(gpa, &ast, &sink);
+        resolved.modules[0].name = "mem";
+        resolved.modules[0].library = true;
+        resolved.modules[0].externs = true;
+        _ = try typecheckTree(gpa, &resolved, &sink);
+        try testing.expectEqual(!case.valid, diagnosticSays(&sink, .t_borrow_contract, "Buffer certificate"));
     }
 }
 

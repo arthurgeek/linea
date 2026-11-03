@@ -150,10 +150,28 @@ and `slice_address`, a new primitive lowering reads from the slice, from a
 slice. `Buffer.at` and `Slice.at` stay `UInt64` fields: the storage primitives
 lowering replaces take them, and `std.ffi` lends a slice's address to C and
 reads bytes at an address C handed back, which no `Address` names; each of
-those accesses is checked against an extent instead. The runtime's sources
-name each marked parameter `at`, `from`, `to` or `…_at`, and a test of the
-table holds every such name to a mark and every mark to such a name, so a
-function added to the runtime cannot take a plain address.
+those accesses is checked against an extent instead. The runtime symbol
+table is the authoritative declaration of which parameters are addresses.
+The runtime's sources name each marked parameter `at`, `from`, `to` or
+`…_at`, and a test holds every such name to a mark and every mark to such a
+name: a supplementary consistency check over the sources, so a function
+added to the runtime without a mark is caught.
+
+**Three kinds of address, by design.** The distinction is an intentional
+representation choice, not an unfinished type-safety task:
+
+- `Address[T]` is a typed address with Linea-level guarantees: an opaque
+  newtype only `std.mem` builds, from storage that holds `T`, and the only
+  thing a marked runtime parameter accepts.
+- The `UInt64` inside `Buffer` and `Slice` is an address carrier, not a claim
+  of type safety. It is what the storage primitives, `std.ffi` and an arena's
+  arithmetic read, and no Linea guarantee rests on its type. It stays sound
+  only while user code cannot reach it: `Buffer` and `Slice` are `@opaque`,
+  and the Buffer and Slice certificates refuse a library whose declaration of
+  either is not, so the plain fields are inaccessible outside `std.mem`.
+- `address.raw(...)` is the explicit transition at the runtime boundary: the
+  one place [T-RawAddress] lets a typed address become the number a runtime
+  call takes.
 
 **The standard library is the source the compiler carries ([M-Standard]).**
 Confinement names a module of the library, and a root whose manifest names it

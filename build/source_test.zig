@@ -1119,7 +1119,10 @@ const Declared = struct {
 /// Whether a runtime parameter's name says it is the address of bytes the
 /// runtime reads, writes or frees: `at`, `from`, `to`, or a name ending in
 /// `_at`. The runtime's sources name every such parameter so, which is what
-/// lets the table's `address` marks be held to them.
+/// lets the table's `address` marks be held to them. The table in
+/// `runtime_symbols.zig` is the authoritative declaration of which parameters
+/// are addresses; this scan of the sources is a supplementary consistency
+/// check that catches a function added to the runtime without a mark.
 fn namesAddress(name: []const u8) bool {
     return std.mem.eql(u8, name, "at") or std.mem.eql(u8, name, "from") or std.mem.eql(u8, name, "to") or
         std.mem.endsWith(u8, name, "_at");

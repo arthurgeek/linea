@@ -136,17 +136,22 @@ static int previous_bus_spent = 0;
  *
  * A run is a sequence of faults on one thread, on one signal and address,
  * with the same interrupted thread state, every register the program sees,
- * each arriving within `refault_within_ns` of the previous handler's return:
- * the instruction ran again with nothing in between. An unrepaired access
- * faults again within microseconds of the return; the bound is a tenth of a
- * second so a thread that waits that long for a processor between two faults
- * of a run, as many threads faulting at once on fewer processors do, does
- * not restart its run. A run that has lasted
- * `unrepaired_after_ns` takes the default action. So an access may keep
- * faulting while a repair is on its way, from the handler or from another
- * thread, for up to a second, however many faults that takes and however
- * long each handler call takes; a repair in a few steps, and a page polled
- * again only after other work, which starts a new run, are never ended.
+ * each arriving within `refault_within_cpu_ns` of the thread's own CPU time
+ * after the previous handler's return: the instruction ran again with
+ * nothing in between. An unrepaired access faults again within microseconds
+ * of CPU time. The gap is measured on the thread's CPU clock, not the wall
+ * clock, so a thread that waits for a processor between two faults, however
+ * long, as on a loaded machine, does not restart its run; a thread that
+ * sleeps between two identical faults does not restart it either. A run that
+ * has lasted `unrepaired_after_ns` of wall-clock time takes the default
+ * action. So an access may keep faulting while a repair is on its way, from
+ * the handler or from another thread, for up to a second, however many
+ * faults that takes and however long each handler call takes; a repair in a
+ * few steps is never ended, and neither is a page polled again after 10 ms
+ * of the thread's own work, which starts a new run. A page re-protected and
+ * polled again with every register unchanged and no work in between, for a
+ * second, is ended like an unrepaired access: nothing a handler can read
+ * tells the two apart.
  *
  * Each thread that faults keeps a record of its own, found by probing a
  * table from a hash of the thread, so threads do not share or slow each
@@ -158,7 +163,7 @@ static int previous_bus_spent = 0;
 typedef __typeof__(((ucontext_t *)0)->uc_mcontext->__ss) interrupted_state;
 
 static const long unrepaired_after_ns = 1000000000L;
-static const long refault_within_ns = 100000000L;
+static const long refault_within_cpu_ns = 10000000L;
 static const long fault_run_stale_ns = 2000000000L;
 static const long fault_run_stuck_ns = 60000000000L;
 
@@ -175,7 +180,7 @@ struct fault_run {
     int signal;
     unsigned long address;
     long began_ns;
-    long returned_ns;
+    long returned_cpu_ns;
     interrupted_state state;
 };
 
@@ -185,9 +190,11 @@ typedef char linea_fault_run_flag_is_lock_free[__atomic_always_lock_free(sizeof(
 typedef char linea_fault_run_owner_is_lock_free[__atomic_always_lock_free(sizeof(uintptr_t), 0) ? 1 : -1];
 typedef char linea_fault_run_time_is_lock_free[__atomic_always_lock_free(sizeof(long), 0) ? 1 : -1];
 
-static long monotonic_ns(void) {
+/* Nanoseconds on `clock`, or -1 where it cannot be read. `clock_gettime` is
+ * async-signal-safe. */
+static long clock_ns(clockid_t clock) {
     struct timespec now;
-    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return -1;
+    if (clock_gettime(clock, &now) != 0) return -1;
     return (long)now.tv_sec * 1000000000L + now.tv_nsec;
 }
 
@@ -246,13 +253,14 @@ static void release_fault_run(struct fault_run *run) {
 /* Records this fault before the previous handler runs, and answers whether
  * it ends a run that has lasted `unrepaired_after_ns`. */
 static int fault_left_unrepaired(int signal, unsigned long address, const void *context) {
-    const long now = monotonic_ns();
-    if (now < 0) return 0;
+    const long now = clock_ns(CLOCK_MONOTONIC);
+    const long cpu = clock_ns(CLOCK_THREAD_CPUTIME_ID);
+    if (now < 0 || cpu < 0) return 0;
     struct fault_run *run = hold_fault_run(now);
     if (run == 0) return 0;
     const interrupted_state *state = &((const ucontext_t *)context)->uc_mcontext->__ss;
     const int same = run->running && run->signal == signal && run->address == address &&
-                     now - run->returned_ns < refault_within_ns && memcmp(&run->state, state, sizeof *state) == 0;
+                     cpu - run->returned_cpu_ns < refault_within_cpu_ns && memcmp(&run->state, state, sizeof *state) == 0;
     if (same && now - run->began_ns >= unrepaired_after_ns) {
         run->running = 0;
         release_fault_run(run);
@@ -273,11 +281,12 @@ static int fault_left_unrepaired(int signal, unsigned long address, const void *
 
 /* Records that the previous handler returned. */
 static void fault_handler_returned(void) {
-    const long now = monotonic_ns();
-    if (now < 0) return;
+    const long now = clock_ns(CLOCK_MONOTONIC);
+    const long cpu = clock_ns(CLOCK_THREAD_CPUTIME_ID);
+    if (now < 0 || cpu < 0) return;
     struct fault_run *run = hold_fault_run(now);
     if (run == 0) return;
-    run->returned_ns = now;
+    run->returned_cpu_ns = cpu;
     __atomic_store_n(&run->in_handler, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&run->last_ns, now, __ATOMIC_RELEASE);
     release_fault_run(run);
@@ -461,10 +470,11 @@ static char main_signal_stack[65536 + thread_record_bytes] __attribute__((aligne
  * alternate signal stack and the bounds of its stack's guard, read from the
  * system's record of the main thread's stack. */
 #if defined(__APPLE__)
-/* Blocks SIGPIPE on the main thread before any other thread exists, so every
- * thread inherits the block. macOS raises a write's SIGPIPE on the process
- * and hands it to any thread that does not block it, as `pipe_signal.h`
- * describes. */
+/* Blocks SIGPIPE on the main thread of a Linea program, so threads created
+ * after it with `pthread_create` inherit the block. macOS raises a write's
+ * SIGPIPE on the process and hands it to any thread that does not block it.
+ * Threads whose mask this does not reach, libdispatch workqueue threads and
+ * threads started before the entry, are named in `pipe_signal.h`. */
 static void block_pipe_signal_at_entry(void) {
     sigset_t pipe_signal;
     if (sigemptyset(&pipe_signal) != 0 || sigaddset(&pipe_signal, SIGPIPE) != 0 ||

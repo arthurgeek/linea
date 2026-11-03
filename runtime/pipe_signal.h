@@ -1,36 +1,47 @@
 /* How the runtime writes to a pipe or socket whose reader has gone without
  * SIGPIPE ending the process, while changing nothing shared: not the
  * process's SIGPIPE disposition, which stays as the host set it, and not
- * the open file, which other threads and processes write through too.
+ * the open file, which other threads and processes write through too. No
+ * part of this changes the process-wide disposition.
  *
- * A socket is written with `send` and `MSG_NOSIGNAL`, which raises no
- * SIGPIPE for that one call. Any other descriptor is written with SIGPIPE
- * blocked on the writing thread, and a SIGPIPE the write left pending on that
- * thread is taken with `sigwait` before the thread's mask is restored. One
- * that was already pending before the write is left pending: a blocked
- * signal does not queue, so a second SIGPIPE merges with it, and taking it
- * would take the one that was there first.
+ * Linux raises a write's SIGPIPE on the writing thread. macOS raises it on
+ * the process: the system hands it to a thread that does not block it, or,
+ * where every thread blocks it, leaves it pending on one of them, not
+ * necessarily the writer. Three cases follow.
  *
- * Linux raises a write's SIGPIPE on the writing thread, so that is the whole
- * of it there. macOS raises it on the process: the system hands it to a
- * thread that does not block it, or, where every thread blocks it, leaves it
- * pending on one of them, not necessarily the writer. So in a Linea program
- * the entry blocks SIGPIPE on the main thread before any other thread exists
- * (`linea_set_args`), and every thread started after it, by the runtime or by
- * C code it calls, inherits the block. A SIGPIPE raised on macOS then stays
- * pending on a thread that never takes it, and the write answers EPIPE. A
- * signal mask is inherited across `fork` and `exec`, so a program a Linea
- * program starts through C (`fork` and `exec`, `posix_spawn`, `system`)
- * starts with SIGPIPE blocked unless the caller sets its mask, as with any
- * program that blocks a signal; undoing the block in a `fork` child would
- * leave a child that goes on running Linea code on several threads open to
- * the signal.
+ * 1. A socket, and every ordinary Linea write, on either system. A socket is
+ *    written with `send` and `MSG_NOSIGNAL`, which raises no SIGPIPE for that
+ *    one call. Any other descriptor is written with SIGPIPE blocked on the
+ *    writing thread, and a SIGPIPE the write left pending on that thread is
+ *    taken with `sigwait` before the thread's mask is restored. One that was
+ *    already pending before the write is left pending: a blocked signal does
+ *    not queue, so a second SIGPIPE merges with it, and taking it would take
+ *    the one that was there first. On Linux this is the whole of it.
  *
- * What this cannot cover, on macOS only: a process that runs Linea code
- * without a Linea entry, as a host calling exported functions does, where a
- * thread of the host's does not block SIGPIPE. A write to a pipe with no
- * reader then raises a SIGPIPE that thread takes, under the host's
- * disposition, exactly as the host's own write would. */
+ * 2. A standalone Linea program on macOS. Its entry, `linea_set_args`,
+ *    blocks SIGPIPE on the main thread, and threads created after it with
+ *    `pthread_create`, by the runtime or by C code it calls, inherit the
+ *    mask. A SIGPIPE a write raises then stays pending on a thread that
+ *    never takes it, and the write answers EPIPE. Linea does not control the
+ *    mask of threads it did not create from a thread holding the block:
+ *    libdispatch (GCD) workqueue threads start with their own mask, not
+ *    main's, and a thread a C constructor started before `linea_set_args`
+ *    ran never inherited it. While such a thread is alive and does not block
+ *    SIGPIPE, a write's SIGPIPE can reach it, under the process's
+ *    disposition. A signal mask, and a pending signal, survive `exec`: a
+ *    program a Linea program starts through C (`fork` and `exec`,
+ *    `posix_spawn`, `system`) begins with SIGPIPE blocked unless the caller
+ *    sets its mask, and a program the process becomes by `exec` in place
+ *    keeps a SIGPIPE left pending on main and dies of it once it unblocks
+ *    SIGPIPE; no path of the runtime or the standard library calls `exec`.
+ *
+ * 3. Linea embedded in a host process, which calls exported functions and
+ *    runs no Linea entry. Threads the host creates keep the host's signal
+ *    policy: the runtime blocks SIGPIPE only around its own writes, on the
+ *    writing thread. On macOS a host thread that does not block SIGPIPE can
+ *    take a Linea write's SIGPIPE, under the host's disposition, as it would
+ *    take the host's own write's. An embedder that needs protection blocks
+ *    SIGPIPE on its own threads. */
 
 #ifndef LINEA_PIPE_SIGNAL_H
 #define LINEA_PIPE_SIGNAL_H
