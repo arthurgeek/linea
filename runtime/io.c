@@ -83,35 +83,25 @@ long linea_read_some(int fd, unsigned long at, unsigned long len) {
     return count < 0 ? -(long)errno : (long)count;
 }
 
-#if defined(__APPLE__)
-/* Writes without raising SIGPIPE, answering the count or a negated errno.
- * macOS raises the SIGPIPE of a write to a pipe or socket with no reader on
- * the process, which hands it to any thread that does not block it, so
- * blocking it on the writing thread, as on Linux, does not keep it from
- * ending the process; `write_without_pipe_signal` keeps the write from
- * raising it at all. */
-static long write_quietly(int fd, const void *bytes, size_t len) {
-    ssize_t written;
-    do {
-        written = write_without_pipe_signal(fd, bytes, len);
-    } while (written < 0 && errno == EINTR);
-    return written < 0 ? -(long)errno : (long)written;
-}
-#endif
-
 long linea_write_some(int fd, unsigned long at, unsigned long len) {
     const int invalid = byte_range(at, len);
     if (invalid != 0) return -(long)invalid;
     if (len == 0) return 0;
+    const void *bytes = (const void *)(uintptr_t)at;
 
-#if defined(__APPLE__)
-    return write_quietly(fd, (const void *)(uintptr_t)at, (size_t)len);
-#else
+    /* A socket raises no SIGPIPE through `send` with `MSG_NOSIGNAL`. */
+    ssize_t count;
+    do {
+        count = send_without_signal(fd, bytes, (size_t)len);
+    } while (count < 0 && errno == EINTR);
+    if (count >= 0 || errno != ENOTSOCK) return count < 0 ? -(long)errno : (long)count;
+
+    /* Any other descriptor is written with SIGPIPE blocked on this thread,
+     * as `pipe_signal.h` describes. An ignored SIGPIPE needs no block. */
     struct sigaction action;
     if (sigaction(SIGPIPE, NULL, &action) == 0 && action.sa_handler == SIG_IGN) {
-        ssize_t count;
         do {
-            count = write(fd, (const void *)(uintptr_t)at, (size_t)len);
+            count = write(fd, bytes, (size_t)len);
         } while (count < 0 && errno == EINTR);
         return count < 0 ? -(long)errno : (long)count;
     }
@@ -126,14 +116,15 @@ long linea_write_some(int fd, unsigned long at, unsigned long len) {
         return -(long)error;
     }
     const int already_pending = sigismember(&pending, SIGPIPE);
-    ssize_t count;
     do {
-        count = write(fd, (const void *)(uintptr_t)at, (size_t)len);
+        count = write(fd, bytes, (size_t)len);
     } while (count < 0 && errno == EINTR);
     const int error = count < 0 ? errno : 0;
 
-    /* A blocked standard signal coalesces with one already pending. Consume
-     * only a newly generated SIGPIPE; ignored signals need no consumption. */
+    /* A blocked standard signal merges with one already pending, so only a
+     * SIGPIPE this write left pending on this thread is taken. On macOS the
+     * write's SIGPIPE may be pending on another thread instead, which blocks
+     * it for good in a Linea program. */
     if (error == EPIPE && already_pending == 0) {
         if (sigpending(&pending) != 0) abort();
         if (sigismember(&pending, SIGPIPE) == 1) {
@@ -149,7 +140,6 @@ long linea_write_some(int fd, unsigned long at, unsigned long len) {
      * the runtime contract; reporting it as I/O would lose accepted bytes. */
     if (pthread_sigmask(SIG_SETMASK, &previous, NULL) != 0) abort();
     return error != 0 ? -(long)error : (long)count;
-#endif
 }
 
 long linea_read_at(int fd, unsigned long at, unsigned long len, unsigned long offset) {

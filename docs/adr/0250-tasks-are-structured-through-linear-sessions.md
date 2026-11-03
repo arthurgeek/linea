@@ -583,10 +583,14 @@ a measurement shows the allocation matters.
   it set `SA_NODEFER`; one installed with `SA_RESETHAND` runs for the first
   such fault only, and later ones take the default action, where the system
   reports the flag. macOS does not report it through `sigaction`; there a
-  fault that repeats 64 times in a row on one thread, signal and address with
-  every register unchanged, each within 10 ms of the last, takes the default
-  action, since no handler is repairing it. A repair in a few steps or a page
-  polled after other work never reaches the count. What is not
+  run of identical faults (one thread, signal and address, every register
+  unchanged, each arriving within 100 ms of the previous handler's return)
+  that has lasted a second takes the default action, since no repair is
+  coming. A repair from the handler or another thread may take up to that
+  second however many faults it costs and however slow the handler; a
+  repair in a few steps, or a page polled again after other work, is never
+  ended. Each faulting thread keeps a record of its own, so threads do not
+  slow each other's detection. What is not
   reproduced: the previous handler runs on the stack the runtime's handler
   runs on, the thread's alternate signal stack where it has one, whether or
   not it asked for `SA_ONSTACK`; and after an `SA_RESETHAND` handler has run,
@@ -605,21 +609,29 @@ a measurement shows the allocation matters.
   fault that is not Linea's, met while the table stays busy past a bounded
   wait of about a second, ends with that generic report rather than reaching
   the host's handler.
-  `SIGPIPE` is left as the process set it. A closed pipe answers `EPIPE` to
-  every write the runtime makes whatever the disposition: on Linux, which
-  raises the signal on the writing thread, the write blocks it on that thread
-  and consumes one it raises. macOS raises it on the process, so there the
-  write raises nothing: the descriptor's open file gets `F_SETNOSIGPIPE`
-  before the write and keeps it, and a socket whose peer has gone, which
-  refuses the setting, is written with `send` and `MSG_NOSIGNAL`. The
-  setting belongs to the open file, so every holder of it, a process that
-  inherited it included, gets `EPIPE` instead of `SIGPIPE` from then on.
-  Restoring it after the write is not sound: a forked process shares the open
-  file but not the runtime's record of writes in progress, so its restore
-  can clear the setting under this process's waiting write, which then
-  raises `SIGPIPE`; and a pipe opened twice by name is two open files with
-  one inode, which no record by inode tells apart. A failure report to a
-  standard error with no reader, pipe or socket, ends by its abort, not by
+  `SIGPIPE` is left as the process set it, and so is every open file. A
+  closed pipe or socket answers `EPIPE` to every write the runtime makes: a
+  socket is written with `send` and `MSG_NOSIGNAL`, which raises nothing for
+  that call, and any other descriptor with `SIGPIPE` blocked on the writing
+  thread, taking a `SIGPIPE` the write left pending on that thread before the
+  mask is restored, and leaving one that was pending before the write. Linux
+  raises the signal on the writing thread, so that is complete there. macOS
+  raises it on the process, hands it to a thread that does not block it, and
+  leaves it pending on some thread, not necessarily the writer, where all
+  block it. So a Linea program's entry blocks `SIGPIPE` on the main thread
+  before any other thread exists, every thread inherits the block, and a
+  `SIGPIPE` raised there stays pending on a thread that never takes it. The
+  mask is inherited across `exec`, so a program a Linea program starts
+  through C begins with `SIGPIPE` blocked unless the caller sets its mask.
+  Setting `F_SETNOSIGPIPE` on the open file is rejected: kept, it changes
+  what every other holder of the file, other processes included, sees; and
+  restoring it after the write cannot be done soundly, since a forked
+  process shares the open file but not a record of writes in progress. What remains, on macOS only: a process that runs Linea code
+  without a Linea entry, as a host calling exported functions does, with a
+  host thread that does not block `SIGPIPE`, takes a Linea write's `SIGPIPE`
+  on that thread under the host's disposition, as the host's own write
+  would. A failure report to a standard error with no reader, pipe or
+  socket, ends by its abort, not by
   `SIGPIPE`. This replaces the restoring of the default action that
   [0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md)
   describes.

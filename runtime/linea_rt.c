@@ -125,83 +125,162 @@ static int previous_segv_spent = 0;
 static int previous_bus_spent = 0;
 
 #if defined(__APPLE__)
-/* The faults on macOS a previous handler is handed, recorded so an
- * unrepaired fault repeating without end can be told apart.
+/* The runs of identical faults on macOS that a previous handler is handed,
+ * recorded so an access no handler will repair can be ended.
  *
  * macOS does not report `SA_RESETHAND` through `sigaction`, so the runtime
  * cannot tell that a previous handler asked to run once. A handler that
  * returns without repairing the access would then run for every repetition
  * of the fault, without end, where the system would have taken the default
- * action on the second. So a fault is taken as unrepaired once the same
- * thread has faulted `unrepaired_repeats` times in a row on the same signal
- * and address with the same interrupted thread state, every register the
- * program sees, each within `unrepaired_gap_ns` of the one before: an
- * access no handler repairs faults again within microseconds. That fault
- * takes the default action. A repair in a few steps faults a few times, and
- * a program that re-protects a page to poll it touches it again only after
- * other work, so neither reaches the count.
+ * action on the second.
  *
- * The records are slots chosen by a hash of the faulting thread. A slot
- * another thread holds at that moment is passed over, and two threads that
- * share a slot overwrite each other's count, so an unrepaired fault on one
- * of them is caught only once it repeats `unrepaired_repeats` times between
- * the other's faults. */
+ * A run is a sequence of faults on one thread, on one signal and address,
+ * with the same interrupted thread state, every register the program sees,
+ * each arriving within `refault_within_ns` of the previous handler's return:
+ * the instruction ran again with nothing in between. An unrepaired access
+ * faults again within microseconds of the return; the bound is a tenth of a
+ * second so a thread that waits that long for a processor between two faults
+ * of a run, as many threads faulting at once on fewer processors do, does
+ * not restart its run. A run that has lasted
+ * `unrepaired_after_ns` takes the default action. So an access may keep
+ * faulting while a repair is on its way, from the handler or from another
+ * thread, for up to a second, however many faults that takes and however
+ * long each handler call takes; a repair in a few steps, and a page polled
+ * again only after other work, which starts a new run, are never ended.
+ *
+ * Each thread that faults keeps a record of its own, found by probing a
+ * table from a hash of the thread, so threads do not share or slow each
+ * other's runs. A record is taken over by another thread once its own has
+ * not faulted for `fault_run_stale_ns`, or, while its handler runs, for
+ * `fault_run_stuck_ns`, which covers a thread that ended or left its handler
+ * by a jump. With every record held, a fault is passed on unrecorded, and
+ * its run is not ended. */
 typedef __typeof__(((ucontext_t *)0)->uc_mcontext->__ss) interrupted_state;
 
-enum { unrepaired_repeats = 64 };
-static const long unrepaired_gap_ns = 10000000;
+static const long unrepaired_after_ns = 1000000000L;
+static const long refault_within_ns = 100000000L;
+static const long fault_run_stale_ns = 2000000000L;
+static const long fault_run_stuck_ns = 60000000000L;
 
-struct repeated_fault {
+struct fault_run {
+    /* Held while the fields below `last_ns` are read or written. */
     int busy;
+    /* The owning thread, as a number; zero for a record never used. */
+    uintptr_t owner;
+    /* Whether the owner's handler is running, and when the owner last
+     * entered or left it, in nanoseconds of `CLOCK_MONOTONIC`. */
+    int in_handler;
+    long last_ns;
+    int running;
     int signal;
-    int repeats;
-    pthread_t thread;
     unsigned long address;
-    struct timespec at;
+    long began_ns;
+    long returned_ns;
     interrupted_state state;
 };
 
-enum { repeated_fault_slot_bits = 6, repeated_fault_slots = 1 << repeated_fault_slot_bits };
-static struct repeated_fault repeated_faults[repeated_fault_slots];
-typedef char linea_repeated_fault_claim_is_lock_free[__atomic_always_lock_free(sizeof(int), 0) ? 1 : -1];
+enum { fault_run_slot_bits = 8, fault_run_slots = 1 << fault_run_slot_bits };
+static struct fault_run fault_runs[fault_run_slots];
+typedef char linea_fault_run_flag_is_lock_free[__atomic_always_lock_free(sizeof(int), 0) ? 1 : -1];
+typedef char linea_fault_run_owner_is_lock_free[__atomic_always_lock_free(sizeof(uintptr_t), 0) ? 1 : -1];
+typedef char linea_fault_run_time_is_lock_free[__atomic_always_lock_free(sizeof(long), 0) ? 1 : -1];
 
-/* The slot for `thread`. A `pthread_t` on macOS is the address of a
- * page-aligned record, so the page offset is shifted out and the rest mixed
- * by the 64-bit golden-ratio multiplier, whose top bits spread consecutive
- * page numbers over the slots. The product wraps, which is what mixes it. */
-static struct repeated_fault *repeated_fault_slot(pthread_t thread) {
-    const unsigned long page = (unsigned long)(uintptr_t)thread >> 12;
-    unsigned long mixed;
-    (void)__builtin_mul_overflow(page, 0x9E3779B97F4A7C15UL, &mixed);
-    return &repeated_faults[mixed >> (64 - repeated_fault_slot_bits)];
+static long monotonic_ns(void) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return -1;
+    return (long)now.tv_sec * 1000000000L + now.tv_nsec;
 }
 
-/* Records this fault, and answers whether it is the `unrepaired_repeats`th
- * of a run of identical faults on this thread, each soon after the last. */
-static int fault_left_unrepaired(int signal, unsigned long address, const void *context) {
-    struct timespec now;
-    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
-    struct repeated_fault *slot = repeated_fault_slot(pthread_self());
-    if (__atomic_exchange_n(&slot->busy, 1, __ATOMIC_ACQUIRE) != 0) return 0;
-    const interrupted_state *state = &((const ucontext_t *)context)->uc_mcontext->__ss;
-    const time_t seconds = now.tv_sec - slot->at.tv_sec;
-    const int soon = seconds >= 0 && seconds < 2 && seconds * 1000000000L + (now.tv_nsec - slot->at.tv_nsec) < unrepaired_gap_ns;
-    const int same = slot->repeats > 0 && soon && slot->signal == signal && pthread_equal(slot->thread, pthread_self()) != 0 &&
-                     slot->address == address && memcmp(&slot->state, state, sizeof *state) == 0;
-    if (same) {
-        slot->repeats += 1;
-    } else {
-        slot->repeats = 1;
-        slot->signal = signal;
-        slot->thread = pthread_self();
-        slot->address = address;
-        slot->state = *state;
+/* Where the probe for `thread` starts. A `pthread_t` on macOS is the address
+ * of a page-aligned record, so the page offset is shifted out and the rest
+ * mixed by the 64-bit golden-ratio multiplier, whose top bits spread
+ * consecutive page numbers over the table. The product wraps, which is what
+ * mixes it. */
+static unsigned long fault_run_start(uintptr_t thread) {
+    unsigned long mixed;
+    (void)__builtin_mul_overflow((unsigned long)thread >> 12, 0x9E3779B97F4A7C15UL, &mixed);
+    return mixed >> (64 - fault_run_slot_bits);
+}
+
+/* Whether another thread may take `run` over at `now`. */
+static int fault_run_abandoned(const struct fault_run *run, long now) {
+    const long idle = now - __atomic_load_n(&run->last_ns, __ATOMIC_ACQUIRE);
+    return __atomic_load_n(&run->in_handler, __ATOMIC_ACQUIRE) ? idle >= fault_run_stuck_ns : idle >= fault_run_stale_ns;
+}
+
+/* The calling thread's record, held, or null where none is free or its own
+ * is held by a thread taking it over. A thread's own record is never past a
+ * record no thread has used, since it took the first free one on its probe. */
+static struct fault_run *hold_fault_run(long now) {
+    const uintptr_t self = (uintptr_t)pthread_self();
+    const unsigned long start = fault_run_start(self);
+    struct fault_run *free_run = 0;
+    for (unsigned long i = 0; i < fault_run_slots; i += 1) {
+        struct fault_run *run = &fault_runs[(start + i) % fault_run_slots];
+        const uintptr_t owner = __atomic_load_n(&run->owner, __ATOMIC_ACQUIRE);
+        if (owner == self) {
+            if (__atomic_exchange_n(&run->busy, 1, __ATOMIC_ACQUIRE) != 0) return 0;
+            if (__atomic_load_n(&run->owner, __ATOMIC_ACQUIRE) == self) return run;
+            __atomic_store_n(&run->busy, 0, __ATOMIC_RELEASE);
+            return 0;
+        }
+        if (free_run == 0 && (owner == 0 || fault_run_abandoned(run, now))) free_run = run;
+        if (owner == 0) break;
     }
-    slot->at = now;
-    const int unrepaired = slot->repeats >= unrepaired_repeats;
-    if (unrepaired) slot->repeats = 0;
-    __atomic_store_n(&slot->busy, 0, __ATOMIC_RELEASE);
-    return unrepaired;
+    if (free_run == 0 || __atomic_exchange_n(&free_run->busy, 1, __ATOMIC_ACQUIRE) != 0) return 0;
+    const uintptr_t owner = __atomic_load_n(&free_run->owner, __ATOMIC_ACQUIRE);
+    if (owner != 0 && !fault_run_abandoned(free_run, now)) {
+        __atomic_store_n(&free_run->busy, 0, __ATOMIC_RELEASE);
+        return 0;
+    }
+    __atomic_store_n(&free_run->owner, self, __ATOMIC_RELEASE);
+    __atomic_store_n(&free_run->in_handler, 0, __ATOMIC_RELEASE);
+    free_run->running = 0;
+    return free_run;
+}
+
+static void release_fault_run(struct fault_run *run) {
+    __atomic_store_n(&run->busy, 0, __ATOMIC_RELEASE);
+}
+
+/* Records this fault before the previous handler runs, and answers whether
+ * it ends a run that has lasted `unrepaired_after_ns`. */
+static int fault_left_unrepaired(int signal, unsigned long address, const void *context) {
+    const long now = monotonic_ns();
+    if (now < 0) return 0;
+    struct fault_run *run = hold_fault_run(now);
+    if (run == 0) return 0;
+    const interrupted_state *state = &((const ucontext_t *)context)->uc_mcontext->__ss;
+    const int same = run->running && run->signal == signal && run->address == address &&
+                     now - run->returned_ns < refault_within_ns && memcmp(&run->state, state, sizeof *state) == 0;
+    if (same && now - run->began_ns >= unrepaired_after_ns) {
+        run->running = 0;
+        release_fault_run(run);
+        return 1;
+    }
+    if (!same) {
+        run->running = 1;
+        run->signal = signal;
+        run->address = address;
+        run->began_ns = now;
+        run->state = *state;
+    }
+    __atomic_store_n(&run->in_handler, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&run->last_ns, now, __ATOMIC_RELEASE);
+    release_fault_run(run);
+    return 0;
+}
+
+/* Records that the previous handler returned. */
+static void fault_handler_returned(void) {
+    const long now = monotonic_ns();
+    if (now < 0) return;
+    struct fault_run *run = hold_fault_run(now);
+    if (run == 0) return;
+    run->returned_ns = now;
+    __atomic_store_n(&run->in_handler, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&run->last_ns, now, __ATOMIC_RELEASE);
+    release_fault_run(run);
 }
 #endif
 
@@ -216,9 +295,8 @@ static int fault_left_unrepaired(int signal, unsigned long address, const void *
  * call. A handler installed with `SA_RESETHAND` runs for the first such fault
  * only, and every later one takes the default action, which the system would
  * have reset it to. macOS does not report `SA_RESETHAND` through
- * `sigaction`; there a fault that repeats unrepaired many times in quick
- * succession takes the default action instead, as `struct repeated_fault`
- * describes.
+ * `sigaction`; there a fault that has repeated unrepaired for a second takes
+ * the default action instead, as `struct fault_run` describes.
  *
  * Not reproduced: a handler always runs on the stack the runtime's own
  * handler runs on, the thread's alternate signal stack where it has one,
@@ -267,6 +345,9 @@ static void pass_on(int signal, siginfo_t *info, void *context) {
             previous->sa_handler(signal);
         }
         if (pthread_sigmask(SIG_SETMASK, &before, 0) != 0) fail("linea: the runtime cannot hand a fault on\n");
+#if defined(__APPLE__)
+        fault_handler_returned();
+#endif
         return;
     }
     struct sigaction fallback;
@@ -379,7 +460,24 @@ static char main_signal_stack[65536 + thread_record_bytes] __attribute__((aligne
 /* Gives the main thread what `linea_thread_begin` gives a task's: an
  * alternate signal stack and the bounds of its stack's guard, read from the
  * system's record of the main thread's stack. */
+#if defined(__APPLE__)
+/* Blocks SIGPIPE on the main thread before any other thread exists, so every
+ * thread inherits the block. macOS raises a write's SIGPIPE on the process
+ * and hands it to any thread that does not block it, as `pipe_signal.h`
+ * describes. */
+static void block_pipe_signal_at_entry(void) {
+    sigset_t pipe_signal;
+    if (sigemptyset(&pipe_signal) != 0 || sigaddset(&pipe_signal, SIGPIPE) != 0 ||
+        pthread_sigmask(SIG_BLOCK, &pipe_signal, 0) != 0) {
+        fail("linea: the main thread cannot block SIGPIPE\n");
+    }
+}
+#endif
+
 static void begin_main_thread(void) {
+#if defined(__APPLE__)
+    block_pipe_signal_at_entry();
+#endif
     unsigned long low = 0;
 #if defined(__APPLE__)
     pthread_t self = pthread_self();
@@ -764,7 +862,7 @@ static void storage_fault(unsigned long address) {
 static void forget_other_threads(void) {
     __atomic_store_n(&faults_waiting, 0, __ATOMIC_RELEASE);
 #if defined(__APPLE__) && !defined(LINEA_SANITIZED)
-    for (int i = 0; i < repeated_fault_slots; i += 1) __atomic_store_n(&repeated_faults[i].busy, 0, __ATOMIC_RELEASE);
+    for (int i = 0; i < fault_run_slots; i += 1) __atomic_store_n(&fault_runs[i].busy, 0, __ATOMIC_RELEASE);
 #endif
     if (__atomic_load_n(&table_owned, __ATOMIC_ACQUIRE) == 0) release_table();
 }

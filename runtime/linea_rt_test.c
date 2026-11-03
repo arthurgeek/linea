@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -174,13 +175,12 @@ static void host_on_fault_returning(int signal, siginfo_t *info, void *context) 
     (void)info;
     (void)context;
     host_faults += 1;
-    if (host_faults > 64) _exit(5);
 }
 
 /* A handler installed with `SA_RESETHAND` that returns without repairing the
  * access ends the process by the fault: at once where the system reports the
- * flag, and on macOS, which does not, after the access has faulted the same
- * way 64 times in quick succession. */
+ * flag, and on macOS, which does not, once the access has kept faulting the
+ * same way for a second. */
 static void host_resethand_handler_ends(void) {
     host_fault_with(host_on_fault_returning, (unsigned)SA_RESETHAND);
 }
@@ -229,9 +229,9 @@ static void *load_from(void *page) {
 }
 
 /* Sixteen threads each fault without end on a page of their own, and the
- * host's handler repairs nothing: each thread's faults are counted apart from
- * the others', so a thread's run of identical faults is not broken by the
- * others' and the process ends by the fault. */
+ * host's handler repairs nothing: each thread's run of faults is recorded
+ * apart from the others', so none is broken or slowed by another's and the
+ * process ends by the fault once the runs have lasted their second. */
 enum { faulting_threads = 16 };
 
 static void unrepaired_faults_on_many_threads(void) {
@@ -243,6 +243,78 @@ static void unrepaired_faults_on_many_threads(void) {
         assert(pthread_create(&threads[i], 0, load_from, page) == 0);
     }
     for (int i = 0; i < faulting_threads; i += 1) assert(pthread_join(threads[i], 0) == 0);
+}
+
+/* A host handler that leaves the repair to another thread: it yields and
+ * returns, and the access faults again until the repair lands. */
+static void host_on_fault_yielding(int signal, siginfo_t *info, void *context) {
+    (void)signal;
+    (void)info;
+    (void)context;
+    host_faults += 1;
+    sched_yield();
+}
+
+/* How long the repairing thread waits before it makes the page readable. */
+static long repair_after_ns = 0;
+
+static void *repair_later(void *unused) {
+    (void)unused;
+    struct timespec pause_for = {repair_after_ns / 1000000000L, repair_after_ns % 1000000000L};
+    nanosleep(&pause_for, 0);
+    if (mprotect(host_page, host_page_bytes, PROT_READ) != 0) _exit(4);
+    return 0;
+}
+
+/* The repair arrives from another thread `repair_after_ns` after the access
+ * first faults; the access then succeeds. */
+static void host_repairs_from_another_thread(void) {
+    install_host_handler(host_on_fault_yielding, 0);
+    pthread_t repairer;
+    assert(pthread_create(&repairer, 0, repair_later, 0) == 0);
+    (void)*(volatile char *)host_page;
+    assert(pthread_join(repairer, 0) == 0);
+    assert(host_faults >= 1);
+}
+
+static void host_repairs_from_another_thread_soon(void) {
+    repair_after_ns = 2000000;
+    host_repairs_from_another_thread();
+}
+
+/* Half a second, within the second an access may keep faulting unrepaired. */
+static void host_repairs_from_another_thread_late(void) {
+    repair_after_ns = 500000000;
+    host_repairs_from_another_thread();
+}
+
+/* A host handler that takes 20 ms and repairs nothing. */
+static void host_on_fault_slowly(int signal, siginfo_t *info, void *context) {
+    (void)signal;
+    (void)info;
+    (void)context;
+    struct timespec pause_for = {0, 20000000};
+    nanosleep(&pause_for, 0);
+}
+
+static void host_slow_handler_repairs_nothing(void) { host_fault_with(host_on_fault_slowly, 0); }
+
+/* Eight threads each fault without end on a page of their own. */
+static void unrepaired_faults_on_eight_threads(void) {
+    install_host_handler(host_on_fault_ignoring, 0);
+    pthread_t threads[8];
+    for (int i = 0; i < 8; i += 1) {
+        void *page = mmap(0, host_page_bytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        assert(page != MAP_FAILED);
+        assert(pthread_create(&threads[i], 0, load_from, page) == 0);
+    }
+    for (int i = 0; i < 8; i += 1) assert(pthread_join(threads[i], 0) == 0);
+}
+
+static double seconds_now(void) {
+    struct timespec now;
+    assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+    return (double)now.tv_sec + (double)now.tv_nsec / 1e9;
 }
 
 /* Runs `body` in a child and checks it was ended by the default action of a
@@ -273,6 +345,16 @@ static void ends_by_memory_fault(void (*body)(void)) {
     assert(WIFSIGNALED(status) && (WTERMSIG(status) == SIGSEGV || WTERMSIG(status) == SIGBUS));
 }
 
+/* Runs `body` in a child, checks it was ended by a memory fault, and checks
+ * that took between `at_least` and `at_most` seconds. */
+static void ends_by_memory_fault_after(void (*body)(void), double at_least, double at_most) {
+    const double started = seconds_now();
+    ends_by_memory_fault(body);
+    const double took = seconds_now() - started;
+    if (took < at_least || took > at_most) fprintf(stderr, "the faulting process ended after %.3f s\n", took);
+    assert(took >= at_least && took <= at_most);
+}
+
 /* A signal stack too small to hold the thread's record is refused, and
  * leaves the thread's alternate signal stack as it was. */
 static void a_tiny_signal_stack_is_refused(void) {
@@ -290,9 +372,9 @@ static void *park(void *arg) {
     return 0;
 }
 
-/* Runs `body` in a child whose standard error is a pipe or a socket nobody
- * reads, beside a second thread that does not block SIGPIPE, and checks it
- * still ended by SIGABRT: a failure report is never cut short by SIGPIPE. */
+/* Runs `body` in a Linea program whose standard error is a pipe or a socket
+ * nobody reads, beside a second thread it started, and checks it still ended
+ * by SIGABRT: a failure report is never cut short by SIGPIPE. */
 static void aborts_into_closed_channel(void (*body)(void), int socket) {
     pid_t pid = fork();
     assert(pid >= 0);
@@ -306,6 +388,9 @@ static void aborts_into_closed_channel(void (*body)(void), int socket) {
         assert((socket ? socketpair(AF_UNIX, SOCK_STREAM, 0, err_channel) : pipe(err_channel)) == 0);
         assert(close(err_channel[0]) == 0);
         assert(dup2(err_channel[1], 2) == 2);
+        char name[] = "reporting";
+        char *argv[] = {name, NULL};
+        linea_set_args(1, argv);
         pthread_t parked;
         assert(pthread_create(&parked, 0, park, 0) == 0);
         body();
@@ -656,8 +741,12 @@ int main(void) {
      * fault that its host's handler leaves unrepaired; elsewhere the kernel
      * repeats it as it would without the runtime. */
 #if defined(__APPLE__)
-    ends_by_memory_fault(unrepaired_faults_on_many_threads);
+    ends_by_memory_fault_after(unrepaired_faults_on_many_threads, 1.0, 3.0);
+    ends_by_memory_fault_after(host_slow_handler_repairs_nothing, 1.0, 4.0);
+    ends_by_memory_fault_after(unrepaired_faults_on_eight_threads, 1.0, 3.0);
 #endif
+    exits_cleanly(host_repairs_from_another_thread_soon);
+    exits_cleanly(host_repairs_from_another_thread_late);
     exits_cleanly(a_tiny_signal_stack_is_refused);
 #if !defined(LINEA_SANITIZED)
     ends_by_fault(ignored_fault_ends_the_process);

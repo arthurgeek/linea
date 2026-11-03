@@ -122,6 +122,45 @@ static int open_pipe(int fds[2]) { return pipe(fds); }
  * child for its standard streams. */
 static int open_socket_pair(int fds[2]) { return socketpair(AF_UNIX, SOCK_STREAM, 0, fds); }
 
+void linea_set_args(int argc, char **argv);
+
+/* Starts the runtime as a Linea program's entry does, before the program
+ * starts any thread. */
+static void start_as_a_program(void) {
+    char name[] = "io_test";
+    char *argv[] = {name, NULL};
+    linea_set_args(1, argv);
+}
+
+/* A write to a pipe with no reader changes nothing another writer of that
+ * pipe sees: a child process sharing the pipe, with SIGPIPE at its default
+ * action and unblocked, is still ended by SIGPIPE when it writes. */
+static void broken_pipe_still_signals_other_writers(void) {
+    int fds[2];
+    assert(pipe(fds) == 0);
+    assert(close(fds[0]) == 0);
+    assert(linea_write_some(fds[1], ADDRESS("x"), 1) == -EPIPE);
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        struct sigaction action;
+        memset(&action, 0, sizeof action);
+        action.sa_handler = SIG_DFL;
+        assert(sigemptyset(&action.sa_mask) == 0);
+        assert(sigaction(SIGPIPE, &action, NULL) == 0);
+        sigset_t none;
+        assert(sigemptyset(&none) == 0);
+        assert(sigprocmask(SIG_SETMASK, &none, NULL) == 0);
+        if (write(fds[1], "y", 1) < 0) _exit(errno == EPIPE ? 1 : 2);
+        _exit(3);
+    }
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    if (!WIFSIGNALED(status)) fprintf(stderr, "the other writer exited with %d\n", WEXITSTATUS(status));
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGPIPE);
+    assert(close(fds[1]) == 0);
+}
+
 static void broken_channel_beside_another_thread(int (*open_channel)(int fds[2])) {
     const pid_t pid = fork();
     assert(pid >= 0);
@@ -131,6 +170,7 @@ static void broken_channel_beside_another_thread(int (*open_channel)(int fds[2])
         action.sa_handler = SIG_DFL;
         assert(sigemptyset(&action.sa_mask) == 0);
         assert(sigaction(SIGPIPE, &action, NULL) == 0);
+        start_as_a_program();
         int fds[2];
         assert(open_channel(fds) == 0);
         assert(close(fds[0]) == 0);
@@ -177,6 +217,7 @@ static void pipe_shared_with_a_child(void) {
         action.sa_handler = SIG_DFL;
         assert(sigemptyset(&action.sa_mask) == 0);
         assert(sigaction(SIGPIPE, &action, NULL) == 0);
+        start_as_a_program();
         int fds[2];
         assert(pipe(fds) == 0);
         const int flags = fcntl(fds[1], F_GETFL);
@@ -436,6 +477,7 @@ int main(void) {
     random_bytes();
     broken_pipe();
     concurrent_broken_pipe();
+    broken_pipe_still_signals_other_writers();
     broken_pipe_beside_another_thread();
     broken_socket_beside_another_thread();
     pipe_shared_with_a_child();
