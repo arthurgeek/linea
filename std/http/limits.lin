@@ -8,7 +8,9 @@ import std.testing
 // the arena. Timeouts are milliseconds, and zero waits forever.
 // `first_byte_timeout_ms` bounds how long the server waits for the first byte
 // after accepting a connection, so an idle speculative connection is closed
-// without holding the accept loop for the full request timeout.
+// without holding the accept loop for the full request timeout. It bounds the
+// client, not the server: bytes that arrived in time are read however late
+// the server first reads them.
 // `read_timeout_ms` bounds the whole request, head and body together, counted
 // from the moment the connection is accepted, so a client that sends a byte at
 // a time is cut off as surely as a silent one. `write_timeout_ms` bounds each
