@@ -601,10 +601,10 @@ fn std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Releas
         None => {
             {}
         },
-        Some(_linea_derive_2047_1_0_0) => {
+        Some(_linea_derive_2052_1_0_0) => {
             {
                 {
-                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2047_1_0_0)
+                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2052_1_0_0)
                 }
             }
         },
@@ -709,7 +709,7 @@ pub fn std.mem;Slice[UInt8].get(self: std.mem.Slice[UInt8], i: UInt64) -> std.op
 }
 
 internal fn std.mem;write_slice_fd(bytes: std.mem.Slice[UInt8], fd: Int32) -> Int64 {
-    linea_write_some(fd, bytes.at, bytes.len)
+    linea_write_some(fd, std.mem.address;raw[UInt8](slice_address(bytes)), bytes.len)
 }
 
 pub fn std.io.core;IoError.from_os(operation: std.io.core.IoOperation, code: Int32, progress: UInt64 = 0) -> std.io.core.IoError {
@@ -1245,14 +1245,21 @@ pub fn std.option;Option[std.text.Str].unwrap_or(sink self: std.option.Option[st
 
 extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64
 
+internal fn std.mem.address;raw[UInt8](at: std.mem.address.Address[UInt8]) -> UInt64 {
+    let Address(number) = copy(at)
+    number
+}
+
 extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
 
 extern fn linea_io_category(code: Int32) -> UInt8
 
 fn std.mem.SystemAllocator;std.mem;Allocator.dispose(sink b: std.mem.Buffer[std.mem.SystemAllocator]) {
-    let Buffer { at: at, len: _length, allocated: allocated, allocator: allocator, obligation: SystemAllocation {} } = b
+    // The runtime frees the number in an address made from the buffer.
+    let at: std.mem.address.Address[UInt8] = address_in(b, 0)
+    let Buffer { at: _, len: _length, allocated: allocated, allocator: allocator, obligation: SystemAllocation {} } = b
     match allocator {
-        System => linea_free(at, allocated, Buffer.alignment),
+        System => linea_free(std.mem.address;raw[UInt8](at), allocated, Buffer.alignment),
     }
 }
 
