@@ -1159,9 +1159,14 @@ const Typedefs = struct {
 /// comment is replaced by spaces, newlines kept, so a declaration written
 /// inside one is not read; and the contents of every string and character
 /// literal are replaced by spaces, quotes kept, so a `linea_` name or a `/*`
-/// inside one is neither a declaration nor a comment.
-fn scannable(gpa: std.mem.Allocator, text: []const u8) ![]u8 {
+/// inside one is neither a declaration nor a comment. A literal left open at
+/// the end of its line is not C, so what follows it cannot be read: `open`
+/// is where the first such literal starts.
+const Scanned = struct { text: []u8, open: ?usize };
+
+fn scannable(gpa: std.mem.Allocator, text: []const u8) !Scanned {
     const out = try gpa.dupe(u8, text);
+    var open: ?usize = null;
     var j: usize = 0;
     while (j + 1 < out.len) : (j += 1) {
         if (out[j] != '\\') continue;
@@ -1178,12 +1183,14 @@ fn scannable(gpa: std.mem.Allocator, text: []const u8) ![]u8 {
     while (i < out.len) {
         const c = out[i];
         if (c == '"' or c == '\'') {
+            const opening = i;
             i += 1;
             while (i < out.len and out[i] != c and out[i] != '\n') {
                 const step: usize = if (out[i] == '\\' and i + 1 < out.len) 2 else 1;
                 for (out[i .. i + step]) |*byte| byte.* = ' ';
                 i += step;
             }
+            if ((i >= out.len or out[i] == '\n') and open == null) open = opening;
             i += 1;
         } else if (c == '/' and i + 1 < out.len and (out[i + 1] == '/' or out[i + 1] == '*')) {
             const end = if (out[i + 1] == '/')
@@ -1195,7 +1202,7 @@ fn scannable(gpa: std.mem.Allocator, text: []const u8) ![]u8 {
             i = end;
         } else i += 1;
     }
-    return out;
+    return .{ .text = out, .open = open };
 }
 
 /// A preprocessor directive's text after its `#` and any whitespace on either
@@ -1217,8 +1224,10 @@ fn isDirective(text: []const u8, name: []const u8) bool {
 /// conditional block. Which branch of a conditional is compiled depends on the
 /// platform and the build's definitions, which these gates do not evaluate,
 /// so a declaration inside one could be read from a branch never compiled. A
-/// header's include guard, `#ifndef NAME` followed by `#define NAME`, holds
-/// the whole header and is not counted. Directives are read with whitespace
+/// header's include guard, `#ifndef NAME` with `#define NAME` on the very next
+/// line, holds the whole header and is not counted. A guard written with a
+/// blank line or a comment between the two is counted as a conditional, so
+/// its header's declarations are reported unread rather than read. Directives are read with whitespace
 /// before and after the `#`, from text `scannable` has joined.
 const Conditionals = struct {
     at: usize = 0,
@@ -1260,7 +1269,10 @@ const Conditionals = struct {
 /// is recorded only by name, so a declaration naming it is reported unread
 /// and a typedef no declaration names is no failure.
 fn callbackTypedefs(gpa: std.mem.Allocator, written: []const u8, out: *Typedefs) !void {
-    const text = try scannable(gpa, written);
+    const scanned = try scannable(gpa, written);
+    // A typedef after a literal left open is not read, so a prototype naming
+    // it is reported unread.
+    const text = scanned.text[0 .. scanned.open orelse scanned.text.len];
     var conditionals: Conditionals = .{};
     var start: usize = 0;
     while (start < text.len) {
@@ -1381,7 +1393,8 @@ const Unread = struct { symbol: []const u8, why: []const u8 };
 /// unread rather than skipped: a runtime function the table cannot be held to
 /// is a failure, not an omission.
 fn declaredIn(gpa: std.mem.Allocator, written: []const u8, typedefs: *const Typedefs, out: *std.ArrayList(Declared), unread: *std.ArrayList(Unread)) !void {
-    const text = try scannable(gpa, written);
+    const scanned = try scannable(gpa, written);
+    const text = scanned.text;
     var conditionals: Conditionals = .{};
     var at: usize = 0;
     while (std.mem.indexOfPos(u8, text, at, "linea_")) |found| {
@@ -1396,6 +1409,10 @@ fn declaredIn(gpa: std.mem.Allocator, written: []const u8, typedefs: *const Type
         while (end < text.len and (std.ascii.isAlphanumeric(text[end]) or text[end] == '_')) end += 1;
         const symbol = text[found..end];
         if (end >= text.len or text[end] != '(') continue;
+        if (scanned.open) |open| if (found > open) {
+            try unread.append(gpa, .{ .symbol = symbol, .why = "it follows a string or character literal left open on its line" });
+            continue;
+        };
         if (std.mem.startsWith(u8, head, "static")) continue;
         if (conditionals.inside(text, line_start)) {
             try unread.append(gpa, .{ .symbol = symbol, .why = "it is declared inside a conditional block" });
@@ -1565,6 +1582,27 @@ test "a runtime declaration inside a string or character literal is not read" {
     try testing.expectEqual(@as(usize, 1), declared.items.len);
     try testing.expectEqualStrings("linea_close", declared.items[0].symbol);
     try testing.expectEqual(@as(usize, 0), unread.items.len);
+}
+
+test "a runtime declaration after a literal left open on its line is unread" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var declared: std.ArrayList(Declared) = .empty;
+    var unread: std.ArrayList(Unread) = .empty;
+    const no_typedefs: Typedefs = .empty;
+    try declaredIn(gpa,
+        \\long linea_before(int fd);
+        \\static const char *text = "linea_ghost(int fd);
+        \\long linea_after(int fd);
+        \\static const char quote = 'x;
+        \\long linea_close(int fd);
+    , &no_typedefs, &declared, &unread);
+    try testing.expectEqual(@as(usize, 1), declared.items.len);
+    try testing.expectEqualStrings("linea_before", declared.items[0].symbol);
+    try testing.expectEqual(@as(usize, 2), unread.items.len);
+    try testing.expectEqualStrings("linea_after", unread.items[0].symbol);
+    try testing.expectEqualStrings("linea_close", unread.items[1].symbol);
 }
 
 test "a directive is read with whitespace before and after its hash" {

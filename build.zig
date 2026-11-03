@@ -1688,6 +1688,13 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/linea_rt.c", .flags = preempted_flags.items },
         .{ .file = "runtime/preempted_fault_test.c", .flags = runtime_flags.items },
     });
+    var interrupted_flags: std.ArrayList([]const u8) = .empty;
+    interrupted_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    interrupted_flags.append(b.allocator, "-Dmemcmp=linea_test_memcmp") catch @panic("OOM");
+    native.add(native_runtime_step, "native-interrupted-fault-tests", &.{
+        .{ .file = "runtime/linea_rt.c", .flags = interrupted_flags.items },
+        .{ .file = "runtime/interrupted_fault_test.c", .flags = runtime_flags.items },
+    });
 
     const native_task_step = b.step("test-native-task", "Check native task threads, rendezvous sessions, joins, stack overflow reports and concurrent allocation");
     var refused_task_flags: std.ArrayList([]const u8) = .empty;
@@ -1738,7 +1745,9 @@ pub fn build(b: *std.Build) void {
         }
         // The runtime's own tests too, as written and as a sanitized build
         // compiles them, since a test only one platform or one build runs is
-        // otherwise an unused function the others refuse.
+        // otherwise an unused function the others refuse. These objects are
+        // only compiled: the native test steps run the tests on the host, and
+        // the sanitize lanes run them sanitized on Linux.
         var sanitized_test_flags: std.ArrayList([]const u8) = .empty;
         sanitized_test_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
         sanitized_test_flags.append(b.allocator, "-DLINEA_SANITIZED=1") catch @panic("OOM");
@@ -1746,6 +1755,7 @@ pub fn build(b: *std.Build) void {
             "linea_rt_test",
             "storage_busy_test",
             "preempted_fault_test",
+            "interrupted_fault_test",
             "io_test",
             "io_fault_test",
             "net_test",

@@ -1600,10 +1600,13 @@ program's entry, when a task starts a thread, or when the checking runtime
 first allocates. A fault that is not Linea's goes on to the handler the host
 had installed before.
 
-What it never changes: the process-wide disposition of `SIGPIPE`. A write to a
-pipe or socket whose reader has gone answers an error, never a signal,
-without the runtime setting `SIGPIPE` to ignored for the whole process. How
-that works depends on where the write runs:
+What it never changes: the process-wide disposition of `SIGPIPE`. A write
+Linea makes to a pipe or socket whose reader has gone answers an error
+without the runtime setting `SIGPIPE` to ignored for the whole process.
+Whether the signal can still reach some thread of the process depends on the
+system and on which threads are running, as the cases below say, so this is
+what Linea's own writes promise, not a guarantee about every thread a host
+runs:
 
 1. Sockets and ordinary Linea writes, on every system. A socket is written
    with a flag that raises no `SIGPIPE` for that one call. Any other write
