@@ -1733,8 +1733,15 @@ pub fn build(b: *std.Build) void {
         .{ .os = "macos", .query = .{ .cpu_arch = .aarch64, .os_tag = .macos } },
     }) |platform| {
         const platform_target = b.resolveTargetQuery(platform.query);
+        // `linea_rt.c` is built three ways, each keeping code the others leave
+        // out: checking storage, plain, and as a sanitized build compiles it.
+        var sanitized_runtime_flags: std.ArrayList([]const u8) = .empty;
+        sanitized_runtime_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+        sanitized_runtime_flags.append(b.allocator, "-DLINEA_SANITIZED=1") catch @panic("OOM");
         for ([_]struct { name: []const u8, file: []const u8, flags: []const []const u8 }{
-            .{ .name = "linea_rt", .file = "runtime/linea_rt.c", .flags = checked_flags.items },
+            .{ .name = "linea_rt_checked", .file = "runtime/linea_rt.c", .flags = checked_flags.items },
+            .{ .name = "linea_rt", .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+            .{ .name = "linea_rt_sanitized", .file = "runtime/linea_rt.c", .flags = sanitized_runtime_flags.items },
             .{ .name = "io", .file = "runtime/io.c", .flags = runtime_flags.items },
             .{ .name = "net", .file = "runtime/net.c", .flags = runtime_flags.items },
             .{ .name = "clock", .file = "runtime/clock.c", .flags = runtime_flags.items },

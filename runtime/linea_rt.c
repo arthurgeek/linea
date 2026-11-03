@@ -112,17 +112,23 @@ static pthread_once_t thread_record_once = PTHREAD_ONCE_INIT;
  * `pthread_setspecific`; neither is on POSIX's async-signal-safe list, and
  * on Linux and macOS each reads or writes the calling thread's own slot
  * without allocating or locking. The count is 64 bits wide on the platforms
- * the runtime builds for, so it does not wrap. */
+ * the runtime builds for, so it does not wrap. Only the checking runtime and
+ * macOS's fault handler compare threads, so only they keep tokens. */
+#if LINEA_CHECK_STORAGE || (defined(__APPLE__) && !defined(LINEA_SANITIZED))
+#define LINEA_THREAD_TOKENS 1
 static pthread_key_t thread_token_key;
 static unsigned long last_thread_token = 0;
-typedef char linea_token_count_is_lock_free[__atomic_always_lock_free(sizeof last_thread_token, 0) ? 1 : -1];
+typedef char linea_token_count_is_lock_free[__atomic_always_lock_free(sizeof(unsigned long), 0) ? 1 : -1];
+#endif
 
 static void create_thread_record_key(void) {
     if (pthread_key_create(&thread_record_key, 0) != 0) fail("linea: the runtime cannot create its thread record key\n");
+#if defined(LINEA_THREAD_TOKENS)
     if (pthread_key_create(&thread_token_key, 0) != 0) fail("linea: the runtime cannot create its thread token key\n");
+#endif
 }
 
-#if LINEA_CHECK_STORAGE || (defined(__APPLE__) && !defined(LINEA_SANITIZED))
+#if defined(LINEA_THREAD_TOKENS)
 /* The calling thread's token, or zero where it has claimed none. */
 static unsigned long thread_token(void) {
     return (unsigned long)(uintptr_t)pthread_getspecific(thread_token_key);
