@@ -32664,6 +32664,8 @@ const Checker = struct {
 
         const may_recur = try self.callsMayRecur(owner);
         defer self.gpa.free(may_recur);
+        const component = try self.recurrenceComponents(owner);
+        defer self.gpa.free(component);
 
         for (self.calls.items) |call| {
             const from = owner[call.at.index()];
@@ -32683,7 +32685,7 @@ const Checker = struct {
                 }
             }
             if (!grows) continue;
-            if (!try self.reaches(call, from, starts, calls)) continue;
+            if (!try self.reaches(call, from, starts, calls, component)) continue;
 
             _ = self.report(
                 .t_poly_rec,
@@ -32857,6 +32859,108 @@ const Checker = struct {
         return result;
     }
 
+    /// The strongly connected component of every declaration, numbered by
+    /// Tarjan's algorithm over a graph with an edge from a declaration to what
+    /// each call in its body reaches (`recurrenceTarget`) and from a signature
+    /// to every member supplying it. That holds every step `Reachability`
+    /// takes: a direct call to its target, a dispatched one to the chosen
+    /// member or to every member of its signature. A declaration outside the
+    /// root's component never calls back into it.
+    ///
+    /// Without this, each recurrence query walks everything its root reaches,
+    /// every supplier of every trait it calls included, so a library of many
+    /// implementations pays for all of them once per growing call. Work and
+    /// storage follow declarations, calls and supplied members.
+    fn recurrenceComponents(self: *const Checker, owner: []const DeclId) ![]u32 {
+        const count = self.ast.declCount();
+        const starts = try self.gpa.alloc(u32, count + 1);
+        defer self.gpa.free(starts);
+        @memset(starts, 0);
+        for (self.calls.items) |call| {
+            const from = owner[call.at.index()];
+            if (from == .none) continue;
+            if (self.recurrenceTarget(call) == null) continue;
+            starts[from.index() + 1] += 1;
+        }
+        for (0..count) |i| starts[i + 1] += @intCast(self.supply.membersOf(DeclId.at(@intCast(i))).len);
+        for (1..count + 1) |i| starts[i] += starts[i - 1];
+        const targets = try self.gpa.alloc(u32, starts[count]);
+        defer self.gpa.free(targets);
+        const cursor = try self.gpa.dupe(u32, starts[0..count]);
+        defer self.gpa.free(cursor);
+        for (self.calls.items) |call| {
+            const from = owner[call.at.index()];
+            if (from == .none) continue;
+            const target = self.recurrenceTarget(call) orelse continue;
+            targets[cursor[from.index()]] = @intCast(target.index());
+            cursor[from.index()] += 1;
+        }
+        for (0..count) |i| {
+            for (self.supply.membersOf(DeclId.at(@intCast(i)))) |member| {
+                targets[cursor[i]] = member;
+                cursor[i] += 1;
+            }
+        }
+
+        const unvisited = std.math.maxInt(u32);
+        const order = try self.gpa.alloc(u32, count);
+        defer self.gpa.free(order);
+        @memset(order, unvisited);
+        const low = try self.gpa.alloc(u32, count);
+        defer self.gpa.free(low);
+        const on_stack = try self.gpa.alloc(bool, count);
+        defer self.gpa.free(on_stack);
+        @memset(on_stack, false);
+        const component = try self.gpa.alloc(u32, count);
+        errdefer self.gpa.free(component);
+        var stack: std.ArrayList(u32) = .empty;
+        defer stack.deinit(self.gpa);
+        // A declaration being visited and the next of its edges to follow.
+        const Entered = struct { node: u32, next: u32 };
+        var visits: std.ArrayList(Entered) = .empty;
+        defer visits.deinit(self.gpa);
+        var visited: u32 = 0;
+        var components: u32 = 0;
+        for (0..count) |first| {
+            if (order[first] != unvisited) continue;
+            var enter: ?u32 = @intCast(first);
+            while (true) {
+                if (enter) |v| {
+                    order[v] = visited;
+                    low[v] = visited;
+                    visited += 1;
+                    try stack.append(self.gpa, v);
+                    on_stack[v] = true;
+                    try visits.append(self.gpa, .{ .node = v, .next = starts[v] });
+                    enter = null;
+                }
+                const top = &visits.items[visits.items.len - 1];
+                const v = top.node;
+                if (top.next < starts[v + 1]) {
+                    const w = targets[top.next];
+                    top.next += 1;
+                    if (order[w] == unvisited) {
+                        enter = w;
+                    } else if (on_stack[w]) low[v] = @min(low[v], order[w]);
+                    continue;
+                }
+                _ = visits.pop();
+                if (low[v] == order[v]) {
+                    while (stack.pop()) |w| {
+                        on_stack[w] = false;
+                        component[w] = components;
+                        if (w == v) break;
+                    }
+                    components += 1;
+                }
+                if (visits.items.len == 0) break;
+                const parent = visits.items[visits.items.len - 1].node;
+                low[parent] = @min(low[parent], low[v]);
+            }
+        }
+        return component;
+    }
+
     /// Both own and implementation arguments use the same structural growth
     /// measure, including parameters determined only by trait arguments.
     fn instantiatesLarger(
@@ -32882,6 +32986,10 @@ const Checker = struct {
         root: DeclId,
         starts: []const u32,
         calls: []const ExprId,
+        /// `recurrenceComponents`: a call is followed only into the root's
+        /// component, since no declaration outside it calls back into the
+        /// root, so nothing recorded there reaches the root's parameters.
+        component: []const u32,
         frames: std.AutoHashMapUnmanaged(DeclId, Frame) = .empty,
         queue: std.ArrayList(DeclId) = .empty,
         origins: std.AutoHashMapUnmanaged(DeclId, types_mod.ImplementationParameters) = .empty,
@@ -33194,6 +33302,7 @@ const Checker = struct {
                         if (choice.declaredImplementation()) |selected| {
                             const row = c.builder.implementations[selected.index()];
                             if (c.supply.memberOf(row.decl, signature)) |member| {
+                                if (!self.withRoot(member)) return;
                                 const frame = try self.enqueue(member, own, choice.impl_args);
                                 try self.transfer(recorded.selection.own_args, frame.own.len, member, false, scan, true);
                                 try self.transfer(choice.impl_args, frame.implementation.len, member, true, scan, false);
@@ -33210,12 +33319,14 @@ const Checker = struct {
                 }
                 for (c.supply.membersOf(signature)) |supplier| {
                     const member = DeclId.at(supplier);
+                    if (!self.withRoot(member)) continue;
                     const frame = try self.enqueue(member, own, &.{});
                     try self.transfer(recorded.selection.own_args, frame.own.len, member, false, scan, true);
                     try self.supplierArguments(member, implementation, frame, scan);
                 }
                 return;
             }
+            if (!self.withRoot(target)) return;
             const implementation = try self.arguments(recorded.selection.impl_args, scan);
             defer c.gpa.free(implementation);
             const written = try c.recurrenceArguments(recorded, target);
@@ -33225,6 +33336,10 @@ const Checker = struct {
             const frame = try self.enqueue(target, direct, implementation);
             try self.transfer(written, frame.own.len, target, false, scan, true);
             try self.transfer(recorded.selection.impl_args, frame.implementation.len, target, true, scan, true);
+        }
+
+        fn withRoot(self: *const Reachability, declaration: DeclId) bool {
+            return self.component[declaration.index()] == self.component[self.root.index()];
         }
 
         fn supplierArguments(self: *Reachability, member: DeclId, key: types_mod.CallImpl, frame: Frame, scan: *Scan) !void {
@@ -33452,8 +33567,9 @@ const Checker = struct {
         root: DeclId,
         starts: []const u32,
         calls: []const ExprId,
+        component: []const u32,
     ) std.mem.Allocator.Error!bool {
-        var reachability: Reachability = .{ .checker = self, .root = root, .starts = starts, .calls = calls };
+        var reachability: Reachability = .{ .checker = self, .root = root, .starts = starts, .calls = calls, .component = component };
         defer reachability.deinit();
         return reachability.run(first);
     }

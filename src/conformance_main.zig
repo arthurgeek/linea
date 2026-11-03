@@ -3006,6 +3006,43 @@ fn genericPositiveCycleModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// `n` pairs of functions that call each other, the first with a larger type
+/// argument and the second with a fixed one, so each pair recurs with a
+/// bounded height. The second calls a trait operation on a value whose type
+/// is the first's own parameter, which every one of the `n` implementations
+/// may answer, and none of which calls back into the pair.
+fn boundedRecursionsBesideSuppliersModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    std.debug.assert(n > 0);
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll(
+        "trait Show { fn show(self: Self) -> UInt8 }\n" ++
+            "impl Show for UInt8 { fn show(self: Self) -> UInt8 { self } }\n" ++
+            "@copyable\nstruct Wrap[phantom T] {}\n" ++
+            "impl[T] Show for Wrap[T] { fn show(_self: Self) -> UInt8 { 0 } }\n",
+    );
+    for (0..n) |i| try w.print("@copyable\nstruct Shown{d} {{}}\nimpl Show for Shown{d} {{ fn show(_self: Self) -> UInt8 {{ 1 }} }}\n", .{ i, i });
+    for (0..n) |i| {
+        try w.print(
+            "fn grow{d}[T: Show](value: T, n: UInt8) -> UInt8 {{\n" ++
+                "    if n == 0 {{ return Show.show(value) }}\n" ++
+                "    let wrapped: Wrap[T] = .{{}}\n" ++
+                "    settle{d}(wrapped, value, n - 1)\n" ++
+                "}}\n" ++
+                "fn settle{d}[W: Show, T: Show](wrapped: W, value: T, n: UInt8) -> UInt8 {{\n" ++
+                "    if n == 0 {{ return Show.show(value) }}\n" ++
+                "    grow{d}(Show.show(wrapped), n - 1)\n" ++
+                "}}\n",
+            .{ i, i, i, i },
+        );
+    }
+    try w.writeAll("fn main() -> UInt8 {\n    var shown: UInt8 = 0\n");
+    for (0..n) |i| try w.print("    let shown{d}: Shown{d} = .{{}}\n    shown = Show.show(shown{d}) + grow{d}(UInt8(0), 3) - 1\n", .{ i, i, i, i });
+    try w.writeAll("    shown\n}\n");
+    return out.toOwnedSlice();
+}
+
 test "generic graph sweeps check shared DAGs and reject positive cycles" {
     for ([_]u32{ 3, 6 }) |n| {
         const shared = try genericSharedDagModule(testing.allocator, n);
@@ -3014,6 +3051,9 @@ test "generic graph sweeps check shared DAGs and reject positive cycles" {
         const growing = try genericPositiveCycleModule(testing.allocator, n);
         defer testing.allocator.free(growing);
         _ = try treeCost(testing.allocator, testing.io, growing, .{ .refused = .t_poly_rec });
+        const bounded = try boundedRecursionsBesideSuppliersModule(testing.allocator, n);
+        defer testing.allocator.free(bounded);
+        _ = try treeCost(testing.allocator, testing.io, bounded, .check);
     }
 }
 
@@ -6971,6 +7011,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "generic shared DAG checking", .n = 8, .cost = throughTreeBatch(genericSharedDagModule, .check, 128) },
     .{ .name = "generic trait-selected shared DAG checking", .n = 8, .cost = throughTreeBatch(genericTraitSelectedSharedDagModule, .check, 128) },
     .{ .name = "generic positive cycle checking", .n = 500, .cost = throughTreeBatch(genericPositiveCycleModule, .{ .refused = .t_poly_rec }, 1) },
+    .{ .name = "bounded recursions beside many suppliers", .n = 1000, .cost = throughTreeBatch(boundedRecursionsBesideSuppliersModule, .check, 1) },
     .{ .name = "locals in one body", .n = 16000, .cost = throughTheTree(deepModule) },
     .{ .name = "conditional loop exits", .n = 8000, .cost = throughTheTree(conditionalLoopExitsModule) },
     .{ .name = "small ownership deltas", .n = 2000, .cost = throughTheTree(smallOwnershipDeltasModule) },
