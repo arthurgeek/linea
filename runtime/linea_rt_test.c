@@ -162,12 +162,16 @@ static void host_mask_is_blocked(void) {
     assert(host_faults == 1 && usr1_blocked && fault_blocked);
 }
 
+#if !defined(LINEA_SANITIZED)
 /* With `SA_NODEFER`, the host's handler runs with the fault's signal
- * unblocked, so a fault inside it reaches it again. */
+ * unblocked, so a fault inside it reaches it again. A sanitized runtime
+ * installs no fault handler, and the thread sanitizer runs every handler with
+ * all signals blocked, so only the unsanitized runtime is held to this. */
 static void host_nodefer_leaves_the_fault_unblocked(void) {
     host_fault_with(host_on_fault_noting_mask, (unsigned)SA_NODEFER);
     assert(host_faults == 1 && usr1_blocked && !fault_blocked);
 }
+#endif
 
 /* A host handler that notes a fault and returns without repairing it. */
 static void host_on_fault_returning(int signal, siginfo_t *info, void *context) {
@@ -747,7 +751,9 @@ int main(void) {
      * its own in that child. */
     exits_cleanly(host_handlers_survive);
     exits_cleanly(host_mask_is_blocked);
+#if !defined(LINEA_SANITIZED)
     exits_cleanly(host_nodefer_leaves_the_fault_unblocked);
+#endif
     ends_by_memory_fault(host_resethand_handler_ends);
     exits_cleanly(host_repairs_in_two_steps);
     exits_cleanly(host_polls);
