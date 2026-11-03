@@ -216,17 +216,21 @@ static void host_polls(void) {
     assert(host_faults == 5);
 }
 
+#if defined(__APPLE__)
 /* A host handler that returns without repairing anything. */
 static void host_on_fault_ignoring(int signal, siginfo_t *info, void *context) {
     (void)signal;
     (void)info;
     (void)context;
 }
+#endif
 
+#if defined(__APPLE__)
 static void *load_from(void *page) {
     (void)*(volatile char *)page;
     return 0;
 }
+#endif
 
 /* Sixteen threads each fault without end on a page of their own, and the
  * host's handler repairs nothing: each thread's run of faults is recorded
@@ -234,6 +238,7 @@ static void *load_from(void *page) {
  * process ends by the fault once the runs have lasted their second. */
 enum { faulting_threads = 16 };
 
+#if defined(__APPLE__)
 static void unrepaired_faults_on_many_threads(void) {
     install_host_handler(host_on_fault_ignoring, 0);
     pthread_t threads[faulting_threads];
@@ -244,6 +249,7 @@ static void unrepaired_faults_on_many_threads(void) {
     }
     for (int i = 0; i < faulting_threads; i += 1) assert(pthread_join(threads[i], 0) == 0);
 }
+#endif
 
 /* A host handler that leaves the repair to another thread: it yields and
  * returns, and the access faults again until the repair lands. */
@@ -288,6 +294,7 @@ static void host_repairs_from_another_thread_late(void) {
     host_repairs_from_another_thread();
 }
 
+#if defined(__APPLE__)
 /* A host handler that takes 20 ms and repairs nothing. */
 static void host_on_fault_slowly(int signal, siginfo_t *info, void *context) {
     (void)signal;
@@ -296,7 +303,9 @@ static void host_on_fault_slowly(int signal, siginfo_t *info, void *context) {
     struct timespec pause_for = {0, 20000000};
     nanosleep(&pause_for, 0);
 }
+#endif
 
+#if defined(__APPLE__)
 static void host_slow_handler_repairs_nothing(void) { host_fault_with(host_on_fault_slowly, 0); }
 
 /* Eight threads each fault without end on a page of their own. */
@@ -310,12 +319,15 @@ static void unrepaired_faults_on_eight_threads(void) {
     }
     for (int i = 0; i < 8; i += 1) assert(pthread_join(threads[i], 0) == 0);
 }
+#endif
 
+#if defined(__APPLE__)
 static double seconds_now(void) {
     struct timespec now;
     assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
     return (double)now.tv_sec + (double)now.tv_nsec / 1e9;
 }
+#endif
 
 /* Runs `body` in a child and checks it was ended by the default action of a
  * memory fault, SIGSEGV or SIGBUS. */
@@ -345,6 +357,7 @@ static void ends_by_memory_fault(void (*body)(void)) {
     assert(WIFSIGNALED(status) && (WTERMSIG(status) == SIGSEGV || WTERMSIG(status) == SIGBUS));
 }
 
+#if defined(__APPLE__)
 /* Runs `body` in a child, checks it was ended by a memory fault, and checks
  * that took between `at_least` and `at_most` seconds. */
 static void ends_by_memory_fault_after(void (*body)(void), double at_least, double at_most) {
@@ -354,6 +367,7 @@ static void ends_by_memory_fault_after(void (*body)(void), double at_least, doub
     if (took < at_least || took > at_most) fprintf(stderr, "the faulting process ended after %.3f s\n", took);
     assert(took >= at_least && took <= at_most);
 }
+#endif
 
 /* A signal stack too small to hold the thread's record is refused, and
  * leaves the thread's alternate signal stack as it was. */

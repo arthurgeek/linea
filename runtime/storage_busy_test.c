@@ -68,6 +68,9 @@ int linea_test_nanosleep(const struct timespec *duration, struct timespec *left)
     return nanosleep(duration, left);
 }
 
+/* The tests below read faults through the runtime's fault handler, which a
+ * sanitized runtime does not install. */
+#if !defined(LINEA_SANITIZED)
 static void *allocate(void *unused) {
     (void)unused;
     (void)linea_alloc(16, 8);
@@ -292,6 +295,7 @@ static void aborts_in_time_saying(void (*body)(void), const char *expected) {
     assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
     assert(strcmp(said, expected) == 0);
 }
+#endif
 
 int main(void) {
     /* A sanitized runtime installs no fault handler and leaves faults to the

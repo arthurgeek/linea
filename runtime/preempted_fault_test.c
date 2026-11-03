@@ -30,6 +30,7 @@ int linea_test_clock_gettime(clockid_t clock, struct timespec *now) {
     return 0;
 }
 
+#if defined(__APPLE__) && !defined(LINEA_SANITIZED)
 /* A host handler that repairs nothing. */
 static void host_on_fault_ignoring(int signal, siginfo_t *info, void *context) {
     (void)signal;
@@ -79,6 +80,7 @@ static void ends_by_memory_fault(void (*body)(void)) {
     }
     assert(WIFSIGNALED(status) && (WTERMSIG(status) == SIGSEGV || WTERMSIG(status) == SIGBUS));
 }
+#endif
 
 int main(void) {
     /* Only macOS hides `SA_RESETHAND`, so only there does the runtime end a

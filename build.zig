@@ -1736,6 +1736,29 @@ pub fn build(b: *std.Build) void {
             const name = b.fmt("{s}_{s}", .{ input.name, platform.os });
             native_runtime_step.dependOn(&runtimeObject(b, platform_target, name, b.path(input.file), input.flags).step);
         }
+        // The runtime's own tests too, as written and as a sanitized build
+        // compiles them, since a test only one platform or one build runs is
+        // otherwise an unused function the others refuse.
+        var sanitized_test_flags: std.ArrayList([]const u8) = .empty;
+        sanitized_test_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+        sanitized_test_flags.append(b.allocator, "-DLINEA_SANITIZED=1") catch @panic("OOM");
+        for ([_][]const u8{
+            "linea_rt_test",
+            "storage_busy_test",
+            "preempted_fault_test",
+            "io_test",
+            "io_fault_test",
+            "net_test",
+            "net_fault_test",
+            "clock_test",
+            "clock_fault_test",
+            "task_test",
+            "task_fault_test",
+        }) |test_name| {
+            const file = b.path(b.fmt("runtime/{s}.c", .{test_name}));
+            native_runtime_step.dependOn(&runtimeObject(b, platform_target, b.fmt("{s}_{s}", .{ test_name, platform.os }), file, runtime_flags.items).step);
+            native_runtime_step.dependOn(&runtimeObject(b, platform_target, b.fmt("{s}_{s}_sanitized", .{ test_name, platform.os }), file, sanitized_test_flags.items).step);
+        }
     }
 
     // The runtime objects are compiled for the baseline CPU of the target
