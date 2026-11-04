@@ -551,468 +551,225 @@ fn std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Releas
 }
 
 fn std.io.core.IoOperation;std.fmt;Display.fmt[std.io.core.Gathered](self: std.io.core.IoOperation, inout w: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] {
-    match read self {
+    let text_after = match read self {
         Read => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Read")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Read"
             }
-            return .Ok(())
         },
         Write => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Write")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Write"
             }
-            return .Ok(())
         },
         Flush => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Flush")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Flush"
             }
-            return .Ok(())
         },
         Close => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Close")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Close"
             }
-            return .Ok(())
         },
         Open => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Open")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Open"
             }
-            return .Ok(())
         },
         Metadata => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Metadata")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Metadata"
             }
-            return .Ok(())
         },
         Permissions => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Permissions")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Permissions"
             }
-            return .Ok(())
         },
         Publish => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Publish")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Publish"
             }
-            return .Ok(())
         },
         Remove => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Remove")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Remove"
             }
-            return .Ok(())
         },
         Random => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Random")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Random"
             }
-            return .Ok(())
         },
         Listen => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Listen")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Listen"
             }
-            return .Ok(())
         },
         Accept => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Accept")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Accept"
             }
-            return .Ok(())
         },
         Connect => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Connect")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Connect"
             }
-            return .Ok(())
         },
         Configure => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Configure")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Configure"
             }
-            return .Ok(())
         },
     }
+    std.io.core.Gathered;std.io.core;Writer.write_str(&w, text_after)
 }
 
 fn std.io.core.IoCategory;std.fmt;Display.fmt[std.io.core.Gathered](self: std.io.core.IoCategory, inout w: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] {
-    match read self {
+    let text_after = match read self {
         Other => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Other")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Other"
             }
-            return .Ok(())
         },
         NotFound => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "NotFound")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "NotFound"
             }
-            return .Ok(())
         },
         PermissionDenied => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "PermissionDenied")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "PermissionDenied"
             }
-            return .Ok(())
         },
         AlreadyExists => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "AlreadyExists")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "AlreadyExists"
             }
-            return .Ok(())
         },
         WouldBlock => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "WouldBlock")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "WouldBlock"
             }
-            return .Ok(())
         },
         BrokenPipe => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "BrokenPipe")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "BrokenPipe"
             }
-            return .Ok(())
         },
         Interrupted => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Interrupted")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Interrupted"
             }
-            return .Ok(())
         },
         InvalidInput => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "InvalidInput")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "InvalidInput"
             }
-            return .Ok(())
         },
         NotDirectory => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "NotDirectory")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "NotDirectory"
             }
-            return .Ok(())
         },
         IsDirectory => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "IsDirectory")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "IsDirectory"
             }
-            return .Ok(())
         },
         Unsupported => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Unsupported")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Unsupported"
             }
-            return .Ok(())
         },
         NoSpace => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "NoSpace")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "NoSpace"
             }
-            return .Ok(())
         },
         ResourceExhausted => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "ResourceExhausted")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "ResourceExhausted"
             }
-            return .Ok(())
         },
         Symlink => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "Symlink")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "Symlink"
             }
-            return .Ok(())
         },
         InvalidDescriptor => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "InvalidDescriptor")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "InvalidDescriptor"
             }
-            return .Ok(())
         },
         NoProgress => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "NoProgress")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "NoProgress"
             }
-            return .Ok(())
         },
         InvalidProgress => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "InvalidProgress")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "InvalidProgress"
             }
-            return .Ok(())
         },
         TimedOut => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "TimedOut")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "TimedOut"
             }
-            return .Ok(())
         },
         ConnectionReset => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "ConnectionReset")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "ConnectionReset"
             }
-            return .Ok(())
         },
         ConnectionRefused => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "ConnectionRefused")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "ConnectionRefused"
             }
-            return .Ok(())
         },
         AddressInUse => {
-            std.io.core.Gathered;std.io.core;Writer.write_str(&w, "AddressInUse")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Gathered;std.io.core;Writer.write_str(&w, ")")?
-                }
+            {
+                "AddressInUse"
             }
-            return .Ok(())
         },
     }
+    std.io.core.Gathered;std.io.core;Writer.write_str(&w, text_after)
 }
 
 fn UInt64;std.fmt;Display.fmt[std.io.core.Gathered](self: UInt64, inout w: std.io.core.Gathered) -> std.result.Result[(),std.io.core.IoError] {
