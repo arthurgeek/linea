@@ -1,0 +1,50 @@
+// `count` calls `Show.show` at a receiver it knows only by its bound, so the
+// call may reach every implementation of `Show`, and `Echo`'s calls `count`
+// again; on that cycle every call passes the value at the type it was given.
+// `measure` is handed an array of the value, a larger type, and its
+// implementation calls nothing back, so the program stands.
+trait Show {
+    fn show[U: Copyable](self: Self, depth: UInt8, value: U) -> UInt8
+}
+
+trait Measure {
+    fn measure[U: Copyable](self: Self, value: U) -> UInt8
+}
+
+struct Plain {
+    size: UInt8,
+}
+
+struct Echo {
+    size: UInt8,
+}
+
+impl Show for Plain {
+    fn show[U: Copyable](self: Plain, _depth: UInt8, _value: U) -> UInt8 {
+        self.size
+    }
+}
+
+impl Show for Echo {
+    fn show[U: Copyable](self: Echo, depth: UInt8, value: U) -> UInt8 {
+        count(Plain { size = self.size }, depth, value)
+    }
+}
+
+impl Measure for Plain {
+    fn measure[U: Copyable](self: Plain, _value: U) -> UInt8 {
+        self.size
+    }
+}
+
+fn count[R: Show, U: Copyable](receiver: R, depth: UInt8, value: U) -> UInt8 {
+    if depth == 0 {
+        0
+    } else {
+        Measure.measure(Plain { size = 1 }, [copy(value)]) + Show.show(receiver, depth - 1, value)
+    }
+}
+
+fn main() -> UInt8 {
+    count(Echo { size = 2 }, 2, UInt8(1))
+}

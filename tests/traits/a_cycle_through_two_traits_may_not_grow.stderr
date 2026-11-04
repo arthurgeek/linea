@@ -1,0 +1,5 @@
+error[T-PolyRec]: this call instantiates `outer` with more than it was given
+  --> tests/traits/a_cycle_through_two_traits_may_not_grow.lin:37:9
+   |
+37 |         Outer.outer(Shell { size = size }, depth - 1, [copy(value)]) + 1
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls
