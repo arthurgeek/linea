@@ -3220,7 +3220,9 @@ An `if` whose condition reads at least one descriptor and is built only from
 `Bool` and `UInt64` descriptors, integer and `Bool` literals, `!`, `&&`, `||`,
 comparisons and parentheses is decided during expansion, separately for each
 case and component. Expansion writes only the selected branch, as a block, or
-an empty block when the condition is false and there is no `else`. The branch
+an empty block when the condition is false and there is no `else`. An `if`
+without `else` has type `()` whichever branch is kept, so its block must be
+`()` as an ordinary one's must. The branch
 not selected is not part of that case's generated code, so it is neither
 checked nor run there, and a declaration only that branch used is unused there.
 A descriptor's value does not depend on traversal order, so a condition decides

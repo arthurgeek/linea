@@ -35,7 +35,8 @@ format spec is the plain `Str` literal it spells. Each value is written as
 An `if` whose condition reads at least one descriptor and is built only from
 `Bool` and `UInt64` descriptors, integer and `Bool` literals, `!`, `&&`, `||`,
 comparisons and parentheses is decided during expansion. Only the selected
-branch is written, as a block.
+branch is written, as a block. An `if` without `else` keeps type `()`, so its
+selected block must be `()`, as at run time.
 
 `reflect.case.component_count` joins the case descriptors, so a template can
 tell a case with no components from one with some.

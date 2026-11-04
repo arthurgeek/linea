@@ -823,17 +823,26 @@ const Renderer = struct {
         try self.endOrigin(origin);
     }
 
-    /// Writes the branch a decided `if` selects, as a block, or an empty
-    /// block where the condition is false and there is no `else`.
+    /// Writes the branch a decided `if` selects: its block, or the `if` an
+    /// `else if` selects. An `if` without `else` has type `()` whichever
+    /// branch is kept, so a selected block is bound to `_: ()`, and a false
+    /// condition writes an empty block.
     fn renderDecision(self: *Renderer, plan: DecisionPlan, state: RenderState) RenderError!void {
         const origin = try self.beginOrigin(plan.conditional, state);
         const conditional = self.ast.conditional(plan.conditional);
         const metadata = self.plan.metadata[plan.metadata_start..plan.metadata_end];
-        const branch = if (try self.evaluate(conditional.cond, metadata, state) != 0) conditional.then else conditional.otherwise;
-        if (branch == ExprId.none) {
-            try self.append("{}");
+        const selected = try self.evaluate(conditional.cond, metadata, state) != 0;
+        if (conditional.otherwise == ExprId.none) {
+            if (selected) {
+                const span = self.ast.exprSpan(conditional.then);
+                try self.append("{\nlet _: () = ");
+                try self.renderRange(span.start, span.end, state);
+                try self.append("\n}");
+            } else {
+                try self.append("{}");
+            }
         } else {
-            const span = self.ast.exprSpan(branch);
+            const span = self.ast.exprSpan(if (selected) conditional.then else conditional.otherwise);
             try self.renderRange(span.start, span.end, state);
         }
         try self.endOrigin(origin);

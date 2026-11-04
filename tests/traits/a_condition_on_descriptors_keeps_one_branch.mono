@@ -28,12 +28,16 @@ fn Point;;Tally.tally(value: Point, inout total: UInt8) {
             {
                 {
                     {
-                        total = total + 1
+                        let _: () = {
+                            total = total + 1
+                        }
                     }
                 }
                 {
                     {
-                        total = total + 1
+                        let _: () = {
+                            total = total + 1
+                        }
                     }
                 }
             }
@@ -47,7 +51,9 @@ fn Shape;;Tally.tally(value: Shape, inout total: UInt8) {
         Dot => {
             {}
             {
-                total = total + 100
+                let _: () = {
+                    total = total + 100
+                }
             }
         },
         Box(_linea_derive_7_1_0_0, _linea_derive_7_1_1_0, _linea_derive_7_1_2_0) => {
@@ -59,12 +65,16 @@ fn Shape;;Tally.tally(value: Shape, inout total: UInt8) {
                 }
                 {
                     {
-                        total = total + 1
+                        let _: () = {
+                            total = total + 1
+                        }
                     }
                 }
                 {
                     {
-                        total = total + 1
+                        let _: () = {
+                            total = total + 1
+                        }
                     }
                 }
             }
