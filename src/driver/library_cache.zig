@@ -111,8 +111,8 @@ const lock_wait_ns: i96 = 60 * std.time.ns_per_s;
 /// several commands missing one entry at once one checks and writes it and
 /// the others wait and read it. The lock is an advisory lock on `NAME.lock`,
 /// which the system releases when its holder exits, however it exits; a
-/// command that waits says so once, and after `wait_ns` checks without the
-/// cache.
+/// command that waits says so once on a terminal, and after `wait_ns`
+/// checks without the cache.
 fn openWaiting(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest, modules: []const []const u8, wait_ns: i96) !?*CheckedLibrary {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -127,7 +127,9 @@ fn openWaiting(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest,
     const lock = cache.createFile(io, lock_name, .{ .truncate = false }) catch return null;
     defer lock.close(io);
     if (!(lock.tryLock(io, .exclusive) catch return null)) {
-        std.debug.print("linea: waiting for another command to check the standard library into {s}\n", .{dir});
+        // Said to a person watching, never into captured output, where
+        // whether a command waited depends on how commands raced.
+        if (std.Io.File.stderr().isTty(io) catch false) std.debug.print("linea: waiting for another command to check the standard library into {s}\n", .{dir});
         const began = std.Io.Timestamp.now(io, .awake);
         while (true) {
             io.sleep(.fromMilliseconds(50), .awake) catch {};

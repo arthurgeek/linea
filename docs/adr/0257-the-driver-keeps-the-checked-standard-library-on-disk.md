@@ -69,7 +69,7 @@ user's home.
 
 **One writer per entry.** A command missing an entry takes an advisory lock
 on the entry's `NAME.lock` before it checks the library; another missing the
-same entry says once on standard error that it is waiting, reads the entry
+same entry says once that it is waiting, where standard error is a terminal, reads the entry
 when it appears, and after a minute checks the library itself without the
 cache. The system releases the lock when its holder exits however it exits,
 so no identifier is read and no lock is taken over: a lock file left behind
