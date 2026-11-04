@@ -51,9 +51,7 @@ const Walk = struct {
         const finished = try pool.runMerged(
             gpa,
             self.io,
-            // With the checked-library cache off: parallel programs would each
-            // check and write the same entry into the user's cache.
-            &.{ "env", "LINEA_CACHE_DIR=", self.linea, @tagName(program.command), program.target },
+            &.{ self.linea, @tagName(program.command), program.target },
             .{ .path = directory },
             program_timeout_seconds,
         );

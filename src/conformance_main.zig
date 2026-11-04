@@ -34,6 +34,7 @@ const ExprId = node_mod.ExprId;
 const driver = @import("driver/driver.zig");
 const lexer_dump = @import("lexer/dump.zig");
 const annotated = @import("fmt/annotated.zig");
+const library_cache_mod = @import("driver/library_cache.zig");
 const loader = @import("driver/loader.zig");
 const library = @import("driver/library.zig");
 const InMemoryFile = loader.InMemoryFile;
@@ -1068,8 +1069,13 @@ fn checkTranscript(
     defer if (!keep) std.Io.Dir.cwd().deleteTree(io, relative) catch {};
     const directory = try std.Io.Dir.cwd().realPathFileAlloc(io, relative, gpa);
     // One cache for every transcript of the walk, so the first command to
-    // check a program writes the library and the rest read it.
-    const library_cache = try std.fmt.allocPrint(gpa, "{s}/library-cache", .{scratch});
+    // check a program writes the library and the rest read it: the one the
+    // runner was given, which a build shares between runs, or one in the
+    // walk's scratch.
+    const library_cache = if (environ.getPosix(library_cache_mod.directory_variable)) |named|
+        (if (named.len != 0) named else try std.fmt.allocPrint(gpa, "{s}/library-cache", .{scratch}))
+    else
+        try std.fmt.allocPrint(gpa, "{s}/library-cache", .{scratch});
     try std.Io.Dir.cwd().createDirPath(io, library_cache);
 
     const ran = transcripts.run(gpa, io, .{
@@ -9306,7 +9312,7 @@ fn runSoundness(
     var outcome_stats: OutcomeStats = .{};
     var cache = try OutcomeCache.init(gpa, io, environ.getPosix("PATH"), scratch_dir, runtime_path, options.sanitize);
     cache.stats = &outcome_stats;
-    const prefix = try loader.CheckedLibrary.init(scratch_backing);
+    const prefix = try library_cache_mod.checkedFor(scratch_backing, io, environ, &.{});
     defer prefix.deinit();
     const settings: SoundnessSettings = .{
         .cache = &cache,
@@ -16692,7 +16698,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
 
     const checked_library = initialized: {
         const started = std.Io.Timestamp.now(io, .awake);
-        const prefix = try loader.CheckedLibrary.init(scratch_backing);
+        const prefix = try library_cache_mod.checkedFor(scratch_backing, io, environ, &.{});
         const elapsed = started.durationTo(std.Io.Timestamp.now(io, .awake));
         std.debug.print("conformance: checked library init wall: {d:.3}ms\n", .{
             @as(f64, @floatFromInt(elapsed.nanoseconds)) / std.time.ns_per_ms,
