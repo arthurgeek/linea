@@ -81,8 +81,8 @@ pub const LibraryPrefix = struct {
     seed: Seed,
 
     /// Reuse requires the same closed source prefix and stable interned names.
-    /// Application expansion uses the complete resolver until its generated
-    /// source can be appended to an existing expansion.
+    /// An application's derives and templates expand after the library's
+    /// generated declarations.
     pub fn canResume(self: *const LibraryPrefix, program: *const Program, interner: *const Interner) bool {
         const cached = self.result.expanded.source;
         if (program.modules.len <= cached.modules.len or program.primary.index() < cached.modules.len) return false;
@@ -104,6 +104,9 @@ pub const LibraryPrefix = struct {
         }
         for (program.modules[cached.modules.len..]) |module| {
             if (module.library) return false;
+            // An application's derives expand from the templates the library
+            // planned, which a library deriving nothing never planned.
+            if (self.seed.template_plans != null) continue;
             for (module.decls.start..module.decls.end) |i| {
                 const d = DeclId.at(@intCast(i));
                 switch (program.ast.declTag(d)) {
@@ -183,7 +186,7 @@ pub fn resolveWithPrefix(
     defer parser.deinit();
     const relocation = try parser.appendGenerated(&prefix.result.expanded.source.ast, &prefix.result.expanded.ast);
     var joined = try parser.finish();
-    const expanded = try ExpandedProgram.attachLibraryPrefix(gpa, program, &joined, &names, &prefix.result.expanded, relocation);
+    const expanded = try ExpandedProgram.attachLibraryPrefix(gpa, program, &joined, &names, &prefix.result.expanded, relocation, .{});
     const input: Resumed = .{ .prefix = prefix, .expanded = expanded, .relocation = relocation };
     return resolveInternal(gpa, program, interner, sink, purpose, null, &input);
 }
@@ -203,6 +206,10 @@ const Seed = struct {
     pattern_heads: []const PatternHead,
     inherent_heads: []const InherentHead,
     inherent_selections: []const StringId,
+    /// The library's planned templates, so an application's derive expands
+    /// from them without walking the library's template bodies again. Null
+    /// where the library derives nothing, which planned none.
+    template_plans: ?[]const Resolver.TemplatePlan,
 
     fn capture(gpa: std.mem.Allocator, r: *const Resolver, prelude: []const BindingId) !Seed {
         return .{
@@ -218,6 +225,7 @@ const Seed = struct {
             .pattern_heads = try gpa.dupe(PatternHead, r.pattern_heads.items),
             .inherent_heads = try gpa.dupe(InherentHead, r.inherent_heads.items),
             .inherent_selections = try gpa.dupe(StringId, r.inherent_selections.items),
+            .template_plans = r.prefix_template_plans,
         };
     }
 };
@@ -4053,102 +4061,115 @@ fn resolveInternal(
             defer z.end();
             try r.declareModuleScopes();
         }
+    }
 
-        // Template planning resolves source member annotations and bodies before
-        // expansion. Grow the same builder afterwards so generated expressions
-        // retain source IDs as an exact prefix.
+    // Template planning resolves source member annotations and bodies before
+    // expansion. Grow the same builder afterwards so generated expressions
+    // retain source IDs as an exact prefix.
 
-        var source_constraints = try Constraints.init(gpa, ast);
-        defer source_constraints.deinit(gpa);
-        r.constraints = &source_constraints;
-        var derive_shared_valid = try ast.declTable(gpa, bool, true);
-        defer derive_shared_valid.deinit(gpa);
-        // Template identity and derive targets use the source module scopes. No
-        // body or exact-domain table is read until expansion has frozen the tree.
-        for (program.modules, 0..) |*m, i| {
-            try r.enter(.from(i));
-            for (m.decls.start..m.decls.end) |j| {
-                const d = DeclId.at(@intCast(j));
-                switch (ast.declTag(d)) {
-                    .struct_, .enum_, .newtype => {
-                        const attached = ast.attachedDeriveTraitRange(d).len() != 0;
-                        if (ast.declTag(d) == .newtype and !attached) continue;
-                        r.generic = d;
-                        const errors_before = sink.error_count;
-                        try r.refuseTypeParametersOfOneName(d);
-                        try r.checkBounds(d);
-                        // A derive header is valid when the type's own header
-                        // is: field errors belong to the representation.
-                        const header_valid = sink.error_count == errors_before;
-                        if (attached) {
-                            const params = ast.declTypeParamRange(d);
-                            for (params.start..params.end, 0..) |parameter_index, local_index| {
-                                early_type_parameter_uses[parameter_index] = r.used_type_params.items[local_index];
-                            }
-                            early_bounds_checked.set(d, true);
+    var source_constraints = try Constraints.init(gpa, ast);
+    defer source_constraints.deinit(gpa);
+    r.constraints = &source_constraints;
+    var derive_shared_valid = try ast.declTable(gpa, bool, true);
+    defer derive_shared_valid.deinit(gpa);
+    // Template identity and derive targets use the source module scopes. No
+    // body or exact-domain table is read until expansion has frozen the tree.
+    for (program.modules, 0..) |*m, i| {
+        // A resumed run read the library's headers with the library.
+        if (resumed != null and m.library) continue;
+        try r.enter(.from(i));
+        for (m.decls.start..m.decls.end) |j| {
+            const d = DeclId.at(@intCast(j));
+            switch (ast.declTag(d)) {
+                .struct_, .enum_, .newtype => {
+                    const attached = ast.attachedDeriveTraitRange(d).len() != 0;
+                    if (ast.declTag(d) == .newtype and !attached) continue;
+                    r.generic = d;
+                    const errors_before = sink.error_count;
+                    try r.refuseTypeParametersOfOneName(d);
+                    try r.checkBounds(d);
+                    // A derive header is valid when the type's own header
+                    // is: field errors belong to the representation.
+                    const header_valid = sink.error_count == errors_before;
+                    if (attached) {
+                        const params = ast.declTypeParamRange(d);
+                        for (params.start..params.end, 0..) |parameter_index, local_index| {
+                            early_type_parameter_uses[parameter_index] = r.used_type_params.items[local_index];
                         }
-                        if (ast.declTag(d) != .newtype) {
-                            for (ast.declFields(d)) |field| try r.useRef(field.written);
-                            for (ast.declVariants(d)) |variant| {
-                                for (ast.variantFields(variant)) |field| try r.useRef(field.written);
-                            }
-                            try r.reportUnusedTypeParams(d);
+                        early_bounds_checked.set(d, true);
+                    }
+                    if (ast.declTag(d) != .newtype) {
+                        for (ast.declFields(d)) |field| try r.useRef(field.written);
+                        for (ast.declVariants(d)) |variant| {
+                            for (ast.variantFields(variant)) |field| try r.useRef(field.written);
                         }
-                        if (attached) {
-                            // A type the parser could not name has already been
-                            // reported. Its name slot holds whatever token stood
-                            // there, and a header copied from it names nothing.
-                            const named = ast.declName(d) != .none and ast.tokenTag(ast.declName(d)) == .identifier;
-                            derive_shared_valid.set(d, named and header_valid and r.boundArityHolds(d));
-                            // The type declaration is the shared attached header;
-                            // each trait reference owns its own validity, so one
-                            // unresolved entry cannot suppress a resolved sibling.
-                            for (ast.derive_traits[ast.attachedDeriveTraitRange(d).start..ast.attachedDeriveTraitRange(d).end]) |trait| {
-                                _ = try r.implTraitRef(trait.ref);
-                                for (ast.typeArgs(trait.ref.args)) |arg| try r.useRef(arg);
-                            }
-                        }
-                        r.generic = .none;
-                    },
-                    // What an alias names is read here, so a derive that compares
-                    // written types reads through it.
-                    .alias => {
-                        r.generic = d;
-                        try r.refuseTypeParametersOfOneName(d);
-                        try r.checkBounds(d);
-                        try r.useRef(ast.declReturnRef(d));
                         try r.reportUnusedTypeParams(d);
-                        r.generic = .none;
-                    },
-                    .template_impl => {
-                        r.generic = d;
-                        try r.refuseTypeParametersOfOneName(d);
-                        try r.checkBounds(d);
-                        _ = try r.implTrait(d);
-                        for (ast.typeArgs(ast.declTraitArgs(d))) |arg| try r.useRef(arg);
-                        r.generic = .none;
-                    },
-                    .derive_impl => {
-                        r.generic = d;
-                        const errors_before = sink.error_count;
-                        try r.refuseTypeParametersOfOneName(d);
-                        try r.checkBounds(d);
-                        for (ast.typeArgs(ast.declHead(d).args)) |arg| try r.useRef(arg);
-                        try r.implTarget(d);
-                        derive_shared_valid.set(d, ast.deriveHeadIsValid(d) and sink.error_count == errors_before);
-                        for (ast.deriveTraits(d)) |trait| {
+                    }
+                    if (attached) {
+                        // A type the parser could not name has already been
+                        // reported. Its name slot holds whatever token stood
+                        // there, and a header copied from it names nothing.
+                        const named = ast.declName(d) != .none and ast.tokenTag(ast.declName(d)) == .identifier;
+                        derive_shared_valid.set(d, named and header_valid and r.boundArityHolds(d));
+                        // The type declaration is the shared attached header;
+                        // each trait reference owns its own validity, so one
+                        // unresolved entry cannot suppress a resolved sibling.
+                        for (ast.derive_traits[ast.attachedDeriveTraitRange(d).start..ast.attachedDeriveTraitRange(d).end]) |trait| {
                             _ = try r.implTraitRef(trait.ref);
                             for (ast.typeArgs(trait.ref.args)) |arg| try r.useRef(arg);
                         }
-                        r.generic = .none;
-                    },
-                    else => {},
-                }
+                    }
+                    r.generic = .none;
+                },
+                // What an alias names is read here, so a derive that compares
+                // written types reads through it.
+                .alias => {
+                    r.generic = d;
+                    try r.refuseTypeParametersOfOneName(d);
+                    try r.checkBounds(d);
+                    try r.useRef(ast.declReturnRef(d));
+                    try r.reportUnusedTypeParams(d);
+                    r.generic = .none;
+                },
+                .template_impl => {
+                    r.generic = d;
+                    try r.refuseTypeParametersOfOneName(d);
+                    try r.checkBounds(d);
+                    _ = try r.implTrait(d);
+                    for (ast.typeArgs(ast.declTraitArgs(d))) |arg| try r.useRef(arg);
+                    r.generic = .none;
+                },
+                .derive_impl => {
+                    r.generic = d;
+                    const errors_before = sink.error_count;
+                    try r.refuseTypeParametersOfOneName(d);
+                    try r.checkBounds(d);
+                    for (ast.typeArgs(ast.declHead(d).args)) |arg| try r.useRef(arg);
+                    try r.implTarget(d);
+                    derive_shared_valid.set(d, ast.deriveHeadIsValid(d) and sink.error_count == errors_before);
+                    for (ast.deriveTraits(d)) |trait| {
+                        _ = try r.implTraitRef(trait.ref);
+                        for (ast.typeArgs(trait.ref.args)) |arg| try r.useRef(arg);
+                    }
+                    r.generic = .none;
+                },
+                else => {},
             }
         }
-        try r.checkDeriveTemplates();
+    }
+    try r.checkDeriveTemplates(if (resumed) |input| input.prefix.result.expanded.source.ast.declCount() else 0);
 
-        expanded = try r.expand(source_interner, &derive_shared_valid);
+    // What the tables sized by the syntax covered before expansion: the
+    // source program, or the library's expansion a resumed run continues.
+    const prior_counts = .{ .decls = ast.declCount(), .exprs = ast.exprCount(), .tokens = ast.tokenCount(), .stmts = ast.stmtCount() };
+    if (resumed != null) {
+        r.expanded = &expanded;
+        if (try r.expand(source_interner, &derive_shared_valid, resumed)) |grown| {
+            expanded.deinit(gpa);
+            expanded = grown;
+        }
+    } else {
+        expanded = (try r.expand(source_interner, &derive_shared_valid, null)).?;
         expanded_ready = true;
     }
     r.expanded = &expanded;
@@ -4156,14 +4177,12 @@ fn resolveInternal(
     r.ast = ast;
 
     const source_ast = &program.ast;
-    if (resumed == null) {
-        try r.indexTypeParams(source_ast.declCount(), ast.declCount());
-        try r.targets.appendNTimes(gpa, .none, ast.exprCount() - source_ast.exprCount());
-        try r.spelled.appendNTimes(gpa, .none, ast.exprCount() - source_ast.exprCount());
-        try r.written.appendNTimes(gpa, .none, ast.tokenCount() - source_ast.tokenCount());
-        try r.scope_of_stmt.appendNTimes(gpa, .none, ast.stmtCount() - source_ast.stmtCount());
-        try r.scope_of_expr.appendNTimes(gpa, .none, ast.exprCount() - source_ast.exprCount());
-    }
+    try r.indexTypeParams(prior_counts.decls, ast.declCount());
+    try r.targets.appendNTimes(gpa, .none, ast.exprCount() - prior_counts.exprs);
+    try r.spelled.appendNTimes(gpa, .none, ast.exprCount() - prior_counts.exprs);
+    try r.written.appendNTimes(gpa, .none, ast.tokenCount() - prior_counts.tokens);
+    try r.scope_of_stmt.appendNTimes(gpa, .none, ast.stmtCount() - prior_counts.stmts);
+    try r.scope_of_expr.appendNTimes(gpa, .none, ast.exprCount() - prior_counts.exprs);
 
     constraints = try Constraints.init(gpa, ast);
     errdefer constraints.deinit(gpa);
@@ -4181,7 +4200,7 @@ fn resolveInternal(
         const module = expanded.moduleOf(DeclId.at(part.decl_start));
         try module_of_file.put(gpa, part.file, module);
     }
-    if (resumed == null) try r.registerGeneratedDeclarations();
+    try r.registerGeneratedDeclarations(prior_counts.decls);
 
     // Which implementation each member belongs to, before any annotation is
     // read: an `impl` is written after the members it holds, so a walk in
@@ -4200,7 +4219,7 @@ fn resolveInternal(
         for (expanded.declsOf(.from(i))) |d| {
             // Source representations were resolved before expansion so copied
             // component types retain their bindings and import identities.
-            if (resumed == null and d.index() < source_ast.declCount() and
+            if (d.index() < source_ast.declCount() and
                 (ast.declTag(d) == .struct_ or ast.declTag(d) == .enum_ or ast.declTag(d) == .alias)) continue;
             if (ast.declTag(d) == .impl_) {
                 try r.implTarget(d);
@@ -6236,6 +6255,9 @@ const Resolver = struct {
     pattern_heads: std.ArrayList(PatternHead) = .empty,
     pattern_index_ready: bool = false,
     record_prefix: bool = false,
+    /// The templates expansion planned, kept when `record_prefix` asks for a
+    /// library's continuation rows. They live in the resolution's allocator.
+    prefix_template_plans: ?[]const TemplatePlan = null,
     /// Every internal type under the root and name from which it is reachable.
     /// Kept separately from public types so storage remains linear in
     /// declarations rather than roots multiplied by public declarations.
@@ -9163,8 +9185,9 @@ const Resolver = struct {
         return DeclId.none;
     }
 
-    fn checkDeriveTemplates(self: *Resolver) !void {
-        for (0..self.ast.declCount()) |i| {
+    /// Checks the templates and derive requests declared from `first` on.
+    fn checkDeriveTemplates(self: *Resolver, first: usize) !void {
+        for (first..self.ast.declCount()) |i| {
             const d = DeclId.at(@intCast(i));
             if (self.ast.declTag(d) != .template_impl) continue;
             const trait = self.declReachedBy(self.ast.declTrait(d));
@@ -9184,7 +9207,7 @@ const Resolver = struct {
             gop.value_ptr.* = d;
         }
 
-        for (0..self.ast.declCount()) |i| {
+        for (first..self.ast.declCount()) |i| {
             const d = DeclId.at(@intCast(i));
             const request = self.ast.deriveRequestTraitRange(d);
             if (request.len() == 0) continue;
@@ -9306,6 +9329,39 @@ const Resolver = struct {
         /// the template's module.
         prelude: bool,
     };
+
+    /// A copy of `plans` owning every slice it holds, for a library prefix
+    /// that outlives the expansion which planned them.
+    fn clonePlans(gpa: std.mem.Allocator, plans: []const TemplatePlan) ![]const TemplatePlan {
+        const out = try gpa.alloc(TemplatePlan, plans.len);
+        for (out, plans) |*copy, plan| {
+            const references = try gpa.alloc([]const TemplateFreeReference, plan.free_references.len);
+            for (references, plan.free_references) |*into, from| into.* = try gpa.dupe(TemplateFreeReference, from);
+            const reflected = try gpa.alloc(ReflectionMemberPlan, plan.reflection_members.len);
+            for (reflected, plan.reflection_members) |*into, from| {
+                into.* = from;
+                inline for (@typeInfo(ReflectionMemberPlan).@"struct".fields) |field| {
+                    if (comptime @typeInfo(field.type) == .pointer and !std.mem.eql(u8, field.name, "parameters")) {
+                        @field(into, field.name) = try gpa.dupe(@typeInfo(field.type).pointer.child, @field(from, field.name));
+                    }
+                }
+                const parameters = try gpa.alloc(ParameterPlan, from.parameters.len);
+                for (parameters, from.parameters) |*parameter, original| {
+                    parameter.* = original;
+                    parameter.references = try gpa.dupe(@typeInfo(@TypeOf(original.references)).pointer.child, original.references);
+                }
+                into.parameters = parameters;
+            }
+            copy.* = .{
+                .template = plan.template,
+                .members = try gpa.dupe(TemplateMemberPlan, plan.members),
+                .free_references = references,
+                .reflection_members = reflected,
+                .valid = plan.valid,
+            };
+        }
+        return out;
+    }
 
     const TemplatePlans = struct {
         items: std.ArrayList(TemplatePlan) = .empty,
@@ -9595,12 +9651,13 @@ const Resolver = struct {
     /// Resolves and validates every template once, before any derive copies it.
     /// Member and signature maps are bounded by the one template and trait, and
     /// reference classification happens at ordinary lexical lookup sites.
-    fn planTemplates(self: *Resolver, index: *const DeclIndex) !TemplatePlans {
+    /// Plans the templates declared from `first_decl` on.
+    fn planTemplates(self: *Resolver, index: *const DeclIndex, first_decl: usize) !TemplatePlans {
         var out: TemplatePlans = .{};
         errdefer out.deinit(self.gpa);
         var entered_module: ?ModuleId = null;
 
-        for (0..self.program.ast.declCount()) |i| {
+        for (first_decl..self.program.ast.declCount()) |i| {
             const template = DeclId.at(@intCast(i));
             if (self.program.ast.declTag(template) != .template_impl) continue;
             const trait = self.declReachedBy(self.program.ast.declTrait(template));
@@ -10280,28 +10337,58 @@ const Resolver = struct {
         return .{ .start = TokenId.at(start), .end = TokenId.at(end) };
     }
 
+    /// Expands every derive request the program writes into generated
+    /// declarations. A resumed run expands only the application's requests,
+    /// after the library's generated declarations `resumed` already holds,
+    /// planning from the templates the library planned; it answers null where
+    /// the application requests none, leaving that expansion as it is.
     fn expand(
         self: *Resolver,
         source_interner: *const Interner,
         derive_shared_valid: *const Table(DeclId, bool),
-    ) !ExpandedProgram {
-        for (0..self.program.ast.declCount()) |i| {
+        resumed: ?*const Resumed,
+    ) !?ExpandedProgram {
+        // A resumed run's library declarations, tokens and modules were
+        // expanded with the library; the application's follow them.
+        const library_source = if (resumed) |input| &input.prefix.result.expanded.source.ast else null;
+        const first_decl: usize = if (library_source) |library| library.declCount() else 0;
+        const first_token: usize = if (library_source) |library| library.tokenCount() else 0;
+        const first_module: usize = if (resumed) |input| input.prefix.result.expanded.source.modules.len else 0;
+        // What the generated sources are appended after: the source program,
+        // or the library's expansion a resumed run continues.
+        const prior: *const Ast = if (resumed != null) &self.expanded.?.ast else &self.program.ast;
+        for (first_decl..self.program.ast.declCount()) |i| {
             switch (self.program.ast.declTag(DeclId.at(@intCast(i)))) {
                 .template_impl, .derive_impl => break,
                 .struct_, .enum_, .newtype => if (self.program.ast.attachedDeriveTraitRange(DeclId.at(@intCast(i))).len() != 0) break,
                 else => {},
             }
-        } else return ExpandedProgram.borrowSource(self.gpa, self.program);
+        } else return if (resumed != null) null else try ExpandedProgram.borrowSource(self.gpa, self.program);
 
         var index = try DeclIndex.build(self.gpa, &self.program.ast);
         defer index.deinit(self.gpa);
-        var template_plans = try self.planTemplates(&index);
+        var template_plans = try self.planTemplates(&index, first_decl);
         defer template_plans.deinit(self.gpa);
         var template_members: std.ArrayList(TemplateMemberPlan) = .empty;
         defer template_members.deinit(self.gpa);
         for (template_plans.items.items) |plan| {
             try template_members.appendSlice(self.gpa, plan.members);
         }
+        // The library's plans follow the application's in `items` and are
+        // borrowed from the prefix, so they are found by trait but neither
+        // freed nor added to the application's member plans.
+        const own_plans = template_plans.items.items.len;
+        if (resumed) |input| {
+            for (input.prefix.seed.template_plans orelse &.{}) |plan| {
+                const trait = self.declReachedBy(self.program.ast.declTrait(plan.template));
+                if (trait == .none) continue;
+                const at: u32 = @intCast(template_plans.items.items.len);
+                try template_plans.items.append(self.gpa, plan);
+                try template_plans.by_trait.put(self.gpa, trait, at);
+            }
+        }
+        defer template_plans.items.items.len = own_plans;
+        if (self.record_prefix) self.prefix_template_plans = try clonePlans(self.gpa, template_plans.items.items);
 
         var texts: std.ArrayList([]const u8) = .empty;
         defer {
@@ -10330,7 +10417,7 @@ const Resolver = struct {
         const generated_alias_prefix = "_linea_trait_";
         var source_alias_ordinals: SourceAliasOrdinals = .empty;
         defer source_alias_ordinals.deinit(self.gpa);
-        for (0..self.program.ast.tokenCount()) |i| {
+        for (first_token..self.program.ast.tokenCount()) |i| {
             const id = TokenId.at(@intCast(i));
             if (self.program.ast.tokenTag(id) != .identifier) continue;
             const identifier = self.program.ast.tokenText(id);
@@ -10350,7 +10437,7 @@ const Resolver = struct {
         const next_generated_alias_ordinals = try self.gpa.alloc(u64, self.program.modules.len);
         defer self.gpa.free(next_generated_alias_ordinals);
         @memset(next_generated_alias_ordinals, 0);
-        for (self.program.modules, 0..) |source_module, module_index| {
+        for (self.program.modules[first_module..], first_module..) |source_module, module_index| {
             for (source_module.decls.start..source_module.decls.end) |decl_index| {
                 const source_decl = DeclId.at(@intCast(decl_index));
                 const name = self.program.ast.declName(source_decl);
@@ -10358,12 +10445,18 @@ const Resolver = struct {
                 try occupied_names[module_index].put(self.gpa, self.program.ast.tokenText(name), {});
             }
         }
+        // A resumed run numbers its implementations, requirements and files
+        // after the library's, as one expansion of the whole program does.
+        const implementation_base: u32 = if (resumed != null) @intCast(self.expanded.?.generated_implementations.len) else 0;
+        const requirement_base: u32 = if (resumed != null) @intCast(self.expanded.?.component_requirements.len) else 0;
         var capacity = ExpansionCapacity{
-            .source_domain_end = largestAstDomainEnd(&self.program.ast) orelse std.math.maxInt(u32),
-            .generated_file_end = nextGeneratedFile(&self.program.ast) orelse std.math.maxInt(u32),
+            .source_domain_end = largestAstDomainEnd(prior) orelse std.math.maxInt(u32),
+            .generated_file_end = nextGeneratedFile(prior) orelse std.math.maxInt(u32),
+            .implementation_count = implementation_base,
+            .requirement_count = requirement_base,
         };
 
-        for (0..self.program.ast.declCount()) |i| {
+        for (first_decl..self.program.ast.declCount()) |i| {
             const derive = DeclId.at(@intCast(i));
             const attached = self.program.ast.declTag(derive) != .derive_impl;
             const trait_range = self.program.ast.deriveRequestTraitRange(derive);
@@ -10972,7 +11065,7 @@ const Resolver = struct {
         }
         var used_paths: std.StringHashMapUnmanaged(void) = .empty;
         defer used_paths.deinit(self.gpa);
-        for (self.program.ast.parts) |part| {
+        for (prior.parts) |part| {
             try used_paths.put(self.gpa, std.fs.path.basename(part.path), {});
         }
         var path_ordinal: u32 = 0;
@@ -11003,7 +11096,7 @@ const Resolver = struct {
             self.gpa,
             self.sink,
             &expanded_interner,
-            &self.program.ast,
+            prior,
         );
         defer parser.deinit();
 
@@ -11076,8 +11169,8 @@ const Resolver = struct {
             }
             if (member_at != plan.members.len or generated_impl == .none or
                 generated_import_count != plan.import_targets.len or
-                generated_implementations.items.len != plan.implementation.index() or
-                component_requirements.items.len != plan.requirements_range.start)
+                implementation_base + generated_implementations.items.len != plan.implementation.index() or
+                requirement_base + component_requirements.items.len != plan.requirements_range.start)
             {
                 return error.InvalidGeneratedDeclarationCount;
             }
@@ -11105,7 +11198,24 @@ const Resolver = struct {
         var owned_component_requirements = try component_requirements.toOwnedSlice(self.gpa);
         errdefer self.gpa.free(owned_component_requirements);
         var expanded_ast = try parser.finish();
-        return ExpandedProgram.init(
+        if (resumed) |input| return try ExpandedProgram.attachLibraryPrefix(
+            self.gpa,
+            self.program,
+            &expanded_ast,
+            &expanded_interner,
+            &input.prefix.result.expanded,
+            input.relocation,
+            .{
+                .sources = &generated_sources,
+                .template_members = template_members.items,
+                .implementations = &owned_generated_implementations,
+                .requirements = &owned_component_requirements,
+                .generated = generated.items,
+                .imports = generated_imports.items,
+                .origin_segments = generated_origins.items,
+            },
+        );
+        return try ExpandedProgram.init(
             self.gpa,
             self.program,
             &expanded_ast,
@@ -11323,9 +11433,11 @@ const Resolver = struct {
         );
     }
 
-    fn registerGeneratedDeclarations(self: *Resolver) !void {
+    /// Declares what expansion generated from `first` on: a resumed run's
+    /// library declared its own.
+    fn registerGeneratedDeclarations(self: *Resolver, first: usize) !void {
         const expanded = self.expanded.?;
-        for (self.program.ast.declCount()..expanded.ast.declCount()) |i| {
+        for (first..expanded.ast.declCount()) |i| {
             const d = DeclId.at(@intCast(i));
             if (expanded.ast.declTag(d) == .import_) {
                 self.current = expanded.moduleOf(d);

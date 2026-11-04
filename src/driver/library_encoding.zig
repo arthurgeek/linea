@@ -295,7 +295,7 @@ test "checked library encoding: a decoded library checks and emits every program
         .{ .text = "import std.io\nfn main() -> Result[UInt8, io.IoError] { let name = \"Ada\"\n io.println(\"Hello, {name}!\")?\n .Ok(0) }" },
         .{ .text = "import std.collections\nfn main() -> UInt8 { var v: collections.Vec[UInt8] = .new(); v.push(3); defer v.release(); v.len().to[UInt8]().unwrap_or(0) - 1 }" },
         .{ .text = "fn main() -> UInt8 { let held: UInt8 = 7; let apply = [held] || held; apply() }", .reused = false },
-        .{ .text = "@derive(Equatable)\nstruct Value {}\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = false },
+        .{ .text = "@derive(Equatable)\nstruct Value {}\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = true },
         .{ .text = "export fn square(num: Int32) -> Int32 { num * num }", .reused = true, .library = true },
         .{ .text = "fn main() -> UInt8 { 1 + false }" },
     };

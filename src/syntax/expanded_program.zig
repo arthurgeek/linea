@@ -467,9 +467,24 @@ pub const ExpandedProgram = struct {
         };
     }
 
-    /// Takes ownership of joined syntax and its interner, including on failure.
-    /// Library module IDs and metadata ordinals remain stable; generated syntax
-    /// IDs move after the application's complete source prefix.
+    /// What an application's own derives generated, appended after the
+    /// library's generated declarations by a resumed expansion. Numbered as
+    /// one expansion of the whole program numbers them: implementations,
+    /// requirements and files continue after the library's.
+    pub const Appended = struct {
+        sources: ?*GeneratedSources = null,
+        template_members: []const TemplateMemberPlan = &.{},
+        implementations: ?*[]GeneratedImplementation = null,
+        requirements: ?*[]ComponentRequirement = null,
+        generated: []const GeneratedDecl = &.{},
+        imports: []const GeneratedImport = &.{},
+        origin_segments: []const GeneratedOriginSegment = &.{},
+    };
+
+    /// Takes ownership of joined syntax and its interner, including on failure,
+    /// and of what `appended` owns. Library module IDs and metadata ordinals
+    /// remain stable; generated syntax IDs move after the application's
+    /// complete source prefix, and the application's generated syntax follows.
     pub fn attachLibraryPrefix(
         gpa: std.mem.Allocator,
         source: *const Program,
@@ -477,11 +492,21 @@ pub const ExpandedProgram = struct {
         interner: *Interner,
         cached: *const ExpandedProgram,
         relocation: @import("relocation.zig").Relocation,
+        appended: Appended,
     ) InitError!ExpandedProgram {
         var owned_ast = ast.*;
         ast.* = undefined;
         var owned_interner = interner.*;
         interner.* = .empty;
+        var appended_sources: GeneratedSources = if (appended.sources) |sources| sources.* else .empty;
+        if (appended.sources) |sources| sources.* = .empty;
+        defer appended_sources.deinit(gpa);
+        const appended_implementations: []GeneratedImplementation = if (appended.implementations) |rows| rows.* else &.{};
+        if (appended.implementations) |rows| rows.* = &.{};
+        defer gpa.free(appended_implementations);
+        const appended_requirements: []ComponentRequirement = if (appended.requirements) |rows| rows.* else &.{};
+        if (appended.requirements) |rows| rows.* = &.{};
+        defer gpa.free(appended_requirements);
         var transferred = false;
         errdefer if (!transferred) {
             owned_ast.deinit(gpa);
@@ -490,8 +515,26 @@ pub const ExpandedProgram = struct {
 
         var sources: GeneratedSources = .empty;
         defer sources.deinit(gpa);
-        sources.paths = try dupeStrings(gpa, cached.generated_sources.paths);
-        sources.buffers = try dupeStrings(gpa, cached.generated_sources.buffers);
+        {
+            const paths = try gpa.alloc([]const u8, cached.generated_sources.paths.len + appended_sources.paths.len);
+            @memset(paths, &.{});
+            sources.paths = paths;
+            const buffers = try gpa.alloc([]const u8, cached.generated_sources.buffers.len + appended_sources.buffers.len);
+            @memset(buffers, &.{});
+            sources.buffers = buffers;
+            for (paths[0..cached.generated_sources.paths.len], cached.generated_sources.paths) |*into, from| into.* = try gpa.dupe(u8, from);
+            for (buffers[0..cached.generated_sources.buffers.len], cached.generated_sources.buffers) |*into, from| into.* = try gpa.dupe(u8, from);
+            // The application's sources are moved rather than copied: the
+            // joined syntax was parsed from them.
+            for (paths[cached.generated_sources.paths.len..], @constCast(appended_sources.paths)) |*into, *from| {
+                into.* = from.*;
+                from.* = &.{};
+            }
+            for (buffers[cached.generated_sources.buffers.len..], @constCast(appended_sources.buffers)) |*into, *from| {
+                into.* = from.*;
+                from.* = &.{};
+            }
+        }
         std.debug.assert(owned_ast.parts.len - source.ast.parts.len == sources.buffers.len);
         for (@constCast(owned_ast.parts[source.ast.parts.len..]), 0..) |*part, i| {
             part.path = sources.paths[i];
@@ -505,11 +548,12 @@ pub const ExpandedProgram = struct {
         for (cached.source.ast.derive_traits, 0..) |trait, i| {
             if (trait.ref.name != .none) derive_traits.set(trait.ref.name, .at(@intCast(i)));
         }
-        const generated = try gpa.alloc(GeneratedDecl, cached.ast.declCount() - cached.source.ast.declCount());
+        const library_generated = cached.ast.declCount() - cached.source.ast.declCount();
+        const generated = try gpa.alloc(GeneratedDecl, library_generated + appended.generated.len);
         defer gpa.free(generated);
         var imports: std.ArrayList(GeneratedImport) = .empty;
         defer imports.deinit(gpa);
-        for (generated, 0..) |*entry, i| {
+        for (generated[0..library_generated], 0..) |*entry, i| {
             const decl = DeclId.at(cached.source.ast.declCount() + @as(u32, @intCast(i)));
             const origin = cached.origins.get(decl).?;
             entry.* = .{
@@ -520,9 +564,11 @@ pub const ExpandedProgram = struct {
             const target = cached.import_targets.get(decl);
             if (target != .none) try imports.append(gpa, .{ .decl = relocation.value(decl), .target = target });
         }
-        const segments = try gpa.alloc(GeneratedOriginSegment, cached.origin_segments.len);
+        @memcpy(generated[library_generated..], appended.generated);
+        try imports.appendSlice(gpa, appended.imports);
+        const segments = try gpa.alloc(GeneratedOriginSegment, cached.origin_segments.len + appended.origin_segments.len);
         defer gpa.free(segments);
-        for (segments, cached.origin_segments) |*entry, segment| {
+        for (segments[0..cached.origin_segments.len], cached.origin_segments) |*entry, segment| {
             const origin = cached.origin_rows[segment.origin.index()];
             entry.* = .{
                 .file = relocation.value(segment.file),
@@ -531,15 +577,19 @@ pub const ExpandedProgram = struct {
                 .derive_trait = if (origin.derive_trait == .none) .none else relocation.value(derive_traits.get(origin.derive_trait)),
             };
         }
-        const plans = try gpa.alloc(TemplateMemberPlan, cached.template_members.len);
+        @memcpy(segments[cached.origin_segments.len..], appended.origin_segments);
+        const plans = try gpa.alloc(TemplateMemberPlan, cached.template_members.len + appended.template_members.len);
         defer gpa.free(plans);
-        for (plans, cached.template_members) |*out, row| out.* = relocation.value(row);
-        var implementations = try gpa.alloc(GeneratedImplementation, cached.generated_implementations.len);
+        for (plans[0..cached.template_members.len], cached.template_members) |*out, row| out.* = relocation.value(row);
+        @memcpy(plans[cached.template_members.len..], appended.template_members);
+        var implementations = try gpa.alloc(GeneratedImplementation, cached.generated_implementations.len + appended_implementations.len);
         defer gpa.free(implementations);
-        for (implementations, cached.generated_implementations) |*out, row| out.* = relocation.value(row);
-        var requirements = try gpa.alloc(ComponentRequirement, cached.component_requirements.len);
+        for (implementations[0..cached.generated_implementations.len], cached.generated_implementations) |*out, row| out.* = relocation.value(row);
+        @memcpy(implementations[cached.generated_implementations.len..], appended_implementations);
+        var requirements = try gpa.alloc(ComponentRequirement, cached.component_requirements.len + appended_requirements.len);
         defer gpa.free(requirements);
-        for (requirements, cached.component_requirements) |*out, row| out.* = relocation.value(row);
+        for (requirements[0..cached.component_requirements.len], cached.component_requirements) |*out, row| out.* = relocation.value(row);
+        @memcpy(requirements[cached.component_requirements.len..], appended_requirements);
         transferred = true;
         return init(gpa, source, &owned_ast, &owned_interner, &sources, plans, &implementations, &requirements, generated, imports.items, segments);
     }
@@ -1854,7 +1904,7 @@ test "expanded module roots" {
     defer append_parser.deinit();
     const relocation = try append_parser.appendGenerated(&source.ast, &expanded.ast);
     var joined_ast = try append_parser.finish();
-    var attached = try ExpandedProgram.attachLibraryPrefix(gpa, &application, &joined_ast, &joined_interner, &expanded, relocation);
+    var attached = try ExpandedProgram.attachLibraryPrefix(gpa, &application, &joined_ast, &joined_interner, &expanded, relocation, .{});
     defer attached.deinit(gpa);
     try testing.expectEqual(ModuleId.from(2), attached.moduleOf(.at(5)));
     try testing.expectEqual(ModuleId.from(0), attached.moduleOf(.at(6)));
