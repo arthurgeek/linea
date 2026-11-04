@@ -1991,8 +1991,8 @@ runs faster. All three compute the same results, and `-O 0|1|2|3|s|z` names
 the level on any of them: `linea run hello.lin -O 2` runs the program
 `linea build` would make.
 
-`linea lsp` serves
-editors, and offers the edit a `help:` line names as a quick fix;
+`linea lsp` serves editors, and offers the edit a `help:` line names as a
+quick fix;
 `linea check --error-format=json <path>` writes each diagnostic as one line of
 JSON, with those same edits under `fixes`; `linea fmt --check <path>` reports
 the files the formatter would change without writing them; `linea build --keep` retains the intermediate

@@ -18,9 +18,10 @@ paid for the optimiser each time it ran a program for a few milliseconds.
 The level never changes what a program does. The emitted module carries no
 wrap flags, aliasing metadata or fast-math
 ([0091](0091-the-optimiser-is-given-proofs-not-premises.md)), and the
-conformance runner's `-Dopt-levels=true` holds every corpus case to the same
-exit and output at every level. Choosing a level is a choice of build time
-against run time and nothing else.
+conformance runner's `-Dopt-levels=true`, passed locally when a change touches
+what the optimiser may see, holds every corpus case to the same exit and
+output at every level. Choosing a level is a choice of build time against run
+time and nothing else.
 
 Measured with a ReleaseFast compiler on an Apple M-series machine, best of
 three builds and five runs, `linea build <example> -O <level>`:
@@ -73,28 +74,35 @@ driver picks one by command. The level is still always stated to `cc`, so a
 
 The conformance runner builds every corpus case at `corpus_level`, which is
 `build_level`: a recorded outcome is the program `linea build` ships, and the
-outcome cache keyed by level keeps every recorded outcome. `-Dopt-levels=true`
-covers `-O0` with the other levels.
+outcome cache keyed by level keeps every recorded outcome. CI checks `-O0`
+through what calls `linea run` and `linea test`: the guide's programs, the
+examples' own tests and the command transcripts. `-Dopt-levels=true`, which no
+CI lane passes, holds every corpus case to every level.
 
 ## Consequences
 
 - A large program reaches its first line of output in about half the time
   under `linea run`, and `linea test` builds its test binary as fast.
 - A program run with `linea run` is not the program `linea build` makes. They
-  compute the same answer, which `-Dopt-levels=true` checks, but a program
+  compute the same answer, which `-Dopt-levels=true` checks when passed, but a program
   that computes for a long time runs several times slower under `run`;
   `linea run -O 2` gives the built program's speed.
 - A test that times itself, or a benchmark written as a test, measures
   unoptimised code unless it is run with `-O 2`.
 - The corpus is built at a level `run` does not use by default. A defect that
-  shows only at `-O0` is caught by `-Dopt-levels=true` and the soundness step,
-  not by the default walk.
+  shows only at `-O0` is caught in CI by the soundness step, the guide, the
+  examples' own tests and the transcripts, which build at `-O0`; a corpus case
+  that differs only at `-O0` is caught by `-Dopt-levels=true`, which runs
+  locally, not by the default walk.
+- A project's C sources compile at the program's level, so C code with
+  undefined behaviour may act differently under `run` and `build`. Linea's
+  promise covers the code it emits, not the C a project brings.
 
 ## Alternatives considered
 
 **`-O1` for `run` and `test`.** It keeps nearly all of `-O2`'s run time on
 computing code, but it is nearly all of `-O2`'s build time too: the measured
-saving is 7 to 11 % on the large programs, against 47 to 48 % for `-O0`. It
+saving is 8 to 11 % on the large programs, against 47 to 48 % for `-O0`. It
 would trade almost all of the run time for almost none of the build time
 the change is for.
 
@@ -108,5 +116,5 @@ optimise. Emitting less IR helps every level and is separate work.
 
 **Build the corpus at `run`'s level.** It would make the default walk check
 what a developer runs, and it would change every recorded outcome's cache key
-at once. The corpus records what ships; `-O0` stays covered by
-`-Dopt-levels=true`.
+at once. The corpus records what ships; `-O0` stays covered by the gates
+that call `run` and `test`, and by `-Dopt-levels=true`.

@@ -9247,25 +9247,25 @@ fn levelsAgree(
     io: std.Io,
     cache: *const OutcomeCache,
     failures: *std.ArrayList(Failure),
-    at_default_options: BuildRunOptions,
-    at_default: Ran,
+    at_corpus_options: BuildRunOptions,
+    at_corpus: Ran,
     display_path: []const u8,
     program: ?[]const u8,
 ) !LevelVerdict {
     var verdict: LevelVerdict = .agreed;
     for (toolchain.levels) |level| {
-        if (std.mem.eql(u8, level, at_default_options.opt)) continue;
-        var options = at_default_options;
+        if (std.mem.eql(u8, level, at_corpus_options.opt)) continue;
+        var options = at_corpus_options;
         options.opt = level;
-        options.name = try std.fmt.allocPrint(scratch, "{s}O{s}", .{ at_default_options.name, level });
+        options.name = try std.fmt.allocPrint(scratch, "{s}O{s}", .{ at_corpus_options.name, level });
         const ran = try outcomeOf(scratch, io, cache, options);
         if (ran.tool_failed and ran.tool_missing) return .unbuilt;
-        if (std.mem.eql(u8, ran.text, at_default.text) and std.mem.eql(u8, ran.output, at_default.output)) continue;
+        if (std.mem.eql(u8, ran.text, at_corpus.text) and std.mem.eql(u8, ran.output, at_corpus.output)) continue;
         verdict = .disagreed;
         try failures.append(scratch, .{
             .path = display_path,
             .what = try std.fmt.allocPrint(scratch, "answers differently at -O{s}", .{level}),
-            .expected = try std.fmt.allocPrint(scratch, "at -O{s}:\n{s}--- output ---\n{s}", .{ at_default_options.opt, at_default.text, at_default.output }),
+            .expected = try std.fmt.allocPrint(scratch, "at -O{s}:\n{s}--- output ---\n{s}", .{ at_corpus_options.opt, at_corpus.text, at_corpus.output }),
             .actual = try std.fmt.allocPrint(scratch, "at -O{s}:\n{s}--- output ---\n{s}{s}{s}", .{
                 level,
                 ran.text,
