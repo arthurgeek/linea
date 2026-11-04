@@ -468,6 +468,7 @@ The library tests itself.
   ok    http.a_request_split_into_single_bytes_parses_as_one
   ok    http.a_request_that_leaves_no_room_for_the_response_is_answered_500
   ok    http.a_request_the_handler_never_saw_is_logged_without_an_id
+  ok    http.a_request_timed_out_with_input_unread_is_answered_408
   ok    http.a_request_with_a_body_parses
   ok    http.a_request_without_a_cookie_header_has_no_cookies
   ok    http.a_response_body_is_text_only_when_it_is_held_utf8
@@ -1515,4 +1516,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1512 passed, 0 failed
+  1513 passed, 0 failed
