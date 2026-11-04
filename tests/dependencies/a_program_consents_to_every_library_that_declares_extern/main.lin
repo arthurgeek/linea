@@ -1,11 +1,11 @@
-// `wrap` consents to `descriptors` declaring `extern` functions, and the
+// `wrap` consents to `clock` declaring `extern` functions, and the
 // program, which links them, has to consent too.
 import wrap
 
 fn main() -> UInt8 {
-    if wrap.close(-1) {
-        0
-    } else {
+    if wrap.pause(0) {
         1
+    } else {
+        0
     }
 }

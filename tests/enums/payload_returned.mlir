@@ -14,7 +14,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %rz1 = arith.constant 16 : i64
     %rs1 = llvm.alloca %rz1 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %rz4 = arith.constant 16 : i64
@@ -43,7 +43,7 @@ module {
     %v7 = arith.addi %v6, %p7 : i64 loc("tests/enums/payload_returned.lin":18:19)
     func.return %v7 : i64 loc("tests/enums/payload_returned.lin":18:5)
   }
-  func.func private @"lin.;make"(%sret: !llvm.ptr, %a0: i64) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;make"(%sret: !llvm.ptr, %a0: i64) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 16 : i64
@@ -64,7 +64,7 @@ module {
     "llvm.intr.memcpy"(%sret, %s1, %rl7) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("tests/enums/payload_returned.lin":4:5)
     func.return loc("tests/enums/payload_returned.lin":4:5)
   }
-  func.func private @"lin.;size"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;size"(%a0: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64

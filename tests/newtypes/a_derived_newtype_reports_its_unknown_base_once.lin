@@ -1,0 +1,8 @@
+// A derived newtype whose base names no type is reported at the base, and the
+// derive that cannot read it once, as a derived struct's field is.
+@derive(Equatable)
+type Wrapped[T] = Missing[T]
+
+fn main() -> UInt8 {
+    0
+}

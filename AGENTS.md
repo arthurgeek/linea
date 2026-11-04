@@ -76,8 +76,11 @@ until it is green.
   Intermediates go to `.zig-cache/conformance-scratch` unless `--scratch` names
   another directory. Pass
   `--runtime zig-out/lib/liblinea_rt_checked.a`, the runtime `zig build
-  conformance` uses: it checks storage, and a case recording one of its reports
-  is not run against `liblinea_rt.a`. Run narrowed walks serially. A narrowed
+  conformance` uses: it checks storage, so a case whose program reaches freed or
+  unallocated storage fails. A golden recording one of the checking allocator's
+  reports fails without being run, since no accepted program may reach one; the
+  reports themselves are tested by the runtime's native tests. Run narrowed
+  walks serially. A narrowed
   walk runs that directory's cases and every transcript beneath it, without
   coverage floors, generated programs or examples. A root that is one case (a
   `.lin` file, a `.cmd` transcript, or a directory holding `main.lin`) runs that
@@ -295,16 +298,19 @@ and add its choice bytes to `tests/fuzz/corpus.zig` under `storage` with the
 fix. The step fails when it built or ran fewer programs than it was given, a
 missing tool included.
 
-`-Dsanitize` watches the runtime's C code, every allocation and free through
-the intercepted allocator, leaks at exit, and crashes. It does not watch reads
-or writes in generated Linea code: the IR carries no `sanitize_address`
-attribute, so a stale read in generated code is caught only by
-the compiler refusing the program. `address` is the only sanitizer offered, and
-its leak checker is the only run-time check that ownership abandoned no value.
+`-Dsanitize=address` or `-Dsanitize=thread` watches the runtime's C code and
+the generated Linea code: the emitter marks every function it defines with the
+selected sanitizer's attribute, so a stale read or a data race the compiler
+accepted is reported at run time. It also watches every allocation and free
+through the intercepted allocator, leaks at exit, and crashes. The address
+sanitizer's leak checker is the only run-time check that ownership abandoned
+no value.
 A sanitized walk runs what runs -- the cases recording an exit status, the
 examples and the transcripts that build or run a program -- and generates no
 programs; the corpus-wide frontend and editor properties stay with the
-unsanitized walk.
+unsanitized walk. A case recording the runtime's stack overflow report is not
+run under a sanitizer: the sanitized runtime installs no fault handler and
+leaves that fault to the sanitizer, which reports it in its own words.
 
 `-Dopt-levels=true` builds every corpus case that runs at every optimisation
 level and holds it to the same exit and output. Pass it locally when changing
@@ -382,6 +388,10 @@ These constrain every pass, including ones not yet written.
 
 ## Language constraints
 
+- **Concurrent HTTP serving is non-negotiable.** `http.serve` MUST ALWAYS default
+  to `policy: task.Policy = .Threads(128)`. NEVER degrade it or change its default
+  to `.Sequential`. Any PR, commit, or agent change that defaults `http.serve` to sequential
+  is defective by definition and will be rejected by both source gates and runtime tests.
 - **No operation has undefined behaviour.** Every operation produces a defined
   result or is a diagnosed error, independent of optimisation level. The
   compiler may not optimise on the absence of undefined behaviour.
@@ -427,6 +437,31 @@ branch tip that CI runs must be green.
 A case says what the language means and nothing else. It carries no
 "currently", no note about what the compiler does today versus what it should,
 and the same ban on narration as code comments.
+
+### A broken language promise is a compiler bug
+
+The language promises that an accepted program has no undefined behaviour, no
+data race, no use of freed or moved storage, no abandoned linear value, and no
+set of tasks waiting on each other forever. A program that breaks one of them
+and is accepted is a defect in the compiler, whatever library code it calls:
+the compiler trusted something it did not check. Fixing the library alone
+leaves the next library free to write the same hole.
+
+1. Find the rule that should have refused the program, and what it trusted
+   instead: an annotation it took on faith, a capability derived from a
+   representation that hides what it stands for, an entry point it does not
+   model.
+2. Make that class of program unwritable: a rule, or a certificate held to a
+   library declaration, that refuses every program of the class, not the one
+   reported. Its refusal is a corpus case recorded first, as every case is.
+3. Tie the rule to the compiler's own tables, so a declaration added later is
+   covered without anyone remembering it: a runtime symbol marked in
+   `runtime_symbols.zig`, a declaration named in `RawAccesses`, a soundness
+   matrix cell generated from them.
+4. Then migrate the library code the rule now refuses.
+
+A defect that breaks no promise, such as a wrong answer or a slow path, is
+fixed where it is.
 
 ### Golden files
 

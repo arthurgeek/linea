@@ -189,6 +189,7 @@ pub fn emit(
     module: *const Module,
     table: *FileTable,
     sink: *Sink,
+    options: Options,
 ) (std.mem.Allocator.Error || std.Io.Writer.Error)!bool {
     const zone = tracy.beginZone(@src(), "emit.mlir");
     defer zone.end();
@@ -316,13 +317,13 @@ pub fn emit(
     for (module.functions, 0..) |*f, i| {
         const id = FunctionId.at(@intCast(i));
         if (module.isExternal(id)) continue;
-        try emitFunction(gpa, w, module, f, try table.buildMap(gpa, f.file), table.get(f.file).path, id, file_symbols[f.file.index()].?);
+        try emitFunction(gpa, w, module, f, try table.buildMap(gpa, f.file), table.get(f.file).path, id, file_symbols[f.file.index()].?, options.sanitize);
     }
 
     // Only where something is to be entered. A library holds no entry point, so
     // there is nothing for the runtime to call and no wrapper that could call
     // it -- and an object without one is exactly what a library is.
-    if (module.entry != .none) try emitEntryWrapper(w, module);
+    if (module.entry != .none) try emitEntryWrapper(w, module, options.sanitize);
 
     // What a library is entered through instead: one thunk per export, after
     // every body, so a reader meets a symbol only once its callee is defined.
@@ -330,7 +331,7 @@ pub fn emit(
         const id = FunctionId.at(@intCast(i));
         if (module.isExternal(id)) continue;
         const name = module.exportedNameOf(id) orelse continue;
-        try emitForeignEntry(w, module, f, id, .{ .exported = name });
+        try emitForeignEntry(w, module, f, id, .{ .exported = name }, options.sanitize);
     }
 
     // One C-callable entry per function passed to C as a callback, found in
@@ -347,11 +348,64 @@ pub fn emit(
     }
     for (module.functions, called_back, 0..) |*f, wanted, i| {
         if (!wanted) continue;
-        try emitForeignEntry(w, module, f, FunctionId.at(@intCast(i)), .called_back);
+        try emitForeignEntry(w, module, f, FunctionId.at(@intCast(i)), .called_back, options.sanitize);
     }
 
     try w.writeAll("}\n");
     return true;
+}
+
+/// The LLVM function attribute that makes a body probe each page of a frame
+/// larger than one as it allocates it, inline rather than through a call.
+const probe_stack = "[\"probe-stack\", \"inline-asm\"]";
+
+/// A sanitizer the program is built with, which instruments every function
+/// the module defines, so its reads and writes are watched as the runtime's
+/// C is: a race between two tasks' Linea code, or a read of freed storage in
+/// it, is reported at run time as one in the runtime would be.
+pub const Sanitizer = enum {
+    address,
+    thread,
+
+    /// The LLVM function attribute that has the sanitizer's pass instrument
+    /// a function.
+    fn attribute(self: Sanitizer) []const u8 {
+        return switch (self) {
+            .address => "sanitize_address",
+            .thread => "sanitize_thread",
+        };
+    }
+
+    /// The sanitizer a build names, as `LINEA_SANITIZE` spells it, or null
+    /// for none or a name this emitter does not instrument for.
+    pub fn named(name: ?[]const u8) ?Sanitizer {
+        return std.meta.stringToEnum(Sanitizer, name orelse return null);
+    }
+};
+
+/// What emission is asked to add to the module beyond what the MIR says.
+pub const Options = struct {
+    sanitize: ?Sanitizer = null,
+};
+
+/// Writes `options`' sanitizer attribute as one more entry of a `passthrough`
+/// list that already holds `before` entries.
+fn writeSanitizeEntry(w: *std.Io.Writer, sanitize: ?Sanitizer, before: bool) std.Io.Writer.Error!void {
+    const chosen = sanitize orelse return;
+    if (before) try w.writeAll(", ");
+    try w.print("\"{s}\"", .{chosen.attribute()});
+}
+
+test "a sanitized body names its sanitizer beside its stack probe" {
+    var buffer: [64]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buffer);
+    try writeSanitizeEntry(&w, .thread, true);
+    try testing.expectEqualStrings(", \"sanitize_thread\"", w.buffered());
+    var none = std.Io.Writer.fixed(&buffer);
+    try writeSanitizeEntry(&none, null, true);
+    try testing.expectEqualStrings("", none.buffered());
+    try testing.expectEqual(@as(?Sanitizer, .address), Sanitizer.named("address"));
+    try testing.expectEqual(@as(?Sanitizer, null), Sanitizer.named(null));
 }
 
 /// The MLIR type a runtime signature's scalar is passed as.
@@ -362,7 +416,7 @@ fn mlirType(scalar: runtime_symbols.Scalar) []const u8 {
         .i64, .u64 => "i64",
         .f32 => "f32",
         .f64 => "f64",
-        .ptr => "!llvm.ptr",
+        .ptr, .callback => "!llvm.ptr",
         .unit => unreachable,
     };
 }
@@ -428,11 +482,17 @@ test "owned runtime symbols are declared and called with their table's widths" {
 /// where a program reads its arguments: a second shape for how a program starts
 /// would be a second answer to one question. A module with no entry point has
 /// nothing to wrap, and a library never has one.
-fn emitEntryWrapper(w: *std.Io.Writer, module: *const Module) std.Io.Writer.Error!void {
+fn emitEntryWrapper(w: *std.Io.Writer, module: *const Module, sanitize: ?Sanitizer) std.Io.Writer.Error!void {
     const entry = runtime_symbols.entry_signature;
-    try w.print("  func.func @{s}(%argc: {s}, %argv: {s}) -> {s} {{\n", .{
+    try w.print("  func.func @{s}(%argc: {s}, %argv: {s}) -> {s}", .{
         entry.symbol, mlirType(entry.parameters[0].scalar), mlirType(entry.parameters[1].scalar), mlirType(entry.result),
     });
+    if (sanitize != null) {
+        try w.writeAll(" attributes {passthrough = [");
+        try writeSanitizeEntry(w, sanitize, false);
+        try w.writeAll("]}");
+    }
+    try w.writeAll(" {\n");
     try w.print("    func.call @{s}(%argc, %argv)", .{runtime_symbols.set_args});
     try writeOwnedCallType(w, runtime_symbols.set_args_signature);
     try w.writeAll("\n");
@@ -564,6 +624,7 @@ fn emitForeignEntry(
     mir: *const Mir,
     id: FunctionId,
     entry: ForeignEntry,
+    sanitize: ?Sanitizer,
 ) std.Io.Writer.Error!void {
     // What the thunk itself answers: the declared type, or nothing where that
     // is Unit, because a C function returning void sets no register.
@@ -601,7 +662,17 @@ fn emitForeignEntry(
     }
     // A callback's entry is reached only through the address the program
     // hands C, so the object publishes no symbol for it, as for a body.
-    if (entry == .called_back) try w.writeAll(" attributes {llvm.linkage = #llvm.linkage<internal>}");
+    if (entry == .called_back or sanitize != null) {
+        try w.writeAll(" attributes {");
+        if (entry == .called_back) try w.writeAll("llvm.linkage = #llvm.linkage<internal>");
+        if (sanitize != null) {
+            if (entry == .called_back) try w.writeAll(", ");
+            try w.writeAll("passthrough = [");
+            try writeSanitizeEntry(w, sanitize, false);
+            try w.writeAll("]");
+        }
+        try w.writeAll("}");
+    }
     try w.writeAll(" {\n");
 
     // A value narrower than the convention arrives narrow and is widened the
@@ -689,6 +760,7 @@ fn emitFunction(
     path: []const u8,
     id: FunctionId,
     file_symbol: u32,
+    sanitize: ?Sanitizer,
 ) (std.mem.Allocator.Error || std.Io.Writer.Error)!void {
     // An answer too wide for a register is written into storage the caller
     // owns, handed in as a leading pointer. Asked of the module because the
@@ -726,11 +798,16 @@ fn emitFunction(
     // reaches is the thunk, and the thunk is in this module and references the
     // body. So a library has the shape a program has, and neither has a body
     // the optimiser must keep on the chance of a caller it cannot see.
-    if (mir.return_type == .never) {
-        try w.writeAll(" attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [\"noreturn\"]} {\n");
-    } else {
-        try w.writeAll(" attributes {llvm.linkage = #llvm.linkage<internal>} {\n");
-    }
+    //
+    // Every body probes its stack: a frame larger than a page touches each
+    // page in turn as it grows, so no frame steps over the guard pages below
+    // a thread's stack into memory beyond them, and an overflow faults in the
+    // guard, where the runtime reports it.
+    try w.writeAll(" attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [");
+    if (mir.return_type == .never) try w.writeAll("\"noreturn\", ");
+    try w.writeAll(probe_stack);
+    try writeSanitizeEntry(w, sanitize, true);
+    try w.writeAll("]} {\n");
 
     // The entry block, always first, because a function is entered at the block
     // its text begins with while `Mir` says which block that is. Every slot is
@@ -2300,7 +2377,7 @@ test "trap file symbols ignore unreferenced source prefixes and distinguish equa
         functions[0].file = .from(prefix + 1);
         functions[1].file = .from(prefix);
         var output: std.Io.Writer.Allocating = .init(gpa);
-        try testing.expect(try emit(gpa, &output.writer, &module, &table, &sink));
+        try testing.expect(try emit(gpa, &output.writer, &module, &table, &sink, .{}));
         if (prefix == 0) {
             expected = try gpa.dupe(u8, output.written());
             try testing.expectEqual(@as(usize, 2), std.mem.count(u8, expected, "llvm.mlir.global internal constant @linea_file"));
@@ -2997,7 +3074,7 @@ test "aggregate tail calls use the final return destination only across an empty
         defer map.deinit();
         var output: std.Io.Writer.Allocating = .init(gpa);
         defer output.deinit();
-        try emitFunction(gpa, &output.writer, &module, &mir, &map, source.path, .at(0), 0);
+        try emitFunction(gpa, &output.writer, &module, &mir, &map, source.path, .at(0), 0, null);
         const forwards = shape == .direct or shape == .copied_join;
         try testing.expectEqual(forwards, std.mem.indexOf(u8, output.written(), "func.call @lin.tail(%sret,") != null);
         try testing.expectEqual(!forwards, std.mem.indexOf(u8, output.written(), "%rs") != null);
@@ -3009,12 +3086,19 @@ test "allocator zero facts require the exact library producer" {
     const program_mod = @import("../syntax/program.zig");
     // A declaration whose types or conventions are not the runtime's is
     // refused before anything is emitted ([T-ExternRuntime]).
-    const cases = [_]struct { module: []const u8 = "mem", declaration: []const u8, facts: bool = false, refused: bool = false }{
+    const raw_load = "extern fn linea_raw_load(at: UInt64, len: UInt64, i: UInt64) -> UInt64";
+    const cases = [_]struct { module: []const u8 = "mem", declaration: []const u8, load: []const u8 = raw_load, facts: bool = false, refused: bool = false }{
         .{ .declaration = "extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64", .facts = true },
-        .{ .module = "text", .declaration = "extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64" },
+        // Only `mem` declares the allocator; another module's declaration is
+        // refused before it could produce anything.
+        .{ .module = "text", .declaration = "extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64", .refused = true },
         .{ .declaration = "fn linea_alloc(size: UInt64, align: UInt64) -> UInt64 { size + align }" },
         // A parameter's name is a label, so a renamed one is still the producer.
         .{ .declaration = "extern fn linea_alloc(bytes: UInt64, align: UInt64) -> UInt64", .facts = true },
+        // So is a storage primitive: a renamed parameter still lowers every
+        // call to a checked access, and another signature is refused.
+        .{ .declaration = "extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64", .load = "extern fn linea_raw_load(address: UInt64, len: UInt64, i: UInt64) -> UInt64", .facts = true },
+        .{ .declaration = "extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64", .load = "extern fn linea_raw_load(at: UInt64, len: UInt64, i: UInt64) -> UInt32", .facts = true, .refused = true },
         .{ .declaration = "extern fn linea_alloc(size: UInt32, align: UInt64) -> UInt64", .refused = true },
         .{ .declaration = "extern fn linea_alloc(sink size: UInt64, align: UInt64) -> UInt64", .refused = true },
         .{ .declaration = "extern fn linea_alloc(size: UInt64, align: UInt64 = 8) -> UInt64" },
@@ -3025,8 +3109,8 @@ test "allocator zero facts require the exact library producer" {
         defer arena.deinit();
         const gpa = arena.allocator();
         const text = if (case.facts)
-            try std.fmt.allocPrint(gpa, "{s}\nextern fn linea_raw_load(at: UInt64, len: UInt64, i: UInt64) -> UInt64\n" ++
-                "fn main() -> UInt8 {{ let at = linea_alloc(64, 8); UInt8(linea_raw_load(at, 64, 8)) }}", .{case.declaration})
+            try std.fmt.allocPrint(gpa, "{s}\n{s}\n" ++
+                "fn main() -> UInt8 {{ let at = linea_alloc(64, 8); UInt8(linea_raw_load(at, 64, 8)) }}", .{ case.declaration, case.load })
         else
             try std.fmt.allocPrint(gpa, "{s}\nfn main() -> UInt8 {{ UInt8(linea_alloc(64, 8)) }}", .{case.declaration});
         const source: source_mod.Source = .{ .path = "allocator.lin", .text = text };
@@ -3057,7 +3141,7 @@ test "allocator zero facts require the exact library producer" {
         var table: FileTable = .{};
         _ = try table.add(gpa, source);
         var out: std.Io.Writer.Allocating = .init(gpa);
-        const emitted = try emit(gpa, &out.writer, &module, &table, &sink);
+        const emitted = try emit(gpa, &out.writer, &module, &table, &sink, .{});
         if (!emitted) {
             std.debug.print("\nallocator fixture: {s}\n", .{case.declaration});
             for (sink.list.items) |diagnostic| std.debug.print("{s}\n", .{diagnostic.message});

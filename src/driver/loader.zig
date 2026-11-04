@@ -555,6 +555,26 @@ fn loadInputs(
     };
 }
 
+/// The text the compiler carries for a file of the standard library, by its
+/// path relative to the library's root, or null where it carries none. The
+/// carried files are sorted by path, so one lookup is a binary search.
+fn carriedText(relative: []const u8) ?[]const u8 {
+    const prefix = library.prelude_dir ++ "/";
+    const at = std.sort.binarySearch(InMemoryFile, &library.files, relative, struct {
+        fn order(wanted: []const u8, file: InMemoryFile) std.math.Order {
+            return std.mem.order(u8, wanted, file.path[prefix.len..]);
+        }
+    }.order) orelse return null;
+    return library.files[at].text;
+}
+
+test "the carried standard library is found by its relative paths" {
+    try testing.expect(carriedText("linea.json") != null);
+    try testing.expect(carriedText("mem/buffer.lin") != null);
+    try testing.expect(carriedText("mem/forged.lin") == null);
+    try testing.expect(carriedText("") == null);
+}
+
 /// Whether the root's manifest among `files` names it the standard library.
 fn isStandard(gpa: std.mem.Allocator, files: []const InMemoryFile, root_dir: ?[]const u8) std.mem.Allocator.Error!bool {
     const declared = try declaredGiven(gpa, files, root_dir);
@@ -2224,6 +2244,35 @@ const Loader = struct {
         return .{ .path = path, .text = text };
     }
 
+    /// Refuses a file of a root named `std` whose text is not the one the
+    /// compiler carries at the same path ([M-Standard]). Such a root is
+    /// compiled as the standard library, whose modules alone may declare the
+    /// runtime functions that hand out allocations, descriptors, threads and
+    /// queues, and whose types the checker certifies. The name is anyone's to
+    /// write in a manifest; the carried text is not. Held where the root is
+    /// read from disk, which is what a command builds from; an editor's
+    /// in-memory root, and a test assembling a library from the carried files
+    /// and its own, keep loading.
+    fn holdToCarried(self: *Loader, id: FileId, source: Source) LoadError!void {
+        const spelled = try canonical(self.gpa, source.path);
+        defer self.gpa.free(spelled);
+        const relative = if (self.bound.len == 0)
+            spelled
+        else if (std.mem.startsWith(u8, spelled, self.bound) and spelled.len > self.bound.len and spelled[self.bound.len] == '/')
+            spelled[self.bound.len + 1 ..]
+        else
+            spelled;
+        if (carriedText(relative)) |text| if (std.mem.eql(u8, text, source.text)) return;
+        try self.sink.addErrorFmt(
+            .m_standard,
+            id,
+            .empty,
+            "give the library another name, or build the compiler from this source",
+            "`{s}` is not the standard library this compiler carries, and only that library may be named `std`",
+            .{source.path},
+        );
+    }
+
     /// Loads the module in `dir`, or returns the one already there.
     /// `only` names a single entry file; null takes every `.lin` file in `dir`.
     fn load(self: *Loader, dir: []const u8, only: ?[]const u8, root: RootId) LoadError!ModuleId {
@@ -2245,6 +2294,7 @@ const Loader = struct {
                 if (!std.mem.eql(u8, f.path, one)) continue;
                 const source = try self.sourceFor(f);
                 const id = try self.table.add(self.gpa, source);
+                if (self.program_is_library and root == .primary and self.input == .disk) try self.holdToCarried(id, source);
                 try ids.append(self.gpa, id);
                 try parsed.append(self.gpa, .{ .file = id, .source = source });
             }
@@ -2255,6 +2305,7 @@ const Loader = struct {
                     const f = self.files[i];
                     const source = try self.sourceFor(f);
                     const id = try self.table.add(self.gpa, source);
+                    if (self.program_is_library and root == .primary and self.input == .disk) try self.holdToCarried(id, source);
                     try ids.append(self.gpa, id);
                     try parsed.append(self.gpa, .{ .file = id, .source = source });
                 }
@@ -5604,10 +5655,62 @@ test "checked library reuse and fallback preserve emitted MLIR" {
             try testing.expect(!sink.hasErrors());
             try table.buildMaps(gpa);
             var writer: std.Io.Writer.Allocating = .init(gpa);
-            try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink));
+            try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink, .{}));
             output[i] = writer.written();
         }
         try testing.expectEqualStrings(output[0], output[1]);
+    }
+}
+
+test "a sanitized module instruments every function it defines and only then" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var table: FileTable = .empty;
+    var sink = Sink.init(gpa);
+    var names: Interner = .empty;
+    const files = &.{
+        InMemoryFile{ .path = "main.lin", .text =
+        \\fn twice(value: Int64) -> Int64 {
+        \\    value * 2
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    if twice(2) == 4 { 0 } else { 1 }
+        \\}
+        \\
+        },
+        InMemoryFile{ .path = "linea.json", .text = "{}" },
+    };
+    const program = try loadFromMemory(gpa, &table, &sink, &names, "main.lin", files, .program, true, .borrow);
+    var semantics = try checkProgram(gpa, gpa, &program, &names, &sink, .program);
+    defer semantics.deinit(gpa);
+    try testing.expect(!sink.hasErrors());
+    var module = (try @import("../mir/lower.zig").lowerProgram(gpa, &semantics.expanded, &semantics.res, &semantics.typing, &semantics.disposals, &sink, .program)) orelse return error.TestUnexpectedResult;
+    defer module.deinit(gpa);
+    try table.buildMaps(gpa);
+    const mlir = @import("../backend/mlir.zig");
+    for ([_]?mlir.Sanitizer{ null, .address, .thread }) |sanitize| {
+        var writer: std.Io.Writer.Allocating = .init(gpa);
+        try testing.expect(try mlir.emit(gpa, &writer.writer, &module, &table, &sink, .{ .sanitize = sanitize }));
+        const attribute: []const u8 = if (sanitize) |chosen| switch (chosen) {
+            .address => "\"sanitize_address\"",
+            .thread => "\"sanitize_thread\"",
+        } else "\"sanitize_";
+        // A definition is a `func.func` that opens a body; a declaration of
+        // what the runtime defines has none and is instrumented where it is
+        // compiled.
+        var defined: usize = 0;
+        var lines = std.mem.splitScalar(u8, writer.written(), '\n');
+        while (lines.next()) |line| {
+            if (!std.mem.startsWith(u8, std.mem.trimStart(u8, line, " "), "func.func ")) continue;
+            if (!std.mem.endsWith(u8, line, " {")) continue;
+            defined += 1;
+            const marked = std.mem.indexOf(u8, line, attribute) != null;
+            try testing.expectEqual(sanitize != null, marked);
+        }
+        // The entry wrapper C's `main` calls, `main` and `twice`.
+        try testing.expect(defined >= 3);
     }
 }
 
@@ -5731,11 +5834,59 @@ test "checked unused library delegation resumes generic indexing and traversal" 
         try testing.expect(!sink.hasErrors());
         try table.buildMaps(gpa);
         var writer: std.Io.Writer.Allocating = .init(gpa);
-        try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink));
+        try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink, .{}));
         output[mode] = writer.written();
     }
     try testing.expectEqualStrings(output[0], output[1]);
     try testing.expectEqualDeep(saved_positions, prefix.checked.typing.traversal_positions.get(delegated_traversal).?);
+}
+
+// `view_place` trusts a view's `carried` field to hold the dependencies of
+// its elements, so the View certificate holds that field to
+// `carried: mem.Carried[T]` as it holds `at` and `len`. The library is
+// checked with that line of `std/mem/view.lin` replaced, once as written and
+// once for each changed shape.
+test "the View certificate holds its carried field to mem.Carried of its element" {
+    const written = "    carried: mem.Carried[T],\n";
+    const cases = [_]struct { carried: []const u8, valid: bool }{
+        .{ .carried = "    carried: mem.Carried[T],\n", .valid = true },
+        .{ .carried = "    carried: mem.SystemAllocator,\n", .valid = false },
+        .{ .carried = "    carried: mem.Carried[UInt8],\n", .valid = false },
+        .{ .carried = "    kept: mem.Carried[T],\n", .valid = false },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        const files = try gpa.dupe(InMemoryFile, &library.files);
+        var replaced = false;
+        for (files) |*file| {
+            if (!std.mem.eql(u8, file.path, "std/mem/view.lin")) continue;
+            const at = std.mem.indexOf(u8, file.text, written) orelse return error.TestUnexpectedResult;
+            file.text = try std.mem.concat(gpa, u8, &.{ file.text[0..at], case.carried, file.text[at + written.len ..] });
+            replaced = true;
+        }
+        try testing.expect(replaced);
+        var table: FileTable = .empty;
+        var interner: Interner = .empty;
+        var sink = Sink.init(gpa);
+        var program = try loadFromMemory(gpa, &table, &sink, &interner, library.prelude_dir, files, .program, false, .borrow);
+        program.kind = .library;
+        var resolved = try @import("../sema/resolve.zig").resolveLibraryPrefix(gpa, &program, &interner, &sink);
+        defer resolved.deinit();
+        // A changed shape also leaves the library's own uses of `View` wrong,
+        // so checking ends with an error and the sink is read for the
+        // certificate's.
+        if (@import("../sema/typecheck.zig").typecheckLibraryPrefix(gpa, &resolved.result.expanded, &resolved.result.resolution, &sink)) |checked| {
+            var held = checked;
+            held.deinit();
+        } else |err| if (err != error.InvalidLibraryPrefix) return err;
+        var refused = false;
+        for (sink.items()) |d| {
+            if (std.mem.indexOf(u8, d.message, "View certificate") != null) refused = true;
+        }
+        try testing.expectEqual(!case.valid, refused);
+    }
 }
 
 test "checked construction derives survive library reuse and fallback" {
@@ -5840,7 +5991,7 @@ test "checked construction derives survive library reuse and fallback" {
             try testing.expect(!sink.hasErrors());
             try table.buildMaps(gpa);
             var writer: std.Io.Writer.Allocating = .init(gpa);
-            try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink));
+            try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink, .{}));
             output[mode] = writer.written();
         }
         try testing.expectEqualStrings(output[0], output[1]);

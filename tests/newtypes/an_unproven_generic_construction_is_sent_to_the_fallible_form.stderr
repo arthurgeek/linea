@@ -1,0 +1,5 @@
+error[T-Refine]: `stars` is not known to be in 1..=5
+ --> tests/newtypes/an_unproven_generic_construction_is_sent_to_the_fallible_form.lin:9:32
+  |
+9 |     let rating: Rating[Film] = Rating(stars)
+  |                                ^^^^^^^^^^^^^ make it fallible: `Rating?(stars)`

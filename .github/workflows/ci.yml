@@ -241,6 +241,8 @@ jobs:
   # not watched. What this lane watches is the runtime, every allocation and
   # free through the intercepted allocator, and a leak check at every clean
   # exit -- the only check at run time that ownership abandoned no value.
+  # The thread sanitizer instruments the same C, which holds every
+  # synchronisation between a program's tasks, and reports a race there.
   #
   # So it runs what runs: the cases that record an exit status, the examples
   # and the transcripts that build or run a program, and no generated
@@ -262,11 +264,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # `address` is the one sanitizer offered; the `Sanitize` doc in
-        # `build.zig` records why `memory` was retired and why `thread` was
-        # never offered. A gate in `build.zig` fails the build if this list
-        # and the enum disagree, so no entry can be dropped by forgetting.
-        sanitizer: [address]
+        # Every sanitizer `Sanitize` in `build.zig` offers, each in a run of
+        # its own since the two cannot share a process; its doc records why
+        # `memory` was retired. A gate in `build.zig` fails the build if this
+        # list and the enum disagree, so no entry can be dropped by
+        # forgetting.
+        sanitizer: [address, thread]
     steps:
       - uses: actions/checkout@v7
 
@@ -307,6 +310,13 @@ jobs:
         # compiler's coverage belongs to `check`, and this lane's subject is the
         # runtime and the generated code under the sanitizer.
         run: nix develop --command zig build conformance --release=safe -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB-${{ matrix.sanitizer }}" -Dsanitize=${{ matrix.sanitizer }}
+
+      - name: Runtime C tests under ${{ matrix.sanitizer }}
+        # The runtime's own C tests, built by `cc` with the sanitizer's
+        # runtime linked, so the C the corpus reaches only through programs is
+        # also driven directly: the task tests' threads, sessions and
+        # concurrent allocation included.
+        run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-clock test-native-runtime test-native-task -Dsanitize=${{ matrix.sanitizer }}
 
       - name: Save program outcomes
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}

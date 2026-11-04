@@ -12,8 +12,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #define ADDRESS(p) ((unsigned long)(uintptr_t)(p))
@@ -67,6 +69,195 @@ static void broken_pipe(void) {
     assert(close(pipe_fds[1]) == 0);
 }
 
+struct broken_pipe_arg {
+    int fd;
+    long result;
+};
+
+static void *broken_pipe_worker(void *ptr) {
+    struct broken_pipe_arg *arg = ptr;
+    arg->result = linea_write_some(arg->fd, ADDRESS("x"), 1);
+    return NULL;
+}
+
+static void concurrent_broken_pipe(void) {
+    enum { num_threads = 16 };
+    struct sigaction sa, old_sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = SIG_IGN;
+    assert(sigaction(SIGPIPE, &sa, &old_sa) == 0);
+
+    int pipe_fds[2];
+    assert(pipe(pipe_fds) == 0);
+    assert(close(pipe_fds[0]) == 0);
+
+    pthread_t threads[num_threads];
+    struct broken_pipe_arg args[num_threads];
+    for (int i = 0; i < num_threads; i++) {
+        args[i].fd = pipe_fds[1];
+        args[i].result = 0;
+        assert(pthread_create(&threads[i], NULL, broken_pipe_worker, &args[i]) == 0);
+    }
+    for (int i = 0; i < num_threads; i++) {
+        assert(pthread_join(threads[i], NULL) == 0);
+        assert(args[i].result == -EPIPE);
+    }
+    assert(close(pipe_fds[1]) == 0);
+    assert(sigaction(SIGPIPE, &old_sa, NULL) == 0);
+}
+
+/* A write to a pipe or a socket with no reader answers EPIPE while another
+ * thread, which does not block SIGPIPE, waits for it: the process is not
+ * ended by the signal, whichever thread the system would deliver it to. */
+static void *write_to_broken_pipe(void *ptr) {
+    struct broken_pipe_arg *arg = ptr;
+    arg->result = linea_write_some(arg->fd, ADDRESS("x"), 1);
+    return NULL;
+}
+
+/* Fills `fds` with a pipe's two ends, reading end first. */
+static int open_pipe(int fds[2]) { return pipe(fds); }
+
+/* Fills `fds` with a connected pair of sockets, as a parent process hands a
+ * child for its standard streams. */
+static int open_socket_pair(int fds[2]) { return socketpair(AF_UNIX, SOCK_STREAM, 0, fds); }
+
+void linea_set_args(int argc, char **argv);
+
+/* Starts the runtime as a Linea program's entry does, before the program
+ * starts any thread. */
+static void start_as_a_program(void) {
+    char name[] = "io_test";
+    char *argv[] = {name, NULL};
+    linea_set_args(1, argv);
+}
+
+/* A write to a pipe with no reader changes nothing another writer of that
+ * pipe sees: a child process sharing the pipe, with SIGPIPE at its default
+ * action and unblocked, is still ended by SIGPIPE when it writes. */
+static void broken_pipe_still_signals_other_writers(void) {
+    int fds[2];
+    assert(pipe(fds) == 0);
+    assert(close(fds[0]) == 0);
+    assert(linea_write_some(fds[1], ADDRESS("x"), 1) == -EPIPE);
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        struct sigaction action;
+        memset(&action, 0, sizeof action);
+        action.sa_handler = SIG_DFL;
+        assert(sigemptyset(&action.sa_mask) == 0);
+        assert(sigaction(SIGPIPE, &action, NULL) == 0);
+        sigset_t none;
+        assert(sigemptyset(&none) == 0);
+        assert(sigprocmask(SIG_SETMASK, &none, NULL) == 0);
+        if (write(fds[1], "y", 1) < 0) _exit(errno == EPIPE ? 1 : 2);
+        _exit(3);
+    }
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    if (!WIFSIGNALED(status)) fprintf(stderr, "the other writer exited with %d\n", WEXITSTATUS(status));
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGPIPE);
+    assert(close(fds[1]) == 0);
+}
+
+static void broken_channel_beside_another_thread(int (*open_channel)(int fds[2])) {
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        struct sigaction action;
+        memset(&action, 0, sizeof action);
+        action.sa_handler = SIG_DFL;
+        assert(sigemptyset(&action.sa_mask) == 0);
+        assert(sigaction(SIGPIPE, &action, NULL) == 0);
+        start_as_a_program();
+        int fds[2];
+        assert(open_channel(fds) == 0);
+        assert(close(fds[0]) == 0);
+        struct broken_pipe_arg arg = {fds[1], 0};
+        pthread_t writer;
+        assert(pthread_create(&writer, NULL, write_to_broken_pipe, &arg) == 0);
+        assert(pthread_join(writer, NULL) == 0);
+        if (arg.result != -EPIPE) fprintf(stderr, "the write answered %ld\n", arg.result);
+        _exit(arg.result == -EPIPE ? 0 : 1);
+    }
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    if (WIFSIGNALED(status)) fprintf(stderr, "the writing process ended by signal %d\n", WTERMSIG(status));
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+static void broken_pipe_beside_another_thread(void) { broken_channel_beside_another_thread(open_pipe); }
+static void broken_socket_beside_another_thread(void) { broken_channel_beside_another_thread(open_socket_pair); }
+
+/* Two processes share a full pipe, as a parent and the child it forked
+ * share their standard output, and each blocks in a write to it: the child's
+ * started first. The reader frees one byte at a time until the child's write
+ * finishes, then goes while the parent's write is still waiting. Neither
+ * process is ended by SIGPIPE: the parent's write answers EPIPE. */
+struct small_writes {
+    int fd;
+    long result;
+};
+
+static void *write_until_refused(void *ptr) {
+    struct small_writes *w = ptr;
+    do {
+        w->result = linea_write_some(w->fd, ADDRESS("p"), 1);
+    } while (w->result > 0);
+    return NULL;
+}
+
+static void pipe_shared_with_a_child(void) {
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        struct sigaction action;
+        memset(&action, 0, sizeof action);
+        action.sa_handler = SIG_DFL;
+        assert(sigemptyset(&action.sa_mask) == 0);
+        assert(sigaction(SIGPIPE, &action, NULL) == 0);
+        start_as_a_program();
+        int fds[2];
+        assert(pipe(fds) == 0);
+        const int flags = fcntl(fds[1], F_GETFL);
+        assert(fcntl(fds[1], F_SETFL, flags | O_NONBLOCK) == 0);
+        char fill[4096];
+        memset(fill, 'f', sizeof fill);
+        while (write(fds[1], fill, sizeof fill) > 0) {
+        }
+        assert(fcntl(fds[1], F_SETFL, flags) == 0);
+        const pid_t child = fork();
+        assert(child >= 0);
+        if (child == 0) {
+            assert(close(fds[0]) == 0);
+            _exit(linea_write_some(fds[1], ADDRESS("c"), 1) == 1 ? 0 : 1);
+        }
+        struct timespec pause_for = {0, 100000000};
+        nanosleep(&pause_for, 0);
+        struct small_writes w = {fds[1], 0};
+        pthread_t writer;
+        assert(pthread_create(&writer, NULL, write_until_refused, &w) == 0);
+        nanosleep(&pause_for, 0);
+        int status = 0;
+        char drained;
+        struct timespec between = {0, 10000000};
+        while (waitpid(child, &status, WNOHANG) == 0) {
+            if (read(fds[0], &drained, 1) != 1) _exit(2);
+            nanosleep(&between, 0);
+        }
+        assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+        assert(close(fds[0]) == 0);
+        assert(pthread_join(writer, NULL) == 0);
+        if (w.result != -EPIPE) fprintf(stderr, "the parent's write answered %ld\n", w.result);
+        _exit(w.result == -EPIPE ? 0 : 1);
+    }
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    if (WIFSIGNALED(status)) fprintf(stderr, "the parent writing beside its child ended by signal %d\n", WTERMSIG(status));
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
 static void random_bytes(void) {
     unsigned char bytes[300];
     memset(bytes, 0x55, sizeof(bytes));
@@ -76,6 +267,12 @@ static void random_bytes(void) {
     assert(linea_random_bytes(ADDRESS(bytes), sizeof(bytes)) == 256);
     for (size_t i = 256; i < sizeof(bytes); ++i) assert(bytes[i] == 0x55);
     assert(linea_random_bytes(ADDRESS(bytes + 256), 44) == 44);
+    unsigned long first[2] = {0, 0};
+    unsigned long second[2] = {0, 0};
+    assert(linea_random_words(&first[0], &first[1]) == 0);
+    assert(linea_random_words(&second[0], &second[1]) == 0);
+    /* Two reads of 128 random bits agree with probability 2^-128. */
+    assert(first[0] != second[0] || first[1] != second[1]);
 }
 
 static void short_write(void) {
@@ -249,11 +446,42 @@ static void error_categories(void) {
     assert(linea_io_category(INT_MAX) == LINEA_IO_OTHER);
 }
 
+static void positional_io(void) {
+    char template[] = "/tmp/linea_pos_XXXXXX";
+    int fd = mkstemp(template);
+    assert(fd >= 0);
+    unlink(template);
+
+    assert(linea_read_at(fd, 0, 0, 0) == 0);
+    assert(linea_write_at(fd, 0, 0, 0) == 0);
+    assert(linea_read_at(fd, 0, 1, 0) == -EFAULT);
+    assert(linea_write_at(fd, 0, 1, 0) == -EFAULT);
+
+    assert(linea_write_at(fd, ADDRESS("hello world"), 11, 0) == 11);
+    assert(linea_write_at(fd, ADDRESS("linea"), 5, 6) == 5);
+
+    char buf[16] = {0};
+    assert(linea_read_at(fd, ADDRESS(buf), 5, 0) == 5);
+    assert(memcmp(buf, "hello", 5) == 0);
+
+    memset(buf, 0, sizeof(buf));
+    assert(linea_read_at(fd, ADDRESS(buf), 5, 6) == 5);
+    assert(memcmp(buf, "linea", 5) == 0);
+
+    assert(linea_close(fd) == 0);
+}
+
 int main(void) {
     error_categories();
     transfers();
     random_bytes();
     broken_pipe();
+    concurrent_broken_pipe();
+    broken_pipe_still_signals_other_writers();
+    broken_pipe_beside_another_thread();
+    broken_socket_beside_another_thread();
+    pipe_shared_with_a_child();
+    positional_io();
     short_write();
     searchable_parent();
     filesystem();

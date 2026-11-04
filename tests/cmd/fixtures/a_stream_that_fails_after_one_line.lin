@@ -19,6 +19,13 @@ fn write_report[P: Allocator](inout body: http.BodyWriter[P]) -> Result[(), http
     return .Err(http.error(body.request(), .InternalServerError, "the report's data ran out"))
 }
 
+// `routes` builds the router that answers `GET /report`.
+fn routes() -> http.Router[()] {
+    var router = http.Router.new()
+    http.Router.route_raw(&router, "GET /report", report).unwrap()
+    router
+}
+
 fn main() -> UInt8 {
     let args = env.args()
     let port = match args.at(1) {
@@ -34,16 +41,15 @@ fn main() -> UInt8 {
             return 64
         },
     }
-    var router = http.Router.new()
-    http.Router.route_raw(&router, "GET /report", report).unwrap()
     let listener = net.listen(net.loopback(port)).unwrap()
     let logger = log.to_stderr(minimum: .Info)
     let bound = listener.local_address().unwrap()
     logger.info("listening", log.field("address", bound))
-    var server = http.logged(logger, router)
-    defer server.release()
+    // The one serving task builds its handler with this closure: the report
+    // route, logged to standard error.
+    let server = [logger] || http.logged(copy(logger), routes())
     let limits = http.Limits { connections = .Some(1), ..Default.default() }
-    match http.serve(listener, &server, limits: limits) {
+    match http.serve(listener, server, limits: limits, policy: .Sequential) {
         Ok(_) => 0,
         Err(_) => 1,
     }

@@ -21,6 +21,11 @@ extern fn slice_place[T](owner: Slice[T], i: UInt64) -> T where carries(owner)
 
 extern fn slice_subspan[T](owner: Slice[T], start: UInt64, count: UInt64) -> Slice[T] where carries(owner)
 
+// The address of a slice's first element, which names values of its element
+// type, for a runtime call that reads the slice's bytes. The compiler replaces
+// this declaration.
+extern fn slice_address[T](view: Slice[T]) -> Address[T]
+
 // Process argument spans refer to runtime-owned immutable storage.
 extern fn argument_span(i: UInt64) -> Slice[UInt8]
 

@@ -1,0 +1,5 @@
+error[S-Entry]: copyable and unshareable are exclusive
+ --> tests/decl/attributes/copyable_and_unshareable_are_exclusive/main.lin:5:13
+  |
+5 | @(copyable, unshareable)
+  |             ^^^^^^^^^^^ drop `unshareable` and reach the shared state through a borrow of an `@unshareable` owner

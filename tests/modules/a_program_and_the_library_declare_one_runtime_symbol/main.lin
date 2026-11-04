@@ -1,0 +1,16 @@
+// `std.time` declares `extern fn linea_clock_sleep`, and so does this program.
+// Both declarations name the one function the runtime provides, so waiting
+// through `time.sleep` and waiting through the program's own declaration call
+// the same symbol.
+import std.time
+
+extern fn linea_clock_sleep(nanoseconds: UInt64) -> Int64
+
+fn main() -> UInt8 {
+    time.sleep(time.Duration.from_milliseconds(1))
+    if linea_clock_sleep(1000) < 0 {
+        1
+    } else {
+        0
+    }
+}

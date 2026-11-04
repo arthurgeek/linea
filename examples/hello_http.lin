@@ -86,18 +86,30 @@ fn port_argument() -> Option[UInt16] {
     }
 }
 
+// A serving task's router. `serve` registered the same routes before
+// serving, so registering them here cannot fail.
+fn serving_router() -> http.Router[()] {
+    var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    router
+}
+
 fn serve(port: UInt16) -> UInt8 {
-    var router = http.Router.new()
-    let _ = routes(&router) else |error| {
+    // The routes are registered once here, so a refused pattern is reported
+    // before anything is served.
+    var checked: http.Router[()] = http.Router.new()
+    let _ = routes(&checked) else |error| {
         io.eprintln("cannot register a route: {error}")
-        router.release()
+        checked.release()
         return 2
     }
+    checked.release()
     io.eprintln("listening on http://127.0.0.1:{port}")
-    // `listen_and_serve` opens the listener, answers requests until it fails,
-    // and releases the router. One `else` handles a failure to listen and a
-    // failure while serving.
-    let _ = http.listen_and_serve(net.loopback(port), router) else |error| {
+    // `listen_and_serve` opens the listener and answers many requests at once
+    // until it fails. Each serving task builds its own router with
+    // `serving_router`, so no router is reached by two tasks. One `else`
+    // handles a failure to listen and a failure while serving.
+    let _ = http.listen_and_serve(net.loopback(port), serving_router) else |error| {
         io.eprintln("{error}")
         return 1
     }

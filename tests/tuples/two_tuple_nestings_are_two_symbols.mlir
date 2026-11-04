@@ -15,7 +15,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 32 : i64
@@ -136,7 +136,7 @@ module {
     %v83 = arith.addi %v82, %p83 : i64 loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":25:11)
     func.return %v83 : i64 loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":25:5)
   }
-  func.func private @"lin.;Holder.give[std.tuple.Tuple2[Int64,std.tuple.Tuple2[std.text.Str,Bool]]]"(%a0: !llvm.ptr, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;Holder.give[std.tuple.Tuple2[Int64,std.tuple.Tuple2[std.text.Str,Bool]]]"(%a0: !llvm.ptr, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -151,7 +151,7 @@ module {
     %v3 = arith.extui %iw3 : i8 to i64 loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":12:9)
     func.return %v3 : i64 loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":12:9)
   }
-  func.func private @"lin.;Holder.give[std.tuple.Tuple2[std.tuple.Tuple2[Int64,std.text.Str],Bool]]"(%a0: !llvm.ptr, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;Holder.give[std.tuple.Tuple2[std.tuple.Tuple2[Int64,std.text.Str],Bool]]"(%a0: !llvm.ptr, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -166,7 +166,7 @@ module {
     %v3 = arith.extui %iw3 : i8 to i64 loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":12:9)
     func.return %v3 : i64 loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":12:9)
   }
-  func.func private @"lin.;Holder.give[std.tuple.Tuple2[Int64,std.text.Str]]"(%a0: !llvm.ptr, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;Holder.give[std.tuple.Tuple2[Int64,std.text.Str]]"(%a0: !llvm.ptr, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64

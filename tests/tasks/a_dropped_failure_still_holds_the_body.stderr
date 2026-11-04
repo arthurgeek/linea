@@ -1,0 +1,8 @@
+error[O-Leak]: `_failure` (a linear `task.Unstarted[<closure>]`) is still owned when this path leaves
+  --> tests/tasks/a_dropped_failure_still_holds_the_body.lin:22:13
+   |
+22 |         Err(_failure) => {},
+   |             ^^^^^^^^ never settled on the path that reaches the end of this block
+   |                           - the block ends here
+   |
+   = help: the body is still yours after a failed `prepare`: take it back with `let Unstarted { body, reason } = _failure` and settle it before this path leaves

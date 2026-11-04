@@ -23,6 +23,7 @@ for the code in brackets to reach the rule itself.
 | `O-Borrow` | error | Calling things: [Why captures are written out](02-calling-things.md#why-captures-are-written-out) | [§5.5 What is checked](../linea-semantics.md#55-what-is-checked), at `[O-Borrow]` |
 | `O-Capture` | error | Calling things: [Closures: functions that capture](02-calling-things.md#closures-functions-that-capture) | [§5.2 Matching](../linea-semantics.md#52-matching), at `[O-Capture]` |
 | `O-Copy` | error | Copying, settling and sealing: [`copyable`: values that are safe to duplicate](04-copying-settling-and-sealing.md#copyable-values-that-are-safe-to-duplicate) | [§5.3 Copying](../linea-semantics.md#53-copying), at `[O-Copy]` |
+| `O-Cross` | error | Tasks and sessions: [No data races and no locks](13-tasks-and-sessions.md#no-data-races-and-no-locks) | [§5.5 What is checked](../linea-semantics.md#55-what-is-checked), at `[O-Cross]` |
 | `O-DeferDead` | error | Copying, settling and sealing: [A `defer` and a move](04-copying-settling-and-sealing.md#a-defer-and-a-move) | [§4 Types](../linea-semantics.md#4-types), at `[O-DeferDead]` |
 | `O-Escapes` | error | Borrowing: [What happens if you forget one](06-borrowing.md#what-happens-if-you-forget-one) | [§5.5 What is checked](../linea-semantics.md#55-what-is-checked), at `[O-Escapes]` |
 | `O-Leak` | error | Linea in an hour: [`Vec`: a list that grows](01-linea-in-an-hour.md#vec-a-list-that-grows) | [§5.5 What is checked](../linea-semantics.md#55-what-is-checked), at `[O-Leak]` |

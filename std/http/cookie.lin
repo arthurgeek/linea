@@ -373,20 +373,60 @@ fn is_cookie_path(path: Str) -> Bool {
     true
 }
 
-// A domain is one or more letters, digits, hyphens and dots.
+// A cookie domain is an optional leading dot followed by dot-separated
+// non-empty labels. Each label begins and ends with an ASCII letter or digit,
+// and may contain hyphens in between (RFC 6265 / RFC 1034).
 fn is_cookie_domain(domain: Str) -> Bool {
-    if domain.length() == 0 {
+    let len = domain.length()
+    if len == 0 {
         return false
     }
-    for at in 0..domain.length() {
+    let start_at = if domain.byte(0).unwrap() == ascii_dot {
+        UInt64(1)
+    } else {
+        UInt64(0)
+    }
+    if start_at >= len {
+        // Only a leading dot with no labels.
+        return false
+    }
+    var label_len: UInt64 = 0
+    var last_byte: UInt8 = 0
+    for at in start_at..len {
         let byte = domain.byte(at).unwrap()
-        let letter = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
-        let digit = byte >= ascii_zero && byte <= ascii_nine
-        if !letter && !digit && byte != 45 && byte != ascii_dot {
-            return false
+        if byte == ascii_dot {
+            if label_len == 0 {
+                // Empty label (e.g. consecutive dots or leading dot after start_at).
+                return false
+            }
+            let letter = (last_byte >= 65 && last_byte <= 90) || (last_byte >= 97 && last_byte <= 122)
+            let digit = last_byte >= ascii_zero && last_byte <= ascii_nine
+            if !letter && !digit {
+                return false
+            }
+            label_len = 0
+        } else {
+            let letter = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+            let digit = byte >= ascii_zero && byte <= ascii_nine
+            let hyphen = byte == 45
+            if !letter && !digit && !hyphen {
+                return false
+            }
+            if label_len == 0 {
+                if !letter && !digit {
+                    return false
+                }
+            }
+            label_len += 1
+            last_byte = byte
         }
     }
-    true
+    if label_len == 0 {
+        return false
+    }
+    let letter = (last_byte >= 65 && last_byte <= 90) || (last_byte >= 97 && last_byte <= 122)
+    let digit = last_byte >= ascii_zero && last_byte <= ascii_nine
+    letter || digit
 }
 
 // `has_prefix` tells whether `name` starts with `prefix` under ASCII case
@@ -586,7 +626,7 @@ impl[P: Allocator] Response[P] {
         for path in ["x", "/a b", "/a;b", "/a\r\nb", "/é"] {
             testing.assert_eq(&response.set_cookie("n", "v", path: path), .Err(CookieError.InvalidPath), "a bad path was accepted")?
         }
-        for domain in ["a b", "a;b", "exa/mple.com", "é.com", "a\r\nb"] {
+        for domain in ["a b", "a;b", "exa/mple.com", "é.com", "a\r\nb", ".", "-", "-example.com", "example-.com", "example..com", "example.com."] {
             testing.assert_eq(&response.set_cookie("n", "v", domain: domain), .Err(CookieError.InvalidDomain), "a bad domain was accepted")?
         }
         testing.assert_ok_eq(&response.set_cookie("n", "v", path: "/a/b-c_d%20", domain: ".sub-1.example.com"), (), "a good path and domain were refused")?

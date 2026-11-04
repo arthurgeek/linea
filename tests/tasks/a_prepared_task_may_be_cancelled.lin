@@ -1,0 +1,29 @@
+import std.io
+import std.mem
+import std.session
+import std.task
+
+use mem.Lender
+use session.Chan
+use session.End
+use task.Unstarted
+
+// A slot that will not be started is cancelled: its parked thread is joined,
+// and the body it held comes back without having run.
+fn main() -> Result[UInt8, io.IoError] {
+    defer let arena = mem.Arena.open(mem.system(), 4096)
+    var runs = UInt64(0)
+    let body = sink [inout runs] |sink me: Chan[End]| {
+        runs += 1
+        me.close()
+    }
+    let _unrun = match task.prepare_in(arena.handle(), body, stack: task.default_stack_bytes) {
+        Ok(slot) => slot.cancel(),
+        Err(failure) => {
+            let Unstarted { body, reason: _ } = failure
+            body
+        },
+    }
+    io.println("runs after cancel: {runs}")?
+    .Ok(0)
+}

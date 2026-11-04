@@ -1,0 +1,11 @@
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+  --> tests/tasks/a_session_step_keeps_the_bodys_lend_until_close.lin:18:21
+   |
+12 |     let body = sink [inout count] |sink me: Chan[Send[UInt64, End]]| {
+   |                            ----- lent `inout` here
+18 |     let premature = count
+   |                     ^^^^^ this uses the place while it is lent
+19 |     done.close()
+   |     ---- a value holding the lend is still used here
+   |
+   = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure

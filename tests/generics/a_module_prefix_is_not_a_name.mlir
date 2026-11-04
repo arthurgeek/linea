@@ -15,7 +15,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -88,7 +88,7 @@ module {
     %v30 = arith.addi %v29, %p30 : i64 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:46)
     func.return %v30 : i64 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:5)
   }
-  func.func private @"lin.sub;mk"(%sret: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.sub;mk"(%sret: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     cf.br ^b0
@@ -101,7 +101,7 @@ module {
     "llvm.intr.memcpy"(%sret, %s0, %rl5) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("tests/generics/a_module_prefix_is_not_a_name/sub/sub.lin":6:5)
     func.return loc("tests/generics/a_module_prefix_is_not_a_name/sub/sub.lin":6:5)
   }
-  func.func private @"lin.;g[sub.X,Y]"(%a0: !llvm.ptr, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;g[sub.X,Y]"(%a0: !llvm.ptr, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -113,7 +113,7 @@ module {
     %v0 = arith.constant 1 : i64 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":22:5)
     func.return %v0 : i64 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":22:5)
   }
-  func.func private @"lin.;g[Sub,X[Y]]"(%a0: !llvm.ptr, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;g[Sub,X[Y]]"(%a0: !llvm.ptr, %a1: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -125,13 +125,13 @@ module {
     %v0 = arith.constant 1 : i64 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":22:5)
     func.return %v0 : i64 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":22:5)
   }
-  func.func private @"lin.;Sub.helper"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;Sub.helper"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     cf.br ^b0
   ^b0:
     %v0 = arith.constant 3 : i64 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":27:9)
     func.return %v0 : i64 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":27:9)
   }
-  func.func private @"lin.sub;helper"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.sub;helper"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     cf.br ^b0
   ^b0:
     %v0 = arith.constant 5 : i64 loc("tests/generics/a_module_prefix_is_not_a_name/sub/sub.lin":10:5)

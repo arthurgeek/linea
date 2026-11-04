@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "io.h"
+#include "pipe_signal.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -11,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/random.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #if defined(__linux__)
@@ -85,6 +87,24 @@ long linea_write_some(int fd, unsigned long at, unsigned long len) {
     const int invalid = byte_range(at, len);
     if (invalid != 0) return -(long)invalid;
     if (len == 0) return 0;
+    const void *bytes = (const void *)(uintptr_t)at;
+
+    /* A socket raises no SIGPIPE through `send` with `MSG_NOSIGNAL`. */
+    ssize_t count;
+    do {
+        count = send_without_signal(fd, bytes, (size_t)len);
+    } while (count < 0 && errno == EINTR);
+    if (count >= 0 || errno != ENOTSOCK) return count < 0 ? -(long)errno : (long)count;
+
+    /* Any other descriptor is written with SIGPIPE blocked on this thread,
+     * as `pipe_signal.h` describes. An ignored SIGPIPE needs no block. */
+    struct sigaction action;
+    if (sigaction(SIGPIPE, NULL, &action) == 0 && action.sa_handler == SIG_IGN) {
+        do {
+            count = write(fd, bytes, (size_t)len);
+        } while (count < 0 && errno == EINTR);
+        return count < 0 ? -(long)errno : (long)count;
+    }
 
     sigset_t blocked, previous, pending;
     if (sigemptyset(&blocked) != 0 || sigaddset(&blocked, SIGPIPE) != 0) abort();
@@ -96,14 +116,15 @@ long linea_write_some(int fd, unsigned long at, unsigned long len) {
         return -(long)error;
     }
     const int already_pending = sigismember(&pending, SIGPIPE);
-    ssize_t count;
     do {
-        count = write(fd, (const void *)(uintptr_t)at, (size_t)len);
+        count = write(fd, bytes, (size_t)len);
     } while (count < 0 && errno == EINTR);
     const int error = count < 0 ? errno : 0;
 
-    /* A blocked standard signal coalesces with one already pending. Consume
-     * only a newly generated SIGPIPE; ignored signals need no consumption. */
+    /* A blocked standard signal merges with one already pending, so only a
+     * SIGPIPE this write left pending on this thread is taken. On macOS the
+     * write's SIGPIPE may be pending on another thread instead, which blocks
+     * it for good in a Linea program. */
     if (error == EPIPE && already_pending == 0) {
         if (sigpending(&pending) != 0) abort();
         if (sigismember(&pending, SIGPIPE) == 1) {
@@ -119,6 +140,30 @@ long linea_write_some(int fd, unsigned long at, unsigned long len) {
      * the runtime contract; reporting it as I/O would lose accepted bytes. */
     if (pthread_sigmask(SIG_SETMASK, &previous, NULL) != 0) abort();
     return error != 0 ? -(long)error : (long)count;
+}
+
+long linea_read_at(int fd, unsigned long at, unsigned long len, unsigned long offset) {
+    const int invalid = byte_range(at, len);
+    if (invalid != 0) return -(long)invalid;
+    if (len == 0) return 0;
+    if (offset > (unsigned long)INT64_MAX) return -(long)EOVERFLOW;
+    ssize_t count;
+    do {
+        count = pread(fd, (void *)(uintptr_t)at, (size_t)len, (off_t)offset);
+    } while (count < 0 && errno == EINTR);
+    return count < 0 ? -(long)errno : (long)count;
+}
+
+long linea_write_at(int fd, unsigned long at, unsigned long len, unsigned long offset) {
+    const int invalid = byte_range(at, len);
+    if (invalid != 0) return -(long)invalid;
+    if (len == 0) return 0;
+    if (offset > (unsigned long)INT64_MAX) return -(long)EOVERFLOW;
+    ssize_t count;
+    do {
+        count = pwrite(fd, (const void *)(uintptr_t)at, (size_t)len, (off_t)offset);
+    } while (count < 0 && errno == EINTR);
+    return count < 0 ? -(long)errno : (long)count;
 }
 
 long linea_close(int fd) {
@@ -141,6 +186,18 @@ long linea_random_bytes(unsigned long at, unsigned long len) {
         result = getentropy((void *)(uintptr_t)at, (size_t)count);
     } while (result != 0 && errno == EINTR);
     return result == 0 ? (long)count : -(long)errno;
+}
+
+long linea_random_words(unsigned long *high, unsigned long *low) {
+    uint64_t words[2];
+    int result;
+    do {
+        result = getentropy(words, sizeof(words));
+    } while (result != 0 && errno == EINTR);
+    if (result != 0) return -(long)errno;
+    *high = (unsigned long)words[0];
+    *low = (unsigned long)words[1];
+    return 0;
 }
 
 /* `(memchr)` names the function rather than the macro newer glibc headers

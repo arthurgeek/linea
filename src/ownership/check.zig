@@ -1357,6 +1357,11 @@ const Checker = struct {
     /// named, because a postfix call reaches the type's own first.
     fn settleHelp(self: *const Checker, t: TypeId, lead: []const u8, receiver: ?[]const u8) std.mem.Allocator.Error![]const u8 {
         const arena = self.sink.arena;
+        // A failed preparation holds the body it was given, which owns
+        // something linear, so the edit is to take the body back.
+        if (receiver) |r| if (self.typing.declOfType(t)) |d| if (d == self.typing.raw_accesses.task_unstarted) {
+            return std.fmt.allocPrint(arena, "the body is still yours after a failed `prepare`: take it back with `let Unstarted {{ body, reason }} = {s}` and settle it before this path leaves", .{r});
+        };
         var ops: std.ArrayList([]const u8) = .empty;
         var more = false;
         if (receiver) |r| {
@@ -3958,7 +3963,7 @@ test "ownership result targets isolate borrowed payloads" {
 const DependencyGroup = enum { observations, targets };
 
 fn checkDependencyCases(group: DependencyGroup) !void {
-    const cases = [_]struct { source: []const u8, refused: bool, certified: bool = false, raw_carrier: bool = false, prelude: bool = false, owner_conflict: bool = false, group: DependencyGroup = .observations, readonly_take: bool = false }{
+    const cases = [_]struct { source: []const u8, refused: bool, certified: bool = false, prelude: bool = false, owner_conflict: bool = false, group: DependencyGroup = .observations, readonly_take: bool = false }{
         .{ .source =
         \\struct Owner { value: UInt8 }
         \\fn make(owner: Owner) -> [borrow Owner; 2] where borrows(owner) {
@@ -4558,39 +4563,6 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         \\}
         , .refused = false, .certified = true },
         .{ .source =
-        \\@copyable enum Option[T] { None, Some(T) }
-        \\@(opaque, linear) struct Buffer[A] { at: UInt64, len: UInt64, allocated: UInt64, allocator: A }
-        \\struct Storage[phantom T, A] { buffer: Option[Buffer[A]], allocator: A, at: UInt64, len: UInt64 }
-        \\extern fn slot_put[T,A](inout owner: Storage[T,A], at: UInt64, len: UInt64, i: UInt64, sink v: T) where retains(owner: v)
-        \\extern fn slot_take[T,A](inout owner: Storage[T,A], at: UInt64, len: UInt64, i: UInt64) -> T where carries(owner)
-        \\fn extract[T,A: Copyable](sink owner: Storage[T,A]) -> Option[Buffer[A]] where carries(.Some: owner) {
-        \\    let Storage { buffer: raw, allocator: _, at: _, len: _ } = owner
-        \\    raw
-        \\}
-        \\fn restore[T,A: Copyable](sink raw: Buffer[A]) -> Storage[T,A] where carries(raw) {
-        \\    let allocator = copy(raw.allocator)
-        \\    let at = raw.at
-        \\    let len = raw.len
-        \\    return .{ buffer = .Some(raw), allocator, at, len }
-        \\}
-        \\fn main() -> UInt8 {
-        \\    var number: UInt8 = 1
-        \\    var owner: Storage[borrow UInt8,UInt8] = .{ buffer = .Some(.{ at = 0, len = 8, allocated = 8, allocator = 0 }), allocator = 0, at = 0, len = 8 }
-        \\    slot_put(&owner, 0, 8, 0, borrow number)
-        \\    let raw = extract(owner)
-        \\    var restored: Storage[borrow UInt8,UInt8] = match raw { Some(buffer) => restore(buffer), None => return 0 }
-        \\    number = 2
-        \\    let item = slot_take(&restored, 0, 8, 0)
-        \\    let value = *item
-        \\    let Storage { buffer: disposed, allocator: _, at: _, len: _ } = restored
-        \\    match disposed {
-        \\        Some(buffer) => { let Buffer { at: _, len: _, allocated: _, allocator: _ } = buffer },
-        \\        None => {},
-        \\    }
-        \\    value
-        \\}
-        , .refused = true, .raw_carrier = true, .owner_conflict = true },
-        .{ .source =
         \\@copyable struct Data { view: borrow UInt8 }
         \\trait Duplicate { fn duplicate(self: Self) -> Data where carries(self) }
         \\impl Duplicate for Data {
@@ -4707,7 +4679,7 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
         var ast = try parse(gpa, &source, .from(0), tokens, &sink);
         var resolved = try resolveTree(gpa, &ast, &sink);
-        if (case.certified or case.raw_carrier) {
+        if (case.certified) {
             resolved.modules[0].name = "mem";
             resolved.modules[0].library = true;
             resolved.modules[0].externs = true;

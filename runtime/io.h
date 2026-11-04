@@ -33,9 +33,14 @@ int linea_errno(void);
 
 long linea_read_some(int fd, unsigned long at, unsigned long len);
 long linea_write_some(int fd, unsigned long at, unsigned long len);
+long linea_read_at(int fd, unsigned long at, unsigned long len, unsigned long offset);
+long linea_write_at(int fd, unsigned long at, unsigned long len, unsigned long offset);
 long linea_close(int fd);
 /* Random bytes make at most 256 bytes of progress per call. */
 long linea_random_bytes(unsigned long at, unsigned long len);
+/* Two random 64-bit words, written only when both were read: zero, or a
+ * negated errno. */
+long linea_random_words(unsigned long *high, unsigned long *low);
 /* Path extents include exactly one terminating NUL. At-relative names are
  * single components. Every failure is a negated errno, captured immediately. */
 long linea_open_parent(unsigned long at, unsigned long extent);

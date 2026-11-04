@@ -1,0 +1,39 @@
+// `count` hands `Show.show` an array of the value it was given, a larger type.
+// The receiver is a `Plain`, so the call reaches `Plain`'s implementation,
+// which calls nothing back, and the program stands. `Echo`'s implementation
+// does call `count` again, but this call never reaches it.
+trait Show {
+    fn show[U: Copyable](self: Self, depth: UInt8, value: U) -> UInt8
+}
+
+struct Plain {
+    size: UInt8,
+}
+
+struct Echo {
+    size: UInt8,
+}
+
+impl Show for Plain {
+    fn show[U: Copyable](self: Plain, _depth: UInt8, _value: U) -> UInt8 {
+        self.size
+    }
+}
+
+impl Show for Echo {
+    fn show[U: Copyable](self: Echo, depth: UInt8, value: U) -> UInt8 {
+        count(depth, value) + self.size
+    }
+}
+
+fn count[U: Copyable](depth: UInt8, value: U) -> UInt8 {
+    if depth == 0 {
+        0
+    } else {
+        Show.show(Plain { size = 1 }, depth, [copy(value)]) + count(depth - 1, value)
+    }
+}
+
+fn main() -> UInt8 {
+    Show.show(Echo { size = 2 }, 2, UInt8(1))
+}

@@ -1,0 +1,33 @@
+import std.io
+import std.mem
+import std.session
+import std.task
+
+use mem.Vec
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+// The creator sends a vector it owns, so the task owns it from then on, sums
+// it, releases it and sends the total back.
+fn main() -> Result[UInt8, io.IoError] {
+    let body = sink [] |sink me: Chan[Recv[Vec[UInt64], Send[UInt64, End]]]| {
+        let (numbers, answering) = me.recv()
+        var total = UInt64(0)
+        for read number in numbers {
+            total += number
+        }
+        numbers.release()
+        answering.send(total).close()
+    }
+    var numbers: Vec[UInt64] = Vec.new()
+    for number in 1..=10 {
+        &numbers.push(number).unwrap()
+    }
+    let slot = task.prepare(body).unwrap()
+    let (total, done) = slot.start().send(numbers).recv()
+    done.close()
+    io.println("total: {total}")?
+    .Ok(0)
+}

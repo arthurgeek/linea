@@ -1,0 +1,7 @@
+error[O-Cross]: a task's body of type `F` may carry captures that cannot cross to another task
+  --> tests/tasks/a_body_of_an_unknown_type_does_not_cross.lin:10:29
+   |
+10 |     let slot = task.prepare(body).unwrap()
+   |                             ^^^^ what this body captures is not known here
+   |
+   = help: start the task where its body is written, so its captures can be checked

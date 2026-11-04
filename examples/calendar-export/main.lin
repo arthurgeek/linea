@@ -57,9 +57,11 @@ fn weekday(year: UInt64, month: UInt64, day: UInt64) -> UInt64 {
     sum % 7
 }
 
-// `App` is the state the routes share. `http.with_state` owns it and lends it
-// down to each route as `inout app`. The logger is the only value they share,
-// so it is the only field; another shared value would be another field.
+// `App` is what each serving task lends its route on every request, through
+// `http.with_state`, as `inout app`. It holds only a logger, which owns
+// nothing, so every task has an `App` of its own and no state is shared; a
+// value the tasks had to share would live in an owning task instead, as
+// `listen_and_serve_with` arranges.
 @derive(Release)
 struct App {
     logger: log.Logger[io.Descriptor],
@@ -92,7 +94,7 @@ fn calendar(inout app: App, request: http.Request) -> Result[http.Response, http
 // refusal before answering it, so it takes the state and the request and is
 // registered with `route_raw`; a handler whose parameters name what it reads
 // is registered with `route`, as `countdown-server` does. `route_raw` hands the
-// handler the `App` it is lent on every request.
+// handler the `App` its task lends on every request.
 fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
     &router.route_raw(r"GET /calendar/{year}", calendar)
 }
@@ -125,33 +127,39 @@ fn main() -> UInt8 {
         return status
     }
     let logger = log.to_stderr(minimum: .Info)
-    // The annotation names the state the routes take, `App`.
-    var router: http.Router[App] = http.Router.new()
-    let _ = routes(&router) else |error| {
+    // The route is registered once here, so a refused pattern is reported
+    // before anything is served. The annotation names what the route takes,
+    // `App`.
+    var checked: http.Router[App] = http.Router.new()
+    let _ = routes(&checked) else |error| {
         logger.error("cannot register a route", log.field("error", error))
-        router.release()
+        checked.release()
         return 2
     }
-    // `http.logged` logs the address the server listens on, and then one line
-    // per request once its response has been sent.
-    // `copy(logger)` gives `http.logged` and `App` loggers of their own and
-    // keeps this one for the line `main` writes if serving stops. A logger to
-    // standard error owns nothing, so a copy costs nothing.
-    let server = http.logged(copy(logger), router)
-    let app = App { logger = copy(logger) }
+    checked.release()
     // `..http.Limits.default()` takes every limit not written here from the
     // standard limits, so only the connection count changes.
     let limits = http.Limits { connections = copy(options.requests), ..http.Limits.default() }
-    // `listen_and_serve` opens the listener, takes the server and lends `app`
-    // to the route on every request, closes the listener when it stops, and
+    // Each serving task builds its own handler with this closure: a router
+    // lent an `App` of the task's own by `http.with_state`, inside
+    // `http.logged`, which logs the address the server listens on and then one
+    // line per request once its response has been sent. A logger to standard
+    // error owns nothing, so each `copy(logger)` costs nothing, and the route
+    // was checked above, so registering it again cannot fail.
+    let serving = [sink logger = copy(logger)] || {
+        var router: http.Router[App] = http.Router.new()
+        routes(&router).unwrap()
+        http.logged(copy(logger), http.with_state(App { logger = copy(logger) }, router))
+    }
+    // `listen_and_serve` opens the listener, serves many requests at once,
+    // joins every serving task and closes the listener when it stops, and
     // reports a failure to listen or to serve through `error`. Port 0 asks the
     // operating system for any free port, and `http.logged` logs the one it
-    // chose. It returns `app`, which `main` releases.
-    let finished = http.listen_and_serve(net.loopback(options.port), server, state: app, limits: limits) else |error| {
+    // chose.
+    let _ = http.listen_and_serve(net.loopback(options.port), serving, limits: limits) else |error| {
         logger.error("serving stopped", log.field("error", error))
         return 1
     }
-    finished.release()
     0
 }
 

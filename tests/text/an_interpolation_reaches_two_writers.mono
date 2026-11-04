@@ -409,7 +409,7 @@ pub fn std.option;Option[std.text.Str].unwrap_or(sink self: std.option.Option[st
 }
 
 internal fn std.mem;write_slice_fd(bytes: std.mem.Slice[UInt8], fd: Int32) -> Int64 {
-    linea_write_some(fd, bytes.at, bytes.len)
+    linea_write_some(fd, std.mem.address;raw[UInt8](slice_address(bytes)), bytes.len)
 }
 
 pub fn std.io.core;IoError.from_os(operation: std.io.core.IoOperation, code: Int32, progress: UInt64 = 0) -> std.io.core.IoError {
@@ -452,6 +452,11 @@ fn std.text;starts_a_character(s: std.text.Str, at: UInt64) -> Bool {
             None => false,
         }
     }
+}
+
+internal fn std.mem.address;raw[UInt8](at: std.mem.address.Address[UInt8]) -> UInt64 {
+    let Address(number) = copy(at)
+    number
 }
 
 extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64

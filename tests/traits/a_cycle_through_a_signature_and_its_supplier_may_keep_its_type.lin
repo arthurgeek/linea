@@ -1,0 +1,34 @@
+// `descend` calls `Visit.visit`, and the one implementation answering it calls
+// `descend` again, at the type `descend` was given, so the cycle needs one body
+// per type. `measure` is handed an array of the value, a larger type, but
+// calls nothing back, so that call is outside the cycle and the program
+// stands.
+trait Visit {
+    fn visit[U: Copyable](self: Self, depth: UInt8, value: U) -> UInt8
+}
+
+struct Node {
+    size: UInt8,
+}
+
+impl Visit for Node {
+    fn visit[U: Copyable](self: Node, depth: UInt8, value: U) -> UInt8 {
+        descend(self, depth, value)
+    }
+}
+
+fn measure[U: Copyable](_value: U) -> UInt8 {
+    1
+}
+
+fn descend[U: Copyable](node: Node, depth: UInt8, value: U) -> UInt8 {
+    if depth == 0 {
+        node.size
+    } else {
+        measure([copy(value)]) + Visit.visit(node, depth - 1, value)
+    }
+}
+
+fn main() -> UInt8 {
+    descend(Node { size = 4 }, 2, UInt8(1))
+}

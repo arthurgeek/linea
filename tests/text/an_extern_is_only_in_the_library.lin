@@ -4,10 +4,10 @@
 // and a program that could declare its own would end that: it could name the
 // allocator's `free` and call it twice, and every guarantee the ownership pass
 // makes would be decoration.
-extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
+extern fn linea_clock_sleep(nanoseconds: UInt64) -> Int64
 
 fn main() -> UInt8 {
-    let n: Int64 = linea_write_some(2, 0, 0)
+    let n: Int64 = linea_clock_sleep(0)
     if n < 0 {
         1
     } else {

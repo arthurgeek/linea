@@ -1,0 +1,28 @@
+==================
+A newtype names its type parameters
+==================
+
+@copyable
+type Id[phantom Of] = UInt64
+type Readings[T] = Option[T]
+
+---
+
+(source_file
+  (newtype_declaration
+    (attribute
+      (policy_attribute))
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (type_identifier))
+  (newtype_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (generic_type
+      (type_identifier)
+      (type_arguments
+        (type_identifier)))))

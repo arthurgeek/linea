@@ -13,7 +13,7 @@ const runtime_symbols = @import("runtime_symbols");
 test "runtime archive members have stable names and separate linkage" {
     const archive = @embedFile("runtime_archive");
     try testing.expect(std.mem.startsWith(u8, archive, "!<arch>\n"));
-    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "clock.o", "linea_float.o", "math.o" };
+    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "clock.o", "task.o", "linea_float.o", "math.o" };
     var member: usize = 0;
     var offset: usize = 8;
     var long_names: []const u8 = "";
@@ -1112,12 +1112,239 @@ const Declared = struct {
     symbol: []const u8,
     parameters: []const runtime_symbols.Parameter,
     result: runtime_symbols.Scalar,
+    /// Each parameter's name as the source spells it.
+    names: []const []const u8 = &.{},
 };
 
+/// Whether a runtime parameter's name says it is the address of bytes the
+/// runtime reads, writes or frees: `at`, `from`, `to`, or a name ending in
+/// `_at`. The runtime's sources name every such parameter so, which is what
+/// lets the table's `address` marks be held to them. The table in
+/// `runtime_symbols.zig` is the authoritative declaration of which parameters
+/// are addresses; this scan of the sources is a supplementary consistency
+/// check that catches a function added to the runtime without a mark.
+fn namesAddress(name: []const u8) bool {
+    return std.mem.eql(u8, name, "at") or std.mem.eql(u8, name, "from") or std.mem.eql(u8, name, "to") or
+        std.mem.endsWith(u8, name, "_at");
+}
+
+test "an address parameter is named as one" {
+    try testing.expect(namesAddress("at"));
+    try testing.expect(namesAddress("answer_at"));
+    try testing.expect(namesAddress("from"));
+    try testing.expect(!namesAddress("address"));
+    try testing.expect(!namesAddress("attempts"));
+    try testing.expect(!namesAddress("len"));
+}
+
+/// The function pointer types the runtime's headers declare, by name, and
+/// the names of those declared inside a conditional block, whose shape
+/// depends on a branch these gates do not evaluate.
+const Typedefs = struct {
+    shapes: std.StringHashMapUnmanaged(*const runtime_symbols.Callback) = .empty,
+    conditional: std.StringHashMapUnmanaged(void) = .empty,
+
+    const empty: Typedefs = .{};
+
+    /// Whether `written` names a callback typedef declared inside a
+    /// conditional block.
+    fn isConditional(self: *const Typedefs, written: []const u8) bool {
+        return self.conditional.contains(std.mem.trim(u8, written, " \t\n"));
+    }
+};
+
+/// `text` as the declaration scan reads it, the same length: a backslash
+/// that ends a line and the newline after it are replaced by spaces, so a
+/// continued directive is one line, as the preprocessor joins it; every
+/// comment is replaced by spaces, newlines kept, so a declaration written
+/// inside one is not read; and the contents of every string and character
+/// literal are replaced by spaces, quotes kept, so a `linea_` name or a `/*`
+/// inside one is neither a declaration nor a comment. A literal left open at
+/// the end of its line is not C, so what follows it cannot be read: `open`
+/// is where the first such literal starts.
+const Scanned = struct { text: []u8, open: ?usize };
+
+fn scannable(gpa: std.mem.Allocator, text: []const u8) !Scanned {
+    const out = try gpa.dupe(u8, text);
+    var open: ?usize = null;
+    var j: usize = 0;
+    while (j + 1 < out.len) : (j += 1) {
+        if (out[j] != '\\') continue;
+        if (out[j + 1] == '\n') {
+            out[j] = ' ';
+            out[j + 1] = ' ';
+        } else if (out[j + 1] == '\r' and j + 2 < out.len and out[j + 2] == '\n') {
+            out[j] = ' ';
+            out[j + 1] = ' ';
+            out[j + 2] = ' ';
+        }
+    }
+    var i: usize = 0;
+    while (i < out.len) {
+        const c = out[i];
+        if (c == '"' or c == '\'') {
+            const opening = i;
+            i += 1;
+            while (i < out.len and out[i] != c and out[i] != '\n') {
+                const step: usize = if (out[i] == '\\' and i + 1 < out.len) 2 else 1;
+                for (out[i .. i + step]) |*byte| byte.* = ' ';
+                i += step;
+            }
+            if ((i >= out.len or out[i] == '\n') and open == null) open = opening;
+            i += 1;
+        } else if (c == '/' and i + 1 < out.len and (out[i + 1] == '/' or out[i + 1] == '*')) {
+            const end = if (out[i + 1] == '/')
+                std.mem.indexOfScalarPos(u8, out, i, '\n') orelse out.len
+            else if (std.mem.indexOfPos(u8, out, i + 2, "*/")) |close| close + 2 else out.len;
+            for (out[i..end]) |*byte| {
+                if (byte.* != '\n') byte.* = ' ';
+            }
+            i = end;
+        } else i += 1;
+    }
+    return .{ .text = out, .open = open };
+}
+
+/// A preprocessor directive's text after its `#` and any whitespace on either
+/// side of it, such as `ifndef NAME` from `  #  ifndef NAME`, or null for a
+/// line that is not a directive.
+fn directive(line: []const u8) ?[]const u8 {
+    const trimmed = std.mem.trimStart(u8, line, " \t");
+    if (!std.mem.startsWith(u8, trimmed, "#")) return null;
+    return std.mem.trimStart(u8, trimmed[1..], " \t");
+}
+
+/// Whether `text` is the directive `name` followed by its end or whitespace.
+fn isDirective(text: []const u8, name: []const u8) bool {
+    if (!std.mem.startsWith(u8, text, name)) return false;
+    return text.len == name.len or text[name.len] == ' ' or text[name.len] == '\t' or text[name.len] == '\r' or text[name.len] == '(';
+}
+
+/// Walks a C source's lines in order and says whether a line lies inside a
+/// conditional block. Which branch of a conditional is compiled depends on the
+/// platform and the build's definitions, which these gates do not evaluate,
+/// so a declaration inside one could be read from a branch never compiled. A
+/// header's include guard, `#ifndef NAME` with `#define NAME` on the very next
+/// line, holds the whole header and is not counted. A guard written with a
+/// blank line or a comment between the two is counted as a conditional, so
+/// its header's declarations are reported unread rather than read. Directives are read with whitespace
+/// before and after the `#`, from text `scannable` has joined.
+const Conditionals = struct {
+    at: usize = 0,
+    depth: usize = 0,
+
+    /// Whether the line starting at `line_start` lies inside a conditional
+    /// block. Lines are asked about in increasing order, so the walk is one
+    /// pass over the text.
+    fn inside(self: *Conditionals, text: []const u8, line_start: usize) bool {
+        while (self.at < line_start) {
+            const end = std.mem.indexOfScalarPos(u8, text, self.at, '\n') orelse text.len;
+            const line = text[self.at..end];
+            const next = @min(end + 1, text.len);
+            if (directive(line)) |d| {
+                if (isDirective(d, "if") or isDirective(d, "ifdef") or isDirective(d, "ifndef")) {
+                    if (!isIncludeGuard(d, text[next..])) self.depth += 1;
+                } else if (isDirective(d, "endif")) {
+                    if (self.depth > 0) self.depth -= 1;
+                }
+            }
+            self.at = next;
+        }
+        return self.depth > 0;
+    }
+
+    fn isIncludeGuard(opening: []const u8, rest: []const u8) bool {
+        if (!isDirective(opening, "ifndef")) return false;
+        const name = std.mem.trim(u8, opening["ifndef".len..], " \t\r");
+        const following = directive(rest[0 .. std.mem.indexOfScalar(u8, rest, '\n') orelse rest.len]) orelse return false;
+        if (!isDirective(following, "define")) return false;
+        return std.mem.eql(u8, std.mem.trim(u8, following["define".len..], " \t\r"), name);
+    }
+};
+
+/// Every `typedef R (*name)(P, …);` written at the start of a line in `text`,
+/// outside comments, read into the callback shape a table parameter names. A
+/// typedef whose result or parameters this cannot read is left out, so a
+/// prototype naming it does not read either. One inside a conditional block
+/// is recorded only by name, so a declaration naming it is reported unread
+/// and a typedef no declaration names is no failure.
+fn callbackTypedefs(gpa: std.mem.Allocator, written: []const u8, out: *Typedefs) !void {
+    const scanned = try scannable(gpa, written);
+    // A typedef after a literal left open is not read, so a prototype naming
+    // it is reported unread.
+    const text = scanned.text[0 .. scanned.open orelse scanned.text.len];
+    var conditionals: Conditionals = .{};
+    var start: usize = 0;
+    while (start < text.len) {
+        const end = std.mem.indexOfScalarPos(u8, text, start, '\n') orelse text.len;
+        const line = text[start..end];
+        const line_start = start;
+        start = end + 1;
+        if (!std.mem.startsWith(u8, line, "typedef ")) continue;
+        const pointer = std.mem.indexOf(u8, line, "(*") orelse continue;
+        const name_end = std.mem.indexOfScalarPos(u8, line, pointer, ')') orelse continue;
+        if (conditionals.inside(text, line_start)) {
+            try out.conditional.put(gpa, line[pointer + 2 .. name_end], {});
+            continue;
+        }
+        const open = std.mem.indexOfScalarPos(u8, line, name_end, '(') orelse continue;
+        const close = std.mem.lastIndexOfScalar(u8, line, ')') orelse continue;
+        if (close <= open) continue;
+        const result = scalarOf(line["typedef ".len..pointer], out) orelse continue;
+        var parameters: std.ArrayList(runtime_symbols.Scalar) = .empty;
+        var readable = true;
+        var pieces = std.mem.splitScalar(u8, line[open + 1 .. close], ',');
+        while (pieces.next()) |piece| {
+            const trimmed = std.mem.trim(u8, piece, " \t");
+            // A callback's parameters are words the runtime passes by value; a
+            // pointer is a shape the table cannot name, so the typedef is
+            // left unread and every declaration naming it is reported.
+            if (std.mem.indexOfScalar(u8, trimmed, '*') != null) {
+                readable = false;
+                break;
+            }
+            const cut = std.mem.lastIndexOfScalar(u8, trimmed, ' ') orelse {
+                readable = false;
+                break;
+            };
+            const parameter = scalarOf(trimmed[0..cut], out) orelse {
+                readable = false;
+                break;
+            };
+            try parameters.append(gpa, parameter.scalar);
+        }
+        if (!readable) continue;
+        const shape = try gpa.create(runtime_symbols.Callback);
+        shape.* = .{ .parameters = try parameters.toOwnedSlice(gpa), .result = result.scalar };
+        try out.shapes.put(gpa, line[pointer + 2 .. name_end], shape);
+    }
+}
+
+test "a callback typedef is read into the shape a table parameter names" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var typedefs: Typedefs = .empty;
+    try callbackTypedefs(gpa,
+        \\typedef void (*linea_task_release)(unsigned long at, unsigned long len);
+        \\typedef size_t (*linea_unreadable)(unsigned long at);
+        \\typedef void (*linea_by_pointer)(unsigned long at, unsigned long *len);
+    , &typedefs);
+    const release = scalarOf("linea_task_release", &typedefs).?;
+    const two: runtime_symbols.Callback = .{ .parameters = &.{ .u64, .u64 }, .result = .unit };
+    const three: runtime_symbols.Callback = .{ .parameters = &.{ .u64, .u64, .u64 }, .result = .unit };
+    try testing.expect(runtime_symbols.sameParameter(release, .{ .scalar = .callback, .callback = &two }));
+    try testing.expect(!runtime_symbols.sameParameter(release, .{ .scalar = .callback, .callback = &three }));
+    try testing.expect(scalarOf("linea_unreadable", &typedefs) == null);
+    try testing.expect(scalarOf("linea_by_pointer", &typedefs) == null);
+}
+
 /// The scalar a C or Zig type spells, and whether it is passed through a
-/// pointer the callee writes. Null for a spelling the table has no scalar for.
-fn scalarOf(written: []const u8) ?runtime_symbols.Parameter {
+/// pointer the callee writes, or the shape of a callback a typedef in
+/// `typedefs` names. Null for a spelling the table has no scalar for.
+fn scalarOf(written: []const u8, typedefs: *const Typedefs) ?runtime_symbols.Parameter {
     const t = std.mem.trim(u8, written, " \t\n");
+    if (typedefs.shapes.get(t)) |shape| return .{ .scalar = .callback, .callback = shape };
     const Spelling = struct { []const u8, runtime_symbols.Parameter };
     const spellings = [_]Spelling{
         .{ "uint8_t", .{ .scalar = .u8 } },
@@ -1142,18 +1369,33 @@ fn scalarOf(written: []const u8) ?runtime_symbols.Parameter {
     return null;
 }
 
+/// Why a declaration naming a callback typedef declared inside a conditional
+/// block is unread: which shape it has depends on the platform.
+const conditional_callback = "it names a callback typedef declared inside a conditional block";
+
 /// Why a runtime source could not be read as declarations, naming the symbol.
 const Unread = struct { symbol: []const u8, why: []const u8 };
 
 /// Every `linea_` function a runtime source defines or declares: C
 /// prototypes and definitions and Zig `export fn`s, written at the start of a
-/// line. A `static` C function is private to its file and is not one. A
+/// line outside comments and literals.
+///
+/// This is a constrained source-consistency check, not a C parser: the
+/// runtime symbol table in `runtime_symbols.zig` is the authoritative
+/// declaration of every runtime function, and this scan only holds the
+/// sources to it. It reads the shapes the runtime is written in, and where it
+/// cannot classify a declaration with certainty it reports it as unread,
+/// which fails the gate, rather than leaving it out. A `static` C function is private to its file and is
+/// not one; one declared inside a conditional block is returned as unread. A
 /// declaration of a function the compiler owns is read like any other and
 /// held to `owned_functions`. Any `linea_` name at the start of
 /// a declaration whose shape or types this cannot read is returned as
 /// unread rather than skipped: a runtime function the table cannot be held to
 /// is a failure, not an omission.
-fn declaredIn(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(Declared), unread: *std.ArrayList(Unread)) !void {
+fn declaredIn(gpa: std.mem.Allocator, written: []const u8, typedefs: *const Typedefs, out: *std.ArrayList(Declared), unread: *std.ArrayList(Unread)) !void {
+    const scanned = try scannable(gpa, written);
+    const text = scanned.text;
+    var conditionals: Conditionals = .{};
     var at: usize = 0;
     while (std.mem.indexOfPos(u8, text, at, "linea_")) |found| {
         at = found + 1;
@@ -1167,7 +1409,15 @@ fn declaredIn(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(Decl
         while (end < text.len and (std.ascii.isAlphanumeric(text[end]) or text[end] == '_')) end += 1;
         const symbol = text[found..end];
         if (end >= text.len or text[end] != '(') continue;
+        if (scanned.open) |open| if (found > open) {
+            try unread.append(gpa, .{ .symbol = symbol, .why = "it follows a string or character literal left open on its line" });
+            continue;
+        };
         if (std.mem.startsWith(u8, head, "static")) continue;
+        if (conditionals.inside(text, line_start)) {
+            try unread.append(gpa, .{ .symbol = symbol, .why = "it is declared inside a conditional block" });
+            continue;
+        }
         const close = std.mem.indexOfScalarPos(u8, text, end, ')') orelse {
             try unread.append(gpa, .{ .symbol = symbol, .why = "its parameter list does not close" });
             continue;
@@ -1183,12 +1433,14 @@ fn declaredIn(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(Decl
             if (std.mem.startsWith(u8, tail, "callconv(.c)")) tail = std.mem.trim(u8, tail["callconv(.c)".len..], " ");
             break :zig tail;
         } else head;
-        const result = scalarOf(result_spelling) orelse {
-            try unread.append(gpa, .{ .symbol = symbol, .why = "its result type is not one the table spells" });
+        const result = scalarOf(result_spelling, typedefs) orelse {
+            const why = if (typedefs.isConditional(result_spelling)) conditional_callback else "its result type is not one the table spells";
+            try unread.append(gpa, .{ .symbol = symbol, .why = why });
             continue;
         };
         var parameters: std.ArrayList(runtime_symbols.Parameter) = .empty;
-        var readable = true;
+        var names: std.ArrayList([]const u8) = .empty;
+        var unreadable: ?[]const u8 = null;
         const inner = std.mem.trim(u8, text[end + 1 .. close], " \n");
         if (inner.len > 0 and !std.mem.eql(u8, inner, "void")) {
             var pieces = std.mem.splitScalar(u8, inner, ',');
@@ -1202,19 +1454,212 @@ fn declaredIn(gpa: std.mem.Allocator, text: []const u8, out: *std.ArrayList(Decl
                     (if (trimmed[cut] == '*') trimmed[0 .. cut + 1] else trimmed[0..cut])
                 else
                     trimmed;
-                const parameter = scalarOf(spelled) orelse {
-                    readable = false;
+                const parameter = scalarOf(spelled, typedefs) orelse {
+                    unreadable = if (typedefs.isConditional(spelled)) conditional_callback else "a parameter type is not one the table spells";
                     break;
                 };
                 try parameters.append(gpa, parameter);
+                const name = if (std.mem.indexOfScalar(u8, trimmed, ':')) |colon|
+                    std.mem.trim(u8, trimmed[0..colon], " ")
+                else if (std.mem.lastIndexOfAny(u8, trimmed, " *")) |cut|
+                    trimmed[cut + 1 ..]
+                else
+                    "";
+                try names.append(gpa, name);
             }
         }
-        if (!readable) {
-            try unread.append(gpa, .{ .symbol = symbol, .why = "a parameter type is not one the table spells" });
+        if (unreadable) |why| {
+            try unread.append(gpa, .{ .symbol = symbol, .why = why });
             continue;
         }
-        try out.append(gpa, .{ .symbol = symbol, .parameters = try parameters.toOwnedSlice(gpa), .result = result.scalar });
+        try out.append(gpa, .{ .symbol = symbol, .parameters = try parameters.toOwnedSlice(gpa), .result = result.scalar, .names = try names.toOwnedSlice(gpa) });
     }
+}
+
+test "a runtime typedef inside a comment is not read" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var typedefs: Typedefs = .empty;
+    try callbackTypedefs(gpa,
+        \\#ifndef LINEA_FIXTURE_H
+        \\#define LINEA_FIXTURE_H
+        \\/*
+        \\typedef void (*linea_commented)(unsigned long at);
+        \\*/
+        \\typedef void (*linea_read)(unsigned long at);
+        \\#endif
+    , &typedefs);
+    try testing.expect(scalarOf("linea_commented", &typedefs) == null);
+    try testing.expect(scalarOf("linea_read", &typedefs) != null);
+}
+
+test "a declaration naming a callback typedef declared inside a conditional is unread" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const text =
+        \\#if defined(__APPLE__)
+        \\typedef void (*linea_task_release)(unsigned long at);
+        \\#else
+        \\typedef void (*linea_task_release)(unsigned long at, unsigned long len);
+        \\#endif
+        \\void linea_task_hand(unsigned long at, linea_task_release release);
+        \\linea_task_release linea_task_releaser(void);
+    ;
+    var typedefs: Typedefs = .empty;
+    try callbackTypedefs(gpa, text, &typedefs);
+    try testing.expect(scalarOf("linea_task_release", &typedefs) == null);
+    var declared: std.ArrayList(Declared) = .empty;
+    var unread: std.ArrayList(Unread) = .empty;
+    try declaredIn(gpa, text, &typedefs, &declared, &unread);
+    try testing.expectEqual(@as(usize, 0), declared.items.len);
+    try testing.expectEqual(@as(usize, 2), unread.items.len);
+    try testing.expectEqualStrings("linea_task_hand", unread.items[0].symbol);
+    try testing.expectEqualStrings(conditional_callback, unread.items[0].why);
+    try testing.expectEqualStrings("linea_task_releaser", unread.items[1].symbol);
+    try testing.expectEqualStrings(conditional_callback, unread.items[1].why);
+}
+
+test "a typedef inside a conditional that no declaration names is no failure" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const text =
+        \\#if defined(SOME_PLATFORM)
+        \\typedef unsigned long platform_word;
+        \\typedef void (*platform_hook)(unsigned long at);
+        \\#endif
+        \\typedef void (*linea_read)(unsigned long at);
+        \\void linea_hand(unsigned long at, linea_read read);
+    ;
+    var typedefs: Typedefs = .empty;
+    try callbackTypedefs(gpa, text, &typedefs);
+    try testing.expect(scalarOf("linea_read", &typedefs) != null);
+    var declared: std.ArrayList(Declared) = .empty;
+    var unread: std.ArrayList(Unread) = .empty;
+    try declaredIn(gpa, text, &typedefs, &declared, &unread);
+    try testing.expectEqual(@as(usize, 0), unread.items.len);
+    try testing.expectEqual(@as(usize, 1), declared.items.len);
+    try testing.expectEqualStrings("linea_hand", declared.items[0].symbol);
+}
+
+test "a runtime declaration inside a comment is not read, and one inside a conditional is unread" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var declared: std.ArrayList(Declared) = .empty;
+    var unread: std.ArrayList(Unread) = .empty;
+    const no_typedefs: Typedefs = .empty;
+    try declaredIn(gpa,
+        \\/*
+        \\long linea_commented(int fd);
+        \\*/
+        \\#if LINEA_CHECK_STORAGE
+        \\long linea_checked(int fd);
+        \\#endif
+        \\long linea_close(int fd);
+    , &no_typedefs, &declared, &unread);
+    try testing.expectEqual(@as(usize, 1), declared.items.len);
+    try testing.expectEqualStrings("linea_close", declared.items[0].symbol);
+    try testing.expectEqual(@as(usize, 1), unread.items.len);
+    try testing.expectEqualStrings("linea_checked", unread.items[0].symbol);
+}
+
+test "a runtime declaration inside a string or character literal is not read" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var declared: std.ArrayList(Declared) = .empty;
+    var unread: std.ArrayList(Unread) = .empty;
+    const no_typedefs: Typedefs = .empty;
+    try declaredIn(gpa,
+        \\static const char *text =
+        \\"linea_ghost(int fd);";
+        \\static const char quote = '"';
+        \\long linea_close(int fd);
+    , &no_typedefs, &declared, &unread);
+    try testing.expectEqual(@as(usize, 1), declared.items.len);
+    try testing.expectEqualStrings("linea_close", declared.items[0].symbol);
+    try testing.expectEqual(@as(usize, 0), unread.items.len);
+}
+
+test "a runtime declaration after a literal left open on its line is unread" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var declared: std.ArrayList(Declared) = .empty;
+    var unread: std.ArrayList(Unread) = .empty;
+    const no_typedefs: Typedefs = .empty;
+    try declaredIn(gpa,
+        \\long linea_before(int fd);
+        \\static const char *text = "linea_ghost(int fd);
+        \\long linea_after(int fd);
+        \\static const char quote = 'x;
+        \\long linea_close(int fd);
+    , &no_typedefs, &declared, &unread);
+    try testing.expectEqual(@as(usize, 1), declared.items.len);
+    try testing.expectEqualStrings("linea_before", declared.items[0].symbol);
+    try testing.expectEqual(@as(usize, 2), unread.items.len);
+    try testing.expectEqualStrings("linea_after", unread.items[0].symbol);
+    try testing.expectEqualStrings("linea_close", unread.items[1].symbol);
+}
+
+test "a literal left open at the end of the text, with no newline after it, is found" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const text = "long linea_close(int fd);\nstatic const char *text = \"linea_ghost(int fd);";
+    const scanned = try scannable(gpa, text);
+    try testing.expectEqual(@as(?usize, std.mem.indexOfScalar(u8, text, '"')), scanned.open);
+    try testing.expectEqual(text.len, scanned.text.len);
+    try testing.expect(std.mem.indexOf(u8, scanned.text, "linea_ghost") == null);
+    const closed = try scannable(gpa, "long linea_close(int fd);\nstatic const char *text = \"done\";");
+    try testing.expectEqual(@as(?usize, null), closed.open);
+}
+
+test "a directive is read with whitespace before and after its hash" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var declared: std.ArrayList(Declared) = .empty;
+    var unread: std.ArrayList(Unread) = .empty;
+    const no_typedefs: Typedefs = .empty;
+    try declaredIn(gpa,
+        \\#ifndef LINEA_FIXTURE_H
+        \\  #  define LINEA_FIXTURE_H
+        \\long linea_close(int fd);
+        \\#  if LINEA_CHECK_STORAGE
+        \\long linea_checked(int fd);
+        \\#  endif
+        \\#endif
+    , &no_typedefs, &declared, &unread);
+    try testing.expectEqual(@as(usize, 1), declared.items.len);
+    try testing.expectEqualStrings("linea_close", declared.items[0].symbol);
+    try testing.expectEqual(@as(usize, 1), unread.items.len);
+    try testing.expectEqualStrings("linea_checked", unread.items[0].symbol);
+}
+
+test "a directive continued by a backslash is one line" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var declared: std.ArrayList(Declared) = .empty;
+    var unread: std.ArrayList(Unread) = .empty;
+    const no_typedefs: Typedefs = .empty;
+    try declaredIn(gpa,
+        \\#define LINEA_CALL(x) \
+        \\linea_spliced(x)
+        \\#if defined(LINEA_A) \
+        \\    || defined(LINEA_B)
+        \\long linea_checked(int fd);
+        \\#endif
+        \\long linea_close(int fd);
+    , &no_typedefs, &declared, &unread);
+    try testing.expectEqual(@as(usize, 1), declared.items.len);
+    try testing.expectEqualStrings("linea_close", declared.items[0].symbol);
+    try testing.expectEqual(@as(usize, 1), unread.items.len);
+    try testing.expectEqualStrings("linea_checked", unread.items[0].symbol);
 }
 
 test "a runtime declaration the table cannot read is reported, not skipped" {
@@ -1223,6 +1668,7 @@ test "a runtime declaration the table cannot read is reported, not skipped" {
     const gpa = arena.allocator();
     var declared: std.ArrayList(Declared) = .empty;
     var unread: std.ArrayList(Unread) = .empty;
+    const no_typedefs: Typedefs = .empty;
     try declaredIn(gpa,
         \\long linea_close(int fd);
         \\size_t linea_measure(int fd);
@@ -1233,7 +1679,7 @@ test "a runtime declaration the table cannot read is reported, not skipped" {
         \\    linea_close(1);
         \\/* linea_commented(int) */
         \\export fn linea_float64_parse(address: u64, length: u64, bits: *u64, offset: *u64) callconv(.c) u64 {
-    , &declared, &unread);
+    , &no_typedefs, &declared, &unread);
     try testing.expectEqual(@as(usize, 3), declared.items.len);
     try testing.expectEqualStrings("linea_close", declared.items[0].symbol);
     // A symbol the compiler owns is read like any other, so its widths are
@@ -1255,7 +1701,11 @@ test "the runtime signature table is the runtime's own sources" {
     var unread: std.ArrayList(Unread) = .empty;
     const sources = @import("runtime_sources").files;
     try testing.expect(sources.len > 0);
-    for (sources) |file| try declaredIn(gpa, file.text, &declared, &unread);
+    // A prototype may name a typedef another header declares, so every
+    // typedef is read before any prototype.
+    var typedefs: Typedefs = .empty;
+    for (sources) |file| try callbackTypedefs(gpa, file.text, &typedefs);
+    for (sources) |file| try declaredIn(gpa, file.text, &typedefs, &declared, &unread);
 
     // Every declaration reads, so nothing the runtime provides escapes the
     // comparison below.
@@ -1272,7 +1722,17 @@ test "the runtime signature table is the runtime's own sources" {
             if (!std.mem.eql(u8, d.symbol, expected.symbol)) continue;
             found = true;
             try testing.expectEqual(expected.result, d.result);
-            try testing.expectEqualSlices(runtime_symbols.Parameter, expected.parameters, d.parameters);
+            try testing.expectEqual(expected.parameters.len, d.parameters.len);
+            for (expected.parameters, d.parameters, d.names) |want, got, name| {
+                if (!runtime_symbols.sameParameter(want, got)) std.debug.print("{s}: a parameter differs from the runtime's\n", .{expected.symbol});
+                try testing.expect(runtime_symbols.sameParameter(want, got));
+                // A parameter the runtime names as an address takes only the
+                // number in an `Address` ([T-RawAddress]), so a function
+                // added later cannot take a plain one.
+                if (expected.declared_by == .compiler or want.scalar != .u64) continue;
+                if (namesAddress(name) != want.address) std.debug.print("{s}: `{s}` is an address in one of the runtime and the table and not the other\n", .{ expected.symbol, name });
+                try testing.expectEqual(namesAddress(name), want.address);
+            }
         }
         if (!found) std.debug.print("the runtime does not define {s}\n", .{expected.symbol});
         try testing.expect(found);
@@ -3315,4 +3775,27 @@ test "a sequential run orders exactly the heavy steps its suite selects" {
     try testing.expectEqualSlices(test_roots.Heavy, &.{ .compile_unit_tests, .unit_tests }, unit.slice());
     const conformance = test_roots.heavyOrder(test_roots.select(.{ .suite = .conformance, .optimize = .ReleaseFast, .filtered = false }), .{ .properties = false, .guide = true });
     try testing.expectEqualSlices(test_roots.Heavy, &.{ .compile_compiler, .compile_runner, .corpus, .examples }, conformance.slice());
+}
+
+test "http.serve must always default to concurrent worker execution (.Threads(128))" {
+    const serve_lin = try std.Io.Dir.cwd().readFileAlloc(testing.io, "std/http/serve.lin", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(serve_lin);
+    try testing.expect(servesConcurrentlyByDefault(serve_lin));
+}
+
+/// Whether the declaration of `pub fn serve` in `text`, its signature up to
+/// the body's opening brace, defaults its policy to `.Threads(128)`. Another
+/// function declaring that default answers nothing for `serve`.
+fn servesConcurrentlyByDefault(text: []const u8) bool {
+    const head = "\npub fn serve[";
+    const start = std.mem.indexOf(u8, text, head) orelse return false;
+    const signature_end = std.mem.indexOfScalarPos(u8, text, start + 1, '{') orelse return false;
+    const signature = text[start..signature_end];
+    return std.mem.indexOf(u8, signature, "policy: task.Policy = .Threads(128)") != null;
+}
+
+test "only serve's own signature answers for its default" {
+    try testing.expect(servesConcurrentlyByDefault("x\npub fn serve[L](sink listener: L, policy: task.Policy = .Threads(128)) -> R {\n}"));
+    try testing.expect(!servesConcurrentlyByDefault("x\npub fn serve[L](sink listener: L, policy: task.Policy = .Sequential) -> R {\n}\npub fn other(policy: task.Policy = .Threads(128)) {\n}"));
+    try testing.expect(!servesConcurrentlyByDefault("x\npub fn listen_and_serve(policy: task.Policy = .Threads(128)) {\n}"));
 }

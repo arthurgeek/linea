@@ -95,7 +95,7 @@ true of a different implementation.
 | [0053](0053-exclusivity-is-triggered-by-mutation.md) | Exclusivity is triggered by mutation, not by the marker | Accepted; supersedes the exclusivity clause of 0025 |
 | [0054](0054-the-bound-is-on-height-and-covers-written-types.md) | The nesting bound is on height, and a written type answers to it | Accepted; supersedes 0042 |
 | [0056](0056-a-modifier-is-refused-where-it-says-nothing.md) | A modifier is refused where it says nothing | Accepted; extended by 0145 |
-| [0065](0065-a-phantom-type-parameter-is-declared.md) | A phantom type parameter is declared, not inferred from disuse | Accepted; its bound clause superseded by 0099 |
+| [0065](0065-a-phantom-type-parameter-is-declared.md) | A phantom type parameter is declared, not inferred from disuse | Accepted; its bound clause superseded by 0099; extended by 0254 |
 | [0066](0066-a-blocks-state-is-its-dominators-plus-what-it-changed.md) | A block's state is its dominator's, plus what it changed | Accepted; refined by 0073 |
 | [0067](0067-a-place-is-updated-through-itself.md) | A compound assignment updates a place through itself | Accepted |
 | [0068](0068-a-declaration-may-name-a-symbol-the-runtime-provides.md) | A declaration may name a symbol the runtime provides | Accepted; extended by 0150 and 0156; `std/` clause superseded by 0171; integer-only, linear and callable clauses superseded by 0228 |
@@ -132,7 +132,7 @@ true of a different implementation.
 | [0084](0084-test-is-a-reserved-word-not-a-contextual-one.md) | `test` is a reserved word, not a contextual one | Accepted |
 | [0247](0247-a-test-in-an-impl-is-a-member-of-nothing.md) | A test in an inherent `impl` is a member of nothing | Accepted |
 | [0085](0085-the-library-is-imported.md) | The library is imported, and the prelude is what the syntax obliges | Accepted; reserved-root clause superseded by 0171; minimal-prelude and no-shadowing clauses superseded by 0179 |
-| [0171](0171-the-standard-library-is-an-ordinary-library.md) | The standard library is an ordinary library, known by its manifest | Accepted; supersedes clauses of 0068, 0075, 0085 and 0111; extends 0096; extended by 0229; boolean grant superseded by 0228 |
+| [0171](0171-the-standard-library-is-an-ordinary-library.md) | The standard library is an ordinary library, known by its manifest | Accepted; supersedes clauses of 0068, 0075, 0085 and 0111; extends 0096; extended by 0229; boolean grant superseded by 0228; direct runtime call clause superseded by 0255 |
 | [0179](0179-the-prelude-holds-the-core-vocabulary-and-yields-to-a-module.md) | The prelude holds the core vocabulary, and yields to a module's own names | Accepted; supersedes the minimal-prelude and no-shadowing clauses of 0085 |
 | [0087](0087-an-associated-type-is-a-function-of-the-coherence-key.md) | An associated type is a function of the coherence key | Accepted; extends 0081; extended by 0088, 0142 and 0241 |
 | [0241](0241-declared-answers-are-settled-when-first-needed.md) | Declared answers are settled when first needed | Accepted; extends 0087 and 0165; extended by 0251 |
@@ -158,7 +158,9 @@ true of a different implementation.
 | [0124](0124-copyability-and-settlement-are-independent-capabilities.md) | Copyability and settlement are independent capabilities | Accepted; supersedes classification in 0034, 0046, and 0051; extends 0103; refines 0123; extended by 0125, 0131, 0193 and 0221 |
 | [0125](0125-scalar-value-positions-take-snapshots.md) | Scalar value positions take snapshots | Accepted; supersedes universal explicit-copy clause of 0034; extends 0124 |
 | [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) | `Owned` admits a type that can carry no borrow | Accepted; extends 0123 and 0124 |
-| [0250](0250-tasks-are-structured-through-linear-sessions.md) | Tasks are structured through linear sessions | Proposed; stages 0 to 3 are built (`mem.Carried`, `Shareable`, [T-Dual], postfix session operations through 0252), and the rest lands in the stages it lists |
+| [0250](0250-tasks-are-structured-through-linear-sessions.md) | Tasks are structured through linear sessions | Proposed; stages 0 to 4 are built (`mem.Carried`, `Shareable`, [T-Dual], postfix session operations through 0252, and `std.task`, `session.Chan`, [O-Cross] with the runtime that runs a task), and stage 6 in the form 0253 records; the many-to-one mailbox is not built, and the rest lands in the stages it lists; `Shareable` containment clause superseded by 0255 |
+| [0253](0253-independent-work-runs-through-an-explicit-executor-policy.md) | Independent work runs through an explicit policy, and shared state through an owning task | Proposed; built: `task.Policy` and the combinators, [T-ThreadStart], `task.own`, and `http.serve` concurrent by default with a handler per serving task; complements 0250 |
+| [0255](0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md) | An erased value is reached through an address that names its type | Accepted; supersedes the writer containment clause of 0193, the `Shareable` containment clause of 0250, the direct runtime call clause of 0171 and the granted-address, corpus and skip clauses of 0197; extends 0254 |
 | [0126](0126-observations-project-referent-places-transparently.md) | Observations project referent places transparently | Accepted; supersedes projection syntax of 0123; extends 0088 |
 | [0127](0127-constants-retain-distinct-values-and-infer-their-types.md) | Constants infer initializer types and retain distinct integer, boolean and text values | Accepted; extends 0020 and 0059, supersedes the representation decision in 0078; extended by 0140, 0146 and 0157 |
 | [0140](0140-aggregate-constants-retain-checked-construction-plans.md) | Aggregate constants retain shared data and checked construction plans | Accepted; extends 0020, 0059 and 0127; extended by 0157, 0183 and 0227; materialization clause superseded by 0178; unit-expression clause superseded by 0188 |
@@ -268,7 +270,8 @@ ones most likely to be superseded as the compiler grows.
 | [0213](0213-a-trait-may-be-implemented-for-a-callable-type.md) | A trait may be implemented for a callable type, keyed by its shape | Accepted; extends 0081, 0093 and 0148 |
 | [0214](0214-a-route-takes-a-function-whose-parameters-name-its-inputs.md) | A route is a function whose parameters name its inputs | Accepted; refines 0185; extends 0180; `where carries(request)` clause superseded by 0216 |
 | [0216](0216-a-carrier-type-supplies-its-signatures-default-contract.md) | A carrier type supplies its signatures' default contract | Accepted; supersedes the `where carries(request)` clause of 0214 |
-| [0099](0099-a-phantom-parameter-carries-its-bound.md) | A phantom parameter carries its bound | Accepted; supersedes the bound clause of 0065 |
+| [0099](0099-a-phantom-parameter-carries-its-bound.md) | A phantom parameter carries its bound | Accepted; supersedes the bound clause of 0065; extended by 0254 |
+| [0254](0254-a-newtype-takes-type-parameters.md) | A newtype takes type parameters | Accepted; extends 0065 and 0099; extended by 0255 |
 | [0102](0102-computation-and-storage-representations-are-separate.md) | Computation and storage representations are separate | Accepted; extends 0028; partially supersedes 0031 and 0052 |
 | [0104](0104-release-is-optional-and-never-scheduled.md) | Release is optional and never scheduled | Accepted; supersedes 0097, extends 0063; extended by 0103, 0158, 0184 and 0208 |
 | [0184](0184-a-failure-holding-an-owned-value-settles-to-its-reason.md) | A failure holding an owned value settles to its reason | Accepted; extends 0104 and 0162; `http.Error` settling clause superseded by 0218 |
@@ -278,7 +281,7 @@ ones most likely to be superseded as the compiler grows.
 | [0147](0147-a-borrowed-let-pattern-reads-a-stable-place.md) | A borrowed let pattern reads a stable place | Accepted; extends 0129; extended by 0178, 0201 and 0224 |
 | [0130](0130-explicit-captures-use-inline-environments.md) | Explicit captures use inline environments | Accepted; supersedes the capture exclusion in 0105; read-only restriction superseded by 0131; extended by 0173 and 0193 |
 | [0131](0131-closure-invocation-and-capture-ownership-are-independent.md) | Closure invocation and capture ownership are independent | Accepted; supersedes the read-only restriction in 0130; extends 0123 and 0124; extended by 0132, 0158 and 0173; stored inout capture clause superseded by 0193 |
-| [0193](0193-a-closure-may-hold-a-place-lent-inout.md) | A closure may hold a place lent `inout` | Accepted; supersedes the stored inout capture clause of 0131; extends 0123, 0124, 0130 and 0173 |
+| [0193](0193-a-closure-may-hold-a-place-lent-inout.md) | A closure may hold a place lent `inout` | Accepted; supersedes the stored inout capture clause of 0131; extends 0123, 0124, 0130 and 0173; writer containment clause superseded by 0255 |
 | [0132](0132-callable-results-separate-types-from-dependencies.md) | Callable results separate types from dependencies | Accepted; supersedes source-clause spelling in 0123; extends 0131; extended by 0144, 0164 and 0173 |
 | [0158](0158-a-function-value-implements-release.md) | A function value implements Release | Accepted; extends 0104 and 0131; extended by 0173 |
 | [0173](0173-a-capturing-closure-is-erased-into-allocator-owned-storage.md) | A capturing closure is erased into allocator-owned storage | Accepted; extends 0098, 0105, 0130, 0131, 0132 and 0158; extended by 0176, 0180 and 0193 |
@@ -292,7 +295,7 @@ ones most likely to be superseded as the compiler grows.
 | [0117](0117-local-callable-selections-preserve-their-targets.md) | Local callable selections preserve their targets | Accepted; extends 0105 |
 | [0118](0118-unobserved-array-initializers-are-omitted-during-lowering.md) | Unobserved array initializers are omitted during lowering | Accepted |
 | [0119](0119-zeroed-allocation-facts-survive-opaque-calls.md) | Zeroed allocation facts survive opaque calls | Accepted |
-| [0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md) | A checking runtime makes a use of freed storage abort | Accepted |
+| [0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md) | A checking runtime makes a use of freed storage abort | Accepted; granted-address, corpus and skip clauses superseded by 0255 |
 | [0256](0256-run-and-test-compile-unoptimised-build-ships-optimised.md) | `run` and `test` compile unoptimised; `build` ships optimised | Accepted; builds on 0090 and 0091 |
 | [0121](0121-typed-storage-is-private-and-checked.md) | Typed storage is private and checked | Accepted; extends 0076 and 0088; storage lifetime clauses superseded by 0123 |
 | [0111](0111-import-paths-are-root-relative.md) | Import paths are root-relative | Accepted; supersedes ADR 0032's descending-path clause; reserved-root sentence superseded by 0171; extended by 0229 |
@@ -391,14 +394,6 @@ which is why printing it was enough; the cost is that
 everything the compiler emits except one function. What settles it is whether
 the wrapper ever varies — a program with no `main`, which the test runner needs,
 is the first thing that would make it.
-
-How **one process serves requests concurrently** is decided by
-[0250](0250-tasks-are-structured-through-linear-sessions.md): a task is created
-with its session, its handle carries its body's captures, and `close` joins it.
-What remains open is what that record builds in stages: until its runtime stage
-lands, `http.listen_and_serve` answers one connection at a time
-([0154](0154-sockets-and-http-follow-go.md)), and concurrency comes from
-processes.
 
 Whether **a contract may be gated on a type**, so that `iter.extend` drops
 its retention for an instantiation whose `Item` is `Owned`; recorded in

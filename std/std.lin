@@ -22,6 +22,7 @@ import index
 import iter
 import tuple
 import session
+import task
 
 // Equality, comparison and stepping support ==, < and ranges.
 pub use cmp.Equatable

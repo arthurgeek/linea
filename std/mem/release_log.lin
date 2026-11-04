@@ -3,18 +3,21 @@ import std.testing
 // A ReleaseLog records the code of each ReleaseTag released while it is open,
 // in release order, so a test can see a release that was skipped, repeated or
 // reordered. It is one system buffer of UInt64 words: the number of releases,
-// then one code per release.
-@linear
+// then one code per release. A tag writes the log's words through a `read` of
+// the log, so a log is `@unshareable`: two tasks each releasing a tag of one
+// log would race on its count.
+@(linear, unshareable)
 internal struct ReleaseLog {
     buffer: Buffer[SystemAllocator],
 }
 
 // A ReleaseTag records its code in the log it came from when it is released.
-// It holds the log's address, so the log must outlive every tag it made.
+// It observes the log, so the log outlives every tag it made, a tag is not
+// `Owned`, and a tag reaches another task only where the log could be read
+// there too, which [O-Cross] refuses.
 @linear
 internal struct ReleaseTag {
-    at: UInt64,
-    extent: UInt64,
+    log: borrow ReleaseLog,
     code: UInt64,
 }
 
@@ -39,8 +42,8 @@ impl ReleaseLog {
     }
 
     // Make a tag that records `code` in this log when it is released.
-    internal fn tag(self: Self, code: UInt64) -> ReleaseTag {
-        .{ at = self.buffer.at, extent = self.buffer.len, code }
+    internal fn tag(self: Self, code: UInt64) -> ReleaseTag where borrows(self) {
+        .{ log = borrow self, code }
     }
 
     test fn a_tag_records_its_code_when_it_is_released() {
@@ -53,6 +56,13 @@ impl ReleaseLog {
         log.release()
         testing.assert(before, "making a tag recorded a release")?
         testing.assert(after, "releasing a tag did not record its code")?
+    }
+
+    // The address and length of the log's words, for a test that hands them
+    // to code which reaches the log through nothing else, as an HTTP
+    // extractor sees only its request. `record_release` writes through them.
+    internal fn words(self: Self) -> (UInt64, UInt64) {
+        (self.buffer.at, self.buffer.len)
     }
 
     // Return whether the log recorded exactly `codes`, in order.
@@ -93,12 +103,22 @@ impl Release for ReleaseLog {
 }
 
 // Releasing a tag appends its code after the codes already recorded and counts
-// it. A log that is full traps on the out-of-bounds store.
+// it.
 impl Release for ReleaseTag {
     fn release(sink self: Self) {
-        let ReleaseTag { at, extent, code } = self
-        let count = linea_raw_load(at, extent, 0)
-        linea_raw_store(at, extent, (count + 1) * release_word_bytes, code)
-        linea_raw_store(at, extent, 0, count + 1)
+        let ReleaseTag { log, code } = self
+        let (at, extent) = log.words()
+        record_release(at, extent, code)
     }
+}
+
+// Append `code` to the log whose words are the `extent` bytes at `at`, and
+// count it. A log that is full traps on the out-of-bounds store. The address
+// observes nothing, so a value holding one in place of a tag writes the log
+// without the log being observed, and only a test that starts no task may
+// keep one.
+internal fn record_release(at: UInt64, extent: UInt64, code: UInt64) {
+    let count = linea_raw_load(at, extent, 0)
+    linea_raw_store(at, extent, (count + 1) * release_word_bytes, code)
+    linea_raw_store(at, extent, 0, count + 1)
 }

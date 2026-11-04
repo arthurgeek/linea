@@ -3006,6 +3006,43 @@ fn genericPositiveCycleModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// `n` pairs of functions that call each other, the first with a larger type
+/// argument and the second with a fixed one, so each pair recurs with a
+/// bounded height. The second calls a trait operation on a value whose type
+/// is the first's own parameter, which every one of the `n` implementations
+/// may answer, and none of which calls back into the pair.
+fn boundedRecursionsBesideSuppliersModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    std.debug.assert(n > 0);
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll(
+        "trait Show { fn show(self: Self) -> UInt8 }\n" ++
+            "impl Show for UInt8 { fn show(self: Self) -> UInt8 { self } }\n" ++
+            "@copyable\nstruct Wrap[phantom T] {}\n" ++
+            "impl[T] Show for Wrap[T] { fn show(_self: Self) -> UInt8 { 0 } }\n",
+    );
+    for (0..n) |i| try w.print("@copyable\nstruct Shown{d} {{}}\nimpl Show for Shown{d} {{ fn show(_self: Self) -> UInt8 {{ 1 }} }}\n", .{ i, i });
+    for (0..n) |i| {
+        try w.print(
+            "fn grow{d}[T: Show](value: T, n: UInt8) -> UInt8 {{\n" ++
+                "    if n == 0 {{ return Show.show(value) }}\n" ++
+                "    let wrapped: Wrap[T] = .{{}}\n" ++
+                "    settle{d}(wrapped, value, n - 1)\n" ++
+                "}}\n" ++
+                "fn settle{d}[W: Show, T: Show](wrapped: W, value: T, n: UInt8) -> UInt8 {{\n" ++
+                "    if n == 0 {{ return Show.show(value) }}\n" ++
+                "    grow{d}(Show.show(wrapped), n - 1)\n" ++
+                "}}\n",
+            .{ i, i, i, i },
+        );
+    }
+    try w.writeAll("fn main() -> UInt8 {\n    var shown: UInt8 = 0\n");
+    for (0..n) |i| try w.print("    let shown{d}: Shown{d} = .{{}}\n    shown = Show.show(shown{d}) + grow{d}(UInt8(0), 3) - 1\n", .{ i, i, i, i });
+    try w.writeAll("    shown\n}\n");
+    return out.toOwnedSlice();
+}
+
 test "generic graph sweeps check shared DAGs and reject positive cycles" {
     for ([_]u32{ 3, 6 }) |n| {
         const shared = try genericSharedDagModule(testing.allocator, n);
@@ -3014,6 +3051,9 @@ test "generic graph sweeps check shared DAGs and reject positive cycles" {
         const growing = try genericPositiveCycleModule(testing.allocator, n);
         defer testing.allocator.free(growing);
         _ = try treeCost(testing.allocator, testing.io, growing, .{ .refused = .t_poly_rec });
+        const bounded = try boundedRecursionsBesideSuppliersModule(testing.allocator, n);
+        defer testing.allocator.free(bounded);
+        _ = try treeCost(testing.allocator, testing.io, bounded, .check);
     }
 }
 
@@ -5302,7 +5342,7 @@ fn costOfFiles(
         // Retaining unread MLIR would add output-sized growth and copying.
         var output_buffer: [4096]u8 = undefined;
         var ir: std.Io.Writer.Discarding = .init(&output_buffer);
-        if (!try emitMlir(a, &ir.writer, &lowered, &table, &sink)) {
+        if (!try emitMlir(a, &ir.writer, &lowered, &table, &sink, .{})) {
             return error.CostModuleRejected;
         }
     }
@@ -5454,7 +5494,7 @@ fn treeCostGrowing(gpa: std.mem.Allocator, io: std.Io, text: []const u8, mode: T
         // Retaining unread MLIR would add output-sized growth and copying.
         var output_buffer: [4096]u8 = undefined;
         var ir: std.Io.Writer.Discarding = .init(&output_buffer);
-        if (!try emitMlir(a, &ir.writer, &lowered, &table, &sink)) {
+        if (!try emitMlir(a, &ir.writer, &lowered, &table, &sink, .{})) {
             return error.CostModuleRejected;
         }
     }
@@ -6971,6 +7011,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "generic shared DAG checking", .n = 8, .cost = throughTreeBatch(genericSharedDagModule, .check, 128) },
     .{ .name = "generic trait-selected shared DAG checking", .n = 8, .cost = throughTreeBatch(genericTraitSelectedSharedDagModule, .check, 128) },
     .{ .name = "generic positive cycle checking", .n = 500, .cost = throughTreeBatch(genericPositiveCycleModule, .{ .refused = .t_poly_rec }, 1) },
+    .{ .name = "bounded recursions beside many suppliers", .n = 1000, .cost = throughTreeBatch(boundedRecursionsBesideSuppliersModule, .check, 1) },
     .{ .name = "locals in one body", .n = 16000, .cost = throughTheTree(deepModule) },
     .{ .name = "conditional loop exits", .n = 8000, .cost = throughTheTree(conditionalLoopExitsModule) },
     .{ .name = "small ownership deltas", .n = 2000, .cost = throughTheTree(smallOwnershipDeltasModule) },
@@ -8526,7 +8567,7 @@ fn checkGeneratedProgram(
 
         const mir = (try lower(scratch, &semantics.expanded, &semantics.res, &semantics.typing, &semantics.disposals, sink, .program)) orelse return error.GeneratedProgramRejected;
         var ir: std.Io.Writer.Allocating = .init(scratch);
-        if (!try emitOrRecord(scratch, &failures, &ir, &mir, table, sink, display_path)) {
+        if (!try emitOrRecord(scratch, &failures, &ir, &mir, table, sink, display_path, settings.env.sanitize)) {
             break :generated;
         }
 
@@ -8627,7 +8668,7 @@ fn checkGeneratedProgram(
             result.err = err;
             break :generated;
         };
-        const walked = checkWalkLoops(scratch, io, settings.cache, settings.library, &failures, .{
+        const walked = checkWalkLoops(scratch, io, settings.cache, settings.library, settings.env.sanitize, &failures, .{
             .display_path = display_path,
             .entry = source.path,
             .files = &.{.{ .path = source.path, .text = source.text }},
@@ -8772,6 +8813,8 @@ fn compileWithLibrary(
     /// The root's `linea.json`, for a program whose root a manifest grants
     /// something, or null for one without.
     manifest: ?[]const u8,
+    /// The sanitizer the program will run under, which instruments its code.
+    sanitize: ?[]const u8,
 ) !LibraryVerdict {
     var table: FileTable = .empty;
     var sink = Sink.init(scratch);
@@ -8795,15 +8838,15 @@ fn compileWithLibrary(
         return .{ .refused = .{ .report = report.written(), .rules = try rulesNamedBy(scratch, &sink) } };
     };
     var ir: std.Io.Writer.Allocating = .init(scratch);
-    if (!try emitOrRecord(scratch, failures, &ir, &module, &table, &sink, display_path)) return .broken;
+    if (!try emitOrRecord(scratch, failures, &ir, &module, &table, &sink, display_path, sanitize)) return .broken;
     return .{ .accepted = ir.written() };
 }
 
 /// Whether a sanitizer reported a fault on standard error.
 ///
-/// The address and leak sanitizers each name themselves in the first
-/// line of a report, and the undefined-behaviour checks the runtime is built
-/// with say `runtime error:` when they report rather than trap.
+/// The address, leak and thread sanitizers each name themselves in the
+/// first line of a report, and the undefined-behaviour checks the runtime is
+/// built with say `runtime error:` when they report rather than trap.
 fn sanitizerReported(errors: []const u8) bool {
     return std.mem.indexOf(u8, errors, "Sanitizer") != null or
         std.mem.indexOf(u8, errors, "runtime error:") != null;
@@ -8812,6 +8855,7 @@ fn sanitizerReported(errors: []const u8) bool {
 test "a sanitizer report is found wherever it sits on standard error" {
     try testing.expect(sanitizerReported("==12==ERROR: AddressSanitizer: heap-use-after-free on address"));
     try testing.expect(sanitizerReported("printed first\n==12==ERROR: LeakSanitizer: detected memory leaks"));
+    try testing.expect(sanitizerReported("WARNING: ThreadSanitizer: data race (pid=7)"));
     try testing.expect(sanitizerReported("linea_rt.c:40:3: runtime error: signed integer overflow"));
     try testing.expect(!sanitizerReported("linea: index out of bounds at main.lin:4:9\n"));
     try testing.expect(!sanitizerReported(""));
@@ -8972,7 +9016,7 @@ fn checkMatrixCell(
         const text = try matrix.render(scratch, cell, liveness);
         const display_path = try std.fmt.allocPrint(scratch, "soundness/{f}/{s}", .{ cell, @tagName(liveness) });
         const name = try std.fmt.allocPrint(scratch, "soundness{d}{s}", .{ ordinal, @tagName(liveness) });
-        switch (try compileWithLibrary(scratch, &failures, settings.library, display_path, text, cell.manifest())) {
+        switch (try compileWithLibrary(scratch, &failures, settings.library, display_path, text, cell.manifest(), settings.env.sanitize)) {
             .broken => {},
             .refused => |refusal| switch (liveness) {
                 .live => {
@@ -9173,7 +9217,7 @@ fn checkStorageProgram(
     const display_path = try std.fmt.allocPrint(scratch, "storage/{s}.lin", .{label});
     const name = try std.fmt.allocPrint(scratch, "storage{s}", .{label});
 
-    switch (try compileWithLibrary(scratch, &failures, settings.library, display_path, generated.text, null)) {
+    switch (try compileWithLibrary(scratch, &failures, settings.library, display_path, generated.text, null, settings.env.sanitize)) {
         .broken => {},
         .refused => |refusal| try failures.append(scratch, .{
             .path = display_path,
@@ -9204,7 +9248,7 @@ fn checkStorageProgram(
         const m = (try storage_gen.mutant(scratch, generated, choices, @intCast(k))) orelse break;
         result.mutants += 1;
         const mutant_path = try std.fmt.allocPrint(scratch, "storage/{s}.mutant{d}.lin", .{ label, k });
-        switch (try compileWithLibrary(scratch, &failures, settings.library, mutant_path, m.text, null)) {
+        switch (try compileWithLibrary(scratch, &failures, settings.library, mutant_path, m.text, null, settings.env.sanitize)) {
             .broken => {},
             .refused => |refusal| {
                 result.mutants_refused += 1;
@@ -15732,6 +15776,8 @@ fn emitOrRecord(
     table: *FileTable,
     sink: *Sink,
     display_path: []const u8,
+    /// The sanitizer the program will run under, which instruments its code.
+    sanitize: ?[]const u8,
 ) !bool {
     // Whether the program was accepted is settled after the composed step,
     // not before it: discovery reports [L-Size] about concrete types the
@@ -15753,7 +15799,7 @@ fn emitOrRecord(
         return false;
     }
 
-    if (try emitMlir(gpa, &ir.writer, module, table, sink)) return true;
+    if (try emitMlir(gpa, &ir.writer, module, table, sink, .{ .sanitize = mlir_backend.Sanitizer.named(sanitize) })) return true;
 
     var why: std.Io.Writer.Allocating = .init(gpa);
     try render.renderAll(&why.writer, table, sink, .{ .color = .never });
@@ -16183,21 +16229,36 @@ test "an example's goldens are read from tests/examples under its own name" {
     try testing.expectError(error.FileNotFound, fixture.directory.dir.access(testing.io, "examples/value.fmt", .{}));
 }
 
-test "a case recording a storage report is not run against a runtime without the checking allocator" {
+test "a case recording a storage report fails unrun, and an update keeps its golden" {
     var fixture: LayoutFixture = try .init();
     defer fixture.deinit();
     const recorded = "trap\nlinea: storage was freed twice\n";
     try fixture.write("tests/storage/freed_twice.lin", fixture.text);
     try fixture.write("tests/storage/freed_twice.exit", recorded);
-    // An archive that does not name the checking allocator's marker.
+    // An archive that cannot be linked, so a walk that built the case would
+    // fail for another reason; this one fails before building it.
     try fixture.write("liblinea_rt.a", "!<arch>\n_linea_alloc _linea_free\n");
     const runtime = try std.fs.path.join(fixture.arena.allocator(), &.{ fixture.root, "liblinea_rt.a" });
-    // Neither a failure nor, with `--update`, a golden rewritten to what an
-    // unchecked runtime does.
-    try testing.expectEqual(@as(u8, 0), try fixture.run("tests/storage", &.{ "--runtime", runtime }));
-    try testing.expectEqual(@as(u8, 0), try fixture.run("tests/storage", &.{ "--runtime", runtime, "--update" }));
+    // No accepted program reaches a report of the checking allocator, so a
+    // golden recording one is a defect recorded, and `--update` does not
+    // replace it with another outcome either.
+    try testing.expectEqual(@as(u8, 1), try fixture.run("tests/storage", &.{ "--runtime", runtime }));
+    try testing.expectEqual(@as(u8, 1), try fixture.run("tests/storage", &.{ "--runtime", runtime, "--update" }));
     const kept = try fixture.directory.dir.readFileAlloc(testing.io, "tests/storage/freed_twice.exit", fixture.arena.allocator(), .unlimited);
     try testing.expectEqualStrings(recorded, kept);
+}
+
+test "a case recording a stack overflow is not run under a sanitizer" {
+    var fixture: LayoutFixture = try .init();
+    defer fixture.deinit();
+    const recorded = "trap\nlinea: a stack overflowed\n";
+    try fixture.write("tests/tasks/overflow.lin", fixture.text);
+    try fixture.write("tests/tasks/overflow.exit", recorded);
+    try fixture.write("liblinea_rt.a", "!<arch>\n_linea_alloc _linea_free\n");
+    const runtime = try std.fs.path.join(fixture.arena.allocator(), &.{ fixture.root, "liblinea_rt.a" });
+    // The archive cannot be linked, so a walk that built and ran the case
+    // would fail; one that passes it over does not.
+    try testing.expectEqual(@as(u8, 0), try fixture.run("tests/tasks", &.{ "--runtime", runtime, "--sanitize", "address" }));
 }
 
 test "a golden beside an example is refused" {
@@ -16704,7 +16765,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         "conformance: the runtime {s} holds no checking allocator, so storage is not checked; {s} holds one\n",
         .{ rt, runtime_symbols.checked_archive_name },
     );
-    var unchecked_skips: std.atomic.Value(u32) = .init(0);
+    var sanitized_skips: std.atomic.Value(u32) = .init(0);
     const settings: Settings = .{
         .library = checked_library,
         .properties = options.properties,
@@ -16716,8 +16777,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         .sanitize = sanitize,
         .runtime_path = runtime_path,
         .scratch_dir = scratch_dir,
-        .checks_storage = checks_storage,
-        .unchecked_skips = &unchecked_skips,
+        .sanitized_skips = &sanitized_skips,
     };
     discovery_zone.end();
 
@@ -16940,9 +17000,6 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
     std.mem.sort(Failure, failures.items, {}, failureLess);
 
     try checkLibrary(gpa, io, &failures);
-    // Asked of the corpus only, like the coverage floors: the examples are
-    // programs that work, so every rule is unreached there and should be.
-    if (enforce_floors) try checkEveryRuleIsReached(gpa, &failures, &rules_reached);
     merge_zone.end();
 
     // The corpus supplies programs someone chose to write, which is a supply
@@ -17189,6 +17246,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
                     tally(&properties, &passed_over, .command, false);
                     continue;
                 }
+                markRulesTranscriptRecords(text, &rules_reached);
                 try commands.append(gpa, .{
                     .text = text,
                     .stem = stem,
@@ -17296,6 +17354,12 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         for (0..corpus.commands) |_| tally(&properties, &passed_over, .command, false);
     }
     commands_zone.end();
+
+    // Asked of the corpus only, like the coverage floors: the examples are
+    // programs that work, so every rule is unreached there and should be.
+    // After the command cases, which reach the rules about roots read from
+    // disk.
+    if (enforce_floors) try checkEveryRuleIsReached(gpa, &failures, &rules_reached);
 
     // LSP session cases: a directory holding `session.jsonl` is a script of
     // JSON-RPC requests, replayed in-process against a server rooted at that
@@ -17664,10 +17728,10 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
 
     const report_zone = tracy.beginZone(@src(), "report");
     defer report_zone.end();
-    const skipped_unchecked = unchecked_skips.load(.monotonic);
-    if (skipped_unchecked != 0) std.debug.print(
-        "conformance: {d} case(s) record a report of the checking allocator and were not run; run them with {s}\n",
-        .{ skipped_unchecked, runtime_symbols.checked_archive_name },
+    const skipped_sanitized = sanitized_skips.load(.monotonic);
+    if (skipped_sanitized != 0) std.debug.print(
+        "conformance: {d} case(s) record the runtime's stack overflow report, which a sanitizer replaces, and were not run; the unsanitized walk runs them\n",
+        .{skipped_sanitized},
     );
     if (failures.items.len == 0) {
         std.debug.print("conformance: {d} case(s) and {d} transcript(s) OK in {d}s\n", .{
@@ -18789,7 +18853,7 @@ fn checkDamage(
         // call is how the verifier answers -- there is no second entry point
         // that skips it, and there must not be one.
         var ir: std.Io.Writer.Allocating = .init(scratch);
-        if (!try emitMlir(scratch, &ir.writer, &module, table, &sink)) {
+        if (!try emitMlir(scratch, &ir.writer, &module, table, &sink, .{ .sanitize = mlir_backend.Sanitizer.named(env.sanitize) })) {
             if (saidDefect(&sink)) continue;
 
             var why: std.Io.Writer.Allocating = .init(scratch);
@@ -18934,7 +18998,7 @@ fn checkMaterializedDerives(
 
     const mir = (try lower(gpa, &settled.expanded, &settled.res, &settled.typing, &settled.disposals, &sink, .program)) orelse return error.SourceRejected;
     var ir: std.Io.Writer.Allocating = .init(gpa);
-    if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, display_path)) return;
+    if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, display_path, env.sanitize)) return;
     if (!try sameCodeIgnoringFunctionOrder(gpa, original_ir, ir.written())) {
         try failures.append(gpa, .{
             .path = display_path,
@@ -19070,7 +19134,7 @@ fn checkRewrites(
 
         const mir = (try lower(scratch, &settled.expanded, res, typing, disposals, &sink, .program)) orelse return error.SourceRejected;
         var ir: std.Io.Writer.Allocating = .init(scratch);
-        if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, program.display_path)) continue;
+        if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, program.display_path, env.sanitize)) continue;
 
         // Writing an operator out as what it is defined to be must reach the
         // same code, not merely the same answer: the semantics says `is`, and
@@ -19298,6 +19362,8 @@ fn checkWalkLoops(
     io: std.Io,
     cache: *const OutcomeCache,
     checked_library: ?*const loader.CheckedLibrary,
+    /// The sanitizer the rewritten programs run under.
+    sanitize: ?[]const u8,
     failures: *std.ArrayList(Failure),
     subject: WalkSubject,
 ) !bool {
@@ -19311,7 +19377,7 @@ fn checkWalkLoops(
         const retained_upto = failures.items.len;
         var semantics = subject.semantics;
         semantics.file = id;
-        if (try compareWalkLoops(gpa, per_rewrite.allocator(), io, cache, checked_library, failures, subject, semantics, k, file)) claimed = true;
+        if (try compareWalkLoops(gpa, per_rewrite.allocator(), io, cache, checked_library, sanitize, failures, subject, semantics, k, file)) claimed = true;
         try retainFrom(gpa, failures, retained_upto);
     }
     return claimed;
@@ -19323,6 +19389,7 @@ fn compareWalkLoops(
     io: std.Io,
     cache: *const OutcomeCache,
     checked_library: ?*const loader.CheckedLibrary,
+    sanitize: ?[]const u8,
     failures: *std.ArrayList(Failure),
     subject: WalkSubject,
     semantics: TransformSemantics,
@@ -19367,7 +19434,7 @@ fn compareWalkLoops(
     const module = mir orelse return true;
     if (sink.hasErrors()) return true;
     var ir: std.Io.Writer.Allocating = .init(scratch);
-    if (!try emitOrRecord(gpa, failures, &ir, &module, table, sink, subject.display_path)) return true;
+    if (!try emitOrRecord(gpa, failures, &ir, &module, table, sink, subject.display_path, sanitize)) return true;
     const suffix = try std.fmt.allocPrint(scratch, "walks{d}", .{k});
     _ = try compareRewrittenRun(gpa, scratch, io, cache, run.env, failures, run.answered, suffix, why, ir.written());
     return true;
@@ -19707,7 +19774,7 @@ test "a program is filed under the bytes it embeds" {
         var settled = try checked.checkProgram(a, a, &loaded, &interner, &sink, .program);
         const module = (try lower(a, &settled.expanded, &settled.res, &settled.typing, &settled.disposals, &sink, .program)).?;
         var written: std.Io.Writer.Allocating = .init(a);
-        try testing.expect(try emitMlir(a, &written.writer, &module, &table, &sink));
+        try testing.expect(try emitMlir(a, &written.writer, &module, &table, &sink, .{}));
         ir.* = written.written();
         try testing.expect(std.mem.indexOf(u8, ir.*, motd) != null);
     }
@@ -20215,6 +20282,40 @@ fn checkEveryRuleIsReached(
     });
 }
 
+/// Marks every rule a transcript's recorded output names in an `error[...]`
+/// header as reached. A transcript runs the compiler as a user does, so it
+/// reaches rules a case checked from memory cannot, such as one about a root
+/// read from disk; a transcript whose output differs from what it records
+/// already fails the walk, so what it records is what the compiler printed.
+fn markRulesTranscriptRecords(text: []const u8, reached: *std.EnumMap(diagnostic.Code, void)) void {
+    var rest = text;
+    while (std.mem.indexOf(u8, rest, "error[")) |at| {
+        rest = rest[at + "error[".len ..];
+        const close = std.mem.indexOfScalar(u8, rest, ']') orelse return;
+        const name = rest[0..close];
+        for (std.enums.values(diagnostic.Code)) |c| {
+            if (std.mem.eql(u8, c.ruleName(), name)) reached.put(c, {});
+        }
+        rest = rest[close..];
+    }
+}
+
+test "a transcript reaches every rule its recorded output names" {
+    var reached: std.EnumMap(diagnostic.Code, void) = .{};
+    markRulesTranscriptRecords(
+        \\  $ linea check forged
+        \\  error[M-Standard]: `forged/std.lin` is not the standard library this compiler carries
+        \\  error[NOT-A-RULE]: ignored
+        \\  [1]
+    , &reached);
+    try testing.expect(reached.contains(.m_standard));
+    var count: usize = 0;
+    for (std.enums.values(diagnostic.Code)) |c| {
+        if (reached.contains(c)) count += 1;
+    }
+    try testing.expectEqual(@as(usize, 1), count);
+}
+
 /// The library the compiler carries is the directory on disk.
 ///
 /// The list is generated by walking `std/` at build time, so this pins that
@@ -20456,7 +20557,7 @@ fn showStderrOfMismatches(gpa: std.mem.Allocator, failures: []Failure, errors: [
     if (errors.len == 0) return;
     for (failures) |*f| {
         const is_run = std.mem.eql(u8, f.what, "exit") or std.mem.eql(u8, f.what, "out");
-        if (!is_run or recordsStorageReport(f.expected)) continue;
+        if (!is_run) continue;
         if (std.mem.indexOf(u8, f.actual, errors) != null) continue;
         f.actual = try std.fmt.allocPrint(gpa, "{s}\n--- stderr ---\n{s}", .{ f.actual, errors });
     }
@@ -20468,12 +20569,10 @@ test "a mismatching run reports what it said on standard error" {
     var failures = [_]Failure{
         .{ .path = "a.lin", .what = "exit", .expected = "exit 0\n", .actual = "trap\n" },
         .{ .path = "a.lin", .what = "mlir", .expected = "x", .actual = "y" },
-        .{ .path = "b.lin", .what = "exit", .expected = "trap\nlinea: storage was freed twice\n", .actual = "exit 0\n" },
     };
     try showStderrOfMismatches(arena.allocator(), &failures, "linea: oops\n");
     try testing.expectEqualStrings("trap\n\n--- stderr ---\nlinea: oops\n", failures[0].actual);
     try testing.expectEqualStrings("y", failures[1].actual);
-    try testing.expectEqualStrings("exit 0\n", failures[2].actual);
     var said_already = [_]Failure{.{ .path = "c.lin", .what = "exit", .expected = "exit 0\n", .actual = "trap\nlinea: oops\n" }};
     try showStderrOfMismatches(arena.allocator(), &said_already, "linea: oops\n");
     try testing.expectEqualStrings("trap\nlinea: oops\n", said_already[0].actual);
@@ -20596,11 +20695,9 @@ const Settings = struct {
     sanitize: ?[]const u8,
     runtime_path: ?[]const u8,
     scratch_dir: []const u8,
-    /// Whether the runtime holds the checking allocator, read from the archive.
-    checks_storage: bool = false,
-    /// Counts the cases recording a checking-allocator report that were not
-    /// run, because the runtime holds no checking allocator.
-    unchecked_skips: ?*std.atomic.Value(u32) = null,
+    /// Counts the cases recording the runtime's overflow report that were not
+    /// run, because a sanitizer takes that fault instead.
+    sanitized_skips: ?*std.atomic.Value(u32) = null,
 };
 
 /// The reports the checking allocator makes, read from the runtime's own
@@ -20637,14 +20734,48 @@ test "the checking allocator's reports are read from the runtime" {
 }
 
 /// Whether a recorded outcome is an abort the checking allocator reported.
-/// Only a runtime holding that allocator can produce one, so such a case is
-/// not run against any other.
+/// The language promises that no accepted program reaches one, so such an
+/// outcome is never a golden.
 fn recordsStorageReport(recorded: []const u8) bool {
     if (!std.mem.startsWith(u8, recorded, trap_answer)) return false;
     var lines = std.mem.splitScalar(u8, recorded[trap_answer.len..], '\n');
     while (lines.next()) |line| {
         for (storageReports()) |report| if (std.mem.startsWith(u8, line, report)) return true;
     }
+    return false;
+}
+
+/// The report the runtime's fault handler makes when a stack overflows into
+/// its guard pages, read from the runtime's `overflow_report`: the text before
+/// its newline.
+fn overflowReport() []const u8 {
+    const source = @embedFile("runtime_source");
+    const report = comptime blk: {
+        @setEvalBranchQuota(1_000_000);
+        const marker = "static const char *const overflow_report = \"";
+        const start = (std.mem.indexOf(u8, source, marker) orelse
+            @compileError("runtime/linea_rt.c no longer declares overflow_report")) + marker.len;
+        const end = std.mem.indexOfAnyPos(u8, source, start, "\\\"").?;
+        break :blk source[start..end];
+    };
+    return report;
+}
+
+test "the overflow report is read from the runtime" {
+    try testing.expectEqualStrings("linea: a stack overflowed", overflowReport());
+    try testing.expect(recordsOverflowReport("trap\nlinea: a stack overflowed\n"));
+    try testing.expect(!recordsOverflowReport("trap\nlinea: index out of bounds at t.lin:1:2\n"));
+    try testing.expect(!recordsOverflowReport("exit 0\n"));
+}
+
+/// Whether a recorded outcome is an abort the runtime's fault handler reported
+/// for a stack overflow. A sanitized runtime installs no fault handler and
+/// leaves the fault to the sanitizer, which reports it in its own words, so
+/// such a case is not run under a sanitizer.
+fn recordsOverflowReport(recorded: []const u8) bool {
+    if (!std.mem.startsWith(u8, recorded, trap_answer)) return false;
+    var lines = std.mem.splitScalar(u8, recorded[trap_answer.len..], '\n');
+    while (lines.next()) |line| if (std.mem.eql(u8, line, overflowReport())) return true;
     return false;
 }
 
@@ -21385,16 +21516,24 @@ fn checkCase(
             }
 
             var ir: std.Io.Writer.Allocating = .init(gpa);
-            if (try emitOrRecord(gpa, &w.failures, &ir, &mir, &table, &sink, display_path)) {
+            if (try emitOrRecord(gpa, &w.failures, &ir, &mir, &table, &sink, display_path, env.sanitize)) {
                 const mlir_golden = try std.mem.concat(gpa, u8, &.{ stem, ".mlir" });
                 var matching_mlir = false;
                 var native_verified = false;
                 if (try readIfExists(io, gpa, mlir_golden)) |expected| {
-                    if (try compare(gpa, io, &w.failures, display_path, "mlir", mlir_golden, expected, ir.written(), env.update, false)) {
+                    // A golden records the module a build without a sanitizer
+                    // emits. A sanitized walk marks every function with its
+                    // sanitizer, so it emits the module again to compare.
+                    var plain: std.Io.Writer.Allocating = .init(gpa);
+                    const recorded_ir = if (env.sanitize == null) ir.written() else written: {
+                        if (!try emitMlir(gpa, &plain.writer, &mir, &table, &sink, .{})) @panic("a module the emitter wrote once was refused the second time");
+                        break :written plain.written();
+                    };
+                    if (try compare(gpa, io, &w.failures, display_path, "mlir", mlir_golden, expected, recorded_ir, env.update, false)) {
                         std.debug.print("updated {s}\n", .{mlir_golden});
                     }
 
-                    matching_mlir = std.mem.eql(u8, expected, ir.written());
+                    matching_mlir = std.mem.eql(u8, expected, recorded_ir);
                 }
 
                 const size_golden = try std.mem.concat(gpa, u8, &.{ stem, ".size" });
@@ -21443,15 +21582,23 @@ fn checkCase(
                 // is narrowed to what a sanitizer can see, when the case
                 // reaches the runtime at all. It reaches it by printing,
                 // which a `.out` golden records, or by trapping, which the
-                // exit status records. A case recording a report of the
-                // checking allocator is not run against a runtime that holds
-                // none: it would differ from its golden, and accepting that
-                // difference would record the defect the report is about.
-                const needs_checks = want_exit != null and !env.checks_storage and recordsStorageReport(want_exit.?);
-                if (needs_checks) {
-                    if (env.unchecked_skips) |count| _ = count.fetchAdd(1, .monotonic);
+                // exit status records. No accepted program uses storage it
+                // does not own, so a report of the checking allocator is a
+                // compiler or runtime defect: a case recording one fails
+                // unrun, and a run answering one is never recorded.
+                // A case recording the runtime's overflow report is not run
+                // under a sanitizer, which takes that fault itself.
+                if (want_exit) |recorded_exit| if (recordsStorageReport(recorded_exit)) try w.failures.append(gpa, .{
+                    .path = display_path,
+                    .what = "records a report of the checking allocator",
+                    .expected = "an outcome an accepted program can have",
+                    .actual = recorded_exit,
+                });
+                const needs_handler = want_exit != null and env.sanitize != null and recordsOverflowReport(want_exit.?);
+                if (needs_handler) {
+                    if (env.sanitized_skips) |count| _ = count.fetchAdd(1, .monotonic);
                 }
-                if (want_exit != null and !needs_checks) {
+                if (want_exit != null and !recordsStorageReport(want_exit.?) and !needs_handler) {
                     if (env.runtime_path) |rt| {
                         const case_name = try scratchName(gpa, stem);
                         const outcome_zone = tracy.beginZone(@src(), "case.outcome");
@@ -21503,7 +21650,7 @@ fn checkCase(
                                 golden_of[k],
                                 expected,
                                 s.of(ran),
-                                env.update and !ran.tool_failed,
+                                env.update and !ran.tool_failed and !recordsStorageReport(s.of(ran)),
                                 s.empty_is_an_answer,
                             )) {
                                 std.debug.print("updated {s}\n", .{golden_of[k]});
@@ -21636,7 +21783,9 @@ fn checkCase(
                         });
                     }
                 }
-                if (matching_mlir) try verifyRecordedModule(gpa, io, &w.failures, display_path, mlir_golden, native_verified);
+                // A sanitized build ran the instrumented module, not the bytes
+                // the golden records, so its proof does not cover them.
+                if (matching_mlir) try verifyRecordedModule(gpa, io, &w.failures, display_path, mlir_golden, native_verified and env.sanitize == null);
             }
         }
     }
@@ -21691,7 +21840,7 @@ fn checkCase(
                 if (std.mem.eql(u8, table.get(part.file).path, cf.path)) break part.file;
             } else null;
         }
-        walks_written_out = try checkWalkLoops(gpa, io, env.cache, env.library, &w.failures, .{
+        walks_written_out = try checkWalkLoops(gpa, io, env.cache, env.library, env.sanitize, &w.failures, .{
             .display_path = display_path,
             .entry = case.entry,
             .files = case.files,

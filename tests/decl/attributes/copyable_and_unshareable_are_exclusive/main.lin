@@ -1,0 +1,13 @@
+// Copies of a value reach what it reaches, so a copyable type that reaches
+// shared state reaches it through a borrow of an `@unshareable` owner, whose
+// observation every copy carries. A copyable type declared `@unshareable`
+// would have its copies share state that nothing ties together.
+@(copyable, unshareable)
+struct Cursor {
+    at: UInt64,
+}
+
+fn main() -> UInt8 {
+    let cursor = Cursor { at = 0 }
+    UInt8(cursor.at)
+}

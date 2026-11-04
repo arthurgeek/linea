@@ -1,9 +1,7 @@
 // A function that returns nothing writes no `->`. Its result is `()`, so a
 // method, a trait's operation, an `extern`, a function type and a lambda
 // leave it out the same way.
-extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64
-
-extern fn linea_free(at: UInt64, size: UInt64, align: UInt64)
+extern fn tally_note(count: Int32)
 
 struct Tally {
     count: UInt8,
@@ -35,9 +33,6 @@ fn twice(inout value: UInt8, step: fn(inout value: UInt8)) {
 }
 
 fn main() -> UInt8 {
-    let at = linea_alloc(8, 8)
-    linea_free(at, 8, 8)
-
     var bill: UInt8 = 40
     add_tip(&bill)
 
@@ -51,5 +46,6 @@ fn main() -> UInt8 {
     }
     var spare: UInt8 = 9
     reset(&spare)
+    tally_note(Int32(tally.count))
     bill + tally.count + spare
 }

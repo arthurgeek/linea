@@ -1,5 +1,5 @@
-extern fn linea_close(fd: Int64, flags: Int64) -> UInt8
+extern fn linea_clock_sleep(nanoseconds: Int64, flags: Int64) -> UInt8
 
 export fn call_it(value: Int64) -> Int64 {
-    Int64(linea_close(value, 0))
+    Int64(linea_clock_sleep(value, 0))
 }

@@ -1,0 +1,29 @@
+// `descend` calls `Visit.visit`, and the one implementation answering it calls
+// `descend` again, so the signature, its supplier and `descend` form one
+// cycle. `descend` hands the trait an array of the value it was given, so each
+// lap would need a body at a larger type, and the call is refused.
+trait Visit {
+    fn visit[U: Copyable](self: Self, depth: UInt8, value: U) -> UInt8
+}
+
+struct Node {
+    size: UInt8,
+}
+
+impl Visit for Node {
+    fn visit[U: Copyable](self: Node, depth: UInt8, value: U) -> UInt8 {
+        descend(self, depth, value)
+    }
+}
+
+fn descend[U: Copyable](node: Node, depth: UInt8, value: U) -> UInt8 {
+    if depth == 0 {
+        node.size
+    } else {
+        Visit.visit(node, depth - 1, [copy(value)]) + 1
+    }
+}
+
+fn main() -> UInt8 {
+    descend(Node { size = 4 }, 2, UInt8(1))
+}

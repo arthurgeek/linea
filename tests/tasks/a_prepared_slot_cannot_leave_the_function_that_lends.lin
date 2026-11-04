@@ -1,0 +1,21 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+// `launch` would hand back a slot whose body holds its own `count` capture
+// lent `inout`.
+fn main() -> UInt8 {
+    var count = UInt64(0)
+    var launch = inout [inout count] || {
+        let body = sink [inout count] |sink me: Chan[End]| {
+            count += 1
+            me.close()
+        }
+        task.prepare(body).unwrap()
+    }
+    let slot = &launch()
+    slot.start().close()
+    UInt8(count)
+}

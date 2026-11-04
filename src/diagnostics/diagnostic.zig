@@ -142,6 +142,10 @@ pub const Code = enum {
     /// answering both through one name would make the rule mean "the entry
     /// point is wrong" without saying which way.
     m_entry,
+    /// A root naming itself `std` whose source is not the standard library the
+    /// compiler carries. That root is trusted as the standard library is, so a
+    /// library taking the name with other source would gain that trust.
+    m_standard,
     /// A sealed type's representation reached from outside the module that
     /// declares it: built, taken apart, or read into.
     m_opaque,
@@ -174,6 +178,10 @@ pub const Code = enum {
     o_uncommitted,
     /// An observation escapes its owner or the permitted callable sources.
     o_escapes,
+    /// A task's body captures what may not cross to another task: an
+    /// observation of a place that is not `Shareable`, or a lend the body
+    /// does not hold itself.
+    o_cross,
     o_borrow,
     /// A value borrowing a temporary is used after the temporary's statement
     /// ends.
@@ -356,6 +364,15 @@ pub const Code = enum {
     /// An `extern` in the runtime's `linea_` namespace whose symbol the
     /// runtime does not declare, or whose signature is not the runtime's.
     t_extern_runtime,
+    /// A call to a runtime function that runs Linea code on a thread of its
+    /// own, anywhere but the one start whose handle keeps the body's
+    /// dependencies until the thread is joined.
+    t_thread_start,
+    /// The number in a `mem.address.Address` read anywhere but as the
+    /// argument for a runtime parameter that copies, receives or keeps the
+    /// bytes, or as the `at` of a `mem.Closure`; or an `extern` that names an
+    /// address, which would hand C one it may keep.
+    t_raw_address,
     /// An `export` whose signature holds a type that may not cross.
     t_export,
     /// A type parameter whose declaration says the wrong thing about what it
@@ -445,6 +462,7 @@ pub const Code = enum {
             .m_unused => "M-Unused",
             .m_vis => "M-Vis",
             .m_entry => "M-Entry",
+            .m_standard => "M-Standard",
             .m_opaque => "M-Opaque",
             .m_extern => "M-Extern",
             .m_foreign => "M-Foreign",
@@ -458,6 +476,7 @@ pub const Code = enum {
             .o_defer_dead => "O-DeferDead",
             .o_uncommitted => "O-Uncommitted",
             .o_escapes => "O-Escapes",
+            .o_cross => "O-Cross",
             .o_borrow => "O-Borrow",
             .o_temporary => "O-Temporary",
             .o_loop => "O-Loop",
@@ -526,6 +545,8 @@ pub const Code = enum {
             .t_extern_callback => "T-ExternCallback",
             .t_extern_handle => "T-ExternHandle",
             .t_extern_runtime => "T-ExternRuntime",
+            .t_thread_start => "T-ThreadStart",
+            .t_raw_address => "T-RawAddress",
             .t_export => "T-Export",
             .t_phantom => "T-Phantom",
             .t_projection => "T-Projection",

@@ -838,18 +838,30 @@ fn port_argument() -> Option[UInt16] {
     }
 }
 
+// A serving task's router. `serve` registered the same routes before
+// serving, so registering them here cannot fail.
+fn serving_router() -> http.Router[()] {
+    var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    router
+}
+
 fn serve(port: UInt16) -> UInt8 {
-    var router = http.Router.new()
-    let _ = routes(&router) else |error| {
+    // The routes are registered once here, so a refused pattern is reported
+    // before anything is served.
+    var checked: http.Router[()] = http.Router.new()
+    let _ = routes(&checked) else |error| {
         io.eprintln("cannot register a route: {error}")
-        router.release()
+        checked.release()
         return 2
     }
+    checked.release()
     io.eprintln("listening on http://127.0.0.1:{port}")
-    // `listen_and_serve` opens the listener, answers requests until it fails,
-    // and releases the router. One `else` handles a failure to listen and a
-    // failure while serving.
-    let _ = http.listen_and_serve(net.loopback(port), router) else |error| {
+    // `listen_and_serve` opens the listener and answers many requests at once
+    // until it fails. Each serving task builds its own router with
+    // `serving_router`, so no router is reached by two tasks. One `else`
+    // handles a failure to listen and a failure while serving.
+    let _ = http.listen_and_serve(net.loopback(port), serving_router) else |error| {
         io.eprintln("{error}")
         return 1
     }
@@ -864,7 +876,8 @@ JSON body into one before calling it. When the body cannot be decoded the
 router answers the request itself, 400 or 422, and `echo` never runs. `health`
 reads nothing, so it takes only the request. `routes` registers the two
 handlers, and
-`main` hands the router to `listen_and_serve`, which serves until it fails. The
+`main` hands `serving_router` to `listen_and_serve`, which answers many
+requests at once, each serving task with a router of its own, until it fails. The
 program needs a port, so run it with `linea run hello_http.lin -- 8080` and ask
 it things from another terminal:
 
@@ -941,18 +954,28 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
     &router.route(r"GET /archive/{rest...}", archive)
 }
 
+// Each serving task builds its own router. `main` registered the same
+// routes before serving, so registering them here cannot fail.
+fn serving_router() -> http.Router[()] {
+    var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    router
+}
+
 fn main() -> UInt8 {
-    var router = http.Router.new()
-    if routes(&router).is_err() {
-        router.release()
+    var checked: http.Router[()] = http.Router.new()
+    if routes(&checked).is_err() {
+        checked.release()
         io.eprintln("a route pattern was refused")
         return 2
     }
-    // The program chooses the address and the handler.
-    // `listen_and_serve` opens the listener and serves until it fails, then
-    // closes the listener and releases the router, whichever way it stopped.
-    // One `else` handles a failure to listen and a failure to serve.
-    let _ = http.listen_and_serve(net.loopback(8080), router) else |error| {
+    checked.release()
+    // The program chooses the address and how each serving task builds its
+    // handler. `listen_and_serve` opens the listener and serves many requests
+    // at once until it fails, then joins every serving task and closes the
+    // listener, whichever way it stopped. One `else` handles a failure to
+    // listen and a failure to serve.
+    let _ = http.listen_and_serve(net.loopback(8080), serving_router) else |error| {
         io.eprintln("{error}")
         return 1
     }
@@ -966,9 +989,9 @@ when the address could not be opened (a port another program holds, for
 example), and `Serve` carries the `ServeError` that ended serving: `Accept`,
 `Close`, `ArenaTooSmall` or `Memory`. `http.serve` is the same loop for a
 program that opens the listener itself. A service whose routes share state
-passes it as `state: app`, and `listen_and_serve` returns it when serving ends
-([Shared state](#shared-state)); a service that shares nothing, like this one,
-leaves it out. Each request is served from memory that comes from the system
+serves through `listen_and_serve_with`, which keeps the state in an owning task
+and returns it when serving ends ([Shared state](#shared-state)); a service
+that shares nothing, like this one, calls `listen_and_serve`. Each request is served from memory that comes from the system
 allocator; `http.listen_and_serve_in` takes another first
 ([Limits](#limits)).
 
@@ -1251,13 +1274,22 @@ import std.json
 import std.log
 import std.mem
 import std.net
+import std.task
 
-// `App` is the state every route shares. `http.listen_and_serve` owns it and
-// lends it to the route that answers each request as `inout app`.
+// `App` is the state every route shares: how many readings were recorded. The
+// server answers many requests at once, so `http.listen_and_serve_with` keeps
+// it in an owning task, which runs each call against it one at a time.
 @derive(Release)
 struct App {
-    logger: log.Logger[io.Descriptor],
     readings: UInt64,
+}
+
+// `Ctx` is what each serving task lends its routes on every request: a client
+// of the task that owns the `App`, and a logger of its own.
+@derive(Release)
+struct Ctx {
+    app: task.Client[App],
+    logger: log.Logger[io.Descriptor],
 }
 
 // `Reading` is the JSON a station posts, such as `{"celsius":21,"sky":"clear"}`.
@@ -1307,13 +1339,18 @@ impl[P: Allocator] http.Extract[P] for Station {
     }
 }
 
-// POST /readings records one reading. After the state, each parameter is an
+// POST /readings records one reading. After the context, each parameter is an
 // extractor: the station, then the reading. The router reads them in this
-// order and answers the request with the first refusal.
-fn record(inout app: App, station: Station, reading: Reading, request: http.Request) -> Result[http.Response, http.Error] {
-    app.readings += 1
-    app.logger.info("reading", log.field("station", station.name).and("celsius", reading.celsius))
-    http.json(request, Recorded { station = copy(station.name), sky = reading.sky.view(), count = app.readings })
+// order and answers the request with the first refusal. One call adds the
+// reading and answers the new count, so two stations reporting at once are
+// counted as two.
+fn record(inout ctx: Ctx, station: Station, reading: Reading, request: http.Request) -> Result[http.Response, http.Error] {
+    let count = ctx.app.call(|inout app: App| {
+        app.readings += 1
+        app.readings
+    })
+    ctx.logger.info("reading", log.field("station", station.name).and("celsius", reading.celsius))
+    http.json(request, Recorded { station = copy(station.name), sky = reading.sky.view(), count })
 }
 
 // `derive(http.Params)` reads a struct from a query's `name=value` pairs.
@@ -1341,12 +1378,13 @@ fn write_outlook(days: UInt64, inout body: http.BodyWriter) -> Result[(), http.E
 }
 
 // GET /stats reads the count `record` keeps in the state.
-fn stats(inout app: App, request: http.Request) -> Result[http.Response, http.Error] {
-    http.text(request, "{app.readings} readings\n")
+fn stats(inout ctx: Ctx, request: http.Request) -> Result[http.Response, http.Error] {
+    let readings = ctx.app.call(|inout app: App| app.readings)
+    http.text(request, "{readings} readings\n")
 }
 
 // `retains(router: greeting)` says the router keeps what `greeting` points at.
-fn routes(inout router: http.Router[App], greeting: Str) -> Result[(), http.RouteError] where retains(router: greeting) {
+fn routes(inout router: http.Router[Ctx], greeting: Str) -> Result[(), http.RouteError] where retains(router: greeting) {
     &router.route("POST /readings", record)?
     &router.route("GET /outlook", outlook)?
     &router.route("GET /stats", stats)?
@@ -1357,20 +1395,30 @@ fn routes(inout router: http.Router[App], greeting: Str) -> Result[(), http.Rout
 
 fn main() -> UInt8 {
     let logger = log.to_stderr(minimum: .Info)
-    // The annotation names the state the routes take.
-    var router: http.Router[App] = http.Router.new()
-    if routes(&router, "Weather stations report here.\n").is_err() {
-        router.release()
+    // The routes are registered once here, so a refused pattern is reported
+    // before anything is served. The annotation names what the routes take.
+    var checked: http.Router[Ctx] = http.Router.new()
+    if routes(&checked, "Weather stations report here.\n").is_err() {
+        checked.release()
         return 2
     }
-    // `http.logged` logs the address the server listens on and one line per
-    // request. `http.with_request_ids` around it numbers each request, so the
-    // number is in the response and in the logged line. `state: app` hands the
-    // state to the server, which lends it down through both to the route that
-    // answers and gives it back when serving ends.
-    let app = App { logger = copy(logger), readings = 0 }
-    let server = http.with_request_ids(http.logged(copy(logger), router))
-    let finished = http.listen_and_serve(net.loopback(8080), server, state: app) else |error| {
+    checked.release()
+    // Each serving task builds its handler with this closure, given a client
+    // of the task that owns the `App`: `http.with_state` lends the task's `Ctx`
+    // to the router, `http.logged` logs the address the server listens on and
+    // one line per request, and `http.with_request_ids` around it gives each
+    // request an id, the one its client sent or a new time-ordered UUID, so
+    // the id is in the response and in the logged line. The routes were
+    // checked above, so registering them again cannot fail.
+    let serving = [sink logger = copy(logger)] |app: task.Client[App]| -> where carries(app) {
+        var router: http.Router[Ctx] = http.Router.new()
+        routes(&router, "Weather stations report here.\n").unwrap()
+        let ctx = Ctx { app = copy(app), logger = copy(logger) }
+        http.with_request_ids(http.logged(copy(logger), http.with_state(ctx, router)))
+    }
+    // `listen_and_serve_with` keeps `App` in an owning task while serving and
+    // hands it back when serving ends.
+    let finished = http.listen_and_serve_with(net.loopback(8080), serving, App { readings = 0 }) else |error| {
         logger.error("serving stopped", log.field("error", error))
         return 1
     }
@@ -1393,14 +1441,14 @@ $ curl -X POST -H 'Authorization: Bearer harbour' -H 'Content-Type: application/
 $ curl -i -X POST -H 'Content-Type: application/json' -d '{"celsius":21,"sky":"clear"}' http://127.0.0.1:8080/readings
 HTTP/1.1 401 Unauthorized
 Connection: close
-X-Request-Id: 3
+X-Request-Id: 01a0e2f7-c2ac-7e8e-9099-6f031600a35a
 Content-Type: text/plain; charset=utf-8
 
 name the station with `Authorization: Bearer <name>`
-$ curl -i -X POST -H 'Authorization: Bearer harbour' -H 'Content-Type: application/json' -d '{"celsius":21}' http://127.0.0.1:8080/readings
+$ curl -i -X POST -H 'X-Request-Id: harbour-check-4' -H 'Authorization: Bearer harbour' -H 'Content-Type: application/json' -d '{"celsius":21}' http://127.0.0.1:8080/readings
 HTTP/1.1 422 Unprocessable Content
 Connection: close
-X-Request-Id: 4
+X-Request-Id: harbour-check-4
 Content-Type: text/plain; charset=utf-8
 
 missing field at $["sky"]
@@ -1412,7 +1460,7 @@ day 2: sunny
 $ curl -i 'http://127.0.0.1:8080/outlook?days=many'
 HTTP/1.1 400 Bad Request
 Connection: close
-X-Request-Id: 7
+X-Request-Id: 01a0e2f7-c325-7f29-893b-658c95e60af5
 Content-Type: text/plain; charset=utf-8
 
 cannot read query value "days" from "many": invalid decimal syntax at byte 0
@@ -1423,14 +1471,14 @@ While it runs, standard error shows what happened:
 <!-- guide: unchecked the output of an edited or partial program -->
 ```text
 2026-09-27T13:04:43Z INFO listening address=127.0.0.1:8080
-2026-09-27T13:04:43Z INFO request method=GET path=/ request_id=1 status=200 bytes=30 duration=91µs
+2026-09-27T13:04:43Z INFO request method=GET path=/ request_id=01a0e2f7-c204-752e-9651-0c5ca6a3a450 status=200 bytes=30 duration=91µs
 2026-09-27T13:04:43Z INFO reading station=harbour celsius=21
-2026-09-27T13:04:43Z INFO request method=POST path=/readings request_id=2 status=200 bytes=45 duration=144µs
-2026-09-27T13:04:43Z WARN request method=POST path=/readings request_id=3 status=401 bytes=53 duration=28µs error="the handler refused the request: name the station with `Authorization: Bearer <name>`"
-2026-09-27T13:04:43Z WARN request method=POST path=/readings request_id=4 status=422 bytes=26 duration=37µs error="the handler refused the request: missing field at $[\"sky\"]"
-2026-09-27T13:04:43Z INFO request method=GET path=/stats request_id=5 status=200 bytes=11 duration=25µs
-2026-09-27T13:04:43Z INFO request method=GET path=/outlook request_id=6 status=200 bytes=26 duration=27µs
-2026-09-27T13:04:43Z WARN request method=GET path=/outlook request_id=7 status=400 bytes=77 duration=28µs error="the handler refused the request: cannot read query value \"days\" from \"many\": invalid decimal syntax at byte 0"
+2026-09-27T13:04:43Z INFO request method=POST path=/readings request_id=01a0e2f7-c28f-7128-85d9-0ed99531985d status=200 bytes=45 duration=144µs
+2026-09-27T13:04:43Z WARN request method=POST path=/readings request_id=01a0e2f7-c2ac-7e8e-9099-6f031600a35a status=401 bytes=53 duration=28µs error="the handler refused the request: name the station with `Authorization: Bearer <name>`"
+2026-09-27T13:04:43Z WARN request method=POST path=/readings request_id=harbour-check-4 status=422 bytes=26 duration=37µs error="the handler refused the request: missing field at $[\"sky\"]"
+2026-09-27T13:04:43Z INFO request method=GET path=/stats request_id=01a0e2f7-c2ee-76ca-8d3a-1fb190c192cf status=200 bytes=11 duration=25µs
+2026-09-27T13:04:43Z INFO request method=GET path=/outlook request_id=01a0e2f7-c30b-7f28-9a17-953fa09f76b5 status=200 bytes=26 duration=27µs
+2026-09-27T13:04:43Z WARN request method=GET path=/outlook request_id=01a0e2f7-c325-7f29-893b-658c95e60af5 status=400 bytes=77 duration=28µs error="the handler refused the request: cannot read query value \"days\" from \"many\": invalid decimal syntax at byte 0"
 ```
 
 The rest of this section takes it apart.
@@ -1775,26 +1823,39 @@ handler writes `P` in all three
 
 ### Shared state
 
-`App` is the **state**: the logger and the count of readings. The call
-`http.listen_and_serve(address, server, state: app)` owns it and lends it, as
-`inout app`, to the route that answers each request, one request at a time.
-So `record` can add to `app.readings` and `stats` can read it, with no global
-variable and no lock: `serve` answers one request at a time. The annotation
-`http.Router[App]` on the router names the state its routes take, and
-`Router.new()` makes it. A route that does not use the state leaves it out,
-like `outlook`, and the router lends it only to the routes that ask. Leave the
-annotation out and `Router.new()` makes a `Router[()]`, whose routes take no
-state: registering `record` on it is a mismatch, and its help says that
-`Router.new()` left `S` to its default `()`.
+`App` is the **state**: the count of readings. The server answers many
+requests at once, each on one of its serving tasks, so no route may hold the
+count itself: two routes adding to it at the same moment would lose one.
+`http.listen_and_serve_with(address, serving, App { readings = 0 })` starts an
+owning task that holds the `App`, and gives `serving` a `task.Client[App]` for
+each serving task. A route reaches the count through the client's `call`,
+which runs the closure it is given on the owning task, against the `App`, one
+call at a time, and returns what the closure answers. So `record` adds a
+reading and reads the new count in one call, and `stats` reads it, with no
+global variable and no lock. The compiler holds this to the language's
+promise: a closure given to `call` runs on another thread, so it must own
+everything it captures (`Owned`), and a value that views the request has to be
+copied into one of its own first.
 
-The state is released with the server on a failure, so it may hold something
-that must be settled, such as a vector from `mem.system()` or a database
-connection. When serving ends normally `listen_and_serve` returns the state,
-as the last lines of `main` do to log a final count, and the program releases
-it. A call that passes no `state:` serves a state of `()`, and returns `()`.
-A program that serves with `http.serve` keeps the server, so after serving
-stops `server.state()` reads the state back. This is axum's `State`, lent
-rather than cloned.
+`Ctx` is what each serving task lends its routes on every request: the client
+and a logger of its own. `http.with_state(ctx, router)` lends it, as
+`inout ctx`, to the route that answers. The annotation `http.Router[Ctx]` on
+the router names what its routes take, and `Router.new()` makes it. A route
+that does not use it leaves it out, like `outlook`, and the router lends it
+only to the routes that ask. Leave the annotation out and `Router.new()` makes
+a `Router[()]`, whose routes take nothing: registering `record` on it is a
+mismatch, and its help says that `Router.new()` left `S` to its default `()`.
+
+The state is released on a failure, so it may hold something that must be
+settled, such as a vector from `mem.system()` or a database connection. When
+serving ends normally `listen_and_serve_with` joins every serving task, closes
+the owning task and returns the state, as the last lines of `main` do to log a
+final count, and the program releases it. A service that shares nothing calls
+`http.listen_and_serve` with a function that builds each task's handler, as
+the first server does. Either one serves one connection at a time when it is
+given `policy: .Sequential`: a single serving task builds one handler with the
+same function and answers every connection in turn, on the thread that called
+it.
 
 A route can be a closure instead of a named function, registered with
 `route_raw`, which takes a function of the state and the request: `GET /` is
@@ -1903,21 +1964,27 @@ answer has been sent, with its status, size and duration: `Info` for 2xx and
 3xx, `Warn` for 4xx, `Error` for 5xx. The `reading` line comes from `record`
 itself, through `app.logger`, while it answers.
 
-`http.with_request_ids(handler)` is middleware too. It numbers the requests it
-passes on, 1, 2, 3 and so on, so a client can quote the number when reporting a
-problem. Each request the handler receives carries the number as an
-`X-Request-Id` header, read with `request.header("X-Request-Id")`. Any header
-of that name the client sent is removed, so the handler never sees a number a
-client chose. The handler's answer, a response or a refusal, carries the same
-header, replacing one the handler set itself. An answer the server writes
-without the handler, such as a 413 or a 503, has no number.
+`http.with_request_ids(handler)` is middleware too. It gives every request it
+passes on an id, so a client can quote the id when reporting a problem and the
+lines several services log about one request can be found together. When the
+client, or a proxy in front of the server, sent an `X-Request-Id` header that
+is 1 to 128 bytes of visible ASCII, that is the id. Otherwise the id is a new
+version 7 UUID from `std.uuid`, which begins with the millisecond it was made,
+so ids sort by time. Each serving task makes its ids on its own, so serving on
+many tasks needs nothing shared between them.
+
+Each request the handler receives carries the id as an `X-Request-Id` header,
+read with `request.header("X-Request-Id")`; any other header of that name the
+client sent is removed. The handler's answer, a response or a refusal, carries
+the same header, replacing one the handler set itself. An answer the server
+writes without the handler, such as a 413 or a 503, has no id.
 
 Wrap it around `logged`, as `stations.lin` does, and each logged line gains
-`request_id=3`. The number is printed from a field only `with_request_ids`
-sets, never from a header, so plain `http.logged` never logs a client's value.
-Wrapped inside `logged`, the handler and the answer still carry the number,
-but the line has no `request_id` field. You do not need `http.Observer` for
-any of this.
+`request_id=` and the id. The id is printed from a field only
+`with_request_ids` sets, never from a header, so plain `http.logged` never logs
+a client's value, and a malformed one never reaches the log at all. Wrapped
+inside `logged`, the handler and the answer still carry the id, but the line
+has no `request_id` field. You do not need `http.Observer` for any of this.
 
 `serve` writes no log of its own. It reports each finished exchange, failures
 included, to its handler through the `http.Observer` trait, which every handler
@@ -1970,23 +2037,25 @@ inside `http.logged` is timed with the handler it holds.
 
 ## Limits
 
-`http.listen_and_serve(address, server, state: app)` uses the standard
+`http.listen_and_serve_with(address, serving, state)` uses the standard
 limits. Pass `limits:` to change them. `http.Limits.default()` gives the
 standard ones, so struct update changes only what you write. In
 `stations.lin`, this serves one connection and returns:
 
-<!-- guide: edit stations.lin 126 let finished =… -->
+<!-- guide: edit stations.lin 151 let finished =… -->
 ```linea
     let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
-    let finished = http.listen_and_serve(net.loopback(8080), server, state: app, limits: limits) else |error| {
+    let finished = http.listen_and_serve_with(net.loopback(8080), serving, App { readings = 0 }, limits: limits) else |error| {
 ```
 
 Each request is served from an arena carved from the system allocator. To
 carve it from another one, call `http.listen_and_serve_in` (or
-`http.serve_in`) with that allocator first, such as
-`http.listen_and_serve_in(arena.handle(), address, server, limits: limits)`;
-code that is generic over an allocator calls the `_in` form, so the allocator
-it was given reaches every request.
+`http.serve_in`) with that allocator first; every serving task carves from it,
+so it must be `Shareable`. An arena's handle is not, since taking memory from
+it moves the arena's cursor, so a server cannot carve its requests from an
+arena it was handed, even with `policy: .Sequential`. Code that is generic
+over an allocator calls the `_in` form, so the allocator it was given reaches
+every request.
 
 | Field | Default | What it bounds |
 | --- | --- | --- |
@@ -2007,13 +2076,17 @@ arena could not hold the largest request the other limits allow.
 
 ## What `listen_and_serve` and `serve` promise
 
-`listen_and_serve` opens the listener, tells the handler the address it bound
-(`http.logged` logs it), runs `serve`, and releases the handler it took, and
-the state too on a failure. So
-these hold for `serve`, and for `listen_and_serve` with the handler released too:
+`listen_and_serve` opens the listener, tells each handler the address it bound
+(`http.logged` logs it), runs `serve`, and releases every handler it built.
+`listen_and_serve_with` also keeps the state in its owning task until every
+serving task has been joined, and releases it on a failure. So these hold for
+`serve`, and for `listen_and_serve` with the handlers released too:
 
 - It owns the listener it is given and closes it on every exit.
-- It answers one request per connection, one connection at a time.
+- It answers one request per connection, on as many tasks at once as its
+  policy allows (`.Threads(128)` unless it is given another), each with a
+  handler of its own; with `policy: .Sequential` it answers one connection at
+  a time.
 - A failed connection — a client that disconnects, a malformed request, a
   timeout — is answered or dropped, and never stops the server.
 - It returns only when accepting fails in a way retrying cannot fix, when the
@@ -2159,8 +2232,9 @@ above, 431 for too many headers, 400 for a malformed method or length, and 400
 for a method, query or header that is not UTF-8. A path that is not UTF-8 is
 encoded byte by byte, as a browser would send it. The
 timeouts do not apply, since the web server decides how long a program may
-run. `serve_cgi(handler, state: app, limits: limits)` takes the same
-`state:` and `limits:` as `listen_and_serve`, and `serve_cgi_in(allocator,
+run. `serve_cgi(handler, state: app, limits: limits)` lends `state:` to the
+handler as `http.with_state` does and returns it once the request is answered,
+takes the same `limits:` as `listen_and_serve`, and `serve_cgi_in(allocator,
 handler)` carves the request's arena from another allocator. Any other variable, such as one your server sets for the program's
 configuration, is yours to read with `env.variable`, which returns
 `Option[Str]`: `env.variable("PARTY_DATE").unwrap_or("soon")`. The text it
@@ -2191,9 +2265,9 @@ browser elsewhere, answer a redirect status such as `.SeeOther`, 303, with the
 
 Both run the same handler; what differs is who owns the process.
 
-- `listen_and_serve` is one long-lived process that answers one connection
-  at a time. State in `state:` lives between requests, and nothing is paid to
-  start each one; a slow request holds up the ones queued behind it.
+- `listen_and_serve` is one long-lived process that answers many connections
+  at once, on serving tasks it starts and joins. State an owning task keeps
+  lives between requests, and nothing is paid to start each one.
 - CGI starts a process per request, so the web server runs as many at once as
   it lets programs run: concurrency comes from processes, and the operating
   system keeps each one's memory apart. Every request starts fresh, so state
@@ -2221,19 +2295,24 @@ application that runs both ways and stores its entries in SQLite.
   a malformed `%`.
 - Every request lives in an arena that `serve` rewinds; `http.new_request`
   and `&router.serve_http(state, request)` drive the same steps by hand.
-- `state: app` hands the state to `listen_and_serve`, which lends it to each
-  route and returns it when serving ends; `http.Router.new()` and a call
-  without `state:` serve none.
+- `listen_and_serve_with` keeps the state in an owning task, gives each
+  serving task a client of it, and returns it when serving ends; a route
+  reaches it through `call`. `listen_and_serve` serves a service that shares
+  nothing.
 - `http.logged` logs every request, and handlers log through a logger kept in
-  the state. `http.with_request_ids` numbers each request and answer, and
-  around `logged` puts the number in the line.
+  the context each serving task lends them. `http.with_request_ids` gives each request and answer an
+  id, the client's or a new UUID, and around `logged` puts the id in the line.
 - A closure can be a route, registered with `route_raw`, or a streamed body that carries what its handler
   computed; `body.flush()` sends what has been written.
-- `http.listen_and_serve(address, handler, state:, limits:)` opens the
-  listener, serves, and closes and releases everything on every path; only the
-  address and the handler are required, and `http.serve` is the loop for a
-  program that opens the listener itself. `listen_and_serve_in` and `serve_in`
-  take the allocator each request is carved from first.
+- `http.listen_and_serve(address, make_handler, limits:, policy:)` opens the
+  listener, serves on as many tasks as `policy` allows, each with a handler
+  `make_handler` builds, and closes and releases everything on every path;
+  only the address and `make_handler` are required, and `http.serve` is the
+  loop for a program that opens the listener itself.
+  `listen_and_serve_with(address, make_handler, state)` keeps the state in an
+  owning task and hands each serving task a client of it, and
+  `policy: .Sequential` serves one connection at a time with one handler.
+  Each `_in` form takes the allocator each request is carved from first.
 - `http.Limits`, passed as `limits:`, bounds what a request may send and how
   many connections are answered.
 - `http.serve_cgi(handler)` answers the one request a web server started the

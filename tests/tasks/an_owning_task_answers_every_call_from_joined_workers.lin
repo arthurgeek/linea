@@ -1,0 +1,47 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+struct Tally {
+    count: UInt64,
+}
+
+// Four tasks each add one to the tally a thousand times. Only the owning task
+// touches the tally, so no addition is lost, and `close` hands it back once
+// every task holding a client has been joined.
+fn main() -> UInt8 {
+    let tally = task.own(Tally { count = 0 }).unwrap()
+    let counter = tally.client()
+    let first = task.prepare(
+        sink [sink counter = copy(counter)] |sink me: Chan[End]| {
+            for _ in 0..1000 {
+                counter.call(|inout t: Tally| t.count += 1)
+            }
+            me.close()
+        },
+    ).unwrap().start()
+    let second = task.prepare(
+        sink [sink counter = copy(counter)] |sink me: Chan[End]| {
+            for _ in 0..1000 {
+                counter.call(|inout t: Tally| t.count += 1)
+            }
+            me.close()
+        },
+    ).unwrap().start()
+    for _ in 0..1000 {
+        counter.call(|inout t: Tally| t.count += 1)
+    }
+    let seen = counter.call(|inout t: Tally| t.count)
+    first.close()
+    second.close()
+    let Tally { count } = tally.close()
+    io.println("seen at least {seen >= 1000}, total {count}").unwrap()
+    if count == 3000 {
+        0
+    } else {
+        1
+    }
+}

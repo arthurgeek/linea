@@ -1,0 +1,5 @@
+error[T-Refine]: 6 is not in 1..=5 for Rating[Book]
+  --> tests/newtypes/a_refined_generic_newtype_holds_every_instantiation_to_its_range.lin:12:30
+   |
+12 |     let book: Rating[Book] = Rating(6)
+   |                              ^^^^^^^^^ this value is outside the type's range

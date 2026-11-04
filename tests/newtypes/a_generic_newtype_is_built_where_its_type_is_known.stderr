@@ -1,0 +1,5 @@
+error[T-Infer]: the type arguments of `Id` cannot be determined
+ --> tests/newtypes/a_generic_newtype_is_built_where_its_type_is_known.lin:9:19
+  |
+9 |     let unknown = Id(3)
+  |                   ^^^^^ say what it builds where the value goes, as with an annotation

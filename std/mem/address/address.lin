@@ -1,0 +1,31 @@
+import std.testing
+
+// An Address is where values of `T` are kept in bytes: the number of the
+// first byte, with the type of what the bytes hold. Whatever keeps an address
+// names `T` in its own type, so a value kept in bytes is never held where no
+// type says so, and what a value of `T` may write through or may not share is
+// counted for whatever holds its address. The address is opaque, so only this
+// module turns a number into one or one into a number.
+@(opaque, copyable)
+type Address[phantom T] = UInt64
+
+// The address of a value with no size, which no bytes hold.
+internal fn nowhere[T]() -> Address[T] {
+    Address(0)
+}
+
+// The number an address is. [T-RawAddress] accepts a call to it only where
+// the runtime is told what to do with the bytes: as an argument for a runtime
+// parameter that copies them to another task, writes bytes another task sent
+// into them, or keeps them for a task it starts, and as the `at` of a
+// `mem.Closure`.
+internal fn raw[T](at: Address[T]) -> UInt64 {
+    let Address(number) = copy(at)
+    number
+}
+
+test fn nowhere_is_the_address_of_no_bytes() {
+    let none: Address[UInt64] = nowhere()
+    let Address(number) = none
+    testing.assert_eq(number, 0, "nowhere named a byte")?
+}

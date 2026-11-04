@@ -1,0 +1,20 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+// `close` on the handle waits for the body to return and joins its thread,
+// so the creator prints what the body counted only once the task is done.
+fn main() -> Result[UInt8, io.IoError] {
+    var visits = UInt64(0)
+    let body = sink [inout visits] |sink me: Chan[End]| {
+        visits += 3
+        me.close()
+    }
+    let slot = task.prepare(body).unwrap()
+    slot.start().close()
+    io.println("visits: {visits}")?
+    .Ok(0)
+}
