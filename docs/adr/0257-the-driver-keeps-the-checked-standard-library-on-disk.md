@@ -1,4 +1,4 @@
-# 253. The driver keeps the checked standard library on disk
+# 257. The driver keeps the checked standard library on disk
 
 Status: Accepted — 2026-11-03.
 
