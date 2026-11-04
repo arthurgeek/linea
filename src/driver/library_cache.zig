@@ -56,16 +56,9 @@ const entry_prefix = "checked-std-";
 const kept_entries = 16;
 
 /// Where the cache lives, allocated in `gpa`, or null where it is turned off or
-/// `HOME` is not set. A Debug compiler uses it only where `LINEA_CACHE_DIR`
-/// names a directory: checking the library cold costs it many times what a
-/// command does, and each worktree's build is a compiler of its own.
+/// `HOME` is not set.
 pub fn directory(gpa: std.mem.Allocator, environ: std.process.Environ) std.mem.Allocator.Error!?[]const u8 {
-    return directoryIn(gpa, environ, builtin.mode);
-}
-
-fn directoryIn(gpa: std.mem.Allocator, environ: std.process.Environ, mode: std.builtin.OptimizeMode) std.mem.Allocator.Error!?[]const u8 {
     if (environ.getPosix(directory_variable)) |named| return if (named.len == 0) null else try gpa.dupe(u8, named);
-    if (mode == .Debug) return null;
     const home = environ.getPosix("HOME") orelse return null;
     if (home.len == 0) return null;
     return try std.fs.path.join(gpa, &.{ home, default_directory });
@@ -92,24 +85,57 @@ pub fn open(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, modules: []cons
     return openKeyed(gpa, io, dir, hasher.finalResult(), modules);
 }
 
+/// The checked library holding the prelude's closure and `modules`: read
+/// from or written to the cache `environ` names, as a command would, or
+/// checked in this process where there is no usable cache.
+pub fn checkedFor(gpa: std.mem.Allocator, io: std.Io, environ: std.process.Environ, modules: []const []const u8) !*CheckedLibrary {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    if (try directory(arena.allocator(), environ)) |dir| {
+        if (try open(gpa, io, dir, modules)) |library| return library;
+    }
+    return CheckedLibrary.initFor(gpa, modules);
+}
+
 fn openKeyed(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest, modules: []const []const u8) !?*CheckedLibrary {
+    return openWaiting(gpa, io, dir, key, modules, lock_timeout_ns);
+}
+
+/// How long a command waits on another that holds an entry's lock before it
+/// takes the lock itself: longer than a Debug compiler takes to check the
+/// whole library.
+const lock_timeout_ns: i96 = 10 * std.time.ns_per_min;
+
+/// `openKeyed`, holding the entry's lock while it checks the library, so of
+/// several commands missing one entry at once one checks and writes it and
+/// the others wait and read it. A lock whose holder has exited, or that is
+/// older than `timeout_ns`, is taken over.
+fn openWaiting(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest, modules: []const []const u8, timeout_ns: i96) !?*CheckedLibrary {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const scratch = arena.allocator();
     const name = try entryName(scratch, key);
-    if (read(scratch, io, dir, name, key)) |payload| {
-        if (encoding.decode(gpa, payload)) |library| return library else |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            error.Corrupt => {},
-        }
-    } else |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => {},
-    }
+    if (try readDecoded(gpa, scratch, io, dir, name, key)) |library| return library;
     // The file the entry is written through is made before the library is
     // checked, so a cache that cannot be written is known before that cost.
     var cache = std.Io.Dir.cwd().createDirPathOpen(io, dir, .{ .open_options = .{ .iterate = true } }) catch return null;
     defer cache.close(io);
+    const lock_name = try std.fmt.allocPrint(scratch, "{s}.lock", .{name});
+    while (true) {
+        if (takeLock(io, cache, lock_name)) break else |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return null,
+        }
+        if (lockIsStale(io, cache, lock_name, timeout_ns)) {
+            cache.deleteFile(io, lock_name) catch {};
+            continue;
+        }
+        io.sleep(.fromMilliseconds(50), .awake) catch {};
+        if (try readDecoded(gpa, scratch, io, dir, name, key)) |library| return library;
+    }
+    defer cache.deleteFile(io, lock_name) catch {};
+    // The holder this command waited on may have written it just before.
+    if (try readDecoded(gpa, scratch, io, dir, name, key)) |library| return library;
     var file = cache.createFileAtomic(io, name, .{ .replace = true }) catch return null;
     defer file.deinit(io);
     const library = CheckedLibrary.initFor(gpa, modules) catch |err| switch (err) {
@@ -123,6 +149,44 @@ fn openKeyed(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest, m
     write(io, &file, key, payload) catch return library;
     evict(io, cache) catch {};
     return library;
+}
+
+/// The library the entry `name` holds, or null where it is missing or damaged.
+fn readDecoded(gpa: std.mem.Allocator, scratch: std.mem.Allocator, io: std.Io, dir: []const u8, name: []const u8, key: Digest) !?*CheckedLibrary {
+    const payload = read(scratch, io, dir, name, key) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return null,
+    };
+    return encoding.decode(gpa, payload) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.Corrupt => null,
+    };
+}
+
+/// Creates the lock `name`, holding this process's identifier, or fails with
+/// `error.PathAlreadyExists` where another holds it.
+fn takeLock(io: std.Io, cache: std.Io.Dir, name: []const u8) !void {
+    const file = try cache.createFile(io, name, .{ .exclusive = true });
+    defer file.close(io);
+    var text: [24]u8 = undefined;
+    file.writeStreamingAll(io, std.fmt.bufPrint(&text, "{d}", .{currentProcess()}) catch unreachable) catch {};
+}
+
+/// Whether the lock `name` is held by a process that has exited, or has
+/// been held longer than `timeout_ns`. A lock whose holder has not yet
+/// written its identifier is held.
+fn lockIsStale(io: std.Io, cache: std.Io.Dir, name: []const u8, timeout_ns: i96) bool {
+    const stat = cache.statFile(io, name, .{}) catch return false;
+    if (std.Io.Timestamp.now(io, .real).nanoseconds - stat.mtime.nanoseconds > timeout_ns) return true;
+    var buffer: [24]u8 = undefined;
+    const text = cache.readFile(io, name, &buffer) catch return false;
+    const holder = std.fmt.parseInt(std.posix.pid_t, text, 10) catch return false;
+    std.posix.kill(holder, @enumFromInt(0)) catch |err| return err == error.ProcessNotFound;
+    return false;
+}
+
+fn currentProcess() std.posix.pid_t {
+    return if (builtin.os.tag == .linux and !builtin.link_libc) std.os.linux.getpid() else std.c.getpid();
 }
 
 fn entryName(gpa: std.mem.Allocator, key: Digest) std.mem.Allocator.Error![]const u8 {
@@ -314,6 +378,63 @@ test "checked library cache: a missing, damaged or foreign entry is checked agai
     }
 }
 
+test "checked library cache: a lock whose holder has exited, or that is too old, is taken over" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try std.fmt.allocPrint(testing.allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer testing.allocator.free(dir);
+    const key: Digest = @splat(9);
+    const name = try entryName(testing.allocator, key);
+    defer testing.allocator.free(name);
+    const lock = try std.fmt.allocPrint(testing.allocator, "{s}.lock", .{name});
+    defer testing.allocator.free(lock);
+
+    // A holder no process is.
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = lock, .data = "2147483646" });
+    const first = (try openWaiting(testing.allocator, testing.io, dir, key, &.{}, lock_timeout_ns)).?;
+    first.deinit();
+    try testing.expectError(error.FileNotFound, tmp.dir.statFile(testing.io, lock, .{}));
+
+    // A live holder, this process, past the time a command waits for one.
+    try tmp.dir.deleteFile(testing.io, name);
+    var text: [24]u8 = undefined;
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = lock, .data = try std.fmt.bufPrint(&text, "{d}", .{currentProcess()}) });
+    const second = (try openWaiting(testing.allocator, testing.io, dir, key, &.{}, 0)).?;
+    second.deinit();
+    _ = try tmp.dir.statFile(testing.io, name, .{});
+}
+
+test "checked library cache: of commands missing one entry at once, one writes it and the others read it" {
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    const dir = try std.fmt.allocPrint(testing.allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer testing.allocator.free(dir);
+    const Opener = struct {
+        dir: []const u8,
+        result: ?*CheckedLibrary = null,
+        fn run(self: *@This()) void {
+            self.result = openKeyed(testing.allocator, testing.io, self.dir, @splat(5), &.{}) catch null;
+        }
+    };
+    var openers: [3]Opener = .{ .{ .dir = dir }, .{ .dir = dir }, .{ .dir = dir } };
+    var threads: [3]std.Thread = undefined;
+    for (&threads, &openers) |*thread, *opener| thread.* = try std.Thread.spawn(.{}, Opener.run, .{opener});
+    for (threads) |thread| thread.join();
+    var encodings: [3][]u8 = undefined;
+    for (&openers, &encodings) |opener, *bytes| {
+        const library = opener.result.?;
+        bytes.* = try encoding.encode(testing.allocator, library);
+        library.deinit();
+    }
+    defer for (encodings) |bytes| testing.allocator.free(bytes);
+    for (encodings[1..]) |bytes| try testing.expectEqualSlices(u8, encodings[0], bytes);
+    // The entry, and no lock left behind.
+    var count: usize = 0;
+    var it = tmp.dir.iterate();
+    while (try it.next(testing.io)) |_| count += 1;
+    try testing.expectEqual(@as(usize, 1), count);
+}
+
 test "checked library cache: a cache that cannot be written is not used, and the library is not checked for it" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -324,11 +445,10 @@ test "checked library cache: a cache that cannot be written is not used, and the
     try testing.expect(try openKeyed(testing.allocator, testing.io, dir, @splat(7), &.{}) == null);
 }
 
-test "checked library cache: an empty directory variable turns the cache off, and a Debug compiler uses only a named one" {
+test "checked library cache: an empty directory variable turns the cache off" {
     if (std.process.Environ.Block != std.process.Environ.PosixBlock) return error.SkipZigTest;
     const home = [_:null]?[*:0]const u8{"HOME=/home/someone"};
-    try testing.expect(try directoryIn(testing.allocator, .{ .block = .{ .slice = &home } }, .Debug) == null);
-    const named = (try directoryIn(testing.allocator, .{ .block = .{ .slice = &home } }, .ReleaseFast)).?;
+    const named = (try directory(testing.allocator, .{ .block = .{ .slice = &home } })).?;
     defer testing.allocator.free(named);
     try testing.expectEqualStrings("/home/someone/.linea-cache", named);
 

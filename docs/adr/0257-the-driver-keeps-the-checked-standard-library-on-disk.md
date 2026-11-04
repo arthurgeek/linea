@@ -55,15 +55,23 @@ records its key in its header as well as its name.
 **A place.** The cache is a directory beneath the user's home,
 `$HOME/.linea-cache`, or the directory `LINEA_CACHE_DIR` names; set to the
 empty string, `LINEA_CACHE_DIR` turns the cache off. Without `HOME` or with
-the cache off, a command compiles exactly as it did before. A Debug compiler
-uses the cache only where `LINEA_CACHE_DIR` names a directory: every
-worktree's Debug build is a compiler of its own with entries of its own, and
-the first command for a set of modules pays the most there. Measured on a
-Debug compiler, `linea check` of `hello.lin` takes 1.77 s with the cache off,
-2.49 s cold and 0.73 s warm, and of `json_inventory.lin` 5.34 s, 7.61 s and
-2.55 s. The conformance runner points `LINEA_CACHE_DIR` at its scratch
-directory, so a transcript never reads or writes the user's cache, and the
-guide and example gates run with the cache off.
+the cache off, a command compiles exactly as it did before. The cache is on for every
+compiler, a Debug one included, where it pays most: on a Debug compiler
+`linea check` of `hello.lin` takes 1.77 s with the cache off, 2.49 s cold
+and 0.73 s warm, and of `json_inventory.lin` 5.34 s, 7.61 s and 2.55 s. The
+build points `LINEA_CACHE_DIR` at one directory in its own cache
+(`.zig-cache/linea-cache`, or `-Dlibrary-cache=PATH`, `off` for none) for
+every `linea` its steps run and for the conformance runner, whose own checked
+library is read from and written to the same entries; transcripts share it
+too. Repeated `zig build test`, `guide` and `example-tests` runs, and their
+parallel workers, read what the first wrote, and nothing is written to the
+user's home.
+
+**One writer per entry.** A command missing an entry takes the entry's lock
+(`NAME.lock`, holding its process identifier) before it checks the library;
+another missing the same entry waits for the entry to appear and reads it.
+A lock whose holder has exited, or that is older than ten minutes, is taken
+over, so a command that died mid-check stops no other.
 
 **Damage is a miss.** An entry that is missing, cut short, written by another
 compiler or format, or whose encoding does not hash to the XxHash3 its header
