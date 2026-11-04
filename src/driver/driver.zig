@@ -52,6 +52,7 @@ const Program = @import("../syntax/program.zig").Program;
 const loadFromDisk = @import("loader.zig").loadFromDisk;
 const loadFromMemory = @import("loader.zig").loadFromMemory;
 const checkProgram = @import("loader.zig").checkProgram;
+const library_cache = @import("library_cache.zig");
 const annotated = @import("../fmt/annotated.zig");
 
 pub const exit_ok: u8 = 0;
@@ -610,9 +611,24 @@ pub fn run(process: std.process.Init) !u8 {
     // there is a rule this program broke, and this is a rule the compiler did.
     var defect = false;
 
+    // A command that checks the program resumes from the checked standard
+    // library the cache holds, where the program allows it; dumping tokens or
+    // syntax checks nothing.
+    const checked_library: ?*loader.CheckedLibrary = if (is_dump_tokens or is_dump_ast)
+        null
+    else if (try library_cache.directory(gpa, process.minimal.environ)) |dir|
+        try library_cache.open(process.gpa, io, dir)
+    else
+        null;
+    defer if (checked_library) |checked| checked.deinit();
+
     // Every root loads from disk, the standard library's included: its
     // manifest is what makes it the library, wherever it sits.
-    var program = loadFromDisk(gpa, io, &table, &sink, &interner, file_path, purpose, true) catch |e| {
+    const loaded = if (checked_library) |checked|
+        checked.loadFromDisk(gpa, io, &table, &sink, &interner, file_path, purpose)
+    else
+        loadFromDisk(gpa, io, &table, &sink, &interner, file_path, purpose, true);
+    var program = loaded catch |e| {
         // A manifest that was read and says what its root cannot be is not a
         // read failure, so it is said on its own.
         if (e == error.ManifestNamesTheLibrary) {
@@ -724,7 +740,12 @@ pub fn run(process: std.process.Init) !u8 {
             } else {
                 // `run` and `check` differ only in whether the value is printed,
                 // so a file that checks clean is a file that runs.
-                var settled = if (is_check)
+                var settled = if (checked_library) |checked|
+                    if (is_check)
+                        try checked.checkWhole(gpa, process.gpa, &program, &interner, &sink, purpose)
+                    else
+                        try checked.checkProgram(gpa, process.gpa, &program, &interner, &sink, purpose)
+                else if (is_check)
                     try loader.checkWhole(gpa, process.gpa, &program, &interner, &sink, purpose)
                 else
                     try checkProgram(gpa, process.gpa, &program, &interner, &sink, purpose);

@@ -2069,7 +2069,12 @@ ownership disposal plan. Conformance workers share that snapshot and own their
 mutable continuation tables. The language server checks the library once when
 it starts and resumes every module it analyses from it, with the method lists
 an editor's completions read prepared on the continued typing as well. The
-ordinary command-line compiler still performs a fresh compilation.
+command line reads the session from an on-disk cache keyed by the compiler
+binary's SHA-256 (ADR 0253): `driver/library_cache.zig` finds or writes the
+entry, `driver/library_encoding.zig` turns a `CheckedLibrary` into bytes and
+back through `support/serial.zig`, and a missing or damaged entry is checked
+again. A typing's fields `retained_typing.attach` never reads
+(`retained_typing.unread_fields`) are not encoded.
 
 Library source IDs remain a prefix. Generated syntax moves after application
 source through typed, domain-specific relocation; semantic tables relocate their

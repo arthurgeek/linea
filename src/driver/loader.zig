@@ -1,4 +1,5 @@
 const std = @import("std");
+const loader_mod = @This();
 const module_route = @import("../support/module_route.zig");
 const tracy = @import("../support/tracy.zig");
 const symbol_names = @import("../support/symbol.zig");
@@ -272,20 +273,60 @@ pub const CheckedLibrary = struct {
         purpose: Purpose,
         ownership: MemoryOwnership,
     ) !Program {
+        return self.loadInputs(gpa, .{ .memory = ownership }, table, sink, interner, entry, null, files, purpose);
+    }
+
+    /// `loader.loadFromDisk`, with the library's sources in place of
+    /// loading the library where the program can resume from this library.
+    pub fn loadFromDisk(
+        self: *const CheckedLibrary,
+        gpa: std.mem.Allocator,
+        io: std.Io,
+        table: *FileTable,
+        sink: *Sink,
+        interner: *Interner,
+        entry: []const u8,
+        purpose: Purpose,
+    ) !Program {
+        return loadFromDiskWith(gpa, io, table, sink, interner, entry, purpose, true, self);
+    }
+
+    fn loadInputs(
+        self: *const CheckedLibrary,
+        gpa: std.mem.Allocator,
+        input: Input,
+        table: *FileTable,
+        sink: *Sink,
+        interner: *Interner,
+        entry: []const u8,
+        module: ?[]const u8,
+        files: []const InMemoryFile,
+        purpose: Purpose,
+    ) !Program {
         std.debug.assert(table.count() == 0 and interner.count() == 0);
         // The library compiled as itself shares nothing with the copy a
         // prefix holds; it is loaded on its own.
-        if (try isStandard(gpa, files, dirOfEntry(entry))) return loadInputs(gpa, .{ .memory = ownership }, table, sink, interner, entry, null, files, purpose, true, null);
+        if (try isStandard(gpa, files, dirOfEntry(entry))) return loader_mod.loadInputs(gpa, input, table, sink, interner, entry, module, files, purpose, true, null);
         const diagnostic_count = sink.list.items.len;
         const error_count = sink.error_count;
         const warning_count = sink.warning_count;
         interner.* = try Interner.initPrefix(gpa, &self.resolved.interner);
         for (self.sources.table.sources.items) |source| _ = try table.add(gpa, source);
         // Borrow while deciding eligibility: copied source buffers belong to the
-        // caller and cannot be reclaimed through Program or FileTable.
-        var candidate = try loadInputs(gpa, .{ .memory = .borrow }, table, sink, interner, entry, null, files, purpose, true, &self.sources);
+        // caller and cannot be reclaimed through Program or FileTable. A disk
+        // load owns what it reads, so its candidate is the answer when it can
+        // resume.
+        const candidate_input: Input = switch (input) {
+            .memory => .{ .memory = .borrow },
+            .disk => input,
+        };
+        var candidate = try loader_mod.loadInputs(gpa, candidate_input, table, sink, interner, entry, module, files, purpose, true, &self.sources);
         const compatible = self.resolved.canResume(&candidate, interner);
-        if (compatible and ownership == .borrow) return candidate;
+        const kept = switch (input) {
+            .memory => |ownership| ownership == .borrow,
+            .disk => true,
+        };
+        if (compatible and kept) return candidate;
         candidate.deinit(gpa);
         interner.deinit(gpa);
         table.deinit(gpa);
@@ -298,7 +339,7 @@ pub const CheckedLibrary = struct {
             interner.* = try Interner.initPrefix(gpa, &self.resolved.interner);
             for (self.sources.table.sources.items) |source| _ = try table.add(gpa, source);
         }
-        return loadInputs(gpa, .{ .memory = ownership }, table, sink, interner, entry, null, files, purpose, true, if (compatible) &self.sources else null);
+        return loader_mod.loadInputs(gpa, input, table, sink, interner, entry, module, files, purpose, true, if (compatible) &self.sources else null);
     }
 
     pub fn checkProgram(
@@ -311,6 +352,19 @@ pub const CheckedLibrary = struct {
         purpose: Purpose,
     ) !Semantics {
         return checkProgramInternal(gpa, scratch, program, source_interner, sink, purpose, self, false);
+    }
+
+    /// `loader.checkWhole`, resuming from this library where the program can.
+    pub fn checkWhole(
+        self: *const CheckedLibrary,
+        gpa: std.mem.Allocator,
+        scratch: std.mem.Allocator,
+        program: *const Program,
+        source_interner: *const Interner,
+        sink: *Sink,
+        purpose: Purpose,
+    ) !Semantics {
+        return checkWholeInternal(gpa, scratch, program, source_interner, sink, purpose, self);
     }
 
     /// Editor analysis prepares complete method lists at written selections.
@@ -705,6 +759,20 @@ pub fn loadFromDisk(
     purpose: Purpose,
     with_library: bool,
 ) !Program {
+    return loadFromDiskWith(gpa, io, table, sink, interner, entry, purpose, with_library, null);
+}
+
+fn loadFromDiskWith(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    table: *FileTable,
+    sink: *Sink,
+    interner: *Interner,
+    entry: []const u8,
+    purpose: Purpose,
+    with_library: bool,
+    resumed_from: ?*const CheckedLibrary,
+) !Program {
     // A command line says which it means and is believed. Bounded by the
     // directory the compiler was run in, so a manifest further up names
     // somebody else's program and not this one.
@@ -747,6 +815,7 @@ pub fn loadFromDisk(
         });
     }
 
+    if (resumed_from) |checked| return checked.loadInputs(gpa, .{ .disk = io }, table, sink, interner, given, found.module, files.items, purpose);
     return loadInputs(gpa, .{ .disk = io }, table, sink, interner, given, found.module, files.items, purpose, with_library, null);
 }
 
@@ -3973,7 +4042,19 @@ pub fn checkWhole(
     sink: *Sink,
     purpose: Purpose,
 ) !Semantics {
-    var semantics = try checkProgram(gpa, scratch, program, source_interner, sink, purpose);
+    return checkWholeInternal(gpa, scratch, program, source_interner, sink, purpose, null);
+}
+
+fn checkWholeInternal(
+    gpa: std.mem.Allocator,
+    scratch: std.mem.Allocator,
+    program: *const Program,
+    source_interner: *const Interner,
+    sink: *Sink,
+    purpose: Purpose,
+    resumed_from: ?*const CheckedLibrary,
+) !Semantics {
+    var semantics = try checkProgramInternal(gpa, scratch, program, source_interner, sink, purpose, resumed_from, false);
     errdefer semantics.deinit(gpa);
     try checkInstantiations(gpa, &semantics, sink);
     return semantics;

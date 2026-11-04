@@ -1067,6 +1067,10 @@ fn checkTranscript(
     var keep = false;
     defer if (!keep) std.Io.Dir.cwd().deleteTree(io, relative) catch {};
     const directory = try std.Io.Dir.cwd().realPathFileAlloc(io, relative, gpa);
+    // One cache for every transcript of the walk, so the first command to
+    // check a program writes the library and the rest read it.
+    const library_cache = try std.fmt.allocPrint(gpa, "{s}/library-cache", .{scratch});
+    try std.Io.Dir.cwd().createDirPath(io, library_cache);
 
     const ran = transcripts.run(gpa, io, .{
         .linea = compiler,
@@ -1075,6 +1079,7 @@ fn checkTranscript(
         .environ = environ,
         .runtime = runtime,
         .sanitize = sanitize,
+        .library_cache = library_cache,
     }, parsed) catch |e| {
         try failures.append(gpa, .{
             .path = case.display_path,

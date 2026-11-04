@@ -1,0 +1,127 @@
+# 253. The driver keeps the checked standard library on disk
+
+Status: Accepted — 2026-11-03.
+
+## Context
+
+Every `linea check`, `run`, `build` and `test` loads, resolves, type-checks
+and ownership-checks the whole standard library before the program: about
+0.19 s in a ReleaseFast compiler and 1.3 s in a Debug one, which is all of
+`linea check` on a program that only returns zero. The answer depends on
+nothing but the compiler, because the library is carried in the binary
+(ADR 0171).
+
+`loader.CheckedLibrary` already holds that answer in memory, and the
+conformance runner and the language server resume programs from it
+(`canResume` decides when one can). The command line started a fresh
+compilation every time, so each command paid for the library again.
+
+Keeping the answer between processes needs two things the in-memory session
+did not: a byte form of everything a resumed compilation reads, and a place
+to keep it with a key that changes whenever the answer could.
+
+## Decision
+
+**An encoding.** `driver/library_encoding.zig` writes a `CheckedLibrary` as
+bytes and reads it back: the parsed library program, its file table and
+interner, the expanded program and resolution, the resolver's continuation
+rows and expanded interner, the typing and the checker's continuation rows,
+and ownership's disposal plan. The encoding is `support/serial.zig`'s, derived
+from the types: fields in declaration order with no padding, integers as
+LEB128, slices as a length and their elements, and a hash map's entries in the
+order of their encoded keys. It is therefore a function of the values alone,
+and two checks of the library encode to the same bytes, which a test holds.
+What the encoding cannot follow alone is named in one place, the encoding's
+hooks: an interner's lookup map is rebuilt from its texts, the expanded
+program's pointer to its source is the library's own program, and a typing's
+fields that `retained_typing.attach` never reads are not written. Those
+fields are listed once, as `retained_typing.unread_fields`, and both `attach`
+and the encoding read the list, so a field the resumed check starts reading is
+written by the encoding without a second edit.
+
+**A key.** An entry is keyed by the SHA-256 of the running compiler's
+executable and by `library_encoding.format_version`. The binary's own bytes
+change whenever the compiler's code or the library it carries does, and they
+are what decides the answer, so nothing that changes the answer can leave the
+key alone. The entry records its key in its header as well as its name.
+
+**A place.** The cache is a directory beneath the user's home,
+`$HOME/.linea-cache`, or the directory `LINEA_CACHE_DIR` names; set to the
+empty string, `LINEA_CACHE_DIR` turns the cache off. Without `HOME` or with
+the cache off, a command compiles exactly as it did before. The conformance
+runner points `LINEA_CACHE_DIR` at its scratch directory, so a transcript
+never reads or writes the user's cache.
+
+**Damage is a miss.** An entry that is missing, cut short, written by another
+compiler or format, or whose encoding does not hash to the SHA-256 its header
+records, is checked again and rewritten. A decoder never reads past its input
+and never builds an enum value from a number naming none. A write goes to an
+unnamed file renamed over the entry, so concurrent commands each see a whole
+entry or none. Writing an entry keeps the eight most recently written and
+removes older ones, so rebuilding the compiler does not grow the directory
+without bound.
+
+**The driver owns it.** No pass gains state: the driver reads or builds a
+`CheckedLibrary` before loading the program, and resumes from it through the
+same `CheckedLibrary.loadFromDisk`, `checkProgram` and `checkWhole` the other
+sessions use, so a command line, the runner and the editor resume one way.
+
+## Consequences
+
+- A warm command skips checking the library wherever `canResume` admits the
+  program. A program `canResume` refuses still loads and checks the library
+  afresh, and now also pays to read the entry. Of the 44 programs under
+  `examples/`, none resumes: 29 import a library module the prelude does not
+  reach, 13 derive, one writes a template and the rest hold a closure.
+  Loading every library module into the prefix lets 21 of them resume, but
+  the resumed check then runs whole-program reachability over every library
+  declaration and `hello.lin` takes 1.08 s instead of 0.15 s, so the prefix
+  stays the prelude's closure.
+- Measured on a ReleaseFast compiler, reading a 16 MB entry costs about
+  42 ms (5 ms hashing the executable, 10 ms reading and hashing the entry,
+  27 ms decoding), and a resumed check of a program returning zero takes
+  49 ms against 109 ms fresh. In a Debug compiler the same program checks in
+  1.15 s warm against 1.6 s without the cache.
+- The first command after a compiler changes pays for checking the library,
+  encoding it and writing the entry.
+- Hashing the executable costs a read of the binary on every command.
+- An entry is read back only by the binary that wrote it, so the encoding
+  needs no compatibility across versions and carries none: a change to any
+  encoded type raises nothing by hand, because the binary, and so the key,
+  changes with it. `format_version` covers a change to the header or the
+  encoding's rules that leaves the types alone.
+- The cache trusts what it decodes once the digest matches. A directory
+  another user can write could hand the compiler a forged library; the
+  default lives in the user's own home for that reason, and a
+  `LINEA_CACHE_DIR` must name a directory only its user writes.
+
+## Alternatives considered
+
+**A project-local `.linea-cache/` beside the program's manifest.** The entry
+is the same for every project a compiler builds, so a project-local cache
+pays the cold check once per project per compiler, and a loose file with no
+manifest has no project root to put one in: the cache would be written beside
+whatever directory a file was named in, the corpus's and the examples'
+included. A per-project cache earns its place for answers that depend on the
+project, such as compiled objects; the standard library's does not.
+
+**A build identifier computed when the compiler is built.** A hash of the
+compiler's sources, the library and the build options, embedded through
+`build_options`, costs nothing at run time. It is only as complete as the list
+of inputs the build script hashes: an input left out, such as the Zig version
+or an optimisation flag, leaves a stale entry answering for a compiler it was
+not written by. The binary's own bytes have no such list.
+
+**The executable's size and modification time.** Cheaper than a hash, and
+wrong whenever a rebuild keeps the size and a copy keeps the time.
+
+**The platform cache directory** (`~/Library/Caches` on macOS,
+`$XDG_CACHE_HOME` on Linux). One more rule per platform for a directory a
+person names and deletes by hand; `LINEA_CACHE_DIR` places it anywhere.
+
+**A temporary directory.** Shared between users on most systems, so a
+directory another user created first could hold a forged entry.
+
+**Encoding only what a resumed compilation reads, by hand.** A writer and a
+reader per table is two statements of each type that drift from the type; a
+derived encoding follows the types, and its hooks name the exceptions.
