@@ -88,10 +88,22 @@ sessions use, so a command line, the runner and the editor resume one way.
 
 - A warm command skips checking the library wherever `canResume` admits the
   program. A program `canResume` refuses still loads and checks the library
-  afresh.
-- The first command after a compiler changes pays for checking the library,
-  encoding it and writing the entry.
-- Hashing the executable costs a read of the binary on every command.
+  afresh. Of the 51 roots under `examples/`, 32 resume; the other 19 each
+  hold a closure of their own.
+- Measured on a ReleaseFast compiler, best of seven: `linea check` of
+  `hello.lin` takes 0.161 s warm against 0.153 s with the cache off,
+  `json_inventory.lin` 0.400 s against 0.442 s, and `http-json-echo`
+  0.692 s against 1.118 s; `linea build` of `http-json-echo` takes 4.49 s
+  against 4.90 s. A program that cannot resume reads its own files twice and
+  nothing else: `prime_sieve.lin` checks in 0.159 s against 0.157 s with the
+  cache off, where reading the entry first cost it 0.04 s. The entry holds every library module, 45.7 MB, and reading it
+  (hashing the executable, checking the entry's hash, decoding) is most of
+  what a warm `hello.lin` spends beyond its own check.
+- The first command after a compiler changes pays for checking every
+  library module, encoding it and writing the entry: about 1.1 s more than a
+  command without the cache on a ReleaseFast compiler.
+- Hashing the executable costs a read of the binary on every command that
+  can resume.
 - An entry is read back only by the binary that wrote it, so the encoding
   needs no compatibility across versions and carries none: a change to any
   encoded type raises nothing by hand, because the binary, and so the key,
