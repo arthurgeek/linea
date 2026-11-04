@@ -136,8 +136,6 @@ fn openWaiting(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest,
     defer cache.deleteFile(io, lock_name) catch {};
     // The holder this command waited on may have written it just before.
     if (try readDecoded(gpa, scratch, io, dir, name, key)) |library| return library;
-    var file = cache.createFileAtomic(io, name, .{ .replace = true }) catch return null;
-    defer file.deinit(io);
     const library = CheckedLibrary.initFor(gpa, modules) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return null,
@@ -146,7 +144,7 @@ fn openWaiting(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest,
     const payload = try encoding.encode(scratch, library);
     // A write that fails after the check leaves the checked library this
     // command already holds.
-    write(io, &file, key, payload) catch return library;
+    write(io, cache, scratch, name, key, payload) catch return library;
     evict(io, cache) catch {};
     return library;
 }
@@ -213,7 +211,9 @@ fn compilerIdentity() ?Digest {
                     const segment: std.macho.segment_command_64 = @as(*align(1) const std.macho.segment_command_64, @ptrCast(command)).*;
                     // The writable segments hold pointers the loader fixes up
                     // for wherever the image was placed, and `__LINKEDIT`
-                    // holds the signature, which re-signing changes.
+                    // holds symbols and the signature's bytes. Re-signing
+                    // still changes the key: the load commands at the start
+                    // of `__TEXT` record the signature's size.
                     if (!segment.initprot.WRITE and segment.filesize != 0 and !std.mem.eql(u8, segment.segName(), "__LINKEDIT")) {
                         const start: [*]const u8 = @ptrFromInt(segment.vmaddr + slide);
                         hasher.update(start[0..segment.filesize]);
@@ -282,7 +282,9 @@ fn payloadOf(bytes: []const u8, key: Digest) ?[]const u8 {
     return payload;
 }
 
-fn write(io: std.Io, file: anytype, key: Digest, payload: []const u8) !void {
+/// Writes the entry `name` through `NAME.PID.tmp`, renamed over it, so a
+/// reader sees a whole entry or none.
+fn write(io: std.Io, cache: std.Io.Dir, scratch: std.mem.Allocator, name: []const u8, key: Digest, payload: []const u8) !void {
     var header: [header_len]u8 = undefined;
     var at: usize = 0;
     @memcpy(header[at..][0..magic.len], magic);
@@ -294,9 +296,15 @@ fn write(io: std.Io, file: anytype, key: Digest, payload: []const u8) !void {
     std.mem.writeInt(u64, header[at..][0..8], payload.len, .little);
     at += 8;
     std.mem.writeInt(u64, header[at..][0..8], std.hash.XxHash3.hash(0, payload), .little);
-    try file.file.writeStreamingAll(io, &header);
-    try file.file.writeStreamingAll(io, payload);
-    try file.replace(io);
+    const temporary = try std.fmt.allocPrint(scratch, "{s}.{d}.tmp", .{ name, currentProcess() });
+    errdefer cache.deleteFile(io, temporary) catch {};
+    {
+        const file = try cache.createFile(io, temporary, .{});
+        defer file.close(io);
+        try file.writeStreamingAll(io, &header);
+        try file.writeStreamingAll(io, payload);
+    }
+    try std.Io.Dir.rename(cache, temporary, cache, name, io);
 }
 
 /// Removes the oldest entries beyond `kept_entries`, and files an interrupted
@@ -308,12 +316,16 @@ fn evict(io: std.Io, cache: std.Io.Dir) !void {
     const now = std.Io.Timestamp.now(io, .real).nanoseconds;
     var it = cache.iterate();
     while (try it.next(io)) |entry| {
-        // An entry's unnamed file, which a command stopped while writing it
-        // left behind: sixteen hex digits, and an hour old.
-        if (entry.kind == .file and entry.name.len == 16 and std.mem.indexOfNone(u8, entry.name, "0123456789abcdef") == null) {
-            const stat = cache.statFile(io, entry.name, .{}) catch continue;
-            if (now - stat.mtime.nanoseconds > std.time.ns_per_hour) cache.deleteFile(io, entry.name) catch {};
-            continue;
+        // What a command stopped while writing an entry left behind: its
+        // temporary file an hour on, and its lock once no command would wait
+        // on it.
+        if (entry.kind == .file and std.mem.startsWith(u8, entry.name, entry_prefix)) {
+            const age: ?i96 = if (std.mem.endsWith(u8, entry.name, ".tmp")) std.time.ns_per_hour else if (std.mem.endsWith(u8, entry.name, ".lock")) lock_timeout_ns else null;
+            if (age) |limit| {
+                const stat = cache.statFile(io, entry.name, .{}) catch continue;
+                if (now - stat.mtime.nanoseconds > limit) cache.deleteFile(io, entry.name) catch {};
+                continue;
+            }
         }
         if (entry.kind != .file or !std.mem.startsWith(u8, entry.name, entry_prefix)) continue;
         if (entry.name.len != @sizeOf(@FieldType(Entry, "name"))) continue;

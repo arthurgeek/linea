@@ -79,13 +79,14 @@ records, is checked again and rewritten. The encoding's hash is read on every
 command and only detects damage, so it is a fast checksum: the entry is
 trusted because only its user writes the directory, not because of its hash.
 A decoder never reads past its input and never builds an enum value from a
-number naming none. A write goes to an unnamed file renamed over the entry,
+number naming none. A write goes to `NAME.PID.tmp`, renamed over the entry,
 so concurrent commands each see a whole entry or none. Writing an entry
-keeps the sixteen most recently written, removes older ones and any file an
-interrupted write left an hour ago, so rebuilding the compiler does not grow the directory
-without bound.
+keeps the sixteen most recently written and removes older ones, so
+rebuilding the compiler does not grow the directory without bound, and
+removes the temporary file an interrupted write left an hour on and its lock
+ten minutes on; it removes nothing else in the directory.
 
-**A cache that cannot be written is not used.** The entry's file is created
+**A cache that cannot be written is not used.** The entry's lock is created
 before the library is checked; where it cannot be, the command compiles as it
 would without a cache rather than checking every library module only to keep
 nothing.

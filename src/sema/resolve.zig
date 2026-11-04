@@ -83,7 +83,7 @@ pub const LibraryPrefix = struct {
     /// Reuse requires the same closed source prefix and stable interned names.
     /// An application's derives and templates expand after the library's
     /// generated declarations.
-    pub fn canResume(self: *const LibraryPrefix, program: *const Program, interner: *const Interner) bool {
+    pub fn canResume(self: *const LibraryPrefix, gpa: std.mem.Allocator, program: *const Program, interner: *const Interner) std.mem.Allocator.Error!bool {
         const cached = self.result.expanded.source;
         if (program.modules.len <= cached.modules.len or program.primary.index() < cached.modules.len) return false;
         if (program.prelude != cached.prelude) return false;
@@ -102,7 +102,7 @@ pub const LibraryPrefix = struct {
                 before.imports.len != after.imports.len or !std.mem.eql(FileId, before.files, after.files)) return false;
             for (before.imports, after.imports) |a, b| if (a.decl != b.decl or a.module != b.module) return false;
         }
-        if (!loadsEveryLibraryModule(program, cached.modules.len)) return false;
+        if (!try loadsEveryLibraryModule(gpa, program, cached.modules.len)) return false;
         for (program.modules[cached.modules.len..]) |module| {
             if (module.library) return false;
             // An application's derives expand from the templates the library
@@ -132,32 +132,27 @@ pub const LibraryPrefix = struct {
 /// checked library holding another would show the program names, members and
 /// implementations a fresh check does not see.
 ///
-/// **Bound:** the program's modules and their imports. The modules reached
-/// are held in fixed buffers, so a program of more modules than they hold is
-/// answered no and compiles afresh.
-fn loadsEveryLibraryModule(program: *const Program, library: usize) bool {
-    var reached_buffer: [512]bool = undefined;
-    var queue_buffer: [512]ModuleId = undefined;
-    if (program.modules.len > reached_buffer.len) return false;
-    const reached = reached_buffer[0..program.modules.len];
-    @memset(reached, false);
-    var tail: usize = 0;
+/// **Bound:** the program's modules and their imports, with a set and a
+/// queue sized by the program's modules.
+fn loadsEveryLibraryModule(gpa: std.mem.Allocator, program: *const Program, library: usize) std.mem.Allocator.Error!bool {
+    var reached = try std.DynamicBitSetUnmanaged.initEmpty(gpa, program.modules.len);
+    defer reached.deinit(gpa);
+    var queue: std.ArrayList(ModuleId) = .empty;
+    defer queue.deinit(gpa);
     for (program.modules, 0..) |module, i| {
         if (module.library and ModuleId.from(i) != program.prelude) continue;
-        reached[i] = true;
-        queue_buffer[tail] = .from(i);
-        tail += 1;
+        reached.set(i);
+        try queue.append(gpa, .from(i));
     }
     var head: usize = 0;
-    while (head < tail) : (head += 1) {
-        for (program.get(queue_buffer[head]).imports) |import| {
-            if (import.module == .none or reached[import.module.index()]) continue;
-            reached[import.module.index()] = true;
-            queue_buffer[tail] = import.module;
-            tail += 1;
+    while (head < queue.items.len) : (head += 1) {
+        for (program.get(queue.items[head]).imports) |import| {
+            if (import.module == .none or reached.isSet(import.module.index())) continue;
+            reached.set(import.module.index());
+            try queue.append(gpa, import.module);
         }
     }
-    for (reached[0..library]) |loaded| if (!loaded) return false;
+    for (0..library) |i| if (!reached.isSet(i)) return false;
     return true;
 }
 
@@ -239,7 +234,7 @@ pub fn resolveWithPrefix(
     purpose: Purpose,
     prefix: *const LibraryPrefix,
 ) !ResolveResult {
-    if (!prefix.canResume(program, interner)) return resolve(gpa, program, interner, sink, purpose);
+    if (!try prefix.canResume(gpa, program, interner)) return resolve(gpa, program, interner, sink, purpose);
     var names = try Interner.initPrefix(gpa, interner);
     defer names.deinit(gpa);
     var parser = try Modules.initPrefix(gpa, sink, &names, &program.ast);
@@ -18688,7 +18683,7 @@ test "library resolution continuation preserves bindings and diagnoses applicati
             } };
             const program: Program = .{ .modules = &modules, .ast = try parser.finish(), .primary = .from(1), .prelude = .from(0) };
             try testing.expectEqual(@as(u32, 0), app_sink.error_count);
-            try testing.expectEqual(fixture.reusable, prefix.canResume(&program, &app_names));
+            try testing.expectEqual(fixture.reusable, (try prefix.canResume(testing.allocator, &program, &app_names)));
             const continued = try resolveWithPrefix(gpa, &program, &app_names, &app_sink, .program, &prefix);
             var fresh_sink = Sink.init(gpa);
             const fresh = try resolve(gpa, &program, &app_names, &fresh_sink, .program);

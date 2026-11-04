@@ -343,7 +343,7 @@ pub const CheckedLibrary = struct {
             .disk => input,
         };
         var candidate = try loader_mod.loadInputs(gpa, candidate_input, table, sink, interner, entry, module, files, purpose, true, &self.sources);
-        const compatible = self.resolved.canResume(&candidate, interner);
+        const compatible = try self.resolved.canResume(gpa, &candidate, interner);
         const kept = switch (input) {
             .memory => |ownership| ownership == .borrow,
             .disk => true,
@@ -4019,7 +4019,7 @@ fn checkProgramInternal(
     prepare_completions: bool,
 ) !Semantics {
     const retained = if (library_prefix) |prefix|
-        if (prefix.resolved.canResume(program, source_interner)) prefix else null
+        if (try prefix.resolved.canResume(gpa, program, source_interner)) prefix else null
     else
         null;
     const z_resolve = tracy.beginZone(@src(), "resolve");
@@ -5601,7 +5601,7 @@ test "an application resumes unless its own files hold a closure or a generated 
         var joined_names: Interner = .empty;
         const prefix = if (std.mem.indexOf(u8, case.text, "import std.io") != null) with_io else prelude;
         const joined = try prefix.loadFromMemory(gpa, &joined_table, &sink, &joined_names, case.path, files, .program, .borrow);
-        try testing.expectEqual(case.resumes, prefix.resolved.canResume(&joined, &joined_names));
+        try testing.expectEqual(case.resumes, (try prefix.resolved.canResume(gpa, &joined, &joined_names)));
     }
 }
 
@@ -5623,7 +5623,7 @@ test "a checked library holding a module the program does not load resumes nothi
         var names: Interner = .empty;
         const files = &.{InMemoryFile{ .path = "main.lin", .text = text }};
         const program = try prefix.loadFromMemory(gpa, &table, &sink, &names, "main.lin", files, .program, .borrow);
-        try testing.expect(!prefix.resolved.canResume(&program, &names));
+        try testing.expect(!(try prefix.resolved.canResume(gpa, &program, &names)));
         var semantics = try prefix.checkProgram(gpa, testing.allocator, &program, &names, &sink, .program);
         defer semantics.deinit(gpa);
         try testing.expect(!semantics.reused_library);
@@ -5961,7 +5961,7 @@ test "checked unused library delegation resumes generic indexing and traversal" 
         var names: Interner = .empty;
         var sink = Sink.init(gpa);
         const program = try prefix.loadFromMemory(gpa, &table, &sink, &names, "main.lin", &application, .program, .borrow);
-        try testing.expect(prefix.resolved.canResume(&program, &names));
+        try testing.expect(try prefix.resolved.canResume(testing.allocator, &program, &names));
         var semantics = if (mode == 0)
             try checkProgram(gpa, gpa, &program, &names, &sink, .program)
         else
