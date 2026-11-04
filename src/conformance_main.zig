@@ -20816,6 +20816,45 @@ test "recorded MLIR verification accepts native cache proof but retains invalid 
     try testing.expectEqual(@as(usize, 1), failures.items.len);
 }
 
+/// A case checked and lowered without the checked library.
+const FreshCheck = struct {
+    program: Program,
+    semantics: loader.Semantics,
+    lowered: ?MirModule,
+};
+
+/// Checks and lowers `case` afresh, and records a failure where the
+/// diagnostics it reports differ from those the resumed check reported into
+/// `resumed`. Allocated in `gpa`, the case's arena.
+fn freshCheck(
+    gpa: std.mem.Allocator,
+    scratch: std.mem.Allocator,
+    case: Case,
+    resumed_table: *const FileTable,
+    resumed: *const Sink,
+    display_path: []const u8,
+    failures: *std.ArrayList(Failure),
+) !FreshCheck {
+    var table: FileTable = .empty;
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    const program = try loadFromMemory(gpa, &table, &sink, &interner, case.entry, try inputsOf(gpa, case), .program, true, .borrow);
+    try table.buildMaps(gpa);
+    const semantics = try checkProgram(gpa, scratch, &program, &interner, &sink, .program);
+    var fresh_report: std.Io.Writer.Allocating = .init(gpa);
+    try render.renderAll(&fresh_report.writer, &table, &sink, .{ .color = .never });
+    var resumed_report: std.Io.Writer.Allocating = .init(gpa);
+    try render.renderAll(&resumed_report.writer, resumed_table, resumed, .{ .color = .never });
+    if (!std.mem.eql(u8, fresh_report.written(), resumed_report.written())) try failures.append(gpa, .{
+        .path = display_path,
+        .what = "a check resumed from the checked library reported other than a fresh check",
+        .expected = fresh_report.written(),
+        .actual = resumed_report.written(),
+    });
+    const lowered = if (sink.hasErrors()) null else try lower(gpa, &semantics.expanded, &semantics.res, &semantics.typing, &semantics.disposals, &sink, .program);
+    return .{ .program = program, .semantics = semantics, .lowered = lowered };
+}
+
 fn checkCase(
     gpa: std.mem.Allocator,
     scratch_parent: std.mem.Allocator,
@@ -21024,13 +21063,27 @@ fn checkCase(
     var rejected = sink.hasErrors();
     var lowered: ?MirModule = null;
 
+    // The dumps print syntax IDs and the order types were minted in, which
+    // a check resumed from the checked library numbers after the whole
+    // library. They are taken from a fresh check of the case, as the command
+    // line takes them, and that check's diagnostics are held to the resumed
+    // one's.
+    const dump_goldens = [_][]const u8{
+        try std.mem.concat(gpa, u8, &.{ stem, ".inferred" }),
+        try std.mem.concat(gpa, u8, &.{ stem, ".mono" }),
+        try std.mem.concat(gpa, u8, &.{ stem, ".mir" }),
+    };
+    const fresh: ?FreshCheck = for (dump_goldens) |golden| {
+        if (!rejected and try readIfExists(io, gpa, golden) != null) break try freshCheck(gpa, scratch_parent, case, &table, &sink, display_path, &w.failures);
+    } else null;
+
     // The inferred dump reads the checker's answers back into the
     // source, so it is only meaningful where the checker had answers.
     if (!rejected) {
-        const golden = try std.mem.concat(gpa, u8, &.{ stem, ".inferred" });
+        const golden = dump_goldens[0];
         if (try readIfExists(io, gpa, golden)) |expected| {
             var out: std.Io.Writer.Allocating = .init(gpa);
-            try annotated.dumpInferred(gpa, &out.writer, &ast, res, typing, program.ownDeclarations());
+            try annotated.dumpInferred(gpa, &out.writer, &fresh.?.program.ast, &fresh.?.semantics.res, &fresh.?.semantics.typing, fresh.?.program.ownDeclarations());
             if (try compare(gpa, io, &w.failures, display_path, "inferred", golden, expected, out.written(), env.update, false)) {
                 std.debug.print("updated {s}\n", .{golden});
             }
@@ -21041,10 +21094,10 @@ fn checkCase(
         lower_zone.end();
         rejected = sink.hasErrors();
 
-        const mono_golden = try std.mem.concat(gpa, u8, &.{ stem, ".mono" });
-        if (lowered) |*module| if (try readIfExists(io, gpa, mono_golden)) |expected| {
+        const mono_golden = dump_goldens[1];
+        if (lowered != null) if (try readIfExists(io, gpa, mono_golden)) |expected| {
             var out: std.Io.Writer.Allocating = .init(gpa);
-            try annotated.dumpMono(gpa, &out.writer, &settled.expanded, typing, module);
+            try annotated.dumpMono(gpa, &out.writer, &fresh.?.semantics.expanded, &fresh.?.semantics.typing, &fresh.?.lowered.?);
             if (try compare(gpa, io, &w.failures, display_path, "mono", mono_golden, expected, out.written(), env.update, false)) {
                 std.debug.print("updated {s}\n", .{mono_golden});
             }
@@ -21357,10 +21410,10 @@ fn checkCase(
     var answered_env: Env = undefined;
     if (lowered) |mir| {
         if (!rejected) {
-            const mir_golden = try std.mem.concat(gpa, u8, &.{ stem, ".mir" });
+            const mir_golden = dump_goldens[2];
             if (try readIfExists(io, gpa, mir_golden)) |expected| {
                 var out: std.Io.Writer.Allocating = .init(gpa);
-                try dumpMirModule(&out.writer, &mir);
+                try dumpMirModule(&out.writer, &fresh.?.lowered.?);
                 if (try compare(gpa, io, &w.failures, display_path, "mir", mir_golden, expected, out.written(), env.update, false)) {
                     std.debug.print("updated {s}\n", .{mir_golden});
                 }
