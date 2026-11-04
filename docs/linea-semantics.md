@@ -3218,7 +3218,9 @@ literal.
 
 An `if` whose condition reads at least one descriptor and is built only from
 `Bool` and `UInt64` descriptors, integer and `Bool` literals, `!`, `&&`, `||`,
-comparisons and parentheses is decided during expansion, separately for each
+`==` and `!=` between two `Bool` or two integer operands, `<`, `<=`, `>` and
+`>=` between integers, and parentheses is decided during expansion, separately
+for each
 case and component. Expansion writes only the selected branch, as a block, or
 an empty block when the condition is false and there is no `else`. An `if`
 without `else` has type `()` whichever branch is kept, so its block must be

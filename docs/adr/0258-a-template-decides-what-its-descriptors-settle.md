@@ -34,7 +34,8 @@ format spec is the plain `Str` literal it spells. Each value is written as
 
 An `if` whose condition reads at least one descriptor and is built only from
 `Bool` and `UInt64` descriptors, integer and `Bool` literals, `!`, `&&`, `||`,
-comparisons and parentheses is decided during expansion. Only the selected
+`==` and `!=` over two operands of one kind, order comparisons of integers and
+parentheses is decided during expansion. Only the selected
 branch is written, as a block. An `if` without `else` keeps type `()`, so its
 selected block must be `()`, as at run time.
 

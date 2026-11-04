@@ -1,0 +1,39 @@
+struct Point {
+    x: UInt8,
+}
+
+enum Shape {
+    Dot,
+}
+
+fn ;main() -> UInt8 {
+    let point: Point = .{ x = 1 }
+    var total: UInt8 = 0
+    Point;;Tally.tally(point, &total)
+    Shape;;Tally.tally(Shape.Dot, &total)
+    total
+}
+
+fn Point;;Tally.tally(value: Point, inout total: UInt8) {
+    match read value {
+        Point {
+            x: _linea_derive_6_0_0_0,
+        } => {
+            {
+                let _: () = {
+                    total = total + 10
+                }
+            }
+        },
+    }
+}
+
+fn Shape;;Tally.tally(value: Shape, inout total: UInt8) {
+    match read value {
+        Dot => {
+            {
+                total = total + 1
+            }
+        },
+    }
+}

@@ -86,8 +86,8 @@ const Decidable = enum { boolean, integer };
 
 /// Whether expansion can evaluate `id` from the descriptors in `metadata`
 /// alone, and to which kind of value: a `Bool` descriptor, an integer one, a
-/// literal, or `!`, `&&`, `||`, a comparison of two integers, or parentheses
-/// over those. `descriptors` counts the descriptors read, so a caller can
+/// literal, or `!`, `&&`, `||`, `==` and `!=` over two values of one kind,
+/// an order comparison of two integers, or parentheses over those. `descriptors` counts the descriptors read, so a caller can
 /// refuse a condition that reads none.
 fn decidable(ast: *const Ast, id: ExprId, metadata: []const MetadataPlan, descriptors: *u32) ?Decidable {
     switch (ast.exprTag(id)) {
@@ -99,7 +99,13 @@ fn decidable(ast: *const Ast, id: ExprId, metadata: []const MetadataPlan, descri
             if (decidable(ast, operands.rhs, metadata, descriptors) != .boolean) return null;
             return .boolean;
         },
-        .eq, .ne, .lt, .le, .gt, .ge => {
+        .eq, .ne => {
+            const operands = ast.binary(id);
+            const lhs = decidable(ast, operands.lhs, metadata, descriptors) orelse return null;
+            if (decidable(ast, operands.rhs, metadata, descriptors) != lhs) return null;
+            return .boolean;
+        },
+        .lt, .le, .gt, .ge => {
             const operands = ast.binary(id);
             if (decidable(ast, operands.lhs, metadata, descriptors) != .integer) return null;
             if (decidable(ast, operands.rhs, metadata, descriptors) != .integer) return null;
