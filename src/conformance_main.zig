@@ -16701,6 +16701,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         .levels = options.levels,
         .cache = &cache,
         .update = update,
+        .narrowed = narrowed != null,
         .sanitize = sanitize,
         .runtime_path = runtime_path,
         .scratch_dir = scratch_dir,
@@ -20282,7 +20283,22 @@ fn emittedLines(ir: []const u8) usize {
     return std.mem.count(u8, ir, "\n");
 }
 
-/// Holds the emitted module to the line count its `.size` golden records.
+/// What an update may do to a `.size` golden.
+const SizeUpdate = enum {
+    /// Compare only.
+    none,
+    /// Record a count that shrank, and refuse one that grew as a comparison
+    /// does. A walk of more than one case updates this way, so an update of
+    /// the whole corpus can lower a bound and never raise one.
+    shrink,
+    /// Record any count. Only a walk narrowed to the one case updates this
+    /// way, so growth is accepted for the program it was measured on.
+    any,
+};
+
+/// Holds the emitted module to the line count its `.size` golden records, and
+/// returns what an update recorded: `grew by N`, `shrank by N` or `recorded N`
+/// where the golden held no count.
 ///
 /// The C compiler's time scales with the module it is given, so a module that
 /// grows makes every build of that program slower. A count that grows fails.
@@ -20298,14 +20314,19 @@ fn compareSize(
     golden_path: []const u8,
     expected: []const u8,
     ir: []const u8,
-    update: bool,
-) !bool {
+    update: SizeUpdate,
+) !?[]const u8 {
     const lines = emittedLines(ir);
     const recorded = std.fmt.parseInt(usize, std.mem.trim(u8, expected, " \n"), 10) catch null;
-    if (recorded == lines) return false;
-    if (update) {
+    if (recorded == lines) return null;
+    const grew = if (recorded) |bound| lines > bound else false;
+    if (update == .any or (update == .shrink and !grew)) {
         try writeFile(io, golden_path, try std.fmt.allocPrint(gpa, "{d}\n", .{lines}));
-        return true;
+        const bound = recorded orelse return try std.fmt.allocPrint(gpa, "recorded {d} lines", .{lines});
+        return if (grew)
+            try std.fmt.allocPrint(gpa, "grew by {d} lines, to {d}", .{ lines - bound, lines })
+        else
+            try std.fmt.allocPrint(gpa, "shrank by {d} lines, to {d}", .{ bound - lines, lines });
     }
     const bound = recorded orelse {
         try failures.append(gpa, .{
@@ -20314,11 +20335,14 @@ fn compareSize(
             .expected = "a line count of the emitted MLIR, and this file records none",
             .actual = try std.fmt.allocPrint(gpa, "{d}\n", .{lines}),
         });
-        return false;
+        return null;
     };
-    try failures.append(gpa, if (lines > bound) .{
+    try failures.append(gpa, if (grew) .{
         .path = lin_path,
-        .what = "size: the emitted MLIR grew past its recorded line count",
+        .what = if (update == .shrink)
+            "size: the emitted MLIR grew past its recorded line count; an update records growth only from a walk narrowed to this case"
+        else
+            "size: the emitted MLIR grew past its recorded line count",
         .expected = try std.fmt.allocPrint(gpa, "at most {d} lines\n", .{bound}),
         .actual = try std.fmt.allocPrint(gpa, "{d} lines, {d} more\n", .{ lines, lines - bound }),
     } else .{
@@ -20327,7 +20351,7 @@ fn compareSize(
         .expected = try std.fmt.allocPrint(gpa, "{d} lines\n", .{bound}),
         .actual = try std.fmt.allocPrint(gpa, "{d} lines, {d} fewer\n", .{ lines, bound - lines }),
     });
-    return false;
+    return null;
 }
 
 test "a size golden fails when the module grows and when it shrinks" {
@@ -20337,21 +20361,51 @@ test "a size golden fails when the module grows and when it shrinks" {
     var failures: std.ArrayList(Failure) = .empty;
     const module = "module {\n}\n";
 
-    try testing.expect(!try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "2\n", module, false));
+    try testing.expectEqual(null, try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "2\n", module, .none));
     try testing.expectEqual(@as(usize, 0), failures.items.len);
 
-    try testing.expect(!try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "1\n", module, false));
+    try testing.expectEqual(null, try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "1\n", module, .none));
     try testing.expectEqual(@as(usize, 1), failures.items.len);
     try testing.expect(std.mem.indexOf(u8, failures.items[0].what, "grew") != null);
     try testing.expectEqualStrings("2 lines, 1 more\n", failures.items[0].actual);
 
-    try testing.expect(!try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "3\n", module, false));
+    try testing.expectEqual(null, try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "3\n", module, .none));
     try testing.expectEqual(@as(usize, 2), failures.items.len);
     try testing.expect(std.mem.indexOf(u8, failures.items[1].what, "--update") != null);
     try testing.expectEqualStrings("2 lines, 1 fewer\n", failures.items[1].actual);
 
-    try testing.expect(!try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "", module, false));
+    try testing.expectEqual(null, try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "", module, .none));
     try testing.expectEqual(@as(usize, 3), failures.items.len);
+}
+
+test "an update records a size that grew only from a walk narrowed to its case" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const golden = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/c.size", .{tmp.sub_path});
+    var failures: std.ArrayList(Failure) = .empty;
+    const module = "a\nb\nc\nd\n";
+
+    // A walk of many cases refuses growth and leaves the golden as it was.
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "c.size", .data = "3\n" });
+    try testing.expectEqual(null, try compareSize(gpa, testing.io, &failures, "c.lin", golden, "3\n", module, .shrink));
+    try testing.expectEqual(@as(usize, 1), failures.items.len);
+    try testing.expect(std.mem.indexOf(u8, failures.items[0].what, "narrowed to this case") != null);
+    try testing.expectEqualStrings("3\n", try tmp.dir.readFileAlloc(testing.io, "c.size", gpa, .unlimited));
+
+    // The same walk records a count that shrank.
+    try testing.expectEqualStrings("shrank by 2 lines, to 4", (try compareSize(gpa, testing.io, &failures, "c.lin", golden, "6\n", module, .shrink)).?);
+    try testing.expectEqualStrings("4\n", try tmp.dir.readFileAlloc(testing.io, "c.size", gpa, .unlimited));
+
+    // A walk narrowed to the case records growth and says by how much.
+    try testing.expectEqualStrings("grew by 1 lines, to 4", (try compareSize(gpa, testing.io, &failures, "c.lin", golden, "3\n", module, .any)).?);
+    try testing.expectEqualStrings("4\n", try tmp.dir.readFileAlloc(testing.io, "c.size", gpa, .unlimited));
+
+    // A golden holding no count records the first one.
+    try testing.expectEqualStrings("recorded 4 lines", (try compareSize(gpa, testing.io, &failures, "c.lin", golden, "", module, .shrink)).?);
+    try testing.expectEqual(@as(usize, 1), failures.items.len);
 }
 
 /// Appends what the program said on standard error to a mismatching exit
@@ -20496,6 +20550,9 @@ const Settings = struct {
     levels: bool = false,
     cache: *const OutcomeCache,
     update: bool,
+    /// Whether the walk was narrowed to one case, the only walk whose update
+    /// may record a `.size` golden that grew.
+    narrowed: bool = false,
     sanitize: ?[]const u8,
     runtime_path: ?[]const u8,
     scratch_dir: []const u8,
@@ -21302,8 +21359,9 @@ fn checkCase(
 
                 const size_golden = try std.mem.concat(gpa, u8, &.{ stem, ".size" });
                 if (try readIfExists(io, gpa, size_golden)) |expected| {
-                    if (try compareSize(gpa, io, &w.failures, display_path, size_golden, expected, ir.written(), env.update)) {
-                        std.debug.print("updated {s}\n", .{size_golden});
+                    const size_update: SizeUpdate = if (!env.update) .none else if (env.narrowed) .any else .shrink;
+                    if (try compareSize(gpa, io, &w.failures, display_path, size_golden, expected, ir.written(), size_update)) |change| {
+                        std.debug.print("updated {s}: {s}\n", .{ size_golden, change });
                     }
                 }
 
