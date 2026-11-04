@@ -199,10 +199,26 @@ pub fn Decoder(comptime Hooks: type) type {
 
         /// A length no larger than the bytes left, since every element takes
         /// at least one byte or is zero-sized.
+        /// A length a hook reads, whose elements the hook decodes itself or
+        /// does not encode at all.
         pub fn length(self: *Self) DecodeError!usize {
             const n = try self.unsigned();
-            if (n > self.input.len - self.at and n > std.math.maxInt(u32)) return error.Corrupt;
+            if (n > std.math.maxInt(u32)) return error.Corrupt;
             return @intCast(n);
+        }
+
+        /// The length of a run of `E`, which cannot exceed how many of them
+        /// the input left could hold: a run that claims more is corrupt
+        /// before anything is allocated for it.
+        fn lengthOf(self: *Self, comptime E: type) DecodeError!usize {
+            return self.lengthAtLeast(comptime leastEncoded(Hooks, E));
+        }
+
+        /// `lengthOf` for elements that each take at least `least` bytes.
+        fn lengthAtLeast(self: *Self, comptime least: usize) DecodeError!usize {
+            const n = try self.length();
+            if (least != 0 and n > (self.input.len - self.at) / least) return error.Corrupt;
+            return n;
         }
 
         pub fn finished(self: *const Self) bool {
@@ -246,7 +262,7 @@ pub fn Decoder(comptime Hooks: type) type {
                 },
                 .pointer => |info| switch (info.size) {
                     .slice => {
-                        const n = try self.length();
+                        const n = try self.lengthOf(info.child);
                         if (info.child == u8 and info.is_const and info.sentinel_ptr == null and (info.alignment orelse 1) <= 1) {
                             return self.bytes(n);
                         }
@@ -311,7 +327,7 @@ pub fn Decoder(comptime Hooks: type) type {
 
         fn hashMap(self: *Self, comptime T: type) DecodeError!T {
             const KV = T.KV;
-            const n = try self.length();
+            const n = try self.lengthOf(KV);
             var map: T = .empty;
             try map.ensureTotalCapacity(self.arena, std.math.cast(T.Size, n) orelse return error.Corrupt);
             for (0..n) |_| {
@@ -325,7 +341,7 @@ pub fn Decoder(comptime Hooks: type) type {
         }
 
         fn arrayHashMap(self: *Self, comptime T: type) DecodeError!T {
-            const n = try self.length();
+            const n = try self.lengthOf(T.KV);
             var map: T = .empty;
             try map.ensureTotalCapacity(self.arena, n);
             for (0..n) |_| {
@@ -339,7 +355,11 @@ pub fn Decoder(comptime Hooks: type) type {
         }
 
         fn multiArrayList(self: *Self, comptime T: type) DecodeError!T {
-            const n = try self.length();
+            const n = try self.lengthAtLeast(comptime least: {
+                var sum: usize = 0;
+                for (std.enums.values(T.Field)) |field| sum += leastEncoded(Hooks, ColumnOf(T, field));
+                break :least sum;
+            });
             var list: T = .empty;
             try list.setCapacity(self.arena, n);
             list.len = n;
@@ -396,6 +416,27 @@ fn unencodable(comptime T: type, comptime Hooks: type, comptime path: []const u8
 
 /// An element written as its bytes: every bit pattern of it is a value and it
 /// holds no padding.
+/// The fewest bytes a value of `T` encodes to, which bounds how many of them
+/// the rest of an input can hold. A type `Hooks` takes may encode to nothing.
+fn leastEncoded(comptime Hooks: type, comptime T: type) usize {
+    if (Hooks.custom(T)) return 0;
+    return switch (@typeInfo(T)) {
+        .void => 0,
+        .bool, .float, .optional, .@"enum", .pointer, .@"union" => 1,
+        .int => |info| if (info.bits > 64) @sizeOf(T) else 1,
+        .array => |info| info.len * (if (rawElement(info.child)) @sizeOf(info.child) else leastEncoded(Hooks, info.child)),
+        .@"struct" => |info| least: {
+            if (info.layout == .@"packed" or isArrayList(T) or isHashMap(T) or isArrayHashMap(T) or isMultiArrayList(T) or isMultiArraySlice(T)) break :least 1;
+            var sum: usize = 0;
+            for (info.fields) |field| {
+                if (!field.is_comptime) sum += leastEncoded(Hooks, field.type);
+            }
+            break :least sum;
+        },
+        else => 0,
+    };
+}
+
 /// Whether an exhaustive enum's tags are exactly the integers below its count.
 fn denseFromZero(comptime E: type) bool {
     const fields = @typeInfo(E).@"enum".fields;
@@ -555,4 +596,17 @@ test "input that ends early or names no value is corrupt" {
     }
     var d: Decoder(NoHooks) = .{ .input = &.{7}, .arena = gpa, .hooks = &hooks };
     try testing.expectError(error.Corrupt, d.value(Shape));
+}
+
+test "a length claiming more elements than the input holds is corrupt before anything is allocated" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var hooks: NoHooks = .{};
+    // Four billion slices, then nothing to hold them.
+    const input = [_]u8{ 0xff, 0xff, 0xff, 0xff, 0x0f } ++ [_]u8{0} ** 15;
+    var d: Decoder(NoHooks) = .{ .input = &input, .arena = arena.allocator(), .hooks = &hooks };
+    try testing.expectError(error.Corrupt, d.value([]const []const []const [4096]u8));
+    // Elements that encode to nothing may be as many as a length says.
+    var empty: Decoder(NoHooks) = .{ .input = &.{3}, .arena = arena.allocator(), .hooks = &hooks };
+    try testing.expectEqual(@as(usize, 3), (try empty.value([]const void)).len);
 }
