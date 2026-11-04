@@ -39,11 +39,18 @@ fields are listed once, as `retained_typing.unread_fields`, and both `attach`
 and the encoding read the list, so a field the resumed check starts reading is
 written by the encoding without a second edit.
 
-**A key.** An entry is keyed by the SHA-256 of the running compiler's
-executable and by `library_encoding.format_version`. The binary's own bytes
-change whenever the compiler's code or the library it carries does, and they
-are what decides the answer, so nothing that changes the answer can leave the
-key alone. The entry records its key in its header as well as its name.
+**A key.** An entry is keyed by the SHA-256 of the running compiler's own
+read-only image as it is mapped in memory, its code and constant data (the
+standard library it carries included), and by
+`library_encoding.format_version`. Those bytes change whenever the compiler's
+code or its library does, and they are what decides the answer, so nothing
+that changes the answer can leave the key alone. They are read from the
+process, not from the file at the executable's path: a compiler installed
+over that path while an older one starts would otherwise have the older one
+write its library under the newer one's key. On a platform whose loaded image
+the compiler does not read (it reads macOS's `__TEXT` and Linux's read-only
+`PT_LOAD` segments) there is no key and the cache is not used. The entry
+records its key in its header as well as its name.
 
 **A place.** The cache is a directory beneath the user's home,
 `$HOME/.linea-cache`, or the directory `LINEA_CACHE_DIR` names; set to the
@@ -62,6 +69,11 @@ number naming none. A write goes to an unnamed file renamed over the entry,
 so concurrent commands each see a whole entry or none. Writing an entry keeps the eight most recently written and
 removes older ones, so rebuilding the compiler does not grow the directory
 without bound.
+
+**A cache that cannot be written is not used.** The entry's file is created
+before the library is checked; where it cannot be, the command compiles as it
+would without a cache rather than checking every library module only to keep
+nothing.
 
 **The whole library.** The checked library holds every module of the
 standard library, not only the prelude's closure, so a program importing
@@ -102,8 +114,8 @@ sessions use, so a command line, the runner and the editor resume one way.
 - The first command after a compiler changes pays for checking every
   library module, encoding it and writing the entry: about 1.1 s more than a
   command without the cache on a ReleaseFast compiler.
-- Hashing the executable costs a read of the binary on every command that
-  can resume.
+- Hashing the loaded image costs a pass over the compiler's code and constant
+  data in memory on every command that can resume.
 - An entry is read back only by the binary that wrote it, so the encoding
   needs no compatibility across versions and carries none: a change to any
   encoded type raises nothing by hand, because the binary, and so the key,
@@ -142,6 +154,11 @@ compiler's sources, the library and the build options, embedded through
 of inputs the build script hashes: an input left out, such as the Zig version
 or an optimisation flag, leaves a stale entry answering for a compiler it was
 not written by. The binary's own bytes have no such list.
+
+**The SHA-256 of the file at the executable's path.** What the compiler
+first used. It reads a file that may no longer be the running compiler: moving
+another binary over the path while a compiler started wrote that compiler's
+library under the other binary's key.
 
 **The executable's size and modification time.** Cheaper than a hash, and
 wrong whenever a rebuild keeps the size and a copy keeps the time.

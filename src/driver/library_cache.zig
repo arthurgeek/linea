@@ -28,6 +28,7 @@
 //! whole entry or none, whichever of several writers renames last.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const testing = std.testing;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const loader = @import("loader.zig");
@@ -62,20 +63,16 @@ pub fn directory(gpa: std.mem.Allocator, environ: std.process.Environ) std.mem.A
 }
 
 /// The checked library for this compiler: read from the cache in `dir`, or
-/// checked and written there.
-pub fn open(gpa: std.mem.Allocator, io: std.Io, dir: []const u8) !*CheckedLibrary {
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-    const scratch = arena.allocator();
-    const key = compilerIdentity(scratch, io) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        // A compiler that cannot read itself has no key, so it keeps nothing.
-        else => return CheckedLibrary.init(gpa),
-    };
+/// checked and written there. Null where this compiler has no key or the
+/// cache cannot be written, and the command compiles as it would without a
+/// cache: checking every library module only to keep nothing costs more than
+/// the command saves.
+pub fn open(gpa: std.mem.Allocator, io: std.Io, dir: []const u8) !?*CheckedLibrary {
+    const key = compilerIdentity() orelse return null;
     return openKeyed(gpa, io, dir, key);
 }
 
-fn openKeyed(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest) !*CheckedLibrary {
+fn openKeyed(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest) !?*CheckedLibrary {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const scratch = arena.allocator();
@@ -89,14 +86,19 @@ fn openKeyed(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest) !
         error.OutOfMemory => return error.OutOfMemory,
         else => {},
     }
+    // The file the entry is written through is made before the library is
+    // checked, so a cache that cannot be written is known before that cost.
+    var cache = std.Io.Dir.cwd().createDirPathOpen(io, dir, .{ .open_options = .{ .iterate = true } }) catch return null;
+    defer cache.close(io);
+    var file = cache.createFileAtomic(io, name, .{ .replace = true }) catch return null;
+    defer file.deinit(io);
     const library = try CheckedLibrary.init(gpa);
     errdefer library.deinit();
     const payload = try encoding.encode(scratch, library);
-    write(io, dir, name, key, payload) catch |err| switch (err) {
-        // A cache that cannot be written leaves the command as it would be
-        // without one.
-        else => {},
-    };
+    // A write that fails after the check leaves the checked library this
+    // command already holds.
+    write(io, &file, key, payload) catch return library;
+    evict(io, cache) catch {};
     return library;
 }
 
@@ -104,22 +106,64 @@ fn entryName(gpa: std.mem.Allocator, key: Digest) std.mem.Allocator.Error![]cons
     return std.fmt.allocPrint(gpa, "{s}{x}", .{ entry_prefix, key });
 }
 
-/// The SHA-256 of the running compiler's executable, which changes whenever the
-/// compiler's code or the library it carries does.
-fn compilerIdentity(gpa: std.mem.Allocator, io: std.Io) !Digest {
-    const path = try std.process.executablePathAlloc(io, gpa);
-    const file = try std.Io.Dir.openFileAbsolute(io, path, .{});
-    defer file.close(io);
+/// The SHA-256 of the running compiler's own read-only image as it is mapped
+/// in memory: its code and constant data, the standard library it carries
+/// included. Read from the process rather than from the file at its path,
+/// which another compiler may have replaced since this one started. Null on a
+/// platform this does not read, where the cache is not used.
+fn compilerIdentity() ?Digest {
     var hasher = Sha256.init(.{});
-    var buffer: [256 * 1024]u8 = undefined;
-    var offset: u64 = 0;
-    while (true) {
-        const n = try file.readPositionalAll(io, &buffer, offset);
-        hasher.update(buffer[0..n]);
-        offset += n;
-        if (n < buffer.len) break;
+    switch (builtin.os.tag) {
+        .macos => {
+            const header: *const std.macho.mach_header_64 = @ptrCast(@alignCast(std.c._dyld_get_image_header(0) orelse return null));
+            const slide = std.c._dyld_get_image_vmaddr_slide(0);
+            var command: [*]const u8 = @ptrCast(header);
+            command += @sizeOf(std.macho.mach_header_64);
+            var hashed = false;
+            for (0..header.ncmds) |_| {
+                const load: *align(1) const std.macho.load_command = @ptrCast(command);
+                if (load.cmd == .SEGMENT_64) {
+                    const segment: std.macho.segment_command_64 = @as(*align(1) const std.macho.segment_command_64, @ptrCast(command)).*;
+                    // The writable segments hold pointers the loader fixes up
+                    // for wherever the image was placed, and `__LINKEDIT`
+                    // holds the signature, which re-signing changes.
+                    if (!segment.initprot.WRITE and segment.filesize != 0 and !std.mem.eql(u8, segment.segName(), "__LINKEDIT")) {
+                        const start: [*]const u8 = @ptrFromInt(segment.vmaddr + slide);
+                        hasher.update(start[0..segment.filesize]);
+                        hashed = true;
+                    }
+                }
+                command += load.cmdsize;
+            }
+            if (!hashed) return null;
+        },
+        .linux => {
+            const Image = struct {
+                hasher: *Sha256,
+                hashed: bool = false,
+                fn segments(info: *std.posix.dl_phdr_info, _: usize, image: *@This()) error{Done}!void {
+                    // The first object is the executable itself.
+                    for (info.phdr[0..info.phnum]) |phdr| {
+                        if (phdr.type != .LOAD or phdr.flags.W or phdr.filesz == 0) continue;
+                        const start: [*]const u8 = @ptrFromInt(info.addr + phdr.vaddr);
+                        image.hasher.update(start[0..phdr.filesz]);
+                        image.hashed = true;
+                    }
+                    return error.Done;
+                }
+            };
+            var image: Image = .{ .hasher = &hasher };
+            std.posix.dl_iterate_phdr(&image, error{Done}, Image.segments) catch {};
+            if (!image.hashed) return null;
+        },
+        else => return null,
     }
     return hasher.finalResult();
+}
+
+test "the compiler is keyed by its own image, alike every time it is read" {
+    const first = compilerIdentity() orelse return error.SkipZigTest;
+    try testing.expectEqualSlices(u8, &first, &compilerIdentity().?);
 }
 
 /// The encoding an entry holds, where its header matches `key` and the
@@ -151,9 +195,7 @@ fn payloadOf(bytes: []const u8, key: Digest) ?[]const u8 {
     return payload;
 }
 
-fn write(io: std.Io, dir: []const u8, name: []const u8, key: Digest, payload: []const u8) !void {
-    var cache = try std.Io.Dir.cwd().createDirPathOpen(io, dir, .{ .open_options = .{ .iterate = true } });
-    defer cache.close(io);
+fn write(io: std.Io, file: anytype, key: Digest, payload: []const u8) !void {
     var header: [header_len]u8 = undefined;
     var at: usize = 0;
     @memcpy(header[at..][0..magic.len], magic);
@@ -165,13 +207,9 @@ fn write(io: std.Io, dir: []const u8, name: []const u8, key: Digest, payload: []
     std.mem.writeInt(u64, header[at..][0..8], payload.len, .little);
     at += 8;
     std.mem.writeInt(u64, header[at..][0..8], std.hash.XxHash3.hash(0, payload), .little);
-
-    var file = try cache.createFileAtomic(io, name, .{ .replace = true });
-    defer file.deinit(io);
     try file.file.writeStreamingAll(io, &header);
     try file.file.writeStreamingAll(io, payload);
     try file.replace(io);
-    evict(io, cache) catch {};
 }
 
 /// Removes the oldest entries beyond `kept_entries`.
@@ -213,7 +251,7 @@ test "checked library cache: a missing, damaged or foreign entry is checked agai
     defer testing.allocator.free(name);
 
     // Missing: checked and written.
-    const first = try openKeyed(testing.allocator, testing.io, dir, key);
+    const first = (try openKeyed(testing.allocator, testing.io, dir, key)).?;
     const expected = try encoding.encode(testing.allocator, first);
     defer testing.allocator.free(expected);
     first.deinit();
@@ -222,7 +260,7 @@ test "checked library cache: a missing, damaged or foreign entry is checked agai
     try testing.expectEqualSlices(u8, expected, payloadOf(written, key).?);
 
     // Present: read back, and the same library.
-    const second = try openKeyed(testing.allocator, testing.io, dir, key);
+    const second = (try openKeyed(testing.allocator, testing.io, dir, key)).?;
     const reread = try encoding.encode(testing.allocator, second);
     defer testing.allocator.free(reread);
     second.deinit();
@@ -236,12 +274,22 @@ test "checked library cache: a missing, damaged or foreign entry is checked agai
     damaged[damaged.len / 2] ^= 1;
     for ([_][]const u8{ written[0 .. written.len - 1], damaged, written[0..10], "" }) |broken| {
         try tmp.dir.writeFile(testing.io, .{ .sub_path = name, .data = broken });
-        const library = try openKeyed(testing.allocator, testing.io, dir, key);
+        const library = (try openKeyed(testing.allocator, testing.io, dir, key)).?;
         library.deinit();
         const rewritten = try tmp.dir.readFileAlloc(testing.io, name, testing.allocator, .unlimited);
         defer testing.allocator.free(rewritten);
         try testing.expectEqualSlices(u8, written, rewritten);
     }
+}
+
+test "checked library cache: a cache that cannot be written is not used, and the library is not checked for it" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    // A file where the directory should be.
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "cache", .data = "" });
+    const dir = try std.fmt.allocPrint(testing.allocator, ".zig-cache/tmp/{s}/cache", .{tmp.sub_path});
+    defer testing.allocator.free(dir);
+    try testing.expect(try openKeyed(testing.allocator, testing.io, dir, @splat(7)) == null);
 }
 
 test "checked library cache: an empty directory variable turns the cache off" {
