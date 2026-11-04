@@ -455,8 +455,10 @@ A `.size` golden records how many lines of MLIR a program emits before
 and also when it shrinks, so the recorded count follows each improvement down.
 An update prints `grew by N lines` or `shrank by N lines` beside each `.size` it
 writes. An update of more than one case records a count that shrank and
-refuses one that grew, so a mass update never raises a bound. To accept growth
-deliberately, update that example alone, for example
+refuses one that grew, or a first count in an empty `.size`, so a mass update
+never raises or sets a bound; a narrowed root with `--property-cases` is such
+an update. To accept growth or record a new bound deliberately, update that
+example alone, for example
 `zig build conformance -Dupdate -- examples/hello.lin`, and say in the commit
 why the program grew.
 

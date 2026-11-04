@@ -20299,9 +20299,10 @@ test "a walk selects one case only from a case root without a manifest" {
 const SizeUpdate = enum {
     /// Compare only.
     none,
-    /// Record a count that shrank, and refuse one that grew as a comparison
-    /// does. A walk of more than one case updates this way, so an update of
-    /// the whole corpus can lower a bound and never raise one.
+    /// Record a count that shrank, and refuse one that grew, or a first count
+    /// for a golden holding none, as a comparison does. A walk of more than
+    /// one case updates this way, so an update of the whole corpus can lower a
+    /// bound and never raise or set one.
     shrink,
     /// Record any count. Only a walk narrowed to the one case updates this
     /// way, so growth is accepted for the program it was measured on.
@@ -20331,7 +20332,9 @@ fn compareSize(
     const lines = emittedLines(ir);
     const recorded = std.fmt.parseInt(usize, std.mem.trim(u8, expected, " \n"), 10) catch null;
     if (recorded == lines) return null;
-    const grew = if (recorded) |bound| lines > bound else false;
+    // A golden recording no count bounds nothing, so filling it raises the
+    // bound from none, which only a walk of the one case may do.
+    const grew = if (recorded) |bound| lines > bound else true;
     if (update == .any or (update == .shrink and !grew)) {
         try writeFile(io, golden_path, try std.fmt.allocPrint(gpa, "{d}\n", .{lines}));
         const bound = recorded orelse return try std.fmt.allocPrint(gpa, "recorded {d} lines", .{lines});
@@ -20343,7 +20346,10 @@ fn compareSize(
     const bound = recorded orelse {
         try failures.append(gpa, .{
             .path = lin_path,
-            .what = "size",
+            .what = if (update == .shrink)
+                "size: an update records a first line count only from a walk narrowed to this case"
+            else
+                "size",
             .expected = "a line count of the emitted MLIR, and this file records none",
             .actual = try std.fmt.allocPrint(gpa, "{d}\n", .{lines}),
         });
@@ -20415,9 +20421,15 @@ test "an update records a size that grew only from a walk narrowed to its case" 
     try testing.expectEqualStrings("grew by 1 lines, to 4", (try compareSize(gpa, testing.io, &failures, "c.lin", golden, "3\n", module, .any)).?);
     try testing.expectEqualStrings("4\n", try tmp.dir.readFileAlloc(testing.io, "c.size", gpa, .unlimited));
 
-    // A golden holding no count records the first one.
-    try testing.expectEqualStrings("recorded 4 lines", (try compareSize(gpa, testing.io, &failures, "c.lin", golden, "", module, .shrink)).?);
-    try testing.expectEqual(@as(usize, 1), failures.items.len);
+    // A golden holding no count records the first one only from a walk
+    // narrowed to its case.
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "c.size", .data = "" });
+    try testing.expectEqual(null, try compareSize(gpa, testing.io, &failures, "c.lin", golden, "", module, .shrink));
+    try testing.expectEqual(@as(usize, 2), failures.items.len);
+    try testing.expect(std.mem.indexOf(u8, failures.items[1].what, "narrowed to this case") != null);
+    try testing.expectEqualStrings("", try tmp.dir.readFileAlloc(testing.io, "c.size", gpa, .unlimited));
+    try testing.expectEqualStrings("recorded 4 lines", (try compareSize(gpa, testing.io, &failures, "c.lin", golden, "", module, .any)).?);
+    try testing.expectEqualStrings("4\n", try tmp.dir.readFileAlloc(testing.io, "c.size", gpa, .unlimited));
 }
 
 /// Appends what the program said on standard error to a mismatching exit
