@@ -1,0 +1,42 @@
+trait Tally {
+    fn tally(value: Self) -> UInt64
+}
+
+// Only a case with no components selects the first branch, so only
+// `Shape.Dot` reports its mismatch.
+template impl Tally {
+    fn tally(value: Self) -> UInt64 {
+        match read value {
+            reflect.case => {
+                if reflect.case.component_count == 0 {
+                    let wrong: UInt64 = "zero"
+                    wrong
+                } else {
+                    UInt64(1)
+                }
+            },
+        }
+    }
+}
+
+struct Point {
+    x: UInt8,
+}
+
+enum Shape {
+    Dot,
+    Box(UInt8),
+}
+
+derive Tally for Point
+
+derive Tally for Shape
+
+fn main() -> UInt8 {
+    let point: Point = .{ x = 1 }
+    if Tally.tally(point) == 1 {
+        0
+    } else {
+        1
+    }
+}

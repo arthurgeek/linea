@@ -3226,7 +3226,10 @@ an empty block when the condition is false and there is no `else`. An `if`
 without `else` has type `()` whichever branch is kept, so its block must be
 `()` as an ordinary one's must. The branch
 not selected is not part of that case's generated code, so it is neither
-checked nor run there, and a declaration only that branch used is unused there.
+checked nor run there. A `let` or `var` of the template whose every use in one
+generated copy sat in branches that copy does not select is spelled with a
+leading `_` there, as a parameter whose uses expansion dropped is, so it is not
+unused.
 A descriptor's value does not depend on traversal order, so a condition decides
 the same branch in a `reflect.components.reversed` loop as in a forward one.
 An integer comparison is decided only when an operand is a descriptor, which

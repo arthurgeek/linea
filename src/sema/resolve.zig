@@ -5909,6 +5909,9 @@ const ReflectionContext = struct {
     metadata: std.ArrayList(MetadataPlan) = .empty,
     texts: std.ArrayList(reflection.TextPlan) = .empty,
     decisions: std.ArrayList(reflection.DecisionPlan) = .empty,
+    erasable_locals: std.ArrayList(reflection.ErasableLocal) = .empty,
+    erasable_uses: std.ArrayList(reflection.ErasableUse) = .empty,
+    erasable_index: std.AutoHashMapUnmanaged(BindingId, u32) = .empty,
     ordinals: std.ArrayList(OrdinalPlan) = .empty,
     wraps: std.ArrayList(reflection.WrapPlan) = .empty,
     constructions: std.ArrayList(reflection.ConstructionPlan) = .empty,
@@ -5938,6 +5941,9 @@ const ReflectionContext = struct {
         self.metadata.deinit(gpa);
         self.texts.deinit(gpa);
         self.decisions.deinit(gpa);
+        self.erasable_locals.deinit(gpa);
+        self.erasable_uses.deinit(gpa);
+        self.erasable_index.deinit(gpa);
         self.ordinals.deinit(gpa);
         self.wraps.deinit(gpa);
         self.constructions.deinit(gpa);
@@ -5996,6 +6002,10 @@ const ReflectionContext = struct {
         const texts = try self.texts.toOwnedSlice(gpa);
         errdefer gpa.free(texts);
         const decisions = try self.decisions.toOwnedSlice(gpa);
+        errdefer gpa.free(decisions);
+        const erasable_locals = try self.erasable_locals.toOwnedSlice(gpa);
+        errdefer gpa.free(erasable_locals);
+        const erasable_uses = try self.erasable_uses.toOwnedSlice(gpa);
         return .{
             .member = self.member,
             .cases = cases,
@@ -6011,6 +6021,8 @@ const ReflectionContext = struct {
             .locals = locals,
             .texts = texts,
             .decisions = decisions,
+            .erasable_locals = erasable_locals,
+            .erasable_uses = erasable_uses,
         };
     }
 };
@@ -6447,6 +6459,25 @@ const Resolver = struct {
             if (offset >= validation.references.len) return;
             validation.references[offset] = b;
         }
+    }
+
+    /// Records a use of a `let` or `var` the template member declares, so
+    /// expansion can tell a local whose every use it dropped with an unselected
+    /// branch. A local named with `_`, or declared in a construction recipe,
+    /// which expansion renames itself, is not recorded.
+    fn noteTemplateLocalUse(self: *Resolver, at: TokenId, b: BindingId) std.mem.Allocator.Error!void {
+        const validation = self.template_validation orelse return;
+        const context = validation.reflection;
+        if (b.index() < validation.binding_floor or at == .none) return;
+        if (context.recipe_floor) |floor| if (b.index() >= floor) return;
+        const held = self.bindings.items[b.index()];
+        if (held.kind != .local or held.exempt or held.at == .none) return;
+        const entry = try context.erasable_index.getOrPut(self.gpa, b);
+        if (!entry.found_existing) {
+            entry.value_ptr.* = @intCast(context.erasable_locals.items.len);
+            try context.erasable_locals.append(self.gpa, .{ .declaration = held.at });
+        }
+        try context.erasable_uses.append(self.gpa, .{ .local = entry.value_ptr.*, .at = at });
     }
 
     /// Puts `top[at]` at the end of its name's chain.
@@ -13645,6 +13676,7 @@ const Resolver = struct {
     fn bindTo(self: *Resolver, id: ExprId, use: Use, b: BindingId) std.mem.Allocator.Error!void {
         const i = b.index();
         self.noteTemplateBinding(self.ast.exprMain(id), b);
+        if (use != .assigned) try self.noteTemplateLocalUse(self.ast.exprMain(id), b);
         if (self.current_closure != .none and i < self.closure_binding_start) {
             switch (self.bindings.items[i].kind) {
                 .local, .parameter, .capture, .binder => {

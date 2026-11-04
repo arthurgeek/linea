@@ -54,9 +54,12 @@ template gets the same single writes. `examples/hello.lin` emits 3,723 lines of
 MLIR, `json_inventory` 36,238 and `http-json-echo` 158,905.
 
 A branch expansion does not select is not part of that case's generated code,
-so it is neither type-checked nor run there; a declaration only that branch
-used is unused there and refused as any unused declaration is. A template
-author sees an error in a branch only for a target that selects it.
+so it is neither type-checked nor run there. A template local whose every use
+sat in unselected branches is spelled with a leading `_` in that copy, as a
+parameter whose uses expansion dropped already is: the runtime `if` would have
+used it, so refusing it as unused would refuse a template for what one target
+selected. A template author sees an error in a branch only for a target that
+selects it.
 
 Neither form changes what a program computes: the decided `if` selects the
 branch the runtime one would have, and the folded literal holds the text the

@@ -81,6 +81,20 @@ pub const DecisionPlan = struct {
     metadata_end: u32,
 };
 
+/// A `let` or `var` a template member declares and uses. Where expansion
+/// drops every use of one copy of it with an unselected branch, that copy is
+/// renamed with a leading `_`, as a parameter whose uses were dropped is, so
+/// the template is not refused for what one target's descriptors selected.
+pub const ErasableLocal = struct {
+    declaration: token.TokenId,
+};
+
+/// One use of `ReflectionMemberPlan.erasable_locals[local]`.
+pub const ErasableUse = struct {
+    local: u32,
+    at: token.TokenId,
+};
+
 /// What a decidable condition's subexpression evaluates to.
 const Decidable = enum { boolean, integer };
 
@@ -243,6 +257,8 @@ pub const ReflectionMemberPlan = struct {
     locals: []const LocalRename = &.{},
     texts: []const TextPlan = &.{},
     decisions: []const DecisionPlan = &.{},
+    erasable_locals: []const ErasableLocal = &.{},
+    erasable_uses: []const ErasableUse = &.{},
 
     pub fn deinit(self: *const ReflectionMemberPlan, gpa: std.mem.Allocator) void {
         gpa.free(self.cases);
@@ -260,6 +276,8 @@ pub const ReflectionMemberPlan = struct {
         gpa.free(self.locals);
         gpa.free(self.texts);
         gpa.free(self.decisions);
+        gpa.free(self.erasable_locals);
+        gpa.free(self.erasable_uses);
     }
 };
 
@@ -287,7 +305,7 @@ const Operation = struct {
     kind: Kind,
     index: u32,
 
-    const Kind = enum { case, same_case, loop, place, metadata, text, decision, ordinal, free_reference, parameter_declaration, parameter_reference, parameter_contract_reference, type_parameter, construction, component_type, local, wrap };
+    const Kind = enum { case, same_case, loop, place, metadata, text, decision, erasable_declaration, erasable_use, ordinal, free_reference, parameter_declaration, parameter_reference, parameter_contract_reference, type_parameter, construction, component_type, local, wrap };
 
     fn before(_: void, lhs: Operation, rhs: Operation) bool {
         if (lhs.span.start != rhs.span.start) return lhs.span.start < rhs.span.start;
@@ -331,11 +349,16 @@ const Renderer = struct {
     occupied: std.StringHashMapUnmanaged(void) = .empty,
     parameter_used: []bool,
     parameter_positions: std.ArrayList(struct { parameter: u32, offset: u32 }) = .empty,
+    /// Each copy of an erasable local the output declares, in output order.
+    local_copies: std.ArrayList(struct { local: u32, offset: u32, used: bool = false }) = .empty,
+    /// The copy each erasable local's uses currently reach, or `no_copy`.
+    current_copy: []u32,
 
     fn deinit(self: *Renderer) void {
         self.out.deinit(self.gpa);
         self.origins.deinit(self.gpa);
         self.parameter_positions.deinit(self.gpa);
+        self.local_copies.deinit(self.gpa);
         for (self.bindings.items) |name| self.gpa.free(name);
         self.bindings.deinit(self.gpa);
         self.binding_index.deinit(self.gpa);
@@ -517,6 +540,17 @@ const Renderer = struct {
                 },
                 .parameter_reference => {
                     self.parameter_used[operation.index] = true;
+                    try self.append(self.source[operation.span.start..operation.span.end]);
+                },
+                .erasable_declaration => {
+                    const offset = std.math.cast(u32, self.out.items.len) orelse return error.GeneratedSourceTooLarge;
+                    self.current_copy[operation.index] = std.math.cast(u32, self.local_copies.items.len) orelse return error.Overflow;
+                    try self.local_copies.append(self.gpa, .{ .local = operation.index, .offset = offset });
+                    try self.append(self.source[operation.span.start..operation.span.end]);
+                },
+                .erasable_use => {
+                    const copy = self.current_copy[self.plan.erasable_uses[operation.index].local];
+                    if (copy != no_copy) self.local_copies.items[copy].used = true;
                     try self.append(self.source[operation.span.start..operation.span.end]);
                 },
             }
@@ -944,60 +978,101 @@ const Renderer = struct {
         try self.append(self.ast.tokenText(reference.member));
     }
 
-    /// Marks parameters whose body references were erased. Contract roots
-    /// follow the same fresh spelling without counting as body uses.
-    /// Generated member origins retain the public template parameter names.
-    fn markErasedParametersUnused(self: *Renderer) RenderError!void {
-        const prefixes = try self.gpa.alloc(u32, self.plan.parameters.len);
-        defer self.gpa.free(prefixes);
-        @memset(prefixes, 0);
+    /// The leading underscores that make `original` a name no identifier of
+    /// the member, target or derive spells, or zero for a name that already
+    /// begins with one.
+    fn unusedPrefix(self: *Renderer, original: []const u8) RenderError!u32 {
+        if (std.mem.startsWith(u8, original, "_")) return 0;
+        var candidate: std.ArrayList(u8) = .empty;
+        defer candidate.deinit(self.gpa);
+        try candidate.appendSlice(self.gpa, original);
+        var prefix: u32 = 0;
+        while (true) {
+            if (candidate.items.len == std.math.maxInt(u32)) return error.GeneratedSourceTooLarge;
+            try candidate.insert(self.gpa, 0, '_');
+            prefix += 1;
+            if (!self.occupied.contains(candidate.items)) return prefix;
+        }
+    }
+
+    /// Marks unused what expansion left without a use: a parameter whose body
+    /// references were all erased, and a copy of a local whose every use was
+    /// in an unselected branch. Each is spelled with leading underscores.
+    /// Contract roots follow a parameter's fresh spelling without counting as
+    /// body uses. Generated member origins retain the public template names.
+    fn markErasedUnused(self: *Renderer) RenderError!void {
+        const Insertion = struct { offset: u32, prefix: u32 };
+        var insertions: std.ArrayList(Insertion) = .empty;
+        defer insertions.deinit(self.gpa);
+
+        const parameter_prefixes = try self.gpa.alloc(u32, self.plan.parameters.len);
+        defer self.gpa.free(parameter_prefixes);
         for (self.plan.parameters, 0..) |parameter, i| {
-            if (self.parameter_used[i] or parameter.declaration == .none) continue;
-            const original = self.ast.tokenText(parameter.declaration);
-            if (std.mem.startsWith(u8, original, "_")) continue;
-            var candidate: std.ArrayList(u8) = .empty;
-            defer candidate.deinit(self.gpa);
-            try candidate.appendSlice(self.gpa, original);
-            while (true) {
-                if (candidate.items.len == std.math.maxInt(u32)) return error.GeneratedSourceTooLarge;
-                try candidate.insert(self.gpa, 0, '_');
-                prefixes[i] += 1;
-                if (!self.occupied.contains(candidate.items)) break;
-            }
+            parameter_prefixes[i] = if (self.parameter_used[i] or parameter.declaration == .none)
+                0
+            else
+                try self.unusedPrefix(self.ast.tokenText(parameter.declaration));
         }
-        var kept: usize = 0;
-        var growth: usize = 0;
         for (self.parameter_positions.items) |position| {
-            const prefix = prefixes[position.parameter];
-            if (prefix == 0) continue;
-            growth = try std.math.add(usize, growth, prefix);
-            self.parameter_positions.items[kept] = position;
-            kept += 1;
+            const prefix = parameter_prefixes[position.parameter];
+            if (prefix != 0) try insertions.append(self.gpa, .{ .offset = position.offset, .prefix = prefix });
         }
-        self.parameter_positions.shrinkRetainingCapacity(kept);
-        if (kept == 0) return;
+        for (self.local_copies.items) |copy| {
+            if (copy.used) continue;
+            const prefix = try self.unusedPrefix(self.ast.tokenText(self.plan.erasable_locals[copy.local].declaration));
+            if (prefix != 0) try insertions.append(self.gpa, .{ .offset = copy.offset, .prefix = prefix });
+        }
+        if (insertions.items.len == 0) return;
+        std.mem.sortUnstable(Insertion, insertions.items, {}, struct {
+            fn before(_: void, lhs: Insertion, rhs: Insertion) bool {
+                return lhs.offset < rhs.offset;
+            }
+        }.before);
+
+        // `inserted[i]` is how many bytes the first `i` insertions add.
+        const inserted = try self.gpa.alloc(u32, insertions.items.len + 1);
+        defer self.gpa.free(inserted);
+        inserted[0] = 0;
+        for (insertions.items, 0..) |insertion, i| inserted[i + 1] = try std.math.add(u32, inserted[i], insertion.prefix);
+        const growth = inserted[insertions.items.len];
         if (growth > std.math.maxInt(u32) - self.out.items.len) return error.GeneratedSourceTooLarge;
+
         var renamed: std.ArrayList(u8) = .empty;
         errdefer renamed.deinit(self.gpa);
         try renamed.ensureTotalCapacity(self.gpa, self.out.items.len + growth);
         var copied: usize = 0;
-        for (self.parameter_positions.items) |position| {
-            renamed.appendSliceAssumeCapacity(self.out.items[copied..position.offset]);
-            for (0..prefixes[position.parameter]) |_| renamed.appendAssumeCapacity('_');
-            copied = position.offset;
+        for (insertions.items) |insertion| {
+            renamed.appendSliceAssumeCapacity(self.out.items[copied..insertion.offset]);
+            for (0..insertion.prefix) |_| renamed.appendAssumeCapacity('_');
+            copied = insertion.offset;
         }
         renamed.appendSliceAssumeCapacity(self.out.items[copied..]);
         self.out.deinit(self.gpa);
         self.out = renamed;
-        // All renamed spellings are in the signature, before reflected bodies.
-        const last = self.parameter_positions.items[kept - 1].offset;
+
+        // An origin moves by what was inserted before it: an underscore
+        // written where the origin starts belongs to it, one where it ends
+        // does not.
+        const shift = struct {
+            fn bytesBefore(all: []const Insertion, sums: []const u32, offset: u32) u32 {
+                var lo: usize = 0;
+                var hi = all.len;
+                while (lo < hi) {
+                    const mid = lo + (hi - lo) / 2;
+                    if (all[mid].offset < offset) lo = mid + 1 else hi = mid;
+                }
+                return sums[lo];
+            }
+        }.bytesBefore;
         for (self.origins.items) |*origin| {
-            std.debug.assert(origin.start >= last);
-            origin.start = try std.math.add(u32, origin.start, @intCast(growth));
-            origin.end = try std.math.add(u32, origin.end, @intCast(growth));
+            origin.start += shift(insertions.items, inserted, origin.start);
+            origin.end += shift(insertions.items, inserted, origin.end);
         }
     }
 };
+
+/// No copy of an erasable local is in scope.
+const no_copy = std.math.maxInt(u32);
 
 pub fn renderMember(
     gpa: std.mem.Allocator,
@@ -1021,7 +1096,11 @@ pub fn renderMember(
             try std.math.add(
                 usize,
                 try std.math.add(usize, plan.metadata.len, plan.ordinals.len),
-                try std.math.add(usize, plan.texts.len, plan.decisions.len),
+                try std.math.add(
+                    usize,
+                    try std.math.add(usize, plan.texts.len, plan.decisions.len),
+                    try std.math.add(usize, plan.erasable_locals.len, plan.erasable_uses.len),
+                ),
             ),
         ),
     );
@@ -1081,6 +1160,14 @@ pub fn renderMember(
         operations[at] = .{ .span = ast.exprSpan(decision.conditional), .kind = .decision, .index = @intCast(i) };
         at += 1;
     }
+    for (plan.erasable_locals, 0..) |local, i| {
+        operations[at] = .{ .span = ast.tokenSpan(local.declaration), .kind = .erasable_declaration, .index = @intCast(i) };
+        at += 1;
+    }
+    for (plan.erasable_uses, 0..) |use, i| {
+        operations[at] = .{ .span = ast.tokenSpan(use.at), .kind = .erasable_use, .index = @intCast(i) };
+        at += 1;
+    }
     for (plan.ordinals, 0..) |ordinal, i| {
         operations[at] = .{ .span = ast.exprSpan(ordinal.call), .kind = .ordinal, .index = @intCast(i) };
         at += 1;
@@ -1125,6 +1212,9 @@ pub fn renderMember(
     const parameter_used = try gpa.alloc(bool, plan.parameters.len);
     defer gpa.free(parameter_used);
     @memset(parameter_used, false);
+    const current_copy = try gpa.alloc(u32, plan.erasable_locals.len);
+    defer gpa.free(current_copy);
+    @memset(current_copy, no_copy);
     var renderer: Renderer = .{
         .gpa = gpa,
         .ast = ast,
@@ -1138,12 +1228,13 @@ pub fn renderMember(
         .component_types = component_types,
         .operations = operations,
         .parameter_used = parameter_used,
+        .current_copy = current_copy,
     };
     defer renderer.deinit();
     try renderer.buildBindings(derive);
     const member = ast.declSpan(plan.member);
     try renderer.renderRange(member.start, member.end, .{});
-    try renderer.markErasedParametersUnused();
+    try renderer.markErasedUnused();
     const text = try renderer.out.toOwnedSlice(gpa);
     errdefer gpa.free(text);
     const origins = try renderer.origins.toOwnedSlice(gpa);

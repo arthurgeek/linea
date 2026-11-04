@@ -1,0 +1,53 @@
+import std.io
+
+trait Listing {
+    fn listing(value: Self)
+}
+
+// `separator` is read only before a component after the first. A struct with
+// one field never selects that branch, and the local is still not unused,
+// because the template uses it.
+template impl Listing {
+    fn listing(value: Self) {
+        let separator = ", "
+        match read value {
+            reflect.case => {
+                for component in reflect.components {
+                    if component.ordinal != 0 {
+                        print(separator)
+                    }
+                    print(component.name)
+                }
+                print("\n")
+            },
+        }
+    }
+}
+
+fn print(text: Str) {
+    match io.print(text) {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+}
+
+struct Single {
+    only: UInt8,
+}
+
+struct Pair {
+    left: UInt8,
+    right: UInt8,
+}
+
+derive Listing for Single
+
+derive Listing for Pair
+
+fn main() -> UInt8 {
+    let single: Single = .{ only = 1 }
+    let pair: Pair = .{ left = 2, right = 3 }
+    Listing.listing(single)
+    Listing.listing(pair)
+    0
+}
