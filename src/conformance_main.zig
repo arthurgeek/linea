@@ -15668,8 +15668,11 @@ test "layout oracle deduplication reports every rejected original case" {
     defer tmp.cleanup();
     const scratch = try tmp.dir.realPathFileAlloc(testing.io, ".", gpa);
     const cache: OutcomeCache = .{ .dir = scratch, .salt = 0 };
+    var libraries: Libraries = .{ .backing = testing.allocator, .io = testing.io, .environ = .empty, .prelude = test_library.get() };
+    defer libraries.deinit();
     const settings: Settings = .{
         .library = test_library.get(),
+        .libraries = &libraries,
         .cache = &cache,
         .update = false,
         .sanitize = null,
@@ -16716,8 +16719,11 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         .{ rt, runtime_symbols.checked_archive_name },
     );
     var unchecked_skips: std.atomic.Value(u32) = .init(0);
+    var libraries: Libraries = .{ .backing = scratch_backing, .io = io, .environ = environ, .prelude = checked_library };
+    defer libraries.deinit();
     const settings: Settings = .{
         .library = checked_library,
+        .libraries = &libraries,
         .properties = options.properties,
         .corpus_properties = sanitize == null,
         .levels = options.levels,
@@ -20585,10 +20591,49 @@ fn writeFile(io: std.Io, path: []const u8, data: []const u8) !void {
     try w.interface.flush();
 }
 
+/// The checked libraries cases resume from: one per set of library modules
+/// the cases' imports reach, as the command line keys its entries, each read
+/// from or written to the cache the runner's environment names. Shared by
+/// every walker; a library is built once, under the lock.
+const Libraries = struct {
+    backing: std.mem.Allocator,
+    io: std.Io,
+    environ: std.process.Environ,
+    /// The prelude's closure, for a case importing nothing else.
+    prelude: *const loader.CheckedLibrary,
+    mutex: std.Io.Mutex = .init,
+    by_modules: std.StringHashMapUnmanaged(*loader.CheckedLibrary) = .empty,
+
+    /// The library `case` resumes from, as `linea check` would choose it.
+    fn forCase(self: *Libraries, gpa: std.mem.Allocator, case: Case) !*const loader.CheckedLibrary {
+        const modules = (try loader.resumableLibraryOfMemory(gpa, case.entry, try inputsOf(gpa, case), .program)) orelse
+            return self.prelude;
+        if (modules.len == 0) return self.prelude;
+        const key = try std.mem.join(gpa, "\x00", modules);
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        if (self.by_modules.get(key)) |held| return held;
+        const owned = try self.backing.alloc([]const u8, modules.len);
+        for (owned, modules) |*into, from| into.* = try self.backing.dupe(u8, from);
+        const built = try library_cache_mod.checkedFor(self.backing, self.io, self.environ, owned);
+        try self.by_modules.put(self.backing, try self.backing.dupe(u8, key), built);
+        return built;
+    }
+
+    fn deinit(self: *Libraries) void {
+        var it = self.by_modules.valueIterator();
+        while (it.next()) |held| held.*.deinit();
+        self.* = undefined;
+    }
+};
+
 /// What every case's check reads and none of them changes.
 const Settings = struct {
-    /// The checked library every case resumes from.
+    /// The checked library of the prelude's closure, which the editor and the
+    /// generated programs resume from.
     library: *const loader.CheckedLibrary,
+    /// The libraries each case resumes from.
+    libraries: *Libraries,
     properties: bool = false,
     /// Whether every case is held to the frontend and editor properties the
     /// whole corpus is asked: formatting, poison, extents, scopes, hints,
@@ -20891,6 +20936,10 @@ fn checkCase(
     var sink = Sink.init(gpa);
     var interner: Interner = .empty;
 
+    // The library `linea check` would resume this case from: the prelude's
+    // closure, or one holding the library modules its imports reach.
+    const resumed_from = try env.libraries.forCase(gpa, case);
+
     // Loading, parsing and following imports, which for a case that is one
     // file is loading, parsing and following none. Property: parsing
     // yields a complete tree for any input -- every declaration's body is
@@ -20900,7 +20949,7 @@ fn checkCase(
         const load_zone = tracy.beginZone(@src(), "frontend");
         defer load_zone.end();
         const inputs = try inputsOf(gpa, case);
-        break :loaded try env.library.loadFromMemory(gpa, &table, &sink, &interner, case.entry, inputs, .program, .borrow);
+        break :loaded try resumed_from.loadFromMemory(gpa, &table, &sink, &interner, case.entry, inputs, .program, .borrow);
     };
     try table.buildMaps(gpa);
     const ast = program.ast;
@@ -21003,7 +21052,7 @@ fn checkCase(
         var other_table: FileTable = .empty;
         var other_sink = Sink.init(gpa);
         var other_interner: Interner = .empty;
-        const other = try env.library.loadFromMemory(gpa, &other_table, &other_sink, &other_interner, case.entry, flipped, .program, .borrow);
+        const other = try resumed_from.loadFromMemory(gpa, &other_table, &other_sink, &other_interner, case.entry, flipped, .program, .borrow);
 
         var a: std.Io.Writer.Allocating = .init(gpa);
         try dumpAst(&a.writer, &ast, program.ownDeclarations());
@@ -21058,7 +21107,7 @@ fn checkCase(
     // This must happen before that comparison, or the rendered output is
     // missing everything the later passes reported.
     const semantic_check_zone = tracy.beginZone(@src(), "case.semantic-check");
-    var settled = try env.library.checkProgram(gpa, scratch_parent, &program, &interner, &sink, .program);
+    var settled = try resumed_from.checkProgram(gpa, scratch_parent, &program, &interner, &sink, .program);
     defer settled.deinit(gpa);
     const res = &settled.res;
     const disposals = &settled.disposals;

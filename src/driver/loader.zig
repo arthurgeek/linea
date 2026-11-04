@@ -799,7 +799,25 @@ pub fn resumableLibraryOf(gpa: std.mem.Allocator, io: std.Io, entry: []const u8,
     var sink = Sink.init(scratch);
     var interner: Interner = .empty;
     const program = loadFromDiskWith(scratch, io, &table, &sink, &interner, entry, purpose, false, null) catch return null;
-    if (!@import("../sema/resolve.zig").applicationMayResume(&program)) return null;
+    return resumableLibraryIn(gpa, &program);
+}
+
+/// `resumableLibraryOf` for a program held in memory.
+pub fn resumableLibraryOfMemory(gpa: std.mem.Allocator, entry: []const u8, files: []const InMemoryFile, purpose: Purpose) !?[]const []const u8 {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+    var table: FileTable = .empty;
+    var sink = Sink.init(scratch);
+    var interner: Interner = .empty;
+    const program = loadFromMemory(scratch, &table, &sink, &interner, entry, files, purpose, false, .borrow) catch return null;
+    return resumableLibraryIn(gpa, &program);
+}
+
+/// The library modules `program`, loaded without the checked library, holds,
+/// sorted, or null where its own files keep it from resuming.
+fn resumableLibraryIn(gpa: std.mem.Allocator, program: *const Program) !?[]const []const u8 {
+    if (!@import("../sema/resolve.zig").applicationMayResume(program)) return null;
     var dirs: std.ArrayList([]const u8) = .empty;
     for (program.modules) |module| {
         if (module.library) try dirs.append(gpa, try gpa.dupe(u8, module.dir));
