@@ -329,468 +329,155 @@ fn std.io.core.IoError;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.io.
 }
 
 fn std.io.core.IoOperation;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.io.core.IoOperation, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
-    match read self {
+    let text_after = match read self {
         Read => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Read")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Read"
         },
         Write => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Write")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Write"
         },
         Flush => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Flush")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Flush"
         },
         Close => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Close")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Close"
         },
         Open => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Open")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Open"
         },
         Metadata => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Metadata")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Metadata"
         },
         Permissions => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Permissions")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Permissions"
         },
         Publish => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Publish")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Publish"
         },
         Remove => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Remove")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Remove"
         },
         Random => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Random")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Random"
         },
         Listen => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Listen")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Listen"
         },
         Accept => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Accept")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Accept"
         },
         Connect => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Connect")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Connect"
         },
         Configure => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Configure")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Configure"
         },
     }
+    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, text_after)
 }
 
 fn std.io.core.IoCategory;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.io.core.IoCategory, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
-    match read self {
+    let text_after = match read self {
         Other => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Other")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Other"
         },
         NotFound => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "NotFound")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"NotFound"
         },
         PermissionDenied => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "PermissionDenied")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"PermissionDenied"
         },
         AlreadyExists => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "AlreadyExists")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"AlreadyExists"
         },
         WouldBlock => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "WouldBlock")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"WouldBlock"
         },
         BrokenPipe => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "BrokenPipe")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"BrokenPipe"
         },
         Interrupted => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Interrupted")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Interrupted"
         },
         InvalidInput => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "InvalidInput")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"InvalidInput"
         },
         NotDirectory => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "NotDirectory")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"NotDirectory"
         },
         IsDirectory => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "IsDirectory")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"IsDirectory"
         },
         Unsupported => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Unsupported")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Unsupported"
         },
         NoSpace => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "NoSpace")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"NoSpace"
         },
         ResourceExhausted => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "ResourceExhausted")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"ResourceExhausted"
         },
         Symlink => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Symlink")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"Symlink"
         },
         InvalidDescriptor => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "InvalidDescriptor")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"InvalidDescriptor"
         },
         NoProgress => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "NoProgress")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"NoProgress"
         },
         InvalidProgress => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "InvalidProgress")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"InvalidProgress"
         },
         TimedOut => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "TimedOut")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"TimedOut"
         },
         ConnectionReset => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "ConnectionReset")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"ConnectionReset"
         },
         ConnectionRefused => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "ConnectionRefused")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"ConnectionRefused"
         },
         AddressInUse => {
-            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "AddressInUse")?
-            var wrote_component = false
             {}
-            if wrote_component {
-                if false {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
-                } else {
-                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
-                }
-            }
-            return .Ok(())
+            r"AddressInUse"
         },
     }
+    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, text_after)
 }
 
 fn UInt64;std.fmt;Display.fmt[std.io.core.Descriptor](self: UInt64, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {

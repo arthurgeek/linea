@@ -13267,6 +13267,8 @@ const Resolver = struct {
                     .case_ordinal
                 else if (std.mem.eql(u8, name, "components_named"))
                     .components_named
+                else if (std.mem.eql(u8, name, "text_after"))
+                    .case_text_after
                 else
                     return false;
                 if (context.active_case_depth == 0) {
@@ -13284,6 +13286,8 @@ const Resolver = struct {
                 .component_name
             else if (std.mem.eql(u8, name, "ordinal"))
                 .component_ordinal
+            else if (std.mem.eql(u8, name, "text_before") and context.recipe_floor == null)
+                .component_text_before
             else
                 return false;
             context.component_receiver = true;

@@ -3205,7 +3205,17 @@ Inside an active case, `reflect.case.name`, `reflect.case.ordinal` and
 `reflect.case.components_named` are respectively a `Str`, `UInt64` and `Bool`.
 Inside a component loop, `component.name` and `component.ordinal` are a `Str`
 and `UInt64`. Struct component names are field names; positional enum and
-newtype components use the decimal spelling of their ordinal. Case and
+newtype components use the decimal spelling of their ordinal.
+
+Two further `Str` descriptors spell the fixed text of the form derived
+`Display` and `Debug` write: `Name`, `Name(a, b)` or `Name { x: a, y: b }`.
+Inside a component loop over observed components, `component.text_before` is
+the text written before that component: the case name followed by `(`, or by
+` { ` when components are named, before the first component, and `, ` before a
+later one; a named component's text then ends with its name and `: `.
+Inside an active case, `reflect.case.text_after` is the text written after the
+last component, `)` or ` }`, or the case name alone when the case has no
+components. A construction descriptor has no `text_before`. Case and
 component ordinals follow declaration order. `reflect.ordinal_of(value)` is
 available only outside reflected cases and component loops and evaluates its
 argument once before selecting that value's case ordinal.

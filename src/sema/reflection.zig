@@ -56,8 +56,13 @@ pub const MetadataPlan = struct {
         case_name,
         case_ordinal,
         components_named,
+        /// The fixed text derived formatting writes after the case's last
+        /// component, or the case name alone when it has none.
+        case_text_after,
         component_name,
         component_ordinal,
+        /// The fixed text derived formatting writes before this component.
+        component_text_before,
     };
 };
 
@@ -462,6 +467,12 @@ const Renderer = struct {
         };
     }
 
+    /// Whether a case's components are written by name: a struct's fields
+    /// are, a variant's payloads and a newtype's base are positional.
+    fn componentsNamed(self: *const Renderer) bool {
+        return self.ast.declTag(self.target) == .struct_;
+    }
+
     fn caseName(self: *const Renderer, case: CaseOrdinal) []const u8 {
         return switch (self.ast.declTag(self.target)) {
             .struct_, .newtype => self.ast.tokenText(self.ast.declName(self.target)),
@@ -687,7 +698,16 @@ const Renderer = struct {
                 try self.appendOrdinal(ordinalIndex(case));
                 try self.append(")");
             },
-            .components_named => try self.append(if (self.ast.declTag(self.target) == .struct_) "true" else "false"),
+            .components_named => try self.append(if (self.componentsNamed()) "true" else "false"),
+            .case_text_after => {
+                try self.append("r\"");
+                if (try self.componentCount(case) == 0) {
+                    try self.append(self.caseName(case));
+                } else {
+                    try self.append(if (self.componentsNamed()) " }" else ")");
+                }
+                try self.append("\"");
+            },
             .component_name => {
                 const component = state.component orelse return error.ComponentPlaceOutsideLoop;
                 if (self.ast.declTag(self.target) == .struct_) {
@@ -702,6 +722,22 @@ const Renderer = struct {
                 try self.append("UInt64(");
                 try self.appendOrdinal(ordinalIndex(state.component orelse return error.ComponentPlaceOutsideLoop));
                 try self.append(")");
+            },
+            .component_text_before => {
+                const component = state.component orelse return error.ComponentPlaceOutsideLoop;
+                const named = self.componentsNamed();
+                try self.append("r\"");
+                if (ordinalIndex(component) == 0) {
+                    try self.append(self.caseName(case));
+                    try self.append(if (named) " { " else "(");
+                } else {
+                    try self.append(", ");
+                }
+                if (named) {
+                    try self.append(self.ast.tokenText(self.fieldsOfCase(case)[ordinalIndex(component)].name));
+                    try self.append(": ");
+                }
+                try self.append("\"");
             },
         }
         try self.endOrigin(origin);

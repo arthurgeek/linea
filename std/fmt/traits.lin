@@ -10,39 +10,23 @@ pub trait Display {
 // Derived Display writes the type or variant name, then its components: in
 // parentheses when they are positional, or as `name: value` pairs in braces
 // when they are named. A case with no components writes its name alone.
+//
+// Each piece of fixed text is one write. An arm writes the text before each
+// component, then yields the text after the last one, and the final write
+// after the `match` writes it. A case with no components yields its name, so
+// formatting it is a single write.
 template impl Display where reflect.components: Display {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
-        match read self {
+        let text_after = match read self {
             reflect.case => {
-                Writer.write_str(&w, reflect.case.name)?
-                var wrote_component = false
                 for component in reflect.components {
-                    if component.ordinal == 0 {
-                        if reflect.case.components_named {
-                            Writer.write_str(&w, r" { ")?
-                        } else {
-                            Writer.write_str(&w, "(")?
-                        }
-                    } else {
-                        Writer.write_str(&w, ", ")?
-                    }
-                    if reflect.case.components_named {
-                        Writer.write_str(&w, component.name)?
-                        Writer.write_str(&w, ": ")?
-                    }
+                    Writer.write_str(&w, component.text_before)?
                     Display.fmt(component.of(self), &w)?
-                    wrote_component = true
                 }
-                if wrote_component {
-                    if reflect.case.components_named {
-                        Writer.write_str(&w, r" }")?
-                    } else {
-                        Writer.write_str(&w, ")")?
-                    }
-                }
-                return .Ok(())
+                reflect.case.text_after
             },
         }
+        Writer.write_str(&w, text_after)
     }
 }
 
@@ -56,36 +40,15 @@ pub trait Debug {
 // component with Debug so nested text and payloads keep their detail.
 template impl Debug where reflect.components: Debug {
     fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
-        match read self {
+        let text_after = match read self {
             reflect.case => {
-                Writer.write_str(&w, reflect.case.name)?
-                var wrote_component = false
                 for component in reflect.components {
-                    if component.ordinal == 0 {
-                        if reflect.case.components_named {
-                            Writer.write_str(&w, r" { ")?
-                        } else {
-                            Writer.write_str(&w, "(")?
-                        }
-                    } else {
-                        Writer.write_str(&w, ", ")?
-                    }
-                    if reflect.case.components_named {
-                        Writer.write_str(&w, component.name)?
-                        Writer.write_str(&w, ": ")?
-                    }
+                    Writer.write_str(&w, component.text_before)?
                     Debug.debug(component.of(self), &w)?
-                    wrote_component = true
                 }
-                if wrote_component {
-                    if reflect.case.components_named {
-                        Writer.write_str(&w, r" }")?
-                    } else {
-                        Writer.write_str(&w, ")")?
-                    }
-                }
-                return .Ok(())
+                reflect.case.text_after
             },
         }
+        Writer.write_str(&w, text_after)
     }
 }

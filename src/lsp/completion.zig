@@ -826,6 +826,7 @@ fn appendReflectionSelections(
             try appendReflectionItem(gpa, offered, "name", .Field);
             try appendReflectionItem(gpa, offered, "ordinal", .Field);
             try appendReflectionItem(gpa, offered, "components_named", .Field);
+            try appendReflectionItem(gpa, offered, "text_after", .Field);
         }
         return true;
     }
@@ -833,7 +834,10 @@ fn appendReflectionSelections(
     if (context.in_template and (context.recipe_binder or (context.active_case and context.component_binder))) {
         try appendReflectionItem(gpa, offered, "name", .Field);
         try appendReflectionItem(gpa, offered, "ordinal", .Field);
-        if (context.component_binder) try appendReflectionItem(gpa, offered, "of", .Method);
+        if (context.component_binder) {
+            try appendReflectionItem(gpa, offered, "of", .Method);
+            try appendReflectionItem(gpa, offered, "text_before", .Field);
+        }
         return true;
     }
     return false;
@@ -2267,6 +2271,7 @@ test "structural reflection completion follows its lexical context" {
     try testing.expect(holds(case_labels, "name"));
     try testing.expect(holds(case_labels, "ordinal"));
     try testing.expect(holds(case_labels, "components_named"));
+    try testing.expect(holds(case_labels, "text_after"));
 
     const component_metadata = std.mem.indexOf(u8, text, "component.ordinal").? + "component.".len;
     const component_labels = try offeredAt(gpa, text, component_metadata);
@@ -2274,6 +2279,7 @@ test "structural reflection completion follows its lexical context" {
     try testing.expect(holds(component_labels, "name"));
     try testing.expect(holds(component_labels, "ordinal"));
     try testing.expect(holds(component_labels, "of"));
+    try testing.expect(holds(component_labels, "text_before"));
 }
 
 test "construction completion distinguishes recipes from observed components" {
@@ -2303,6 +2309,7 @@ test "construction completion distinguishes recipes from observed components" {
     try testing.expect(holds(fields, "name"));
     try testing.expect(holds(fields, "ordinal"));
     try testing.expect(!holds(fields, "of"));
+    try testing.expect(!holds(fields, "text_before"));
 }
 
 test "construction descriptor completion offers its written component type" {
