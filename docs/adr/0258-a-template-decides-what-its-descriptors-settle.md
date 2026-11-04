@@ -38,7 +38,7 @@ An `if` whose condition reads at least one descriptor and is built only from
 parentheses is decided during expansion. An integer comparison is decided
 only when an operand is a descriptor, so every literal it reads has the type
 the checker gives it there, `UInt64`. Only the selected
-branch is written, as a block. An `if` without `else` keeps type `()`, so its
+branch is written: its block, or the `if` an `else if` selects. An `if` without `else` keeps type `()`, so its
 selected block must be `()`, as at run time.
 
 `reflect.case.component_count` joins the case descriptors, so a template can

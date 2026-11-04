@@ -3221,8 +3221,9 @@ An `if` whose condition reads at least one descriptor and is built only from
 `==` and `!=` between two `Bool` or two integer operands, `<`, `<=`, `>` and
 `>=` between integers, and parentheses is decided during expansion, separately
 for each
-case and component. Expansion writes only the selected branch, as a block, or
-an empty block when the condition is false and there is no `else`. An `if`
+case and component. Expansion writes only the selected branch: its block, the
+`if` an `else if` selects (decided in turn when its own condition qualifies),
+or an empty block when the condition is false and there is no `else`. An `if`
 without `else` has type `()` whichever branch is kept, so its block must be
 `()` as an ordinary one's must. The branch
 not selected is not part of that case's generated code, so it is neither
