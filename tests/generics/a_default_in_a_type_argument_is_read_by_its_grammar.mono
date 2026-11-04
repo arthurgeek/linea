@@ -1,12 +1,12 @@
-@(opaque, copyable)
-struct Str {
-    bytes: std.mem.Slice[UInt8],
-}
-
 @copyable
 struct P {
     a: UInt8,
     b: UInt8,
+}
+
+@(opaque, copyable)
+struct Str {
+    bytes: std.mem.Slice[UInt8],
 }
 
 @(opaque, copyable, derive(Release))
