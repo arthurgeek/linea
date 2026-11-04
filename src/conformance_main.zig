@@ -20601,8 +20601,15 @@ const Libraries = struct {
     environ: std.process.Environ,
     /// The prelude's closure, for a case importing nothing else.
     prelude: *const loader.CheckedLibrary,
+    /// Guards `by_modules` alone; a set's library is built under its own
+    /// slot's lock, so walkers needing other sets do not wait on it.
     mutex: std.Io.Mutex = .init,
-    by_modules: std.StringHashMapUnmanaged(*loader.CheckedLibrary) = .empty,
+    by_modules: std.StringHashMapUnmanaged(*Slot) = .empty,
+
+    const Slot = struct {
+        mutex: std.Io.Mutex = .init,
+        library: ?*loader.CheckedLibrary = null,
+    };
 
     /// The library `case` resumes from, as `linea check` would choose it,
     /// and whether it holds modules beyond the prelude's closure.
@@ -20611,19 +20618,30 @@ const Libraries = struct {
             return .{ .library = self.prelude, .imported = false };
         if (modules.len == 0) return .{ .library = self.prelude, .imported = false };
         const key = try std.mem.join(gpa, "\x00", modules);
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
-        if (self.by_modules.get(key)) |held| return .{ .library = held, .imported = true };
-        const owned = try self.backing.alloc([]const u8, modules.len);
-        for (owned, modules) |*into, from| into.* = try self.backing.dupe(u8, from);
-        const built = try library_cache_mod.checkedFor(self.backing, self.io, self.environ, owned);
-        try self.by_modules.put(self.backing, try self.backing.dupe(u8, key), built);
-        return .{ .library = built, .imported = true };
+        const slot = slot: {
+            self.mutex.lockUncancelable(self.io);
+            defer self.mutex.unlock(self.io);
+            const entry = try self.by_modules.getOrPut(self.backing, key);
+            if (!entry.found_existing) {
+                entry.key_ptr.* = try self.backing.dupe(u8, key);
+                entry.value_ptr.* = try self.backing.create(Slot);
+                entry.value_ptr.*.* = .{};
+            }
+            break :slot entry.value_ptr.*;
+        };
+        slot.mutex.lockUncancelable(self.io);
+        defer slot.mutex.unlock(self.io);
+        if (slot.library == null) {
+            const owned = try self.backing.alloc([]const u8, modules.len);
+            for (owned, modules) |*into, from| into.* = try self.backing.dupe(u8, from);
+            slot.library = try library_cache_mod.checkedFor(self.backing, self.io, self.environ, owned);
+        }
+        return .{ .library = slot.library.?, .imported = true };
     }
 
     fn deinit(self: *Libraries) void {
         var it = self.by_modules.valueIterator();
-        while (it.next()) |held| held.*.deinit();
+        while (it.next()) |slot| if (slot.*.library) |held| held.deinit();
         self.* = undefined;
     }
 };
