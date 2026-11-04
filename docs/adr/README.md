@@ -292,6 +292,7 @@ ones most likely to be superseded as the compiler grows.
 | [0118](0118-unobserved-array-initializers-are-omitted-during-lowering.md) | Unobserved array initializers are omitted during lowering | Accepted |
 | [0119](0119-zeroed-allocation-facts-survive-opaque-calls.md) | Zeroed allocation facts survive opaque calls | Accepted |
 | [0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md) | A checking runtime makes a use of freed storage abort | Accepted |
+| [0253](0253-run-and-test-compile-unoptimised-build-ships-optimised.md) | `run` and `test` compile unoptimised; `build` ships optimised | Accepted; builds on 0090 and 0091 |
 | [0121](0121-typed-storage-is-private-and-checked.md) | Typed storage is private and checked | Accepted; extends 0076 and 0088; storage lifetime clauses superseded by 0123 |
 | [0111](0111-import-paths-are-root-relative.md) | Import paths are root-relative | Accepted; supersedes ADR 0032's descending-path clause; reserved-root sentence superseded by 0171; extended by 0229 |
 | [0133](0133-empty-typed-storage-needs-no-allocation.md) | Empty typed storage needs no allocation | Accepted; supersedes mandatory backing-buffer shape in 0123; extends 0098 |

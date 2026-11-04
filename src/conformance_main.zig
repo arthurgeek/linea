@@ -1161,6 +1161,8 @@ fn checkCommandOptimisation(
         .data =
         \\fn main() -> UInt8 { 0 }
         \\
+        \\test fn a_program_has_a_test() {}
+        \\
         ,
     });
     var child_environ = try environ.createMap(a);
@@ -1172,7 +1174,16 @@ fn checkCommandOptimisation(
 
     var levels: [toolchain.levels.len + 1]?[]const u8 = .{null} ** (toolchain.levels.len + 1);
     for (toolchain.levels, levels[1..]) |level, *slot| slot.* = level;
-    for ([_][]const u8{ "build", "run" }) |command| {
+    // Each command with the level it compiles at when none is named. `build`
+    // makes the program that ships; `run` and `test` rebuild on every edit, so
+    // they skip the optimiser that dominates their build time.
+    const commands = [_]struct { name: []const u8, default: []const u8 }{
+        .{ .name = "build", .default = "2" },
+        .{ .name = "run", .default = "0" },
+        .{ .name = "test", .default = "0" },
+    };
+    for (commands) |entry| {
+        const command = entry.name;
         for (levels) |level| {
             var argv: std.ArrayList([]const u8) = .empty;
             try argv.appendSlice(a, &.{ compiler, command, source });
@@ -1188,7 +1199,7 @@ fn checkCommandOptimisation(
                 .exited => |code| code,
                 else => 255,
             };
-            const expected = try std.fmt.allocPrint(a, "error: cc failed\n-O{s}\n", .{level orelse toolchain.default_level});
+            const expected = try std.fmt.allocPrint(a, "error: cc failed\n-O{s}\n", .{level orelse entry.default});
             if (status != 74 or result.stdout.len != 0 or !std.mem.eql(u8, expected, result.stderr)) {
                 try failures.append(gpa, .{
                     .path = "command optimisation",
@@ -1199,7 +1210,7 @@ fn checkCommandOptimisation(
             }
         }
     }
-    std.debug.print("conformance: 14 command optimisation handoffs checked\n", .{});
+    std.debug.print("conformance: {d} command optimisation handoffs checked\n", .{commands.len * levels.len});
 }
 
 /// What there was to check, counted from the walk rather than from a run.
@@ -19638,6 +19649,11 @@ const BuildRun = union(enum) {
     timed_out: void,
 };
 
+/// The level a corpus case is built at: the one `linea build` ships at, so a
+/// recorded outcome is the shipped program's. `-Dopt-levels=true` holds every
+/// other level, `run`'s and `test`'s included, to the same answer.
+const corpus_level = toolchain.build_level;
+
 const BuildRunOptions = struct {
     scratch: []const u8,
     name: []const u8,
@@ -19651,7 +19667,7 @@ const BuildRunOptions = struct {
     /// the only arrangement that shows a library is callable from outside.
     foreign: Foreign = .{},
     /// The level `cc` compiles the module at, one of `toolchain.levels`.
-    opt: []const u8 = toolchain.default_level,
+    opt: []const u8 = corpus_level,
     /// Where a concurrent caller retains harness diagnostics for ordered merge.
     diagnostics: ?*std.Io.Writer = null,
 
@@ -19668,7 +19684,7 @@ const BuildRunOptions = struct {
 const OutcomeKey = struct {
     ir: []const u8,
     foreign: Foreign = .{},
-    opt: []const u8 = toolchain.default_level,
+    opt: []const u8 = corpus_level,
 };
 
 test "a program is filed under the bytes it embeds" {

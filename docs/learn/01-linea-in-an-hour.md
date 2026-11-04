@@ -1984,7 +1984,14 @@ helpers, allocation failures and testing a server.
 | `linea fmt <path>` | format source files in place |
 | `linea init <directory>` | start a project; `--library` starts a library |
 
-A `<path>` is a single `.lin` file or a project directory. `linea lsp` serves
+A `<path>` is a single `.lin` file or a project directory. `linea run` and
+`linea test` compile without optimising, so a change is quick to try;
+`linea build` optimises the program it makes, which takes longer to compile and
+runs faster. All three compute the same results, and `-O 0|1|2|3|s|z` names
+the level on any of them: `linea run hello.lin -O 2` runs the program
+`linea build` would make.
+
+`linea lsp` serves
 editors, and offers the edit a `help:` line names as a quick fix;
 `linea check --error-format=json <path>` writes each diagnostic as one line of
 JSON, with those same edits under `fixes`; `linea fmt --check <path>` reports
