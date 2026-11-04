@@ -49,11 +49,12 @@ const Digest = [Sha256.digest_length]u8;
 const header_len = magic.len + 4 + Sha256.digest_length + 8 + 8;
 /// What every entry's file name starts with, followed by its key in hex.
 const entry_prefix = "checked-std-";
-/// The most entries the directory keeps: writing one removes the oldest
-/// beyond this many, so a compiler rebuilt many times leaves this many behind.
-/// An entry is one set of library modules, and a project's programs import a
-/// few such sets.
-const kept_entries = 16;
+/// The most entries the directory keeps: writing one removes the least
+/// recently used beyond this many, so a compiler rebuilt many times leaves
+/// this many behind. An entry is one set of library modules; the corpus's
+/// cases import some fifty-five sets, and an entry averages about 21 MB, so
+/// the directory stays under some 1.4 GB.
+const kept_entries = 64;
 
 /// Where the cache lives, allocated in `gpa`, or null where it is turned off or
 /// `HOME` is not set.
@@ -98,42 +99,44 @@ pub fn checkedFor(gpa: std.mem.Allocator, io: std.Io, environ: std.process.Envir
 }
 
 fn openKeyed(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest, modules: []const []const u8) !?*CheckedLibrary {
-    return openWaiting(gpa, io, dir, key, modules, lock_timeout_ns);
+    return openWaiting(gpa, io, dir, key, modules, lock_wait_ns);
 }
 
-/// How long a command waits on another that holds an entry's lock before it
-/// takes the lock itself: longer than a Debug compiler takes to check the
-/// whole library.
-const lock_timeout_ns: i96 = 10 * std.time.ns_per_min;
+/// How long a command waits for another checking the same entry before it
+/// checks the library itself without the cache: what a Debug compiler takes
+/// to check a large set of modules, well short of a command that seems hung.
+const lock_wait_ns: i96 = 60 * std.time.ns_per_s;
 
 /// `openKeyed`, holding the entry's lock while it checks the library, so of
 /// several commands missing one entry at once one checks and writes it and
-/// the others wait and read it. A lock whose holder has exited, or that is
-/// older than `timeout_ns`, is taken over.
-fn openWaiting(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest, modules: []const []const u8, timeout_ns: i96) !?*CheckedLibrary {
+/// the others wait and read it. The lock is an advisory lock on `NAME.lock`,
+/// which the system releases when its holder exits, however it exits; a
+/// command that waits says so once, and after `wait_ns` checks without the
+/// cache.
+fn openWaiting(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest, modules: []const []const u8, wait_ns: i96) !?*CheckedLibrary {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const scratch = arena.allocator();
     const name = try entryName(scratch, key);
     if (try readDecoded(gpa, scratch, io, dir, name, key)) |library| return library;
-    // The file the entry is written through is made before the library is
-    // checked, so a cache that cannot be written is known before that cost.
+    // The lock is made before the library is checked, so a cache that
+    // cannot be written is known before that cost.
     var cache = std.Io.Dir.cwd().createDirPathOpen(io, dir, .{ .open_options = .{ .iterate = true } }) catch return null;
     defer cache.close(io);
     const lock_name = try std.fmt.allocPrint(scratch, "{s}.lock", .{name});
-    while (true) {
-        if (takeLock(io, cache, lock_name)) break else |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return null,
+    const lock = cache.createFile(io, lock_name, .{ .truncate = false }) catch return null;
+    defer lock.close(io);
+    if (!(lock.tryLock(io, .exclusive) catch return null)) {
+        std.debug.print("linea: waiting for another command to check the standard library into {s}\n", .{dir});
+        const began = std.Io.Timestamp.now(io, .awake);
+        while (true) {
+            io.sleep(.fromMilliseconds(50), .awake) catch {};
+            if (try readDecoded(gpa, scratch, io, dir, name, key)) |library| return library;
+            if (lock.tryLock(io, .exclusive) catch return null) break;
+            if (began.durationTo(std.Io.Timestamp.now(io, .awake)).nanoseconds > wait_ns) return null;
         }
-        if (lockIsStale(io, cache, lock_name, timeout_ns)) {
-            cache.deleteFile(io, lock_name) catch {};
-            continue;
-        }
-        io.sleep(.fromMilliseconds(50), .awake) catch {};
-        if (try readDecoded(gpa, scratch, io, dir, name, key)) |library| return library;
     }
-    defer cache.deleteFile(io, lock_name) catch {};
+    defer lock.unlock(io);
     // The holder this command waited on may have written it just before.
     if (try readDecoded(gpa, scratch, io, dir, name, key)) |library| return library;
     const library = CheckedLibrary.initFor(gpa, modules) catch |err| switch (err) {
@@ -149,38 +152,25 @@ fn openWaiting(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest,
     return library;
 }
 
-/// The library the entry `name` holds, or null where it is missing or damaged.
+/// The library the entry `name` holds, or null where it is missing or
+/// damaged. An entry read is touched, so the entries kept are the ones used.
 fn readDecoded(gpa: std.mem.Allocator, scratch: std.mem.Allocator, io: std.Io, dir: []const u8, name: []const u8, key: Digest) !?*CheckedLibrary {
     const payload = read(scratch, io, dir, name, key) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return null,
     };
-    return encoding.decode(gpa, payload) catch |err| switch (err) {
+    const library = encoding.decode(gpa, payload) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.Corrupt => null,
+        error.Corrupt => return null,
     };
-}
-
-/// Creates the lock `name`, holding this process's identifier, or fails with
-/// `error.PathAlreadyExists` where another holds it.
-fn takeLock(io: std.Io, cache: std.Io.Dir, name: []const u8) !void {
-    const file = try cache.createFile(io, name, .{ .exclusive = true });
-    defer file.close(io);
-    var text: [24]u8 = undefined;
-    file.writeStreamingAll(io, std.fmt.bufPrint(&text, "{d}", .{currentProcess()}) catch unreachable) catch {};
-}
-
-/// Whether the lock `name` is held by a process that has exited, or has
-/// been held longer than `timeout_ns`. A lock whose holder has not yet
-/// written its identifier is held.
-fn lockIsStale(io: std.Io, cache: std.Io.Dir, name: []const u8, timeout_ns: i96) bool {
-    const stat = cache.statFile(io, name, .{}) catch return false;
-    if (std.Io.Timestamp.now(io, .real).nanoseconds - stat.mtime.nanoseconds > timeout_ns) return true;
-    var buffer: [24]u8 = undefined;
-    const text = cache.readFile(io, name, &buffer) catch return false;
-    const holder = std.fmt.parseInt(std.posix.pid_t, text, 10) catch return false;
-    std.posix.kill(holder, @enumFromInt(0)) catch |err| return err == error.ProcessNotFound;
-    return false;
+    touch: {
+        var cache = std.Io.Dir.cwd().openDir(io, dir, .{}) catch break :touch;
+        defer cache.close(io);
+        const file = cache.openFile(io, name, .{ .mode = .read_write }) catch break :touch;
+        defer file.close(io);
+        file.setTimestampsNow(io) catch {};
+    }
+    return library;
 }
 
 fn currentProcess() std.posix.pid_t {
@@ -316,14 +306,24 @@ fn evict(io: std.Io, cache: std.Io.Dir) !void {
     const now = std.Io.Timestamp.now(io, .real).nanoseconds;
     var it = cache.iterate();
     while (try it.next(io)) |entry| {
-        // What a command stopped while writing an entry left behind: its
-        // temporary file an hour on, and its lock once no command would wait
-        // on it.
+        // What a command stopped while writing an entry left behind, an
+        // hour on, and the lock of an entry that is gone, where no command
+        // holds it.
         if (entry.kind == .file and std.mem.startsWith(u8, entry.name, entry_prefix)) {
-            const age: ?i96 = if (std.mem.endsWith(u8, entry.name, ".tmp")) std.time.ns_per_hour else if (std.mem.endsWith(u8, entry.name, ".lock")) lock_timeout_ns else null;
-            if (age) |limit| {
+            if (std.mem.endsWith(u8, entry.name, ".tmp")) {
                 const stat = cache.statFile(io, entry.name, .{}) catch continue;
-                if (now - stat.mtime.nanoseconds > limit) cache.deleteFile(io, entry.name) catch {};
+                if (now - stat.mtime.nanoseconds > std.time.ns_per_hour) cache.deleteFile(io, entry.name) catch {};
+                continue;
+            }
+            if (std.mem.endsWith(u8, entry.name, ".lock")) {
+                const of = entry.name[0 .. entry.name.len - ".lock".len];
+                if (cache.statFile(io, of, .{})) |_| continue else |_| {}
+                const lock = cache.openFile(io, entry.name, .{ .mode = .read_write }) catch continue;
+                defer lock.close(io);
+                if (lock.tryLock(io, .exclusive) catch false) {
+                    defer lock.unlock(io);
+                    cache.deleteFile(io, entry.name) catch {};
+                }
                 continue;
             }
         }
@@ -390,7 +390,7 @@ test "checked library cache: a missing, damaged or foreign entry is checked agai
     }
 }
 
-test "checked library cache: a lock whose holder has exited, or that is too old, is taken over" {
+test "checked library cache: a held lock is waited on, a released one taken, and one left behind holds nothing" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const dir = try std.fmt.allocPrint(testing.allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});
@@ -398,20 +398,26 @@ test "checked library cache: a lock whose holder has exited, or that is too old,
     const key: Digest = @splat(9);
     const name = try entryName(testing.allocator, key);
     defer testing.allocator.free(name);
-    const lock = try std.fmt.allocPrint(testing.allocator, "{s}.lock", .{name});
-    defer testing.allocator.free(lock);
+    const lock_name = try std.fmt.allocPrint(testing.allocator, "{s}.lock", .{name});
+    defer testing.allocator.free(lock_name);
 
-    // A holder no process is.
-    try tmp.dir.writeFile(testing.io, .{ .sub_path = lock, .data = "2147483646" });
-    const first = (try openWaiting(testing.allocator, testing.io, dir, key, &.{}, lock_timeout_ns)).?;
+    // A lock file another command left behind, naming anything, holds no
+    // command: only a held lock does.
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = lock_name, .data = "1" });
+    const first = (try openWaiting(testing.allocator, testing.io, dir, key, &.{}, lock_wait_ns)).?;
     first.deinit();
-    try testing.expectError(error.FileNotFound, tmp.dir.statFile(testing.io, lock, .{}));
 
-    // A live holder, this process, past the time a command waits for one.
+    // Held by another: the command waits, then checks without the cache.
     try tmp.dir.deleteFile(testing.io, name);
-    var text: [24]u8 = undefined;
-    try tmp.dir.writeFile(testing.io, .{ .sub_path = lock, .data = try std.fmt.bufPrint(&text, "{d}", .{currentProcess()}) });
-    const second = (try openWaiting(testing.allocator, testing.io, dir, key, &.{}, 0)).?;
+    const held = try tmp.dir.openFile(testing.io, lock_name, .{ .mode = .read_write });
+    defer held.close(testing.io);
+    try testing.expect(try held.tryLock(testing.io, .exclusive));
+    try testing.expect(try openWaiting(testing.allocator, testing.io, dir, key, &.{}, 100 * std.time.ns_per_ms) == null);
+    try testing.expectError(error.FileNotFound, tmp.dir.statFile(testing.io, name, .{}));
+
+    // Released: the command takes it and writes the entry.
+    held.unlock(testing.io);
+    const second = (try openWaiting(testing.allocator, testing.io, dir, key, &.{}, lock_wait_ns)).?;
     second.deinit();
     _ = try tmp.dir.statFile(testing.io, name, .{});
 }
@@ -440,11 +446,14 @@ test "checked library cache: of commands missing one entry at once, one writes i
     }
     defer for (encodings) |bytes| testing.allocator.free(bytes);
     for (encodings[1..]) |bytes| try testing.expectEqualSlices(u8, encodings[0], bytes);
-    // The entry, and no lock left behind.
+    // The entry and its lock, and no temporary file left behind.
     var count: usize = 0;
     var it = tmp.dir.iterate();
-    while (try it.next(testing.io)) |_| count += 1;
-    try testing.expectEqual(@as(usize, 1), count);
+    while (try it.next(testing.io)) |entry| {
+        try testing.expect(!std.mem.endsWith(u8, entry.name, ".tmp"));
+        count += 1;
+    }
+    try testing.expectEqual(@as(usize, 2), count);
 }
 
 test "checked library cache: a cache that cannot be written is not used, and the library is not checked for it" {

@@ -67,11 +67,13 @@ too. Repeated `zig build test`, `guide` and `example-tests` runs, and their
 parallel workers, read what the first wrote, and nothing is written to the
 user's home.
 
-**One writer per entry.** A command missing an entry takes the entry's lock
-(`NAME.lock`, holding its process identifier) before it checks the library;
-another missing the same entry waits for the entry to appear and reads it.
-A lock whose holder has exited, or that is older than ten minutes, is taken
-over, so a command that died mid-check stops no other.
+**One writer per entry.** A command missing an entry takes an advisory lock
+on the entry's `NAME.lock` before it checks the library; another missing the
+same entry says once on standard error that it is waiting, reads the entry
+when it appears, and after a minute checks the library itself without the
+cache. The system releases the lock when its holder exits however it exits,
+so no identifier is read and no lock is taken over: a lock file left behind
+holds no command.
 
 **Damage is a miss.** An entry that is missing, cut short, written by another
 compiler or format, or whose encoding does not hash to the XxHash3 its header
@@ -81,10 +83,12 @@ trusted because only its user writes the directory, not because of its hash.
 A decoder never reads past its input and never builds an enum value from a
 number naming none. A write goes to `NAME.PID.tmp`, renamed over the entry,
 so concurrent commands each see a whole entry or none. Writing an entry
-keeps the sixteen most recently written and removes older ones, so
-rebuilding the compiler does not grow the directory without bound, and
-removes the temporary file an interrupted write left an hour on and its lock
-ten minutes on; it removes nothing else in the directory.
+keeps the sixty-four most recently read or written, an entry's time being
+touched when it is read, and removes the rest, so rebuilding the compiler
+does not grow the directory without bound; the corpus's cases import some
+fifty-five sets of modules, about 21 MB each. It also removes the temporary
+file an interrupted write left an hour on, and the lock of an entry that is
+gone where no command holds it; it removes nothing else in the directory.
 
 **A cache that cannot be written is not used.** The entry's lock is created
 before the library is checked; where it cannot be, the command compiles as it
