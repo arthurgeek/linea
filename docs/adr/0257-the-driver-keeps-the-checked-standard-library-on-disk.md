@@ -53,13 +53,24 @@ runner points `LINEA_CACHE_DIR` at its scratch directory, so a transcript
 never reads or writes the user's cache.
 
 **Damage is a miss.** An entry that is missing, cut short, written by another
-compiler or format, or whose encoding does not hash to the SHA-256 its header
-records, is checked again and rewritten. A decoder never reads past its input
-and never builds an enum value from a number naming none. A write goes to an
-unnamed file renamed over the entry, so concurrent commands each see a whole
-entry or none. Writing an entry keeps the eight most recently written and
+compiler or format, or whose encoding does not hash to the XxHash3 its header
+records, is checked again and rewritten. The encoding's hash is read on every
+command and only detects damage, so it is a fast checksum: the entry is
+trusted because only its user writes the directory, not because of its hash.
+A decoder never reads past its input and never builds an enum value from a
+number naming none. A write goes to an unnamed file renamed over the entry,
+so concurrent commands each see a whole entry or none. Writing an entry keeps the eight most recently written and
 removes older ones, so rebuilding the compiler does not grow the directory
 without bound.
+
+**The whole library.** The checked library holds every module of the
+standard library, not only the prelude's closure, so a program importing
+`std.json` or `std.http` resumes as one using only the prelude does. A
+resumed check then holds every library declaration, and the passes that
+continue from it must not walk them again: [T-PolyRec] keeps the library's
+own verdict for a library call unless a cycle through it passes through a
+declaration the program adds, and the complete-template refill writes only
+the instantiations the program minted.
 
 **The driver owns it.** No pass gains state: the driver reads or builds a
 `CheckedLibrary` before loading the program, and resumes from it through the
@@ -70,18 +81,7 @@ sessions use, so a command line, the runner and the editor resume one way.
 
 - A warm command skips checking the library wherever `canResume` admits the
   program. A program `canResume` refuses still loads and checks the library
-  afresh, and now also pays to read the entry. Of the 44 programs under
-  `examples/`, none resumes: 29 import a library module the prelude does not
-  reach, 13 derive, one writes a template and the rest hold a closure.
-  Loading every library module into the prefix lets 21 of them resume, but
-  the resumed check then runs whole-program reachability over every library
-  declaration and `hello.lin` takes 1.08 s instead of 0.15 s, so the prefix
-  stays the prelude's closure.
-- Measured on a ReleaseFast compiler, reading a 16 MB entry costs about
-  42 ms (5 ms hashing the executable, 10 ms reading and hashing the entry,
-  27 ms decoding), and a resumed check of a program returning zero takes
-  49 ms against 109 ms fresh. In a Debug compiler the same program checks in
-  1.15 s warm against 1.6 s without the cache.
+  afresh.
 - The first command after a compiler changes pays for checking the library,
   encoding it and writing the entry.
 - Hashing the executable costs a read of the binary on every command.
@@ -96,6 +96,18 @@ sessions use, so a command line, the runner and the editor resume one way.
   `LINEA_CACHE_DIR` must name a directory only its user writes.
 
 ## Alternatives considered
+
+**Library reachability facts recorded in the entry.** [T-PolyRec] could keep,
+per library call, the declarations its cycle query reached, and a resumed
+check could walk only from the program's calls into those facts. The rule a
+resumed check needs is narrower: a library call's verdict changes only where
+the program closes a cycle through it, which two walks over the call graph
+the check builds anyway answer, linear in its calls, with nothing more to
+encode or keep consistent with the library's typing.
+
+**The prelude's closure as the checked library.** A smaller entry, but
+29 of the 44 programs under `examples/` import a module outside it, `hello`
+included, and none of those resumes.
 
 **A project-local `.linea-cache/` beside the program's manifest.** The entry
 is the same for every project a compiler builds, so a project-local cache

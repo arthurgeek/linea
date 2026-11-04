@@ -14,12 +14,16 @@
 //! | 4 | `library_encoding.format_version`, little-endian |
 //! | 32 | the SHA-256 of the compiler binary that wrote it |
 //! | 8 | the encoding's length, little-endian |
-//! | 32 | the SHA-256 of the encoding |
+//! | 8 | the XxHash3 of the encoding, little-endian |
 //! | n | the encoding |
 //!
 //! An entry that is missing, shorter or longer than its header says, written
 //! by another compiler or version, or whose encoding does not hash to what the
 //! header records, is checked again and written again; it is never an error.
+//! The encoding's hash detects an entry damaged on disk, and is read on every
+//! command, so it is a fast checksum rather than a cryptographic hash: an
+//! entry is trusted because only its user writes the directory, not because
+//! of its hash.
 //! A write goes to an unnamed file renamed over the entry, so a reader sees a
 //! whole entry or none, whichever of several writers renames last.
 
@@ -41,7 +45,7 @@ pub const default_directory = ".linea-cache";
 
 const magic = "LINEACHK";
 const Digest = [Sha256.digest_length]u8;
-const header_len = magic.len + 4 + Sha256.digest_length + 8 + Sha256.digest_length;
+const header_len = magic.len + 4 + Sha256.digest_length + 8 + 8;
 /// What every entry's file name starts with, followed by its key in hex.
 const entry_prefix = "checked-std-";
 /// The most entries the directory keeps: writing one removes the oldest
@@ -140,12 +144,10 @@ fn payloadOf(bytes: []const u8, key: Digest) ?[]const u8 {
     if (std.mem.readInt(u32, take(bytes, &at, 4), .little) != encoding.format_version) return null;
     if (!std.mem.eql(u8, take(bytes, &at, Sha256.digest_length), &key)) return null;
     const len = std.mem.readInt(u64, take(bytes, &at, 8), .little);
-    const digest = take(bytes, &at, Sha256.digest_length).*;
+    const checksum = std.mem.readInt(u64, take(bytes, &at, 8), .little);
     if (len != bytes.len - header_len) return null;
     const payload = bytes[header_len..];
-    var computed: Digest = undefined;
-    Sha256.hash(payload, &computed, .{});
-    if (!std.mem.eql(u8, &computed, &digest)) return null;
+    if (std.hash.XxHash3.hash(0, payload) != checksum) return null;
     return payload;
 }
 
@@ -162,7 +164,7 @@ fn write(io: std.Io, dir: []const u8, name: []const u8, key: Digest, payload: []
     at += Sha256.digest_length;
     std.mem.writeInt(u64, header[at..][0..8], payload.len, .little);
     at += 8;
-    Sha256.hash(payload, header[at..][0..Sha256.digest_length], .{});
+    std.mem.writeInt(u64, header[at..][0..8], std.hash.XxHash3.hash(0, payload), .little);
 
     var file = try cache.createFileAtomic(io, name, .{ .replace = true });
     defer file.deinit(io);

@@ -180,6 +180,20 @@ pub const LibraryPrefix = struct {
             };
             defer loader.deinit();
             try loader.loadLibrary();
+            // Every module of the library, not only the prelude's closure, so a
+            // program importing any of them resumes from this prefix.
+            var dirs: std.StringArrayHashMapUnmanaged(void) = .empty;
+            for (library.files) |file| {
+                if (!std.mem.endsWith(u8, file.path, ".lin")) continue;
+                try dirs.put(gpa, std.fs.path.dirname(file.path) orelse continue, {});
+            }
+            dirs.sort(struct {
+                keys: []const []const u8,
+                pub fn lessThan(self: @This(), a: usize, b: usize) bool {
+                    return std.mem.lessThan(u8, self.keys[a], self.keys[b]);
+                }
+            }{ .keys = dirs.keys() });
+            for (dirs.keys()) |dir| _ = try loader.inLibrary(dir);
             if (sink.hasErrors()) return error.InvalidLibraryPrefix;
             break :blk .{
                 .modules = try loader.modules.toOwnedSlice(gpa),
@@ -5454,6 +5468,8 @@ test "checked library resumes a program that derives, with the diagnostics and M
         "@derive(Equatable, Debug)\nstruct Point { x: UInt8, y: UInt8 }\nfn main() -> UInt8 { let a: Point = .{ x = 1, y = 2 }; let b: Point = .{ x = 1, y = 2 }; if a == b { 0 } else { 1 } }",
         "enum Shade { Light, Dark }\nderive Equatable for Shade\nfn main() -> UInt8 { if Shade.Light == Shade.Dark { 1 } else { 0 } }",
         "@derive(Equatable)\nstruct Holder { inner: Missing }\nfn main() -> UInt8 { 0 }",
+        // A trait from a library module the prelude does not reach.
+        "import std.json\n@derive(json.Encode)\nstruct Reply { count: UInt8 }\nfn main() -> UInt8 { let _reply: Reply = .{ count = 3 }; 0 }",
         // A generic type, whose implementation applies where its parameter's
         // components meet the template's bounds.
         "@derive(Equatable, Debug)\nstruct Pair[T] { left: T, right: T }\nfn main() -> UInt8 { let a: Pair[UInt8] = .{ left = 1, right = 2 }; let b: Pair[UInt8] = .{ left = 1, right = 2 }; if a == b { 0 } else { 1 } }",

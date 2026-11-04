@@ -222,7 +222,16 @@ pub fn Decoder(comptime Hooks: type) type {
                 .float => return @bitCast(try self.value(std.meta.Int(.unsigned, @bitSizeOf(T)))),
                 .@"enum" => |info| {
                     const raw = try self.integer(info.tag_type, @typeInfo(info.tag_type).int);
-                    if (info.is_exhaustive) return std.enums.fromInt(T, raw) orelse error.Corrupt;
+                    if (info.is_exhaustive) {
+                        // An enum numbering its tags from zero without gaps
+                        // names every value below its count, which a bound
+                        // answers; `fromInt` compares against each tag.
+                        if (comptime denseFromZero(T)) {
+                            if (raw < 0 or raw >= info.fields.len) return error.Corrupt;
+                            return @enumFromInt(raw);
+                        }
+                        return std.enums.fromInt(T, raw) orelse error.Corrupt;
+                    }
                     return @enumFromInt(raw);
                 },
                 .optional => |info| return switch ((try self.bytes(1))[0]) {
@@ -387,6 +396,17 @@ fn unencodable(comptime T: type, comptime Hooks: type, comptime path: []const u8
 
 /// An element written as its bytes: every bit pattern of it is a value and it
 /// holds no padding.
+/// Whether an exhaustive enum's tags are exactly the integers below its count.
+fn denseFromZero(comptime E: type) bool {
+    const fields = @typeInfo(E).@"enum".fields;
+    var seen = [_]bool{false} ** fields.len;
+    for (fields) |field| {
+        if (field.value < 0 or field.value >= fields.len or seen[field.value]) return false;
+        seen[field.value] = true;
+    }
+    return true;
+}
+
 fn rawElement(comptime E: type) bool {
     return switch (@typeInfo(E)) {
         .int => |info| info.bits % 8 == 0 and @sizeOf(E) * 8 == info.bits,

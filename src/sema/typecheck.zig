@@ -32294,7 +32294,8 @@ const Checker = struct {
     /// Removing sinks proves which declarations cannot reach any call cycle.
     /// Calls with a fixed nominal head share one candidate node; unknown
     /// receivers use the signature's complete supplier set. Candidate selection
-    /// ignores predicates, so retained roots still need the weighted query.
+    /// ignores predicates, so retained roots still need the weighted query
+    /// where a cycle through them passes through this program's declarations.
     /// Work and storage follow declarations, calls and distinct candidate edges.
     fn callsMayRecur(self: *const Checker, owner: []const DeclId) ![]bool {
         const declarations = self.ast.declCount();
@@ -32378,6 +32379,53 @@ const Checker = struct {
         }
         const result = try self.gpa.alloc(bool, declarations);
         for (outgoing[0..declarations], result) |degree, *may_recur| may_recur.* = degree != 0;
+        if (self.retained == null) return result;
+
+        // A retained library's calls were held to [T-PolyRec] when it was
+        // checked, over the library's own edges. A cycle through one of them
+        // can differ now only where it passes through a declaration this
+        // program adds: one the library call reaches, and that reaches it
+        // back. Every other retained call keeps the library's verdict, so it
+        // is not queried again.
+        const successors = try self.gpa.alloc(Node, edges.items.len);
+        defer self.gpa.free(successors);
+        const forward = try self.gpa.alloc(u32, count + 1);
+        defer self.gpa.free(forward);
+        @memset(forward, 0);
+        for (edges.items) |edge| forward[@intFromEnum(edge.from) + 1] += 1;
+        for (1..count + 1) |i| forward[i] += forward[i - 1];
+        @memcpy(cursor, forward[0..count]);
+        for (edges.items) |edge| {
+            successors[cursor[@intFromEnum(edge.from)]] = edge.to;
+            cursor[@intFromEnum(edge.from)] += 1;
+        }
+        const from_application = try self.gpa.alloc(bool, count);
+        defer self.gpa.free(from_application);
+        const to_application = try self.gpa.alloc(bool, count);
+        defer self.gpa.free(to_application);
+        inline for (.{ .{ from_application, successors, forward }, .{ to_application, predecessors, starts } }) |walk| {
+            const seen = walk[0];
+            @memset(seen, false);
+            tail = 0;
+            for (0..declarations) |i| if (!self.isRetained(DeclId.at(@intCast(i)))) {
+                seen[i] = true;
+                pending[tail] = @enumFromInt(i);
+                tail += 1;
+            };
+            head = 0;
+            while (head < tail) : (head += 1) {
+                const at = @intFromEnum(pending[head]);
+                for (walk[1][walk[2][at]..walk[2][at + 1]]) |next| {
+                    if (seen[@intFromEnum(next)]) continue;
+                    seen[@intFromEnum(next)] = true;
+                    pending[tail] = next;
+                    tail += 1;
+                }
+            }
+        }
+        for (result, 0..) |*may_recur, i| {
+            if (self.isRetained(DeclId.at(@intCast(i))) and !(from_application[i] and to_application[i])) may_recur.* = false;
+        }
         return result;
     }
 

@@ -2083,10 +2083,18 @@ existing passes continue from these answers. Combined-program coherence,
 application-dependent lookups, and obligations still run; ownership omits only
 the exact declarations already checked in the snapshot.
 
-Reuse eligibility belongs to the resolver. Incompatible graphs, application
-expansions, generated-name collisions, and application closures use ordinary
-loading and checking. Closures require that fallback because generated names
-still depend on allocation order. Returned typing uses the retained allocator,
+The checked library holds every standard-library module. A resumed
+application expands its own derives and templates after the library's
+generated declarations, planning from the templates the library planned
+(`Seed.template_plans`). The passes that continue do not walk the library
+again: [T-PolyRec] queries a library call only where a cycle through it passes
+through an application declaration, and the complete-template refill writes
+only the instantiations the application minted.
+
+Reuse eligibility belongs to the resolver. Incompatible graphs,
+generated-name collisions, and application closures use ordinary loading and
+checking. Closures require that fallback because generated names still
+depend on allocation order. Returned typing uses the retained allocator,
 not the temporary scratch allocator. The snapshot outlives its continuations;
 no pass owns a global cache or mutates the shared snapshot.
 
