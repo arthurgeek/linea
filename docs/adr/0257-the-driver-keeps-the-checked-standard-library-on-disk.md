@@ -75,21 +75,27 @@ before the library is checked; where it cannot be, the command compiles as it
 would without a cache rather than checking every library module only to keep
 nothing.
 
-**The whole library.** The checked library holds every module of the
-standard library, not only the prelude's closure, so a program importing
-`std.json` or `std.http` resumes as one using only the prelude does. A
-resumed check then holds every library declaration, and the passes that
-continue from it must not walk them again: [T-PolyRec] keeps the library's
-own verdict for a library call unless a cycle through it passes through a
-declaration the program adds, and the complete-template refill writes only
-the instantiations the program minted.
+**A library per set of modules.** A checked library holds the prelude's
+closure and the library modules a program's own imports reach, directly or
+through one another: exactly what a fresh load of that program loads. A
+program resumes only from such a library (`canResume` refuses one holding a
+module the program's load would not reach), because a module it does not
+load would show it names, members and implementations a fresh check does
+not see, and change what the check reports. The entry is keyed by that list
+of modules as well as by the compiler, so programs importing the same
+modules share one entry. A resumed check holds every declaration of those
+modules, and the passes that continue from it do not walk them again:
+[T-PolyRec] keeps the library's own verdict for a library call unless a cycle
+through it passes through a declaration the program adds, and the
+complete-template refill writes only the instantiations the program minted.
 
 **Resuming is decided before reading.** `canResume` refuses an application
 holding a closure, a `_linea_trait_` identifier, or a file named as a
 generated one (`linea-derive-N.lin`), which `resolve.applicationMayResume`
 reads from the application's own syntax. The driver asks it of the
-application loaded alone before it hashes the executable or reads an entry,
-so a program that cannot resume pays nothing for the cache.
+application loaded alone (`loader.resumableLibraryOf`), which also names the
+library modules its imports reach, before it hashes the compiler or reads an
+entry, so a program that cannot resume pays nothing for the cache.
 
 **The driver owns it.** No pass gains state: the driver reads or builds a
 `CheckedLibrary` before loading the program, and resumes from it through the
@@ -135,6 +141,12 @@ resumed check needs is narrower: a library call's verdict changes only where
 the program closes a cycle through it, which two walks over the call graph
 the check builds anyway answer, linear in its calls, with nothing more to
 encode or keep consistent with the library's typing.
+
+**One library holding every module.** One entry would serve every program,
+but a program resumed from it sees modules its fresh load never loads:
+`UInt8.from_path` reached `std.fs`'s implementation instead of naming
+nothing, and helps offered `import std.http` to programs that cannot see
+it. A resumed check must report what a fresh one reports.
 
 **The prelude's closure as the checked library.** A smaller entry, but
 29 of the 44 programs under `examples/` import a module outside it, `hello`

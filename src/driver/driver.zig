@@ -623,7 +623,7 @@ pub fn run(process: std.process.Init) !u8 {
     else
         null;
     const checked_library: ?*loader.CheckedLibrary = if (cache_dir) |dir|
-        if (loader.mayResumeFromDisk(process.gpa, io, file_path, purpose)) try library_cache.open(process.gpa, io, dir) else null
+        if (try loader.resumableLibraryOf(gpa, io, file_path, purpose)) |modules| try library_cache.open(process.gpa, io, dir, modules) else null
     else
         null;
     defer if (checked_library) |checked| checked.deinit();

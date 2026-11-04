@@ -102,6 +102,7 @@ pub const LibraryPrefix = struct {
                 before.imports.len != after.imports.len or !std.mem.eql(FileId, before.files, after.files)) return false;
             for (before.imports, after.imports) |a, b| if (a.decl != b.decl or a.module != b.module) return false;
         }
+        if (!loadsEveryLibraryModule(program, cached.modules.len)) return false;
         for (program.modules[cached.modules.len..]) |module| {
             if (module.library) return false;
             // An application's derives expand from the templates the library
@@ -124,6 +125,41 @@ pub const LibraryPrefix = struct {
         self.* = undefined;
     }
 };
+
+/// Whether every one of the first `library` modules, the checked library's,
+/// is one a fresh load of `program` loads: the prelude's closure, or a module
+/// the program's own modules import, directly or through one another. A
+/// checked library holding another would show the program names, members and
+/// implementations a fresh check does not see.
+///
+/// **Bound:** the program's modules and their imports. The modules reached
+/// are held in fixed buffers, so a program of more modules than they hold is
+/// answered no and compiles afresh.
+fn loadsEveryLibraryModule(program: *const Program, library: usize) bool {
+    var reached_buffer: [512]bool = undefined;
+    var queue_buffer: [512]ModuleId = undefined;
+    if (program.modules.len > reached_buffer.len) return false;
+    const reached = reached_buffer[0..program.modules.len];
+    @memset(reached, false);
+    var tail: usize = 0;
+    for (program.modules, 0..) |module, i| {
+        if (module.library and ModuleId.from(i) != program.prelude) continue;
+        reached[i] = true;
+        queue_buffer[tail] = .from(i);
+        tail += 1;
+    }
+    var head: usize = 0;
+    while (head < tail) : (head += 1) {
+        for (program.get(queue_buffer[head]).imports) |import| {
+            if (import.module == .none or reached[import.module.index()]) continue;
+            reached[import.module.index()] = true;
+            queue_buffer[tail] = import.module;
+            tail += 1;
+        }
+    }
+    for (reached[0..library]) |loaded| if (!loaded) return false;
+    return true;
+}
 
 /// Whether the application's own files let a program resume from a checked
 /// library. Asked of the application loaded without a checked library, before

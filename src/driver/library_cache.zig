@@ -67,12 +67,23 @@ pub fn directory(gpa: std.mem.Allocator, environ: std.process.Environ) std.mem.A
 /// cache cannot be written, and the command compiles as it would without a
 /// cache: checking every library module only to keep nothing costs more than
 /// the command saves.
-pub fn open(gpa: std.mem.Allocator, io: std.Io, dir: []const u8) !?*CheckedLibrary {
-    const key = compilerIdentity() orelse return null;
-    return openKeyed(gpa, io, dir, key);
+///
+/// `modules` are the library modules beside the prelude's closure the
+/// library holds (`loader.resumableLibraryOf`), and the entry is keyed by
+/// them as well as by the compiler: a program resumes only from a library
+/// holding exactly the modules a fresh load of it loads.
+pub fn open(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, modules: []const []const u8) !?*CheckedLibrary {
+    const compiler = compilerIdentity() orelse return null;
+    var hasher = Sha256.init(.{});
+    hasher.update(&compiler);
+    for (modules) |module| {
+        hasher.update(module);
+        hasher.update(&.{0});
+    }
+    return openKeyed(gpa, io, dir, hasher.finalResult(), modules);
 }
 
-fn openKeyed(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest) !?*CheckedLibrary {
+fn openKeyed(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest, modules: []const []const u8) !?*CheckedLibrary {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const scratch = arena.allocator();
@@ -92,7 +103,10 @@ fn openKeyed(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest) !
     defer cache.close(io);
     var file = cache.createFileAtomic(io, name, .{ .replace = true }) catch return null;
     defer file.deinit(io);
-    const library = try CheckedLibrary.init(gpa);
+    const library = CheckedLibrary.initFor(gpa, modules) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return null,
+    };
     errdefer library.deinit();
     const payload = try encoding.encode(scratch, library);
     // A write that fails after the check leaves the checked library this
@@ -251,7 +265,7 @@ test "checked library cache: a missing, damaged or foreign entry is checked agai
     defer testing.allocator.free(name);
 
     // Missing: checked and written.
-    const first = (try openKeyed(testing.allocator, testing.io, dir, key)).?;
+    const first = (try openKeyed(testing.allocator, testing.io, dir, key, &.{})).?;
     const expected = try encoding.encode(testing.allocator, first);
     defer testing.allocator.free(expected);
     first.deinit();
@@ -260,7 +274,7 @@ test "checked library cache: a missing, damaged or foreign entry is checked agai
     try testing.expectEqualSlices(u8, expected, payloadOf(written, key).?);
 
     // Present: read back, and the same library.
-    const second = (try openKeyed(testing.allocator, testing.io, dir, key)).?;
+    const second = (try openKeyed(testing.allocator, testing.io, dir, key, &.{})).?;
     const reread = try encoding.encode(testing.allocator, second);
     defer testing.allocator.free(reread);
     second.deinit();
@@ -274,7 +288,7 @@ test "checked library cache: a missing, damaged or foreign entry is checked agai
     damaged[damaged.len / 2] ^= 1;
     for ([_][]const u8{ written[0 .. written.len - 1], damaged, written[0..10], "" }) |broken| {
         try tmp.dir.writeFile(testing.io, .{ .sub_path = name, .data = broken });
-        const library = (try openKeyed(testing.allocator, testing.io, dir, key)).?;
+        const library = (try openKeyed(testing.allocator, testing.io, dir, key, &.{})).?;
         library.deinit();
         const rewritten = try tmp.dir.readFileAlloc(testing.io, name, testing.allocator, .unlimited);
         defer testing.allocator.free(rewritten);
@@ -289,7 +303,7 @@ test "checked library cache: a cache that cannot be written is not used, and the
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "cache", .data = "" });
     const dir = try std.fmt.allocPrint(testing.allocator, ".zig-cache/tmp/{s}/cache", .{tmp.sub_path});
     defer testing.allocator.free(dir);
-    try testing.expect(try openKeyed(testing.allocator, testing.io, dir, @splat(7)) == null);
+    try testing.expect(try openKeyed(testing.allocator, testing.io, dir, @splat(7), &.{}) == null);
 }
 
 test "checked library cache: an empty directory variable turns the cache off" {

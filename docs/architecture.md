@@ -2083,7 +2083,10 @@ existing passes continue from these answers. Combined-program coherence,
 application-dependent lookups, and obligations still run; ownership omits only
 the exact declarations already checked in the snapshot.
 
-The checked library holds every standard-library module. A resumed
+A checked library holds the prelude's closure and the library modules a
+program's imports reach (`CheckedLibrary.initFor`); a program resumes only
+from one holding exactly the modules its fresh load loads, and the command
+line keys its entries by that list. A resumed
 application expands its own derives and templates after the library's
 generated declarations, planning from the templates the library planned
 (`Seed.template_plans`). The passes that continue do not walk the library
