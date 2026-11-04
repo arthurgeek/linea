@@ -132,6 +132,13 @@ sessions use, so a command line, the runner and the editor resume one way.
   imports reach. A program that cannot resume reads its own files twice and
   nothing else: `prime_sieve.lin` checks in 0.159 s against 0.157 s with the
   cache off.
+- On a Debug compiler, with the build's shared cache: `zig build guide` takes
+  181 s with it off, 113 s cold and 112 s warm (its programs share entries
+  within one run, so cold already reads most of them); `zig build
+  example-tests` 65 s, 63 s and 42 s; and `zig build conformance --
+  tests/traits` 99 s, 101 s and 93 s, since the runner already resumes
+  every case in its own process and the cache saves it only the library
+  checks it makes once per run.
 - The first command for a set of modules after the compiler changes pays for
   checking those modules, encoding them and writing the entry: 0.09 s more
   for `hello.lin` and 0.70 s more for `http-json-echo` on a ReleaseFast
