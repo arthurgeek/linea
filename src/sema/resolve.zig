@@ -5907,6 +5907,8 @@ const ReflectionContext = struct {
     loops: std.ArrayList(ComponentLoopPlan) = .empty,
     places: std.ArrayList(ComponentPlacePlan) = .empty,
     metadata: std.ArrayList(MetadataPlan) = .empty,
+    texts: std.ArrayList(reflection.TextPlan) = .empty,
+    decisions: std.ArrayList(reflection.DecisionPlan) = .empty,
     ordinals: std.ArrayList(OrdinalPlan) = .empty,
     wraps: std.ArrayList(reflection.WrapPlan) = .empty,
     constructions: std.ArrayList(reflection.ConstructionPlan) = .empty,
@@ -5934,6 +5936,8 @@ const ReflectionContext = struct {
         self.loops.deinit(gpa);
         self.places.deinit(gpa);
         self.metadata.deinit(gpa);
+        self.texts.deinit(gpa);
+        self.decisions.deinit(gpa);
         self.ordinals.deinit(gpa);
         self.wraps.deinit(gpa);
         self.constructions.deinit(gpa);
@@ -5988,6 +5992,10 @@ const ReflectionContext = struct {
         const component_types = try self.component_types.toOwnedSlice(gpa);
         errdefer gpa.free(component_types);
         const locals = try self.locals.toOwnedSlice(gpa);
+        errdefer gpa.free(locals);
+        const texts = try self.texts.toOwnedSlice(gpa);
+        errdefer gpa.free(texts);
+        const decisions = try self.decisions.toOwnedSlice(gpa);
         return .{
             .member = self.member,
             .cases = cases,
@@ -6001,6 +6009,8 @@ const ReflectionContext = struct {
             .constructions = constructions,
             .component_types = component_types,
             .locals = locals,
+            .texts = texts,
+            .decisions = decisions,
         };
     }
 };
@@ -13267,8 +13277,8 @@ const Resolver = struct {
                     .case_ordinal
                 else if (std.mem.eql(u8, name, "components_named"))
                     .components_named
-                else if (std.mem.eql(u8, name, "text_after"))
-                    .case_text_after
+                else if (std.mem.eql(u8, name, "component_count"))
+                    .component_count
                 else
                     return false;
                 if (context.active_case_depth == 0) {
@@ -13286,8 +13296,6 @@ const Resolver = struct {
                 .component_name
             else if (std.mem.eql(u8, name, "ordinal"))
                 .component_ordinal
-            else if (std.mem.eql(u8, name, "text_before") and context.recipe_floor == null)
-                .component_text_before
             else
                 return false;
             context.component_receiver = true;
@@ -13298,6 +13306,37 @@ const Resolver = struct {
             return true;
         }
         return false;
+    }
+
+    /// How many descriptors the template member being validated has recorded,
+    /// or zero outside a template.
+    fn reflectionMetadataCount(self: *const Resolver) u32 {
+        const validation = self.template_validation orelse return 0;
+        return @intCast(validation.reflection.metadata.items.len);
+    }
+
+    /// Records an interpolated literal whose every value is a descriptor
+    /// written without a format, which expansion writes as plain text.
+    fn planReflectionText(self: *Resolver, id: ExprId, metadata_start: u32) std.mem.Allocator.Error!void {
+        const validation = self.template_validation orelse return;
+        const context = validation.reflection;
+        const interpolation = self.ast.interpolation(id);
+        const values = interpolation.pieces.len / 2;
+        if (context.metadata.items.len - metadata_start != values) return;
+        for (0..values) |value| {
+            if (context.metadata.items[metadata_start + value].expression != interpolation.pieces[2 * value + 1]) return;
+            if (!interpolation.formats[value].eql(.display)) return;
+        }
+        try context.texts.append(self.gpa, .{ .literal = id, .metadata_start = metadata_start });
+    }
+
+    /// Records an `if` whose condition expansion evaluates from descriptors.
+    fn planReflectionDecision(self: *Resolver, id: ExprId, condition: ExprId, metadata_start: u32) std.mem.Allocator.Error!void {
+        const validation = self.template_validation orelse return;
+        const context = validation.reflection;
+        const metadata_end: u32 = @intCast(context.metadata.items.len);
+        if (!reflection.decidesCondition(self.ast, condition, context.metadata.items[metadata_start..metadata_end])) return;
+        try context.decisions.append(self.gpa, .{ .conditional = id, .metadata_start = metadata_start, .metadata_end = metadata_end });
     }
 
     fn reflectionComponentType(self: *Resolver, ref: node.TypeRef) std.mem.Allocator.Error!bool {
@@ -14558,11 +14597,17 @@ const Resolver = struct {
 
             // The text pieces resolve to nothing; the values between them are
             // ordinary expressions and resolve as any argument does.
-            .interp => for (self.ast.interpolation(id).pieces) |piece| try self.expr(piece),
+            .interp => {
+                const metadata_start = self.reflectionMetadataCount();
+                for (self.ast.interpolation(id).pieces) |piece| try self.expr(piece);
+                try self.planReflectionText(id, metadata_start);
+            },
 
             .conditional => {
                 const c = self.ast.conditional(id);
+                const metadata_start = self.reflectionMetadataCount();
                 try self.expr(c.cond);
+                try self.planReflectionDecision(id, c.cond, metadata_start);
                 try self.expr(c.then);
                 if (c.otherwise != ExprId.none) try self.expr(c.otherwise);
             },

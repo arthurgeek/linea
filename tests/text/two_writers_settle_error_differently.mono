@@ -332,59 +332,87 @@ fn std.io.core.IoOperation;std.fmt;Display.fmt[std.io.core.Descriptor](self: std
     let text_after = match read self {
         Read => {
             {}
-            r"Read"
+            {
+                "Read"
+            }
         },
         Write => {
             {}
-            r"Write"
+            {
+                "Write"
+            }
         },
         Flush => {
             {}
-            r"Flush"
+            {
+                "Flush"
+            }
         },
         Close => {
             {}
-            r"Close"
+            {
+                "Close"
+            }
         },
         Open => {
             {}
-            r"Open"
+            {
+                "Open"
+            }
         },
         Metadata => {
             {}
-            r"Metadata"
+            {
+                "Metadata"
+            }
         },
         Permissions => {
             {}
-            r"Permissions"
+            {
+                "Permissions"
+            }
         },
         Publish => {
             {}
-            r"Publish"
+            {
+                "Publish"
+            }
         },
         Remove => {
             {}
-            r"Remove"
+            {
+                "Remove"
+            }
         },
         Random => {
             {}
-            r"Random"
+            {
+                "Random"
+            }
         },
         Listen => {
             {}
-            r"Listen"
+            {
+                "Listen"
+            }
         },
         Accept => {
             {}
-            r"Accept"
+            {
+                "Accept"
+            }
         },
         Connect => {
             {}
-            r"Connect"
+            {
+                "Connect"
+            }
         },
         Configure => {
             {}
-            r"Configure"
+            {
+                "Configure"
+            }
         },
     }
     std.io.core.Descriptor;std.io.core;Writer.write_str(&w, text_after)
@@ -394,87 +422,129 @@ fn std.io.core.IoCategory;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.
     let text_after = match read self {
         Other => {
             {}
-            r"Other"
+            {
+                "Other"
+            }
         },
         NotFound => {
             {}
-            r"NotFound"
+            {
+                "NotFound"
+            }
         },
         PermissionDenied => {
             {}
-            r"PermissionDenied"
+            {
+                "PermissionDenied"
+            }
         },
         AlreadyExists => {
             {}
-            r"AlreadyExists"
+            {
+                "AlreadyExists"
+            }
         },
         WouldBlock => {
             {}
-            r"WouldBlock"
+            {
+                "WouldBlock"
+            }
         },
         BrokenPipe => {
             {}
-            r"BrokenPipe"
+            {
+                "BrokenPipe"
+            }
         },
         Interrupted => {
             {}
-            r"Interrupted"
+            {
+                "Interrupted"
+            }
         },
         InvalidInput => {
             {}
-            r"InvalidInput"
+            {
+                "InvalidInput"
+            }
         },
         NotDirectory => {
             {}
-            r"NotDirectory"
+            {
+                "NotDirectory"
+            }
         },
         IsDirectory => {
             {}
-            r"IsDirectory"
+            {
+                "IsDirectory"
+            }
         },
         Unsupported => {
             {}
-            r"Unsupported"
+            {
+                "Unsupported"
+            }
         },
         NoSpace => {
             {}
-            r"NoSpace"
+            {
+                "NoSpace"
+            }
         },
         ResourceExhausted => {
             {}
-            r"ResourceExhausted"
+            {
+                "ResourceExhausted"
+            }
         },
         Symlink => {
             {}
-            r"Symlink"
+            {
+                "Symlink"
+            }
         },
         InvalidDescriptor => {
             {}
-            r"InvalidDescriptor"
+            {
+                "InvalidDescriptor"
+            }
         },
         NoProgress => {
             {}
-            r"NoProgress"
+            {
+                "NoProgress"
+            }
         },
         InvalidProgress => {
             {}
-            r"InvalidProgress"
+            {
+                "InvalidProgress"
+            }
         },
         TimedOut => {
             {}
-            r"TimedOut"
+            {
+                "TimedOut"
+            }
         },
         ConnectionReset => {
             {}
-            r"ConnectionReset"
+            {
+                "ConnectionReset"
+            }
         },
         ConnectionRefused => {
             {}
-            r"ConnectionRefused"
+            {
+                "ConnectionRefused"
+            }
         },
         AddressInUse => {
             {}
-            r"AddressInUse"
+            {
+                "AddressInUse"
+            }
         },
     }
     std.io.core.Descriptor;std.io.core;Writer.write_str(&w, text_after)

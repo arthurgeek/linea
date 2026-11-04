@@ -3201,21 +3201,29 @@ descriptor, not a runtime value. Its `of` operation takes exactly one argument
 naming a subject matched by the active case or same-case arm. Subject identity
 follows the resolved binding, not its spelling.
 
-Inside an active case, `reflect.case.name`, `reflect.case.ordinal` and
-`reflect.case.components_named` are respectively a `Str`, `UInt64` and `Bool`.
-Inside a component loop, `component.name` and `component.ordinal` are a `Str`
-and `UInt64`. Struct component names are field names; positional enum and
-newtype components use the decimal spelling of their ordinal.
+Inside an active case, `reflect.case.name`, `reflect.case.ordinal`,
+`reflect.case.components_named` and `reflect.case.component_count` are
+respectively a `Str`, `UInt64`, `Bool` and `UInt64`. Inside a component loop,
+`component.name` and `component.ordinal` are a `Str` and `UInt64`. Struct
+component names are field names; positional enum and newtype components use
+the decimal spelling of their ordinal.
 
-Two further `Str` descriptors spell the fixed text of the form derived
-`Display` and `Debug` write: `Name`, `Name(a, b)` or `Name { x: a, y: b }`.
-Inside a component loop over observed components, `component.text_before` is
-the text written before that component: the case name followed by `(`, or by
-` { ` when components are named, before the first component, and `, ` before a
-later one; a named component's text then ends with its name and `: `.
-Inside an active case, `reflect.case.text_after` is the text written after the
-last component, `)` or ` }`, or the case name alone when the case has no
-components. A construction descriptor has no `text_before`. Case and
+An interpolated literal whose every value is a descriptor written without a
+format spec is the plain `Str` literal it spells: each value is written as
+`Display` writes it, and the text around the values keeps its escapes and
+doubled braces. So inside a component loop over `Point`'s first field,
+`"{reflect.case.name} {{ {component.name}: "` is the literal `"Point {{ x: "`.
+A literal with any other value, or a format spec, is an ordinary interpolated
+literal.
+
+An `if` whose condition reads at least one descriptor and is built only from
+`Bool` and `UInt64` descriptors, integer and `Bool` literals, `!`, `&&`, `||`,
+comparisons and parentheses is decided during expansion, separately for each
+case and component. Expansion writes only the selected branch, as a block, or
+an empty block when the condition is false and there is no `else`. The branch
+not selected is not part of that case's generated code, so it is neither
+checked nor run there, and a declaration only that branch used is unused there.
+Any other condition is ordinary code over the descriptors' values. Case and
 component ordinals follow declaration order. `reflect.ordinal_of(value)` is
 available only outside reflected cases and component loops and evaluates its
 argument once before selecting that value's case ordinal.

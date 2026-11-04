@@ -1,0 +1,50 @@
+trait Tally {
+    fn tally(value: Self, inout total: UInt8)
+}
+
+// Every condition here reads only descriptors and literals, so expansion
+// keeps the branch each case and component selects and writes no `if`. The
+// dump shows what each case keeps.
+template impl Tally {
+    fn tally(value: Self, inout total: UInt8) {
+        match read value {
+            reflect.case => {
+                for component in reflect.components {
+                    if component.ordinal == 0 && !reflect.case.components_named {
+                        total = total + 10
+                    } else if component.ordinal >= 1 || reflect.case.components_named {
+                        total = total + 1
+                    }
+                }
+                if reflect.case.component_count == 0 {
+                    total = total + 100
+                }
+            },
+        }
+    }
+}
+
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+enum Shape {
+    Dot,
+    Box(UInt8, UInt8, UInt8),
+}
+
+derive Tally for Point
+
+derive Tally for Shape
+
+fn main() -> UInt8 {
+    let point: Point = .{ x = 1, y = 2 }
+    let dot: Shape = .Dot
+    let box: Shape = .Box(3, 4, 5)
+    var total: UInt8 = 0
+    Tally.tally(point, &total)
+    Tally.tally(dot, &total)
+    Tally.tally(box, &total)
+    total
+}

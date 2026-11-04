@@ -11,19 +11,36 @@ pub trait Display {
 // parentheses when they are positional, or as `name: value` pairs in braces
 // when they are named. A case with no components writes its name alone.
 //
-// Each piece of fixed text is one write. An arm writes the text before each
-// component, then yields the text after the last one, and the final write
-// after the `match` writes it. A case with no components yields its name, so
+// Each piece of fixed text is one write. Every condition below reads only
+// descriptors, so derivation keeps one branch per component and writes no
+// `if`, and every literal interpolates only descriptors, so derivation writes
+// it as plain text: `Point { x: ` before the first field of `Point`, then
+// `, y: `. An arm yields the text after the last component, which the write
+// after the `match` writes; a case with no components yields its name, so
 // formatting it is a single write.
 template impl Display where reflect.components: Display {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
         let text_after = match read self {
             reflect.case => {
                 for component in reflect.components {
-                    Writer.write_str(&w, component.text_before)?
+                    if component.ordinal != 0 && reflect.case.components_named {
+                        Writer.write_str(&w, ", {component.name}: ")?
+                    } else if component.ordinal != 0 {
+                        Writer.write_str(&w, ", ")?
+                    } else if reflect.case.components_named {
+                        Writer.write_str(&w, "{reflect.case.name} {{ {component.name}: ")?
+                    } else {
+                        Writer.write_str(&w, "{reflect.case.name}(")?
+                    }
                     Display.fmt(component.of(self), &w)?
                 }
-                reflect.case.text_after
+                if reflect.case.component_count == 0 {
+                    reflect.case.name
+                } else if reflect.case.components_named {
+                    r" }"
+                } else {
+                    ")"
+                }
             },
         }
         Writer.write_str(&w, text_after)
@@ -43,10 +60,24 @@ template impl Debug where reflect.components: Debug {
         let text_after = match read self {
             reflect.case => {
                 for component in reflect.components {
-                    Writer.write_str(&w, component.text_before)?
+                    if component.ordinal != 0 && reflect.case.components_named {
+                        Writer.write_str(&w, ", {component.name}: ")?
+                    } else if component.ordinal != 0 {
+                        Writer.write_str(&w, ", ")?
+                    } else if reflect.case.components_named {
+                        Writer.write_str(&w, "{reflect.case.name} {{ {component.name}: ")?
+                    } else {
+                        Writer.write_str(&w, "{reflect.case.name}(")?
+                    }
                     Debug.debug(component.of(self), &w)?
                 }
-                reflect.case.text_after
+                if reflect.case.component_count == 0 {
+                    reflect.case.name
+                } else if reflect.case.components_named {
+                    r" }"
+                } else {
+                    ")"
+                }
             },
         }
         Writer.write_str(&w, text_after)
