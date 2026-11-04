@@ -20604,20 +20604,21 @@ const Libraries = struct {
     mutex: std.Io.Mutex = .init,
     by_modules: std.StringHashMapUnmanaged(*loader.CheckedLibrary) = .empty,
 
-    /// The library `case` resumes from, as `linea check` would choose it.
-    fn forCase(self: *Libraries, gpa: std.mem.Allocator, case: Case) !*const loader.CheckedLibrary {
+    /// The library `case` resumes from, as `linea check` would choose it,
+    /// and whether it holds modules beyond the prelude's closure.
+    fn forCase(self: *Libraries, gpa: std.mem.Allocator, case: Case) !struct { library: *const loader.CheckedLibrary, imported: bool } {
         const modules = (try loader.resumableLibraryOfMemory(gpa, case.entry, try inputsOf(gpa, case), .program)) orelse
-            return self.prelude;
-        if (modules.len == 0) return self.prelude;
+            return .{ .library = self.prelude, .imported = false };
+        if (modules.len == 0) return .{ .library = self.prelude, .imported = false };
         const key = try std.mem.join(gpa, "\x00", modules);
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
-        if (self.by_modules.get(key)) |held| return held;
+        if (self.by_modules.get(key)) |held| return .{ .library = held, .imported = true };
         const owned = try self.backing.alloc([]const u8, modules.len);
         for (owned, modules) |*into, from| into.* = try self.backing.dupe(u8, from);
         const built = try library_cache_mod.checkedFor(self.backing, self.io, self.environ, owned);
         try self.by_modules.put(self.backing, try self.backing.dupe(u8, key), built);
-        return built;
+        return .{ .library = built, .imported = true };
     }
 
     fn deinit(self: *Libraries) void {
@@ -20938,7 +20939,8 @@ fn checkCase(
 
     // The library `linea check` would resume this case from: the prelude's
     // closure, or one holding the library modules its imports reach.
-    const resumed_from = try env.libraries.forCase(gpa, case);
+    const chosen = try env.libraries.forCase(gpa, case);
+    const resumed_from = chosen.library;
 
     // Loading, parsing and following imports, which for a case that is one
     // file is loading, parsing and following none. Property: parsing
@@ -21131,6 +21133,13 @@ fn checkCase(
     const fresh: ?FreshCheck = for (dump_goldens) |golden| {
         if (!rejected and try readIfExists(io, gpa, golden) != null) break try freshCheck(gpa, scratch_parent, case, &table, &sink, display_path, &w.failures);
     } else null;
+    // A refused case that resumed from a library holding the modules its
+    // imports reach, the path `linea check` takes for it, is held to a fresh
+    // check's diagnostics too; its `.stderr` golden would not show a
+    // difference only a fresh check makes. Only those: a fresh check costs a
+    // check of the library per case, and a case resuming from the prelude's
+    // closure loads exactly what a fresh load does.
+    if (rejected and chosen.imported) _ = try freshCheck(gpa, scratch_parent, case, &table, &sink, display_path, &w.failures);
 
     // The inferred dump reads the checker's answers back into the
     // source, so it is only meaningful where the checker had answers.

@@ -13076,6 +13076,18 @@ const Checker = struct {
             try self.builder.prepareHeadLookupWithin(owner, ty);
             try self.prepareSettlingResults(owner, ty);
         }
+        // What a function returns may leave an owner the function opens, and
+        // ownership's help then asks whether it is itself an allocator
+        // (`mem.Allocator`), so the rows under each result type's head are
+        // prepared. Once per function; a retained library's were prepared
+        // when it was checked.
+        for (0..self.ast.declCount()) |index| {
+            const function = node.DeclId.at(@intCast(index));
+            if (self.ast.declTag(function) != .function or self.isRetained(function)) continue;
+            const returns = self.decl_returns.get(function);
+            if (returns == .poison) continue;
+            try self.builder.prepareHeadLookupWithin(.none, returns);
+        }
         // An abandoned walk's help names what settles its iterator, as a leak
         // report does for a binding, so its type is prepared the same way.
         for (self.walk_helps.items) |help| {

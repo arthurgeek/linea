@@ -4,4 +4,4 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
 13 |     arena.handle()
    |     ^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
-   = help: `arena` is an allocator `allocator_of_nothing` opens and ends, so nothing built in it may leave: take the allocator as a parameter instead, as `allocator_of_nothing_in` with `A: Allocator` and `allocator: A` first, and build in `allocator`, so the caller's allocator decides how long the result lives
+   = help: `arena` belongs to `allocator_of_nothing` and ends when it returns, so nothing returned may observe it
