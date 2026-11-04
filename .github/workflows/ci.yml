@@ -216,14 +216,18 @@ jobs:
 
       # A failed assertion or golden comparison still leaves completed program
       # outcomes. The runner checks their content and toolchain keys on reuse.
-      # Checked-library entries are 19 to 45 MB each; the cache saves the
-      # four a run read or wrote last. Each is keyed by the compiler's own
-      # image, so a changed compiler or library misses and writes anew.
+      # A checked-library entry is one set of library modules, 19 to 45 MB
+      # (about 21 MB on average). The corpus imports some fifty-five sets,
+      # and reading an entry touches its time, so the sixty-four most
+      # recently used are kept: about 1.4 GB per lane. Each is keyed by the
+      # compiler's own image, so a changed compiler or library misses and
+      # writes anew; the step looks at entries only, never their locks or
+      # temporary files.
       - name: Keep the newest checked libraries
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
         run: |
           dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache"
-          if [ -d "$dir" ]; then ls -t "$dir"/checked-std-* 2>/dev/null | tail -n +5 | xargs -r rm -f; fi
+          if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
       - name: Save program outcomes
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
@@ -319,14 +323,18 @@ jobs:
         # runtime and the generated code under the sanitizer.
         run: nix develop --command zig build conformance --release=safe -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB-${{ matrix.sanitizer }}" -Dsanitize=${{ matrix.sanitizer }}
 
-      # Checked-library entries are 19 to 45 MB each; the cache saves the
-      # four a run read or wrote last. Each is keyed by the compiler's own
-      # image, so a changed compiler or library misses and writes anew.
+      # A checked-library entry is one set of library modules, 19 to 45 MB
+      # (about 21 MB on average). The corpus imports some fifty-five sets,
+      # and reading an entry touches its time, so the sixty-four most
+      # recently used are kept: about 1.4 GB per lane. Each is keyed by the
+      # compiler's own image, so a changed compiler or library misses and
+      # writes anew; the step looks at entries only, never their locks or
+      # temporary files.
       - name: Keep the newest checked libraries
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
         run: |
           dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/linea-cache"
-          if [ -d "$dir" ]; then ls -t "$dir"/checked-std-* 2>/dev/null | tail -n +5 | xargs -r rm -f; fi
+          if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
       - name: Save program outcomes
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
@@ -470,14 +478,18 @@ jobs:
       - name: The examples' own tests pass
         run: nix develop --command zig build example-tests -Dwalkers=2
 
-      # Checked-library entries are 19 to 45 MB each; the cache saves the
-      # four a run read or wrote last. Each is keyed by the compiler's own
-      # image, so a changed compiler or library misses and writes anew.
+      # A checked-library entry is one set of library modules, 19 to 45 MB
+      # (about 21 MB on average). The corpus imports some fifty-five sets,
+      # and reading an entry touches its time, so the sixty-four most
+      # recently used are kept: about 1.4 GB per lane. Each is keyed by the
+      # compiler's own image, so a changed compiler or library misses and
+      # writes anew; the step looks at entries only, never their locks or
+      # temporary files.
       - name: Keep the newest checked libraries
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
         run: |
           dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache"
-          if [ -d "$dir" ]; then ls -t "$dir"/checked-std-* 2>/dev/null | tail -n +5 | xargs -r rm -f; fi
+          if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
       - name: Save program outcomes
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
