@@ -1,0 +1,49 @@
+import std.io
+
+pub fn print_str(value: Str) {
+    match io.println(value) {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+}
+
+trait Outline {
+    fn outline(value: Self)
+}
+
+// Each literal interpolates only descriptors, so expansion writes it as the
+// plain text it spells, and `print_str` receives a `Str`.
+template impl Outline {
+    fn outline(value: Self) {
+        match read value {
+            reflect.case => {
+                print_str("{reflect.case.name} is case {reflect.case.ordinal} of {reflect.case.component_count}")
+                for component in reflect.components {
+                    print_str("  \"{component.name}\" at {component.ordinal}, named: {reflect.case.components_named} {{}}")
+                }
+            },
+        }
+    }
+}
+
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+enum Shape {
+    Dot,
+    Box(UInt8, UInt8),
+}
+
+derive Outline for Point
+
+derive Outline for Shape
+
+fn main() -> UInt8 {
+    let point: Point = .{ x = 1, y = 2 }
+    Outline.outline(point)
+    Outline.outline(Shape.Dot)
+    Outline.outline(Shape.Box(3, 4))
+    0
+}

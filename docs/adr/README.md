@@ -149,7 +149,8 @@ true of a different implementation.
 | [0109](0109-text-io-and-formatting-have-separate-modules.md) | Text, I/O and formatting have separate modules | Accepted |
 | [0110](0110-a-trait-reference-may-be-qualified.md) | A trait reference may be qualified | Accepted; supersedes ADR 0080's bare trait-slot clause |
 | [0112](0112-comparable-carries-equality-compatible-order.md) | Comparable carries an equality-compatible order | Accepted; extends 0082 |
-| [0113](0113-structural-derivation-is-library-defined-source.md) | Structural derivation is library-defined source | Accepted; extends 0035, 0045, 0049 and 0093; extended by 0138, 0145 and 0209; partially superseded by 0142 |
+| [0113](0113-structural-derivation-is-library-defined-source.md) | Structural derivation is library-defined source | Accepted; extends 0035, 0045, 0049 and 0093; extended by 0138, 0145, 0209 and 0258; partially superseded by 0142 |
+| [0258](0258-a-template-decides-what-its-descriptors-settle.md) | A template decides what its descriptors settle | Accepted; extends 0113 |
 | [0145](0145-closed-attributes-attach-ordinary-derive-requests.md) | Closed attributes attach ordinary derive requests | Accepted; extends 0056 and 0113; extended by 0209; generic constraint clause superseded by 0165 |
 | [0165](0165-an-attached-derive-requires-each-field-type.md) | An attached derive requires each field type | Accepted; partially supersedes 0142, 0145 and 0148; extended by 0241 |
 | [0122](0122-a-traversal-may-read-its-receiver.md) | A traversal may read its receiver | Accepted; extended by 0135 |

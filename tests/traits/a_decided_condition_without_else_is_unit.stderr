@@ -1,0 +1,16 @@
+error[T-Mismatch]: expected `()`, found `Int64`
+  --> tests/traits/a_decided_condition_without_else_is_unit.lin:24:8
+   |
+11 |                 let n: UInt64 = if reflect.case.component_count > 0 {
+   |                                 ------------------------------------- generated from this template code
+24 | derive Count for Point
+   |        ^^^^^ expected `()`, found `Int64`
+   |        ----- expected because of this annotation
+error[T-Mismatch]: expected `UInt64`, found `()`
+  --> tests/traits/a_decided_condition_without_else_is_unit.lin:24:8
+   |
+11 |                 let n: UInt64 = if reflect.case.component_count > 0 {
+   |                                 ------------------------------------- generated from this template code
+24 | derive Count for Point
+   |        ^^^^^ this body produces nothing
+   |        ----- expected because of this annotation

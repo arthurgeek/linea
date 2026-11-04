@@ -445,8 +445,22 @@ no golden is refused, because what the compiler did with it would be compared
 against nothing. Never accept an empty or unread golden. Before a mass update,
 check which failing goldens are behaviour (`.exit`, `.out`) rather than
 location-bearing (`.stderr`, `.ssa`, `.mono`): the former moving is a behaviour
-change. Exit-status properties and semantic source rewrites have no golden and
-cannot be updated away.
+change, and so is a `.size` that grew. Exit-status properties and semantic
+source rewrites have no golden and cannot be updated away.
+
+A `.size` golden records how many lines of MLIR a program emits before
+`mlir-opt` runs; the C compiler's share of a build grows with that module.
+`tests/examples/` records one for `hello`, `json_inventory` and
+`http-json-echo`. The walk fails when the count grows past the recorded one,
+and also when it shrinks, so the recorded count follows each improvement down.
+An update prints `grew by N lines` or `shrank by N lines` beside each `.size` it
+writes. An update of more than one case records a count that shrank and
+refuses one that grew, or a first count in an empty `.size`, so a mass update
+never raises or sets a bound; a narrowed root with `--property-cases` is such
+an update. To accept growth or record a new bound deliberately, update that
+example alone, for example
+`zig build conformance -Dupdate -- examples/hello.lin`, and say in the commit
+why the program grew.
 
 The dump subcommands are debugging aids with no stability guarantee, exposed on
 the command line only in debug builds; the dump functions always compile because

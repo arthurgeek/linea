@@ -826,6 +826,7 @@ fn appendReflectionSelections(
             try appendReflectionItem(gpa, offered, "name", .Field);
             try appendReflectionItem(gpa, offered, "ordinal", .Field);
             try appendReflectionItem(gpa, offered, "components_named", .Field);
+            try appendReflectionItem(gpa, offered, "component_count", .Field);
         }
         return true;
     }
@@ -2267,6 +2268,7 @@ test "structural reflection completion follows its lexical context" {
     try testing.expect(holds(case_labels, "name"));
     try testing.expect(holds(case_labels, "ordinal"));
     try testing.expect(holds(case_labels, "components_named"));
+    try testing.expect(holds(case_labels, "component_count"));
 
     const component_metadata = std.mem.indexOf(u8, text, "component.ordinal").? + "component.".len;
     const component_labels = try offeredAt(gpa, text, component_metadata);

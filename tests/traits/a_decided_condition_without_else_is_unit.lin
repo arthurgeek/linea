@@ -1,0 +1,33 @@
+trait Count {
+    fn count(value: Self) -> UInt64
+}
+
+// An `if` without `else` has type `()` whichever branch expansion keeps, so
+// its block cannot give `n` a value.
+template impl Count {
+    fn count(value: Self) -> UInt64 {
+        match read value {
+            reflect.case => {
+                let n: UInt64 = if reflect.case.component_count > 0 {
+                    5
+                }
+                n
+            },
+        }
+    }
+}
+
+struct Point {
+    x: UInt8,
+}
+
+derive Count for Point
+
+fn main() -> UInt8 {
+    let point: Point = .{ x = 1 }
+    if Count.count(point) == 5 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,39 @@
+trait Tally {
+    fn tally(value: Self, inout total: UInt8)
+}
+
+// `==` and `!=` compare `Bool` descriptors as well as numbers, so each case
+// keeps one branch. The dump shows what each case keeps.
+template impl Tally {
+    fn tally(value: Self, inout total: UInt8) {
+        match read value {
+            reflect.case => {
+                if reflect.case.components_named == false {
+                    total = total + 1
+                } else if reflect.case.components_named != (reflect.case.component_count == 0) {
+                    total = total + 10
+                }
+            },
+        }
+    }
+}
+
+struct Point {
+    x: UInt8,
+}
+
+enum Shape {
+    Dot,
+}
+
+derive Tally for Point
+
+derive Tally for Shape
+
+fn main() -> UInt8 {
+    let point: Point = .{ x = 1 }
+    var total: UInt8 = 0
+    Tally.tally(point, &total)
+    Tally.tally(Shape.Dot, &total)
+    total
+}

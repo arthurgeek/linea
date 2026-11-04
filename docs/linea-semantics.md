@@ -3201,11 +3201,43 @@ descriptor, not a runtime value. Its `of` operation takes exactly one argument
 naming a subject matched by the active case or same-case arm. Subject identity
 follows the resolved binding, not its spelling.
 
-Inside an active case, `reflect.case.name`, `reflect.case.ordinal` and
-`reflect.case.components_named` are respectively a `Str`, `UInt64` and `Bool`.
-Inside a component loop, `component.name` and `component.ordinal` are a `Str`
-and `UInt64`. Struct component names are field names; positional enum and
-newtype components use the decimal spelling of their ordinal. Case and
+Inside an active case, `reflect.case.name`, `reflect.case.ordinal`,
+`reflect.case.components_named` and `reflect.case.component_count` are
+respectively a `Str`, `UInt64`, `Bool` and `UInt64`. Inside a component loop,
+`component.name` and `component.ordinal` are a `Str` and `UInt64`. Struct
+component names are field names; positional enum and newtype components use
+the decimal spelling of their ordinal.
+
+An interpolated literal whose every value is a descriptor written without a
+format spec is the plain `Str` literal it spells: each value is written as
+`Display` writes it, and the text around the values keeps its escapes and
+doubled braces. So inside a component loop over `Point`'s first field,
+`"{reflect.case.name} {{ {component.name}: "` is the literal `"Point {{ x: "`.
+A literal with any other value, or a format spec, is an ordinary interpolated
+literal.
+
+An `if` whose condition reads at least one descriptor and is built only from
+`Bool` and `UInt64` descriptors, integer and `Bool` literals, `!`, `&&`, `||`,
+`==` and `!=` between two `Bool` or two integer operands, `<`, `<=`, `>` and
+`>=` between integers, and parentheses is decided during expansion, separately
+for each
+case and component. Expansion writes only the selected branch: its block, the
+`if` an `else if` selects (decided in turn when its own condition qualifies),
+or an empty block when the condition is false and there is no `else`. An `if`
+without `else` has type `()` whichever branch is kept, so its block must be
+`()` as an ordinary one's must. The branch
+not selected is not part of that case's generated code, so it is neither
+checked nor run there. A `let` or `var` of the template whose every use in one
+generated copy sat in branches that copy does not select is spelled with a
+leading `_` there, as a parameter whose uses expansion dropped is, so it is not
+unused.
+A descriptor's value does not depend on traversal order, so a condition decides
+the same branch in a `reflect.components.reversed` loop as in a forward one.
+An integer comparison is decided only when an operand is a descriptor, which
+gives a literal on the other side the descriptor's type `UInt64`; two literals
+compared are `Int64`, as anywhere, so that comparison is ordinary code and a
+condition holding one is not decided. Any other condition is ordinary code over
+the descriptors' values. Case and
 component ordinals follow declaration order. `reflect.ordinal_of(value)` is
 available only outside reflected cases and component loops and evaluates its
 argument once before selecting that value's case ordinal.

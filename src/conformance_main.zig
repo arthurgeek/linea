@@ -455,7 +455,7 @@ fn saidBy(ran: Ran) []const u8 {
 /// What a case records that a run does not produce: the dumps a pass wrote and
 /// the diagnostics it rendered.
 const dump_extensions = [_][]const u8{
-    ".tokens", ".ast", ".inferred", ".mono", ".mir", ".fmt", ".mlir", ".stderr",
+    ".tokens", ".ast", ".inferred", ".mono", ".mir", ".fmt", ".mlir", ".size", ".stderr",
 };
 
 /// What every stream is recorded under.
@@ -470,7 +470,7 @@ const golden_extensions = dump_extensions ++ stream_extensions;
 
 /// Every golden a case only gets to record by being built and run: each stream,
 /// and the dumps written from a program that got past the diagnostics.
-const produced_by_a_run = stream_extensions ++ [_][]const u8{ ".inferred", ".mono", ".mir", ".mlir" };
+const produced_by_a_run = stream_extensions ++ [_][]const u8{ ".inferred", ".mono", ".mir", ".mlir", ".size" };
 
 /// Whether the corpus holds a path.
 ///
@@ -16712,6 +16712,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         .levels = options.levels,
         .cache = &cache,
         .update = update,
+        .narrowed = selectsOneCase(narrowed != null, options.property_cases),
         .sanitize = sanitize,
         .runtime_path = runtime_path,
         .scratch_dir = scratch_dir,
@@ -20292,6 +20293,161 @@ fn readIfExists(io: std.Io, gpa: std.mem.Allocator, path: []const u8) !?[]u8 {
     };
 }
 
+/// How many lines of MLIR a case emits, which is what a `.size` golden
+/// records.
+fn emittedLines(ir: []const u8) usize {
+    return std.mem.count(u8, ir, "\n");
+}
+
+/// Whether a walk selects one case alone: its root is one case, and no
+/// property-case manifest selects more cases beside that root's directory.
+fn selectsOneCase(root_is_case: bool, property_cases: ?[]const u8) bool {
+    return root_is_case and property_cases == null;
+}
+
+test "a walk selects one case only from a case root without a manifest" {
+    try testing.expect(selectsOneCase(true, null));
+    try testing.expect(!selectsOneCase(true, "build/property-cases.txt"));
+    try testing.expect(!selectsOneCase(false, null));
+}
+
+/// What an update may do to a `.size` golden.
+const SizeUpdate = enum {
+    /// Compare only.
+    none,
+    /// Record a count that shrank, and refuse one that grew, or a first count
+    /// for a golden holding none, as a comparison does. A walk of more than
+    /// one case updates this way, so an update of the whole corpus can lower a
+    /// bound and never raise or set one.
+    shrink,
+    /// Record any count. Only a walk narrowed to the one case updates this
+    /// way, so growth is accepted for the program it was measured on.
+    any,
+};
+
+/// Holds the emitted module to the line count its `.size` golden records, and
+/// returns what an update recorded: `grew by N`, `shrank by N` or `recorded N`
+/// where the golden held no count.
+///
+/// The C compiler's time scales with the module it is given, so a module that
+/// grows makes every build of that program slower. A count that grows fails.
+/// A count that shrinks fails too, asking for `--update`, so the recorded
+/// number follows every improvement down and the next growth is measured from
+/// there. The count reads the module before `mlir-opt` runs, which no tool
+/// version or target changes, so the number is the same on every machine.
+fn compareSize(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    failures: *std.ArrayList(Failure),
+    lin_path: []const u8,
+    golden_path: []const u8,
+    expected: []const u8,
+    ir: []const u8,
+    update: SizeUpdate,
+) !?[]const u8 {
+    const lines = emittedLines(ir);
+    const recorded = std.fmt.parseInt(usize, std.mem.trim(u8, expected, " \n"), 10) catch null;
+    if (recorded == lines) return null;
+    // A golden recording no count bounds nothing, so filling it raises the
+    // bound from none, which only a walk of the one case may do.
+    const grew = if (recorded) |bound| lines > bound else true;
+    if (update == .any or (update == .shrink and !grew)) {
+        try writeFile(io, golden_path, try std.fmt.allocPrint(gpa, "{d}\n", .{lines}));
+        const bound = recorded orelse return try std.fmt.allocPrint(gpa, "recorded {d} lines", .{lines});
+        return if (grew)
+            try std.fmt.allocPrint(gpa, "grew by {d} lines, to {d}", .{ lines - bound, lines })
+        else
+            try std.fmt.allocPrint(gpa, "shrank by {d} lines, to {d}", .{ bound - lines, lines });
+    }
+    const bound = recorded orelse {
+        try failures.append(gpa, .{
+            .path = lin_path,
+            .what = if (update == .shrink)
+                "size: an update records a first line count only from a walk narrowed to this case"
+            else
+                "size",
+            .expected = "a line count of the emitted MLIR, and this file records none",
+            .actual = try std.fmt.allocPrint(gpa, "{d}\n", .{lines}),
+        });
+        return null;
+    };
+    try failures.append(gpa, if (grew) .{
+        .path = lin_path,
+        .what = if (update == .shrink)
+            "size: the emitted MLIR grew past its recorded line count; an update records growth only from a walk narrowed to this case"
+        else
+            "size: the emitted MLIR grew past its recorded line count",
+        .expected = try std.fmt.allocPrint(gpa, "at most {d} lines\n", .{bound}),
+        .actual = try std.fmt.allocPrint(gpa, "{d} lines, {d} more\n", .{ lines, lines - bound }),
+    } else .{
+        .path = lin_path,
+        .what = "size: the emitted MLIR shrank; record the new count with --update",
+        .expected = try std.fmt.allocPrint(gpa, "{d} lines\n", .{bound}),
+        .actual = try std.fmt.allocPrint(gpa, "{d} lines, {d} fewer\n", .{ lines, bound - lines }),
+    });
+    return null;
+}
+
+test "a size golden fails when the module grows and when it shrinks" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var failures: std.ArrayList(Failure) = .empty;
+    const module = "module {\n}\n";
+
+    try testing.expectEqual(null, try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "2\n", module, .none));
+    try testing.expectEqual(@as(usize, 0), failures.items.len);
+
+    try testing.expectEqual(null, try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "1\n", module, .none));
+    try testing.expectEqual(@as(usize, 1), failures.items.len);
+    try testing.expect(std.mem.indexOf(u8, failures.items[0].what, "grew") != null);
+    try testing.expectEqualStrings("2 lines, 1 more\n", failures.items[0].actual);
+
+    try testing.expectEqual(null, try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "3\n", module, .none));
+    try testing.expectEqual(@as(usize, 2), failures.items.len);
+    try testing.expect(std.mem.indexOf(u8, failures.items[1].what, "--update") != null);
+    try testing.expectEqualStrings("2 lines, 1 fewer\n", failures.items[1].actual);
+
+    try testing.expectEqual(null, try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "", module, .none));
+    try testing.expectEqual(@as(usize, 3), failures.items.len);
+}
+
+test "an update records a size that grew only from a walk narrowed to its case" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const golden = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/c.size", .{tmp.sub_path});
+    var failures: std.ArrayList(Failure) = .empty;
+    const module = "a\nb\nc\nd\n";
+
+    // A walk of many cases refuses growth and leaves the golden as it was.
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "c.size", .data = "3\n" });
+    try testing.expectEqual(null, try compareSize(gpa, testing.io, &failures, "c.lin", golden, "3\n", module, .shrink));
+    try testing.expectEqual(@as(usize, 1), failures.items.len);
+    try testing.expect(std.mem.indexOf(u8, failures.items[0].what, "narrowed to this case") != null);
+    try testing.expectEqualStrings("3\n", try tmp.dir.readFileAlloc(testing.io, "c.size", gpa, .unlimited));
+
+    // The same walk records a count that shrank.
+    try testing.expectEqualStrings("shrank by 2 lines, to 4", (try compareSize(gpa, testing.io, &failures, "c.lin", golden, "6\n", module, .shrink)).?);
+    try testing.expectEqualStrings("4\n", try tmp.dir.readFileAlloc(testing.io, "c.size", gpa, .unlimited));
+
+    // A walk narrowed to the case records growth and says by how much.
+    try testing.expectEqualStrings("grew by 1 lines, to 4", (try compareSize(gpa, testing.io, &failures, "c.lin", golden, "3\n", module, .any)).?);
+    try testing.expectEqualStrings("4\n", try tmp.dir.readFileAlloc(testing.io, "c.size", gpa, .unlimited));
+
+    // A golden holding no count records the first one only from a walk
+    // narrowed to its case.
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "c.size", .data = "" });
+    try testing.expectEqual(null, try compareSize(gpa, testing.io, &failures, "c.lin", golden, "", module, .shrink));
+    try testing.expectEqual(@as(usize, 2), failures.items.len);
+    try testing.expect(std.mem.indexOf(u8, failures.items[1].what, "narrowed to this case") != null);
+    try testing.expectEqualStrings("", try tmp.dir.readFileAlloc(testing.io, "c.size", gpa, .unlimited));
+    try testing.expectEqualStrings("recorded 4 lines", (try compareSize(gpa, testing.io, &failures, "c.lin", golden, "", module, .any)).?);
+    try testing.expectEqualStrings("4\n", try tmp.dir.readFileAlloc(testing.io, "c.size", gpa, .unlimited));
+}
+
 /// Appends what the program said on standard error to a mismatching exit
 /// status or output, so a run that trapped names its trap in the failure
 /// report. A case recording standard error compares it itself, and a refusal
@@ -20434,6 +20590,9 @@ const Settings = struct {
     levels: bool = false,
     cache: *const OutcomeCache,
     update: bool,
+    /// Whether the walk selects one case alone, the only walk whose update
+    /// may record a `.size` golden that grew.
+    narrowed: bool = false,
     sanitize: ?[]const u8,
     runtime_path: ?[]const u8,
     scratch_dir: []const u8,
@@ -21236,6 +21395,14 @@ fn checkCase(
                     }
 
                     matching_mlir = std.mem.eql(u8, expected, ir.written());
+                }
+
+                const size_golden = try std.mem.concat(gpa, u8, &.{ stem, ".size" });
+                if (try readIfExists(io, gpa, size_golden)) |expected| {
+                    const size_update: SizeUpdate = if (!env.update) .none else if (env.narrowed) .any else .shrink;
+                    if (try compareSize(gpa, io, &w.failures, display_path, size_golden, expected, ir.written(), size_update)) |change| {
+                        std.debug.print("updated {s}: {s}\n", .{ size_golden, change });
+                    }
                 }
 
                 float_literals_survive = try checkFloatRoundTrip(gpa, &w.failures, display_path, &ast, &table, &case, ir.written());

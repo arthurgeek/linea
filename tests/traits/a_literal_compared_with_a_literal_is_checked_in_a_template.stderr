@@ -1,0 +1,7 @@
+error[T-Literal]: `Int64` cannot hold 18446744073709551615
+  --> tests/traits/a_literal_compared_with_a_literal_is_checked_in_a_template.lin:25:8
+   |
+10 |             reflect.case => {
+   |                             - generated from this template code
+25 | derive Tally for Point
+   |        ^^^^^ literal is out of range for its type

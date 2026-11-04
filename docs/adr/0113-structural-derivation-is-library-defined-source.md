@@ -12,6 +12,8 @@ Extended by [0145](0145-closed-attributes-attach-ordinary-derive-requests.md)
 for derive requests attached to nominal type declarations.
 Extended by [0209](0209-a-from-derive-converts-the-variant-the-source-names.md)
 for a template that wraps a parameter in the enum variant its type names.
+Extended by [0258](0258-a-template-decides-what-its-descriptors-settle.md)
+for literals and conditions a template's descriptors settle.
 
 ## Context
 
