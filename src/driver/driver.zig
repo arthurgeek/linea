@@ -216,7 +216,7 @@ const dump_commands = [_]cli.Command{
         .operand = "<file>",
         .help = "print the assembly the build would ship",
         .options = &.{
-            .{ .name = "-O", .arity = .value, .metavar = "0|1|2|3|s|z", .help = "optimisation level for the generated code (default: 2)" },
+            optLevelOption(toolchain.build_level),
         },
     },
 };
@@ -236,6 +236,21 @@ pub fn isDebuggingAid(name: []const u8) bool {
     return false;
 }
 
+/// The `-O` option of a command that compiles at `default` when none is named.
+fn optLevelOption(comptime default: []const u8) cli.Option {
+    return .{ .name = "-O", .arity = .value, .metavar = "0|1|2|3|s|z", .help = "optimisation level for the generated code (default: " ++ default ++ ")" };
+}
+
+/// The level a command compiles at when `-O` names none. `build` makes the
+/// program that ships, and `dump-asm` prints what it ships; `run` and `test`
+/// rebuild on every edit and so skip the optimiser.
+fn defaultOptLevel(tag: cli.Tag) []const u8 {
+    return switch (tag) {
+        .run, .@"test" => toolchain.run_level,
+        else => toolchain.build_level,
+    };
+}
+
 /// Links the checking allocator, which `test` always links: a use of freed
 /// storage, a second disposal or a store outside an allocation aborts.
 const check_storage_option: cli.Option = .{ .name = "--check-storage", .arity = .flag, .help = "abort on a use of freed storage (slower; always on for `test`)" };
@@ -252,7 +267,7 @@ pub const spec: cli.Spec = .{
             .help = "compile a file or program root, run it, and exit as it did",
             .passthrough = true,
             .options = &.{
-                .{ .name = "-O", .arity = .value, .metavar = "0|1|2|3|s|z", .help = "optimisation level for the generated code (default: 2)" },
+                optLevelOption(toolchain.run_level),
                 check_storage_option,
             },
         },
@@ -273,7 +288,7 @@ pub const spec: cli.Spec = .{
             .help = "compile a file or root to an executable, or a library to an object",
             .options = &.{
                 .{ .name = "-o", .arity = .value, .metavar = "<path>", .help = "output path (default: the source's own name)" },
-                .{ .name = "-O", .arity = .value, .metavar = "0|1|2|3|s|z", .help = "optimisation level for the generated code (default: 2)" },
+                optLevelOption(toolchain.build_level),
                 .{ .name = "--keep", .arity = .flag, .help = "keep the intermediate .mlir, .mlir.llvm and .ll files" },
                 check_storage_option,
             },
@@ -288,7 +303,13 @@ pub const spec: cli.Spec = .{
                 .{ .name = "--check", .arity = .flag, .help = "report what would change, writing nothing" },
             },
         },
-        .{ .tag = .@"test", .name = "test", .operand = "<root>", .help = "run every test beneath a program root" },
+        .{
+            .tag = .@"test",
+            .name = "test",
+            .operand = "<root>",
+            .help = "run every test beneath a program root",
+            .options = &.{optLevelOption(toolchain.run_level)},
+        },
         .{ .tag = .lsp, .name = "lsp", .operand = "", .help = "serve the Language Server Protocol on standard input and output", .common_options = false },
         .{
             .tag = .init,
@@ -486,7 +507,7 @@ pub fn run(process: std.process.Init) !u8 {
     var color: ColorArg = .auto;
     var error_format: ErrorFormat = .human;
     var out_path: ?[]const u8 = null;
-    var opt_level: []const u8 = toolchain.default_level;
+    var opt_level: []const u8 = defaultOptLevel(cmd.tag);
     var keep = false;
     var storage: toolchain.Storage = if (cmd.tag == .@"test") .checked else .unchecked;
     // What a lowering is for. Only `emit-mlir` offers the choice today, and

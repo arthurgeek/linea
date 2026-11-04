@@ -274,13 +274,23 @@ pub const Artifact = enum { executable, object };
 /// premise that could make two levels disagree about what a program does.
 pub const levels = [_][]const u8{ "0", "1", "2", "3", "s", "z" };
 
-/// The level a build uses when none is named.
-pub const default_level = "2";
+/// The level `build` compiles at when none is named. `build` makes the
+/// program that ships, so it pays for the optimiser once.
+pub const build_level = "2";
 
-test "the default optimisation level is one of the levels a build offers" {
-    var found = false;
-    for (levels) |level| found = found or std.mem.eql(u8, level, default_level);
-    try testing.expect(found);
+/// The level `run` and `test` compile at when none is named. Both rebuild on
+/// every edit, and `cc` optimising the emitted IR is most of what a build
+/// costs: `-O0` compiles a large program in about half the time `-O2` takes,
+/// while `-O1` saves a tenth. The program runs slower, which a loop of edits
+/// and short runs rarely notices; `-O` names a level where it does.
+pub const run_level = "0";
+
+test "each default optimisation level is one of the levels a build offers" {
+    for ([_][]const u8{ build_level, run_level }) |default| {
+        var found = false;
+        for (levels) |level| found = found or std.mem.eql(u8, level, default);
+        try testing.expect(found);
+    }
 }
 
 pub const Options = struct {
@@ -300,7 +310,7 @@ pub const Options = struct {
     /// The `-O` level `cc` compiles the generated IR at, one of `levels`.
     /// Every level preserves the language contracts, including the permitted
     /// platform-dependent precision of transcendental operations.
-    opt: []const u8 = default_level,
+    opt: []const u8,
     /// A sanitizer the runtime was built with, which the link has to name too
     /// so its support library is pulled in. Null for an ordinary build.
     sanitize: ?[]const u8 = null,

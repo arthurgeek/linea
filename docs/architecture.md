@@ -2128,8 +2128,9 @@ source mapping add.
 ### No optimiser
 
 LLVM optimises the generated code. `mlir-opt` runs conversion passes only, then
-`cc` compiles the translated IR at the selected optimisation level, `-O2` by
-default and overridden by the CLI's `-O`. The emitted IR carries no no-wrap
+`cc` compiles the translated IR at the selected optimisation level: `-O2` for
+`linea build` and `-O0` for `linea run` and `linea test` when the CLI's `-O`
+names none (ADR 0256). The emitted IR carries no no-wrap
 flags, aliasing metadata or fast-math flags, so it grants none of the
 assumptions those annotations permit (ADR 0013: the compiler may not treat the
 absence of undefined behaviour as a premise for optimisation). Monomorphisation
