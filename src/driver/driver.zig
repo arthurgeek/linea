@@ -611,10 +611,11 @@ pub fn run(process: std.process.Init) !u8 {
     // there is a rule this program broke, and this is a rule the compiler did.
     var defect = false;
 
-    // A command that checks the program resumes from the checked standard
-    // library the cache holds, where the program allows it; dumping tokens or
-    // syntax checks nothing.
-    const checked_library: ?*loader.CheckedLibrary = if (is_dump_tokens or is_dump_ast)
+    // `check`, `run`, `build` and `test` resume from the checked standard
+    // library the cache holds, where the program allows it. The dumps and
+    // `emit-mlir` compile afresh: a dump prints syntax IDs, and a resumed
+    // program numbers its own after the library's.
+    const checked_library: ?*loader.CheckedLibrary = if (!(is_check or is_run or is_build or is_test))
         null
     else if (try library_cache.directory(gpa, process.minimal.environ)) |dir|
         try library_cache.open(process.gpa, io, dir)
