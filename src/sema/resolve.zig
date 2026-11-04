@@ -138,35 +138,30 @@ pub const LibraryPrefix = struct {
 /// would collide with the names a resumed expansion gives what it
 /// generates, which a fresh expansion numbers around them.
 ///
-/// **Bound:** the program's file parts, and the tokens and expressions of the
-/// application's own files.
+/// **Bound:** the program's modules, a scan of the file parts for each of
+/// the application's own files, and the tokens and expressions those files
+/// hold.
 pub fn applicationMayResume(program: *const Program) bool {
     const ast = &program.ast;
-    for (ast.parts) |part| {
-        if (!applicationFile(program, part.file)) continue;
-        for (part.expr_start..part.expr_end) |i| {
-            if (ast.exprTag(ExprId.at(@intCast(i))) == .lambda) return false;
-        }
-        for (part.token_start..part.token_end) |i| {
-            const tok = TokenId.at(@intCast(i));
-            if (ast.tokenTag(tok) == .identifier and std.mem.startsWith(u8, ast.tokenText(tok), "_linea_trait_")) return false;
-        }
-        const name = std.fs.path.basename(part.path);
-        const generated = "linea-derive-";
-        if (!std.mem.startsWith(u8, name, generated) or !std.mem.endsWith(u8, name, ".lin")) continue;
-        const ordinal = name[generated.len .. name.len - ".lin".len];
-        if (ordinal.len != 0 and std.mem.indexOfNone(u8, ordinal, "0123456789") == null) return false;
-    }
-    return true;
-}
-
-/// Whether `file` belongs to a module that is not the library's.
-fn applicationFile(program: *const Program, file: FileId) bool {
     for (program.modules) |module| {
         if (module.library) continue;
-        if (std.mem.indexOfScalar(FileId, module.files, file) != null) return true;
+        for (module.files) |file| {
+            const part = ast.partOfFile(file) orelse continue;
+            for (part.expr_start..part.expr_end) |i| {
+                if (ast.exprTag(ExprId.at(@intCast(i))) == .lambda) return false;
+            }
+            for (part.token_start..part.token_end) |i| {
+                const tok = TokenId.at(@intCast(i));
+                if (ast.tokenTag(tok) == .identifier and std.mem.startsWith(u8, ast.tokenText(tok), "_linea_trait_")) return false;
+            }
+            const name = std.fs.path.basename(part.path);
+            const generated = "linea-derive-";
+            if (!std.mem.startsWith(u8, name, generated) or !std.mem.endsWith(u8, name, ".lin")) continue;
+            const ordinal = name[generated.len .. name.len - ".lin".len];
+            if (ordinal.len != 0 and std.mem.indexOfNone(u8, ordinal, "0123456789") == null) return false;
+        }
     }
-    return false;
+    return true;
 }
 
 /// Resolve a closed library through the ordinary pass, retaining its builder
