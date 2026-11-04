@@ -1,0 +1,34 @@
+trait Tally {
+    fn tally(value: Self) -> UInt64
+}
+
+// A comparison of two literals is ordinary code even beside a descriptor, so
+// the checker reads both literals as `Int64` and refuses one too large.
+template impl Tally {
+    fn tally(value: Self) -> UInt64 {
+        match read value {
+            reflect.case => {
+                if 18446744073709551615 == 18446744073709551615 && reflect.case.components_named {
+                    UInt64(1)
+                } else {
+                    UInt64(0)
+                }
+            },
+        }
+    }
+}
+
+struct Point {
+    x: UInt8,
+}
+
+derive Tally for Point
+
+fn main() -> UInt8 {
+    let point: Point = .{ x = 1 }
+    if Tally.tally(point) == 1 {
+        0
+    } else {
+        1
+    }
+}

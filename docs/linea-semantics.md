@@ -3229,7 +3229,11 @@ not selected is not part of that case's generated code, so it is neither
 checked nor run there, and a declaration only that branch used is unused there.
 A descriptor's value does not depend on traversal order, so a condition decides
 the same branch in a `reflect.components.reversed` loop as in a forward one.
-Any other condition is ordinary code over the descriptors' values. Case and
+An integer comparison is decided only when an operand is a descriptor, which
+gives a literal on the other side the descriptor's type `UInt64`; two literals
+compared are `Int64`, as anywhere, so that comparison is ordinary code and a
+condition holding one is not decided. Any other condition is ordinary code over
+the descriptors' values. Case and
 component ordinals follow declaration order. `reflect.ordinal_of(value)` is
 available only outside reflected cases and component loops and evaluates its
 argument once before selecting that value's case ordinal.

@@ -103,12 +103,14 @@ fn decidable(ast: *const Ast, id: ExprId, metadata: []const MetadataPlan, descri
             const operands = ast.binary(id);
             const lhs = decidable(ast, operands.lhs, metadata, descriptors) orelse return null;
             if (decidable(ast, operands.rhs, metadata, descriptors) != lhs) return null;
+            if (lhs == .integer and !comparesDescriptor(ast, operands.lhs, operands.rhs, metadata)) return null;
             return .boolean;
         },
         .lt, .le, .gt, .ge => {
             const operands = ast.binary(id);
             if (decidable(ast, operands.lhs, metadata, descriptors) != .integer) return null;
             if (decidable(ast, operands.rhs, metadata, descriptors) != .integer) return null;
+            if (!comparesDescriptor(ast, operands.lhs, operands.rhs, metadata)) return null;
             return .boolean;
         },
         .bool_literal => return .boolean,
@@ -124,6 +126,14 @@ fn decidable(ast: *const Ast, id: ExprId, metadata: []const MetadataPlan, descri
         },
         else => return null,
     }
+}
+
+/// Whether one side of an integer comparison is a descriptor, so the checker
+/// reads a literal on the other side as the descriptor's `UInt64`. Two
+/// literals compared are `Int64`, which may refuse a literal expansion could
+/// read, so that comparison is ordinary code.
+fn comparesDescriptor(ast: *const Ast, lhs: ExprId, rhs: ExprId, metadata: []const MetadataPlan) bool {
+    return descriptorKind(ast.withoutGroups(lhs), metadata) != null or descriptorKind(ast.withoutGroups(rhs), metadata) != null;
 }
 
 fn descriptorKind(id: ExprId, metadata: []const MetadataPlan) ?MetadataPlan.Kind {
