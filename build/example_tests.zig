@@ -39,7 +39,9 @@ const Walk = struct {
 
     fn one(self: Walk, gpa: std.mem.Allocator, root: []const u8) !Outcome {
         const path = try std.fs.path.join(gpa, &.{ self.examples, root });
-        const finished = try pool.runMerged(gpa, self.io, &.{ self.linea, "test", path }, .inherit, root_timeout_seconds);
+        // With the checked-library cache off: parallel roots would each check
+        // and write the same entry into the user's cache.
+        const finished = try pool.runMerged(gpa, self.io, &.{ "env", "LINEA_CACHE_DIR=", self.linea, "test", path }, .inherit, root_timeout_seconds);
         if (finished.timed_out) {
             const command = try std.fmt.allocPrint(gpa, "linea test {s}", .{path});
             return .{ .failure = try pool.timeoutMessage(gpa, command, root_timeout_seconds, finished.output) };
