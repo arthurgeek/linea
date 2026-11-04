@@ -51,12 +51,21 @@ const header_len = magic.len + 4 + Sha256.digest_length + 8 + 8;
 const entry_prefix = "checked-std-";
 /// The most entries the directory keeps: writing one removes the oldest
 /// beyond this many, so a compiler rebuilt many times leaves this many behind.
-const kept_entries = 8;
+/// An entry is one set of library modules, and a project's programs import a
+/// few such sets.
+const kept_entries = 16;
 
 /// Where the cache lives, allocated in `gpa`, or null where it is turned off or
-/// `HOME` is not set.
+/// `HOME` is not set. A Debug compiler uses it only where `LINEA_CACHE_DIR`
+/// names a directory: checking the library cold costs it many times what a
+/// command does, and each worktree's build is a compiler of its own.
 pub fn directory(gpa: std.mem.Allocator, environ: std.process.Environ) std.mem.Allocator.Error!?[]const u8 {
+    return directoryIn(gpa, environ, builtin.mode);
+}
+
+fn directoryIn(gpa: std.mem.Allocator, environ: std.process.Environ, mode: std.builtin.OptimizeMode) std.mem.Allocator.Error!?[]const u8 {
     if (environ.getPosix(directory_variable)) |named| return if (named.len == 0) null else try gpa.dupe(u8, named);
+    if (mode == .Debug) return null;
     const home = environ.getPosix("HOME") orelse return null;
     if (home.len == 0) return null;
     return try std.fs.path.join(gpa, &.{ home, default_directory });
@@ -226,13 +235,22 @@ fn write(io: std.Io, file: anytype, key: Digest, payload: []const u8) !void {
     try file.replace(io);
 }
 
-/// Removes the oldest entries beyond `kept_entries`.
+/// Removes the oldest entries beyond `kept_entries`, and files an interrupted
+/// write left behind.
 fn evict(io: std.Io, cache: std.Io.Dir) !void {
     const Entry = struct { name: [entry_prefix.len + 2 * Sha256.digest_length]u8, modified: i96 };
     var entries: [kept_entries + 1]Entry = undefined;
     var count: usize = 0;
+    const now = std.Io.Timestamp.now(io, .real).nanoseconds;
     var it = cache.iterate();
     while (try it.next(io)) |entry| {
+        // An entry's unnamed file, which a command stopped while writing it
+        // left behind: sixteen hex digits, and an hour old.
+        if (entry.kind == .file and entry.name.len == 16 and std.mem.indexOfNone(u8, entry.name, "0123456789abcdef") == null) {
+            const stat = cache.statFile(io, entry.name, .{}) catch continue;
+            if (now - stat.mtime.nanoseconds > std.time.ns_per_hour) cache.deleteFile(io, entry.name) catch {};
+            continue;
+        }
         if (entry.kind != .file or !std.mem.startsWith(u8, entry.name, entry_prefix)) continue;
         if (entry.name.len != @sizeOf(@FieldType(Entry, "name"))) continue;
         const stat = cache.statFile(io, entry.name, .{}) catch continue;
@@ -306,10 +324,11 @@ test "checked library cache: a cache that cannot be written is not used, and the
     try testing.expect(try openKeyed(testing.allocator, testing.io, dir, @splat(7), &.{}) == null);
 }
 
-test "checked library cache: an empty directory variable turns the cache off" {
+test "checked library cache: an empty directory variable turns the cache off, and a Debug compiler uses only a named one" {
     if (std.process.Environ.Block != std.process.Environ.PosixBlock) return error.SkipZigTest;
     const home = [_:null]?[*:0]const u8{"HOME=/home/someone"};
-    const named = (try directory(testing.allocator, .{ .block = .{ .slice = &home } })).?;
+    try testing.expect(try directoryIn(testing.allocator, .{ .block = .{ .slice = &home } }, .Debug) == null);
+    const named = (try directoryIn(testing.allocator, .{ .block = .{ .slice = &home } }, .ReleaseFast)).?;
     defer testing.allocator.free(named);
     try testing.expectEqualStrings("/home/someone/.linea-cache", named);
 

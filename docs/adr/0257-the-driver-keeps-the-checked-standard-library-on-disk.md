@@ -55,7 +55,13 @@ records its key in its header as well as its name.
 **A place.** The cache is a directory beneath the user's home,
 `$HOME/.linea-cache`, or the directory `LINEA_CACHE_DIR` names; set to the
 empty string, `LINEA_CACHE_DIR` turns the cache off. Without `HOME` or with
-the cache off, a command compiles exactly as it did before. The conformance
+the cache off, a command compiles exactly as it did before. A Debug compiler
+uses the cache only where `LINEA_CACHE_DIR` names a directory: every
+worktree's Debug build is a compiler of its own with entries of its own, and
+the first command for a set of modules pays the most there. Measured on a
+Debug compiler, `linea check` of `hello.lin` takes 1.77 s with the cache off,
+2.49 s cold and 0.73 s warm, and of `json_inventory.lin` 5.34 s, 7.61 s and
+2.55 s. The conformance
 runner points `LINEA_CACHE_DIR` at its scratch directory, so a transcript
 never reads or writes the user's cache.
 
@@ -66,8 +72,8 @@ command and only detects damage, so it is a fast checksum: the entry is
 trusted because only its user writes the directory, not because of its hash.
 A decoder never reads past its input and never builds an enum value from a
 number naming none. A write goes to an unnamed file renamed over the entry,
-so concurrent commands each see a whole entry or none. Writing an entry keeps the eight most recently written and
-removes older ones, so rebuilding the compiler does not grow the directory
+so concurrent commands each see a whole entry or none. Writing an entry keeps the sixteen most recently written, removes older
+ones and any file an interrupted write left an hour ago, so rebuilding the compiler does not grow the directory
 without bound.
 
 **A cache that cannot be written is not used.** The entry's file is created
