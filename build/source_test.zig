@@ -104,8 +104,11 @@ test "CI outcome snapshots preserve restore and save contracts" {
             "\n            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/soundness/outcomes"
         else
             "";
+        // Each lane also keeps the checked-library entries its walks read,
+        // beside the outcomes and under the same key.
         const expected_paths = try std.mem.concat(testing.allocator, u8, &.{
             "${{ env.LINEA_SCRATCH }}-${{ github.job }}", lane, "/outcomes\n            ",
+            "${{ env.LINEA_SCRATCH }}-${{ github.job }}", lane, "/linea-cache\n            ",
             "${{ env.LINEA_SCRATCH }}-${{ github.job }}", lane, "/examples/outcomes",
             extra,
         });
