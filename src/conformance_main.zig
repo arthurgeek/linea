@@ -16701,7 +16701,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         .levels = options.levels,
         .cache = &cache,
         .update = update,
-        .narrowed = narrowed != null,
+        .narrowed = selectsOneCase(narrowed != null, options.property_cases),
         .sanitize = sanitize,
         .runtime_path = runtime_path,
         .scratch_dir = scratch_dir,
@@ -20283,6 +20283,18 @@ fn emittedLines(ir: []const u8) usize {
     return std.mem.count(u8, ir, "\n");
 }
 
+/// Whether a walk selects one case alone: its root is one case, and no
+/// property-case manifest selects more cases beside that root's directory.
+fn selectsOneCase(root_is_case: bool, property_cases: ?[]const u8) bool {
+    return root_is_case and property_cases == null;
+}
+
+test "a walk selects one case only from a case root without a manifest" {
+    try testing.expect(selectsOneCase(true, null));
+    try testing.expect(!selectsOneCase(true, "build/property-cases.txt"));
+    try testing.expect(!selectsOneCase(false, null));
+}
+
 /// What an update may do to a `.size` golden.
 const SizeUpdate = enum {
     /// Compare only.
@@ -20550,7 +20562,7 @@ const Settings = struct {
     levels: bool = false,
     cache: *const OutcomeCache,
     update: bool,
-    /// Whether the walk was narrowed to one case, the only walk whose update
+    /// Whether the walk selects one case alone, the only walk whose update
     /// may record a `.size` golden that grew.
     narrowed: bool = false,
     sanitize: ?[]const u8,
