@@ -145,9 +145,15 @@ const Hooks = struct {
                 @field(typing, field.name) = if (comptime unread(field.name))
                     field.defaultValue().?
                 else if (comptime memo(field.name)) blk: {
-                    // Unstamped: every entry is computed again when read.
+                    // Unstamped: every entry is computed again when read. A
+                    // memo is never longer than the table it mirrors, the
+                    // pool's for a layout and the fields' for the rest, which
+                    // are decoded before it.
                     const Element = std.meta.Elem(field.type);
-                    const entries = try d.arena.alloc(Element, try d.length());
+                    const mirrored = if (comptime std.mem.eql(u8, field.name, "laid_out")) typing.pool.len else typing.fields.len;
+                    const n = try d.length();
+                    if (n > mirrored) return error.Corrupt;
+                    const entries = try d.arena.alloc(Element, n);
                     @memset(entries, std.mem.zeroes(Element));
                     break :blk entries;
                 } else try d.value(field.type);
@@ -156,7 +162,8 @@ const Hooks = struct {
         } else if (T == types.FieldColumns or T == types.VariantColumns) {
             const Row = RowOf(T);
             const List = std.MultiArrayList(Row);
-            const n = try d.length();
+            // Every row takes at least a byte in each column after this.
+            const n = try d.lengthAtLeast(1);
             var list: List = .empty;
             try list.setCapacity(d.arena, n);
             list.len = n;
@@ -169,7 +176,8 @@ const Hooks = struct {
             return .fromSlice(slice);
         } else if (T == Expressions) {
             const List = std.MultiArrayList(Expr);
-            const n = try d.length();
+            // Every row takes at least a byte in each column after this.
+            const n = try d.lengthAtLeast(1);
             var list: List = .empty;
             try list.setCapacity(d.arena, n);
             list.len = n;
@@ -278,6 +286,18 @@ test "checked library encoding: a truncated encoding is corrupt" {
     defer testing.allocator.free(bytes);
     for ([_]usize{ 0, 1, bytes.len / 3, bytes.len / 2, bytes.len - 1 }) |cut| {
         try testing.expectError(error.Corrupt, decode(testing.allocator, bytes[0..cut]));
+    }
+}
+
+test "checked library encoding: a table's length the input cannot back is corrupt" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var hooks: Hooks = .{ .program = undefined };
+    // Four billion rows, then nothing to hold them.
+    const input = [_]u8{ 0xff, 0xff, 0xff, 0xff, 0x0f };
+    inline for (.{ types.FieldColumns, types.VariantColumns, Expressions }) |T| {
+        var d: serial.Decoder(Hooks) = .{ .input = &input, .arena = arena.allocator(), .hooks = &hooks };
+        try testing.expectError(error.Corrupt, d.value(T));
     }
 }
 

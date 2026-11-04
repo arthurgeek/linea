@@ -215,7 +215,7 @@ pub fn Decoder(comptime Hooks: type) type {
         }
 
         /// `lengthOf` for elements that each take at least `least` bytes.
-        fn lengthAtLeast(self: *Self, comptime least: usize) DecodeError!usize {
+        pub fn lengthAtLeast(self: *Self, comptime least: usize) DecodeError!usize {
             const n = try self.length();
             if (least != 0 and n > (self.input.len - self.at) / least) return error.Corrupt;
             return n;
