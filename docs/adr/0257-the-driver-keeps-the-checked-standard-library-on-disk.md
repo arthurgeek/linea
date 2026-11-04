@@ -72,6 +72,13 @@ own verdict for a library call unless a cycle through it passes through a
 declaration the program adds, and the complete-template refill writes only
 the instantiations the program minted.
 
+**Resuming is decided before reading.** `canResume` refuses an application
+holding a closure, a `_linea_trait_` identifier, or a file named as a
+generated one (`linea-derive-N.lin`), which `resolve.applicationMayResume`
+reads from the application's own syntax. The driver asks it of the
+application loaded alone before it hashes the executable or reads an entry,
+so a program that cannot resume pays nothing for the cache.
+
 **The driver owns it.** No pass gains state: the driver reads or builds a
 `CheckedLibrary` before loading the program, and resumes from it through the
 same `CheckedLibrary.loadFromDisk`, `checkProgram` and `checkWhole` the other

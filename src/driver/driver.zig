@@ -615,7 +615,10 @@ pub fn run(process: std.process.Init) !u8 {
     // library the cache holds, where the program allows it. The dumps and
     // `emit-mlir` compile afresh: a dump prints syntax IDs, and a resumed
     // program numbers its own after the library's.
-    const checked_library: ?*loader.CheckedLibrary = if (!(is_check or is_run or is_build or is_test))
+    // Whether the program can resume is read from its own files first, so a
+    // program that cannot reads no entry and hashes no executable.
+    const checked_library: ?*loader.CheckedLibrary = if (!(is_check or is_run or is_build or is_test) or
+        !loader.mayResumeFromDisk(process.gpa, io, file_path, purpose))
         null
     else if (try library_cache.directory(gpa, process.minimal.environ)) |dir|
         try library_cache.open(process.gpa, io, dir)

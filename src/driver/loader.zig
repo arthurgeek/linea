@@ -776,6 +776,21 @@ pub fn loadFromDisk(
     return loadFromDiskWith(gpa, io, table, sink, interner, entry, purpose, with_library, null);
 }
 
+/// Whether the program at `entry` may resume from a checked library, judged
+/// from its own files loaded without the library, so a program that cannot
+/// pays nothing for reading one. A program that does not load is answered
+/// no: the ordinary load reports why.
+pub fn mayResumeFromDisk(gpa: std.mem.Allocator, io: std.Io, entry: []const u8, purpose: Purpose) bool {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+    var table: FileTable = .empty;
+    var sink = Sink.init(scratch);
+    var interner: Interner = .empty;
+    const program = loadFromDiskWith(scratch, io, &table, &sink, &interner, entry, purpose, false, null) catch return false;
+    return @import("../sema/resolve.zig").applicationMayResume(&program);
+}
+
 fn loadFromDiskWith(
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -5520,6 +5535,35 @@ test "checked library resumes a program that derives, with the diagnostics and M
             output[i] = writer.written();
         }
         try testing.expectEqualStrings(output[0], output[1]);
+    }
+}
+
+test "an application resumes unless its own files hold a closure or a generated name" {
+    const prefix = try CheckedLibrary.init(testing.allocator);
+    defer prefix.deinit();
+    const cases = [_]struct { path: []const u8, text: []const u8, resumes: bool }{
+        .{ .path = "main.lin", .text = "fn main() -> UInt8 { 0 }", .resumes = true },
+        // `std.io` holds closures of its own, which are the library's.
+        .{ .path = "main.lin", .text = "import std.io\nfn main() -> UInt8 { io.print(\"hi\\n\"); 0 }", .resumes = true },
+        .{ .path = "main.lin", .text = "fn main() -> UInt8 { let held: UInt8 = 0; let f = [held] || held; f() }", .resumes = false },
+        .{ .path = "main.lin", .text = "fn main() -> UInt8 { let _linea_trait_0: UInt8 = 0; _linea_trait_0 }", .resumes = false },
+        .{ .path = "linea-derive-3.lin", .text = "fn main() -> UInt8 { 0 }", .resumes = false },
+        .{ .path = "linea-derive-x.lin", .text = "fn main() -> UInt8 { 0 }", .resumes = true },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        const files = &.{InMemoryFile{ .path = case.path, .text = case.text }};
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var names: Interner = .empty;
+        const alone = try loadFromMemory(gpa, &table, &sink, &names, case.path, files, .program, true, .borrow);
+        try testing.expectEqual(case.resumes, @import("../sema/resolve.zig").applicationMayResume(&alone));
+        var joined_table: FileTable = .empty;
+        var joined_names: Interner = .empty;
+        const joined = try prefix.loadFromMemory(gpa, &joined_table, &sink, &joined_names, case.path, files, .program, .borrow);
+        try testing.expectEqual(case.resumes, prefix.resolved.canResume(&joined, &joined_names));
     }
 }
 

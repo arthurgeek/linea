@@ -116,22 +116,7 @@ pub const LibraryPrefix = struct {
                 if (program.ast.deriveRequestTraitRange(d).len() != 0) return false;
             }
         }
-        // Closure symbols and capture environment names encode allocation
-        // identities, so application closures require the ordinary load order.
-        for (cached.ast.exprCount()..program.ast.exprCount()) |i| {
-            if (program.ast.exprTag(ExprId.at(@intCast(i))) == .lambda) return false;
-        }
-        for (cached.ast.tokenCount()..program.ast.tokenCount()) |i| {
-            const tok = TokenId.at(@intCast(i));
-            if (program.ast.tokenTag(tok) == .identifier and
-                std.mem.startsWith(u8, program.ast.tokenText(tok), "_linea_trait_")) return false;
-        }
-        for (program.ast.parts[cached.ast.parts.len..]) |part| {
-            for (self.result.expanded.ast.parts[cached.ast.parts.len..]) |generated| {
-                if (std.mem.eql(u8, std.fs.path.basename(part.path), std.fs.path.basename(generated.path))) return false;
-            }
-        }
-        return true;
+        return applicationMayResume(program);
     }
 
     pub fn deinit(self: *LibraryPrefix) void {
@@ -139,6 +124,50 @@ pub const LibraryPrefix = struct {
         self.* = undefined;
     }
 };
+
+/// Whether the application's own files let a program resume from a checked
+/// library. Asked of the application loaded without a checked library, before
+/// one is read, and again by `canResume` of the joined program, so both read
+/// this one rule. Only the files of modules that are not the library's are
+/// read: the library's modules a program imports are the checked library's
+/// own.
+///
+/// A closure's symbol and its capture environment's names encode allocation
+/// identities, so a closure needs the ordinary load order. A `_linea_trait_`
+/// identifier and a file named as a generated one (`linea-derive-N.lin`)
+/// would collide with the names a resumed expansion gives what it
+/// generates, which a fresh expansion numbers around them.
+///
+/// **Bound:** the program's file parts, and the tokens and expressions of the
+/// application's own files.
+pub fn applicationMayResume(program: *const Program) bool {
+    const ast = &program.ast;
+    for (ast.parts) |part| {
+        if (!applicationFile(program, part.file)) continue;
+        for (part.expr_start..part.expr_end) |i| {
+            if (ast.exprTag(ExprId.at(@intCast(i))) == .lambda) return false;
+        }
+        for (part.token_start..part.token_end) |i| {
+            const tok = TokenId.at(@intCast(i));
+            if (ast.tokenTag(tok) == .identifier and std.mem.startsWith(u8, ast.tokenText(tok), "_linea_trait_")) return false;
+        }
+        const name = std.fs.path.basename(part.path);
+        const generated = "linea-derive-";
+        if (!std.mem.startsWith(u8, name, generated) or !std.mem.endsWith(u8, name, ".lin")) continue;
+        const ordinal = name[generated.len .. name.len - ".lin".len];
+        if (ordinal.len != 0 and std.mem.indexOfNone(u8, ordinal, "0123456789") == null) return false;
+    }
+    return true;
+}
+
+/// Whether `file` belongs to a module that is not the library's.
+fn applicationFile(program: *const Program, file: FileId) bool {
+    for (program.modules) |module| {
+        if (module.library) continue;
+        if (std.mem.indexOfScalar(FileId, module.files, file) != null) return true;
+    }
+    return false;
+}
 
 /// Resolve a closed library through the ordinary pass, retaining its builder
 /// rows before finalization groups scopes and consumes the mutable tables.

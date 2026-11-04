@@ -2094,7 +2094,10 @@ only the instantiations the application minted.
 Reuse eligibility belongs to the resolver. Incompatible graphs,
 generated-name collisions, and application closures use ordinary loading and
 checking. Closures require that fallback because generated names still
-depend on allocation order. Returned typing uses the retained allocator,
+depend on allocation order. What the application's own syntax decides is
+`resolve.applicationMayResume`, which the driver asks of the application
+loaded alone before it reads a cached library and `canResume` asks again of
+the joined program. Returned typing uses the retained allocator,
 not the temporary scratch allocator. The snapshot outlives its continuations;
 no pass owns a global cache or mutates the shared snapshot.
 
