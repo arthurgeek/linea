@@ -448,6 +448,15 @@ location-bearing (`.stderr`, `.ssa`, `.mono`): the former moving is a behaviour
 change. Exit-status properties and semantic source rewrites have no golden and
 cannot be updated away.
 
+A `.size` golden records how many lines of MLIR a program emits before
+`mlir-opt` runs; the C compiler's share of a build grows with that module.
+`tests/examples/` records one for `hello`, `json_inventory` and
+`http-json-echo`. The walk fails when the count grows past the recorded one,
+and also when it shrinks, so the recorded count follows each improvement down.
+To accept a change in size deliberately, update that example alone, for
+example `zig build conformance -Dupdate -- examples/hello.lin`, and say in the
+commit why the program grew.
+
 The dump subcommands are debugging aids with no stability guarantee, exposed on
 the command line only in debug builds; the dump functions always compile because
 the conformance runner calls them. A format change churns the whole corpus, so

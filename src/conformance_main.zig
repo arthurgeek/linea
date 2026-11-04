@@ -455,7 +455,7 @@ fn saidBy(ran: Ran) []const u8 {
 /// What a case records that a run does not produce: the dumps a pass wrote and
 /// the diagnostics it rendered.
 const dump_extensions = [_][]const u8{
-    ".tokens", ".ast", ".inferred", ".mono", ".mir", ".fmt", ".mlir", ".stderr",
+    ".tokens", ".ast", ".inferred", ".mono", ".mir", ".fmt", ".mlir", ".size", ".stderr",
 };
 
 /// What every stream is recorded under.
@@ -470,7 +470,7 @@ const golden_extensions = dump_extensions ++ stream_extensions;
 
 /// Every golden a case only gets to record by being built and run: each stream,
 /// and the dumps written from a program that got past the diagnostics.
-const produced_by_a_run = stream_extensions ++ [_][]const u8{ ".inferred", ".mono", ".mir", ".mlir" };
+const produced_by_a_run = stream_extensions ++ [_][]const u8{ ".inferred", ".mono", ".mir", ".mlir", ".size" };
 
 /// Whether the corpus holds a path.
 ///
@@ -20276,6 +20276,84 @@ fn readIfExists(io: std.Io, gpa: std.mem.Allocator, path: []const u8) !?[]u8 {
     };
 }
 
+/// How many lines of MLIR a case emits, which is what a `.size` golden
+/// records.
+fn emittedLines(ir: []const u8) usize {
+    return std.mem.count(u8, ir, "\n");
+}
+
+/// Holds the emitted module to the line count its `.size` golden records.
+///
+/// The C compiler's time scales with the module it is given, so a module that
+/// grows makes every build of that program slower. A count that grows fails.
+/// A count that shrinks fails too, asking for `--update`, so the recorded
+/// number follows every improvement down and the next growth is measured from
+/// there. The count reads the module before `mlir-opt` runs, which no tool
+/// version or target changes, so the number is the same on every machine.
+fn compareSize(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    failures: *std.ArrayList(Failure),
+    lin_path: []const u8,
+    golden_path: []const u8,
+    expected: []const u8,
+    ir: []const u8,
+    update: bool,
+) !bool {
+    const lines = emittedLines(ir);
+    const recorded = std.fmt.parseInt(usize, std.mem.trim(u8, expected, " \n"), 10) catch null;
+    if (recorded == lines) return false;
+    if (update) {
+        try writeFile(io, golden_path, try std.fmt.allocPrint(gpa, "{d}\n", .{lines}));
+        return true;
+    }
+    const bound = recorded orelse {
+        try failures.append(gpa, .{
+            .path = lin_path,
+            .what = "size",
+            .expected = "a line count of the emitted MLIR, and this file records none",
+            .actual = try std.fmt.allocPrint(gpa, "{d}\n", .{lines}),
+        });
+        return false;
+    };
+    try failures.append(gpa, if (lines > bound) .{
+        .path = lin_path,
+        .what = "size: the emitted MLIR grew past its recorded line count",
+        .expected = try std.fmt.allocPrint(gpa, "at most {d} lines\n", .{bound}),
+        .actual = try std.fmt.allocPrint(gpa, "{d} lines, {d} more\n", .{ lines, lines - bound }),
+    } else .{
+        .path = lin_path,
+        .what = "size: the emitted MLIR shrank; record the new count with --update",
+        .expected = try std.fmt.allocPrint(gpa, "{d} lines\n", .{bound}),
+        .actual = try std.fmt.allocPrint(gpa, "{d} lines, {d} fewer\n", .{ lines, bound - lines }),
+    });
+    return false;
+}
+
+test "a size golden fails when the module grows and when it shrinks" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var failures: std.ArrayList(Failure) = .empty;
+    const module = "module {\n}\n";
+
+    try testing.expect(!try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "2\n", module, false));
+    try testing.expectEqual(@as(usize, 0), failures.items.len);
+
+    try testing.expect(!try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "1\n", module, false));
+    try testing.expectEqual(@as(usize, 1), failures.items.len);
+    try testing.expect(std.mem.indexOf(u8, failures.items[0].what, "grew") != null);
+    try testing.expectEqualStrings("2 lines, 1 more\n", failures.items[0].actual);
+
+    try testing.expect(!try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "3\n", module, false));
+    try testing.expectEqual(@as(usize, 2), failures.items.len);
+    try testing.expect(std.mem.indexOf(u8, failures.items[1].what, "--update") != null);
+    try testing.expectEqualStrings("2 lines, 1 fewer\n", failures.items[1].actual);
+
+    try testing.expect(!try compareSize(gpa, testing.io, &failures, "c.lin", "c.size", "", module, false));
+    try testing.expectEqual(@as(usize, 3), failures.items.len);
+}
+
 /// Appends what the program said on standard error to a mismatching exit
 /// status or output, so a run that trapped names its trap in the failure
 /// report. A case recording standard error compares it itself, and a refusal
@@ -21220,6 +21298,13 @@ fn checkCase(
                     }
 
                     matching_mlir = std.mem.eql(u8, expected, ir.written());
+                }
+
+                const size_golden = try std.mem.concat(gpa, u8, &.{ stem, ".size" });
+                if (try readIfExists(io, gpa, size_golden)) |expected| {
+                    if (try compareSize(gpa, io, &w.failures, display_path, size_golden, expected, ir.written(), env.update)) {
+                        std.debug.print("updated {s}\n", .{size_golden});
+                    }
                 }
 
                 float_literals_survive = try checkFloatRoundTrip(gpa, &w.failures, display_path, &ast, &table, &case, ir.written());
