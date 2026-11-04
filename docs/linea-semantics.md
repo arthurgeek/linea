@@ -3223,6 +3223,8 @@ case and component. Expansion writes only the selected branch, as a block, or
 an empty block when the condition is false and there is no `else`. The branch
 not selected is not part of that case's generated code, so it is neither
 checked nor run there, and a declaration only that branch used is unused there.
+A descriptor's value does not depend on traversal order, so a condition decides
+the same branch in a `reflect.components.reversed` loop as in a forward one.
 Any other condition is ordinary code over the descriptors' values. Case and
 component ordinals follow declaration order. `reflect.ordinal_of(value)` is
 available only outside reflected cases and component loops and evaluates its
