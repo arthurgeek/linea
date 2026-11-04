@@ -61,9 +61,9 @@ worktree's Debug build is a compiler of its own with entries of its own, and
 the first command for a set of modules pays the most there. Measured on a
 Debug compiler, `linea check` of `hello.lin` takes 1.77 s with the cache off,
 2.49 s cold and 0.73 s warm, and of `json_inventory.lin` 5.34 s, 7.61 s and
-2.55 s. The conformance
-runner points `LINEA_CACHE_DIR` at its scratch directory, so a transcript
-never reads or writes the user's cache.
+2.55 s. The conformance runner points `LINEA_CACHE_DIR` at its scratch
+directory, so a transcript never reads or writes the user's cache, and the
+guide and example gates run with the cache off.
 
 **Damage is a miss.** An entry that is missing, cut short, written by another
 compiler or format, or whose encoding does not hash to the XxHash3 its header
@@ -72,8 +72,9 @@ command and only detects damage, so it is a fast checksum: the entry is
 trusted because only its user writes the directory, not because of its hash.
 A decoder never reads past its input and never builds an enum value from a
 number naming none. A write goes to an unnamed file renamed over the entry,
-so concurrent commands each see a whole entry or none. Writing an entry keeps the sixteen most recently written, removes older
-ones and any file an interrupted write left an hour ago, so rebuilding the compiler does not grow the directory
+so concurrent commands each see a whole entry or none. Writing an entry
+keeps the sixteen most recently written, removes older ones and any file an
+interrupted write left an hour ago, so rebuilding the compiler does not grow the directory
 without bound.
 
 **A cache that cannot be written is not used.** The entry's file is created
@@ -114,18 +115,18 @@ sessions use, so a command line, the runner and the editor resume one way.
   program. A program `canResume` refuses still loads and checks the library
   afresh. Of the 51 roots under `examples/`, 32 resume; the other 19 each
   hold a closure of their own.
-- Measured on a ReleaseFast compiler, best of seven: `linea check` of
-  `hello.lin` takes 0.161 s warm against 0.153 s with the cache off,
-  `json_inventory.lin` 0.400 s against 0.442 s, and `http-json-echo`
-  0.692 s against 1.118 s; `linea build` of `http-json-echo` takes 4.49 s
-  against 4.90 s. A program that cannot resume reads its own files twice and
+- Measured on a ReleaseFast compiler, best of seven, `linea check` takes
+  0.076 s warm for `hello.lin` against 0.158 s with the cache off, 0.226 s
+  against 0.434 s for `json_inventory.lin`, and 0.686 s against 1.103 s for
+  `http-json-echo`; `linea build` of `http-json-echo` takes 4.47 s against
+  4.92 s. An entry holds 19 to 45 MB, as many modules as the program's
+  imports reach. A program that cannot resume reads its own files twice and
   nothing else: `prime_sieve.lin` checks in 0.159 s against 0.157 s with the
-  cache off, where reading the entry first cost it 0.04 s. The entry holds every library module, 45.7 MB, and reading it
-  (hashing the executable, checking the entry's hash, decoding) is most of
-  what a warm `hello.lin` spends beyond its own check.
-- The first command after a compiler changes pays for checking every
-  library module, encoding it and writing the entry: about 1.1 s more than a
-  command without the cache on a ReleaseFast compiler.
+  cache off.
+- The first command for a set of modules after the compiler changes pays for
+  checking those modules, encoding them and writing the entry: 0.09 s more
+  for `hello.lin` and 0.70 s more for `http-json-echo` on a ReleaseFast
+  compiler.
 - Hashing the loaded image costs a pass over the compiler's code and constant
   data in memory on every command that can resume.
 - An entry is read back only by the binary that wrote it, so the encoding
@@ -154,9 +155,9 @@ but a program resumed from it sees modules its fresh load never loads:
 nothing, and helps offered `import std.http` to programs that cannot see
 it. A resumed check must report what a fresh one reports.
 
-**The prelude's closure as the checked library.** A smaller entry, but
-29 of the 44 programs under `examples/` import a module outside it, `hello`
-included, and none of those resumes.
+**The prelude's closure as the checked library.** A smaller entry, but most
+of the roots under `examples/` import a module outside it, `hello` included,
+and none of those resumes.
 
 **A project-local `.linea-cache/` beside the program's manifest.** The entry
 is the same for every project a compiler builds, so a project-local cache
