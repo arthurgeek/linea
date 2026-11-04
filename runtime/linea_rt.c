@@ -11,6 +11,7 @@
 #define _DARWIN_C_SOURCE
 #include <errno.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -133,10 +134,17 @@ static unsigned long last_thread_token = 0;
 typedef char linea_token_count_is_lock_free[__atomic_always_lock_free(sizeof(unsigned long), 0) ? 1 : -1];
 #endif
 
+#if defined(__APPLE__) && !defined(LINEA_SANITIZED)
+static void end_fault_run(void *token);
+#define LINEA_TOKEN_ENDS end_fault_run
+#else
+#define LINEA_TOKEN_ENDS 0
+#endif
+
 static void create_thread_record_key(void) {
     if (pthread_key_create(&thread_record_key, 0) != 0) fail("linea: the runtime cannot create its thread record key\n");
 #if defined(LINEA_THREAD_TOKENS)
-    if (pthread_key_create(&thread_token_key, 0) != 0) fail("linea: the runtime cannot create its thread token key\n");
+    if (pthread_key_create(&thread_token_key, LINEA_TOKEN_ENDS) != 0) fail("linea: the runtime cannot create its thread token key\n");
 #endif
 }
 
@@ -207,11 +215,15 @@ static int previous_bus_spent = 0;
  *
  * Each thread that faults keeps a record of its own, found by probing a
  * table from a hash of the thread, so threads do not share or slow each
- * other's runs. A record is taken over by another thread once its own has
- * not faulted for `fault_run_stale_ns`, or, while its handler runs, for
- * `fault_run_stuck_ns`, which covers a thread that ended or left its handler
- * by a jump. With every record held, a fault is passed on unrecorded, and
- * its run is not ended. */
+ * other's runs. A thread that ends marks its record ended, from the
+ * destructor of its token, and another thread may take that record at once;
+ * a thread that left the handler by a jump never recorded that the handler
+ * returned, so without the mark its record would stay held long after the
+ * thread was gone. Otherwise a record is taken over by another thread once
+ * its own has not faulted for `fault_run_stale_ns`, or, while its handler
+ * runs, for `fault_run_stuck_ns`, which covers a thread that left its
+ * handler by a jump and still runs. With every record held, a fault is
+ * passed on unrecorded, and its run is not ended. */
 typedef __typeof__(((ucontext_t *)0)->uc_mcontext->__ss) interrupted_state;
 
 static const long unrepaired_after_ns = 1000000000L;
@@ -224,6 +236,8 @@ struct fault_run {
     int busy;
     /* The owning thread's token; zero for a record never used. */
     unsigned long owner;
+    /* Whether the owning thread has ended. */
+    int ended;
     /* Whether the owner's handler is running, and when the owner last
      * entered or left it, in nanoseconds of `CLOCK_MONOTONIC`. */
     int in_handler;
@@ -262,6 +276,7 @@ static unsigned long fault_run_start(unsigned long thread) {
 
 /* Whether another thread may take `run` over at `now`. */
 static int fault_run_abandoned(const struct fault_run *run, long now) {
+    if (__atomic_load_n(&run->ended, __ATOMIC_ACQUIRE)) return 1;
     const long idle = now - __atomic_load_n(&run->last_ns, __ATOMIC_ACQUIRE);
     return __atomic_load_n(&run->in_handler, __ATOMIC_ACQUIRE) ? idle >= fault_run_stuck_ns : idle >= fault_run_stale_ns;
 }
@@ -312,6 +327,7 @@ static struct fault_run *hold_fault_run(long now, sigset_t *before) {
             continue;
         }
         __atomic_store_n(&run->owner, self, __ATOMIC_RELEASE);
+        __atomic_store_n(&run->ended, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&run->in_handler, 0, __ATOMIC_RELEASE);
         run->running = 0;
         return run;
@@ -323,6 +339,31 @@ static struct fault_run *hold_fault_run(long now, sigset_t *before) {
 static void release_fault_run(struct fault_run *run, const sigset_t *before) {
     __atomic_store_n(&run->busy, 0, __ATOMIC_RELEASE);
     (void)pthread_sigmask(SIG_SETMASK, before, 0);
+}
+
+/* Runs as a thread holding `token` ends, outside any signal handler, and
+ * marks the thread's record ended so another thread may take it at once. The
+ * record is held while it is marked, with every signal blocked as
+ * `hold_fault_run` holds it, so a thread taking it over never has the mark
+ * land on a record it has just made its own. A record is held only for a few
+ * stores by a thread with every signal blocked, so the wait for it is short. */
+static void end_fault_run(void *token) {
+    const unsigned long self = (unsigned long)(uintptr_t)token;
+    sigset_t every;
+    sigset_t before;
+    if (sigfillset(&every) != 0 || pthread_sigmask(SIG_SETMASK, &every, &before) != 0) return;
+    const unsigned long start = fault_run_start(self);
+    for (unsigned long i = 0; i < fault_run_slots; i += 1) {
+        struct fault_run *run = &fault_runs[(start + i) % fault_run_slots];
+        const unsigned long owner = __atomic_load_n(&run->owner, __ATOMIC_ACQUIRE);
+        if (owner == 0) break;
+        if (owner != self) continue;
+        while (__atomic_exchange_n(&run->busy, 1, __ATOMIC_ACQUIRE) != 0) sched_yield();
+        if (__atomic_load_n(&run->owner, __ATOMIC_ACQUIRE) == self) __atomic_store_n(&run->ended, 1, __ATOMIC_RELEASE);
+        __atomic_store_n(&run->busy, 0, __ATOMIC_RELEASE);
+        break;
+    }
+    (void)pthread_sigmask(SIG_SETMASK, &before, 0);
 }
 
 /* Records this fault before the previous handler runs, and answers whether

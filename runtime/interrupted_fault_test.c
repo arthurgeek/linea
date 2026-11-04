@@ -113,6 +113,20 @@ static void unrepaired_after_a_thread_jumped_out_and_ended(void) {
     (void)*(volatile char *)inaccessible_page;
 }
 
+/* More threads than the runtime keeps records of runs of faults, 256, each
+ * jumped out of the fault handler and ended; another thread's unrepaired
+ * fault is still ended, so the records of ended threads were reclaimed. */
+static void unrepaired_after_more_threads_jumped_out_and_ended_than_records(void) {
+    prepare();
+    for (int i = 0; i < 1024; i += 1) {
+        jumps = 0;
+        pthread_t thread;
+        assert(pthread_create(&thread, 0, jump_out_then_end, 0) == 0);
+        assert(pthread_join(thread, 0) == 0);
+    }
+    (void)*(volatile char *)inaccessible_page;
+}
+
 /* Runs `body` in a child and checks it was ended by a memory fault within ten
  * seconds. */
 static void ends_by_memory_fault(void (*body)(void)) {
@@ -147,6 +161,7 @@ int main(void) {
     ends_by_memory_fault(unrepaired_after_a_jump_out_of_the_handler);
     ends_by_memory_fault(unrepaired_after_three_jumps_out_of_the_handler);
     ends_by_memory_fault(unrepaired_after_a_thread_jumped_out_and_ended);
+    ends_by_memory_fault(unrepaired_after_more_threads_jumped_out_and_ended_than_records);
 #endif
     puts("native interrupted faults: a jump out of the fault handler leaves the thread's faults recorded");
     return 0;
