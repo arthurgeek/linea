@@ -18661,14 +18661,17 @@ test "library resolution continuation preserves bindings and diagnoses applicati
         var prefix = try resolveLibraryPrefix(testing.allocator, &library, &names, &sink);
         defer prefix.deinit();
         try testing.expectEqual(@as(u32, 0), sink.error_count);
-        for ([_]struct { text: []const u8, reusable: bool }{
+        // An application's derives and templates expand from the templates
+        // the library planned, so they resume only from a library that
+        // derives something.
+        for ([_]struct { text: []const u8, reusable: bool, derives: bool = false }{
             .{ .text = "fn main() -> UInt8 { identity(0) }", .reusable = true },
             .{ .text = "fn main() -> UInt8 { absent(0) }", .reusable = true },
             .{ .text = "fn main() -> UInt8 { let callback = || UInt8(0); callback() }", .reusable = false },
             .{ .text = "fn main() -> UInt8 { let value: UInt8 = 0; let callback = [held = value] || held; callback() }", .reusable = false },
             .{ .text = "struct Other {} impl Other { fn touch(_self: Self) -> UInt8 { 0 } } fn main() -> UInt8 { let _other: Other = .{}; identity(0) }", .reusable = true },
             .{ .text = "fn main() -> UInt8 { let _linea_trait_0 = 0; identity(0) }", .reusable = false },
-            .{ .text = "trait Local {} template impl Local {} struct Thing {} derive Local for Thing\nfn main() -> UInt8 { let _thing: Thing = .{}; identity(0) }", .reusable = false },
+            .{ .text = "trait Local {} template impl Local {} struct Thing {} derive Local for Thing\nfn main() -> UInt8 { let _thing: Thing = .{}; identity(0) }", .reusable = true, .derives = true },
         }) |fixture| {
             var app_names = try Interner.initPrefix(gpa, &prefix.interner);
             var app_sink = Sink.init(gpa);
@@ -18683,7 +18686,8 @@ test "library resolution continuation preserves bindings and diagnoses applicati
             } };
             const program: Program = .{ .modules = &modules, .ast = try parser.finish(), .primary = .from(1), .prelude = .from(0) };
             try testing.expectEqual(@as(u32, 0), app_sink.error_count);
-            try testing.expectEqual(fixture.reusable, (try prefix.canResume(testing.allocator, &program, &app_names)));
+            const reusable = fixture.reusable and (!fixture.derives or prefix.seed.template_plans != null);
+            try testing.expectEqual(reusable, (try prefix.canResume(testing.allocator, &program, &app_names)));
             const continued = try resolveWithPrefix(gpa, &program, &app_names, &app_sink, .program, &prefix);
             var fresh_sink = Sink.init(gpa);
             const fresh = try resolve(gpa, &program, &app_names, &fresh_sink, .program);
@@ -18696,7 +18700,7 @@ test "library resolution continuation preserves bindings and diagnoses applicati
             const a = &continued.resolution;
             const b = &fresh.resolution;
             const relocation: Relocation = .{ .source = .of(&ast), .destination = .of(&program.ast) };
-            if (fixture.reusable) for (prefix.result.resolution.targets, 0..) |target, i| {
+            if (reusable) for (prefix.result.resolution.targets, 0..) |target, i| {
                 try testing.expectEqual(target, a.targets[relocation.id(ExprId, @enumFromInt(i)).index()]);
             };
             for (a.targets, b.targets) |actual, expected| {
