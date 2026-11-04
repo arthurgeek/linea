@@ -1,0 +1,21 @@
+// A handle stored through an `inout` parameter outlives the call, so it
+// cannot observe an arena the call opened and ends.
+import std.mem
+
+use mem.Arena
+use mem.Handle
+use mem.Lender
+use mem.SystemAllocator
+use mem.system
+
+fn keep(inout slot: Option[Handle[SystemAllocator]]) {
+    let arena = Arena.open(system(), 4096)
+    defer arena.release()
+    slot = .Some(arena.handle())
+}
+
+fn main() -> UInt8 {
+    var slot: Option[Handle[SystemAllocator]] = .None
+    keep(&slot)
+    0
+}
