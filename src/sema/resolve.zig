@@ -9246,10 +9246,16 @@ const Resolver = struct {
     }
 
     /// Checks the templates and derive requests declared from `first` on.
+    ///
+    /// The library's templates are the traits' first, whichever order the
+    /// program's declarations sit in: a program's second template for a
+    /// trait the library templates is the one refused, and the library's
+    /// own derives keep theirs.
     fn checkDeriveTemplates(self: *Resolver, first: usize) !void {
-        for (first..self.ast.declCount()) |i| {
+        for ([_]bool{ true, false }) |library| for (first..self.ast.declCount()) |i| {
             const d = DeclId.at(@intCast(i));
             if (self.ast.declTag(d) != .template_impl) continue;
+            if (self.program.get(self.program.moduleOf(d)).library != library) continue;
             const trait = self.declReachedBy(self.ast.declTrait(d));
             if (trait == DeclId.none) continue;
 
@@ -9265,7 +9271,7 @@ const Resolver = struct {
                 continue;
             }
             gop.value_ptr.* = d;
-        }
+        };
 
         for (first..self.ast.declCount()) |i| {
             const d = DeclId.at(@intCast(i));

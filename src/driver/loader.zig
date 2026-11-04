@@ -5531,6 +5531,9 @@ test "checked library resumes a program that derives, with the diagnostics and M
         // Refusals: a repeated trait, and a trait with no template.
         "@derive(Equatable, Equatable)\nstruct Twice { a: UInt8 }\nfn main() -> UInt8 { 0 }",
         "trait Plain {}\n@derive(Plain)\nstruct Bare { a: UInt8 }\nfn main() -> UInt8 { 0 }",
+        // A second template for a trait the library templates: the
+        // library's is the trait's, wherever the program's is declared.
+        "template impl Equatable where reflect.components: Equatable {\n    fn equals(self: Self, other: Self) -> Bool { true }\n}\nfn main() -> UInt8 { 0 }",
     };
     for (texts) |text| {
         const prefix = if (std.mem.indexOf(u8, text, "import std.json") != null) with_json else prelude;
