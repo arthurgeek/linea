@@ -1,4 +1,4 @@
-# 253. `run` and `test` compile unoptimised; `build` ships optimised
+# 256. `run` and `test` compile unoptimised; `build` ships optimised
 
 Status: Accepted — 2026-11-03. Builds on
 [0090](0090-the-backend-is-mlir-printed-rather-than-constructed.md), which
