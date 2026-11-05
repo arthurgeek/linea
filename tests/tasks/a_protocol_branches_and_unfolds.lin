@@ -1,0 +1,42 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.Choose
+use session.End
+use session.Offer
+use session.Recv
+use session.Send
+
+// A counter receives a number, then either sends its double or stops.
+struct Counter {}
+
+impl Protocol for Counter {
+    type Dual = Asker
+    type Step = Recv[UInt64, Offer[Send[UInt64, End], End]]
+}
+
+struct Asker {}
+
+impl Protocol for Asker {
+    type Dual = Counter
+    type Step = Send[UInt64, Choose[Recv[UInt64, End], End]]
+}
+
+// A task offers a choice and its creator takes one branch of it. The endpoint
+// types follow the protocol step by step, and `enter` unfolds a named protocol.
+// The creator sends 21, chooses the doubling branch, and answers 42.
+fn main() -> UInt8 {
+    let body = sink [] |sink me: Chan[Counter]| {
+        let (number, waiting) = me.enter().recv()
+        match waiting.offer() {
+            Left(answering) => answering.send(number * 2).close(),
+            Right(done) => done.close(),
+        }
+    }
+    let slot = task.prepare(body).unwrap()
+    let asking = slot.start().enter().send(21)
+    let (doubled, done) = asking.choose_left().recv()
+    done.close()
+    UInt8(doubled)
+}

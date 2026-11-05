@@ -1,0 +1,20 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+// `close` is the handle's last use, so once it has joined the task, the place
+// the body held lent `inout` is the creator's again: the creator adds to
+// `count` after the task did, and the program answers 2.
+fn main() -> UInt8 {
+    var count = UInt64(0)
+    let body = sink [inout count] |sink me: Chan[End]| {
+        count += 1
+        me.close()
+    }
+    let slot = task.prepare(body).unwrap()
+    slot.start().close()
+    count += 1
+    UInt8(count)
+}
