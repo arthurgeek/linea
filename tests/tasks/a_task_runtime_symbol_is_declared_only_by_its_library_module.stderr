@@ -1,0 +1,20 @@
+error[T-ExternRuntime]: `linea_owner_open` takes or answers what only the standard library's `task` keeps in a type, so only that module declares it
+ --> tests/tasks/a_task_runtime_symbol_is_declared_only_by_its_library_module/main.lin:6:11
+  |
+6 | extern fn linea_owner_open() -> UInt64
+  |           ^^^^^^^^^^^^^^^^ reach it through `task.own`
+error[T-ExternRuntime]: `linea_owner_free` takes or answers what only the standard library's `task` keeps in a type, so only that module declares it
+ --> tests/tasks/a_task_runtime_symbol_is_declared_only_by_its_library_module/main.lin:8:11
+  |
+8 | extern fn linea_owner_free(queue: UInt64)
+  |           ^^^^^^^^^^^^^^^^ reach it through `close` on a `task.Owner`
+error[T-ExternRuntime]: `linea_task_prepare` takes or answers what only the standard library's `task` keeps in a type, so only that module declares it
+  --> tests/tasks/a_task_runtime_symbol_is_declared_only_by_its_library_module/main.lin:10:11
+   |
+10 | extern fn linea_task_prepare(stack_bytes: UInt64) -> Int64
+   |           ^^^^^^^^^^^^^^^^^^ reach it through `task.prepare` and `task.prepare_in`
+error[T-ExternRuntime]: `linea_chan_close` takes or answers what only the standard library's `session` keeps in a type, so only that module declares it
+  --> tests/tasks/a_task_runtime_symbol_is_declared_only_by_its_library_module/main.lin:12:11
+   |
+12 | extern fn linea_chan_close(endpoint: UInt64)
+   |           ^^^^^^^^^^^^^^^^ reach it through `close` on a `session.Chan`

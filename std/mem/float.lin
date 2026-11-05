@@ -1,19 +1,21 @@
-extern fn linea_float64_parse(address: UInt64, length: UInt64, inout bits: UInt64, inout offset: UInt64) -> UInt64
+import std.mem.address
+
+extern fn linea_float64_parse(at: UInt64, length: UInt64, inout bits: UInt64, inout offset: UInt64) -> UInt64
 
 // Parse a Float64 from `bytes` through the runtime, which writes the value's
 // bits and the offset parsing stopped at. Only the call receives the certified
 // byte address; no address escapes to text.
 internal fn parse_float64_bits(bytes: Slice[UInt8], inout bits: UInt64, inout offset: UInt64) -> UInt64 where carries() {
-    linea_float64_parse(bytes.at, bytes.len, &bits, &offset)
+    linea_float64_parse(address.raw(slice_address(bytes)), bytes.len, &bits, &offset)
 }
 
-extern fn linea_float32_parse(address: UInt64, length: UInt64, inout bits: UInt64, inout offset: UInt64) -> UInt64
+extern fn linea_float32_parse(at: UInt64, length: UInt64, inout bits: UInt64, inout offset: UInt64) -> UInt64
 
 // Parse a Float32 the same way, rounding once to the nearest Float32. The
 // runtime writes the bits of the Float64 holding that value, which it holds
 // exactly.
 internal fn parse_float32_bits(bytes: Slice[UInt8], inout bits: UInt64, inout offset: UInt64) -> UInt64 where carries() {
-    linea_float32_parse(bytes.at, bytes.len, &bits, &offset)
+    linea_float32_parse(address.raw(slice_address(bytes)), bytes.len, &bits, &offset)
 }
 
 // A float's IEEE 754 bits as the unsigned integer of its width, and back. The

@@ -1,0 +1,24 @@
+import std.io
+
+use io.Writer
+
+struct Celsius {
+    degrees: Int64,
+}
+
+// Rendering a reading writes a note to standard error first, so `println`
+// runs `fmt`, and `fmt` prints while `println` is printing.
+impl Display for Celsius {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        io.eprintln("rendering a reading")
+        "{self.degrees} C".fmt(&w)
+    }
+}
+
+fn main() -> UInt8 {
+    let reading = Celsius { degrees = 21 }
+    let _ = io.println(reading) else |_| {
+        return 1
+    }
+    0
+}

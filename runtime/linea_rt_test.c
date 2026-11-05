@@ -2,11 +2,17 @@
 /* Assertions execute test setup, checks, and cleanup in every build mode. */
 #undef NDEBUG
 #include <assert.h>
+#include <errno.h>
+#include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 unsigned long linea_alloc(unsigned long size, unsigned long align);
@@ -21,6 +27,10 @@ unsigned long linea_env_len(unsigned long i);
 void linea_trap(int kind, const char *file, int line, int col);
 void linea_panic(unsigned long at, unsigned long len, const char *file, int line, int col);
 void linea_storage_extent(unsigned long at, unsigned long len);
+int linea_thread_begin(unsigned long at, unsigned long bytes, unsigned long low, unsigned long high);
+long linea_read_some(int fd, unsigned long at, unsigned long len);
+long linea_write_some(int fd, unsigned long at, unsigned long len);
+long linea_random_bytes(unsigned long at, unsigned long len);
 
 /* Runs `body` in a child and checks it aborted after writing `expected` to stderr. */
 static void aborts_saying(void (*body)(void), const char *expected) {
@@ -44,6 +54,412 @@ static void aborts_saying(void (*body)(void), const char *expected) {
     assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
     assert(strcmp(said, expected) == 0);
 }
+
+/* Runs `body` in a child and checks it exited cleanly. */
+static void exits_cleanly(void (*body)(void)) {
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        body();
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    if (WIFSIGNALED(status)) fprintf(stderr, "the process ended by signal %d\n", WTERMSIG(status));
+    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) fprintf(stderr, "the process exited with %d\n", WEXITSTATUS(status));
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+/* A page of the host's own, inaccessible until the host's fault handler
+ * makes it readable, and how many faults that handler took in it. */
+static char *host_page = 0;
+static unsigned long host_page_bytes = 0;
+static volatile sig_atomic_t host_faults = 0;
+
+/* The host's fault handler: it answers a fault in its own page by making the
+ * page readable, so the faulting load runs again and succeeds. */
+static void host_on_fault(int signal, siginfo_t *info, void *context) {
+    (void)signal;
+    (void)context;
+    char *address = info->si_addr;
+    if (address < host_page || address >= host_page + host_page_bytes) _exit(3);
+    host_faults += 1;
+    if (mprotect(host_page, host_page_bytes, PROT_READ) != 0) _exit(4);
+}
+
+static void host_on_pipe(int signal) { (void)signal; }
+
+/* A process that runs Linea code beside its own, as a host calling an
+ * exported function does, keeps the handlers it installed: the runtime leaves
+ * SIGPIPE as the host set it, and hands a fault that is not Linea's to the
+ * host's handler. */
+static void host_handlers_survive(void) {
+    struct sigaction fault;
+    memset(&fault, 0, sizeof fault);
+    fault.sa_sigaction = host_on_fault;
+    fault.sa_flags = SA_SIGINFO;
+    assert(sigemptyset(&fault.sa_mask) == 0);
+    assert(sigaction(SIGSEGV, &fault, 0) == 0 && sigaction(SIGBUS, &fault, 0) == 0);
+    struct sigaction pipe_action;
+    memset(&pipe_action, 0, sizeof pipe_action);
+    pipe_action.sa_handler = host_on_pipe;
+    assert(sigemptyset(&pipe_action.sa_mask) == 0);
+    assert(sigaction(SIGPIPE, &pipe_action, 0) == 0);
+
+    char name[] = "host";
+    char *argv[] = {name, NULL};
+    linea_set_args(1, argv);
+
+    struct sigaction now;
+    assert(sigaction(SIGPIPE, 0, &now) == 0 && now.sa_handler == host_on_pipe);
+    host_page_bytes = (unsigned long)sysconf(_SC_PAGESIZE);
+    host_page = mmap(0, host_page_bytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    assert(host_page != MAP_FAILED);
+    assert(*(volatile char *)host_page == 0);
+    assert(host_faults == 1);
+}
+
+/* Installs `handler` for SIGSEGV and SIGBUS with `flags` and with SIGUSR1 in
+ * its mask, starts the runtime, and maps a fresh inaccessible page of the
+ * host's own; `host_fault_with` then loads from it. */
+static void install_host_handler(void (*handler)(int, siginfo_t *, void *), unsigned flags) {
+    struct sigaction fault;
+    memset(&fault, 0, sizeof fault);
+    fault.sa_sigaction = handler;
+    fault.sa_flags = (int)(flags | (unsigned)SA_SIGINFO);
+    assert(sigemptyset(&fault.sa_mask) == 0 && sigaddset(&fault.sa_mask, SIGUSR1) == 0);
+    assert(sigaction(SIGSEGV, &fault, 0) == 0 && sigaction(SIGBUS, &fault, 0) == 0);
+    char name[] = "host";
+    char *argv[] = {name, NULL};
+    linea_set_args(1, argv);
+    host_page_bytes = (unsigned long)sysconf(_SC_PAGESIZE);
+    host_page = mmap(0, host_page_bytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    assert(host_page != MAP_FAILED);
+}
+
+static void host_fault_with(void (*handler)(int, siginfo_t *, void *), unsigned flags) {
+    install_host_handler(handler, flags);
+    (void)*(volatile char *)host_page;
+}
+
+/* What the host's handler found blocked while it ran: SIGUSR1, which its
+ * mask names, and the fault's own signal. */
+static volatile sig_atomic_t usr1_blocked = 0;
+static volatile sig_atomic_t fault_blocked = 0;
+
+static void host_on_fault_noting_mask(int signal, siginfo_t *info, void *context) {
+    sigset_t now;
+    if (pthread_sigmask(SIG_BLOCK, 0, &now) != 0) _exit(6);
+    usr1_blocked = sigismember(&now, SIGUSR1) == 1;
+    fault_blocked = sigismember(&now, signal) == 1;
+    host_on_fault(signal, info, context);
+}
+
+/* The host's handler runs with its mask blocked and, without `SA_NODEFER`,
+ * the fault's signal too. */
+static void host_mask_is_blocked(void) {
+    host_fault_with(host_on_fault_noting_mask, 0);
+    assert(host_faults == 1 && usr1_blocked && fault_blocked);
+}
+
+#if !defined(LINEA_SANITIZED)
+/* With `SA_NODEFER`, the host's handler runs with the fault's signal
+ * unblocked, so a fault inside it reaches it again. A sanitized runtime
+ * installs no fault handler, and the thread sanitizer runs every handler with
+ * all signals blocked, so only the unsanitized runtime is held to this. */
+static void host_nodefer_leaves_the_fault_unblocked(void) {
+    host_fault_with(host_on_fault_noting_mask, (unsigned)SA_NODEFER);
+    assert(host_faults == 1 && usr1_blocked && !fault_blocked);
+}
+#endif
+
+/* A host handler that notes a fault and returns without repairing it. */
+static void host_on_fault_returning(int signal, siginfo_t *info, void *context) {
+    (void)signal;
+    (void)info;
+    (void)context;
+    host_faults += 1;
+}
+
+/* A handler installed with `SA_RESETHAND` that returns without repairing the
+ * access ends the process by the fault: at once where the system reports the
+ * flag, and on macOS, which does not, once the access has kept faulting the
+ * same way for a second. */
+static void host_resethand_handler_ends(void) {
+    host_fault_with(host_on_fault_returning, (unsigned)SA_RESETHAND);
+}
+
+/* The host's handler repairs a store in two steps: the first fault makes the
+ * page readable, the second, from the same store, writable. */
+static void host_on_fault_in_two_steps(int signal, siginfo_t *info, void *context) {
+    (void)signal;
+    (void)info;
+    (void)context;
+    host_faults += 1;
+    const int access = host_faults == 1 ? PROT_READ : PROT_READ | PROT_WRITE;
+    if (mprotect(host_page, host_page_bytes, access) != 0) _exit(4);
+}
+
+static void host_repairs_in_two_steps(void) {
+    install_host_handler(host_on_fault_in_two_steps, 0);
+    *(volatile char *)host_page = 1;
+    assert(host_faults == 2 && host_page[0] == 1);
+}
+
+/* A host that polls by protecting a page and touching it later, as a runtime
+ * stops its threads at a safepoint, repairs each fault, and every poll
+ * survives. */
+static void host_polls(void) {
+    install_host_handler(host_on_fault, 0);
+    for (int poll = 0; poll < 5; poll += 1) {
+        assert(mprotect(host_page, host_page_bytes, PROT_NONE) == 0);
+        struct timespec pause_for = {0, 20000000};
+        nanosleep(&pause_for, 0);
+        (void)*(volatile char *)host_page;
+    }
+    assert(host_faults == 5);
+}
+
+#if defined(__APPLE__)
+/* A host handler that returns without repairing anything. */
+static void host_on_fault_ignoring(int signal, siginfo_t *info, void *context) {
+    (void)signal;
+    (void)info;
+    (void)context;
+}
+#endif
+
+#if defined(__APPLE__)
+static void *load_from(void *page) {
+    (void)*(volatile char *)page;
+    return 0;
+}
+#endif
+
+/* Sixteen threads each fault without end on a page of their own, and the
+ * host's handler repairs nothing: each thread's run of faults is recorded
+ * apart from the others', so none is broken or slowed by another's and the
+ * process ends by the fault once the runs have lasted their second. */
+enum { faulting_threads = 16 };
+
+#if defined(__APPLE__)
+static void unrepaired_faults_on_many_threads(void) {
+    install_host_handler(host_on_fault_ignoring, 0);
+    pthread_t threads[faulting_threads];
+    for (int i = 0; i < faulting_threads; i += 1) {
+        void *page = mmap(0, host_page_bytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        assert(page != MAP_FAILED);
+        assert(pthread_create(&threads[i], 0, load_from, page) == 0);
+    }
+    for (int i = 0; i < faulting_threads; i += 1) assert(pthread_join(threads[i], 0) == 0);
+}
+#endif
+
+/* A host handler that leaves the repair to another thread: it yields and
+ * returns, and the access faults again until the repair lands. */
+static void host_on_fault_yielding(int signal, siginfo_t *info, void *context) {
+    (void)signal;
+    (void)info;
+    (void)context;
+    host_faults += 1;
+    sched_yield();
+}
+
+/* How long the repairing thread waits before it makes the page readable. */
+static long repair_after_ns = 0;
+
+static void *repair_later(void *unused) {
+    (void)unused;
+    struct timespec pause_for = {repair_after_ns / 1000000000L, repair_after_ns % 1000000000L};
+    nanosleep(&pause_for, 0);
+    if (mprotect(host_page, host_page_bytes, PROT_READ) != 0) _exit(4);
+    return 0;
+}
+
+/* The repair arrives from another thread `repair_after_ns` after the access
+ * first faults; the access then succeeds. */
+static void host_repairs_from_another_thread(void) {
+    install_host_handler(host_on_fault_yielding, 0);
+    pthread_t repairer;
+    assert(pthread_create(&repairer, 0, repair_later, 0) == 0);
+    (void)*(volatile char *)host_page;
+    assert(pthread_join(repairer, 0) == 0);
+    assert(host_faults >= 1);
+}
+
+static void host_repairs_from_another_thread_soon(void) {
+    repair_after_ns = 2000000;
+    host_repairs_from_another_thread();
+}
+
+/* Half a second, within the second an access may keep faulting unrepaired. */
+static void host_repairs_from_another_thread_late(void) {
+    repair_after_ns = 500000000;
+    host_repairs_from_another_thread();
+}
+
+#if defined(__APPLE__)
+/* A host handler that takes 20 ms and repairs nothing. */
+static void host_on_fault_slowly(int signal, siginfo_t *info, void *context) {
+    (void)signal;
+    (void)info;
+    (void)context;
+    struct timespec pause_for = {0, 20000000};
+    nanosleep(&pause_for, 0);
+}
+#endif
+
+#if defined(__APPLE__)
+static void host_slow_handler_repairs_nothing(void) { host_fault_with(host_on_fault_slowly, 0); }
+
+/* Eight threads each fault without end on a page of their own. */
+static void unrepaired_faults_on_eight_threads(void) {
+    install_host_handler(host_on_fault_ignoring, 0);
+    pthread_t threads[8];
+    for (int i = 0; i < 8; i += 1) {
+        void *page = mmap(0, host_page_bytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        assert(page != MAP_FAILED);
+        assert(pthread_create(&threads[i], 0, load_from, page) == 0);
+    }
+    for (int i = 0; i < 8; i += 1) assert(pthread_join(threads[i], 0) == 0);
+}
+#endif
+
+#if defined(__APPLE__)
+static double seconds_now(void) {
+    struct timespec now;
+    assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+    return (double)now.tv_sec + (double)now.tv_nsec / 1e9;
+}
+#endif
+
+/* Runs `body` in a child and checks it was ended by the default action of a
+ * memory fault, SIGSEGV or SIGBUS. */
+static void ends_by_memory_fault(void (*body)(void)) {
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        body();
+        _exit(0);
+    }
+    int status = 0;
+    pid_t ended = 0;
+    for (int tenth = 0; tenth < 100 && ended == 0; tenth += 1) {
+        ended = waitpid(pid, &status, WNOHANG);
+        if (ended == 0) {
+            struct timespec pause_for = {0, 100000000};
+            nanosleep(&pause_for, 0);
+        }
+    }
+    if (ended == 0) {
+        kill(pid, SIGKILL);
+        assert(waitpid(pid, &status, 0) == pid);
+        fprintf(stderr, "the faulting process still ran after ten seconds\n");
+        abort();
+    }
+    if (!WIFSIGNALED(status)) fprintf(stderr, "the faulting process exited with %d\n", WEXITSTATUS(status));
+    assert(WIFSIGNALED(status) && (WTERMSIG(status) == SIGSEGV || WTERMSIG(status) == SIGBUS));
+}
+
+#if defined(__APPLE__)
+/* Runs `body` in a child, checks it was ended by a memory fault, and checks
+ * that took between `at_least` and `at_most` seconds. */
+static void ends_by_memory_fault_after(void (*body)(void), double at_least, double at_most) {
+    const double started = seconds_now();
+    ends_by_memory_fault(body);
+    const double took = seconds_now() - started;
+    if (took < at_least || took > at_most) fprintf(stderr, "the faulting process ended after %.3f s\n", took);
+    assert(took >= at_least && took <= at_most);
+}
+#endif
+
+/* A signal stack too small to hold the thread's record is refused, and
+ * leaves the thread's alternate signal stack as it was. */
+static void a_tiny_signal_stack_is_refused(void) {
+    static unsigned long tiny[2] __attribute__((aligned(16)));
+    stack_t before, after;
+    assert(sigaltstack(0, &before) == 0);
+    assert(linea_thread_begin((unsigned long)tiny, sizeof tiny, 0, 0) == EINVAL);
+    assert(sigaltstack(0, &after) == 0);
+    assert(after.ss_sp == before.ss_sp && after.ss_flags == before.ss_flags);
+}
+
+static void *park(void *arg) {
+    (void)arg;
+    for (;;) pause();
+    return 0;
+}
+
+/* Runs `body` in a Linea program whose standard error is a pipe or a socket
+ * nobody reads, beside a second thread it started, and checks it still ended
+ * by SIGABRT: a failure report is never cut short by SIGPIPE. */
+static void aborts_into_closed_channel(void (*body)(void), int socket) {
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        struct sigaction action;
+        memset(&action, 0, sizeof action);
+        action.sa_handler = SIG_DFL;
+        assert(sigemptyset(&action.sa_mask) == 0);
+        assert(sigaction(SIGPIPE, &action, 0) == 0);
+        int err_channel[2];
+        assert((socket ? socketpair(AF_UNIX, SOCK_STREAM, 0, err_channel) : pipe(err_channel)) == 0);
+        assert(close(err_channel[0]) == 0);
+        assert(dup2(err_channel[1], 2) == 2);
+        char name[] = "reporting";
+        char *argv[] = {name, NULL};
+        linea_set_args(1, argv);
+        pthread_t parked;
+        assert(pthread_create(&parked, 0, park, 0) == 0);
+        body();
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    if (WIFSIGNALED(status) && WTERMSIG(status) != SIGABRT) fprintf(stderr, "the failing process ended by signal %d\n", WTERMSIG(status));
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
+}
+
+/* A sanitized runtime leaves faults to the sanitizer, which reports a wild
+ * load in its own words and exits rather than ending by the signal. */
+#if !defined(LINEA_SANITIZED)
+/* Sets SIGSEGV and SIGBUS to `handler` with `flags`, starts the runtime, and
+ * loads from address 16, which lies in the unmapped low pages both Linux and
+ * macOS keep. */
+static void wild_load_after(void (*handler)(int), int flags) {
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = handler;
+    action.sa_flags = flags;
+    assert(sigemptyset(&action.sa_mask) == 0);
+    assert(sigaction(SIGSEGV, &action, 0) == 0 && sigaction(SIGBUS, &action, 0) == 0);
+    char name[] = "wild";
+    char *argv[] = {name, NULL};
+    linea_set_args(1, argv);
+    (void)*(volatile char *)16;
+}
+
+/* A wild load in a process that inherited SIGSEGV and SIGBUS ignored still
+ * ends it with the fault's signal, as it does where they were never set. */
+static void ignored_fault_ends_the_process(void) { wild_load_after(SIG_IGN, 0); }
+
+/* A shell can leave `SA_SIGINFO` set beside the default action; the fault
+ * still takes the default action. */
+static void default_with_siginfo_ends_the_process(void) { wild_load_after(SIG_DFL, SA_SIGINFO); }
+
+/* Runs `body` in a child and checks it was ended by SIGSEGV. */
+static void ends_by_fault(void (*body)(void)) {
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        body();
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGSEGV);
+}
+#endif
 
 static void over_aligned(void) { (void)linea_alloc(8, 16); }
 static void free_nothing(void) { linea_free(linea_alloc(8, 8), 0, 8); }
@@ -103,7 +519,7 @@ static void environment(void) {
     assert(linea_env_at(count) == 0 && linea_env_len(count) == 0);
 }
 
-#if LINEA_CHECK_STORAGE
+#if defined(LINEA_CHECK_STORAGE) && LINEA_CHECK_STORAGE
 /* Runs `body` in a child and checks it was killed by `signal` without writing anything. */
 static void dies_by(void (*body)(void), int signal) {
     pid_t pid = fork();
@@ -129,6 +545,31 @@ static void read_after_free(void) {
 static void write_after_free(void) {
     unsigned long at = linea_alloc(16, 8);
     linea_free(at, 16, 8);
+    store(at + 15, 1);
+}
+
+/* Allocates and frees until the process ends, so the checking allocator's
+ * table is being changed when another thread faults. */
+static int churning = 0;
+
+static void *churn(void *arg) {
+    (void)arg;
+    for (;;) {
+        linea_free(linea_alloc(64, 8), 64, 8);
+        __atomic_store_n(&churning, 1, __ATOMIC_SEQ_CST);
+    }
+    return 0;
+}
+
+/* A fault on freed storage is reported while another thread is changing the
+ * allocator's table, not lost to the default action. */
+static void write_after_free_beside_allocation(void) {
+    unsigned long at = linea_alloc(16, 8);
+    linea_free(at, 16, 8);
+    pthread_t other;
+    assert(pthread_create(&other, 0, churn, 0) == 0);
+    while (__atomic_load_n(&churning, __ATOMIC_SEQ_CST) == 0) {
+    }
     store(at + 15, 1);
 }
 
@@ -181,6 +622,32 @@ static void system_call_on_freed(void) {
     unsigned long at = linea_alloc(64, 8);
     linea_free(at, 64, 8);
     linea_storage_extent(at, 64);
+}
+
+/* The runtime's I/O entries hand the bytes they are given to the allocator
+ * before the system call, so freed storage is never written out, read into
+ * or filled. */
+static void write_from_freed(void) {
+    unsigned long at = linea_alloc(8, 8);
+    linea_free(at, 8, 8);
+    (void)linea_write_some(1, at, 8);
+}
+
+static void read_into_freed(void) {
+    unsigned long at = linea_alloc(8, 8);
+    linea_free(at, 8, 8);
+    (void)linea_read_some(0, at, 8);
+}
+
+static void random_into_freed(void) {
+    unsigned long at = linea_alloc(16, 8);
+    linea_free(at, 16, 8);
+    (void)linea_random_bytes(at, 16);
+}
+
+static void write_past_end(void) {
+    unsigned long at = linea_alloc(8, 8);
+    (void)linea_write_some(1, at, 9);
 }
 
 /* A system call handed more bytes than the allocation holds is stopped
@@ -264,39 +731,67 @@ static void checked_allocation(void) {
     linea_free(large, 100000, 8);
 }
 
-/* The fault handler reports the faulting address and restores the default
- * action once it has run. `SA_RESETHAND` does not fit an `int` on Linux, so
- * installing the handler must not trip the implicit-conversion check. */
-static void fault_handler_is_one_shot_and_informative(void) {
+/* The fault handler is told the faulting address, and stays installed after
+ * a fault it passes on, so it is not reset to the default action.
+ * `SA_RESETHAND` does not fit an `int` on Linux, so the flags are compared
+ * unsigned. */
+static void fault_handler_stays_and_is_informative(void) {
     static const int faults[] = {SIGSEGV, SIGBUS};
     for (unsigned long i = 0; i < sizeof faults / sizeof *faults; i += 1) {
         struct sigaction installed;
         assert(sigaction(faults[i], 0, &installed) == 0);
         assert((installed.sa_flags & SA_SIGINFO) != 0);
-#if defined(__linux__)
-        /* Only Linux reports the one-shot flag back. */
-        assert(((unsigned)installed.sa_flags & (unsigned)SA_RESETHAND) != 0);
-#endif
+        assert(((unsigned)installed.sa_flags & (unsigned)SA_RESETHAND) == 0);
     }
 }
 #endif
 
 int main(void) {
+    /* First, so the host's handlers are in place before the runtime installs
+     * its own in that child. */
+    exits_cleanly(host_handlers_survive);
+    exits_cleanly(host_mask_is_blocked);
+#if !defined(LINEA_SANITIZED)
+    exits_cleanly(host_nodefer_leaves_the_fault_unblocked);
+#endif
+    ends_by_memory_fault(host_resethand_handler_ends);
+    exits_cleanly(host_repairs_in_two_steps);
+    exits_cleanly(host_polls);
+    /* Only macOS hides `SA_RESETHAND`, so only there does the runtime end a
+     * fault that its host's handler leaves unrepaired; elsewhere the kernel
+     * repeats it as it would without the runtime. */
+#if defined(__APPLE__)
+    ends_by_memory_fault_after(unrepaired_faults_on_many_threads, 1.0, 3.0);
+    ends_by_memory_fault_after(host_slow_handler_repairs_nothing, 1.0, 4.0);
+    ends_by_memory_fault_after(unrepaired_faults_on_eight_threads, 1.0, 3.0);
+#endif
+    exits_cleanly(host_repairs_from_another_thread_soon);
+    exits_cleanly(host_repairs_from_another_thread_late);
+    exits_cleanly(a_tiny_signal_stack_is_refused);
+#if !defined(LINEA_SANITIZED)
+    ends_by_fault(ignored_fault_ends_the_process);
+    ends_by_fault(default_with_siginfo_ends_the_process);
+#endif
     allocation();
     arguments();
     environment();
-#if LINEA_CHECK_STORAGE
+#if defined(LINEA_CHECK_STORAGE) && LINEA_CHECK_STORAGE
     checked_allocation();
-    fault_handler_is_one_shot_and_informative();
+    fault_handler_stays_and_is_informative();
 #if defined(__linux__)
     mappings_follow_live_allocations();
 #endif
     aborts_saying(read_after_free, "linea: storage was used after it was freed\n");
     aborts_saying(write_after_free, "linea: storage was used after it was freed\n");
+    for (int i = 0; i < 32; i += 1) aborts_saying(write_after_free_beside_allocation, "linea: storage was used after it was freed\n");
     aborts_saying(view_across_growth, "linea: storage was used after it was freed\n");
     aborts_saying(system_call_on_freed, "linea: storage was used after it was freed\n");
     aborts_saying(system_call_past_end, "linea: an access reached outside its storage\n");
     aborts_saying(system_call_before_start, "linea: an access reached outside its storage\n");
+    aborts_saying(write_from_freed, "linea: storage was used after it was freed\n");
+    aborts_saying(read_into_freed, "linea: storage was used after it was freed\n");
+    aborts_saying(random_into_freed, "linea: storage was used after it was freed\n");
+    aborts_saying(write_past_end, "linea: an access reached outside its storage\n");
     aborts_saying(freed_twice, "linea: storage was freed twice\n");
     aborts_saying(freed_inside, "linea: a disposal named storage that is not allocated\n");
     aborts_saying(freed_short, "linea: a disposal named the wrong size: 8 bytes of a 16-byte allocation\n");
@@ -310,7 +805,12 @@ int main(void) {
     aborts_saying(free_nothing, "linea: a disposal named no extent to release\n");
     aborts_saying(trap_overflow, "linea: integer overflow at t.lin:3:7\n");
     aborts_saying(panic_message, "linea: panic: boom at t.lin:1:2\n");
-#if LINEA_CHECK_STORAGE
+    for (int socket = 0; socket < 2; socket += 1) {
+        aborts_into_closed_channel(over_aligned, socket);
+        aborts_into_closed_channel(trap_overflow, socket);
+        aborts_into_closed_channel(panic_message, socket);
+    }
+#if defined(LINEA_CHECK_STORAGE) && LINEA_CHECK_STORAGE
     puts("native runtime: checked allocation, arguments, environment and aborts passed");
 #else
     puts("native runtime: allocation, arguments, environment and aborts passed");

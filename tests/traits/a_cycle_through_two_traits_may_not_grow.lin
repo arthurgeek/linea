@@ -1,0 +1,43 @@
+// `climb` calls `Outer.outer`, whose implementation calls `Inner.inner`, whose
+// implementation calls `climb` again: the cycle runs through two dispatched
+// calls. `climb` hands `Outer.outer` an array of the value it was given, so
+// each lap would need a body at a larger type, and the call is refused.
+trait Outer {
+    fn outer[U: Copyable](self: Self, depth: UInt8, value: U) -> UInt8
+}
+
+trait Inner {
+    fn inner[U: Copyable](self: Self, depth: UInt8, value: U) -> UInt8
+}
+
+struct Shell {
+    size: UInt8,
+}
+
+struct Core {
+    size: UInt8,
+}
+
+impl Outer for Shell {
+    fn outer[U: Copyable](self: Shell, depth: UInt8, value: U) -> UInt8 {
+        Inner.inner(Core { size = self.size }, depth, value)
+    }
+}
+
+impl Inner for Core {
+    fn inner[U: Copyable](self: Core, depth: UInt8, value: U) -> UInt8 {
+        climb(self.size, depth, value)
+    }
+}
+
+fn climb[U: Copyable](size: UInt8, depth: UInt8, value: U) -> UInt8 {
+    if depth == 0 {
+        size
+    } else {
+        Outer.outer(Shell { size = size }, depth - 1, [copy(value)]) + 1
+    }
+}
+
+fn main() -> UInt8 {
+    climb(4, 2, UInt8(1))
+}

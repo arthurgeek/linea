@@ -5,15 +5,15 @@ const parse_token_limit = 65536;
 const ParseStatus = enum(u64) { ok, syntax, out_of_range, token_limit };
 
 // Input is a certified byte extent from std.mem. Outputs contain no observations.
-export fn linea_float64_parse(address: u64, length: u64, bits: *u64, offset: *u64) callconv(.c) u64 {
-    return parseDecimal(f64, address, length, bits, offset);
+export fn linea_float64_parse(at: u64, length: u64, bits: *u64, offset: *u64) callconv(.c) u64 {
+    return parseDecimal(f64, at, length, bits, offset);
 }
 
 // The same as `linea_float64_parse`, rounding once to the nearest binary32
 // value. `bits` receives the binary64 encoding of that value, which holds it
 // exactly, so both widths cross the foreign interface as one kind of word.
-export fn linea_float32_parse(address: u64, length: u64, bits: *u64, offset: *u64) callconv(.c) u64 {
-    return parseDecimal(f32, address, length, bits, offset);
+export fn linea_float32_parse(at: u64, length: u64, bits: *u64, offset: *u64) callconv(.c) u64 {
+    return parseDecimal(f32, at, length, bits, offset);
 }
 
 // One scanner owns the decimal grammar and its syntax offsets for both

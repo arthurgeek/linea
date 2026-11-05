@@ -1,0 +1,25 @@
+error[T-ExternRuntime]: `linea_chan_send` takes or answers what only the standard library's `mem` keeps in a type, so only that module declares it
+ --> tests/tasks/a_typed_bytes_parameter_takes_only_a_raw_address/main.lin:5:11
+  |
+5 | extern fn linea_chan_send(endpoint: UInt64, at: UInt64, len: UInt64)
+  |           ^^^^^^^^^^^^^^^ reach it through `send` on a `session.Chan`
+error[T-ExternRuntime]: `linea_owner_call` takes or answers what only the standard library's `mem` keeps in a type, so only that module declares it
+ --> tests/tasks/a_typed_bytes_parameter_takes_only_a_raw_address/main.lin:7:11
+  |
+7 | extern fn linea_owner_call(queue: UInt64, at: UInt64, len: UInt64, answer_at: UInt64 = 1, answer_len: UInt64 = 8)
+  |           ^^^^^^^^^^^^^^^^ reach it through `call` on a `task.Client`
+error[T-RawAddress]: the runtime reads or writes values at this address, so it takes only the number in a `mem.address.Address`
+  --> tests/tasks/a_typed_bytes_parameter_takes_only_a_raw_address/main.lin:10:24
+   |
+10 |     linea_chan_send(0, 1, 8)
+   |                        ^ pass `address.raw(at)`, whose address names the type of the values kept there
+error[T-RawAddress]: the runtime reads or writes values at this address, so it takes only the number in a `mem.address.Address`
+  --> tests/tasks/a_typed_bytes_parameter_takes_only_a_raw_address/main.lin:11:25
+   |
+11 |     linea_owner_call(0, 1, 8)
+   |                         ^ pass `address.raw(at)`, whose address names the type of the values kept there
+error[T-RawAddress]: the runtime reads or writes values at this address, so it takes only the number in a `mem.address.Address`
+  --> tests/tasks/a_typed_bytes_parameter_takes_only_a_raw_address/main.lin:11:5
+   |
+11 |     linea_owner_call(0, 1, 8)
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^ pass `address.raw(at)` for `answer_at`, in place of the declaration's default

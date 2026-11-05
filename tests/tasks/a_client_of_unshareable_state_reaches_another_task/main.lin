@@ -1,0 +1,40 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+// A Ledger is unshareable: two tasks reading one could both act on what it
+// says is next. An owning task keeps it on its own thread, so a client of that
+// task may still be given to another task.
+@unshareable
+struct Ledger {
+    next: UInt64,
+}
+
+// Two tasks each take a hundred numbers from the ledger. Only the owning task
+// reads it, so no number is handed out twice.
+fn main() -> UInt8 {
+    let ledger = task.own(Ledger { next = 0 }).unwrap()
+    let numbers = ledger.client()
+    let worker = task.prepare(
+        sink [sink numbers = copy(numbers)] |sink me: Chan[End]| {
+            for _ in 0..100 {
+                numbers.call(|inout l: Ledger| l.next += 1)
+            }
+            me.close()
+        },
+    ).unwrap().start()
+    for _ in 0..100 {
+        numbers.call(|inout l: Ledger| l.next += 1)
+    }
+    worker.close()
+    let Ledger { next } = ledger.close()
+    io.println("handed out {next}").unwrap()
+    if next == 200 {
+        0
+    } else {
+        1
+    }
+}

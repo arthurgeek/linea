@@ -1,8 +1,12 @@
 import std.io
+import std.session
+import std.task
 import std.testing
 import std.time
 
 use io.Close
+use task.Unowned
+use task.Unstarted
 
 // The first retry of a transient accept failure waits 5 ms; each further
 // failure doubles the wait, up to one second.
@@ -201,6 +205,380 @@ pub fn serve[L: Acceptor + io.Close, H: inout fn(sink connection: Connection, pe
         }
     }
     finish(accepting, stopped)
+}
+
+// Accept connections from `listener` and hand each to `handler` across
+// worker tasks according to `policy`. `policy` defaults to `.Threads(128)`,
+// serving connections concurrently. Each worker takes its next connection
+// only once it is free, so a client that holds its worker holds up no other.
+// `handler` is shared by `read`, so it must satisfy `Shareable`. Every
+// started worker task is joined before `serve_workers` returns. When the task
+// that keeps the listener cannot be made, this thread serves alone.
+pub fn serve_workers[L: Acceptor + io.Close + Owned + Shareable, H: Owned + Shareable + Copyable + fn(sink connection: Connection, peer: Address)](sink listener: L, handler: H, policy: task.Policy = .Threads(128), connections: Option[UInt64] = .None) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+    let workers = match copy(policy) {
+        Sequential => 1,
+        Threads(count) => count,
+    }
+    if workers == 0 {
+        let _closed = listener.close()
+        return .Ok(())
+    }
+    if workers == 1 {
+        var alone = copy(handler)
+        return serve(listener, &alone, connections)
+    }
+    let owner = match task.own(Accepting.open(listener, connections)) {
+        Ok(owner) => owner,
+        Err(Unowned { state, reason: _ }) => {
+            var alone = copy(handler)
+            return serve(state.close_alone(), &alone, connections)
+        },
+    }
+    on_tasks(workers, owner.client(), handler, serve_connections[L, H], both_served)
+    owner.close().finish()
+}
+
+// What two shares of `serve_workers`' tasks answered together: nothing, since
+// a worker reports each failure to its handler.
+fn both_served(sink _first: (), sink _second: ()) {}
+
+// One worker of `serve_workers`: hand each connection the listener's owning
+// task gives out to `handler`, until it says to stop.
+fn serve_connections[L: Acceptor + Owned + Shareable, H: Owned + Shareable + Copyable + fn(sink connection: Connection, peer: Address)](handler: H, acceptor: task.Client[Accepting[L]]) {
+    var serving = true
+    while serving {
+        match acceptor.call(|inout accepting: Accepting[L]| &accepting.next()) {
+            Connection(Accepted { connection, address }) => handler(connection, address),
+            Retried(retry) => time.sleep(retry.pause),
+            Wait(pause) => time.sleep(pause),
+            Stop => serving = false,
+        }
+    }
+}
+
+// What a listener's owning task holds while tasks serve it: the listener, how
+// many connections it has handed out, the most it hands out, the pause after
+// a transient accept failure and when that failure was seen, and the failure
+// that ended accepting.
+internal struct Accepting[L] {
+    listener: L,
+    served: UInt64,
+    limit: Option[UInt64],
+    pause_ms: UInt64,
+    retried_at: Option[time.Instant],
+    stopped: Option[NetError],
+}
+
+// What a serving task is handed when it asks for its next connection.
+// `Retried` goes to the one task whose accept failed, which reports it and
+// waits its pause; `Wait` goes to every task that asks before that pause has
+// passed, so the listener is tried again once per pause however many tasks
+// serve it.
+internal enum Next {
+    Connection(Accepted),
+    Retried(AcceptRetry),
+    Wait(time.Duration),
+    Stop,
+}
+
+// What a serving task did with what `Accepting.next` told it, for tests.
+@(copyable, derive(Equatable, Debug))
+enum Told {
+    Connected,
+    Retried,
+    Waited,
+    Stopped,
+}
+
+fn told(sink next: Next) -> Told {
+    match next {
+        Connection(Accepted { connection, address: _ }) => {
+            connection.close().unwrap()
+            .Connected
+        },
+        Retried(_) => .Retried,
+        Wait(_) => .Waited,
+        Stop => .Stopped,
+    }
+}
+
+impl[L: Acceptor] Accepting[L] {
+    // Keep `listener`, to hand out at most `limit` connections, or any number
+    // when that is `.None`.
+    internal fn open(sink listener: L, limit: Option[UInt64]) -> Accepting[L] where carries(listener) {
+        .{ listener, served = 0, limit = copy(limit), pause_ms = 0, retried_at = .None, stopped = .None }
+    }
+
+    // Accept the next connection, unless accepting has stopped, handed out
+    // the most it may, or is waiting out the pause after a failed accept.
+    internal fn next(inout self: Self) -> Next {
+        if self.stopped.is_some() || reached(self.limit, self.served) {
+            return .Stop
+        }
+        match read self.retried_at {
+            Some(at) => {
+                let waited = at.elapsed()
+                let pause = time.Duration.from_milliseconds(self.pause_ms)
+                if waited < pause {
+                    return .Wait(time.Duration.from_nanoseconds(pause.nanoseconds() - waited.nanoseconds()))
+                }
+            },
+            None => {},
+        }
+        self.retried_at = .None
+        match accept_attempt(&self.listener, &self.pause_ms) {
+            Connected(accepted) => {
+                self.served += 1
+                .Connection(accepted)
+            },
+            Retry(retry) => {
+                self.retried_at = .Some(time.Instant.now())
+                .Retried(retry)
+            },
+            Failed(error) => {
+                self.stopped = .Some(error)
+                .Stop
+            },
+        }
+    }
+
+    // Two clients wait, so a listener asked too early accepts one and the
+    // test fails at `early` instead of blocking at `later`.
+    test fn next_asks_the_listener_nothing_until_a_retry_has_waited_its_pause() {
+        let listener = listen(loopback(0)).unwrap()
+        let client = connect(listener.local_address().unwrap()).unwrap()
+        let other = connect(listener.local_address().unwrap()).unwrap()
+        let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
+        let script = scripted(listener, [.Some(.Io(exhausted)), .None, .None, .None], .None)
+        var accepting = Accepting.open(script, limit: .None)
+        let retried = told(&accepting.next())
+        let early = told(&accepting.next())
+        time.sleep(time.Duration.from_milliseconds(first_pause_ms))
+        let later = told(&accepting.next())
+        accepting.finish().unwrap()
+        client.close().unwrap()
+        other.close().unwrap()
+        testing.assert_eq(retried, Told.Retried, "the failed accept was not retried")?
+        testing.assert_eq(early, Told.Waited, "the listener was asked again before the pause ended")?
+        testing.assert_eq(later, Told.Connected, "the connection was not accepted after the pause")?
+    }
+
+    // The listener, for a thread that serves it alone because its owning
+    // task could not be made.
+    internal fn close_alone(sink self: Self) -> L where carries(self.listener) {
+        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped: _ } = self
+        listener
+    }
+}
+
+impl[L: Acceptor + io.Close] Accepting[L] {
+    // Close the listener and report the accept failure that ended serving,
+    // or the failure to close it.
+    internal fn finish(sink self: Self) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped } = self
+        finish(listener, stopped)
+    }
+}
+
+// Run `work(context, acceptor)` on `count` tasks and answer what they
+// answered, joined pairwise by `combine`: half of them are started on a new
+// task, which divides them again and sends back what its share answered, and
+// this thread runs the rest, so starting them takes a depth of the logarithm
+// of `count`. Every task started is joined before this returns. When a task
+// cannot be made, the share it would have run is not run and this thread
+// runs its own share alone, so fewer than `count` tasks run, but at least
+// one does.
+internal fn on_tasks[L: Acceptor + Owned + Shareable, C: Shareable + Copyable, R: Owned, W: Shareable + Copyable + fn(context: C, acceptor: task.Client[Accepting[L]]) -> R, J: Shareable + Copyable + fn(sink first: R, sink second: R) -> R](count: UInt64, acceptor: task.Client[Accepting[L]], context: C, work: W, combine: J) -> R {
+    if count <= 1 {
+        return work(context, acceptor)
+    }
+    let half = count / 2
+    let body = sink [half, sink acceptor = copy(acceptor), sink context = copy(context), sink work = copy(work), sink combine = copy(combine)] |sink me: session.Chan[session.Send[R, session.End]]| {
+        me.send(on_tasks[L, C, R, W, J](half, acceptor, context, work, combine)).close()
+    }
+    match task.prepare(body) {
+        Ok(slot) => {
+            let started = slot.start()
+            let mine = on_tasks[L, C, R, W, J](count - half, acceptor, context, work, combine)
+            let (theirs, done) = started.recv()
+            done.close()
+            combine(theirs, mine)
+        },
+        Err(unstarted) => {
+            let Unstarted { body: _, reason: _ } = unstarted
+            on_tasks[L, C, R, W, J](count - half, acceptor, context, work, combine)
+        },
+    }
+}
+
+// `take_ticket` numbers the tasks that call it, one to however many there are.
+fn take_ticket[L: Acceptor + Owned + Shareable](_context: (), acceptor: task.Client[Accepting[L]]) -> UInt64 {
+    acceptor.call(
+        |inout accepting: Accepting[L]| {
+            accepting.served += 1
+            accepting.served
+        },
+    )
+}
+
+fn add_tickets(sink first: UInt64, sink second: UInt64) -> UInt64 {
+    first + second
+}
+
+// Each of four tasks takes a ticket and answers it, so the answers summed are
+// 1 + 2 + 3 + 4 whichever task took which.
+test fn on_tasks_answers_what_every_task_answered() {
+    let listener = listen(loopback(0)).unwrap()
+    let owner = match task.own(Accepting.open(listener, limit: .None)) {
+        Ok(owner) => owner,
+        Err(Unowned { state, reason: _ }) => {
+            state.finish().unwrap()
+            panic("the listener's owning task could not be made")
+        },
+    }
+    let total = on_tasks(4, owner.client(), (), take_ticket[Listener], add_tickets)
+    owner.close().finish().unwrap()
+    testing.assert_eq(total, UInt64(10), "a task's answer was dropped")?
+}
+
+test fn serve_workers_handles_connections_concurrently() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let client1 = connect(bound).unwrap()
+    let client2 = connect(bound).unwrap()
+    let handler = |sink connection: Connection, _peer: Address| {
+        var conn = connection
+        match io.write_all(&conn, "pong\n".as_bytes()) {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+        let _closed = conn.close()
+    }
+    let ended = serve_workers(listener, handler, policy: .Threads(2), connections: .Some(2))
+    var reader1 = io.BufferedReader.open(capacity: 16, reader: client1) else |_| {
+        panic("reader1 failed")
+    }
+    var reader2 = io.BufferedReader.open(capacity: 16, reader: client2) else |_| {
+        panic("reader2 failed")
+    }
+    let ok1 = match &reader1.read_line_borrowed(max_bytes: 16) {
+        Ok(Some(text)) => text == "pong",
+        _ => false,
+    }
+    let ok2 = match &reader2.read_line_borrowed(max_bytes: 16) {
+        Ok(Some(text)) => text == "pong",
+        _ => false,
+    }
+    let c1 = reader1.abandon().close().is_ok()
+    let c2 = reader2.abandon().close().is_ok()
+    testing.assert_eq(ended, .Ok(()), "threaded serving did not end after two connections")?
+    testing.assert(ok1, "first client did not get response")?
+    testing.assert(ok2, "second client did not get response")?
+    testing.assert(c1 && c2, "closing readers failed")?
+    .Ok(())
+}
+
+// `answer_a_line` waits for its client's line, then answers `ok`. A client
+// that sends nothing holds the task serving it until its read times out.
+fn answer_a_line(sink connection: Connection, _peer: Address) {
+    var waiting = connection
+    let _timed = &waiting.set_timeouts(read_ms: 3000, write_ms: 3000)
+    var reader = io.BufferedReader.open(capacity: 16, reader: waiting) else |_| {
+        panic("the server's reader could not be made")
+    }
+    let got_line = match &reader.read_line_borrowed(max_bytes: 16) {
+        Ok(Some(_)) => true,
+        _ => false,
+    }
+    var answering = reader.abandon()
+    if got_line {
+        let _answered = io.write_all(&answering, "ok\n".as_bytes())
+    }
+    let _closed = answering.close()
+}
+
+// `asked` sends a line on `connection` and answers whether `ok` came back
+// within a second.
+fn asked(sink connection: Connection) -> Bool {
+    var asking = connection
+    let _timed = &asking.set_timeouts(read_ms: 1000, write_ms: 1000)
+    if io.write_all(&asking, "x\n".as_bytes()).is_err() {
+        let _closed = asking.close()
+        return false
+    }
+    var reader = io.BufferedReader.open(capacity: 16, reader: asking) else |_| {
+        panic("the client's reader could not be made")
+    }
+    let answered = match &reader.read_line_borrowed(max_bytes: 16) {
+        Ok(Some(text)) => text == "ok",
+        _ => false,
+    }
+    let _closed = reader.abandon().close()
+    answered
+}
+
+// The first client sends its line only after the third is answered. Two
+// tasks serve: one holds the first client, so the other must serve both the
+// second and the third.
+test fn a_client_that_holds_its_task_holds_up_no_other() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let clients = task.prepare(
+        sink [bound] |sink me: session.Chan[session.Send[Bool, session.End]]| {
+            let slow = connect(bound).unwrap()
+            let quick = connect(bound).unwrap()
+            let third = connect(bound).unwrap()
+            let quick_answered = asked(quick)
+            let third_answered = asked(third)
+            let slow_answered = asked(slow)
+            me.send(quick_answered && third_answered && slow_answered).close()
+        },
+    ).unwrap().start()
+    let ended = serve_workers(listener, answer_a_line, policy: .Threads(2), connections: .Some(3))
+    let (answered, done) = clients.recv()
+    done.close()
+    testing.assert_ok_eq(ended, (), "serving failed")?
+    testing.assert(answered, "a client waited behind one that held its task")?
+}
+
+test fn zero_workers_closes_the_listener_and_returns() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let handler = |sink connection: Connection, _peer: Address| {
+        let _closed = connection.close()
+    }
+    let res = serve_workers(listener, handler, policy: .Threads(0), connections: .Some(1))
+    testing.assert_ok_eq(res, (), "zero workers should succeed immediately")?
+    defer let attempt = connect(bound)
+    testing.assert(attempt.is_err(), "connecting to closed listener should fail")?
+    .Ok(())
+}
+
+test fn serve_workers_sequential_policy() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let client1 = connect(bound).unwrap()
+    let handler = |sink connection: Connection, _peer: Address| {
+        var conn = connection
+        match io.write_all(&conn, "seq\n".as_bytes()) {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+        let _closed = conn.close()
+    }
+    let ended = serve_workers(listener, handler, policy: .Sequential, connections: .Some(1))
+    var reader = io.BufferedReader.open(capacity: 16, reader: client1) else |_| {
+        panic("reader failed")
+    }
+    let ok = match &reader.read_line_borrowed(max_bytes: 16) {
+        Ok(Some(text)) => text == "seq",
+        _ => false,
+    }
+    let c = reader.abandon().close().is_ok()
+    testing.assert_eq(ended, .Ok(()), "sequential serving did not end after one connection")?
+    testing.assert(ok, "client did not get response")?
+    testing.assert(c, "closing reader failed")?
+    .Ok(())
 }
 
 test fn serve_runs_the_handler_once_for_each_connection_and_returns() {

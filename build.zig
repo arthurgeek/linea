@@ -3,7 +3,8 @@ const test_roots = @import("build/test_roots.zig");
 
 // Copy the pinned provider unchanged: Zig forbids sharing its source files
 // between the standard-library module and this integer-only entry point.
-fn addDecimalProvider(b: *std.Build, module: *std.Build.Module) void {
+// Returns the copy of `convert_slow.zig`, the provider's root.
+fn decimalProvider(b: *std.Build) std.Build.LazyPath {
     const lib_directory = b.graph.zig_lib_directory.path orelse @panic("Zig library directory is required");
     const files = b.addWriteFiles();
     const directory = b.pathJoin(&.{ lib_directory, "std", "fmt", "parse_float" });
@@ -12,26 +13,22 @@ fn addDecimalProvider(b: *std.Build, module: *std.Build.Module) void {
         _ = files.addCopyFile(.{ .cwd_relative = b.pathJoin(&.{ directory, name }) }, name);
     }
     _ = files.addCopyFile(b.path("runtime/zig-float-LICENSE"), "LICENSE");
-    module.addImport("decimal_provider", b.createModule(.{
-        .root_source_file = root,
-        .target = module.resolved_target,
-        .optimize = module.optimize,
-    }));
+    return root;
 }
 
 /// What a test run's binaries are watched by.
 ///
 /// A sanitizer works by instrumenting code as it is compiled -- redzones
-/// around a frame, shadow memory beside it -- and the address sanitizer
-/// instruments only functions carrying the `sanitize_address` attribute.
-/// Clang's frontend adds that attribute while it lowers C, so
-/// `runtime/linea_rt.c` is instrumented. The generated program
-/// reaches `cc` as printed LLVM IR (`-x ir`), and the emitter writes no such
-/// attribute, so its loads and stores are not watched: a read of freed or
-/// out-of-bounds storage in generated Linea code is not caught. What a
-/// sanitized run does watch is the runtime's own code, every allocation and
-/// free through the intercepted allocator (a double or invalid free), leaks
-/// at exit, and crashes.
+/// around a frame, shadow memory beside it -- and it instruments only
+/// functions carrying its attribute (`sanitize_address`, `sanitize_thread`).
+/// Clang's frontend adds that attribute while it lowers C, so the runtime is
+/// instrumented. The generated program reaches `cc` as printed LLVM IR
+/// (`-x ir`), so the emitter writes the attribute itself on every function the
+/// module defines when the build names a sanitizer (`LINEA_SANITIZE`): a read
+/// of freed or out-of-bounds storage in generated Linea code is caught as one
+/// in the runtime is. A sanitized run also watches every allocation and free
+/// through the intercepted allocator (a double or invalid free), leaks at
+/// exit, and crashes.
 ///
 /// `address` also answers for the language's central promise. Its leak
 /// checker is the only run-time check for a leak: it runs at every clean exit
@@ -58,8 +55,15 @@ fn addDecimalProvider(b: *std.Build, module: *std.Build.Module) void {
 /// generated code is the language: every operation is defined or refused,
 /// and the trap checks are already printed into the module.
 ///
-/// A thread sanitizer stays absent because its scope is empty: the runtime
-/// creates no thread and the language has no concurrency. A type sanitizer
+/// `thread` watches for data races: tasks run on threads the runtime
+/// creates, and every synchronisation between them -- a session's mutex and
+/// condition variable, the owning task's call queue, the join, the checking
+/// allocator's lock -- is in the runtime's C. Generated code is instrumented
+/// as well, so a race between two tasks' Linea code that the compiler
+/// accepted is reported at run time: the language refuses such a program
+/// ([O-Cross], [O-Borrow]), and this run is what catches the compiler when it
+/// does not. The two sanitizers cannot share a process, so each is its own
+/// run. A type sanitizer
 /// stays absent by decision rather than omission: it checks the promises
 /// TBAA metadata makes, and this compiler deliberately emits none -- proofs
 /// are handed to the optimiser, never premises. The data-flow instrumentation
@@ -73,6 +77,7 @@ fn addDecimalProvider(b: *std.Build, module: *std.Build.Module) void {
 const Sanitize = enum {
     none,
     address,
+    thread,
 
     fn flag(self: Sanitize) ?[]const u8 {
         return switch (self) {
@@ -199,6 +204,61 @@ fn runtimeSources(b: *std.Build) std.Build.LazyPath {
 }
 
 /// One runtime source compiled to the object an archive holds.
+/// The native tests of the runtime's C: each is a binary built from C files
+/// and run.
+const NativeTests = struct {
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    sanitize: Sanitize,
+
+    /// One C file of a test and the flags it is compiled with.
+    const Source = struct { file: []const u8, flags: []const []const u8 };
+
+    /// Builds the test `name` from `sources` and runs it as part of `step`.
+    /// With no sanitizer selected, Zig compiles and links it. A sanitizer's
+    /// runtime is one only the C toolchain links, so a sanitized test is
+    /// compiled and linked by `cc`, as a sanitized program is, with each file
+    /// compiled alone because each takes its own flags. A report stops the
+    /// test (`-fno-sanitize-recover=all`): an undefined-behaviour check that
+    /// printed and carried on would leave the run's status clean.
+    fn add(self: NativeTests, step: *std.Build.Step, name: []const u8, sources: []const Source) void {
+        const b = self.b;
+        const linux = self.target.result.os.tag == .linux;
+        if (self.sanitize.flag()) |sanitizer| {
+            const san_arg = b.fmt("-fsanitize={s}", .{sanitizer});
+            const link = b.addSystemCommand(&.{ "cc", san_arg, "-fsanitize=undefined", "-fno-sanitize-recover=all", "-g" });
+            for (sources) |input| {
+                const compile = b.addSystemCommand(&.{ "cc", "-c", "-g", "-O1", san_arg, "-fsanitize=undefined", "-fno-sanitize-recover=all" });
+                compile.addPrefixedDirectoryArg("-I", b.path("runtime"));
+                compile.addArgs(input.flags);
+                compile.addFileArg(b.path(input.file));
+                compile.addArg("-o");
+                link.addFileArg(compile.addOutputFileArg(b.fmt("{s}.o", .{std.fs.path.stem(input.file)})));
+            }
+            link.addArg("-o");
+            const binary = link.addOutputFileArg(name);
+            if (linux) link.addArgs(&.{ "-lm", "-lpthread" });
+            const run = std.Build.Step.Run.create(b, b.fmt("run {s}", .{name}));
+            run.addFileArg(binary);
+            // The runtime answers a request the C allocator refuses with null,
+            // and the tests hold it to that; a sanitizer's allocator stops the
+            // program instead unless told to return null as `calloc` does.
+            run.setEnvironmentVariable(
+                if (self.sanitize == .thread) "TSAN_OPTIONS" else "ASAN_OPTIONS",
+                "allocator_may_return_null=1",
+            );
+            step.dependOn(&run.step);
+            return;
+        }
+        const module = b.createModule(.{ .target = self.target, .optimize = self.optimize, .link_libc = true });
+        module.addIncludePath(b.path("runtime"));
+        for (sources) |input| module.addCSourceFile(.{ .file = b.path(input.file), .flags = input.flags });
+        if (linux) module.linkSystemLibrary("m", .{});
+        step.dependOn(&b.addRunArtifact(b.addExecutable(.{ .name = name, .root_module = module })).step);
+    }
+};
+
 fn runtimeObject(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
@@ -1174,9 +1234,9 @@ const HeavySteps = struct {
         run.addArg(@tagName(self.sanitize));
         // A sanitized run watches what runs: the cases that record an exit
         // status, the examples, and the transcripts that build or run a program.
-        // The generated code is not instrumented (see `Sanitize`), so what it
-        // watches is the runtime, every allocation and free, and a leak check at
-        // each clean exit. The runner leaves every other case, and the
+        // It watches the generated code and the runtime (see `Sanitize`), every
+        // allocation and free, and a leak check at each clean exit. The runner
+        // leaves every other case, and the
         // corpus-wide frontend and editor properties, to the unsanitized walk.
         // Generated programs are held to the metamorphic properties beside the
         // corpus. The seeds are consecutive from zero, so a run generates the same
@@ -1524,16 +1584,26 @@ pub fn build(b: *std.Build) void {
         // every target the runtime is compiled for.
         "-Wconversion",
         "-Wsign-conversion",
+        "-fstack-protector-strong",
+        "-fno-omit-frame-pointer",
+        "-fvisibility=hidden",
+        "-Wstrict-prototypes",
+        "-Wundef",
+        "-Wshadow",
+        "-Wformat-security",
     }) catch @panic("OOM");
 
     if (sanitize.flag()) |name| {
         // A sanitizer that reports has to be able to reach its reporting
         // routine, so trapping is off wherever one is selected. A trap would
-        // abort with no account of what it found.
-        runtime_flags.append(
-            b.allocator,
+        // abort with no account of what it found. `LINEA_SANITIZED` tells the
+        // runtime and its tests to leave faults to the sanitizer's own
+        // handler; the build defines it because it is the one place that knows
+        // a sanitizer was selected, whichever C compiler builds the file.
+        runtime_flags.appendSlice(b.allocator, &.{
             b.fmt("-fsanitize={s}", .{name}),
-        ) catch @panic("OOM");
+            "-DLINEA_SANITIZED=1",
+        }) catch @panic("OOM");
     } else {
         runtime_flags.append(b.allocator, "-fsanitize-trap=all") catch @panic("OOM");
     }
@@ -1544,120 +1614,6 @@ pub fn build(b: *std.Build) void {
         "-std=c11",        "-fno-fast-math",        "-ffp-contract=off", "-frounding-math",
         "-ftrapping-math", "-fno-finite-math-only", "-fhonor-nans",      "-fno-math-errno",
     }) catch @panic("OOM");
-    const native_math_step = b.step("test-native-math", "Check strict binary64 runtime operations against independent reference vectors");
-    const native_math_module = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true });
-    native_math_module.addCSourceFile(.{ .file = b.path("runtime/math.c"), .flags = math_flags.items });
-    native_math_module.addIncludePath(b.path("runtime"));
-    native_math_module.addCSourceFile(.{ .file = b.path("tests/native/math_test.c"), .flags = math_flags.items });
-    if (target.result.os.tag == .linux) native_math_module.linkSystemLibrary("m", .{});
-    const native_math_tests = b.addExecutable(.{ .name = "native-math-tests", .root_module = native_math_module });
-    const run_native_math = b.addRunArtifact(native_math_tests);
-    native_math_step.dependOn(&run_native_math.step);
-
-    const native_io_step = b.step("test-native-io", "Check native byte transport and filesystem operations");
-    inline for (.{ false, true }) |faults| {
-        const native_io_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        });
-        var transport_flags: std.ArrayList([]const u8) = .empty;
-        transport_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
-        if (faults) transport_flags.appendSlice(b.allocator, &.{
-            "-Dread=linea_test_read",
-            "-Dwrite=linea_test_write",
-            "-Dclose=linea_test_close",
-            "-Dgetentropy=linea_test_getentropy",
-        }) catch @panic("OOM");
-        native_io_module.addCSourceFile(.{
-            .file = b.path("runtime/io.c"),
-            .flags = transport_flags.items,
-        });
-        native_io_module.addCSourceFile(.{
-            .file = b.path(if (faults) "runtime/io_fault_test.c" else "runtime/io_test.c"),
-            .flags = runtime_flags.items,
-        });
-        // The fault tests stand in for the allocator to see what I/O reports
-        // to it; the others link the allocator itself.
-        if (!faults) native_io_module.addCSourceFile(.{ .file = b.path("runtime/linea_rt.c"), .flags = runtime_flags.items });
-        const native_io_tests = b.addExecutable(.{
-            .name = if (faults) "native-io-fault-tests" else "native-io-tests",
-            .root_module = native_io_module,
-        });
-        const run_native_io = b.addRunArtifact(native_io_tests);
-        native_io_step.dependOn(&run_native_io.step);
-    }
-    const native_net_step = b.step("test-native-net", "Check native socket listen, accept, connect and address operations");
-    inline for (.{ false, true }) |faults| {
-        const native_net_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        });
-        var socket_flags: std.ArrayList([]const u8) = .empty;
-        socket_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
-        if (faults) socket_flags.appendSlice(b.allocator, &.{
-            "-Dsocket=linea_test_socket",
-            "-Dsetsockopt=linea_test_setsockopt",
-            "-Dbind=linea_test_bind",
-            "-Dlisten=linea_test_listen",
-            "-Dfcntl=linea_test_fcntl",
-            "-Daccept=linea_test_accept",
-            "-Dconnect=linea_test_connect",
-            "-Dgetpeername=linea_test_getpeername",
-            "-Dgetsockname=linea_test_getsockname",
-        }) catch @panic("OOM");
-        native_net_module.addCSourceFile(.{
-            .file = b.path("runtime/net.c"),
-            .flags = socket_flags.items,
-        });
-        native_net_module.addCSourceFile(.{
-            .file = b.path("runtime/io.c"),
-            .flags = runtime_flags.items,
-        });
-        native_net_module.addCSourceFile(.{
-            .file = b.path("runtime/linea_rt.c"),
-            .flags = runtime_flags.items,
-        });
-        native_net_module.addCSourceFile(.{
-            .file = b.path(if (faults) "runtime/net_fault_test.c" else "runtime/net_test.c"),
-            .flags = runtime_flags.items,
-        });
-        const native_net_tests = b.addExecutable(.{
-            .name = if (faults) "native-net-fault-tests" else "native-net-tests",
-            .root_module = native_net_module,
-        });
-        const run_native_net = b.addRunArtifact(native_net_tests);
-        native_net_step.dependOn(&run_native_net.step);
-    }
-    const native_clock_step = b.step("test-native-clock", "Check native clock reads and the monotonic sleep");
-    inline for (.{ false, true }) |faults| {
-        const native_clock_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        });
-        var clock_flags: std.ArrayList([]const u8) = .empty;
-        clock_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
-        if (faults) clock_flags.appendSlice(b.allocator, &.{
-            "-Dclock_gettime=linea_test_clock_gettime",
-            "-Dnanosleep=linea_test_nanosleep",
-        }) catch @panic("OOM");
-        native_clock_module.addCSourceFile(.{
-            .file = b.path("runtime/clock.c"),
-            .flags = clock_flags.items,
-        });
-        native_clock_module.addCSourceFile(.{
-            .file = b.path(if (faults) "runtime/clock_fault_test.c" else "runtime/clock_test.c"),
-            .flags = runtime_flags.items,
-        });
-        const native_clock_tests = b.addExecutable(.{
-            .name = if (faults) "native-clock-fault-tests" else "native-clock-tests",
-            .root_module = native_clock_module,
-        });
-        const run_native_clock = b.addRunArtifact(native_clock_tests);
-        native_clock_step.dependOn(&run_native_clock.step);
-    }
     // A sanitized runtime leaves storage checking to the sanitizer, whose
     // shadow memory cannot see pages the checking allocator maps itself, so
     // the checking allocator is compiled only where no sanitizer is selected.
@@ -1665,41 +1621,183 @@ pub fn build(b: *std.Build) void {
     checked_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
     if (sanitize == .none) checked_flags.append(b.allocator, "-DLINEA_CHECK_STORAGE=1") catch @panic("OOM");
 
-    const native_runtime_step = b.step("test-native-runtime", "Check the generated-code runtime's allocation, arguments, environment and aborts");
-    inline for (.{ false, true }) |checked| {
-        const flags = if (checked) checked_flags.items else runtime_flags.items;
-        const native_runtime_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
+    const native: NativeTests = .{ .b = b, .target = target, .optimize = optimize, .sanitize = sanitize };
+
+    const native_math_step = b.step("test-native-math", "Check strict binary64 runtime operations against independent reference vectors");
+    native.add(native_math_step, "native-math-tests", &.{
+        .{ .file = "runtime/math.c", .flags = math_flags.items },
+        .{ .file = "tests/native/math_test.c", .flags = math_flags.items },
+    });
+
+    const native_io_step = b.step("test-native-io", "Check native byte transport and filesystem operations");
+    var transport_flags: std.ArrayList([]const u8) = .empty;
+    transport_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    transport_flags.appendSlice(b.allocator, &.{
+        "-Dread=linea_test_read",
+        "-Dwrite=linea_test_write",
+        "-Dclose=linea_test_close",
+        "-Dgetentropy=linea_test_getentropy",
+    }) catch @panic("OOM");
+    native.add(native_io_step, "native-io-tests", &.{
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io_test.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+    });
+    // The fault tests stand in for the allocator to see what I/O reports to
+    // it; the others link the allocator itself.
+    native.add(native_io_step, "native-io-fault-tests", &.{
+        .{ .file = "runtime/io.c", .flags = transport_flags.items },
+        .{ .file = "runtime/io_fault_test.c", .flags = runtime_flags.items },
+    });
+
+    const native_net_step = b.step("test-native-net", "Check native socket listen, accept, connect and address operations");
+    var socket_flags: std.ArrayList([]const u8) = .empty;
+    socket_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    socket_flags.appendSlice(b.allocator, &.{
+        "-Dsocket=linea_test_socket",
+        "-Dsetsockopt=linea_test_setsockopt",
+        "-Dbind=linea_test_bind",
+        "-Dlisten=linea_test_listen",
+        "-Dfcntl=linea_test_fcntl",
+        "-Daccept=linea_test_accept",
+        "-Dconnect=linea_test_connect",
+        "-Dgetpeername=linea_test_getpeername",
+        "-Dgetsockname=linea_test_getsockname",
+    }) catch @panic("OOM");
+    inline for (.{ false, true }) |faults| {
+        native.add(native_net_step, if (faults) "native-net-fault-tests" else "native-net-tests", &.{
+            .{ .file = "runtime/net.c", .flags = if (faults) socket_flags.items else runtime_flags.items },
+            .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+            .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+            .{ .file = if (faults) "runtime/net_fault_test.c" else "runtime/net_test.c", .flags = runtime_flags.items },
         });
-        native_runtime_module.addCSourceFile(.{
-            .file = b.path("runtime/linea_rt.c"),
-            .flags = flags,
-        });
-        native_runtime_module.addCSourceFile(.{
-            .file = b.path("runtime/linea_rt_test.c"),
-            .flags = flags,
-        });
-        const native_runtime_tests = b.addExecutable(.{
-            .name = if (checked) "native-checked-runtime-tests" else "native-runtime-tests",
-            .root_module = native_runtime_module,
-        });
-        const run_native_runtime = b.addRunArtifact(native_runtime_tests);
-        native_runtime_step.dependOn(&run_native_runtime.step);
     }
 
-    // The runtime is compiled for Linux as well as for the host, so a platform
-    // constant that is signed on one and unsigned on the other is a build
-    // error on a macOS checkout and not a trap on the first Linux run.
-    const linux_target = b.resolveTargetQuery(.{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .gnu });
-    for ([_]struct { name: []const u8, file: []const u8, flags: []const []const u8 }{
-        .{ .name = "linea_rt_linux", .file = "runtime/linea_rt.c", .flags = checked_flags.items },
-        .{ .name = "io_linux", .file = "runtime/io.c", .flags = runtime_flags.items },
-        .{ .name = "net_linux", .file = "runtime/net.c", .flags = runtime_flags.items },
-        .{ .name = "clock_linux", .file = "runtime/clock.c", .flags = runtime_flags.items },
-    }) |input| {
-        native_runtime_step.dependOn(&runtimeObject(b, linux_target, input.name, b.path(input.file), input.flags).step);
+    const native_clock_step = b.step("test-native-clock", "Check native clock reads and the monotonic sleep");
+    var clock_flags: std.ArrayList([]const u8) = .empty;
+    clock_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    clock_flags.appendSlice(b.allocator, &.{
+        "-Dclock_gettime=linea_test_clock_gettime",
+        "-Dnanosleep=linea_test_nanosleep",
+    }) catch @panic("OOM");
+    inline for (.{ false, true }) |faults| {
+        native.add(native_clock_step, if (faults) "native-clock-fault-tests" else "native-clock-tests", &.{
+            .{ .file = "runtime/clock.c", .flags = if (faults) clock_flags.items else runtime_flags.items },
+            .{ .file = if (faults) "runtime/clock_fault_test.c" else "runtime/clock_test.c", .flags = runtime_flags.items },
+        });
+    }
+
+    const native_runtime_step = b.step("test-native-runtime", "Check the generated-code runtime's allocation, arguments, environment, aborts, and the storage its I/O entries are handed");
+    inline for (.{ false, true }) |checked| {
+        const flags = if (checked) checked_flags.items else runtime_flags.items;
+        native.add(native_runtime_step, if (checked) "native-checked-runtime-tests" else "native-runtime-tests", &.{
+            .{ .file = "runtime/linea_rt.c", .flags = flags },
+            .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+            .{ .file = "runtime/linea_rt_test.c", .flags = flags },
+        });
+    }
+    var busy_table_flags: std.ArrayList([]const u8) = .empty;
+    busy_table_flags.appendSlice(b.allocator, checked_flags.items) catch @panic("OOM");
+    busy_table_flags.appendSlice(b.allocator, &.{ "-Dmprotect=linea_test_mprotect", "-Dnanosleep=linea_test_nanosleep" }) catch @panic("OOM");
+    native.add(native_runtime_step, "native-storage-busy-tests", &.{
+        .{ .file = "runtime/linea_rt.c", .flags = busy_table_flags.items },
+        .{ .file = "runtime/storage_busy_test.c", .flags = runtime_flags.items },
+    });
+    var preempted_flags: std.ArrayList([]const u8) = .empty;
+    preempted_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    preempted_flags.append(b.allocator, "-Dclock_gettime=linea_test_clock_gettime") catch @panic("OOM");
+    native.add(native_runtime_step, "native-preempted-fault-tests", &.{
+        .{ .file = "runtime/linea_rt.c", .flags = preempted_flags.items },
+        .{ .file = "runtime/preempted_fault_test.c", .flags = runtime_flags.items },
+    });
+    var interrupted_flags: std.ArrayList([]const u8) = .empty;
+    interrupted_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    interrupted_flags.append(b.allocator, "-Dmemcmp=linea_test_memcmp") catch @panic("OOM");
+    native.add(native_runtime_step, "native-interrupted-fault-tests", &.{
+        .{ .file = "runtime/linea_rt.c", .flags = interrupted_flags.items },
+        .{ .file = "runtime/interrupted_fault_test.c", .flags = runtime_flags.items },
+    });
+
+    const native_task_step = b.step("test-native-task", "Check native task threads, rendezvous sessions, joins, stack overflow reports and concurrent allocation");
+    var refused_task_flags: std.ArrayList([]const u8) = .empty;
+    refused_task_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    refused_task_flags.appendSlice(b.allocator, &.{
+        "-Dpthread_create=linea_test_pthread_create",
+        "-Dpthread_join=linea_test_pthread_join",
+        "-Dmmap=linea_test_mmap",
+        "-Dmunmap=linea_test_munmap",
+        "-Dcalloc=linea_test_calloc",
+        "-Dclock_gettime=linea_test_clock_gettime",
+        "-Dpthread_cond_wait=linea_test_pthread_cond_wait",
+    }) catch @panic("OOM");
+    var refused_signal_flags: std.ArrayList([]const u8) = .empty;
+    refused_signal_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    refused_signal_flags.append(b.allocator, "-Dsigaltstack=linea_test_sigaltstack") catch @panic("OOM");
+    inline for (.{ false, true }) |checked| {
+        native.add(native_task_step, if (checked) "native-checked-task-tests" else "native-task-tests", &.{
+            .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+            .{ .file = "runtime/linea_rt.c", .flags = if (checked) checked_flags.items else runtime_flags.items },
+            .{ .file = "runtime/task_test.c", .flags = runtime_flags.items },
+        });
+    }
+    native.add(native_task_step, "native-task-fault-tests", &.{
+        .{ .file = "runtime/task.c", .flags = refused_task_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = refused_signal_flags.items },
+        .{ .file = "runtime/task_fault_test.c", .flags = runtime_flags.items },
+    });
+
+    // The runtime is compiled for Linux and for macOS as well as for the host,
+    // so a platform constant that is signed on one and unsigned on the other,
+    // or a branch only one platform takes, is a build error on either
+    // checkout and not a failure on the first run on the other.
+    for ([_]struct { os: []const u8, query: std.Target.Query }{
+        .{ .os = "linux", .query = .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .gnu } },
+        .{ .os = "macos", .query = .{ .cpu_arch = .aarch64, .os_tag = .macos } },
+    }) |platform| {
+        const platform_target = b.resolveTargetQuery(platform.query);
+        // `linea_rt.c` is built three ways, each keeping code the others leave
+        // out: checking storage, plain, and as a sanitized build compiles it.
+        var sanitized_runtime_flags: std.ArrayList([]const u8) = .empty;
+        sanitized_runtime_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+        sanitized_runtime_flags.append(b.allocator, "-DLINEA_SANITIZED=1") catch @panic("OOM");
+        for ([_]struct { name: []const u8, file: []const u8, flags: []const []const u8 }{
+            .{ .name = "linea_rt_checked", .file = "runtime/linea_rt.c", .flags = checked_flags.items },
+            .{ .name = "linea_rt", .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+            .{ .name = "linea_rt_sanitized", .file = "runtime/linea_rt.c", .flags = sanitized_runtime_flags.items },
+            .{ .name = "io", .file = "runtime/io.c", .flags = runtime_flags.items },
+            .{ .name = "net", .file = "runtime/net.c", .flags = runtime_flags.items },
+            .{ .name = "clock", .file = "runtime/clock.c", .flags = runtime_flags.items },
+            .{ .name = "task", .file = "runtime/task.c", .flags = runtime_flags.items },
+        }) |input| {
+            const name = b.fmt("{s}_{s}", .{ input.name, platform.os });
+            native_runtime_step.dependOn(&runtimeObject(b, platform_target, name, b.path(input.file), input.flags).step);
+        }
+        // The runtime's own tests too, as written and as a sanitized build
+        // compiles them, since a test only one platform or one build runs is
+        // otherwise an unused function the others refuse. These objects are
+        // only compiled: the native test steps run the tests on the host, and
+        // the sanitize lanes run them sanitized on Linux.
+        var sanitized_test_flags: std.ArrayList([]const u8) = .empty;
+        sanitized_test_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+        sanitized_test_flags.append(b.allocator, "-DLINEA_SANITIZED=1") catch @panic("OOM");
+        for ([_][]const u8{
+            "linea_rt_test",
+            "storage_busy_test",
+            "preempted_fault_test",
+            "interrupted_fault_test",
+            "io_test",
+            "io_fault_test",
+            "net_test",
+            "net_fault_test",
+            "clock_test",
+            "clock_fault_test",
+            "task_test",
+            "task_fault_test",
+        }) |test_name| {
+            const file = b.path(b.fmt("runtime/{s}.c", .{test_name}));
+            native_runtime_step.dependOn(&runtimeObject(b, platform_target, b.fmt("{s}_{s}", .{ test_name, platform.os }), file, runtime_flags.items).step);
+            native_runtime_step.dependOn(&runtimeObject(b, platform_target, b.fmt("{s}_{s}_sanitized", .{ test_name, platform.os }), file, sanitized_test_flags.items).step);
+        }
     }
 
     // The runtime objects are compiled for the baseline CPU of the target
@@ -1712,17 +1810,27 @@ pub fn build(b: *std.Build) void {
     // Compile Zig's Ryu formatter through C so ASan and MSan instrument its
     // memory accesses too. Passing Zig LLVM IR to Clang would not add the
     // function attributes that enable those checks.
-    var float_target_query = runtime_target.query;
-    float_target_query.ofmt = .c;
-    const float_source = b.addObject(.{
-        .name = "linea_float",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("runtime/float.zig"),
-            .target = b.resolveTargetQuery(float_target_query),
-            .optimize = .ReleaseSmall,
-        }),
+    //
+    // The C is emitted with one job. Zig's C backend names each generic
+    // instance after its index in the compiler's intern pool, and with several
+    // jobs that index depends on how the threads were scheduled, so a busy
+    // machine writes different static names into the object. The outcome
+    // cache hashes the archive's bytes, and those names alone would discard
+    // every recorded outcome on each build. `Step.Compile` cannot pass `-j`,
+    // so this runs the compiler directly.
+    const float_source = b.addSystemCommand(&.{ b.graph.zig_exe, "build-obj", "-ofmt=c", "-OReleaseSmall", "-j1" });
+    float_source.addArgs(&.{
+        "-target",
+        runtime_target.query.zigTriple(b.allocator) catch @panic("OOM"),
+        "-mcpu",
+        runtime_target.query.serializeCpuAlloc(b.allocator) catch @panic("OOM"),
+        "--dep",
+        "decimal_provider",
     });
-    addDecimalProvider(b, float_source.root_module);
+    float_source.addPrefixedFileArg("-Mroot=", b.path("runtime/float.zig"));
+    float_source.addPrefixedFileArg("-Mdecimal_provider=", decimalProvider(b));
+    float_source.addArgs(&.{ "--cache-dir", b.cache_root.path orelse ".", "--global-cache-dir", b.graph.global_cache_root.path orelse "." });
+    const float_c = float_source.addPrefixedOutputFileArg("-femit-bin=", "linea_float.c");
     var float_flags: std.ArrayList([]const u8) = .empty;
     float_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
     float_flags.appendSlice(b.allocator, &.{
@@ -1749,7 +1857,8 @@ pub fn build(b: *std.Build) void {
         .{ .name = "io", .file = b.path("runtime/io.c"), .flags = runtime_flags.items },
         .{ .name = "net", .file = b.path("runtime/net.c"), .flags = runtime_flags.items },
         .{ .name = "clock", .file = b.path("runtime/clock.c"), .flags = runtime_flags.items },
-        .{ .name = "linea_float", .file = float_source.getEmittedBin(), .flags = float_flags.items },
+        .{ .name = "task", .file = b.path("runtime/task.c"), .flags = runtime_flags.items },
+        .{ .name = "linea_float", .file = float_c, .flags = float_flags.items },
         .{ .name = "math", .file = b.path("runtime/math.c"), .flags = math_flags.items },
     }) |input| {
         const object = runtimeObject(b, runtime_target, input.name, input.file, input.flags);
@@ -2182,7 +2291,11 @@ pub fn build(b: *std.Build) void {
         }),
         .filters = test_filters,
     });
-    addDecimalProvider(b, runtime_tests.root_module);
+    runtime_tests.root_module.addImport("decimal_provider", b.createModule(.{
+        .root_source_file = decimalProvider(b),
+        .target = target,
+        .optimize = optimize,
+    }));
     runtime_tests.root_module.link_libc = true;
     if (target.result.os.tag == .linux) runtime_tests.root_module.linkSystemLibrary("m", .{});
     const run_runtime_tests = b.addRunArtifact(runtime_tests);
@@ -2220,6 +2333,7 @@ pub fn build(b: *std.Build) void {
                 step.dependOn(native_clock_step);
                 step.dependOn(native_math_step);
                 step.dependOn(native_runtime_step);
+                step.dependOn(native_task_step);
             }
         }
         const narrowed = suite[0] == .conformance and narrowed_conformance != null;

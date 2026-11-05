@@ -706,8 +706,12 @@ const Members = struct {
         var at = lo;
         while (at > 0) {
             at -= 1;
-            // No part up to here reaches the access.
-            if (index.reach[at] <= off and !(index.parts[at].start == off)) break;
+            // No part up to here reaches the access. A part ending where an
+            // access of no width begins still holds it: a field of no width
+            // may close that part.
+            const reach = index.reach[at];
+            const short = reach < off or (reach == off and width != 0);
+            if (short and index.parts[at].start != off) break;
             const part = index.parts[at];
             if (try self.partHolds(part.ty, part.start, off, width)) return true;
         }
@@ -766,7 +770,10 @@ const Members = struct {
         if (!coversType(self.module, part)) return false;
         const l = self.module.layoutOf(part);
         if (off == at and width == l.size) return true;
-        if (off < at or off - at >= l.size) return false;
+        if (off < at or off - at > l.size) return false;
+        // An access of no width at the part's end is held only by a field of
+        // no width that closes the part.
+        if (off - at == l.size and width != 0) return false;
         return self.isMember(part, off - at, width);
     }
 };
@@ -1202,7 +1209,10 @@ const Function = struct {
                     try self.report(span, "%{d} does not produce a code pointer", .{id.index()});
                     return false;
                 }
-                if (!self.module.types.callableConverts(self.module.functionOf(function).signature, mir.typeOf(id))) {
+                const target = self.module.functionOf(function).signature;
+                const fits = self.module.types.callableConverts(target, mir.typeOf(id)) or
+                    (mir.tagOf(id) == .foreign_function_addr and sameForeignEntry(&self.module.types, target, mir.typeOf(id)));
+                if (!fits) {
                     try self.report(span, "%{d} signature differs from function {d}", .{ id.index(), function.index() });
                     return false;
                 }
@@ -2884,6 +2894,32 @@ pub const Harness = struct {
 
     const Diagnostic = diagnostic.Diagnostic;
 };
+
+/// Whether C calls a body of signature `target` through the same entry as one
+/// of `declared`: the same parameters and result, but that a parameter the
+/// body takes as a `mem.address.Address` is the `UInt64` the declaration
+/// passes. A runtime callback takes the address it was given that way, and
+/// an address is its number.
+fn sameForeignEntry(types: *const types_mod.Typing, target: TypeId, declared: TypeId) bool {
+    const a = switch (types.get(target)) {
+        .callable => |a| a,
+        else => return false,
+    };
+    const b = switch (types.get(declared)) {
+        .callable => |b| b,
+        else => return false,
+    };
+    const a_params = types.callableParams(a);
+    const b_params = types.callableParams(b);
+    if (a_params.len != b_params.len or a.result != b.result) return false;
+    const address = types.raw_accesses.address;
+    for (a_params, b_params) |x, y| {
+        if (x.convention != y.convention) return false;
+        if (x.ty == y.ty) continue;
+        if (address == .none or y.ty != .u64 or types.declOfType(x.ty) != address) return false;
+    }
+    return true;
+}
 
 test "emission requires external flags for every function" {
     const gpa = testing.allocator;

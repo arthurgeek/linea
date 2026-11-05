@@ -1,0 +1,21 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+// `bump` holds `count` lent `inout`. Only a body's own `inout` capture may take
+// an exclusive lend into a task.
+fn main() -> UInt8 {
+    var count = UInt64(0)
+    let bump = sink [inout count] || {
+        count += 1
+    }
+    let body = sink [sink bump] |sink me: Chan[End]| {
+        bump()
+        me.close()
+    }
+    let slot = task.prepare(body).unwrap()
+    slot.start().close()
+    UInt8(count)
+}

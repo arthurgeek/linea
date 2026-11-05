@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/tasks/a_task_keeps_its_arena_until_it_is_joined.lin:19:5
+   |
+19 |     arena.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+20 |     handle.close()
+   |     ------ the observation is still used here

@@ -1,0 +1,20 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+fn main() -> Result[UInt8, io.IoError] {
+    var runs = UInt64(0)
+    let body = sink [inout runs] |sink me: Chan[End]| {
+        runs += 1
+        me.close()
+    }
+    // Cancelling joins the parked thread and answers the body it held, which
+    // can be prepared again.
+    let returned = task.prepare(body).unwrap().cancel()
+    task.prepare(returned).unwrap().start().close()
+    io.println("runs: {runs}")?
+    .Ok(0)
+}

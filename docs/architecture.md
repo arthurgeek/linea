@@ -716,7 +716,9 @@ The signatures the runtime declares for its `linea_` symbols are one table in
 `support/runtime_symbols.zig`, checked against the runtime's own sources so the
 two cannot drift. `checkRuntimeSymbol` holds every `extern` of a `linea_`
 symbol to that table ([T-ExternRuntime]), in the standard library and any other
-root alike, which is why such a symbol needs no separate agreement check.
+root alike, which is why such a symbol needs no separate agreement check. Each
+row also states which declarations may name its symbol: any module granted
+`extern`, or one module of the standard library, found by `libraryDeclIn`.
 
 `seedProvidedImplementations` registers compiler-provided primitive and array
 implementations in the same relation as written implementations. Coherence
@@ -1059,7 +1061,11 @@ representation is an integer, because the address bits of an array are one.
 
 A third table, the builder's `unshareable_facts`, answers `Shareable` over the
 same walk in `unshareable` mode, which follows the edges the writer table
-follows: fields, observed referents and every type argument. Its seeds are a
+follows: fields, observed referents, the values an address, certified storage
+or a slice names, what a `mem.Carried` carries and the callable a
+`mem.ClosureEntry` stands for, and no other type argument. A value kept in
+bytes is held through a `mem.address.Address` of its own type, so no argument
+the walk passes over names something the value holds. Its seeds are a
 declared type whose record says it is marked `@unshareable`, a callable or open
 type, and a type parameter whose record says neither `Shareable` nor `Integer`.
 A `Shareable` promise on a parameter or on a settled reference read through
@@ -1403,6 +1409,23 @@ indexes, so an access to one field inspects the observations of that field
 and of the whole owner, and a read inspects only lends. Normalized calls determine callee consumption and mutable
 access. Dependencies are carried by the closure environment through the existing
 owner graph.
+
+A task's body crosses to another thread at a call to `task.prepare`,
+`prepare_in`, `start` or `start_in`, which `RawAccesses.crossesTask` names by
+identity. At that call the dependency analysis reads the facts the `body`
+argument carries and holds them to [O-Cross]: an observation's place must be `Shareable`, which it asks of
+`Typing.isShareable`, the table the checker settled for the `Shareable` bound,
+and an exclusive lend must be one of the body's own `inout` captures. Which
+capture a fact came through is read from `capture_sets`, what each capture
+took into its closure, sized by the function's captures; ownership computes
+no shareability of its own.
+
+Those calls are the only way a body reaches a thread because the checker
+refuses, under [T-ThreadStart], every expression naming a runtime function the
+symbol table marks `starts_thread` outside `task.Slot.start`, whose handle
+carries the body's dependencies until the join. The checker finds those
+declarations by the symbol they name, in one pass over the expressions after
+every body is checked, and names `Slot.start` by identity in `RawAccesses`.
 
 Ownership runs even when type checking reports errors. A place with a poison
 type has no usable capability information, so it cannot support meaningful

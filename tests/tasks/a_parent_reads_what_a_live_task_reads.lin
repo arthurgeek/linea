@@ -1,0 +1,24 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Send
+
+// The body and its creator both read `prices` while the task is live.
+// Neither may write it until `close` joins the task, so the reads cannot
+// race.
+fn main() -> Result[UInt8, io.IoError] {
+    let prices = [UInt64(3), 4, 5]
+    let body = sink [read prices] |sink me: Chan[Send[UInt64, End]]| {
+        me.send(prices[0] + prices[1]).close()
+    }
+    let slot = task.prepare(body).unwrap()
+    let handle = slot.start()
+    let last = prices[2]
+    let (sum, done) = handle.recv()
+    done.close()
+    io.println("first two: {sum}, last: {last}")?
+    .Ok(0)
+}

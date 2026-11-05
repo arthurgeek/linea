@@ -1,27 +1,40 @@
 # 250. Tasks are structured through linear sessions
 
-Status: Proposed — 2026-10-26. Once built, it would extend
+Status: Proposed — 2026-10-26; complemented by
+[0253](0253-independent-work-runs-through-an-explicit-executor-policy.md)
+(independent work and execution policy). Once built, it would extend
 [0099](0099-a-phantom-parameter-carries-its-bound.md) (a type's dependencies
 come from its fields, and a `mem.Carried` field carries its argument's),
 [0193](0193-a-closure-may-hold-a-place-lent-inout.md) (a lend reaches a value
 whose type can hold the writer, a `Carried` field for a closure type included)
 and [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) (`Carried[H]` is
-`Owned` exactly when `H` is).
+`Owned` exactly when `H` is). The clause that has the `Shareable` table follow every
+type argument is superseded by
+[0255](0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md).
 
-**What is built.** Of this record, stages 0 to 3 of §16 exist:
-`mem.Carried[H]` (§12), which every other clause rests on; the `Protocol`
-trait with its combinators in `std.session` (§4); the `Shareable` bound with
-the `@unshareable` leaf policy on `mem.Arena`, `mem.Handle` and
-`mem.AllocationLog` (§5); [T-Dual] (§4); and the implementation heads postfix
-session operations need (§15), recorded in
-[0252](0252-a-types-own-implementation-may-write-a-parameter-inside-an-argument.md).
-Nothing else described here is available: there is no `std.task`, no session
-endpoint in `std`, no [O-Cross], no `Owned` payload bound, no mailbox and no
-runtime thread. [O-Cross] is decided here and is
-checked from stage 4, where it is tested against the real `start`. Each
-remaining clause is delivered by a stage of §16, and a stage's change states
-the clauses it builds.
-The guide and `std/README.md` describe only what is built.
+**What is built.** Stages 0 to 4 of §16 exist: `mem.Carried[H]` (§12), which
+every other clause rests on; the `Protocol` trait with its combinators in
+`std.session` (§4); the `Shareable` bound with the `@unshareable` leaf policy
+on `mem.Arena`, `mem.Handle` and `mem.AllocationLog` (§5); [T-Dual] (§4); the
+implementation heads postfix session operations need (§15), recorded in
+[0252](0252-a-types-own-implementation-may-write-a-parameter-inside-an-argument.md);
+and the smallest runtime. Stage 4 builds `std.task` (`prepare`,
+`prepare_in`, `start`, `cancel`, `default_stack_bytes`), the endpoint
+`session.Chan` with its postfix operations (§1 to §3), the `Owned` payload
+bound, [O-Cross] (§5), the answer to the `mem.ReleaseTag` question (§5), one
+thread per task with a rendezvous session and the join of §2 in
+`runtime/task.c`, thread-safe runtime archives with the checking allocator
+under one lock (§10), stack probes and an alternate signal stack on every
+thread (§11), the runtime's C tests, a thread sanitizer lane, soundness
+matrix cells for an observation a live task holds, corpus cases that run,
+and the guide's concurrency chapter. Stage 6 is built in the form
+[0253](0253-independent-work-runs-through-an-explicit-executor-policy.md)
+records: [T-ThreadStart] makes `Slot.start` the one start of a thread, so no
+task is unjoined; `recv_until` on a session (§7); and shared mutable state in
+an owning task, `task.own`, whose clients reach the state through `call`, in
+place of a many-to-one mailbox, which is not built (§6). Each remaining clause is
+delivered by a stage of §16, and a stage's change states the clauses it
+builds. The guide and `std/README.md` describe only what is built.
 
 ## Context
 
@@ -97,43 +110,70 @@ The signatures below fix the shape each stage builds. Names and conventions
 are decided; the stage that builds an operation may refine a parameter label,
 and says so in its own change.
 
-### 1. A task is prepared, then started
+### 1. A task is started in one call, or prepared and then started
 
-Creating a task has two phases, so that a failure destroys nothing.
+Creating a task can fail, since the system may refuse a thread or a stack, and
+a failure must destroy nothing a program cannot drop.
 
 ```linea
-pub fn prepare[P: Protocol, F: sink fn(sink me: Chan[P])](read body: F) -> Result[Slot[P, F, mem.SystemAllocator], PrepareError]
-pub fn prepare_in[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator](allocator: A, stack: UInt64, read body: F) -> Result[Slot[P, F, A], PrepareError] where carries(.Ok: allocator)
+pub fn start[P: Protocol, F: Discardable + sink fn(sink me: Chan[P])](sink body: F) -> Result[Chan[P.Dual, (F, mem.SystemAllocator)], PrepareError] where carries(.Ok: body)
+pub fn start_in[P: Protocol, F: Discardable + sink fn(sink me: Chan[P]), A: Allocator](allocator: A, sink body: F, stack: UInt64) -> Result[Chan[P.Dual, (F, A)], PrepareError] where carries(.Ok: body, allocator)
+
+pub fn prepare[P: Protocol, F: sink fn(sink me: Chan[P])](sink body: F) -> Result[Slot[P, F, mem.SystemAllocator], Unstarted[F]] where carries(.Ok: body), carries(.Err: body)
+pub fn prepare_in[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator](allocator: A, sink body: F, stack: UInt64) -> Result[Slot[P, F, A], Unstarted[F]] where carries(.Ok: body, allocator), carries(.Err: body)
 
 impl[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator] Slot[P, F, A] {
-    pub fn start(sink self: Self, sink body: F) -> Chan[P.Dual, F] where carries(body)
-    pub fn cancel(sink self: Self)
+    pub fn start(sink self: Self) -> Chan[P.Dual, (F, A)] where carries(self)
+    pub fn cancel(sink self: Self) -> F where carries(self.body)
 }
 ```
 
-- `task.prepare` performs every fallible step. It reads `body` only to fix `F`
-  and its layout, allocates the task's record and the body's storage, and
-  creates the thread parked on a start latch. It answers a linear `Slot` that
-  holds no dependency of the body. A failure answers `PrepareError`, naming
-  allocation or thread creation, and the body is untouched.
-- `slot.start(body)` is the **commit point**. It moves the body into the
-  task's storage, releases the latch and answers the handle. It cannot fail.
-  Before it the caller owns everything, and no child code runs. After it the
-  task owns the body.
+- `task.start(body)` is the everyday form. It prepares and starts in one call,
+  and a failure drops the body and answers the reason. That is safe exactly
+  when dropping the body is safe, so the body is bounded `Discardable`: it
+  owns nothing linear. A body that does own something linear is refused by
+  [T-Bound], whose help names the two-step form.
+- `task.prepare(body)` takes the body and performs every fallible step: it
+  allocates the body's storage and creates the thread parked on a start
+  latch. It answers a linear `Slot` that holds the body, so the slot carries
+  every dependency the body captured, and a place the body holds lent
+  `inout` is as reserved while the slot lives as while the task runs. A
+  failure answers `Unstarted[F]`, which holds the body and the
+  `PrepareError`, naming allocation or thread creation, so a body owning a
+  linear value is handed back to its owner. `Unstarted` implements `Release`
+  and `Settle` ([0184](0184-a-failure-holding-an-owned-value-settles-to-its-reason.md))
+  when `F` is Discardable, so `task.prepare(body).settled()?` hands the reason
+  on; a body owning something linear is taken back from the failure.
+- `slot.start()` is the **commit point**. It moves the body into the task's
+  storage, releases the latch and answers the handle. It cannot fail. It is
+  written in the library over the runtime's `linea_task_start`: it moves the
+  body, and after it the `mem.Buffer[A]` that owns the bytes, into those
+  bytes, and hands the runtime two fixed library functions as callbacks
+  ([T-ExternCallback]), `run_body[P, F]`, which the task's thread calls with
+  its endpoint and the bytes' address, and `mem.release_kept_bytes[F, A]`,
+  which `close` calls on the joining thread after the join. Both are generic
+  functions the compiler instantiates for the start's `F` and `A`, so no
+  primitive the compiler replaces is needed. Before it no child code runs,
+  and every way out, a failed `prepare` or a `cancel`, hands the body back.
+  After it the task owns the body.
 - `slot.cancel()` settles an unused slot: it releases the latch with nothing to
-  run and joins the parked thread.
+  run, joins the parked thread and answers the body.
 - A `Slot` is linear and has one owner, so `start` and `cancel` cannot race,
   and [O-Leak] refuses a slot a path abandons.
 
-A body capturing a linear value therefore survives a failed `prepare` and is
-settled by its owner afterwards. The `_in` form takes the allocator first and
-the stack size by name, as every allocating API does
+The handle is `Chan[P.Dual, (F, A)]`: the task keeps the bytes `prepare_in`
+acquired from `allocator` until the join, so the handle keeps whatever the
+slot carried from the allocator, such as an observation of an arena, and the
+arena cannot be released while the task runs. `body` comes before `stack:`,
+since a positional argument cannot follow a named one ([S-Args]). The `_in`
+forms take the allocator first and the stack size by name, as every
+allocating API does
 ([0220](0220-a-constructor-or-function-that-allocates-pairs-a-system-form-with-an-in-form.md),
 [0191](0191-the-caller-chooses-every-allocator.md)).
 
 ### 2. The handle is the creator's endpoint, and `close` is the join
 
-`start` answers `Chan[P.Dual, F]`, the creator's end of the session whose other
+`start` answers `Chan[P.Dual, (F, A)]`, the creator's end of the session whose other
 end the body receives as `me`. Its contract `carries(body)` gives the handle
 every dependency the body captured: each `read` capture is an observation, each
 `inout` capture an exclusive lend. [O-Borrow], [O-Escapes] and [O-Leak] then
@@ -153,7 +193,7 @@ this order:
 
 Without step 2, a child could close its end and keep writing through an
 `inout` capture while the parent, released by [O-Borrow], read the place. A
-mailbox join (§6) follows the same order.
+
 
 There are no detached tasks: every task is joined by a `close` that cannot be
 omitted.
@@ -173,7 +213,7 @@ struct Chan[phantom P: Protocol, H = ()] {
 }
 ```
 
-`H` is the body's type for a task's handle and `()` for a delegated endpoint.
+`H` is `(F, A)`, the body's type and its allocator's, for a task's handle and `()` for a delegated endpoint.
 The `mem.Carried[H]` field is what makes the handle carry the body's
 dependencies (§12).
 
@@ -260,11 +300,20 @@ is written as a declaration attribute, in the closed set beside `@linear`,
 `@copyable` and `@carrier`:
 
 ```linea
-@(opaque, copyable, unshareable)
-struct Handle[H: Allocator = SystemAllocator] {
-    owner: borrow Arena[H],
+@(opaque, unshareable)
+struct Arena[H: Allocator] {
+    slab: Option[Buffer[H]],
 }
 ```
+
+`@unshareable` excludes `@copyable`. Copies of a value reach what it reaches,
+so a copyable type declared `@unshareable` would have its copies share state
+that no dependency ties together: a copy moved into a task, held in a record
+or erased into a `mem.Closure` would cross with nothing to refuse it. A
+copyable type reaches shared state through a borrow of an `@unshareable`
+owner instead, as `mem.Handle` borrows its `mem.Arena`: the borrow makes the
+handle not `Shareable` and not `Owned`, and every copy carries its
+observation, which [O-Cross] refuses wherever the copy is taken.
 
 An attribute, because being unshareable is a fact about a type's representation
 that the declaration states, as `@carrier` and `@copyable` are. A trait would
@@ -295,75 +344,68 @@ capture is held to the same rule, observation by observation. A value carrying
 an exclusive lend crosses only as the capture of the body that holds the lend.
 The report is at the capture and names the part that prevents it, as
 [O-Universe] names the part that prevents a copy. A payload crosses under its
-`Owned` bound. Whether that bound is the whole of the payload rule is open
-until stage 4 (§16): an `Owned` value may still reach shared storage through
-raw addresses, which [O-Cross] does not see.
+`Owned` bound. That bound is the whole of the payload rule, by the
+decision below.
+
+**A value that writes storage another value owns observes it.** The library's
+internal `mem.ReleaseTag` used to hold its `ReleaseLog`'s address as integers
+and write the log's words through it when released. It carried no dependency,
+so it was `Owned`, and two tags moved into two tasks would both write the log's
+count, a race neither `Shareable` nor `Owned` saw. Stage 4 decides it by the
+rule that already makes `mem.Handle` observe its arena and
+`mem.RefusingAllocator` observe its `AllocationLog`: a trusted module that
+writes, through a raw address, storage another value owns states it with an
+observation of that value, and a value whose read writes is `@unshareable`. So
+a tag observes its log (`log: borrow ReleaseLog`), and `ReleaseLog` is
+`@unshareable`. A tag is then not `Owned`, so it is no payload, and a tag moved
+into a task by `sink` carries an observation of an unshareable log, which
+[O-Cross] refuses. That refusal is not conservative: even one tag moved into
+one task would race with its creator reading the log. The library's HTTP
+extractor tests are the one place a log is still written through an address
+nothing observes: an extractor sees only its request, so the log's address
+reaches it in a header, and a private probe in `std.http` records through
+`mem.record_release`. Those tests start no task.
+
+Two other answers lost. Refusing to move an unshareable value across a task
+boundary would contradict the rule above that such a value crosses whole, and
+would forbid moving an arena into the task that uses it, which is race-free. A
+log per task would remove the race between two tags, and leave the race
+between a task writing the log and its creator reading it. A new policy for a
+value whose release writes shared state would be a second mechanism for what an
+observation already says, and would need its own soundness argument.
 
 Two `inout` captures of disjoint record fields, in two bodies, are two exclusive
 lends of disjoint places, which the overlap relation of [N-Aliased] and
 [O-Lent] already keeps apart.
 
-### 6. The mailbox: many children, one receive end
+### 6. Shared state lives in an owning task
 
-Waiting on several sources is a **mailbox**. A task owns one linear
-`Mailbox[M, E]` receive end. `M` is the program's own enum of messages, and
-waiting on several sources is a `match` on the message, with no syntax added.
-Session channels stay two-party and typed by their protocol; the mailbox is the
-many-to-one channel beside them.
+Many tasks reaching one mutable value is an **owning task**:
+`task.own(state)` starts a task that holds the state, and each other task
+reaches it through a copyable `task.Client` that borrows the task's linear
+`Owner`. `client.call(job)` runs `job`, a function of `inout state`, on the
+owning task, one call at a time, and answers what the job answers; `close`
+joins the task and answers the state. The job is `Owned`, so it holds no
+client: a call never waits on the task that runs it. The client borrows the
+owner, so [O-Borrow] refuses `close` while a client is still used, and every
+task holding one is joined first.
+[0253](0253-independent-work-runs-through-an-explicit-executor-policy.md) §4
+records the decision and how the runtime's call queue keeps the edges of §10.
 
-```linea
-impl[M: Owned, E: Shareable] Mailbox[M, E] {
-    pub fn open(read env: E) -> Self where borrows(env)
-    pub fn recv(sink self: Self) -> Received[M, E] where carries(self)
-    pub fn send_after(inout self: Self, after: time.Duration, sink message: M) -> Timer[M]
-}
+A many-to-one mailbox, in which a task receives messages from many children
+through linear senders, was designed here first and is not built. Its senders
+were moved and cloned freely, so a task could hold a sender of the mailbox it
+received from, or a child could wait on the task that waited for its sender to
+close: two waits §9 must rule out, which no user code can write against an
+owning task, since none receives from one. Waiting on several sources at once
+remains open.
 
-impl[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator] Slot[P, F, A] {
-    pub fn start_into[M: Owned, E: Shareable, G: Owned + sink fn(read env: E, sink out: Sender[M])](sink self: Self, inout mailbox: Mailbox[M, E], sink body: G)
-}
-```
+### 7. Timeouts: `recv_until`
 
-The bounds on `start_into` are the rule; how a slot prepared for a mailbox child
-is typed is the mailbox stage's to fix.
-
-- **The shared environment is fixed at open.** A mailbox's type does not
-  change as children join, so nothing per child can carry one child's captures.
-  `Mailbox.open(read env)` takes one `Shareable` environment and answers a
-  mailbox that observes it. The read lasts until the mailbox is settled, which
-  happens only by `Closed`, after every child has returned. A child's body is
-  `Owned`: it owns its captures, holds no `inout` lend, and receives `env` as a
-  `read` parameter.
-- **Senders are linear.** A child's one endpoint to the mailbox's owner is a
-  stream, `Send[M, …]` repeated, then `End`. A sender is never copied. It moves
-  like any endpoint, as a capture or as a delegated payload. Fan-in from a task
-  that is not a child is a child forked for it, or a sender moved to it.
-- **Receiving.** `recv(sink mb)` waits on any live child and answers
-  `Message(m, mb)`, or `Closed` when the mailbox has no live child and no
-  pending timer. `Closed` settles the mailbox, so nothing can join it
-  afterwards.
-- **Joining.** The mailbox joins a child when its stream has ended and its body
-  has returned, in the four steps of §2. A child leaves the mailbox only then.
-- **Order.** Messages from one child arrive in the order it sent them. There is
-  no order across children.
-- **Payloads** are `M: Owned`, the bound sessions use.
-
-`http.serve` opens its mailbox over its server state, starts a handler into it
-per connection, and joins handlers in the order they complete. Its `max:`
-bounds the live children: while the mailbox is full, it accepts nothing. A slow
-early connection therefore delays no later one, and the number of open
-connections is bounded.
-
-### 7. Timers: `send_after`
-
-`mailbox.send_after(after, message)` posts `message` to the mailbox later, from
-a runtime timer that waits on no task, so a timeout is one more arm of the
-`match`. A pending timer counts as a live child: `recv` does not answer `Closed`
-while one is pending. It answers a linear `Timer[M]`. `timer.cancel()` answers
-`Cancelled(message)`, handing back a message that was never sent, or `Fired`
-when it was delivered, and either answer settles the handle.
-
-Deadlines never propagate implicitly. A program states each one where it waits,
-with `recv_until` on a session or `send_after` on a mailbox.
+`chan.recv_until(timeout)` waits for the peer's send for at most `timeout`,
+and answers the value with the rest of the protocol or the endpoint back
+unchanged, so a timeout is one more arm of the `match`. Deadlines never
+propagate implicitly. A program states each one where it waits.
 
 ### 8. Communication is synchronous rendezvous
 
@@ -382,21 +424,16 @@ another in a cycle, not that the world answers.
 
 **The model.** The state of a program is a set of tasks and a graph `G` whose
 nodes are tasks and whose edges are live sessions. A session is an edge between
-the two tasks holding its two endpoints. A mailbox child's stream is an edge
-between the child and the task holding the mailbox. A timer is not a node: it
-waits on no task. An edge is live until both of its ends are settled. A task
+the two tasks holding its two endpoints. An edge is live until both of its ends
+are settled. A task
 leaves `G` when its body has returned and it has been joined.
 
 **Blocked and enabled.** A task is *blocked on an edge* when its next operation
 there (`send`, `choose`, `recv`, `offer`, or a handle's `close`) has not
-completed. A mailbox receive is blocked on every edge of the mailbox's live
-children at once. `recv_until` and a receive with a pending timer also wait on
-the world, and always complete. Two complementary operations on one edge are
+completed. `recv_until` also waits on the world, and always completes. Two complementary operations on one edge are
 *enabled*: `send` with `recv`, `choose` with `offer`, and a handle's `close`
-with a child whose endpoint is at `End` and whose body has returned. A mailbox
-receive is enabled when any live child's stream has a pending `send`, or when
-the mailbox has no live child and no pending timer, in which case it answers
-`Closed`. A child's `close` of its own end at `End` does not wait.
+with a child whose endpoint is at `End` and whose body has returned. A child's
+`close` of its own end at `End` does not wait.
 
 **The scheduling assumption.** Every enabled operation eventually completes.
 One operating-system thread per task, scheduled by the kernel, gives it.
@@ -409,8 +446,6 @@ It holds initially (one task, no edge), and each step preserves it:
 - *`start`* adds a node, the child, and one edge from it to its creator. A new
   leaf joined by one edge closes no cycle. A **nested start** is the same step
   taken by a child.
-- *Mailbox registration* (`start_into`) adds a child and one edge to the task
-  holding the mailbox: a new leaf again.
 - *Delegation* moves an endpoint of an edge `(A, X)` to another task `B`, either
   sent over an edge `(A, B)` or captured by a body `start` turns into a child
   `B` of `A`. Removing `(A, X)` splits its tree in two, with `X` on one side and
@@ -418,14 +453,12 @@ It holds initially (one task, no edge), and each step preserves it:
   other than `(A, X)`, since `B` is not `X` (the forest holds one edge between
   two tasks, and a new child is neither). Adding `(B, X)` joins two different trees, so `G` stays a
   forest. A task cannot send an endpoint over that endpoint's own session,
-  since `send` consumes the endpoint it sends on. Moving a mailbox moves each of
-  its children's edges, one at a time, by the same argument.
+  since `send` consumes the endpoint it sends on.
 - *Communication* of a payload that holds no endpoint, and *unfolding* a
   recursive protocol with `enter`, change no edge. A payload that holds an
   endpoint is delegation.
-- *Stream end*, *close*, a *mailbox join* and a *task ending* remove an edge or
-  an isolated node. Removing an edge or a node closes no cycle.
-- *A timer firing* posts a message and changes no edge.
+- *Close* and a *task ending* remove an edge or an isolated node. Removing an
+  edge or a node closes no cycle.
 
 **Lemma 2: a stuck edge has at most one stuck end.** The two ends of a session
 have dual types, so at any moment one end's next operation is the complement
@@ -433,13 +466,10 @@ of the other's. If both tasks were blocked on the same edge, the two operations
 would be complementary, hence enabled, hence would complete. A handle's `close`
 waits on a child whose end is at `End`, whose only remaining operation there is
 its own `close`, which does not wait, so the child is not blocked on that edge.
-A mailbox child's stream only sends and ends; a pending send would make the
-receive enabled, so a child of a blocked receive is not blocked on its stream.
 
 **The proof.** Suppose a finite non-empty set `T` of tasks stays blocked
 forever, each waiting only on tasks in `T`. Choose `t₀ ∈ T` and an edge `e₀` it
-is blocked on; a blocked mailbox receive has at least one live child, since one
-with none answers `Closed`. Let `t₁` be the other end of `e₀`. It is in `T`, so
+is blocked on. Let `t₁` be the other end of `e₀`. It is in `T`, so
 it is blocked forever, and by Lemma 2 on some edge `e₁ ≠ e₀`. Repeating gives
 an infinite walk `t₀ e₀ t₁ e₁ t₂ …` that never leaves along the edge it arrived
 by. In a forest such a walk never revisits a node, since a revisit would close a
@@ -453,8 +483,16 @@ entered by, and a leaf in `T` must be blocked on some other edge. So no such
 - that a session completes, or that a program terminates;
 - external progress: a task waiting on a socket may wait forever;
 - lock-freedom, that every pending communication eventually completes;
-- any order across a mailbox's children, or that a child with a pending send is
-  served before another child's later send.
+- any order across the callers of one owning task.
+
+**Owning tasks.** A call to an owning task (§6) is not an edge of `G`, and no
+task waits on one forever. A caller waits only while the owning task runs the
+calls queued before its own, and each of those completes without waiting on
+any task: a job is `Owned`, and the handle of every task that can call the
+owning task carries that task's client, a borrow of the owner, so no job holds
+one. The owning task's own wait for the next call is enabled by any call, and
+by `close`, which its holder may reach only once every task holding a client
+has been joined.
 
 Each later record that adds a blocking operation (a lock, a `select`, a channel
 not created by `start`) must say what it does to this argument.
@@ -468,12 +506,15 @@ edges are:
 - **start:** everything the parent did before `start` is visible to the body;
 - **rendezvous:** everything a task did before a `send` is visible to its peer
   after the matching `recv`;
-- **join:** everything the body did is visible after `close`, or after the
-  mailbox join of that child.
+- **join:** everything the body did is visible after `close`;
+- **call:** everything a caller did before `call` is visible to the job the
+  owning task runs for it, and everything the job did is visible to the caller
+  after `call` returns.
 
 The ownership rules supply the rest. A `read` capture leaves both sides only
 reads until `close`. An `inout` capture leaves the place to the child alone
-until the join. A `sink` capture and a payload are moved. `Shareable` excludes
+until the join. A `sink` capture, a payload and a call's job are moved, and an owning task's
+state is reached only by its own thread. `Shareable` excludes
 the one kind of value whose `read` writes. So every non-shared location is
 reached by one task between two edges, and every accepted program is
 sequentially consistent at every optimisation level.
@@ -481,21 +522,135 @@ sequentially consistent at every optimisation level.
 **The runtime contract** states these edges, so they are a property of the
 contract and not of one C implementation. A channel's mutex guards its slot,
 and the slot goes from empty to full to empty. A channel is freed only after
-both ends have settled. Both runtime archives are thread-safe. In the checked
+both ends have settled. An owning task's call queue keeps one request slot
+under one mutex: a caller fills it and waits until the owner has counted its
+request finished, and the owner copies the request out under the same mutex
+and marks it finished once the job has run, so a call is a rendezvous in both
+directions. Both runtime archives are thread-safe. In the checked
 archive every piece of global checking state, its regions and spill table
 included, is under its lock. Concurrent stress tests cover allocation and free.
+
+*Built.* `runtime/task.h` states the edges and `runtime/task.c` keeps them:
+start is a release of the latch under the session's mutex, which the thread
+acquires before it reads the body; a send fills the slot under the mutex and
+waits until the receiver's copy has emptied it, counting values so a sender
+waits for its own and not merely for an empty slot; the join is
+`pthread_join`. The handle's endpoint and the task's differ in their lowest
+bit, so one record serves both, and it is freed by the handle's `close`
+after the join, the only end that waits.
+
+**A payload moves through bytes.** `send` moves the value into bytes from the
+system allocator, the runtime copies them straight into the receiver's
+bytes once both ends have met, and the receiver moves the value out, so one
+copy crosses between the two tasks and the runtime allocates nothing.
+Running out of memory for those bytes is a trap, since neither operation can
+fail. Moving the value with no bytes of its own, from the sender's frame into
+the receiver's, would need the address of a value in a frame, which the
+language deliberately never gives, and a lowering of `send` and `recv` the
+compiler would own; the copy through bytes the library already writes costs
+an allocation per message and nothing else. This stays the payload path until
+a measurement shows the allocation matters.
 
 ### 11. Stacks
 
 - **Size.** `task.default_stack_bytes` names the stack size `prepare` uses, and
   `prepare_in(allocator, stack:, body)` takes one explicitly. The stack size is
-  an allocation size and is never hidden.
+  an allocation size and is never hidden. It is two mebibytes, by
+  measurement: the deepest path through the library, parsing and rendering a
+  JSON document nested as deeply as the parser accepts while sorting twenty
+  thousand numbers and formatting a float, overflows 64 KiB and fits 96 KiB
+  optimised, and overflows 512 KiB and fits 768 KiB at `-O 0`. Two mebibytes
+  is more than twice the unoptimised need, and costs address space, not
+  memory, until it is touched. Below every task's stack lie 64 KiB of guard
+  pages.
 - **Overflow.** The compiler emits stack probes for every frame larger than the
   guard page, so no frame jumps the guard. Every thread, `main` included, has
   an alternate signal stack allocated at thread start and freed at join, so a
   guard-page fault on any thread runs the fault handler, which reports the
   overflow and aborts the process, on the path `main`'s overflow takes too
   ([0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md)).
+  *Built:* every generated body carries `"probe-stack"="inline-asm"`, and
+  the report is `linea: a stack overflowed`. A thread installs its signal
+  stack before it parks, so a failure there is `prepare`'s to report. A
+  sanitized runtime, which the build compiles with `LINEA_SANITIZED`, leaves
+  faults to the sanitizer's own handler.
+- **Signals in a host process.** Exported Linea functions run inside a process
+  that may have installed handlers of its own, so the runtime takes over only
+  what it must. Its `SIGSEGV` and `SIGBUS` handler keeps the action installed
+  before it and hands every fault that is neither an overflow nor the checking
+  allocator's to that action. A previous handler is called with the same
+  arguments, with its `sa_mask` blocked and the fault's signal blocked unless
+  it set `SA_NODEFER`; one installed with `SA_RESETHAND` runs for the first
+  such fault only, and later ones take the default action, where the system
+  reports the flag. macOS does not report it through `sigaction`; there a
+  run of identical faults (one thread, signal and address, every register
+  unchanged, each arriving within 10 ms of the thread's own CPU time after
+  the previous handler's return) that has lasted a second of wall-clock
+  time takes the default action, since no repair is coming. The gap is
+  measured on the thread's CPU clock so that waiting for a processor on a
+  loaded machine does not restart a run. A repair from the handler or
+  another thread may take up to that second however many faults it costs
+  and however slow the handler; a repair in a few steps, or a page polled
+  again after 10 ms of the thread's own work, is never ended, while one
+  polled again with no work in between, with every register unchanged, for
+  a second, is ended like an unrepaired access. Each faulting thread keeps a record of its own, so threads do not
+  slow each other's detection. What is not
+  reproduced: the previous handler runs on the stack the runtime's handler
+  runs on, the thread's alternate signal stack where it has one, whether or
+  not it asked for `SA_ONSTACK`; and after an `SA_RESETHAND` handler has run,
+  `sigaction` still reports the runtime's handler. A default or ignored
+  action is reinstalled and the access runs again, so the process ends as it
+  would without the runtime.
+  The handler calls only async-signal-safe functions, and `pthread_getspecific`,
+  which POSIX does not list but which allocates and locks nothing on Linux
+  and macOS: it finds a thread's guard pages through a thread-specific
+  pointer to a record at the low end of the thread's signal stack, never
+  through a `__thread` variable, which macOS allocates with `malloc` on a
+  thread's first access. It reads the checking allocator's table under a
+  flag taken with lock-free atomics, not a mutex, and a fault on the thread
+  that owns the table reports that storage checking was busy without reading
+  it. In the checking runtime every fault consults that table first, so a
+  fault that is not Linea's, met while the table stays busy past a bounded
+  wait of about a second, ends with that generic report rather than reaching
+  the host's handler.
+  `SIGPIPE`'s disposition is left as the process set it, and so is every
+  open file; nothing here changes the process-wide disposition. Linux raises
+  a write's `SIGPIPE` on the writing thread; macOS raises it on the process,
+  hands it to a thread that does not block it, and, where all block it,
+  leaves it pending on some thread, not necessarily the writer. Three cases:
+  1. Sockets and ordinary Linea writes, on either system: a socket is
+     written with `send` and `MSG_NOSIGNAL`, which raises nothing for that
+     call; any other descriptor with `SIGPIPE` blocked on the writing
+     thread, taking a `SIGPIPE` the write left pending on that thread before
+     the mask is restored, and leaving one that was pending before the
+     write. On Linux this is complete.
+  2. A standalone Linea program on macOS: its entry blocks `SIGPIPE` on the
+     main thread, and threads created afterwards with `pthread_create`
+     inherit the mask, so a `SIGPIPE` stays pending on a thread that never
+     takes it and the write answers `EPIPE`. Linea does not control the mask
+     of libdispatch (GCD) workqueue threads, which do not inherit main's, nor
+     of a thread a C constructor started before the entry; while one of them
+     lives without blocking `SIGPIPE`, a write's `SIGPIPE` can reach it. The
+     mask and a pending signal survive `exec`: a program started through C
+     begins with `SIGPIPE` blocked unless the caller sets its mask, and a
+     program the process becomes by `exec` in place keeps the `SIGPIPE` left
+     pending on main and dies of it once it unblocks it. No path of the
+     runtime or the standard library calls `exec`.
+  3. Linea embedded in a host process: threads the host creates keep the
+     host's signal policy. On macOS a host thread that does not block
+     `SIGPIPE` can take a Linea write's `SIGPIPE` under the host's
+     disposition, as it would the host's own write's. An embedder that needs
+     protection blocks `SIGPIPE` on its own threads.
+  Setting `F_SETNOSIGPIPE` on the open file is rejected: kept, it changes
+  what every other holder of the file, other processes included, sees; and
+  restoring it after the write cannot be done soundly, since a forked
+  process shares the open file but not a record of writes in progress.
+  Ignoring `SIGPIPE` process-wide is rejected because the disposition is the
+  host's. A failure report to a standard error with no reader, pipe or
+  socket, ends by its abort, not by
+  `SIGPIPE`. This replaces the restoring of the default action that
+  [0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md)
+  describes.
 
 ### 12. `mem.Carried[H]`: a field that carries without owning
 
@@ -571,7 +726,13 @@ pub fn split_inout[F: inout fn(inout left: mem.View[T], inout right: mem.View[T]
 
 `mem.View[T]` is a trusted writable view, written over raw access as
 `mem.Slice` is. `at` lies in `0..=len`; a larger `at` is the same trap as an
-index out of range. The two views cover the vector without overlap.
+index out of range. The two views cover the vector without overlap: `left`
+starts at the vector's first element and `right` at element `at`. Indexing a
+view names one of its elements in place, to read or to assign, through the
+compiler's `view_place`, which checks the index against the view's length; it
+is offered for `Owned` elements only, since a value assigned through a view is
+kept by the vector, and what such a value borrowed would not be counted
+against the vector.
 
 Two exclusive lends of disjoint parts of one owner are represented as two
 distinct `inout` parameters of the callback. The vector itself is lent `inout`
@@ -651,46 +812,70 @@ run; stages 5 to 7 extend it.
    whose head refuses it is [T-UnknownOperation] naming the head. There is no
    `Chan` in `std` until stage 4, so the corpus and the guide write their
    own endpoint type over `std.session`.
-4. **The smallest runtime** (§1–§3, §8, §10, §11): one child, `prepare`,
-   `start`, `cancel`, a rendezvous channel, join on `close` with its four steps,
-   thread-safe archives, the checked archive's lock, stack probes and an
-   alternate signal stack per thread. *Exit:* runtime tests for forced
-   allocation failure, forced thread failure, the body still usable after
-   either, `cancel` settling the parked thread, a body that never runs before
-   `start`, and an overflow on a worker reported rather than killed; the
-   soundness matrix meets an observation held by a live task handle with every
-   owner operation (refused before `close`, run clean after it); corpus cases
-   print only after the join, so their output does not depend on scheduling;
-   [O-Cross] defined in the semantics and checked, with corpus cases for each
-   refusal (a `read` capture of an unshareable place, a `sink` capture whose
-   observation reaches one, an exclusive lend crossing outside the body that
-   holds it) and each acceptance, the share-nothing cases (a parent reading
-   what a live task reads, disjoint-field lends) included; the `Owned` bound on
-   the payloads of `send` and `recv`, refusing `Str`; the program generator's
+4. **The smallest runtime** (§1–§3, §8, §10, §11), built in two changes that
+   land together. One child, `prepare`, `start`, `cancel`, a rendezvous
+   channel, join on `close` with its four steps, thread-safe archives, the
+   checked archive's lock, stack probes and an alternate signal stack per
+   thread. *Exit:* runtime tests for forced allocation failure, forced thread
+   failure, the body still usable after either, `cancel` settling the parked
+   thread, a body that never runs before `start`, and an overflow on a worker
+   reported rather than killed; the soundness matrix meets an observation
+   held by a live task handle with every owner operation (refused before
+   `close`, run clean after it); corpus cases print only after the join, so
+   their output does not depend on scheduling; [O-Cross] defined in the
+   semantics and checked, with corpus cases for each refusal (a `read`
+   capture of an unshareable place, a `sink` capture whose observation
+   reaches one, an exclusive lend crossing outside the body that holds it)
+   and each acceptance, the share-nothing cases (a parent reading what a live
+   task reads, disjoint-field lends) included; the `Owned` bound on the
+   payloads of `send` and `recv`, refusing `Str`; the program generator's
    coverage table listing `start`, `send` and `recv` as unreached; soundness
-   matrix cells for capture crossings; and an answer to the question below; a
-   new guide chapter on concurrency covers `prepare` and `start`, sessions,
-   `close` as the join, and what crosses a task boundary, with programs that
-   run.
+   matrix cells for capture crossings; and an answer to the question below;
+   a new guide chapter on concurrency covers `prepare` and `start`,
+   sessions, `close` as the join, and what crosses a task boundary, with
+   programs that run. The runtime's C tests (`runtime/task_test.c` and
+   `runtime/task_fault_test.c`, under `zig build test-native-task`) and a
+   thread sanitizer lane, which runs the corpus and every native runtime
+   test, move here from stage 5, since the runtime they watch arrives here.
+   **Built.** The C tests cover prepare, start and cancel, the rendezvous,
+   choose and offer, close joining only after the body returns, many tasks
+   at once, concurrent allocation under the checked archive's lock and an
+   overflow on a worker and on `main`, and inject failures into the record's
+   allocation, each mapping, `pthread_create` and `sigaltstack`. The guide's
+   chapter is framed against JavaScript's `async`/`await` and Rust's threads
+   and futures, and teaches gathering results (`Promise.all`) and a producer
+   and consumer. The thread lane instruments the generated code as well as
+   the runtime: the emitter writes `sanitize_thread` on every function a
+   sanitized module defines, so a race between two tasks' Linea code that the
+   compiler accepted is reported at run time, as a compiler defect.
 
    *Question for this stage.* The library's internal `mem.ReleaseTag` values
    write one shared release log through raw addresses when they are released. Tags moved into two tasks
    would both write that log on release, a race neither `Shareable` (which
    governs reads) nor an `Owned` payload bound (a tag carries no dependency)
-   refuses. [O-Cross] or the payload rule must answer it, for example by a
-   bound that a moved value reaches no storage another value can reach.
+   refuses. **Answered** in §5: a tag observes its log, and the log is
+   `@unshareable`.
 5. **Runtime stress.** *Exit:* concurrent allocation and free under the
    checked allocator, channel stress, and `prepare` failure under load all pass
    on Linux, and the concurrency chapter says what the runtime guarantees under
-   load.
-6. **The standard library** (§6, §7, §13): `split_inout` over `mem.View`, the
-   mailbox with `send_after` and its timers, `recv_until`, and `http.serve`
-   over a mailbox with `max:`. *Exit:* every `pub fn` tested beside its
-   definition, the concurrency chapter extended to the mailbox, timers,
-   `split_inout` and `http.serve` with programs that run, and an example that
-   serves connections concurrently.
+   load. The thread sanitizer and the runtime's C tests are stage 4's.
+6. **The standard library** (§6, §7, §13): `split_inout` over `mem.View`,
+   `recv_until`, the owning task of §6, and concurrent `http.serve`.
+   *Built*, in the form
+   [0253](0253-independent-work-runs-through-an-explicit-executor-policy.md)
+   records: [T-ThreadStart] keeps every thread joined; `task.own` with
+   `Owner`, `Client` and `call` over a runtime call queue; `http.serve` and
+   `listen_and_serve` concurrent by default on `.Threads(128)`, each serving
+   task with a handler of its own built by a factory, the listener in an
+   owning task that free tasks take connections from; `listen_and_serve_with`
+   keeping the routes' shared state in an owning task; and the HTTP examples
+   and the guide migrated with it. *Open:* a race against a timeout beside
+   `recv_until`, a chat server whose room is an owning task, and waiting on
+   several sources at once, which the unbuilt mailbox was to answer.
+
 7. **`async_map`** (§14). *Exit:* its own record accepted and built, and the
-   concurrency chapter extended to it.
+   concurrency chapter extended to it with an example of a
+   concurrency-limited map, the shape JavaScript writes with `for await`.
 
 ## Consequences
 
@@ -776,8 +961,8 @@ source, keeps the forest.
 
 **A `select` expression over endpoints.** New syntax, and every arm must hand
 back every endpoint that did not fire. **A fixed-arity `wait_any(a, b)`**
-serves channels only, with one function per arity. The mailbox does both with a
-`match`.
+serves channels only, with one function per arity. Waiting on several sources
+is left open (§6).
 
 **Deadline scopes and cancellation tokens that propagate implicitly.** Every
 blocking call would have to honour them: hidden control flow, and a colouring by
@@ -788,11 +973,11 @@ configuration. **A scoped `task.mailbox(|inout mb| …)`** needs a new rule
 restricting what a child may capture to the scope's own captures. One shared
 environment fixed at open needs neither.
 
-**A dispatcher that joins handlers in accept order**, or **N workers with
-per-worker state built by a factory.** Joining in accept order lets a slow early
-connection delay joining every later one. Per-worker state partitions what a
-cache or a count would share. The mailbox joins in completion order, and its
-`max:` bounds what is open.
+**A dispatcher that joins handlers in accept order.** It lets a slow early
+connection delay joining every later one. The serving tasks of
+[0253](0253-independent-work-runs-through-an-explicit-executor-policy.md) each
+take the next connection from the listener's owning task when they are free,
+and what they share, a cache or a count, lives in an owning task.
 
 **Deferring parallel `inout` over one container** until writable views exist.
 The callback form needs only a trusted `mem.View[T]`, which the library can
@@ -828,15 +1013,29 @@ external obligation and holds no lend of a survivor's owner. It is deferred; a
 record that takes it delivers the failure as a protocol branch at `close`, never
 as an exception.
 
+**A slot that holds no body: `prepare(body)` reading it, then
+`slot.start(body)` taking it.** A failure then left the body with its owner
+without a type to hand it back in, but every program wrote the body twice,
+once to fix its type and once to move it, and the slot carried none of the
+body's dependencies until the start. Moving the body at `prepare` writes it
+once, makes the slot carry its captures, and hands it back in `Unstarted` or
+from `cancel`; the one-call `start` covers the bodies that own nothing
+linear, so the two-step form serves the bodies whose failure the program
+must handle.
+
+**A compiler-owned `task_start`**, replaced in lowering as
+`mem.closure_entry` is, with a generated thread entry and a generated
+release of the body's bytes. Both are ordinary generic functions the library
+can write over the typed storage primitives, and [T-ExternCallback] already
+hands C a fixed function's address, so the compiler would have owned two
+bodies and a signature check for nothing the library could not say.
+
 **Detached tasks.** Nothing in the library or the examples needs one, and the
 bound "the body depends on nothing" is a new kind of bound the contract language
 does not have.
 
 ## Open questions
 
-- **The value of `task.default_stack_bytes`.** Open until the runtime stage,
-  which measures the library's deepest frames and states the value with its
-  reason.
 - **Two exclusive lends returned from one call** (`split_inout` answering both
   halves). Open; it needs an exclusive-lend-creating contract and disjoint
   synthetic sub-places.

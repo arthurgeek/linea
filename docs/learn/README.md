@@ -12,6 +12,7 @@
 10. [Testing](10-testing.md)
 11. [Calling C](11-calling-c.md)
 12. [A guest book](12-a-guest-book.md)
+13. [Tasks and sessions](13-tasks-and-sessions.md)
 
 Appendices: [Patterns the standard library repeats](patterns.md) and
 [Errors the guide shows](errors.md).

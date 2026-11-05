@@ -1,0 +1,21 @@
+import std.mem
+import std.session
+import std.task
+
+use mem.Lender
+use session.Chan
+use session.End
+
+// A handle's `acquire` advances its arena's cursor through a `read`, so a
+// task reading the handle would race with its creator on that cursor.
+fn main() -> UInt8 {
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    let handle = arena.handle()
+    let body = sink [read handle] |sink me: Chan[End]| {
+        let _bytes = handle.acquire(8)
+        me.close()
+    }
+    let slot = task.prepare(body).unwrap()
+    slot.start().close()
+    0
+}

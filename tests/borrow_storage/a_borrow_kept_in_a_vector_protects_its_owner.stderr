@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/borrow_storage/a_borrow_kept_in_a_vector_protects_its_owner.lin:8:5
+  |
+8 |     number = 2
+  |     ^^^^^^ keep this place available until the last use of its observation
+9 |     let first = *kept[0]
+  |                 -------- the observation is still used here

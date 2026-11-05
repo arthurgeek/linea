@@ -7,7 +7,12 @@ the reserved-path-root clause of [0085](0085-the-library-is-imported.md) and
 the reserved-root sentence of [0111](0111-import-paths-are-root-relative.md).
 Extends [0096](0096-a-root-is-a-program-or-a-library.md) with two manifest
 keys. The boolean `"extern": true` grant is superseded by
-[0228](0228-a-granted-module-calls-c.md), which grants named modules.
+[0228](0228-a-granted-module-calls-c.md), which grants named modules. The
+clause letting a granted root call the runtime's functions directly is
+superseded by [0255](0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md),
+which confines every function trusted with an allocation, a descriptor or an
+address to the library module that owns it, and recognises the library by
+its carried source.
 
 ## Context
 

@@ -72,6 +72,13 @@ Reading input that may be malformed or never ends, and recovering from bad recor
 
 - [log_filter.lin](log_filter.lin): filters log records from stdin; buffered streams and recovery from bad records.
 
+## Tasks
+
+Work on several threads at once, through sessions the compiler checks.
+
+- [party_guest_list.lin](party_guest_list.lin): collects a party's guest list from friends who each decide on a task of their own; `task.start`, gathering answers in invitation order over sessions before `close` joins each task, and a guest list owned by the party alone.
+- [reading_times.lin](reading_times.lin): estimates how long each article of a newsletter takes to read, measuring all three at once on tasks of their own; `task.prepare`, gathering each result over a session before `close` joins the task, and texts every task reads.
+
 ## TCP servers
 
 Sockets, connections, and what a server owes each one.

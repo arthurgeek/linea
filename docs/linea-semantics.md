@@ -122,7 +122,7 @@ traversal    ::= "trav" name ("(" parameters? ")")? "=" expression
               | "trav" name "via" name
 typedecl     ::= "struct" name generics? where_clause? "{" fields? "}"
                | "enum" name generics? where_clause? "{" variants? "}"
-               | "type" name "=" type_name refinement?
+               | "type" name generics? "=" type_name refinement?
 refinement   ::= "where" "it" "in" litbound rangeop litbound
 litbound     ::= "-"? integer
 trait        ::= "trait" name generics? (":" type_bound ("+" type_bound)*)? where_clause? "{" (signature | projsig | declared)* "}"
@@ -369,9 +369,12 @@ describe, and `impl` contains only the member declarations listed in the
 grammar.
 
 A newtype uses its base's representation and inherits its base's settlement
-obligation. `opaque` restricts access to that representation to the declaring
-module. Its default policy is affine; an explicit copyable policy must satisfy
-[O-Universe], as for a struct or enum ([§4](#4-types)).
+obligation. A generic newtype, `type Id[phantom T] = UInt64`, is instantiated
+as a generic struct is: its base is written with its arguments, and each
+instantiation is a distinct type with that base's representation. `opaque`
+restricts access to that representation to the declaring module. Its default
+policy is affine; an explicit copyable policy must satisfy [O-Universe], as for
+a struct or enum ([§4](#4-types)).
 
 Explicit `read` on a function or lambda parameter is redundant and violates
 [S-Entry]: omitting the convention already means `read`. This includes trait
@@ -1842,6 +1845,19 @@ Whether a
 root is the standard library is read from its manifest and never from its
 directory's name or location.
 
+**[M-Standard]** A root whose manifest names it `std` is the standard library
+only where its source is the one the compiler carries: each file it loads must
+hold, byte for byte, the text of the carried library's file at the same path
+relative to the root, and a file that differs or that the carried library does
+not hold is refused where the root is read from disk; an editor's in-memory
+root keeps loading. The standard library alone may declare the runtime
+functions that hand out allocations, descriptors, threads and call queues
+([T-ExternRuntime]), and the checker certifies its types, so a library taking
+the name with source of its own would be trusted as the standard library is.
+A copy of the library's directory compiles as the library wherever it sits;
+an edited copy compiles once the compiler is built from it
+([ADR 0255](adr/0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md)).
+
 A type's braces contain only its representation: struct fields or enum
 variants. Behaviour is declared in `impl` blocks, which may appear anywhere in
 the declaring module, with no limit on their number.
@@ -1955,7 +1971,11 @@ trait declarations, which are accessed through the trait's namespace.
 
 A newtype construction is a call naming that newtype. Qualified forms
 `a.Score(9)` and `a.Score?(9)` construct the same type as the bare forms made
-available by `use`, with the same `opaque` restrictions. Pattern heads cannot
+available by `use`, with the same `opaque` restrictions. A generic newtype's
+construction takes its type arguments from the type its context expects, as
+`.{ ... }` takes a struct's: a phantom parameter appears in no operand, so the
+operand cannot supply them. A construction no context gives an instantiation
+of the newtype is refused by [T-Infer]. Pattern heads cannot
 be qualified: the matched value determines the type being destructured.
 
 A module name is visible only as a qualifier, never as a value. Using a bare
@@ -3038,10 +3058,14 @@ Declaration attributes form a closed set. `@opaque`, `@linear`, `@copyable`,
 `@carrier`, `@unshareable`, and `@derive(Traits...)` may be written separately or
 as items of one `@(...)` group. Every group precedes the struct, enum, or
 newtype it modifies, before ordinary visibility. An empty group, unknown item,
-a repeated policy, `carrier` or `unshareable`, `linear` combined with `copyable`, an
-attribute before another declaration, or `carrier` on a newtype violates
-[S-Entry]. `@unshareable` marks a type that is not `Shareable` (§5.3); it states
-no ownership policy and is declared only where [M-Extern] grants it. `@carrier`
+a repeated policy, `carrier` or `unshareable`, `linear` combined with `copyable`,
+`unshareable` combined with `copyable`, an attribute before another
+declaration, or `carrier` on a newtype violates [S-Entry]. `@unshareable`
+marks a type that is not `Shareable` (§5.3); it states no ownership policy and
+is declared only where [M-Extern] grants it. It excludes `copyable` because
+copies of a value reach what it reaches: a copyable type reaches shared state
+through a borrow of an `@unshareable` owner, whose observation every copy
+carries, as `mem.Handle` borrows its `mem.Arena`. `@carrier`
 marks a struct or an enum; it states no ownership policy and combines with
 either. What it means is under the callable source clauses
 ([ADR 0216](adr/0216-a-carrier-type-supplies-its-signatures-default-contract.md)).
@@ -4473,9 +4497,9 @@ allocator a generic parameter to preserve allocator polymorphism." A type a
 trait implementation settles cannot take an allocator parameter, so there the
 help offers `mem.SystemAllocator` alone.
 
-**[T-Phantom]** A type parameter absent from every struct field, enum variant and
-trait signature must be declared `phantom`. It contributes to type identity
-without appearing in the stored representation. An unused-name spelling,
+**[T-Phantom]** A type parameter absent from every struct field, enum variant,
+newtype base and trait signature must be declared `phantom`. It contributes to
+type identity without appearing in the stored representation. An unused-name spelling,
 including a leading underscore, does not express this role. Conversely, a
 parameter that does occur in those positions cannot be `phantom`. Phantom
 parameters carry ordinary bounds, checked on their arguments
@@ -4535,11 +4559,14 @@ fields `value: R` and `code: Int32`, in that order; a declaration of any other
 shape is [T-Extern] at the declaration, and an `extern` answering it is not
 checked further.
 
-The private `std.mem` declarations `slot_stride`, `slot_take`, `slot_put`, and
-`slot_place` are typed storage primitives, not foreign calls. A recognized
-primitive must retain its compiler-defined private signature; violations are
-[T-Extern]. Another module's declaration of the same spelling receives no
-exemption.
+The private `std.mem` declarations `slot_stride`, `slot_take`, `slot_put`,
+`slot_place` and `address_in` are typed storage primitives, not foreign calls.
+A recognized primitive must retain its compiler-defined private signature;
+violations are [T-Extern]. Another module's declaration of the same spelling
+receives no exemption. A slot primitive reads the slots' address and extent
+from the storage it is given, whose address names the element type, so a
+value kept in bytes is always held by a type that names its own
+([ADR 0255](adr/0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md)).
 
 The private `std.scalar` declarations `linea_math_sqrt`, `linea_math_floor`,
 `linea_math_ceil`, `linea_math_trunc`, `linea_math_round`, `linea_math_sin`,
@@ -4565,8 +4592,12 @@ argument names a function or is a lambda that captures nothing, because C calls
 an entry generated for one fixed function; a function value whose target is
 known only at run time is refused. The entry takes the callback's parameters in
 their C widths and calls the function, and nothing but an `extern` call is
-handed one. The compiler believes the declaration: C calls the callback only
-during the call, on the calling thread, with the context it was lent.
+handed one. The compiler believes the declaration: C calls a callback that
+takes a context only during the call, on the calling thread, with the context
+it was lent. A callback without a context holds nothing but its fixed
+function, so C may keep it and call it later, from any thread; the standard
+library's `task` hands the runtime the function a task's thread runs this
+way.
 
 ```linea
 struct Tally { total: Int64 }
@@ -4607,8 +4638,8 @@ handle moves what the call still lends, which is [O-Move].
 
 **[T-ExternAgreement]** Every `extern` declaration of one symbol names the one
 function the runtime provides under that symbol, so each module may declare the
-runtime functions it calls: `std.fs` and `std.net` each declare `linea_close`, and
-both call the same function. The declarations must agree on every parameter's
+runtime functions it calls: `std.time` and a program granted `extern` may each
+declare `linea_clock_sleep`, and both call the same function. The declarations must agree on every parameter's
 type and convention and on the result. Parameter names and defaults belong to each
 declaration and need not agree. A declaration whose signature was already refused
 is not compared again
@@ -4616,15 +4647,90 @@ is not compared again
 
 **[T-ExternRuntime]** The `linea_` symbol namespace is the runtime's. An `extern`
 naming a `linea_` symbol must have the signature the runtime declares for that
-symbol (the same parameter types, conventions and result) in whatever root
+symbol (the same parameter types, conventions and result, and for a parameter
+the runtime calls back through, a function type taking and answering exactly
+what the runtime passes and expects) in whatever root
 declares it, and a `linea_` symbol the runtime does not declare is refused. The
 standard library's declarations are held to the runtime's signatures exactly as
 any other root's are. The compiler-owned symbols above are [T-Extern]'s instead,
 and the typed storage primitives have no runtime definition and are refused
-wherever else they are declared. A declaration agreeing with the runtime's
+wherever else they are declared. A runtime function that takes or answers a
+number something must own is declared only by the standard library module
+whose types keep that number: `task` for a parked thread and an owning task's
+call queue; `session` for an endpoint's choice and close; `mem` for the
+functions that copy typed bytes between tasks, the allocator's `linea_alloc`
+and `linea_free`, `linea_close` and every call that reads, writes, opens or
+names a file through a descriptor or the address of a buffer's bytes, the
+decimal parsers that read bytes at an address, and the argument and
+environment entries that answer one; `fs` for `linea_set_mode`; and `net` for
+the socket calls, each of which takes or answers a descriptor. Each such
+number is held by a linear value and each such address by a buffer or a
+slice, so a declaration anywhere else, in any root, is refused: through the
+runtime's own entry points it could free an allocation or a queue twice,
+close a descriptor the standard library still owns, have the runtime read or
+write bytes at a number no value holds, leave a parked thread unjoined or
+close an endpoint it made up. The rule reaches only the runtime's `linea_`
+symbols, so it is defence in depth and not a guarantee: a module granted
+`extern` may declare a C library function such as `close` or `free` itself
+and misuse a number through it, which no rule refuses. What the rule gives is
+that the runtime's entry points taking or answering such a number are
+reached only through the standard library's checked wrappers. A module granted
+`extern` may still declare the functions that take and answer no such number:
+argument and environment counts and lengths, `linea_errno` and
+`linea_io_category`, `linea_random_words`, the clocks, and the float
+formatting that reads only a float's bits. The compiler's table states for
+every symbol which declarations may name it, and marks every parameter or
+result that is such a number, so a symbol added to the runtime is confined or
+opened by a decision, not by omission. Which root is the standard library is
+[M-Standard]'s to say. A declaration
+agreeing with the runtime's
 signature agrees with every other declaration of the symbol, so
 [T-ExternAgreement] does not also report a `linea_` symbol
-([ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md)).
+([ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md),
+[ADR 0255](adr/0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md)).
+
+**[T-ThreadStart]** A runtime function that runs Linea code on a thread of its
+own, `linea_task_start`, may be named, as a callee or as a value, only inside
+`task.Slot.start`. A body handed to such a function keeps running after the
+call returns, and `Slot.start` alone answers a handle that carries what the
+body captured until `close` joins the thread, so the body's reads and lends
+last as long as it runs ([O-Cross]). Anywhere else they would end while the
+body still ran, so no other function of the standard library's `task`, which
+alone declares the symbol ([T-ExternRuntime]), can start a thread with it, and
+no library can offer an unjoined or detached task. The rule reads the symbol a
+declaration names, so a declaration [T-ExternRuntime] refuses is held to it
+too
+([ADR 0250](adr/0250-tasks-are-structured-through-linear-sessions.md)).
+
+**[T-RawAddress]** `std.mem.address.Address[T]`, the address of values of `T`
+kept in bytes, is an opaque newtype over `UInt64` whose module offers only the
+address of no bytes and `raw`, the number in an address. A call of `raw` is
+accepted in two places: as the argument for a runtime parameter the compiler's
+table marks as an address of bytes, which the runtime copies to another task
+before the call returns, writes with bytes another task sent, keeps for a task
+it starts, hands a system call, parses or frees; and as the `at` of a
+`mem.Closure` construction, the one type certified to erase what it holds.
+The standard library makes the address of a buffer's bytes with `address_in`,
+which checks the offset against the buffer, and of a slice's with
+`slice_address`, so a runtime call that reads, writes or frees bytes is handed
+only an address made from what owns them. Every runtime parameter the
+runtime's sources name as an address (`at`, `from`, `to`, or a name ending in
+`_at`) is marked, which a test of the table holds, so one added later cannot
+take a plain number. The storage primitives lowering replaces are the
+exception: each access is checked against the extent passed beside it, and
+the address may be one C handed over. Anywhere else, the call, or `raw` named
+as a value, is refused, because a number would stand for values of a type no
+type names. The argument for a marked parameter is a call of `raw` and nothing
+else: any other number, or a default the declaration gives the parameter, is
+refused, since the runtime would read or write values at an address no type
+names. An `extern` or `export` whose parameters, result or callbacks reach
+an address, through a newtype's base or a place lent `inout`, is refused too,
+since C could keep one or write a number where one belongs; a callback's
+context, which C hands back unread, is the one place exempt. A function passed for a runtime
+callback the table marks may declare the marked parameter as an address,
+which crosses as its `UInt64`, so no source form turns a number into an
+address
+([ADR 0255](adr/0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md)).
 
 **[T-Export]** An `export`'s parameters and result cross the foreign boundary
 as an `extern`'s do, and the result may also be Unit. It applies the same
@@ -5530,19 +5636,27 @@ parameter unseeded correct.
 **Shareable values.** A type is **Shareable** when two tasks may read one value
 of it at once, because no read of it writes. A type is not Shareable when it is
 declared `@unshareable`, or when anything reachable through its fields, variant
-payloads, array elements, newtype base, closure environment, type arguments or
-the referent of an observation is not: an observation lets whoever reads it
-read its referent. `mem.Arena` and `mem.Handle` are `@unshareable`, since a
-handle's `acquire` takes it by `read` and advances the arena's cursor, so
-`Vec[UInt8, mem.Handle]` and `borrow mem.Arena` are not Shareable;
+payloads, array elements, newtype base, closure environment, the referent of an
+observation, the values an address, storage or slice names, what a
+`mem.Carried` carries, or the callable a `mem.ClosureEntry` stands for, is
+not: an observation lets whoever reads it read its referent. A type argument that names
+nothing the value holds, a phantom one such as a session's protocol, is not
+followed, so a `task.Client[S]` of an owning task is Shareable whatever `S` is:
+the state lives on the owning task's thread, and a client holds only a borrow
+of its queue. `mem.Arena` is `@unshareable`, since a handle's `acquire`
+takes the handle by `read` and advances the arena's cursor; `mem.Handle`
+borrows its arena, so it, `Vec[UInt8, mem.Handle]` and `borrow mem.Arena` are
+not Shareable;
 `mem.AllocationLog` is `@unshareable` too, since its allocator writes the log
 under a `read`. A type
-parameter is not Shareable unless it is bounded `Shareable` or `Integer`, and
-neither is a function value, which may hold anything. Being Shareable is
+parameter is not Shareable unless it is bounded `Shareable` or `Integer`. A
+function value is Shareable, since it names a function and holds nothing a
+closure would capture; a closure is Shareable unless one of its captures is
+not, it is invoked `inout`, or it lends a capture `inout`. Being Shareable is
 independent of being Owned: an arena owns its memory and carries nothing yet
 is not Shareable, and `borrow UInt64` is Shareable and not Owned. It is
-independent of copying too: a `mem.Handle` is copyable, and every copy reaches
-the one cursor. Being unshareable restricts only observation: an unshareable
+independent of copying too: a `mem.Handle` is copyable, and every copy borrows
+the one arena and reaches its cursor. Being unshareable restricts only observation: an unshareable
 value moves, copies and settles as its declaration says.
 
 **Carried dependencies.** `mem.Carried[H]` is a zero-sized field type that
@@ -5942,6 +6056,66 @@ nothing to release. Under a
 fixed signature the result type is fixed too, so a returned view is offered no
 copy; a stored view still is, which is the fix for a route handler that keeps a
 request's text in its state.
+
+**[O-Cross]** A value crosses a task boundary as a capture of the body that
+`task.start`, `task.start_in`, `task.prepare` or `task.prepare_in` takes for a
+new task. The task runs on another
+thread while its creator runs on, so what the body carries is used by both at
+once until `close` joins the task. Every observation the body carries must
+observe a `Shareable` place: a `read` capture's own observation of its source,
+and every observation a captured value holds, a value moved in by a `sink`
+capture included, one observation at a time. Two readers of a Shareable place
+cannot race, since neither may write it while the handle lives ([O-Borrow]),
+and a place that is not Shareable is written by a read. A value carrying an
+exclusive lend crosses only as the body's own `inout` capture of the place:
+the body is then the one writer, and the handle keeps every other use of the
+place out until the join. A lend held by another value the body captures, such
+as a closure moved in by `sink`, is refused. A body whose type is a type
+parameter or a function value carries captures the function cannot see, so it
+does not cross. The report is at the capture, names the place, and names the
+part of its type that is not Shareable. An unshareable value itself still
+crosses whole: a `sink` capture of a `mem.Arena` moves the arena, and only the
+task reads it afterwards. A copyable value reaches shared state only through a
+borrow of an `@unshareable` owner, since `@copyable` and `@unshareable` are
+exclusive ([S-Entry]): every copy of a `mem.Handle` carries the observation of
+its arena, so a copy moved in by `sink`, held in a record or erased into a
+`mem.Closure` is refused like the handle itself.
+
+```linea
+fn main() -> UInt8 {
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    let handle = arena.handle()
+    let body = sink [read handle] |sink me: Chan[End]| {
+        let _bytes = handle.acquire(8)
+        me.close()
+    }
+    task.start(body).unwrap().close()
+    0
+}
+```
+
+The body reads `handle`, whose `acquire` advances the arena's cursor through a
+`read`, while `main` could acquire from the arena too, so the capture is
+[O-Cross]. A payload crosses under its operation's `Owned` bound instead:
+`send` and `recv` take a `T: Owned`, so a session sends `text.String` and not
+`Str`. A library value that writes storage another value owns observes that
+owner, as the standard library's `ReleaseTag` observes the `ReleaseLog` it
+writes, so the bound and this rule see the write
+([ADR 0250](adr/0250-tasks-are-structured-through-linear-sessions.md) §5).
+
+A task runs on its own operating-system thread. `start` orders everything
+its creator did before it before everything the body does; a `send` returns
+once the other end has received the value, and orders everything the sender
+did before it before everything the receiver does after the `recv`; `close`
+on the handle returns once the body has returned and its thread has been
+joined, and orders everything the body did before everything after the
+`close`. With [O-Borrow], [O-Cross] and the `Owned` payload bound, every
+other location is reached by one task between two of these points, or only
+read, so an accepted program has no data race and behaves at every
+optimisation level as if its tasks' steps were interleaved one at a time. A
+task's stack has guard pages below it, and every generated function probes a
+frame larger than a page as it grows, so an overflow on any thread, `main`
+included, stops the program with `linea: a stack overflowed`.
 
 **[O-Temporary]** A value that is borrowed where it is written without being a
 place, such as `log.field("count", 3)`'s `3`, an argument `base + 2` to a

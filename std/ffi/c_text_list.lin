@@ -8,6 +8,9 @@ import std.testing
 @(opaque, copyable)
 type CTextList = UInt64
 
+// The width of a pointer on target platforms supported by the runtime (64-bit).
+let pointer_bytes: UInt64 = 8
+
 impl CTextList {
     // Entry `index` of a list C said holds `count` entries. The entry is a
     // null pointer where C stored one, as SQLite does for a NULL column. An
@@ -17,7 +20,7 @@ impl CTextList {
             panic("a C string list was read past the count C gave for it")
         }
         let read CTextList(at) = self
-        CText(mem.foreign_word(at, index * 8))
+        CText(mem.foreign_word(at, index * pointer_bytes))
     }
 
     test fn entries_are_read_where_the_list_holds_them() {

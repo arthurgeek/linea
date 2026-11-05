@@ -14,7 +14,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x f32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -65,7 +65,7 @@ module {
     %v26 = arith.extui %lw26 : i8 to i64 loc("tests/codegen/float32_lowers_to_f32.lin":15:5)
     func.return %v26 : i64 loc("tests/codegen/float32_lowers_to_f32.lin":15:5)
   }
-  func.func private @"lin.;mix"(%a0: f32, %a1: f32) -> f32 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;mix"(%a0: f32, %a1: f32) -> f32 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x f32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -87,7 +87,7 @@ module {
     %v4 = arith.select %nu4, %nq4, %nr4 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
     func.return %v4 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
   }
-  func.func private @"lin.;widen"(%a0: f32) -> f64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;widen"(%a0: f32) -> f64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x f32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
     llvm.store %a0, %s0 : f32, !llvm.ptr
@@ -100,7 +100,7 @@ module {
     %v1 = arith.select %nu1, %nq1, %nr1 : f64 loc("tests/codegen/float32_lowers_to_f32.lin":6:5)
     func.return %v1 : f64 loc("tests/codegen/float32_lowers_to_f32.lin":6:5)
   }
-  func.func private @"lin.;narrow"(%a0: f64) -> f32 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;narrow"(%a0: f64) -> f32 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x f64 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     llvm.store %a0, %s0 : f64, !llvm.ptr

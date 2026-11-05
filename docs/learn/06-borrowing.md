@@ -1187,7 +1187,7 @@ A few types are not `Shareable`, because reading them writes. An arena handle
 is one. `handle.acquire(64)` takes the handle by `read`, yet it moves the
 arena's cursor forward, so two readers acquiring through one handle at the same
 moment would both write that cursor. Being `Copyable` does not help: a handle is
-copyable, and every copy moves the same cursor.
+copyable, and every copy borrows the same arena and moves the same cursor.
 
 ```linea
 import std.io
@@ -1211,7 +1211,7 @@ fn main() -> Result[UInt8, io.IoError] {
 ```
 
 ```
-error[T-Bound]: `T` requires `Shareable`, and `mem.Handle[mem.SystemAllocator]` is unshareable
+error[T-Bound]: `T` requires `Shareable`, and `mem.Handle[mem.SystemAllocator]` is not `Shareable`: it holds a `mem.Arena[mem.SystemAllocator]`, which is unshareable
   --> desks.lin:16:18
    |
 16 |     io.println("{board_size(desks.as_slice())} desks")?
@@ -1237,8 +1237,10 @@ value points at anything; `Shareable` asks whether reading it writes anything:
 
 ### `@unshareable` — a type whose reads write
 
-`mem.Arena`, `mem.Handle` and `mem.AllocationLog` are declared `@unshareable`,
-and that attribute is what the compiler starts from. Only code trusted with C can write memory while
+`mem.Arena` and `mem.AllocationLog` are declared `@unshareable`, and that
+attribute is what the compiler starts from. A `mem.Handle` is not shareable
+because it borrows its arena, and `@unshareable` never goes on a copyable
+type: a copy would share the state with no borrow to say so. Only code trusted with C can write memory while
 it is only reading a value, so only a module its root's manifest grants
 `extern` may declare one. Anywhere else the attribute is refused:
 
@@ -1280,7 +1282,7 @@ import std.mem
 
 // A cursor moves forward each time it is read, so two readers of one cursor
 // would both move it.
-@(copyable, unshareable)
+@unshareable
 struct Cursor {
     at: UInt64,
 }

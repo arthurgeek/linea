@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Option[UInt8]`, found `Option[Rating]`
+ --> tests/newtypes/a_fallible_construction_expecting_another_type_is_a_mismatch.lin:8:5
+  |
+7 | fn parse(stars: UInt8) -> Option[UInt8] {
+  |                           ------ expected because of this return type
+8 |     Rating?(stars)
+  |     ^^^^^^^^^^^^^^ expected `Option[UInt8]`, found `Option[Rating]`

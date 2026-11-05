@@ -1,0 +1,19 @@
+import std.task
+
+struct Tally {
+    count: UInt64,
+}
+
+// A client borrows its owning task, so the task cannot be closed while a
+// client is still used.
+fn main() -> UInt8 {
+    let tally = task.own(Tally { count = 0 }).unwrap()
+    let counter = tally.client()
+    let Tally { count } = tally.close()
+    counter.call(|inout t: Tally| t.count += 1)
+    if count == 0 {
+        0
+    } else {
+        1
+    }
+}

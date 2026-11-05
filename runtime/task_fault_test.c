@@ -1,0 +1,297 @@
+#define _GNU_SOURCE
+#define _DARWIN_C_SOURCE
+/* Assertions execute test setup, checks, and cleanup in every build mode. */
+#undef NDEBUG
+#include <assert.h>
+#include <errno.h>
+#include <limits.h>
+#include <pthread.h>
+#include <sched.h>
+#include <signal.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/mman.h>
+#include <time.h>
+#include <unistd.h>
+
+#include "task.h"
+
+/* `task.c` is compiled with its thread creation, joins, mappings, record
+ * allocation, monotonic clock reads and untimed condition waits renamed to
+ * these, and `linea_rt.c` with its `sigaltstack`, so each can be made to fail
+ * or answer where the system would. Each counts what it made and otherwise
+ * does what the system call does. */
+static int refuse_create = 0;
+static int refuse_record = 0;
+static int refuse_signal_stack = 0;
+static unsigned long refuse_map = 0;
+static unsigned long attempted_maps = 0;
+static unsigned long creates = 0;
+static unsigned long joins = 0;
+static unsigned long maps = 0;
+static unsigned long unmaps = 0;
+
+int linea_test_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*start)(void *), void *arg);
+int linea_test_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*start)(void *), void *arg) {
+    if (refuse_create) return EAGAIN;
+    creates += 1;
+    return pthread_create(thread, attributes, start, arg);
+}
+
+int linea_test_pthread_join(pthread_t thread, void **result);
+int linea_test_pthread_join(pthread_t thread, void **result) {
+    joins += 1;
+    return pthread_join(thread, result);
+}
+
+void *linea_test_mmap(void *at, size_t len, int protection, int flags, int fd, off_t offset);
+void *linea_test_mmap(void *at, size_t len, int protection, int flags, int fd, off_t offset) {
+    attempted_maps += 1;
+    if (refuse_map == attempted_maps) {
+        errno = ENOMEM;
+        return MAP_FAILED;
+    }
+    void *mapped = mmap(at, len, protection, flags, fd, offset);
+    if (mapped != MAP_FAILED) maps += 1;
+    return mapped;
+}
+
+int linea_test_munmap(void *at, size_t len);
+int linea_test_munmap(void *at, size_t len) {
+    unmaps += 1;
+    return munmap(at, len);
+}
+
+void *linea_test_calloc(size_t count, size_t size);
+void *linea_test_calloc(size_t count, size_t size) {
+    if (refuse_record) return 0;
+    return calloc(count, size);
+}
+
+/* While `clock_is_late` is set, every clock reads `late_clock` and each
+ * untimed condition wait is counted in `untimed_waits`. */
+static int clock_is_late = 0;
+static struct timespec late_clock;
+static unsigned long untimed_waits = 0;
+
+int linea_test_clock_gettime(clockid_t clock, struct timespec *now);
+/* While `wall_is_set_back` is set, the wall clock reads the start of 1970,
+ * as it does after someone sets the system's time back. */
+static int wall_is_set_back = 0;
+
+int linea_test_clock_gettime(clockid_t clock, struct timespec *now) {
+    if (__atomic_load_n(&clock_is_late, __ATOMIC_SEQ_CST)) {
+        *now = late_clock;
+        return 0;
+    }
+    if (clock == CLOCK_REALTIME && __atomic_load_n(&wall_is_set_back, __ATOMIC_SEQ_CST)) {
+        *now = (struct timespec){.tv_sec = 0, .tv_nsec = 0};
+        return 0;
+    }
+    return clock_gettime(clock, now);
+}
+
+int linea_test_pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *lock);
+int linea_test_pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *lock) {
+    if (__atomic_load_n(&clock_is_late, __ATOMIC_SEQ_CST)) __atomic_add_fetch(&untimed_waits, 1, __ATOMIC_SEQ_CST);
+    return pthread_cond_wait(cond, lock);
+}
+
+/* Sets every clock an hour before the largest `time_t`. */
+static void make_the_clock_late(time_t latest) {
+    late_clock = (struct timespec){.tv_sec = latest - 3600, .tv_nsec = 999999999L};
+    __atomic_store_n(&untimed_waits, 0, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&clock_is_late, 1, __ATOMIC_SEQ_CST);
+}
+
+static void make_the_clock_true(void) {
+    __atomic_store_n(&clock_is_late, 0, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&untimed_waits, 0, __ATOMIC_SEQ_CST);
+}
+
+/* Waits until a runtime thread has entered an untimed condition wait while the
+ * clock is late. */
+static void await_an_untimed_wait(void) {
+    while (__atomic_load_n(&untimed_waits, __ATOMIC_SEQ_CST) == 0) sched_yield();
+}
+
+int linea_test_sigaltstack(const stack_t *installed, stack_t *previous);
+int linea_test_sigaltstack(const stack_t *installed, stack_t *previous) {
+    if (refuse_signal_stack && installed != 0 && (installed->ss_flags & SS_DISABLE) == 0) {
+        errno = ENOMEM;
+        return -1;
+    }
+    return sigaltstack(installed, previous);
+}
+
+/* The body a task would run: a count of the times it ran. */
+static volatile int ran = 0;
+static volatile int released = 0;
+
+static void entry(unsigned long endpoint, unsigned long at, unsigned long len) {
+    (void)at;
+    (void)len;
+    ran += 1;
+    linea_chan_close(endpoint);
+}
+
+static void release(unsigned long at, unsigned long len) {
+    (void)at;
+    (void)len;
+    released += 1;
+}
+
+/* A failed prepare unmapped every mapping it made and joined every thread
+ * it created, and the body it was not given still runs once a prepare
+ * succeeds. */
+static void nothing_is_left_and_the_body_still_runs(long refused, long expected) {
+    assert(refused == expected);
+    assert(maps == unmaps && creates == joins && ran == 0);
+    const long task = linea_task_prepare(1UL << 16);
+    assert(task > 0);
+    linea_chan_close(linea_task_start((unsigned long)task, entry, release, 0, 0, 0));
+    assert(ran == 1 && released == 1 && maps == unmaps && creates == joins);
+    ran = 0;
+    released = 0;
+}
+
+/* The largest value of `time_t`, which is signed on every target the runtime
+ * builds for; `main` checks that it is. */
+static const time_t latest_time = (time_t)((((uintmax_t)1 << (sizeof(time_t) * CHAR_BIT - 1)) - 1));
+
+/* A timeout of three days in nanoseconds. Read an hour before the largest
+ * `time_t`, it ends past the last time a deadline can name. */
+static const unsigned long three_days_ns = 3UL * 86400UL * 1000000000UL;
+
+/* The body of a task that sends one payload once its creator waits for it. */
+static void send_once_awaited(unsigned long endpoint, unsigned long at, unsigned long len) {
+    (void)at;
+    (void)len;
+    await_an_untimed_wait();
+    unsigned long payload = 4242;
+    linea_chan_send(endpoint, (unsigned long)&payload, sizeof(payload));
+    linea_chan_close(endpoint);
+}
+
+static void release_nothing(unsigned long at, unsigned long len) {
+    (void)at;
+    (void)len;
+}
+
+/* A timed receive whose timeout ends after the last time `time_t` holds waits
+ * without a deadline, and still takes what the peer sends. */
+static void a_receive_timeout_past_the_last_time_waits_without_a_deadline(void) {
+    const long task = linea_task_prepare(1UL << 16);
+    assert(task > 0);
+    const unsigned long session = linea_task_start((unsigned long)task, send_once_awaited, release_nothing, 0, 0, 0);
+    make_the_clock_late(latest_time);
+    unsigned long received = 0;
+    assert(linea_chan_recv_until(session, (unsigned long)&received, sizeof(received), three_days_ns) == 1);
+    assert(received == 4242);
+    make_the_clock_true();
+    linea_chan_close(session);
+}
+
+/* The body of a task that sends one payload a tenth of a second after it
+ * starts. */
+static void send_after_a_tenth(unsigned long endpoint, unsigned long at, unsigned long len) {
+    (void)at;
+    (void)len;
+    const struct timespec tenth = {.tv_sec = 0, .tv_nsec = 100000000L};
+    nanosleep(&tenth, 0);
+    unsigned long payload = 4242;
+    linea_chan_send(endpoint, (unsigned long)&payload, sizeof(payload));
+    linea_chan_close(endpoint);
+}
+
+/* A timed receive measures its timeout on the monotonic clock, so setting
+ * the wall clock back neither ends the wait early nor makes it longer. */
+static void a_receive_timeout_does_not_read_the_wall_clock(void) {
+    const long task = linea_task_prepare(1UL << 16);
+    assert(task > 0);
+    __atomic_store_n(&wall_is_set_back, 1, __ATOMIC_SEQ_CST);
+    const unsigned long session = linea_task_start((unsigned long)task, send_after_a_tenth, release_nothing, 0, 0, 0);
+    unsigned long received = 0;
+    assert(linea_chan_recv_until(session, (unsigned long)&received, sizeof(received), 10UL * 1000000000UL) == 1);
+    assert(received == 4242);
+    __atomic_store_n(&wall_is_set_back, 0, __ATOMIC_SEQ_CST);
+    linea_chan_close(session);
+}
+
+/* A timed receive whose peer sends after the timeout answers 0 once the
+ * timeout has passed, and the payload is still received afterwards. */
+static void a_receive_from_a_late_peer_times_out(void) {
+    const long task = linea_task_prepare(1UL << 16);
+    assert(task > 0);
+    const unsigned long session = linea_task_start((unsigned long)task, send_after_a_tenth, release_nothing, 0, 0, 0);
+    struct timespec before, after;
+    assert(clock_gettime(CLOCK_MONOTONIC, &before) == 0);
+    unsigned long received = 0;
+    assert(linea_chan_recv_until(session, (unsigned long)&received, sizeof(received), 10UL * 1000000UL) == 0);
+    assert(clock_gettime(CLOCK_MONOTONIC, &after) == 0);
+    const long long waited_ns =
+        (long long)(after.tv_sec - before.tv_sec) * 1000000000LL + (long long)(after.tv_nsec - before.tv_nsec);
+    assert(waited_ns >= 10LL * 1000000LL);
+    linea_chan_recv(session, (unsigned long)&received, sizeof(received));
+    assert(received == 4242);
+    linea_chan_close(session);
+}
+
+/* An owning task's queue whose record cannot be allocated is refused with
+ * zero, and the next one opens and serves. */
+static void a_refused_owner_queue_answers_zero(void) {
+    refuse_record = 1;
+    const unsigned long refused = linea_owner_open();
+    refuse_record = 0;
+    assert(refused == 0);
+    const unsigned long queue = linea_owner_open();
+    assert(queue != 0);
+    linea_owner_close(queue);
+    unsigned long request = 0;
+    assert(linea_owner_next(queue, (unsigned long)&request, sizeof request) == 0);
+    linea_owner_free(queue);
+}
+
+int main(void) {
+    a_refused_owner_queue_answers_zero();
+
+    refuse_record = 1;
+    long refused = linea_task_prepare(1UL << 16);
+    refuse_record = 0;
+    nothing_is_left_and_the_body_still_runs(refused, -ENOMEM);
+
+    /* The first mapping is the stack, the second the signal stack. */
+    for (unsigned long which = 1; which <= 2; which += 1) {
+        refuse_map = attempted_maps + which;
+        refused = linea_task_prepare(1UL << 16);
+        refuse_map = 0;
+        nothing_is_left_and_the_body_still_runs(refused, -ENOMEM);
+    }
+
+    refuse_create = 1;
+    refused = linea_task_prepare(1UL << 16);
+    refuse_create = 0;
+    nothing_is_left_and_the_body_still_runs(refused, -EAGAIN);
+
+    /* The thread installs its signal stack before it parks; a refusal there
+     * ends the thread, and prepare joins it and reports the refusal. */
+    refuse_signal_stack = 1;
+    refused = linea_task_prepare(1UL << 16);
+    refuse_signal_stack = 0;
+    nothing_is_left_and_the_body_still_runs(refused, -ENOMEM);
+
+    /* A cancelled task is joined and unmapped. */
+    const long task = linea_task_prepare(1UL << 16);
+    assert(task > 0);
+    linea_task_cancel((unsigned long)task);
+    assert(maps == unmaps && creates == joins && ran == 0 && released == 0);
+
+    assert((time_t)-1 < 0);
+    a_receive_timeout_past_the_last_time_waits_without_a_deadline();
+    a_receive_timeout_does_not_read_the_wall_clock();
+    a_receive_from_a_late_peer_times_out();
+
+    puts("native task faults: refused records, owner queues, mappings, threads and signal stacks leave nothing behind, a wait past the last time has no deadline, a timeout ends a wait and ignores the wall clock");
+    return 0;
+}

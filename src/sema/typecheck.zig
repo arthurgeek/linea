@@ -362,11 +362,15 @@ fn typecheckInternal(
 
         errdefer for (closure_descriptors) |descriptor| gpa.free(descriptor.owned_fields);
         for (closure_descriptors, 0..) |*descriptor, index| {
-            const captures = resolution.closureCaptures(@enumFromInt(index));
+            const closure_id: resolve_mod.ClosureId = @enumFromInt(index);
+            const lambda_expr = resolution.closures.exprOf(closure_id);
+            const captures = resolution.closureCaptures(closure_id);
             var count: usize = 0;
-            for (captures) |capture| if (capture.convention == .sink) {
-                count += 1;
-            };
+            var lends = false;
+            for (captures) |capture| {
+                if (capture.convention == .sink) count += 1;
+                if (capture.convention == .inout) lends = true;
+            }
             const owned = try gpa.alloc(types_mod.FieldOrdinal, count);
             var next: usize = 0;
             for (captures, 0..) |capture, field| if (capture.convention == .sink) {
@@ -374,6 +378,10 @@ fn typecheckInternal(
                 next += 1;
             };
             descriptor.owned_fields = owned;
+            descriptor.lends = lends;
+            if (lambda_expr != .none and ast.exprTag(lambda_expr) == .lambda) {
+                descriptor.invocation = ast.lambda(lambda_expr).invocation;
+            }
         }
 
         const binder_places = try gpa.alloc(?Checker.BinderPlace, resolution.bindingCount());
@@ -467,6 +475,7 @@ fn typecheckInternal(
     c.builder.certified_storage = c.raw_accesses.storage;
     c.builder.certified_buffer = c.raw_accesses.buffer;
     c.builder.certified_slice = c.raw_accesses.slice;
+    c.builder.certified_address = c.raw_accesses.address;
     c.builder.certified_carried = c.raw_accesses.carried;
     c.builder.certified_foreign_views = c.raw_accesses.foreign_views;
     c.builder.certified_closure_entry = c.raw_accesses.closure_entry_type;
@@ -1461,6 +1470,7 @@ fn typecheckInternal(
     z_bodies.end();
 
     try c.settleExternSymbols();
+    try c.checkThreadStarts();
 
     try c.resolveAllOpen();
 
@@ -1477,6 +1487,7 @@ fn typecheckInternal(
     try c.checkEntryAnswer();
     try c.checkTestAnswers();
     try c.checkForeignCallbacks();
+    try c.checkRawAddresses();
     try c.checkHandleChanges();
     try c.checkForeignUses(foreign_module);
 
@@ -11097,7 +11108,13 @@ const Checker = struct {
                         .name = self.ast.tokenText(self.ast.declName(d)),
                         .reason = self.disposalReason(d),
                     } else null,
-                    .parameter => null,
+                    // A one-call start drops the body when preparing fails,
+                    // and the form that hands it back is the edit to make.
+                    .parameter => if (d == self.raw_accesses.task_start or d == self.raw_accesses.task_start_in) .{
+                        .name = self.ast.tokenText(self.ast.declName(d)),
+                        .reason = null,
+                        .help = "this body owns a linear value, so a failed start would abandon it; use `task.prepare(body)` and `slot.start()`",
+                    } else null,
                 },
             )) {
                 switch (constraint.subject) {
@@ -11524,6 +11541,9 @@ const Checker = struct {
         /// Why the operation disposes of a value when its name does not say,
         /// appended to the general help.
         reason: ?[]const u8,
+        /// The whole help for an unmet `Discardable`, where the operation
+        /// names the form a program uses instead.
+        help: ?[]const u8 = null,
     };
 
     /// Refuses `held` for the `Owned` bound written at `bound`, naming the
@@ -11894,6 +11914,7 @@ const Checker = struct {
         // A closure's capability is its captures', so the report names the
         // capture that fails the bound: the closure itself has no name a
         // reader could change, and neither has a bound in another module.
+        const replaced: ?[]const u8 = if (requirement == .discardable) if (operation) |named| named.help else null else null;
         if (try self.capturePreventing(held, requirement)) |capture| {
             const why, const lacks = switch (requirement) {
                 .copyable => .{ "a value of it may be copied", "cannot be copied" },
@@ -11904,7 +11925,7 @@ const Checker = struct {
                 .t_bound,
                 self.ast.fileOf(at),
                 span,
-                switch (requirement) {
+                replaced orelse switch (requirement) {
                     .copyable => try std.fmt.allocPrint(self.sink.arena, "capture `{s}` by `read`, or capture a copyable value taken from it", .{capture.name}),
                     else => try std.fmt.allocPrint(self.sink.arena, "capture `{s}` by `read`, or build it in memory that is dropped with its owner, such as an arena's", .{capture.name}),
                 },
@@ -11913,7 +11934,7 @@ const Checker = struct {
             );
             return true;
         }
-        const help = if (operation != null and requirement == .discardable) help: {
+        const help = if (replaced) |text| text else if (operation != null and requirement == .discardable) help: {
             const held_name = try self.typeName(held);
             const general = try std.fmt.allocPrint(self.sink.arena, "`{s}` may dispose of {s} `{s}`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before", .{ operation.?.name, article.before(held_name), held_name });
             break :help if (operation.?.reason) |reason|
@@ -12983,7 +13004,7 @@ const Checker = struct {
 
         switch (self.builder.get(last)) {
             .newtype => {
-                if (self.builder.partsSource(self.builder.baseOf(last)) == back) try self.builder.setNewtypeBase(last, .poison);
+                if (self.builder.partsSource(try self.builder.baseOf(last)) == back) try self.builder.setNewtypeBase(last, .poison);
                 return;
             },
             else => {},
@@ -15208,7 +15229,7 @@ const Checker = struct {
         }
 
         const base = written.first().?.node;
-        const base_check = try self.checkPart(base, self.builder.baseOf(of), at, .base, .{ .field = self.ast.tokenName(head_tok) });
+        const base_check = try self.checkPart(base, try self.builder.baseOf(of), at, .base, .{ .field = self.ast.tokenName(head_tok) });
         if (base_check != .matches) return base_check;
 
         // A literal or range outside the refinement names a value the base
@@ -15233,7 +15254,11 @@ const Checker = struct {
     /// of the base's values -- since a judgement then would repeat the
     /// declaration's mistake at every pattern.
     fn refinedValues(self: *const Checker, t: TypeId) ?usefulness.Interval {
-        const base = self.builder.baseOf(t).bounds() orelse return null;
+        // A refinement is held to an integer base, which no type parameter
+        // can stand for, so the declaration's own base answers for every
+        // instantiation, written or not.
+        const declared = if (self.builder.view().declOfType(t)) |d| self.type_of_decl.get(d) else t;
+        const base = self.builder.view().baseOf(declared).bounds() orelse return null;
         const r = self.builder.refinementOf(t);
         const lo = @max(r.lo, base.min);
         const hi = @min(r.hi, base.max);
@@ -15430,7 +15455,7 @@ const Checker = struct {
             const t = self.settled(ty);
             return switch (c) {
                 .variant => |k| try self.checker.builder.variantFieldType(t, k, i),
-                .product => if (self.checker.builder.get(t) == .newtype) self.checker.builder.baseOf(t) else (try self.checker.builder.fieldType(t, i)),
+                .product => if (self.checker.builder.get(t) == .newtype) try self.checker.builder.baseOf(t) else (try self.checker.builder.fieldType(t, i)),
                 .integers => .poison,
             };
         }
@@ -16109,7 +16134,7 @@ const Checker = struct {
         // base's plan.
         if (self.builder.get(ty) == .newtype) {
             if (try self.builder.capabilityOf(ty) != .copyable) return .{ .uncopyable = ty };
-            return self.planConstant(id, self.builder.baseOf(ty));
+            return self.planConstant(id, try self.builder.baseOf(ty));
         }
         const stored = self.folded.pool.get(id);
         if (stored != .variant and try self.builder.capabilityOf(ty) != .copyable) return .{ .uncopyable = ty };
@@ -17180,7 +17205,46 @@ const Checker = struct {
         expected: ?Expected,
     ) std.mem.Allocator.Error!TypeId {
         const c = self.ast.call(id);
-        const newtype = self.type_of_decl.get(decl);
+        const template = self.type_of_decl.get(decl);
+        // A generic newtype's arguments come from what the construction is
+        // expected to be, or for `Name?(e)` from the `Option` it is expected
+        // to answer: a phantom parameter appears in no operand, so the value
+        // alone cannot say which instantiation it builds.
+        const newtype = if (self.ast.declTypeParams(decl).len == 0) template else expected_instance: {
+            const pool = self.builder.view();
+            if (Expected.typeOf(expected)) |written| {
+                var want = written;
+                if (self.ast.callFallible(id) and self.option_decl != null and want != .poison and
+                    pool.declOfType(want) == self.option_decl and pool.instanceOf(want) != null)
+                    want = self.builder.appliedTo(want)[0];
+                if (want != .poison and pool.declOfType(want) == decl and pool.instanceOf(want) != null)
+                    break :expected_instance want;
+                // Another type is expected: the construction builds none of
+                // it, whatever its arguments, and is a mismatch.
+                if (want != .poison and self.builder.get(want) != .open_type and self.builder.get(want) != .parameter) {
+                    self.noteQualifier(c.callee);
+                    _ = self.record(c.callee, template);
+                    for (c.args) |a| _ = try self.check(a, null);
+                    // `Name?(e)` answers an `Option` of the newtype, whatever
+                    // its arguments would have been.
+                    const built = if (self.ast.callFallible(id)) built: {
+                        const opt = self.option_decl orelse break :built template;
+                        break :built try self.builder.instantiate(self.type_of_decl.get(opt), opt, &.{template});
+                    } else template;
+                    return self.expect(id, built, expected);
+                }
+            }
+            self.noteQualifier(c.callee);
+            _ = self.record(c.callee, template);
+            for (c.args) |a| _ = try self.check(a, null);
+            return self.report(
+                .t_infer,
+                id,
+                "the type arguments of `{s}` cannot be determined",
+                .{self.ast.tokenText(self.ast.declName(decl))},
+                "say what it builds where the value goes, as with an annotation",
+            );
+        };
         // The callee names the type rather than a value, and every
         // expression must have one -- the same bookkeeping a conversion's
         // callee gets. What qualifies it is named the same way, for the same
@@ -17208,7 +17272,7 @@ const Checker = struct {
             );
         }
         const operand = c.args[0];
-        const base = self.builder.baseOf(newtype);
+        const base = try self.builder.baseOf(newtype);
         const from = try self.check(operand, .{
             .ty = base,
             .at = .{ .file = self.ast.fileOfExpr(c.callee), .span = self.ast.exprSpan(c.callee) },
@@ -17291,7 +17355,7 @@ const Checker = struct {
                 const fix = std.fmt.allocPrint(
                     self.gpa,
                     "make it fallible: `{s}?({s})`",
-                    .{ (try self.typeName(newtype)), spelling },
+                    .{ self.ast.exprText(c.callee), spelling },
                 ) catch return self.record(id, .poison);
                 return self.report(
                     .t_refine,
@@ -19552,6 +19616,7 @@ const Checker = struct {
         // What crosses is decided by the boundary and not by the direction, so
         // this is the routine `extern` asks; only the rule it is reported
         // under differs.
+        try self.refuseForeignAddress(d);
         try self.checkForeignSignature(d, .t_export);
     }
 
@@ -19748,14 +19813,251 @@ const Checker = struct {
             if (try self.validStorageSignature(d)) return;
             return self.sink.addError(.t_extern, self.ast.fileOf(self.ast.declName(d)), self.ast.tokenSpan(self.ast.declName(d)), "a typed storage primitive must have its compiler-defined signature", "restore the private storage declaration's parameter and result types");
         }
+        try self.refuseForeignAddress(d);
         try self.checkForeignSignature(d, .t_extern);
+    }
+
+    /// [T-RawAddress] at a declaration: an `extern` or `export` whose
+    /// signature reaches a `mem.address.Address`, itself, through a newtype's
+    /// base or through a callback, would hand C a
+    /// number that names a type, or take one from it, and C may keep it where
+    /// no type names what the address holds. A runtime callback's function may
+    /// take one, because the entry C calls is the compiler's; the `extern`
+    /// itself declares the `UInt64`.
+    fn refuseForeignAddress(self: *Checker, d: node.DeclId) std.mem.Allocator.Error!void {
+        if (self.raw_accesses.address == .none) return;
+        const signature = switch (self.builder.get(self.decl_signatures.get(d))) {
+            .callable => |callable| callable,
+            else => return,
+        };
+        var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer seen.deinit(self.gpa);
+        var names = try self.reachesAddress(&seen, signature.result);
+        const params = self.builder.callableParams(signature);
+        for (params) |param| {
+            // A callback's context reaches C as an address C hands back
+            // unread ([T-ExternCallback]); any other place lent `inout` is
+            // one C may write a number into.
+            if (param.convention == .inout and self.isCallbackContext(params, param.ty)) continue;
+            if (try self.reachesAddress(&seen, param.ty)) names = true;
+        }
+        if (!names) return;
+        try self.sink.addErrorFmt(
+            .t_raw_address,
+            self.ast.fileOf(self.ast.declName(d)),
+            self.ast.tokenSpan(self.ast.declName(d)),
+            "declare a `UInt64` where C takes a number",
+            "`{s}` would pass an address between C and Linea, and C may keep one where no type names what the address holds",
+            .{self.ast.tokenText(self.ast.declName(d))},
+        );
+    }
+
+    /// Whether `ty` is the context a callback among `params` takes first,
+    /// `inout`, which the `extern` lends C to hand back on every call.
+    fn isCallbackContext(self: *Checker, params: []const types_mod.CallableParam, ty: TypeId) bool {
+        for (params) |param| switch (self.builder.get(param.ty)) {
+            .callable => |callback| {
+                const taken = self.builder.callableParams(callback);
+                if (taken.len != 0 and taken[0].convention == .inout and taken[0].ty == ty) return true;
+            },
+            else => {},
+        };
+        return false;
+    }
+
+    /// Whether `t` is or wraps a `mem.address.Address` as C would see it:
+    /// what crosses is a scalar, a newtype over one, or a callback, so a
+    /// newtype's base and a callback's parameters and result are followed. A
+    /// callback's leading `inout` parameter is its context, which C hands
+    /// back unread.
+    ///
+    /// **Bound:** each type reachable from `t` is entered once.
+    fn reachesAddress(self: *Checker, seen: *std.AutoHashMapUnmanaged(TypeId, void), t: TypeId) std.mem.Allocator.Error!bool {
+        if (t == .poison or (try seen.getOrPut(self.gpa, t)).found_existing) return false;
+        if (self.addressOf(t) != null) return true;
+        switch (self.builder.get(t)) {
+            .newtype => return self.reachesAddress(seen, try self.builder.baseOf(t)),
+            .callable => |callable| {
+                if (try self.reachesAddress(seen, callable.result)) return true;
+                for (self.builder.callableParams(callable), 0..) |param, k| {
+                    if (k == 0 and param.convention == .inout) continue;
+                    if (try self.reachesAddress(seen, param.ty)) return true;
+                }
+                return false;
+            },
+            else => return false,
+        }
+    }
+
+    /// [T-RawAddress] at a use: the number in a `mem.address.Address` is read
+    /// by `address.raw` only as the argument for a runtime parameter
+    /// `runtime_symbols` marks, where the runtime copies the bytes to another
+    /// task, writes bytes another task sent, or keeps them for a task it
+    /// starts, or as the `at` of a `mem.Closure` construction, the one type
+    /// certified to erase what it holds. Anywhere else a number would stand
+    /// for values of a type no type names. One walk over the calls and the
+    /// structure literals to find the places allowed, and one over the
+    /// expressions naming `raw`. The argument for a marked parameter is
+    /// itself a call of `raw`: any other number names bytes of no type.
+    fn checkRawAddresses(self: *Checker) std.mem.Allocator.Error!void {
+        const raw_fn = self.raw_accesses.address_raw;
+        try self.checkTypedBytesArguments(raw_fn);
+        if (raw_fn == .none) return;
+        // The two operations beside `Address` are held to the one signature
+        // each is for, once their signatures are checked.
+        for (self.program.declsOf(self.program.moduleOf(raw_fn))) |member| {
+            const named = self.ast.declName(member);
+            if (named == .none or self.ast.declTag(member) != .function or self.ast.memberOwner(member) != .none) continue;
+            const name = self.ast.tokenText(named);
+            const reads = std.mem.eql(u8, name, "raw");
+            if (!reads and !std.mem.eql(u8, name, "nowhere")) continue;
+            if (!try self.certifiedAddressOperation(member, reads)) self.reportAtToken(.t_borrow_contract, named, "the Address certificate requires `nowhere[T]() -> Address[T]` and `raw[T](at: Address[T]) -> UInt64`", "restore the signature, so neither turns a number into an address", null);
+        }
+        var allowed: std.AutoHashMapUnmanaged(ExprId, void) = .empty;
+        defer allowed.deinit(self.gpa);
+        for (self.calls.items) |call| {
+            const callee = switch (call.target) {
+                .declared => |decl| decl,
+                else => continue,
+            };
+            if (!self.ast.declIsExtern(callee)) continue;
+            const signature = runtime_symbols.signatureOf(self.ast.tokenText(self.ast.declName(callee))) orelse continue;
+            for (call.args, 0..) |arg, i| {
+                if (arg == ExprId.none or i >= signature.parameters.len or !signature.parameters[i].address) continue;
+                try allowed.put(self.gpa, self.ast.withoutGroups(arg), {});
+            }
+        }
+        var callees: std.AutoHashMapUnmanaged(ExprId, void) = .empty;
+        defer callees.deinit(self.gpa);
+        for (0..self.ast.exprCount()) |i| {
+            const id = ExprId.at(@intCast(i));
+            switch (self.ast.exprTag(id)) {
+                .struct_literal => {
+                    const closure = self.raw_accesses.closure;
+                    const built = self.builder.construction_types.items;
+                    if (closure == .none or id.index() >= built.len or self.builder.view().declOfType(built[id.index()]) != closure) continue;
+                    const c = self.ast.call(id);
+                    var at: usize = 0;
+                    while (at + 1 < c.args.len) : (at += 2) {
+                        if (self.ast.exprTag(c.args[at]) == .err) continue;
+                        if (std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(c.args[at])), "at"))
+                            try allowed.put(self.gpa, self.ast.withoutGroups(c.args[at + 1]), {});
+                    }
+                },
+                else => {},
+            }
+        }
+        for (0..self.ast.exprCount()) |i| {
+            const id = ExprId.at(@intCast(i));
+            if (self.ast.exprTag(id) != .call) continue;
+            const callee = self.ast.withoutGroups(self.ast.call(id).callee);
+            if (!self.namesFunction(callee, raw_fn)) continue;
+            try callees.put(self.gpa, callee, {});
+            if (allowed.contains(id)) continue;
+            _ = self.report(
+                .t_raw_address,
+                id,
+                "an address becomes a number only where the runtime is told what to do with its bytes",
+                .{},
+                "pass `raw(at)` straight to a runtime parameter that copies, receives or keeps them, or keep the address",
+            );
+        }
+        for (0..self.ast.exprCount()) |i| {
+            const id = ExprId.at(@intCast(i));
+            if (callees.contains(id) or !self.namesFunction(id, raw_fn)) continue;
+            _ = self.report(
+                .t_raw_address,
+                id,
+                "an address becomes a number only where the runtime is told what to do with its bytes",
+                .{},
+                "call `raw` where the number is passed to the runtime",
+            );
+        }
+    }
+
+    /// [T-RawAddress] at a runtime call: each argument for a parameter
+    /// `runtime_symbols` marks as the address of typed bytes is a call of
+    /// `raw`, whose `Address[T]` names the type of the bytes the runtime
+    /// copies, receives or keeps. An `extern` is never a value, so every call
+    /// of one is a direct call this walk sees. One walk over the calls.
+    fn checkTypedBytesArguments(self: *Checker, raw_fn: node.DeclId) std.mem.Allocator.Error!void {
+        for (self.calls.items) |call| {
+            const callee = switch (call.target) {
+                .declared => |decl| decl,
+                else => continue,
+            };
+            if (!self.ast.declIsExtern(callee)) continue;
+            const signature = runtime_symbols.signatureOf(self.ast.tokenText(self.ast.declName(callee))) orelse continue;
+            for (call.args, 0..) |arg, i| {
+                if (i >= signature.parameters.len or !signature.parameters[i].address) continue;
+                // A default the declaration supplies is a number too.
+                const given = if (arg == ExprId.none) call.at else self.ast.withoutGroups(arg);
+                if (arg != ExprId.none and raw_fn != .none and self.ast.exprTag(given) == .call and
+                    self.namesFunction(self.ast.withoutGroups(self.ast.call(given).callee), raw_fn)) continue;
+                _ = self.report(
+                    .t_raw_address,
+                    given,
+                    "the runtime reads or writes values at this address, so it takes only the number in a `mem.address.Address`",
+                    .{},
+                    if (arg == ExprId.none)
+                        try std.fmt.allocPrint(self.sink.arena, "pass `address.raw(at)` for `{s}`, in place of the declaration's default", .{self.ast.tokenText(self.ast.declParams(callee)[i].name)})
+                    else
+                        "pass `address.raw(at)`, whose address names the type of the values kept there",
+                );
+            }
+        }
+    }
+
+    /// Whether `id` names the function `d`, as a callee or a value.
+    fn namesFunction(self: *const Checker, id: ExprId, d: node.DeclId) bool {
+        const b = self.res.targetOf(id);
+        return b != .none and self.res.kindOf(b) == .function and self.res.declaredBy(b) == d;
+    }
+
+    /// Refuses every expression naming a runtime function that starts a
+    /// thread, as a callee or as a value, outside `task.Slot.start`
+    /// ([T-ThreadStart]). The body such a function hands to its thread keeps
+    /// running after the call returns, and only `Slot.start`'s handle carries
+    /// what that body captured until the thread is joined; anywhere else the
+    /// body's lends and observations would end while it still runs. The
+    /// declarations are found by the symbol they name, so a module's own
+    /// `extern` of the symbol is refused as the library's would be. One walk
+    /// over the expressions, each asked one lookup in the few declarations
+    /// found.
+    fn checkThreadStarts(self: *Checker) std.mem.Allocator.Error!void {
+        var starters: std.ArrayList(node.DeclId) = .empty;
+        defer starters.deinit(self.gpa);
+        for (0..self.ast.declCount()) |i| {
+            const d = node.DeclId.at(@intCast(i));
+            if (!self.ast.declIsExtern(d)) continue;
+            const signature = runtime_symbols.signatureOf(self.ast.tokenText(self.ast.declName(d))) orelse continue;
+            if (signature.starts_thread) try starters.append(self.gpa, d);
+        }
+        if (starters.items.len == 0) return;
+        for (0..self.ast.exprCount()) |i| {
+            const id = ExprId.at(@intCast(i));
+            const b = self.res.targetOf(id);
+            if (b == .none or self.res.kindOf(b) != .function) continue;
+            const d = self.res.declaredBy(b);
+            if (std.mem.indexOfScalar(node.DeclId, starters.items, d) == null) continue;
+            if (self.expression_owners[i] == self.raw_accesses.task_slot_start and self.raw_accesses.task_slot_start != .none) continue;
+            _ = self.report(
+                .t_thread_start,
+                id,
+                "`{s}` runs Linea code on a thread of its own, and only `task.Slot.start` may hand it a body",
+                .{self.ast.tokenText(self.ast.declName(d))},
+                "start the task with `task.prepare(body)` and `start()`, whose handle keeps what the body captured until `close` joins it",
+            );
+        }
     }
 
     /// Holds an `extern` naming a `linea_` symbol to the signature the runtime
     /// gives it ([T-ExternRuntime]). The namespace is the runtime's, so the
-    /// rule reads the symbol and never which root declared it: the standard
-    /// library's declarations answer to the table as anyone's do. The symbols
-    /// the compiler owns outright are [T-Extern]'s.
+    /// signature is read from the symbol and never from which root declared
+    /// it: the standard library's declarations answer to the table as
+    /// anyone's do. Where the table confines a symbol to one module of the
+    /// standard library, every other declaration of it is refused. The
+    /// symbols the compiler owns outright are [T-Extern]'s.
     fn checkRuntimeSymbol(self: *Checker, d: node.DeclId, library: bool) std.mem.Allocator.Error!void {
         const name = self.ast.tokenText(self.ast.declName(d));
         if (!std.mem.startsWith(u8, name, runtime_symbols.namespace) or runtime_symbols.holds(name)) return;
@@ -19771,18 +20073,34 @@ const Checker = struct {
                 .{name},
             );
         };
-        // Lowering replaces the standard library's own `mem` declaration and
-        // no other, so that declaration is held to the table like any other
-        // and every other one has nothing to link against.
-        if (expected.provider == .lowering and !(library and self.program.libraryDeclIn("mem", name) == d)) {
-            return self.sink.addErrorFmt(
-                .t_extern_runtime,
-                file,
-                span,
-                try std.fmt.allocPrint(self.sink.arena, "reach it through {s}", .{expected.reached_through}),
-                "`{s}` is replaced by the compiler where the standard library declares it, so the runtime defines nothing to link against",
-                .{name},
-            );
+        // A symbol the table confines to one module of the standard library
+        // is declared there and nowhere else. Lowering replaces that
+        // declaration of a lowered symbol and no other, so every other one has
+        // nothing to link against. The runtime trusts each call of any other
+        // confined symbol with a number only that module's types keep, so
+        // another declaration could free a queue twice, leave a parked thread
+        // unjoined or hand the runtime an address that names no type.
+        switch (expected.declared_by) {
+            .library => |home| if (!(library and self.program.libraryDeclIn(home.module, name) == d)) {
+                const help = try std.fmt.allocPrint(self.sink.arena, "reach it through {s}", .{home.reached_through});
+                if (expected.provider == .lowering) return self.sink.addErrorFmt(
+                    .t_extern_runtime,
+                    file,
+                    span,
+                    help,
+                    "`{s}` is replaced by the compiler where the standard library declares it, so the runtime defines nothing to link against",
+                    .{name},
+                );
+                try self.sink.addErrorFmt(
+                    .t_extern_runtime,
+                    file,
+                    span,
+                    help,
+                    "`{s}` takes or answers what only the standard library's `{s}` keeps in a type, so only that module declares it",
+                    .{ name, home.module },
+                );
+            },
+            .granted, .compiler => {},
         }
         const declared = self.checkedExternSignature(d) orelse return;
         if (intrinsics.matchesRuntime(&self.builder.view(), declared, expected.*)) return;
@@ -19792,7 +20110,19 @@ const Checker = struct {
         for (expected.parameters, 0..) |parameter, i| {
             if (i > 0) try spelled.appendSlice(self.gpa, ", ");
             if (parameter.passing == .inout) try spelled.appendSlice(self.gpa, "inout ");
-            try spelled.appendSlice(self.gpa, runtimeScalarName(parameter.scalar));
+            if (parameter.callback) |shape| {
+                // A callback is spelled as the function C calls through it.
+                try spelled.appendSlice(self.gpa, "fn(");
+                for (shape.parameters, 0..) |scalar, k| {
+                    if (k > 0) try spelled.appendSlice(self.gpa, ", ");
+                    try spelled.appendSlice(self.gpa, runtimeScalarName(scalar));
+                }
+                try spelled.append(self.gpa, ')');
+                if (shape.result != .unit) {
+                    try spelled.appendSlice(self.gpa, " -> ");
+                    try spelled.appendSlice(self.gpa, runtimeScalarName(shape.result));
+                }
+            } else try spelled.appendSlice(self.gpa, runtimeScalarName(parameter.scalar));
         }
         try spelled.append(self.gpa, ')');
         if (expected.result != .unit) {
@@ -19867,6 +20197,52 @@ const Checker = struct {
         return true;
     }
 
+    /// The `T` of `t` where `t` is a `mem.address.Address[T]`, or null.
+    fn addressOf(self: *Checker, t: TypeId) ?TypeId {
+        if (self.raw_accesses.address == .none or t == .poison) return null;
+        if (self.builder.view().declOfType(t) != self.raw_accesses.address) return null;
+        const applied = self.builder.appliedTo(t);
+        return if (applied.len == 1) applied[0] else null;
+    }
+
+    /// Whether `d` has the one signature its name allows: `raw[T](at:
+    /// Address[T]) -> UInt64` reads an address, and `nowhere[T]() ->
+    /// Address[T]` takes nothing to build one from.
+    fn certifiedAddressOperation(self: *Checker, d: DeclId, reads: bool) !bool {
+        const signature = switch (self.builder.get(self.decl_signatures.get(d))) {
+            .callable => |callable| callable,
+            else => return false,
+        };
+        if (self.ast.declTypeParams(d).len != 1) return false;
+        const element = self.param_types[d.index()][0];
+        const params = self.builder.callableParams(signature);
+        if (!reads) return params.len == 0 and self.addressOf(signature.result) == element;
+        return params.len == 1 and params[0].convention == .read and self.addressOf(params[0].ty) == element and signature.result == .u64;
+    }
+
+    /// `mem.address.Address[phantom T]` is an opaque, copyable newtype over
+    /// `UInt64`, and the module declaring it declares nothing else but
+    /// `nowhere`, the address of no bytes, `raw`, the number in an address,
+    /// and tests. Its seal is what keeps a number from becoming an address:
+    /// a function added beside it could build one, so nothing else is.
+    fn checkAddressCertificate(self: *Checker, declarations: types_mod.Returns, d: DeclId) !void {
+        const ty = declarations.get(d);
+        const params = self.ast.declTypeParams(d);
+        const valid = self.ast.declTag(d) == .newtype and self.ast.declVisibility(d) == .opaque_ and
+            self.ast.declOwnershipPolicy(d) == .copyable and params.len == 1 and params[0].phantom and
+            (try self.builder.baseOf(ty)) == .u64 and self.raw_accesses.address_raw != .none;
+        if (!valid) return self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Address certificate requires an opaque copyable newtype over a number", "declare `@(opaque, copyable) type Address[phantom T] = UInt64` beside `nowhere` and `raw`", null);
+        for (self.program.declsOf(self.program.moduleOf(d))) |member| {
+            if (member == d or self.ast.declIsTest(member) or self.ast.declTag(member) == .import_) continue;
+            const named = self.ast.declName(member);
+            if (named != .none and self.ast.declTag(member) == .function) {
+                const name = self.ast.tokenText(named);
+                if (std.mem.eql(u8, name, "nowhere") or std.mem.eql(u8, name, "raw")) continue;
+            }
+            self.reportAtToken(.t_borrow_contract, if (named != .none) named else self.ast.declMain(member), "the Address certificate requires its module to declare nothing but `Address`, `nowhere` and `raw`", "declare this in another module, where an address cannot be built from its parts", null);
+        }
+    }
+
     fn checkedExternSignature(self: *Checker, d: node.DeclId) ?types_mod.CallableSignature {
         const signature = switch (self.builder.get(self.decl_signatures.get(d))) {
             .callable => |callable| callable,
@@ -19879,6 +20255,16 @@ const Checker = struct {
 
     fn checkStorageCertificates(self: *Checker, declarations: types_mod.Returns) !void {
         const raw = self.raw_accesses;
+        if (raw.buffer != .none) {
+            // A buffer keeps its bytes' address as a plain `UInt64` the
+            // storage primitives read, an address carrier and not a claim of
+            // type safety, so only the library may name its fields: it is
+            // opaque. It settles one allocation, so it cannot be copied.
+            const d = raw.buffer;
+            const valid = self.ast.declTag(d) == .struct_ and self.ast.declVisibility(d) == .opaque_ and
+                self.ast.declOwnershipPolicy(d) != .copyable and self.ast.declTypeParams(d).len == 1;
+            if (!valid) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Buffer certificate requires an opaque move-only allocation descriptor", "declare `@opaque struct Buffer[A: Allocator]`, so no code outside the library names its address", null);
+        }
         if (raw.slice != .none) {
             const d = raw.slice;
             const ty = declarations.get(d);
@@ -19902,7 +20288,8 @@ const Checker = struct {
                 valid = std.mem.eql(u8, self.builder.fieldName(ty, 0), "buffer") and self.option_decl != null and
                     self.builder.view().declOfType(optional) == self.option_decl and optional_args.len == 1 and
                     std.mem.eql(u8, self.builder.fieldName(ty, 1), "allocator") and (try self.builder.fieldType(ty, 1)) == allocator and
-                    std.mem.eql(u8, self.builder.fieldName(ty, 2), "at") and (try self.builder.fieldType(ty, 2)) == .u64 and
+                    std.mem.eql(u8, self.builder.fieldName(ty, 2), "at") and
+                    self.addressOf(try self.builder.fieldType(ty, 2)) == self.param_types[d.index()][0] and
                     std.mem.eql(u8, self.builder.fieldName(ty, 3), "len") and (try self.builder.fieldType(ty, 3)) == .u64;
                 if (valid) {
                     const buffer = optional_args[0];
@@ -19911,8 +20298,33 @@ const Checker = struct {
                         args.len == 1 and args[0] == allocator;
                 }
             }
-            if (!valid) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Storage certificate requires private move-only typed buffer containment", "declare Storage[T, A] with buffer: Option[Buffer[A]], allocator: A, at: UInt64, and len: UInt64 fields", null);
+            if (!valid) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Storage certificate requires private move-only typed buffer containment", "declare Storage[T, A] with buffer: Option[Buffer[A]], allocator: A, at: address.Address[T], and len: UInt64 fields", null);
         }
+        if (raw.view != .none) {
+            // `view_place` reads a view's address and length and trusts that
+            // the elements between them are live, so only the library's own
+            // module builds one: it is opaque, and it cannot be copied, so two
+            // writers of one element never both hold it. Its third field
+            // carries the dependencies of its elements, so it must be a
+            // `mem.Carried` of the view's own element.
+            const d = raw.view;
+            const ty = declarations.get(d);
+            var valid = self.ast.declTag(d) == .struct_ and
+                self.ast.declVisibility(d) == .opaque_ and self.ast.declOwnershipPolicy(d) != .copyable and
+                self.ast.declTypeParams(d).len == 1 and self.builder.fieldCount(ty) == 3 and
+                std.mem.eql(u8, self.builder.fieldName(ty, 0), "at") and
+                self.addressOf(try self.builder.fieldType(ty, 0)) == self.param_types[d.index()][0] and
+                std.mem.eql(u8, self.builder.fieldName(ty, 1), "len") and (try self.builder.fieldType(ty, 1)) == .u64 and
+                std.mem.eql(u8, self.builder.fieldName(ty, 2), "carried");
+            if (valid) {
+                const carried = try self.builder.fieldType(ty, 2);
+                const args = self.builder.appliedTo(carried);
+                valid = raw.carried != .none and self.builder.view().declOfType(carried) == raw.carried and
+                    args.len == 1 and args[0] == self.param_types[d.index()][0];
+            }
+            if (!valid) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the View certificate requires an opaque move-only address-and-length descriptor that carries its elements' dependencies", "declare View[T] with at: address.Address[T], len: UInt64 and carried: mem.Carried[T] fields", null);
+        }
+        if (raw.address != .none) try self.checkAddressCertificate(declarations, raw.address);
         if (raw.errno != .none) {
             const d = raw.errno;
             if (!self.certifiedErrno(declarations, d)) {
@@ -19922,7 +20334,7 @@ const Checker = struct {
         }
         if (raw.closure != .none) {
             const d = raw.closure;
-            if (!self.certifiedClosure(declarations, d)) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Closure certificate requires an opaque affine entry, release, address, length and buffer", "declare Closure[S, A] with entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, and storage: Option[Buffer[A]] fields", null);
+            if (!self.certifiedClosure(declarations, d)) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Closure certificate requires an opaque, affine, unshareable entry, release, address, length and buffer", "declare Closure[S, A] with entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, and storage: Option[Buffer[A]] fields", null);
         }
     }
 
@@ -19947,7 +20359,11 @@ const Checker = struct {
     fn certifiedClosure(self: *Checker, declarations: types_mod.Returns, d: DeclId) bool {
         const raw = self.raw_accesses;
         const ty = declarations.get(d);
+        // A closure erases its callable into bytes no type argument names, so
+        // nothing tells what the callable owns; the declaration must be
+        // unshareable, or a closure owning an arena would cross to a task.
         if (self.ast.declTag(d) != .struct_ or self.ast.declVisibility(d) != .opaque_ or
+            self.ast.declUnshareableToken(d) == .none or
             self.ast.declOwnershipPolicy(d) != .affine or self.ast.declTypeParams(d).len != 2 or
             self.builder.fieldCount(ty) != std.enums.values(ClosureField).len or raw.closure_entry_type == .none or raw.buffer == .none) return false;
         const entry_decl = raw.closure_entry_type;
@@ -19997,11 +20413,11 @@ const Checker = struct {
         if (signature != .callable) return false;
         const raw = self.raw_accesses;
         const contracts = signature.callable.contracts;
-        if (d == raw.stride or raw.processText(d) != null) return contracts.len == 0;
+        if (d == raw.stride or d == raw.address_in or d == raw.slice_address or raw.processText(d) != null) return contracts.len == 0;
         if (contracts.len != 1) return false;
         const effect = contracts[0];
         if (effect.target.len != 0 or effect.source.fields.len != 0 or effect.borrows_source) return false;
-        if (d == raw.put) return effect.kind == .retains and effect.source.root == .parameter and effect.source.root.parameter == 4 and
+        if (d == raw.put) return effect.kind == .retains and effect.source.root == .parameter and effect.source.root.parameter == 2 and
             effect.destination != null and effect.destination.?.root == .parameter and effect.destination.?.root.parameter == 0 and effect.destination.?.fields.len == 0;
         return effect.destination == null and effect.source.root == .parameter and effect.source.root.parameter == 0 and
             effect.kind == (if (d == raw.span or d == raw.buffer_span) @as(@FieldType(types_mod.CallableContract, "kind"), .borrows) else .carries);
@@ -20011,12 +20427,27 @@ const Checker = struct {
         if (self.raw_accesses.erasure(d)) return self.validErasureSignature(d);
         if (!self.validStorageEffects(d)) return false;
         const raw = self.raw_accesses;
-        if (d == raw.span or d == raw.buffer_span or d == raw.subspan or d == raw.slice_place or raw.processText(d) != null) return self.validSpanSignature(d);
-        const count: usize = if (d == raw.stride) 1 else 2;
+        if (d == raw.span or d == raw.buffer_span or d == raw.subspan or d == raw.slice_place or d == raw.view_place or raw.processText(d) != null) return self.validSpanSignature(d);
+        const count: usize = if (d == raw.stride or d == raw.slice_address) 1 else 2;
         const tps = self.ast.declTypeParams(d);
         if (tps.len != count or self.ast.declVisibility(d) != .private) return false;
         const result = try self.declaredResultType(d);
         const ps = self.ast.declParams(d);
+        if (d == raw.slice_address) {
+            const slice = try self.declaredParamType(d, 0);
+            const slice_args = self.builder.appliedTo(slice);
+            return ps.len == 1 and self.addressOf(result) == self.param_types[d.index()][0] and ps[0].convention == .read and
+                raw.slice != .none and self.builder.view().declOfType(slice) == raw.slice and
+                slice_args.len == 1 and slice_args[0] == self.param_types[d.index()][0];
+        }
+        if (d == raw.address_in) {
+            const buffer = try self.declaredParamType(d, 0);
+            const buffer_args = self.builder.appliedTo(buffer);
+            return self.addressOf(result) == self.param_types[d.index()][0] and ps[0].convention == .read and
+                raw.buffer != .none and self.builder.view().declOfType(buffer) == raw.buffer and
+                buffer_args.len == 1 and buffer_args[0] == self.param_types[d.index()][1] and
+                try self.declaredParamType(d, 1) == .u64 and ps[1].convention == .read;
+        }
         if (d == raw.stride) {
             const shape = try self.declaredParamType(d, 0);
             const declared = self.program.libraryDeclIn("mem", "SlotType") orelse return false;
@@ -20031,12 +20462,14 @@ const Checker = struct {
         if (raw.storage == .none or self.builder.view().declOfType(owner) != raw.storage or
             applied.len != 2 or applied[0] != element or applied[1] != allocator or
             ps[0].convention != (if (d == raw.place) node.Convention.read else .inout)) return false;
-        const scalar_end: usize = if (d == raw.place) 5 else 4;
+        // The slots' address and extent are the storage's own; what follows
+        // it is a slot's offset, and for a place the live extent before it.
+        const scalar_end: usize = if (d == raw.place) 3 else 2;
         for (ps[1..scalar_end], 1..) |p, k| {
             if (try self.declaredParamType(d, k) != .u64 or p.convention != .read) return false;
         }
-        if (d == raw.put) return result == .unit and ps[4].convention == .sink and
-            try self.declaredParamType(d, 4) == element;
+        if (d == raw.put) return result == .unit and ps[2].convention == .sink and
+            try self.declaredParamType(d, 2) == element;
         return result == element;
     }
 
@@ -20083,7 +20516,7 @@ const Checker = struct {
         for (ps) |param| if (param.convention != .read or param.default != .none) return false;
         const element = if (d == raw.buffer_span or process_text) TypeId.u8 else self.param_types[d.index()][0];
         const result = try self.declaredResultType(d);
-        if (d == raw.slice_place) {
+        if (d == raw.slice_place or d == raw.view_place) {
             if (result != element) return false;
         } else {
             const result_args = self.builder.appliedTo(result);
@@ -20092,7 +20525,8 @@ const Checker = struct {
         if (process_text) return try self.declaredParamType(d, 0) == .u64;
         const owner = try self.declaredParamType(d, 0);
         const owner_args = self.builder.appliedTo(owner);
-        const owner_decl = if (d == raw.span) raw.storage else if (d == raw.buffer_span) self.program.libraryDeclIn("mem", "Buffer") orelse return false else raw.slice;
+        const owner_decl = if (d == raw.span) raw.storage else if (d == raw.buffer_span) self.program.libraryDeclIn("mem", "Buffer") orelse return false else if (d == raw.view_place) raw.view else raw.slice;
+        if (owner_decl == .none) return false;
         if (self.builder.view().declOfType(owner) != owner_decl) return false;
         if (d == raw.span) {
             if (owner_args.len != 2 or owner_args[0] != element or owner_args[1] != self.param_types[d.index()][1]) return false;
@@ -20964,7 +21398,7 @@ const Checker = struct {
             );
         }
 
-        if (self.res.declaredBy(target) == self.raw_accesses.place or self.res.declaredBy(target) == self.raw_accesses.slice_place) {
+        if (self.res.declaredBy(target) == self.raw_accesses.place or self.res.declaredBy(target) == self.raw_accesses.slice_place or self.res.declaredBy(target) == self.raw_accesses.view_place) {
             const body = if (self.generic != .none) self.ast.declBody(self.generic) else ExprId.none;
             const permitted = self.generic != .none and self.ast.declTag(self.generic) == .projection and
                 body != .none and self.ast.exprTag(body) == .block and self.ast.withoutGroups(self.ast.blockOf(body).tail) == id;
@@ -21565,23 +21999,24 @@ const Checker = struct {
             try self.signatureSelfType(self.generic)
         else if (self.enclosingRow(self.generic)) |implementation| implementation.ty else TypeId.poison;
         var environment = self.closure_descriptors[closure.index()].environment;
+        // Copying a closure would duplicate an `inout` capture's
+        // exclusive lend, so an environment holding one is affine.
+        const lends = for (resolved_captures) |capture| {
+            if (capture.convention == .inout) break true;
+        } else false;
         if (resolved_captures.len != 0 and environment == .unit) {
             const name = try std.fmt.allocPrint(self.gpa, "captures.{d}", .{closure.index()});
             self.builder.owned_names.append(self.gpa, name) catch |err| {
                 self.gpa.free(name);
                 return err;
             };
-            // Copying a closure would duplicate an `inout` capture's
-            // exclusive lend, so an environment holding one is affine.
-            const lends = for (resolved_captures) |capture| {
-                if (capture.convention == .inout) break true;
-            } else false;
             environment = try self.builder.addStruct(name, if (lends) .affine else .copyable, environment_fields);
         }
         self.closure_descriptors[closure.index()] = .{
             .owned_fields = self.closure_descriptors[closure.index()].owned_fields,
             .environment = environment,
             .invocation = lambda.invocation,
+            .lends = lends,
             .enclosing = self.generic,
             .parameters = parameters,
             .expr = id,
@@ -23039,6 +23474,44 @@ const Checker = struct {
     /// The two spellings differ in how the callee and the arguments are found
     /// and in nothing after that, so they are found above and everything the
     /// language says about a call is said once, here.
+    /// The type a runtime symbol's callback argument is held to. C calls the
+    /// callback at parameter `j` of `d` with the address the call was given
+    /// for it, at the position `runtime_symbols` marks; the function passed
+    /// may declare that parameter as a `mem.address.Address[T]`, which
+    /// crosses as its `UInt64`, so the entry C calls hands the number to it
+    /// unchanged and no source form turns a number into an address. Where
+    /// the argument's own type is the declared callback type but for that
+    /// one parameter, it is the type the argument is held to; otherwise the
+    /// declared type is, and a mismatch is reported against it.
+    fn adoptedCallback(self: *Checker, d: DeclId, j: usize, argument: ExprId, declared: TypeId, walked: *bool) std.mem.Allocator.Error!TypeId {
+        if (!self.ast.declIsExtern(d) or self.raw_accesses.address == .none) return declared;
+        const signature = runtime_symbols.signatureOf(self.ast.tokenText(self.ast.declName(d))) orelse return declared;
+        if (j >= signature.parameters.len) return declared;
+        const callback = signature.parameters[j].callback orelse return declared;
+        const position = callback.address orelse return declared;
+        const wanted = switch (self.builder.get(declared)) {
+            .callable => |wanted| wanted,
+            else => return declared,
+        };
+        const value = self.ast.withoutGroups(argument);
+        const got = if (walked.*) self.builder.exprType(value) else try self.check(value, null);
+        walked.* = true;
+        const given = switch (self.builder.get(got)) {
+            .callable => |given| given,
+            else => return declared,
+        };
+        const wanted_params = self.builder.callableParams(wanted);
+        const given_params = self.builder.callableParams(given);
+        if (wanted_params.len != given_params.len or wanted.result != given.result or
+            wanted.invocation != given.invocation or given.contracts.len != wanted.contracts.len) return declared;
+        for (wanted_params, given_params, 0..) |w, g, k| {
+            if (w.convention != g.convention) return declared;
+            if (w.ty == g.ty) continue;
+            if (k != position or w.ty != .u64 or self.addressOf(g.ty) == null) return declared;
+        }
+        return got;
+    }
+
     fn checkCallOf(
         self: *Checker,
         id: ExprId,
@@ -23245,11 +23718,12 @@ const Checker = struct {
         var observations_owned = true;
         defer if (observations_owned) self.gpa.free(receiver_adjustments);
         for (args, params, 0..) |a, p, j| {
-            const parameter_ty = try self.throughTrait(
+            const declared_ty = try self.throughTrait(
                 try self.throughCall(try paramType(self, d, j), d, over, settled),
                 trait_decl,
                 trait_args,
             );
+            const parameter_ty = if (a == ExprId.none) declared_ty else try self.adoptedCallback(d, j, a, declared_ty, &walked[j]);
             var default: types_mod.CallableDefault = .absent;
             if (hasDefault(p)) {
                 if (self.defaults.get(@intCast(d.index()), @intCast(j))) |value| {
@@ -30131,7 +30605,7 @@ const Checker = struct {
         const tail = self.ast.withoutGroups(held.tail);
         if (self.storagePlaceCall(tail)) {
             const args = self.ast.call(tail).args;
-            if ((args.len == 5 or args.len == 2) and self.ast.exprTag(self.ast.placePath(args[0]).root) == .name_ref) {
+            if ((args.len == 3 or args.len == 2) and self.ast.exprTag(self.ast.placePath(args[0]).root) == .name_ref) {
                 const root = self.res.targetOf(self.ast.placePath(args[0]).root);
                 if (root != .none and self.res.kindOf(root) == .parameter and
                     std.meta.eql(self.res.parameterOwner(root), resolve_mod.ParameterOwner{ .declaration = d }) and
@@ -30139,9 +30613,11 @@ const Checker = struct {
                 {
                     for (args[1..], 1..) |arg, arg_index| {
                         if (self.somethingRun(arg) != null) return self.sink.addError(.t_projection, self.ast.fileOfExpr(arg), self.ast.exprSpan(arg), "a storage place argument cannot run code", reach_it);
-                        if (args.len == 5 and arg_index < 4) {
+                        // A slot's address and extent are its storage's own;
+                        // how many slots are live is the receiver's to say.
+                        if (args.len == 3 and arg_index == 1) {
                             const field_root = self.ast.placePath(arg).root;
-                            if (self.res.targetOf(field_root) != root) return self.sink.addError(.t_projection, self.ast.fileOfExpr(arg), self.ast.exprSpan(arg), "a storage place reads its address and lengths from its owner", reach_it);
+                            if (self.res.targetOf(field_root) != root) return self.sink.addError(.t_projection, self.ast.fileOfExpr(arg), self.ast.exprSpan(arg), "a storage place reads how many slots are live from its owner", reach_it);
                         }
                     }
                     return;
@@ -30222,7 +30698,7 @@ const Checker = struct {
         if (self.ast.exprTag(id) != .call) return false;
         const target = self.res.targetOf(self.ast.call(id).callee);
         return target != .none and self.res.kindOf(target) == .function and
-            (self.res.declaredBy(target) == self.raw_accesses.place or self.res.declaredBy(target) == self.raw_accesses.slice_place);
+            (self.res.declaredBy(target) == self.raw_accesses.place or self.res.declaredBy(target) == self.raw_accesses.slice_place or self.res.declaredBy(target) == self.raw_accesses.view_place);
     }
 
     /// The first thing inside an expression that runs code or chooses a path,
@@ -32188,6 +32664,8 @@ const Checker = struct {
 
         const may_recur = try self.callsMayRecur(owner);
         defer self.gpa.free(may_recur);
+        const component = try self.recurrenceComponents(owner);
+        defer self.gpa.free(component);
 
         for (self.calls.items) |call| {
             const from = owner[call.at.index()];
@@ -32207,7 +32685,7 @@ const Checker = struct {
                 }
             }
             if (!grows) continue;
-            if (!try self.reaches(call, from, starts, calls)) continue;
+            if (!try self.reaches(call, from, starts, calls, component)) continue;
 
             _ = self.report(
                 .t_poly_rec,
@@ -32429,6 +32907,108 @@ const Checker = struct {
         return result;
     }
 
+    /// The strongly connected component of every declaration, numbered by
+    /// Tarjan's algorithm over a graph with an edge from a declaration to what
+    /// each call in its body reaches (`recurrenceTarget`) and from a signature
+    /// to every member supplying it. That holds every step `Reachability`
+    /// takes: a direct call to its target, a dispatched one to the chosen
+    /// member or to every member of its signature. A declaration outside the
+    /// root's component never calls back into it.
+    ///
+    /// Without this, each recurrence query walks everything its root reaches,
+    /// every supplier of every trait it calls included, so a library of many
+    /// implementations pays for all of them once per growing call. Work and
+    /// storage follow declarations, calls and supplied members.
+    fn recurrenceComponents(self: *const Checker, owner: []const DeclId) ![]u32 {
+        const count = self.ast.declCount();
+        const starts = try self.gpa.alloc(u32, count + 1);
+        defer self.gpa.free(starts);
+        @memset(starts, 0);
+        for (self.calls.items) |call| {
+            const from = owner[call.at.index()];
+            if (from == .none) continue;
+            if (self.recurrenceTarget(call) == null) continue;
+            starts[from.index() + 1] += 1;
+        }
+        for (0..count) |i| starts[i + 1] += @intCast(self.supply.membersOf(DeclId.at(@intCast(i))).len);
+        for (1..count + 1) |i| starts[i] += starts[i - 1];
+        const targets = try self.gpa.alloc(u32, starts[count]);
+        defer self.gpa.free(targets);
+        const cursor = try self.gpa.dupe(u32, starts[0..count]);
+        defer self.gpa.free(cursor);
+        for (self.calls.items) |call| {
+            const from = owner[call.at.index()];
+            if (from == .none) continue;
+            const target = self.recurrenceTarget(call) orelse continue;
+            targets[cursor[from.index()]] = @intCast(target.index());
+            cursor[from.index()] += 1;
+        }
+        for (0..count) |i| {
+            for (self.supply.membersOf(DeclId.at(@intCast(i)))) |member| {
+                targets[cursor[i]] = member;
+                cursor[i] += 1;
+            }
+        }
+
+        const unvisited = std.math.maxInt(u32);
+        const order = try self.gpa.alloc(u32, count);
+        defer self.gpa.free(order);
+        @memset(order, unvisited);
+        const low = try self.gpa.alloc(u32, count);
+        defer self.gpa.free(low);
+        const on_stack = try self.gpa.alloc(bool, count);
+        defer self.gpa.free(on_stack);
+        @memset(on_stack, false);
+        const component = try self.gpa.alloc(u32, count);
+        errdefer self.gpa.free(component);
+        var stack: std.ArrayList(u32) = .empty;
+        defer stack.deinit(self.gpa);
+        // A declaration being visited and the next of its edges to follow.
+        const Entered = struct { node: u32, next: u32 };
+        var visits: std.ArrayList(Entered) = .empty;
+        defer visits.deinit(self.gpa);
+        var visited: u32 = 0;
+        var components: u32 = 0;
+        for (0..count) |first| {
+            if (order[first] != unvisited) continue;
+            var enter: ?u32 = @intCast(first);
+            while (true) {
+                if (enter) |v| {
+                    order[v] = visited;
+                    low[v] = visited;
+                    visited += 1;
+                    try stack.append(self.gpa, v);
+                    on_stack[v] = true;
+                    try visits.append(self.gpa, .{ .node = v, .next = starts[v] });
+                    enter = null;
+                }
+                const top = &visits.items[visits.items.len - 1];
+                const v = top.node;
+                if (top.next < starts[v + 1]) {
+                    const w = targets[top.next];
+                    top.next += 1;
+                    if (order[w] == unvisited) {
+                        enter = w;
+                    } else if (on_stack[w]) low[v] = @min(low[v], order[w]);
+                    continue;
+                }
+                _ = visits.pop();
+                if (low[v] == order[v]) {
+                    while (stack.pop()) |w| {
+                        on_stack[w] = false;
+                        component[w] = components;
+                        if (w == v) break;
+                    }
+                    components += 1;
+                }
+                if (visits.items.len == 0) break;
+                const parent = visits.items[visits.items.len - 1].node;
+                low[parent] = @min(low[parent], low[v]);
+            }
+        }
+        return component;
+    }
+
     /// Both own and implementation arguments use the same structural growth
     /// measure, including parameters determined only by trait arguments.
     fn instantiatesLarger(
@@ -32454,6 +33034,10 @@ const Checker = struct {
         root: DeclId,
         starts: []const u32,
         calls: []const ExprId,
+        /// `recurrenceComponents`: a call is followed only into the root's
+        /// component, since no declaration outside it calls back into the
+        /// root, so nothing recorded there reaches the root's parameters.
+        component: []const u32,
         frames: std.AutoHashMapUnmanaged(DeclId, Frame) = .empty,
         queue: std.ArrayList(DeclId) = .empty,
         origins: std.AutoHashMapUnmanaged(DeclId, types_mod.ImplementationParameters) = .empty,
@@ -32766,6 +33350,7 @@ const Checker = struct {
                         if (choice.declaredImplementation()) |selected| {
                             const row = c.builder.implementations[selected.index()];
                             if (c.supply.memberOf(row.decl, signature)) |member| {
+                                if (!self.withRoot(member)) return;
                                 const frame = try self.enqueue(member, own, choice.impl_args);
                                 try self.transfer(recorded.selection.own_args, frame.own.len, member, false, scan, true);
                                 try self.transfer(choice.impl_args, frame.implementation.len, member, true, scan, false);
@@ -32782,12 +33367,14 @@ const Checker = struct {
                 }
                 for (c.supply.membersOf(signature)) |supplier| {
                     const member = DeclId.at(supplier);
+                    if (!self.withRoot(member)) continue;
                     const frame = try self.enqueue(member, own, &.{});
                     try self.transfer(recorded.selection.own_args, frame.own.len, member, false, scan, true);
                     try self.supplierArguments(member, implementation, frame, scan);
                 }
                 return;
             }
+            if (!self.withRoot(target)) return;
             const implementation = try self.arguments(recorded.selection.impl_args, scan);
             defer c.gpa.free(implementation);
             const written = try c.recurrenceArguments(recorded, target);
@@ -32797,6 +33384,10 @@ const Checker = struct {
             const frame = try self.enqueue(target, direct, implementation);
             try self.transfer(written, frame.own.len, target, false, scan, true);
             try self.transfer(recorded.selection.impl_args, frame.implementation.len, target, true, scan, true);
+        }
+
+        fn withRoot(self: *const Reachability, declaration: DeclId) bool {
+            return self.component[declaration.index()] == self.component[self.root.index()];
         }
 
         fn supplierArguments(self: *Reachability, member: DeclId, key: types_mod.CallImpl, frame: Frame, scan: *Scan) !void {
@@ -33024,8 +33615,9 @@ const Checker = struct {
         root: DeclId,
         starts: []const u32,
         calls: []const ExprId,
+        component: []const u32,
     ) std.mem.Allocator.Error!bool {
-        var reachability: Reachability = .{ .checker = self, .root = root, .starts = starts, .calls = calls };
+        var reachability: Reachability = .{ .checker = self, .root = root, .starts = starts, .calls = calls, .component = component };
         defer reachability.deinit();
         return reachability.run(first);
     }
@@ -33103,6 +33695,11 @@ const Checker = struct {
             .field => !self.namesAGenericEnum(id),
             .call => blk: {
                 const callee = self.ast.withoutGroups(self.ast.call(id).callee);
+                // A generic newtype's construction takes its arguments from
+                // where it goes, as a contextual literal does.
+                if (resolve_mod.constructionOf(self.ast, self.res, id)) |decl| {
+                    if (self.ast.declTypeParams(decl).len != 0) break :blk false;
+                }
                 break :blk !(self.ast.exprTag(callee) == .variant_ref and self.ast.unaryOperand(callee) == ExprId.none);
             },
 
@@ -39387,6 +39984,114 @@ test "an implementation the compiler provides names no declaration to call" {
     try testing.expect((try pool.implementationRow(trait, &.{}, .u8)).?.isAmbient());
 }
 
+test "an address becomes a number only where the runtime is told what to do with its bytes" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var sink = Sink.init(gpa);
+    const source: Source = .{ .path = "address.lin", .text =
+        \\@(opaque, copyable)
+        \\type Address[phantom T] = UInt64
+        \\fn nowhere[T]() -> Address[T] { Address(0) }
+        \\fn raw[T](at: Address[T]) -> UInt64 { let Address(number) = copy(at); number }
+        \\extern fn linea_chan_send(endpoint: UInt64, at: UInt64, len: UInt64)
+        \\extern fn keep(at: Address[UInt8])
+        \\fn main() -> UInt8 {
+        \\    let at: Address[UInt8] = nowhere()
+        \\    linea_chan_send(0, raw(copy(at)), 1)
+        \\    linea_chan_send(raw(copy(at)), 0, 1)
+        \\    linea_chan_send(0, (raw(copy(at))), 1)
+        \\    let number = raw(at)
+        \\    UInt8(number - number)
+        \\}
+    };
+    var interner: Interner = .empty;
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    var resolved = try resolveTree(gpa, &ast, &sink);
+    resolved.modules[0].name = "address";
+    resolved.modules[0].library = true;
+    resolved.modules[0].externs = true;
+    _ = try typecheckTree(gpa, &resolved, &sink);
+    var refused: usize = 0;
+    for (sink.items()) |diagnostic| {
+        if (diagnostic.code == .t_raw_address) refused += 1;
+    }
+    // The endpoint is not an address, the `0` at the address names no type,
+    // the binding is no runtime call, and `keep` would hand C an address it
+    // may keep. A grouped `raw` is still `raw`.
+    try testing.expectEqual(@as(usize, 4), refused);
+    try testing.expect(diagnosticSays(&sink, .t_raw_address, "takes only the number in a `mem.address.Address`"));
+    try testing.expect(diagnosticSays(&sink, .t_raw_address, "`keep`"));
+}
+
+test "the runtime reads or writes a buffer's bytes only at a typed address" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var sink = Sink.init(gpa);
+    // Inside the standard library's own `mem`, which alone declares these, a
+    // plain number at a byte address is refused as it is for typed bytes a
+    // task sends: the runtime would read or write wherever it points.
+    const source: Source = .{ .path = "mem.lin", .text =
+        \\extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
+        \\extern fn linea_read_at(fd: Int32, at: UInt64, len: UInt64, offset: UInt64) -> Int64
+        \\extern fn linea_random_bytes(at: UInt64, len: UInt64) -> Int64
+        \\extern fn linea_publish_at(parent: Int32, from: UInt64, from_extent: UInt64, to: UInt64, to_extent: UInt64, replace: UInt8) -> Int64
+        \\extern fn linea_float64_parse(at: UInt64, length: UInt64, inout bits: UInt64, inout offset: UInt64) -> UInt64
+        \\extern fn linea_free(at: UInt64, size: UInt64, align: UInt64)
+        \\fn main() -> UInt8 {
+        \\    let _written = linea_write_some(1, 4096, 8)
+        \\    let _read = linea_read_at(0, 4096, 8, 0)
+        \\    let _filled = linea_random_bytes(4096, 16)
+        \\    let _renamed = linea_publish_at(3, 4096, 2, 8192, 2, 0)
+        \\    var bits: UInt64 = 0
+        \\    var offset: UInt64 = 0
+        \\    let _parsed = linea_float64_parse(4096, 8, &bits, &offset)
+        \\    linea_free(4096, 16, 8)
+        \\    0
+        \\}
+    };
+    var interner: Interner = .empty;
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    var resolved = try resolveTree(gpa, &ast, &sink);
+    resolved.modules[0].name = "mem";
+    resolved.modules[0].library = true;
+    resolved.modules[0].externs = true;
+    _ = try typecheckTree(gpa, &resolved, &sink);
+    var refused: usize = 0;
+    for (sink.items()) |diagnostic| {
+        if (diagnostic.code == .t_raw_address) refused += 1;
+    }
+    try testing.expectEqual(@as(usize, 7), refused);
+}
+
+test "the operations beside an address keep the one signature each is for" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var sink = Sink.init(gpa);
+    const source: Source = .{ .path = "address.lin", .text =
+        \\@(opaque, copyable)
+        \\type Address[phantom T] = UInt64
+        \\fn nowhere[T](number: UInt64) -> Address[T] { Address(number) }
+        \\fn raw[T](at: Address[T]) -> UInt64 { let Address(number) = copy(at); number }
+        \\fn main() -> UInt8 {
+        \\    let _at: Address[UInt8] = nowhere(7)
+        \\    0
+        \\}
+    };
+    var interner: Interner = .empty;
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    var resolved = try resolveTree(gpa, &ast, &sink);
+    resolved.modules[0].name = "address";
+    resolved.modules[0].library = true;
+    _ = try typecheckTree(gpa, &resolved, &sink);
+    try testing.expect(diagnosticSays(&sink, .t_borrow_contract, "the Address certificate requires `nowhere[T]() -> Address[T]`"));
+}
+
 test "typed storage intrinsics reject a scalar replacement signature" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -39727,6 +40432,10 @@ test "borrow storage certificates require their declared representation and effe
         \\@linear
         \\struct Storage[phantom T, phantom A] { bytes: UInt64 }
         \\fn main() -> UInt8 { 0 }
+        ,
+        \\@(opaque, copyable)
+        \\struct View[phantom T] { at: UInt64, len: UInt64, carried: UInt64 }
+        \\fn main() -> UInt8 { 0 }
     };
     for (cases) |text| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -39746,9 +40455,13 @@ test "borrow storage certificates require their declared representation and effe
     }
 }
 
-test "borrow storage certificates accept optional allocation and reject mismatched containment" {
+// The library's own `Storage`, whose `at` is a `mem.address.Address[T]` from a
+// module of its own, is the shape every compile certifies; a one-module
+// library has no address module, so each shape here is refused, and the first
+// for its `at` alone: a number names no element type.
+test "borrow storage certificates reject an untyped address and mismatched containment" {
     const cases = [_]struct { fields: []const u8, valid: bool }{
-        .{ .fields = "buffer: Option[Buffer[A]], allocator: A, at: UInt64, len: UInt64", .valid = true },
+        .{ .fields = "buffer: Option[Buffer[A]], allocator: A, at: UInt64, len: UInt64", .valid = false },
         .{ .fields = "buffer: _Other[Buffer[A]], allocator: A, at: UInt64, len: UInt64", .valid = false },
         .{ .fields = "buffer: Option[Buffer[UInt8]], allocator: A, at: UInt64, len: UInt64", .valid = false },
         .{ .fields = "buffer: Option[Buffer[A]], allocator: UInt8, at: UInt64, len: UInt64", .valid = false },
@@ -39788,14 +40501,48 @@ test "borrow storage certificates accept optional allocation and reject mismatch
     }
 }
 
+// `Buffer.at` is a plain `UInt64` the storage primitives read: only the
+// library may name it, so `Buffer` must be opaque, and a copy would duplicate
+// the allocation it settles, so it must be move-only.
+test "the Buffer certificate accepts an opaque move-only buffer and rejects one user code could open or copy" {
+    const cases = [_]struct { head: []const u8, valid: bool }{
+        .{ .head = "@opaque", .valid = true },
+        .{ .head = "@(opaque, linear)", .valid = true },
+        .{ .head = "", .valid = false },
+        .{ .head = "@(opaque, copyable)", .valid = false },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var sink = Sink.init(gpa);
+        const source: Source = .{ .path = "buffer.lin", .text = try std.fmt.allocPrint(gpa,
+            \\{s}
+            \\struct Buffer[A] {{ at: UInt64, len: UInt64, allocator: A }}
+            \\fn _observe(_buffer: Buffer[UInt8]) -> UInt8 {{ 0 }}
+            \\fn main() -> UInt8 {{ 0 }}
+        , .{case.head}) };
+        var interner: Interner = .empty;
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+        var resolved = try resolveTree(gpa, &ast, &sink);
+        resolved.modules[0].name = "mem";
+        resolved.modules[0].library = true;
+        resolved.modules[0].externs = true;
+        _ = try typecheckTree(gpa, &resolved, &sink);
+        try testing.expectEqual(!case.valid, diagnosticSays(&sink, .t_borrow_contract, "Buffer certificate"));
+    }
+}
+
 test "the closure certificate accepts the library's shape and rejects a changed one" {
     const cases = [_]struct { head: []const u8, fields: []const u8, valid: bool }{
-        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = true },
-        .{ .head = "@(opaque, linear)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
-        .{ .head = "@opaque", .fields = "entry: S, settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
-        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
-        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), len: UInt64, at: UInt64, storage: Option[Buffer[A]]", .valid = false },
-        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[UInt8]]", .valid = false },
+        .{ .head = "@(opaque, unshareable)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = true },
+        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@(opaque, linear, unshareable)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@(opaque, unshareable)", .fields = "entry: S, settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@(opaque, unshareable)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@(opaque, unshareable)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), len: UInt64, at: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@(opaque, unshareable)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[UInt8]]", .valid = false },
     };
     for (cases) |case| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -41314,6 +42061,7 @@ fn runtimeScalarName(scalar: runtime_symbols.Scalar) []const u8 {
         .f32 => "Float32",
         .f64 => "Float64",
         .unit => "()",
+        .callback => "fn(...)",
         .ptr => unreachable,
     };
 }

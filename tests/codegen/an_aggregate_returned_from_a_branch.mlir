@@ -14,7 +14,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -57,7 +57,7 @@ module {
     %v13 = arith.addi %v12, %p13 : i64 loc("tests/codegen/an_aggregate_returned_from_a_branch.lin":34:11)
     func.return %v13 : i64 loc("tests/codegen/an_aggregate_returned_from_a_branch.lin":34:5)
   }
-  func.func private @"lin.;pick"(%sret: !llvm.ptr, %a0: i1) attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;pick"(%sret: !llvm.ptr, %a0: i1) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 24 : i64
@@ -106,7 +106,7 @@ module {
     "llvm.intr.memcpy"(%sret, %s2, %rl33) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("tests/codegen/an_aggregate_returned_from_a_branch.lin":18:5)
     func.return loc("tests/codegen/an_aggregate_returned_from_a_branch.lin":18:5)
   }
-  func.func private @"lin.;noise"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;noise"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 24 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     cf.br ^b0
@@ -139,7 +139,7 @@ module {
     %v17 = arith.addi %v16, %p17 : i64 loc("tests/codegen/an_aggregate_returned_from_a_branch.lin":23:5)
     func.return %v17 : i64 loc("tests/codegen/an_aggregate_returned_from_a_branch.lin":23:5)
   }
-  func.func private @"lin.;take"(%a0: !llvm.ptr, %a1: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;take"(%a0: !llvm.ptr, %a1: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64

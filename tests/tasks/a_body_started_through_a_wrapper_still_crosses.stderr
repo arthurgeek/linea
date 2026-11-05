@@ -1,0 +1,7 @@
+error[O-Cross]: a task's body of type `J` may carry captures that cannot cross to another task
+  --> tests/tasks/a_body_started_through_a_wrapper_still_crosses.lin:12:18
+   |
+12 |     task.prepare(job)
+   |                  ^^^ what this body captures is not known here
+   |
+   = help: start the task where its body is written, so its captures can be checked

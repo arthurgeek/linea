@@ -16,9 +16,9 @@ struct Arena[H: Allocator] {
 // backing buffer. Moving, replacing or releasing an arena conflicts with live
 // handles and allocations observing it; moving an unobserved arena into or out
 // of a generic function is an ordinary move.
-// A handle is `unshareable` for the reason its arena is: `acquire` takes it by
-// `read` and advances the arena's cursor.
-@(opaque, copyable, unshareable)
+// A handle is not `Shareable`, because the arena it borrows is not: `acquire`
+// takes the handle by `read` and advances the arena's cursor.
+@(opaque, copyable)
 struct Handle[H: Allocator = SystemAllocator] {
     owner: borrow Arena[H],
 }

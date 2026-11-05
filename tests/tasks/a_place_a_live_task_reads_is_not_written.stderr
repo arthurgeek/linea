@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/tasks/a_place_a_live_task_reads_is_not_written.lin:17:5
+   |
+17 |     prices[2] = 9
+   |     ^^^^^^^^^ keep this place available until the last use of its observation
+18 |     let (sum, done) = handle.recv()
+   |                       ------ the observation is still used here

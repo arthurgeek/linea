@@ -1,0 +1,37 @@
+import std.io
+import std.mem
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use task.Unstarted
+
+// A token that must be handed in, so a body capturing it owns something
+// linear.
+@linear
+struct Token {
+    number: UInt64,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var handed_in = UInt64(0)
+    let token = Token { number = 7 }
+    let body = sink [sink token, inout handed_in] |sink me: Chan[End]| {
+        let Token { number } = token
+        handed_in = number
+        me.close()
+    }
+    // No machine maps a stack of four exbibytes, so this preparation fails
+    // and hands the body back with the reason.
+    let (retried, first_try) = match task.prepare_in(mem.system(), body, stack: 4611686018427387904) {
+        Ok(slot) => (slot.cancel(), "prepared"),
+        Err(failure) => {
+            let Unstarted { body, reason: _ } = failure
+            (body, "refused")
+        },
+    }
+    task.prepare(retried).unwrap().start().close()
+    io.println("first try {first_try}, handed in: {handed_in}")?
+    .Ok(0)
+}

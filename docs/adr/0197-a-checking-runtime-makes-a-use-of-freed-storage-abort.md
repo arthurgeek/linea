@@ -1,6 +1,12 @@
 # 197. A checking runtime makes a use of freed storage abort
 
-Status: Accepted — 2026-09-29
+Status: Accepted — 2026-09-29. The clauses letting a root granted `extern`
+hold an address, keeping `tests/checked_storage/`, and passing over a case
+that records a storage report are superseded by
+[0255](0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md):
+only the standard library declares the runtime functions that take an
+address, the native runtime test holds every report, and a case recording one
+fails.
 
 Builds on [0013](0013-no-undefined-behaviour.md), which rules out undefined
 behaviour, [0017](0017-failure-is-a-trap-or-a-value.md), which makes a logic

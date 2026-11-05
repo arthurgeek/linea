@@ -1,0 +1,28 @@
+// A construction passed to a generic function takes its type arguments from
+// what the other arguments settle, as a `.{ ... }` literal does.
+@(copyable, derive(Release))
+type Id[phantom T] = UInt64
+
+struct Customer {}
+
+fn number[T](id: Id[T]) -> UInt64 {
+    let Id(n) = copy(id)
+    n
+}
+
+fn same[T](a: Id[T], b: Id[T]) -> Bool {
+    number(a) == number(b)
+}
+
+fn main() -> UInt8 {
+    let customer: Id[Customer] = Id(4)
+    var seen: Vec[Id[Customer]] = Vec.new()
+    &seen.push(Id(4)).unwrap()
+    let matched = same(customer, Id(4)) && same(Id(4), customer) && seen.length() == 1
+    seen.release()
+    if matched {
+        0
+    } else {
+        1
+    }
+}

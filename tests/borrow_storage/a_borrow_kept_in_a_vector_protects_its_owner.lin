@@ -1,0 +1,12 @@
+// A vector of borrows keeps each one in its storage, whose type names the
+// element: the number the vector borrows cannot be written while what the
+// vector holds is still read.
+fn main() -> UInt8 {
+    var number: UInt8 = 1
+    var kept: Vec[borrow UInt8] = Vec.new()
+    &kept.push(borrow number).unwrap()
+    number = 2
+    let first = *kept[0]
+    kept.release()
+    first
+}

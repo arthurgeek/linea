@@ -1,11 +1,12 @@
-import std.net
+import std.time
 
-// The runtime gives `linea_close` the signature `(Int32) -> Int64` in every
-// root that declares it, `std.net` included, so this declaration is refused.
-extern fn linea_close(fd: Int64) -> Int64
+// The runtime gives `linea_clock_sleep` the signature `(UInt64) -> Int64` in
+// every root that declares it, `std.time` included, so this declaration is
+// refused.
+extern fn linea_clock_sleep(nanoseconds: Int64) -> Int64
 
 fn main() -> UInt8 {
-    let _address = net.loopback(0)
-    let _closed = linea_close(3)
+    let _now = time.Instant.now()
+    let _slept = linea_clock_sleep(0)
     0
 }

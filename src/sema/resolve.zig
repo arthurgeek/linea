@@ -4146,6 +4146,11 @@ fn resolveInternal(
                     // A derive header is valid when the type's own header
                     // is: field errors belong to the representation.
                     const header_valid = sink.error_count == errors_before;
+                    // A derive's `where` clause names a newtype's base by
+                    // the parameters it is written with, so the base is
+                    // read before the derive expands, and the parameters
+                    // it uses are kept for the declaration's own check.
+                    if (ast.declTag(d) == .newtype) try r.useRef(ast.declReturnRef(d));
                     if (attached) {
                         const params = ast.declTypeParamRange(d);
                         for (params.start..params.end, 0..) |parameter_index, local_index| {
@@ -4359,7 +4364,9 @@ fn resolveInternal(
                 try r.useRef(f.written);
             };
             for (ast.declFields(d)) |f| try r.useRef(f.written);
-            try r.useRef(ast.declReturnRef(d));
+            // A derived newtype's base was read before the derive expanded,
+            // and a name it misses was reported then.
+            if (ast.declTag(d) != .newtype or ast.attachedDeriveTraitRange(d).len() == 0) try r.useRef(ast.declReturnRef(d));
             // What an implementation applied its head to. The arguments and
             // not the head itself: an implementation's parameters are written
             // there and nowhere else, so a head left unread leaves every one
@@ -10340,6 +10347,16 @@ const Resolver = struct {
         try text.appendSlice(self.gpa, derived_predicates);
     }
 
+    /// The last token of a newtype's base: the one before its refinement, or
+    /// the declaration's last before any `;` and the trivia after it.
+    fn newtypeBaseEnd(ast: *const Ast, d: DeclId) TokenId {
+        if (ast.newtypeRefinement(d)) |r| return TokenId.at(r.at.index() - 1);
+        var at = ast.declTokens(d).end.index() - 1;
+        while (at > ast.declReturnRef(d).at.index() and
+            (ast.tokenTag(TokenId.at(at)).isTrivia() or ast.tokenTag(TokenId.at(at)) == .semicolon)) at -= 1;
+        return TokenId.at(at);
+    }
+
     /// Says whether a template requires anything of its target's components.
     fn templateBoundsComponents(ast: *const Ast, template: DeclId) bool {
         for (ast.templateRequirements(template)) |requirement| {
@@ -10705,6 +10722,12 @@ const Resolver = struct {
                         for (fields) |field| {
                             if (self.namesTargetParameter(target, field.written)) try predicate_fields.append(self.gpa, field);
                         }
+                    }
+                    // A newtype's one component is its base.
+                    if (target_tag == .newtype) {
+                        const base = self.program.ast.declReturnRef(target);
+                        if (self.namesTargetParameter(target, base))
+                            try predicate_fields.append(self.gpa, .{ .written = base, .type_end = newtypeBaseEnd(&self.program.ast, target) });
                     }
                 }
                 for (component_fields.items) |field| try copied_ranges.append(self.gpa, .{
@@ -11977,7 +12000,7 @@ const Resolver = struct {
                     // in. Everything else is refused by default, so a
                     // declaration kind added later cannot accept a modifier
                     // it silently ignores.
-                    .struct_, .enum_, .trait_ => {},
+                    .struct_, .enum_, .newtype, .trait_ => {},
                     // An alias is the type it names, so no identity of its
                     // own is there for a parameter to be read for.
                     .alias => {
@@ -12038,7 +12061,7 @@ const Resolver = struct {
 
             if (used) continue;
             const on_type = switch (self.ast.declTag(d)) {
-                .struct_, .enum_, .trait_ => true,
+                .struct_, .enum_, .newtype, .trait_ => true,
                 else => false,
             };
             if (std.mem.startsWith(u8, text, "_")) {
@@ -18793,4 +18816,64 @@ test "construction skips malformed derive receiver shapes" {
     const tree = try resolveTree(gpa, &ast, &sink);
     try testing.expectEqual(@as(u32, 1), sink.error_count);
     try testing.expectEqual(@as(usize, 0), tree.expanded.generated_sources.buffers.len);
+}
+
+/// Resolves a program whose library is a prelude and one module beneath it,
+/// each holding `prelude` and `scalar`, and answers what the sink reported.
+fn resolveLibraryImpls(gpa: std.mem.Allocator, prelude: []const u8, scalar: []const u8) !*Sink {
+    const app_source: Source = .{ .path = "app/main.lin", .text = "fn main() -> UInt8 { 0 }\n" };
+    const prelude_source: Source = .{ .path = "std/main.lin", .text = prelude };
+    const scalar_source: Source = .{ .path = "std/scalar/float.lin", .text = scalar };
+    const sink = try gpa.create(Sink);
+    sink.* = Sink.init(gpa);
+    const interner = try gpa.create(Interner);
+    interner.* = .empty;
+    var trees = Modules.init(gpa, sink, interner);
+    const app_decls = try trees.add(&.{.{ .file = .from(0), .source = app_source }});
+    const prelude_decls = try trees.add(&.{.{ .file = .from(1), .source = prelude_source }});
+    const scalar_decls = try trees.add(&.{.{ .file = .from(2), .source = scalar_source }});
+    const ast = try trees.finish();
+    const modules = try gpa.dupe(program_mod.Module, &.{
+        .{ .name = "app", .dir = "app", .files = &.{}, .decls = app_decls, .imports = &.{} },
+        .{ .name = "std", .dir = "std", .files = &.{}, .decls = prelude_decls, .imports = &.{}, .library = true },
+        .{ .name = "scalar", .dir = "std/scalar", .files = &.{}, .decls = scalar_decls, .imports = &.{}, .library = true },
+    });
+    const program: Program = .{ .modules = modules, .prelude = .from(1), .ast = ast };
+    _ = try resolve(gpa, &program, interner, sink, .program);
+    return sink;
+}
+
+test "the library gives a primitive its methods in more than one inherent impl" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    // An inherent block implements no trait, so a second one for the same
+    // primitive, in the same module or another, is not a second
+    // implementation of anything.
+    const split = try resolveLibraryImpls(gpa,
+        \\impl Float64 {
+        \\    pub fn doubled(self: Self) -> Float64 { self * 2.0 }
+        \\}
+    ,
+        \\impl Float64 {
+        \\    pub fn halved(self: Self) -> Float64 { self / 2.0 }
+        \\}
+        \\impl Float64 {
+        \\    pub fn negated(self: Self) -> Float64 { 0.0 - self }
+        \\}
+    );
+    try testing.expectEqual(@as(u32, 0), split.error_count);
+
+    // A method name is still declared once across every inherent block of
+    // every library module, whether the second sits beside the first or in
+    // another module, for every primitive.
+    for ([_][2][]const u8{
+        .{ "", "impl Float64 {\n    pub fn same(self: Self) -> Float64 { self }\n}\nimpl Float64 {\n    pub fn same(self: Self) -> Float64 { self }\n}\n" },
+        .{ "impl Float64 {\n    pub fn same(self: Self) -> Float64 { self }\n}\n", "impl Float64 {\n    pub fn same(self: Self) -> Float64 { self }\n}\n" },
+        .{ "impl UInt8 {\n    pub fn halved(self: Self) -> UInt8 { self / 2 }\n}\n", "impl UInt8 {\n    pub fn halved(self: Self) -> UInt8 { self / 2 }\n}\n" },
+    }) |texts| {
+        const duplicated = try resolveLibraryImpls(gpa, texts[0], texts[1]);
+        try testing.expectEqual(@as(u32, 1), duplicated.error_count);
+        try testing.expectEqual(Code.n_duplicate, duplicated.list.items[0].code.?);
+    }
 }

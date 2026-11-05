@@ -1,0 +1,8 @@
+// `linea_clock_sleep` is a function the runtime provides; this library's
+// manifest grants it `extern`.
+extern fn linea_clock_sleep(nanoseconds: UInt64) -> Int64
+
+// `pause_failed` waits `nanoseconds` and reports whether the wait failed.
+pub fn pause_failed(nanoseconds: UInt64) -> Bool {
+    linea_clock_sleep(nanoseconds) < 0
+}

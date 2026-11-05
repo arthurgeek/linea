@@ -14,13 +14,13 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
-  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+  func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     cf.br ^b0
   ^b0:
     func.call @"lin.;halt"() : () -> () loc("tests/codegen/a_direct_never_call_is_a_terminator.lin":6:5)
     llvm.unreachable loc("tests/codegen/a_direct_never_call_is_a_terminator.lin":6:5)
   }
-  func.func private @"lin.;halt"() attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = ["noreturn"]} {
+  func.func private @"lin.;halt"() attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = ["noreturn", ["probe-stack", "inline-asm"]]} {
     cf.br ^b0
   ^b0:
     cf.br ^b1 loc("tests/codegen/a_direct_never_call_is_a_terminator.lin":2:5)
