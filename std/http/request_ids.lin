@@ -474,7 +474,10 @@ test fn a_request_the_handler_never_saw_is_logged_without_an_id() {
     request.release()
     let file = log.capture()
     var served = with_request_ids(logged(file.logger(minimum: .Info), health_router()))
-    let limits = Limits { max_body_bytes = 8192, read_timeout_ms = 100, ..serving(1) }
+    // The two seconds bound only a broken read: the second request is refused
+    // for want of arena, and under a sanitizer reading it can take longer than
+    // 100 ms, which would answer it 408 instead.
+    let limits = Limits { max_body_bytes = 8192, read_timeout_ms = 2000, ..serving(1) }
     var refusal = mem.system().acquire(request_buffer_bytes).unwrap()
     let Accepted { connection: c1, address: _ } = &listener.accept().unwrap()
     let arena1 = mem.Arena.open(mem.system(), 53256)
@@ -491,7 +494,7 @@ test fn a_request_the_handler_never_saw_is_logged_without_an_id() {
     defer let got1 = read_to_end(first)
     defer let lines = file.finish()
     testing.assert(lines.view().find("path=/health request_id=seen status=200").is_some(), "the identified request lost its id")?
-    testing.assert(lines.view().find("path=/health status=500").is_some(), "the unseen request was logged with an id")?
+    testing.assert(lines.view().find("path=/health status=500").is_some(), "the unseen request was not logged as a 500 without an id")?
 }
 
 // A buffer that cannot grow answers 500 without calling the handler, and
