@@ -13076,27 +13076,6 @@ const Checker = struct {
             try self.builder.prepareHeadLookupWithin(owner, ty);
             try self.prepareSettlingResults(owner, ty);
         }
-        // Ownership asks whether a type implements a trait outside any scope
-        // (`typecheck.implementsAnyOf`), of whatever type a value that leaves
-        // or a destination holds, so every type in the pool has the rows
-        // under its head prepared at no scope, a retained library's included:
-        // its preparations are not carried over (`retained_typing`). Its
-        // answer then does not depend on which other question happened to
-        // prepare it. The preparation may mint types of its own, which hold
-        // no value and are not prepared in turn.
-        const minted = self.builder.pool.items.len;
-        for (0..minted) |index| {
-            const ty: TypeId = @enumFromInt(@as(u32, @intCast(index)));
-            // A declared type or an instantiation of one, which an
-            // implementation's head names; one still holding an open literal
-            // type is settled where that literal is, by its own check.
-            switch (self.builder.get(ty)) {
-                .struct_, .enum_, .newtype => {},
-                else => continue,
-            }
-            if (try self.builder.mentionsOpen(ty)) continue;
-            try self.builder.prepareHeadLookupWithin(.none, ty);
-        }
         // An abandoned walk's help names what settles its iterator, as a leak
         // report does for a binding, so its type is prepared the same way.
         for (self.walk_helps.items) |help| {

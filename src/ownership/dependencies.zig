@@ -2531,12 +2531,20 @@ const Analysis = struct {
         // A value built in an allocator the function opens: the local lends
         // handles, and what leaves is not the handle itself, which ends with
         // its allocator whoever supplies it.
+        //
+        // Asked of a builder reopened on the finished typing, which works out
+        // a lookup no question in the check prepared: what leaves may be any
+        // type a result or a destination holds. Reopened only here, where
+        // the help is built, which is on a refused program alone.
         const lends = lends: {
             const owner = local orelse break :lends false;
             const lender = self.program.libraryDeclIn("mem", "Lender") orelse break :lends false;
-            if (!try implementsAnyOf(self.gpa, &self.typing.impl_index, self.typing.implementations, self.typing, lender, self.typing.bindingType(owner))) break :lends false;
             const allocator = self.program.libraryDeclIn("mem", "Allocator") orelse break :lends false;
-            break :lends !try implementsAnyOf(self.gpa, &self.typing.impl_index, self.typing.implementations, self.typing, allocator, held orelse break :lends false);
+            const leaving_type = held orelse break :lends false;
+            var pool = try Typing.Builder.reopen(self.gpa, self.typing);
+            defer pool.deinit();
+            if (!try implementsAnyOf(self.gpa, &pool.impl_index, pool.implementations, &pool, lender, self.typing.bindingType(owner))) break :lends false;
+            break :lends !try implementsAnyOf(self.gpa, &pool.impl_index, pool.implementations, &pool, allocator, leaving_type);
         };
         if (local) |owner| {
             const function = try self.functionName();
