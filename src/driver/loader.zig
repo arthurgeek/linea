@@ -5634,7 +5634,7 @@ test "checked library resumes a program that derives, with the diagnostics and M
                 var module = (try @import("../mir/lower.zig").lowerProgram(gpa, &semantics.expanded, &semantics.res, &semantics.typing, &semantics.disposals, &sink, .program)) orelse return error.TestUnexpectedResult;
                 defer module.deinit(gpa);
                 try table.buildMaps(gpa);
-                try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink));
+                try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink, .{}));
             }
             output[i] = writer.written();
         }

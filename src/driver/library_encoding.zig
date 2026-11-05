@@ -347,7 +347,7 @@ test "checked library encoding: a decoded library checks and emits every program
                 defer module.deinit(gpa);
                 try testing.expect(!sink.hasErrors());
                 try table.buildMaps(gpa);
-                try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink));
+                try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink, .{}));
             }
             output[i] = writer.written();
         }
