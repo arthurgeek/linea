@@ -1,6 +1,7 @@
 # 261. Waits go through the runtime's poller, and a loop runs tasks as fibers
 
-Status: Proposed — 2026-11-07. The number is provisional: two branches in
+Status: Proposed — 2026-11-07, revised the same day after two external
+reviews. The number is provisional: two branches in
 flight may take 0259 and 0260, and this record is renumbered to the next free
 number when it lands. Nothing is built. Once built, it would change these
 sentences of existing records:
@@ -47,11 +48,12 @@ Where this record narrows one, the row says so.
 | Non-blocking I/O, asynchronous I/O, timeouts and cancellation were deferred by the socket and text designs. | `linea-design/specs/2026-09-23-tcp-http-server-design.md` §3, "Out of scope"; `2026-09-08-owned-text-borrows-and-io-design.md`, "Deferred" |
 | The poller is the runtime's own C over direct system calls (kqueue, epoll, later io_uring), no event-loop library, shaped around completion; Windows is not a target. | the maintainer, 2026-11-07 |
 
-What is new here: the operation and its state machine (§1, §2), the park
-protocol (§3), the wait set and its registration protocol (§4), the theorem
-split into three properties (§5), the dispatcher and its HTTP/1.1 framing
-policy (§6), pinned fibers and the migration invariant (§7), the loop and
-`Io` (§8), the leased pool for modules that block (§9), and the phases (§12).
+What is new here: the operation and its state machine (§1, §2), the fiber's
+scheduling state (§3), the wait set, its keys and its registration protocol
+(§4), the theorem split into three properties (§5), the dispatcher and its
+HTTP/1.1 policy (§6), pinned fibers and the migration invariant (§7), the loop
+and `Io` (§8), blocking and thread-affine foreign calls and callback mode
+(§9), and the phases (§12).
 
 ## Context
 
@@ -170,12 +172,20 @@ holds from the first phase.
 **Deadlines.** An operation never intentionally waits past its deadline: the
 deadline is checked against the monotonic clock before each attempt and is the
 timeout of each wait, and completion may be observed later than the deadline
-by scheduling latency, which the runtime does not bound. When readiness and
-expiry are observed together, the claimant (§2) makes the attempt once: a call
-that makes progress answers its result, since dropping it would lose bytes
-read or a connection accepted, and a call that answers `EAGAIN` answers
-`-ETIMEDOUT`. `Connection.set_deadline` then stops rewriting socket options
-before each read, and `accept` and `connect` take deadlines the same way.
+by scheduling latency, which the runtime does not bound.
+`Connection.set_deadline` then stops rewriting socket options before each
+read, and `accept` and `connect` take deadlines the same way.
+
+**When readiness and expiry are observed together**, the claimant (§2) applies
+the operation's own rule:
+
+| Operation | Rule |
+| --- | --- |
+| `read`, `write` | one attempt; progress answers its count, since dropping it would lose bytes; `EAGAIN` answers `-ETIMEDOUT` |
+| `accept` | one attempt; a connection accepted is answered and owned by the caller, since the kernel has already removed it from the backlog; `EAGAIN` answers `-ETIMEDOUT` |
+| `connect` | writability is not success: the claimant reads `SO_ERROR`; zero answers connected, an error answers that error, and a connection still in progress at the deadline answers `-ETIMEDOUT` after the runtime closes the socket it made, which the caller never received |
+| `readable`, `writable` | readiness wins, since answering it consumes nothing |
+| `sleep` | expiry is its completion |
 
 **Timers.** Every operation's deadline and every timer of §4 sit in one
 deadline heap per poller, and the nearest deadline is the timeout of the wait:
@@ -209,58 +219,104 @@ An operation moves through these states, each change a compare-and-swap on
 | claimed | complete | the claimant, after its last access to the operation's bytes, after it has disarmed the registration and removed the deadline, and after writing `result` | the swap, with release order |
 | complete | runnable | the claimant, by unparking the submitter (§3) | the unpark |
 
+`claimed` names who owns finalization, not what the result is. The claimant
+records the event that began it (readiness, expiry, a completion), and the
+backend's own machine, internal to `claimed`, decides the result:
+
+- **kqueue, epoll and in place**: the claimant performs the attempt itself
+  under the tie rules of §1, so the kernel never holds the bytes after the
+  attempt returns, and `complete` follows at once.
+- **io_uring**: the kernel holds the bytes from submission. A claim by
+  expiry enters an internal **cancelling** phase: the claimant submits a
+  cancellation for the operation and waits for the operation's **own**
+  completion entry, which arrives after or beside the cancellation's. That
+  entry decides the result: a success (bytes read, a connection accepted)
+  is answered as the result even though the deadline passed, and
+  `-ECANCELED` becomes `-ETIMEDOUT`. Only then is the kernel done with the
+  bytes, and only then is `complete` swapped. A claim by completion needs no
+  cancellation.
+
+The external contract is the same for every backend; only the machine inside
+`claimed` differs.
+
+**Registration storage outlives every event that can name it.** Each poller
+keeps a registration table: slots in pages that are never freed while the
+poller exists. A slot holds a generation and a pointer to the operation it
+currently serves. A kernel cookie (`udata`, `epoll_data.u64`, `user_data`)
+names a slot index and its generation, never an operation's address. Arming
+takes a slot; `complete` disarms the registration and then releases the slot,
+incrementing its generation, after which the operation's frame may be reused.
+An event read from the kernel at any time later (a batch returned before a
+disarm, an event queued during a rearm, an event for a descriptor number that
+has since been reused) looks up a slot that still exists and finds a
+generation that no longer matches, and is discarded. A generation is 32 bits;
+a slot whose generation would wrap is retired and never reused, so no event
+can match a later arming of its slot.
+
 The guarantees, for every backend:
 
 1. **Exactly one terminal result** reaches the submitter: only the claimant
    writes `result`, and only once.
-2. **Events are disarmed before the record is reused.** The claimant disarms
-   the registration and removes the deadline before `complete`, and the
-   submitter's frame cannot be reused before it resumes, after `complete`.
+2. **Events are disarmed before the record is reused**, and an event that
+   arrives after the disarm reaches only the slot table.
 3. **Borrowed bytes stay valid until the backend can no longer reach them.**
    The submitter is parked, and so holds its lends, until `complete`, which
-   follows the last access. On io_uring, `complete` waits for the operation's
-   own completion queue entry, after any cancellation's.
-4. **No late resume.** An event that arrives after `claimed` fails its swap;
-   only the claimant unparks, once.
-5. **No event is mistaken for a reused descriptor.** A registration's kernel
-   cookie (`udata`, `epoll_data.u64`, `user_data`) names the operation's
-   registration slot and its `generation`, which every arming increments; an
-   event whose generation is not the slot's current one is discarded. A
-   descriptor is linear and is closed only by its owner, which cannot be
-   parked in an operation on it, so a stale event can come only from a batch
-   the kernel returned before the close, and the generation discards it.
+   follows the last access by the claimant and, on io_uring, the operation's
+   own completion entry.
+4. **No late resume.** An event that arrives after `claimed` fails its swap or
+   its generation check; only the claimant unparks, once.
+5. **No event is mistaken for a reused descriptor**, by the slot table.
 
-### 3. The runtime's waits are parks, with a strict handoff
+### 3. The runtime's waits are parks, and a fiber has a scheduling state
 
 The runtime stops a task in one routine and wakes it in one:
 
 ```c
-struct linea_park { pthread_mutex_t *lock; pthread_cond_t *changed; struct fiber *fiber; };
-void linea_park(struct linea_park *p, int (*done)(void *), void *state, unsigned long deadline_ns);
+void linea_park(struct linea_park *p, unsigned long deadline_ns);
 void linea_unpark(struct linea_park *p);
 ```
 
 Session rendezvous, `close`'s join, the owning task's call queue,
 `recv_until`, the wait set and `linea_io_perform` all use it. On a thread a
-park is the condition-variable wait `runtime/task.c` already does; on a fiber
-it is a switch to the carrier's scheduler, and `lock` is released only after
-the switch, so an unpark cannot be lost between the check of `done` and the
-switch.
+park is the condition-variable wait `runtime/task.c` already does, under the
+lock of the record being waited on. On a fiber it is the machine below.
 
-The handoff between a submitter and whoever completes its operation is in
-four steps, in this order and never merged:
+**An operation's machine and a fiber's machine are separate.** §2 decides who
+completes an operation and when; this one decides when the fiber that waits
+for it may run. Each fiber has a scheduling state word, changed only by
+compare-and-swap:
 
-1. **Publish.** The submitter writes the operation, arms it (§2) and parks.
-2. **Claim.** One party wins the swap to `claimed` and alone may touch the
-   operation's bytes.
-3. **Complete.** The claimant performs or collects the operation, writes the
-   result, disarms, and swaps to `complete` with release order. No
-   completion is visible before the last access to the bytes.
-4. **Runnable.** Only then does the claimant unpark the submitter, whose
-   resumption acquires.
+| From | To | By | Meaning |
+| --- | --- | --- | --- |
+| Running | Parking | the fiber, before it publishes what it waits for (arms an operation, joins a rendezvous, registers a wait set) | from here a completion may arrive at any time |
+| Parking | Parked | the carrier, after the switch has saved the fiber's context and the carrier runs on its scheduler stack | the fiber's context is complete and nothing executes on its stack |
+| Parking | Notified | the unparker, when the fiber has not finished switching away | the wake is recorded, not acted on |
+| Notified | Runnable | the carrier, when its swap to Parked fails and it finds Notified, after the context is saved | the carrier that switched the fiber out queues it |
+| Parked | Runnable | the unparker | it queues the fiber |
+| Runnable | Running | the fiber's carrier, taking it from its run queue and switching in | |
+| Running | Finished | the fiber, when its body returns; its record is retired by the joiner's `close` | |
 
-The happens-before edges of 0250 §10 are kept by the same lock and the same
-release and acquire.
+The handoff is stated by the states, with no lock held across a switch:
+
+- **A fiber never executes on two carriers.** A fiber is queued only from
+  Runnable, and it reaches Runnable only after its context has been saved: from
+  Parked, which the carrier sets after the save, or from Notified, which the
+  saving carrier itself converts. No unparker queues a fiber in Parking.
+- **No unpark is lost.** An unpark is a successful swap out of Parking or out
+  of Parked. If it lands in Parking, the carrier's swap to Parked fails and the
+  carrier queues the fiber itself. §2 and §4.2 give each wait exactly one
+  unparker, so no wake is counted twice.
+- **Pinned fibers and wakeups from other carriers.** Queueing a pinned fiber
+  means pushing it to its home carrier's queue, which other threads push to
+  (§8.1); a push posts the carrier's user event when the carrier may be waiting
+  in its poller. The push is the release, and the home carrier's pop the
+  acquire, of the happens-before edge 0250 §10 asks of the wait.
+
+The handoff between a submitter and whoever completes its operation is then
+**publish** (Running to Parking, then arm), **claim** (§2), **complete** (§2,
+release order, after the last access to the bytes), **runnable** (the unpark,
+out of Parking or Parked). Completion is never visible before the last
+access, and a fiber is never runnable before its context is saved.
 
 ### 4. A task waits on several sources through a linear wait set
 
@@ -311,12 +367,49 @@ The sources:
 
 `next` waits until a source is ready, delivers exactly one, and answers it
 wrapped. `take(key)` withdraws one registration and answers its value in its
-**own type**: a key is `task.Registered[T]`, copyable and `Owned`, naming the
-value's type, so taking the answer key gives back the endpoint and taking a
-timer's key gives back its message. A key whose registration was delivered or
-taken answers `.None`. `close` answers a `Vec[M]` of every registration still
-held, wrapped, for a set whose keys the program did not keep. An empty set
-answers `.None` from `next` without waiting.
+**own type**: taking the answer key gives back the endpoint and taking a
+timer's key gives back its message. `close` answers a `Vec[M]` of every
+registration still held, wrapped, for a set whose keys the program did not
+keep. An empty set answers `.None` from `next` without waiting.
+
+**A key is a non-owning identifier, validated against the set.**
+`task.Registered[T]` is copyable and `Owned` and holds three numbers: the set's
+identity, a slot and the slot's generation, with `T` as a phantom.
+
+- **Set identity.** Every set takes its identity from a process-wide 64-bit
+  counter when it is opened; identities are never reused. At a billion sets
+  opened a second the counter lasts 584 years, and reaching its end is a trap,
+  not a wrap. `take` on a set answers `.None` for a key of another set.
+- **Slot generation.** A slot's generation increments when its registration is
+  delivered, taken or closed. `take` answers `.None` for a key whose generation
+  is not the slot's current one, so a copied key, used again after its
+  registration was taken and its slot reused, never reaches the replacement. A
+  slot whose 32-bit generation would wrap is retired.
+- **`T`.** A key is minted only by the registration of a `T` in that set, at
+  that slot and generation, so a key that matches names a value of `T`.
+- **After `close`.** `close` consumes the set, so no call can name it again;
+  its identity is never issued again, so its keys answer `.None` from every
+  other set. A key outlives its set harmlessly.
+
+A key that borrowed its set would make every key a live observation of the
+set, and [O-Borrow] would refuse `&waiting.next()`, which changes the set,
+while any key was held: a program could not keep a timer's key across the
+`next` that races it, which is the use keys exist for.
+
+**`io.Pollable` provides readiness; it is not a descriptor accessor.** Its one
+method answers what the set should wait for:
+
+```linea
+pub enum Readiness { Now, Wait(io.Source) }
+pub trait Pollable { fn readiness(self: Self, interest: Interest) -> Readiness }
+```
+
+`Now` covers what user space already knows: a buffered reader holding bytes, a
+value whose next read answers end or an error. `Wait` hands the set an opaque
+`io.Source` the runtime makes from a descriptor, which the set arms on
+registration and disarms before the value leaves the set by delivery, `take`
+or `close`. A value with an operation in progress cannot be registered: the
+operation's task is parked in it with the value lent.
 
 #### 4.1 Two readiness contracts
 
@@ -346,7 +439,7 @@ and each successful swap is the transition's linearization point.
 | registered or signalled | withdrawn | `take` or `close`: the swap, then the mark is cleared and the value moved out |
 
 - **No lost wakeup.** Registration publishes its mark before it checks the
-  source (the slot full, the body returned, `pending_input` true, the timer
+  source (the slot full, the body returned, `readiness` answering `Now`, the timer
   past), and a source posts after it fills the slot or returns and then reads
   the mark. Either the source sees the mark and swaps, or the registration's
   check sees the source and swaps; both may try, and one swap fails.
@@ -356,7 +449,13 @@ and each successful swap is the transition's linearization point.
   rendezvous is lost and none is half done: `next` never performs one.
 - **Exactly-once ownership.** A value leaves the set by exactly one successful
   swap out of `registered` or `signalled`, so it is delivered, taken or
-  closed, never two of these.
+  closed, never two of these. When a source is signalled and `take` wins the
+  swap, `take` answers the value and `next` skips the slot: a signalled timer
+  whose message `take` recovered is never delivered afterwards, and an
+  endpoint whose peer is waiting comes back with the peer still waiting.
+- **Moving a value out.** A descriptor's registration is disarmed before the
+  value moves out of the set, so a value never leaves with a registration of
+  its previous context still active (§8).
 - **Concurrent wakeups.** Several sources may be signalled before one `next`;
   each `next` delivers the earliest and leaves the others signalled.
 - **Timers.** A timer that expires together with another source is signalled
@@ -396,11 +495,31 @@ decide it:
 So `close` keeps `Vec[M]` for the uniform case, and a program with
 heterogeneous losers takes them by key.
 
-#### 4.4 Owning tasks
+#### 4.4 Prerequisite of phase 2: no job waits on a task
 
 0250 §9's argument for an owning task rests on a job never waiting on a task.
-A job reaches only the owner's state, so the state must hold nothing a job can
-wait on: no endpoint, no handle and no wait set holding one (Open question 9).
+A job reaches only the owner's state and its own captures, so neither may hold
+anything a job can wait on. `task.own` bounds the state by `Owned` and `call`
+bounds the job by `Owned + Release`, and a detached endpoint
+(`Chan[P, ()]`) appears to satisfy `Owned`. If it does, a program can already
+put an endpoint in an owner's state and have a job `recv` on it while the
+peer's progress depends on another job queued to the same owner: a wait the
+argument rules out and the compiler accepts. Phase 2 does not begin until this
+is settled, since a wait set holding an endpoint would inherit the hole.
+
+**If the hole exists, the rule is:** a structural predicate, computed from
+fields as `Shareable` is, that is false for `session.Chan` and so for every
+value holding one (a handle, a wait set holding either, an aggregate holding
+any of them); `task.own` requires it of its state and `call` of its job. A
+program that puts a waitable value in an owner's state or a job is refused at
+the call, naming the field that holds it. The refusal is a corpus case
+recorded before the fix, and the predicate's leaves are read from the
+library's declarations, so a waitable type added later is covered. The fix
+lands on its own, independently of this record.
+
+> **Verification result (pending):** _to be filled by the separate check
+> against the compiler: whether the program described above is accepted
+> today, the corpus case that shows it, and the fix's change._
 
 ### 5. Three properties, each with its own argument
 
@@ -440,10 +559,21 @@ fair. Cooperative fibers are weakly fair only if every fiber reaches a park
 point within finite time. A fiber that computes forever without calling the
 runtime keeps every other fiber on its carrier from running; stealing (phase 6)
 helps only while some carrier is idle, and nothing in this record establishes
-fairness against fibers that compute without waiting. Every runtime wait
-yields before it answers, including one that answers at once (`recv_until`
-with a zero timeout, an attempt that would block), so a fiber that polls a
-peer through the runtime lets the peer run. Under fibers the promise of 0250
+fairness against fibers that compute without waiting.
+
+The runtime distinguishes three cases. An operation that succeeds at once
+returns inline, so a hot read of buffered data costs no switch. An operation
+that must wait parks. An attempt that makes no progress and answers at once
+(`recv_until` with a zero timeout, a deadline already past) yields before it
+answers, so a fiber polling a peer on its own carrier lets the peer run. A
+fairness poll, when one exists, yields when the scheduler asks.
+
+Safe-point polls alone would not make property 2 unconditional: the scheduler
+also needs a time budget after which a running fiber is asked to yield, and
+the compiler must poll on every path that can run unboundedly (loop
+back-edges, recursion through function entries, long runtime calls such as a
+large copy). Until both exist and are verified, the theorem stays
+conditional. Under fibers the promise of 0250
 §9 is therefore conditional: **if every fiber reaches a park point within
 finite time**. The guide states it, and Open question 3 asks whether safe-point
 preemption should make it unconditional before fibers serve by default.
@@ -473,7 +603,7 @@ to a free serving task. A serving task answers one request and sends the
 reader back as `Idle`, or reports it `Closed`. The dispatcher waits on busy
 endpoints with `received` in the same set and keeps free ones, whose next
 operation is its own `choose`, in a vector. An idle reader that already holds
-the next request's bytes is ready on registration (`pending_input`). Ready
+the next request's bytes is ready on registration (its `readiness` is `Now`). Ready
 readers that find no free serving task wait in a queue the dispatcher keeps,
 bounded by the connection limit below. When serving ends, the dispatcher takes
 the end branch on every serving task, which answers what its share reported
@@ -482,42 +612,74 @@ now), and closes it.
 
 **The framing policy.** Linea serves a restricted HTTP/1.1 and refuses what it
 does not support safely, so that no request can be read two ways by Linea and
-a proxy in front of it:
+a proxy in front of it. Most of it is the request parser as it stands
+(`std/http/parse.lin`), which keep-alive makes load-bearing; this record adds
+the rules marked new.
 
-- A request body is framed by one `Content-Length` header of decimal digits
-  within `Limits.max_body_bytes`. A repeated `Content-Length`, even with equal
-  values, a value that is not digits, or one past the limit is answered `400`
-  or `413` and the connection closes.
-- A request carrying `Transfer-Encoding` is answered `501 Not Implemented`
-  and the connection closes; one carrying both `Transfer-Encoding` and
-  `Content-Length` is answered `400` and closes. Chunked requests are a later
-  change.
-- A request with neither header has an empty body.
-- A header folded onto the next line (obsolete line folding) is answered `400`
-  and the connection closes.
-- When a handler returns without reading the whole body, the server reads and
-  discards the rest within `max_body_bytes` and the read deadline before the
-  next request; if it cannot, the connection closes.
-- Pipelined requests are answered in order, one at a time: the connection is
-  owned by one serving task at a time, and a buffered next request makes the
-  returned reader ready at once.
-- A response is framed by `Content-Length` when its length is known. A streamed
-  response of unknown length is followed by closing the connection, as every
-  response is now; chunked responses are a later change.
-- An HTTP/1.0 request, or a request with `Connection: close`, closes after its
-  response. Malformed framing of any kind answers `400` where an answer can
-  still be framed, and closes.
+- **Request line.** `METHOD SP target SP version`, split on single spaces into
+  exactly three parts, a method of token characters and an ASCII target with
+  no bare CR; anything else is `400`. Longer than `Limits.max_line_bytes`
+  (8 KiB by default, CRLF counted) is `414 URI Too Long`.
+- **Version.** `HTTP/1.1` and `HTTP/1.0` are served; another well-formed
+  version is `505`, a malformed one `400`.
+- **Header lines.** Each within `max_line_bytes`, else `431`; at most
+  `Limits.max_headers` (100), else `431`. A line without a colon, whitespace
+  before the colon, an empty name, a bare CR, a leading vertical tab or a
+  folded continuation line is `400`.
+- **`Host`.** Required in HTTP/1.1; a duplicate (in either version), an empty
+  value, a path, userinfo, a port past 65535 or a malformed IPv6 literal is
+  `400`.
+- **Body framing.** `Content-Length` of decimal digits frames the body; a
+  sign, a letter, an empty value or a trailing control character is `400`,
+  and a value past `max_body_bytes` (or past 64 bits) is `413`. Repeated
+  `Content-Length` headers that agree are accepted as one, as RFC 9112 §6.3
+  permits and the parser does now; disagreeing ones are `400`.
+  `Transfer-Encoding` alone is `501`; beside `Content-Length` it is `400`. A
+  request with neither has an empty body. A body shorter than its length when
+  the connection ends is `400`.
+- **New: what follows a response.** Every refusal above closes the connection
+  after its answer. When a handler returns without reading the whole body, the
+  server reads and discards the rest within `max_body_bytes` and the read
+  deadline before the next request; if it cannot, the connection closes.
+- **New: connection tokens.** The request's `Connection` header is a
+  comma-separated list of tokens, compared ignoring ASCII case; `close` among
+  them closes the connection after the response. An HTTP/1.0 request closes
+  after its response whatever it says: HTTP/1.0 keep-alive is not offered.
+  Handlers cannot set `Connection`, `Content-Length` or `Transfer-Encoding`
+  (`std/http/header.lin` refuses them), so the server alone frames responses.
+- **New: pipelining.** Requests are answered in order, one at a time: the
+  connection is owned by one serving task at a time, and a buffered next
+  request makes the returned reader ready at once.
+- **New: response framing.** A response is framed by `Content-Length` when its
+  length is known. A streamed response of unknown length is followed by
+  closing the connection, as every response is now. Chunked requests and
+  responses are a later change.
+- **New: limits per request.** Every limit applies to each request of a
+  connection afresh. `first_byte_timeout_ms` bounds the wait for a
+  connection's first request; `read_timeout_ms` bounds each request from its
+  first byte, where it is counted from the accept today; between requests the
+  connection is idle and `idle_timeout_ms` bounds it.
 
-**Limits and backpressure.** `Limits` gains `connections` (accepted
-connections, serving and idle together), `idle_timeout_ms` and nothing else.
-At `connections` the dispatcher withdraws the listener from its set by its key,
-so new connections wait in the kernel's backlog, and registers it again when a
-connection closes. Each idle reader is registered beside an `after` timer and
-the dispatcher keeps both keys: a reader that becomes ready has its timer
-taken; a timer that fires has its reader taken, by key, and closed. An idle
-reader is never evicted to admit a new connection, so a request that is ready
-is never dropped. Every queue the dispatcher holds is bounded by
-`connections`.
+**Limits and backpressure.** `Limits.connections` keeps its meaning (serving
+ends after that many connections). `Limits` gains `open_connections`, the
+most connections held at once, serving and idle together, and
+`idle_timeout_ms`, the longest a connection may stay idle between requests.
+Each idle reader is registered beside an `after` timer and the dispatcher
+keeps both keys: a reader that becomes ready has its timer taken; a timer that
+fires has its reader taken by key and closed.
+
+At `open_connections`, when the listener is ready and some connection is idle,
+the dispatcher **evicts the idle connection that has been idle longest**: it
+takes it by key and closes it, then accepts. Without eviction, idle
+keep-alive clients could hold the whole budget while new clients waited in the
+backlog with no request in progress. A request that a client sends at the
+moment its idle connection is closed is lost to the server, as with any
+server's close of an idle keep-alive connection; RFC 9112 §9.3.1 lets a client
+retry an idempotent request on a connection closed before any response.
+When no connection is idle and the budget is full, the dispatcher withdraws
+the listener from its set by its key, so new connections wait in the kernel's
+backlog, and registers it again when a connection closes. Ready readers that
+find no free serving task wait in a queue bounded by `open_connections`.
 
 `serve` takes `L: net.Acceptor + io.Pollable`. `ScriptedListener` implements
 `io.Pollable` by forwarding to the listener it wraps, so the tests that script
@@ -550,18 +712,22 @@ pinned fibers are measured.
 **The migration invariant** (phase 6): *a fiber may migrate only at a
 suspension point where no active frame depends on the identity or the
 thread-local state of its current carrier.* The runtime tracks it with two
-fields per fiber:
+fields per fiber, and a third property belongs to each call, not to the fiber:
 
-- `foreign_depth`, incremented and decremented by the code the compiler
-  generates around every `extern` call and every callback entry
+- `foreign_depth`, temporary: incremented and decremented by the code the
+  compiler generates around every `extern` call and every callback entry
   ([T-ExternCallback]). Above zero, C frames are live below the fiber's
   current frame.
-- `bound`, set by the fiber's first call into a granted module and never
-  cleared, because C keeps state on a thread between calls (a lock taken in
-  one call and released in another, an error queue read by a later call).
+- `thread_affine`, persistent: set by the fiber's first call into a module
+  that declares itself thread-affine (§9) and kept until the fiber ends,
+  because such a library keeps state on the thread between calls (a lock taken
+  in one call and released in another, an error queue read by a later call).
+  A call into any other granted module leaves it clear.
+- *blocking*, per call: whether the call is offloaded to a pool thread (§9).
+  It decides where one call runs and leaves no mark on the fiber.
 
 A fiber is migratable at a park exactly when `foreign_depth` is zero and
-`bound` is clear. Independently of migration, a park reached with
+`thread_affine` is clear. Independently of migration, a park reached with
 `foreign_depth` above zero does not switch even on its own carrier: it blocks
 the thread, because the C frames below may hold a lock that the next fiber on
 the same carrier would wait for. The runtime calls Linea code only at a task's
@@ -605,7 +771,7 @@ no rule relaxes for fibers that share a carrier.
 `linea_task_start` and may be named only inside `task.Slot.start`, so a fiber
 is joined by `close` as a thread is.
 
-### 8. A loop lasts until exit, and `Io` names it
+### 8. A loop lasts until exit for now, and `Io` names it
 
 `io.Io` is a concrete copyable value, an opaque number the runtime hands out.
 It holds no borrow, so it is `Owned` and `Shareable`:
@@ -633,36 +799,54 @@ carrier's poller (§8.1). A descriptor's stored `Io` would either repeat that or
 contradict it, as when a fiber of one loop reads a connection accepted by a
 fiber of another (Open question 1).
 
-**Lifetime and shutdown.** A loop is not closed by the program. Two shapes of
-`loop.close()` were weighed and both lose:
+**Lifetime and shutdown.** A loop lasts until the process exits. This is
+the initial restriction, chosen for the phases of this record, not a property
+of loops: a host process that embeds Linea, an isolated test runtime, or a
+subsystem retired at run time needs a loop it can end, and §8.2 keeps that as
+the direction. A loop that is never closed is the simplest shape that is
+sound now. Its carriers run only fibers that `Slot.start` started and their
+handles join, and a pool thread runs only calls a fiber is parked in, so
+nothing on them outlives the lends it reads, which is what [T-ThreadStart]
+protects. At exit every task has been joined, since `main` returns only after
+its handles are closed, so no operation is pending and the loop's threads are
+idle.
 
-- *Static exclusion*: `loop.io()` borrowing the loop, so [O-Borrow] refuses
-  `close` while anything holds the `Io`. Every task handle started on it would
-  carry the borrow, and with descriptors carrying it a connection would not be
-  `Owned`, so it could not be sent, held in an owning task's state or kept by
-  a serving task.
-- *Run-time waiting*: `close` waits for the loop's fibers and registrations to
-  end. A task that closes a loop while it holds a handle of a fiber on it waits
-  on itself, which the language promises cannot happen, and the failure moves
-  to run time.
-
-A loop that lasts until exit is the process heap's model: one or two per
-program, opened once. Its carriers run only fibers that `Slot.start` started
-and their handles join, and a pool thread runs only calls its fiber is parked
-in, so nothing on them outlives the lends it reads, which is what
-[T-ThreadStart] protects. At exit every task has been joined, since `main`
-returns only after its handles are closed, so no operation is pending and the
-loop's threads are idle.
+**A descriptor moves between tasks or loops only when no registration or
+operation of its previous context remains active.** The type system moves the
+value; the runtime keeps the rest. An operation is active only while its task
+is parked inside it with the descriptor lent, so the value cannot move then.
+A wait set disarms a value's registration before the value leaves the set
+(§4.2). A one-shot registration that fired and was not rearmed is already
+inactive, and its slot's generation discards any event still queued (§2).
 
 | Program | Permitted? | Why |
 | --- | --- | --- |
 | an `Io` copied into a task body, a struct, a vector or a wait set's message | yes | a number naming a loop that outlives the program's code |
 | an `Io` sent over a session or returned from a function | yes | as above; it is `Owned` |
-| a connection accepted by a fiber of loop A, sent to a fiber of loop B | yes | B's carrier arms its operations on its own poller (§8.1) |
+| a connection accepted by a fiber of loop A, sent to a fiber of loop B | yes | it moves with no registration active; B's carrier arms its next operation on its own poller (§8.1) |
+| a connection taken out of a wait set and sent to another task | yes | the set disarmed it before it left |
 | a connection used by a thread task after a fiber accepted it | yes | the thread performs its operations in place |
 | a fiber started on a loop whose body captures a `read` of the parent's value | yes, under [O-Cross] | as for a thread |
 | a foreign call in progress while `main` returns | cannot happen | the fiber making it is joined first; if the call never returns, neither does the join (§5, property 3) |
-| `loop.close()` | not offered | the two shapes above |
+| `loop.close()` | not offered in these phases | §8.2 |
+
+#### 8.2 Closable loops, a future direction
+
+Two shapes of `loop.close()` were weighed for these phases:
+
+- *Static exclusion*: `loop.io()` borrows the loop, so [O-Borrow] refuses
+  `close` while anything holds the `Io`. Since descriptors no longer store an
+  `Io`, only what is started on the loop would carry the borrow: task handles,
+  which already carry their bodies' dependencies through `mem.Carried`. This
+  is the shape a scoped or closable loop should take. It is deferred because
+  an `Io` that borrows is not `Owned`, so a body that starts more fibers on the
+  loop must capture it by `read`, and the `on:` arguments, `http.serve` and
+  the generic combinators would each need their contracts written for a
+  borrowed capability; that is a change of its own, made when a program needs
+  a loop to end.
+- *Run-time waiting*: `close` waits for the loop's fibers and registrations to
+  end. A task that closes a loop while holding a handle of a fiber on it waits
+  on itself, which the language promises cannot happen. Rejected.
 
 #### 8.1 Who owns a poller
 
@@ -687,25 +871,39 @@ carrier, so no other thread registers, rearms or removes them.
   pollable; a fiber parked in `next` arms that queue's descriptor on its
   carrier's poller. When migration arrives, a set moves with its fiber and is
   armed on the new carrier, so no registration ever moves between pollers.
-- **Shutdown.** None: a loop lasts until exit.
+- **Shutdown.** None in these phases: a loop lasts until exit (§8.2).
 
-### 9. A module that blocks runs on a pool thread leased to its fiber
+### 9. Foreign calls that block or keep thread state
 
-A granted module declares in its manifest that its foreign calls block
-(`"blocking": true`, beside `"extern"`), and the runtime's own file, `fsync`
-and name-lookup functions are marked so in `runtime_symbols.zig`, so one added
-later is covered by the table. [M-Blocking] refuses `"blocking"` without
-`"extern"`. The declaration is per module, not per function: C keeps state on
-a thread between the calls of one library, so every call of one library from
-one fiber must reach the same thread.
+A granted module may declare two independent properties in its manifest,
+beside `"extern"`:
 
-A call into a blocking module from a thread is an ordinary call. From a fiber,
-the first such call leases the fiber a thread from the loop's pool; every
-later call into a blocking module runs on that thread while the fiber is
-parked, until the fiber ends and the thread returns to the pool.
+- `"blocking": true`: its calls may wait on the world (a file, a lock, the
+  network) for long enough that a carrier must not make them;
+- `"thread_affine": true`: it keeps state on the calling thread between calls
+  (a lock taken by one call and released by another, a thread-local error
+  queue), so every call from one fiber must reach the same thread.
+
+The runtime's own file, `fsync` and name-lookup functions are marked blocking,
+and none affine, in `runtime_symbols.zig`, so one added later is covered by the
+table. [M-Blocking] refuses either key without `"extern"`. SQLite keeps its
+error state per connection rather than per thread, so the guest book's wrapper
+declares `"blocking"` alone; a TLS library
+with a thread-local error queue declares both.
+
+| Module declares | From a thread | From a fiber |
+| --- | --- | --- |
+| neither | an ordinary call | on the carrier; it holds the carrier for as long as it runs |
+| `blocking` | an ordinary call | on a **temporary lease**: a pool thread taken for this call and returned when it returns |
+| `thread_affine` | an ordinary call | on the carrier, and the fiber becomes `thread_affine`, so it never migrates |
+| both | an ordinary call | on a **persistent lease**: the fiber's first call takes a pool thread that serves every later call of an affine module from that fiber, until the fiber ends |
+
+So ten thousand fibers that each made one blocking call hold no thread after
+their calls return; only fibers of a thread-affine library that also blocks
+keep one, which the library's own contract demands.
 
 **The call crosses through a typed trampoline.** For each `extern` signature of
-a blocking module the compiler generates a C-ABI trampoline and a context
+a module that blocks the compiler generates a C-ABI trampoline and a context
 record:
 
 ```c
@@ -717,49 +915,85 @@ and a slot for its result; `invoke` loads them, calls the callee with the
 platform's calling convention, and stores the result. The pool only runs
 `invoke(context)`, so floating-point arguments, structures, more than eight
 arguments and hidden result pointers are the compiler's ordinary call
-lowering, not the pool's. The fiber's frame and every buffer the call was lent
-stay put while it is parked, so ownership sees an ordinary call that holds
-what it lends until it returns
-([0246](0246-a-call-holds-what-it-lends-until-it-runs.md)).
+lowering. The fiber's frame and every buffer the call was lent stay put while
+it is parked, so ownership sees an ordinary call that holds what it lends
+until it returns ([0246](0246-a-call-holds-what-it-lends-until-it-runs.md)).
 
-**A leased thread is made as a task's thread is**: a guard-paged stack, an
-alternate signal stack, the fault record. A callback that C makes during a
-call (a SQLite busy handler) runs on it, as the leasing fiber's own code,
-synchronously inside a call the fiber waits for, with `foreign_depth` above
-zero, so a wait in it blocks that thread. The guarantee covers foreign code
-that keeps the contract [T-ExternCallback] states: a callback with a context
-is called during the call, on the calling thread. A callback without a context,
-which C may keep and call later from a thread of its own, runs on that thread
-as it does now and is never a fiber.
-
-**The pool grows.** It adds a thread whenever a fiber needs a lease and none is
+**The pool grows.** It adds a thread whenever a call needs one and none is
 idle, and keeps a bounded number idle. With a fixed bound, a fiber reading a
 FIFO would hold the only thread while the fiber writing it queued behind, and a
 SQLite statement waiting on a lock would hold it while the commit releasing the
 lock queued: waits that threads finish and a bounded pool would not. The
-threads in use are bounded by the fibers holding a lease, which are bounded by
-the live tasks. When a thread cannot be made, the call traps with
-`linea: the blocking pool could not start a thread`, rather than running on the
-carrier, where it could hold up the fiber it waits for (Open question 7).
+threads in use are bounded by the calls in progress plus the persistent
+leases.
+
+**When a pool thread cannot be made.** A call whose public contract can say so
+answers a recoverable error: the runtime's own blocking functions answer an
+`io.IoError` of category `ResourceExhausted` from `fs` and name lookup, as
+they answer a refused descriptor. A call into a user module whose `extern`
+result has no failure to put it in traps with `linea: the blocking pool could
+not start a thread` in the first phase that builds the pool; running it on the
+carrier instead could hold up the fiber it waits for. A manifest form that
+lets a module say how its calls report this is the later answer (Open
+question 6).
 
 What deadlock freedom means here is scoped by §5: the pool adds no edge to the
 session graph, and it relies on external progress, that a foreign call
 returns. A call that never returns stops its fiber and every join above it.
-
 This is not the worker pool 0253 rejected, which ran a body after the lends it
-read had ended: a leased thread runs only calls its fiber is parked in. A call
-into a blocking module cannot be cut short at a deadline, since C holds the
-arguments; a deadline is checked before the call and after it returns. A
-program that keeps its database in an owning task, as 0253 §4 teaches, leases
-one thread for it. CPU work goes through `task.Policy`, not the pool.
+read had ended: a pool thread runs only a call its fiber is parked in. A call
+cannot be cut short at a deadline, since C holds the arguments; a deadline is
+checked before the call and after it returns. A program that keeps its
+database in an owning task, as 0253 §4 teaches, makes its calls from one task.
+CPU work goes through `task.Policy`, not the pool.
 
 The standard streams are not on the pool: `io.print` from a fiber writes
 directly, and a write to a full pipe or a stopped terminal holds its carrier
 until the reader takes the bytes. A module that blocks without declaring it
 holds its carrier for as long as the call takes, which every fiber pinned to
 that carrier waits out. The runtime counts carrier stalls, the time a carrier
-spends inside a foreign call that is not on the pool, and reports them in its
-diagnostics; it does not move fibers away (Alternatives, the monitor).
+spends inside a foreign call made on it, and reports them in its diagnostics;
+it does not move fibers away (Alternatives, the monitor).
+
+#### 9.1 A callback runs as its caller
+
+When C, during a call made on a pool thread, calls a Linea callback
+([T-ExternCallback]), the callback runs in **callback mode**:
+
+- **Task identity.** It runs as the calling fiber, borrowed. The pool thread's
+  current-task pointer names the fiber's task for the length of the foreign
+  call, so a runtime operation the callback makes (a session operation, a
+  `start`, an allocation in the checking archive) is the calling task's.
+- **The fiber cannot resume** until the foreign call returns: its scheduling
+  state stays Parked (§3), and the only unparker of the call's park is the
+  trampoline's return. No code of the fiber runs on two threads at once, since
+  the fiber's own frames are suspended below the foreign call and the
+  callback's frames run above it on the pool thread.
+- **Stack and faults.** The callback runs on the pool thread's own stack,
+  which is mapped as a task thread's is, with guard pages and an alternate
+  signal stack; while a thread serves a lease the fault record names that
+  stack, so an overflow in a callback is reported as on any thread.
+- **What it may touch.** What [T-ExternCallback] already allows: the callback
+  is a plain function and holds nothing, and it reaches the caller's values
+  only through the context the `extern` call lent, which the fiber cannot
+  touch while it is parked in the call. It may perform session operations on
+  endpoints in that context and start tasks, all as the calling task: the
+  edges are the task's own, so §5's argument holds with the callback standing
+  for the task. A task it starts is joined before its handle leaves the
+  context, as anywhere.
+- **Nested waits.** `foreign_depth` is above zero, so a wait in the callback
+  never switches: it parks the pool thread on a condition variable, with
+  operations performed in place, as on a task's own thread. A blocking call
+  made from the callback runs in place on that thread.
+- **Contract.** The guarantee covers foreign code that keeps the contract
+  [T-ExternCallback] states: a callback with a context is called during the
+  call, on the calling thread. A callback without a context, which C may keep
+  and call later from a thread of its own, runs on that thread as it does now
+  and is never in callback mode.
+
+The same mode applies to a callback during a call on a carrier, with the
+carrier in place of the pool thread: the fiber is the running code, so nothing
+is borrowed, and `foreign_depth` keeps any wait from switching.
 
 ### 10. Timeouts without cancellation
 
@@ -780,10 +1014,11 @@ owned, and a timer in a set leaves the other sources registered.
 | §1–§3 operations, parks | nothing | nonblocking sockets, `linea_io_perform` with its state machine, the deadline heap, `linea_park` |
 | §4 wait set | nothing new: registration states are implementation heads, a key is an ordinary copyable type, and what a set carries follows `mem.Vec`'s rule | `task.WaitSet`, `task.Registered`, `io.Pollable`, the runtime set and its protocol |
 | §5 properties | the semantics document's deadlock clause restated as §5's three properties, with the wait set | — |
-| §6 HTTP | nothing | dispatcher, framing policy, `Limits.connections` and `idle_timeout_ms` |
-| §7 fibers | [T-ThreadStart] names the fiber start; the extern call and callback lowering maintains `foreign_depth` and `bound` | switch, carriers, fault record, sanitizer hooks |
+| §6 HTTP | nothing | dispatcher, the policy's new rules, `Limits.open_connections` and `idle_timeout_ms`, eviction |
+| §7 fibers | [T-ThreadStart] names the fiber start; the extern call and callback lowering maintains `foreign_depth` and, for an affine module, `thread_affine` | switch, carriers, the fiber's scheduling state, fault record, sanitizer hooks |
 | §8 loop | nothing new: `Io` is an ordinary copyable type | `io.Io`, `io.Loop`, the `on:` arguments |
-| §9 pool | [M-Blocking]; trampolines generated for the externs of a blocking module; the symbol table marks the runtime's blocking functions | the pool and its leases |
+| §9 foreign calls | [M-Blocking] for the `blocking` and `thread_affine` keys; trampolines generated for the externs of a module that blocks; the symbol table marks the runtime's blocking functions | the pool, temporary and persistent leases, callback mode |
+| §4.4 prerequisite | if the hole exists, the structural predicate that keeps waitable values out of an owner's state and jobs | — |
 
 Each rule lands in `docs/linea-semantics.md` with the phase that builds it,
 since the compiler may emit no rule name the document does not define.
@@ -793,68 +1028,90 @@ since the compiler may emit no rule name the document does not define.
 Each phase is one pull request, or two that land together where it says so.
 Each lands green, states which sections it builds, adds its rules to the
 semantics document, and updates `docs/learn` in the chapter a reader would look
-in.
+in. Phase 1 does not wait for the questions later phases raise.
 
 1. **Nonblocking I/O and deadlines** (§1, §2 with the in-place backend).
    `feat(runtime): perform socket operations with deadlines on nonblocking sockets`.
-   *Proves* full socket semantics on nonblocking descriptors and deadlines
-   that never intentionally wait past their time, with no language change and
-   every task still a thread. *Tests:* `net_test.c` and `net_fault_test.c`
-   cases for short reads and writes, `EAGAIN`, `EINTR`, `EINPROGRESS` with
-   `SO_ERROR`, resets and half-close on both systems, the tie rule of readiness
-   and expiry, and a deadline on `accept`, `connect`, `read` and `write`; the
-   existing `std.net` and HTTP tests unchanged and green. It gives no
-   multi-source waiting and keeps one thread per task.
-2. **The park protocol and wait sets** (§3, §4, §5).
+   *Proves* full socket semantics on nonblocking descriptors and deadlines that
+   never intentionally wait past their time, with no language change and every
+   task still a thread. *Tests:* `net_test.c` and `net_fault_test.c` cases for
+   short reads and writes, `EAGAIN`, `EINTR`, `EINPROGRESS` with `SO_ERROR`,
+   resets and half-close on both systems; each tie rule of §1 (a read, an
+   accept and a connect whose readiness and expiry coincide); a deadline on
+   `accept`, `connect`, `read` and `write`; the existing `std.net` and HTTP
+   tests unchanged and green. It gives no multi-source waiting and keeps one
+   thread per task.
+2. **The park protocol and wait sets** (§3 on threads, §4, §5). *Prerequisite:*
+   §4.4 settled and, if the hole exists, its fix landed.
    `refactor(runtime): stop a task through one park routine`, then
    `feat(task): wait on several sources through a wait set`. *Proves* the
-   registration protocol and the extended deadlock argument. *Tests:*
-   deterministic race tests in C that force each interleaving of registration,
-   peer arrival, a body's return, timer expiry, `next`, `take` and `close`
-   through injected pauses at each linearization point, checking exactly-once
-   ownership and no lost wakeup; corpus cases for a reply against a timeout,
-   the first of three children, and an endpoint at `Send` refused; the
-   semantics' deadlock clause restated; examples of a race against a timeout
-   (JavaScript's `Promise.race`) and of a chat room whose room is a
-   dispatcher.
+   registration protocol, the keys and the extended deadlock argument.
+   *Tests:* deterministic race tests in C that force each interleaving of
+   registration, peer arrival, a body's return, timer expiry, `next`, `take`
+   and `close` through injected pauses at each linearization point, checking
+   exactly-once ownership and no lost wakeup; `take` racing `next` on a
+   signalled endpoint whose sender is waiting (the endpoint returns, the
+   sender still waits, a later `recv` completes) and on an expired timer (the
+   message returns and is never delivered); a copied key used after its slot is
+   reused, and a key of one set used on another, both answering `.None`;
+   corpus cases for a reply against a timeout, the first of three children,
+   and an endpoint at `Send` refused; the semantics' deadlock clause restated;
+   examples of a race against a timeout (JavaScript's `Promise.race`) and of a
+   chat room whose room is a dispatcher.
 3. **The HTTP dispatcher and keep-alive on threads** (§6).
    `feat(http): keep connections alive through a dispatcher`. *Proves* that a
    bounded number of serving tasks serves many more kept-alive clients safely.
    *Tests:* more idle keep-alive connections than serving tasks, all answered;
-   every refusal of the framing policy, with a request-smuggling corpus
-   (duplicate `Content-Length`, `Transfer-Encoding` with `Content-Length`, an
-   obsolete line fold); a handler that leaves its body unread; pipelined
-   requests in order; the idle timeout; the connection limit holding new
-   connections in the backlog. `.Threads(128)` stays the default; the HTTP
-   examples and the networking chapter migrate.
-4. **Pinned fibers** (§7 without migration, §8.1).
-   `test(runtime): hold a context switch to the reference switch`, then
-   `feat(runtime): run tasks as fibers pinned to carriers` and
-   `feat(task): start a task on a loop`, landing together. *Proves* that a task
-   blocked on I/O holds no thread. *Tests:* the switch suite against
-   `ucontext`; faults during a fiber's start, teardown, deep recursion and
-   right after a switch on both architectures; ten thousand connections on a
-   few carriers; the soundness matrix's task cells run on fibers; the thread
-   sanitizer lane with fiber annotations; a fiber that polls a peer on its own
-   carrier with `recv_until(0)` lets the peer run.
-5. **`Io` and the blocking pool** (§8, §9).
-   `feat(io): serve and start on a loop, and lease a thread to a module that blocks`.
+   every refusal of the policy closing the connection after its answer, with a
+   request-smuggling corpus (disagreeing `Content-Length`,
+   `Transfer-Encoding` with `Content-Length`, a folded header); a handler that
+   leaves its body unread; pipelined requests answered in order; `Connection:
+   close` and HTTP/1.0 closing; the idle timeout; at `open_connections`, the
+   longest-idle connection evicted for a new one, and the listener withdrawn
+   when nothing is idle. `.Threads(128)` stays the default; the HTTP examples
+   and the networking chapter migrate.
+4. **Pinned fibers and the minimal `Io` contract** (§3 on fibers, §7 without
+   migration, §8 and §8.1). `test(runtime): hold a context switch to the reference switch`,
+   then `feat(runtime): run tasks as fibers pinned to carriers` and
+   `feat(io): open a loop and start tasks and servers on it`, landing together.
+   This phase owns the public execution contract: `io.Io`, `io.Loop.open`, the
+   `on:` arguments of `task.start`, `task.prepare_in` and `http.serve`, and
+   socket operations armed on the fiber's carrier, so it lands a usable fiber
+   runtime and not a private one. *Proves* that a task blocked on I/O holds no
+   thread. *Tests:* the switch suite against `ucontext`; the fiber state
+   machine under forced interleavings (a completion that lands while the fiber
+   is Parking, an unpark from another carrier, a wake from a thread task), each
+   checking that the fiber never runs on two carriers and no wake is lost;
+   faults during a fiber's start, teardown, deep recursion and right after a
+   switch on both architectures; ten thousand connections on a few carriers; the
+   soundness matrix's task cells run on fibers; the thread sanitizer lane with
+   fiber annotations; a fiber polling a peer on its own carrier with
+   `recv_until(0)` lets the peer run, and a hot buffered read does not switch.
+   Foreign calls from fibers run on the carrier in this phase.
+5. **Foreign calls from fibers** (§9). `feat(ffi): offload blocking calls and keep thread-affine ones on one thread`.
    *Proves* that SQLite and files run from fibers without holding a carrier,
-   through typed trampolines. *Tests:* the guest book on a loop with SQLite in
-   a module that blocks; a FIFO read and write between two fibers; a callback
-   during a pool call; a trampoline per argument class (floats, a structure, a
-   hidden result pointer, more than eight arguments); [M-Blocking]'s refusal.
+   through typed trampolines, and that a thread-affine library keeps its
+   thread. *Tests:* the guest book on a loop with SQLite declared
+   `"blocking"`; a FIFO read and write between two fibers; ten thousand fibers
+   that each make one blocking call holding no pool thread afterwards; a C
+   library that checks its thread identity across calls, declared
+   `"thread_affine"`; a callback during a pool call that performs a session
+   operation and starts and joins a task (callback mode); a trampoline per
+   argument class (floats, a structure, a hidden result pointer, more than
+   eight arguments); [M-Blocking]'s refusals; a refused pool thread answering
+   `ResourceExhausted` from `fs`.
 6. **Migration and scheduling** (§7's invariant), only after phase 4's
    measurements. `feat(runtime): steal runnable fibers between carriers`.
-   *Proves* the migration invariant: a fiber with `foreign_depth` above zero or
-   `bound` set never moves, tested by a C library that checks its thread
-   identity across calls. A monitor arrives only with a measured benefit.
+   *Proves* the migration invariant: a fiber with `foreign_depth` above zero
+   or `thread_affine` set never moves. A monitor arrives only with a measured
+   benefit.
 7. **io_uring** on Linux (§1, §2). `feat(runtime): perform operations through io_uring on Linux`.
-   *Proves* that a completion backend is a backend. *Tests:* cancellation
-   acknowledgement (no completion after `TimedOut` touches the buffer; a result
-   that won the race is answered); operation identities by slot and
-   generation; an explicit fallback to the readiness path or the pool for an
-   operation the kernel does not support, chosen by probing the kernel once.
+   *Proves* that a completion backend is a backend. *Tests:* the cancelling
+   phase (no completion after `TimedOut` touches the buffer; a read or an
+   accept that completes during cancellation answers its result); slot
+   generations against events queued across a disarm; an explicit fallback to
+   the readiness path or the pool for an operation the kernel does not support,
+   chosen by probing the kernel once.
 
 **Measurement plan.** Each phase from 2 measures, against the previous phase
 and against thread per connection, with p50, p95 and p99 latency, throughput,
@@ -866,10 +1123,12 @@ CPU, resident and virtual memory, context switches and wakeups:
 - session-heavy pipelines (rendezvous and switch cost);
 - many short calls into a blocking module (pool handoff);
 - deadlines under load (timeout latency and tails);
-- high connection churn (registration and cleanup).
+- high connection churn (registration and cleanup);
+- many clients on one listener (whether the single dispatcher is a
+  serialization point; sharding by carrier or listener only if it is).
 
-Stealing, a monitor and a stack cache are justified by these numbers or not
-built.
+Stealing, a monitor, a stack cache and dispatcher sharding are justified by
+these numbers or not built.
 
 ## Consequences
 
@@ -883,7 +1142,8 @@ built.
   fibers on its carrier.
 - `Io` adds no type parameter and no field anywhere; a backend is the
   runtime's, and a program cannot write one in Linea.
-- A loop cannot be closed: its threads live until exit, idle when unused.
+- A loop cannot be closed in these phases: its threads live until exit, idle
+  when unused. A scoped loop is the direction (§8.2).
 - A foreign call that blocks in a module not declared blocking holds its
   carrier for as long as it takes.
 - The runtime grows a poller per carrier, a wait set, a context switch, a
@@ -955,7 +1215,16 @@ the runtime's.
 **A descriptor that stores its `Io`** (decision #26 as written). Stated in §8
 and Open question 1.
 
-**A closable loop**, statically excluded or waiting at run time (§8).
+**A closable loop now**, statically excluded or waiting at run time (§8.2).
+
+**Holding the park lock across the switch** instead of a scheduling state. An
+unparker on another carrier would block on a mutex held across a context
+switch, and the release after the switch would run on the scheduler's stack
+with a lock taken on the fiber's; the states of §3 say the same with no lock
+held across a switch.
+
+**Keys that borrow their set.** [O-Borrow] would refuse `next` while any key
+lived (§4).
 
 **Keeping the listener's owning task and adding idle connections to its
 state.** A serving task's call for the next ready connection would block the
@@ -969,6 +1238,11 @@ set.
 **Cancellation observed at every blocking operation** (Zig's
 `error.Canceled`, the linear-types note's proposal). Rejected by decision #14:
 the canceller is a token every blocking call must honour.
+
+**A module-wide `"blocking"` flag that also meant thread affinity, with a
+lease kept for the fiber's life.** Ten thousand fibers that each made one
+blocking call would keep ten thousand threads. Blocking and affinity are
+different obligations (§9).
 
 **A fixed-size blocking pool, or one that runs Linea closures.** A fixed size
 deadlocks on a FIFO or a lock whose releasing call queues behind its waiting
@@ -990,52 +1264,39 @@ with a measured benefit; carriers' stalls are counted instead.
 
 ## Open questions
 
-Each carries this record's recommendation. The first nine are the decisions
-the external review of 2026-11-07 listed as to be settled before acceptance,
-in its order of severity, with those this record settles marked.
+Settled by this record since the second external review (2026-11-07), and no
+longer open: key identity (§4), the fiber's scheduling state (§3), blocking
+apart from thread affinity (§9), callback mode (§9.1), the cancelling phase
+and the slot table (§2), the tie rules (§1), `io.Pollable` (§4), the move rule
+(§8), the HTTP policy and its limits (§6), the phase 4 and 5 boundary (§12).
+§4.4 is a prerequisite of phase 2 with its verification pending, not a
+question. What needs the user:
 
 1. **Whether a descriptor stores its `Io`** (decision #26 as written).
-   Recommended: no (§8). With a poller per carrier, the waiting task decides
-   how a wait happens, so a stored `Io` either repeats it or contradicts it. If
-   it is wanted, it means "this descriptor's operations are performed by that
-   loop", which needs a handoff between substrates for a thread or another
-   loop's fiber, and its only gain would be io_uring's registered files.
-2. **Session readiness.** Settled by §4.1 and §4.2: readiness with a
-   reservation, held because a `send` cannot be withdrawn. Recommended: keep;
-   a later timed send must not withdraw once it has signalled a set.
-3. **Fairness under fibers.** Settled as conditional in §5. Recommended:
-   accept the condition for phase 4, measure the cost of a safe-point poll at
-   loop back-edges and function entries (a load and a branch), and add it
-   before a fiber loop serves by default anywhere, which makes property 2
-   unconditional.
-4. **The operation lifecycle.** Settled by §2. Recommended: accept.
-5. **Fiber migration.** Settled as pinned first (§7, phase 4). Recommended:
-   build migration only if phase 4's measurements show carriers idle while
-   others queue.
-6. **The foreign-call ABI.** Settled as typed trampolines (§9).
-   Recommended: accept.
-7. **The blocking pool's failure.** A growing pool removes the bounded-pool
-   cycle; when a thread cannot be made, the call traps. Recommended: trap, as a
-   payload's allocation failure does (0250 §10). The alternative, running the
-   call on the carrier, can hold up the fiber it waits for.
-8. **The HTTP framing policy.** Settled by §6. Recommended: accept, with
-   chunked requests and responses as the next change.
-9. **Poller ownership.** Settled by §8.1: one poller per carrier, changed only
-   by its own thread. Recommended: accept.
-10. **The monitor.** Deferred, carrier stalls counted (§9). Recommended:
-    revisit only with phase 4's numbers.
-11. **Fiber stack size.** Fixed and mapped, `default_stack_bytes`, tuned later
-    per loop if measurements ask. Recommended: accept.
-12. **An endpoint or wait set in an owning task's state** (§4.4). Today's bound
-    on the state is `Owned`, which a detached endpoint (`Chan[P, ()]`) meets, so
-    a job could already wait on a task; this needs checking against the
-    compiler before phase 2, and the fix is a bound computed from fields that
-    excludes endpoints, handles and sets.
-13. **Process signals as a wait-set source** (`SIGTERM` for a graceful
-    shutdown). It needs the signal blocked process-wide, which 0250 §11 leaves
-    to the host. Recommended: later, with its own record.
-14. **A loop's defaults.** Whether `carriers:` defaults to the processor count.
-    Recommended: always written, since it is a resource size.
-15. **A simulated `Io` with a virtual clock** for tests, so a timeout test does
-    not sleep. A loop knows when every fiber is parked; threads blocked in the
-    kernel do not. Recommended: consider after phase 4.
+   Recommended: no (§8), which both external reviews accepted. With a poller
+   per carrier, the waiting task decides how a wait happens, so a stored `Io`
+   would repeat or contradict it.
+2. **Fairness under fibers.** Recommended: accept the conditional theorem for
+   phases 4 to 6, and build unconditional progress (a scheduler time budget and
+   compiler polls on every unboundedly long path, §5) before a fiber loop serves
+   by default anywhere.
+3. **Closable loops** (§8.2). Recommended: process-lifetime loops for these
+   phases; a scoped loop whose `Io` borrows it, carried by task handles, when a
+   program needs a loop to end.
+4. **Evicting idle connections at the budget** (§6). Recommended: evict the
+   longest-idle connection for a new one, as specified; the alternative keeps
+   idle clients and refuses new ones until an idle timeout.
+5. **Agreeing duplicate `Content-Length`.** The parser accepts them today, as
+   RFC 9112 permits. Recommended: keep; refusing them is stricter and also
+   permitted.
+6. **A refused pool thread for a user module** (§9). Recommended: trap in phase
+   5; later, a manifest form saying how a module's calls report it.
+7. **`carriers:`.** Recommended: always written, since it is a resource size.
+8. **Chunked requests and responses.** Recommended: the next HTTP change
+   after phase 3.
+9. **Process signals as a wait-set source** (`SIGTERM` for a graceful
+   shutdown). It needs the signal blocked process-wide, which 0250 §11 leaves to
+   the host. Recommended: later, with its own record.
+10. **A simulated `Io` with a virtual clock** for tests. A loop knows when every
+    fiber is parked; threads blocked in the kernel do not. Recommended:
+    consider after phase 4.
