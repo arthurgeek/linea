@@ -20,8 +20,10 @@ sentences of existing records:
 - the [T-ThreadStart] rule of `docs/linea-semantics.md`, which §7 widens from
   "on a thread of its own" to "on a thread or a fiber of its own";
 - decision #26 of the 2026-10-15 concurrency review, "carried by service
-  objects like `TcpListener` and `File`", which §8 narrows: `Io` is passed to
-  what starts tasks, and a descriptor does not store it (Open question 1).
+  objects like `TcpListener` and `File`", which §8 replaces: the execution
+  substrate is a property of the task that performs the I/O, so `Io` is passed
+  where tasks start, and a descriptor owns its socket or file and no
+  scheduler.
 
 ## Builds on
 
@@ -37,7 +39,7 @@ Where this record narrows one, the row says so.
 | I/O blocks today; `runtime/net.c` polls only to finish an interrupted `connect`. A fiber substrate needs nonblocking descriptors and a poller, or pins its carrier. | `concurrency-discussion.md` §2 item 3 and §5.4 |
 | Zig 0.16's staging, a blocking backend first and evented backends later behind one `Io` value, is the model. | `concurrency-discussion.md`, comparison table; Zig 0.16.0 `lib/std/Io.zig` |
 | CPU parallelism (`task.Policy`) and I/O waiting (`Io`) are separate capabilities, and the event loop is its own pillar. | `executor-and-policy-design.md` §9, §10; decisions #23, #26 |
-| `Io` is a capability passed like an allocator, and a handler never takes an `io` parameter. Narrowed by §8: it is passed where tasks are started, not stored in descriptors. | decisions #26 |
+| `Io` is a capability passed like an allocator, and a handler never takes an `io` parameter. Replaced in part by §8 (the maintainer, 2026-11-07): `Io` is passed where tasks start; a descriptor does not carry it, has no outstanding operation or registration when its ownership moves, and is not made nonblocking by the task's poller where its kind cannot be polled. | decisions #26 |
 | `Allocator`, `Io`, `Policy` and sessions are four orthogonal resource capabilities; the process heap has open stateless naming. | decisions #28; [0095](0095-the-system-allocator-is-named-rather-than-received.md) |
 | No task is stopped from outside. A deadline is stated where a task waits; cancellation is a protocol branch; deadline scopes and cancellation tokens that propagate implicitly are rejected. | decisions #3, #14; 0250 §3, §7 and Alternatives |
 | No unjoined thread: only `Slot.start` may start Linea code on a thread of its own. | [0253](0253-independent-work-runs-through-an-explicit-executor-policy.md) §3, [T-ThreadStart] |
@@ -53,7 +55,8 @@ scheduling state (§3), the wait set, its keys and its registration protocol
 (§4), the theorem split into three properties (§5), the dispatcher and its
 HTTP/1.1 policy (§6), pinned fibers and the migration invariant (§7), the loop
 and `Io` (§8), blocking and thread-affine foreign calls and callback mode
-(§9), and the phases (§12).
+(§9), operating-system signals as a source (§4.5), a simulated `Io` (§12),
+and the phases (§13).
 
 ## Context
 
@@ -112,7 +115,7 @@ change substrate. Memory is one (about 31 KiB resident per connection a thread
 serves, against nothing measurable for a registration); keep-alive, waiting
 on several sources and timers are the others. Phase 1's backend costs about
 5 % of a loopback round trip, its worst case. The spike measured neither
-fibers, rendezvous, timers nor a scheduler; §12's measurement plan does.
+fibers, rendezvous, timers nor a scheduler; §13's measurement plan does.
 
 ## Decision
 
@@ -366,7 +369,10 @@ The sources:
 - `after(duration, message)`: a timer.
 
 `next` waits until a source is ready, delivers exactly one, and answers it
-wrapped. `take(key)` withdraws one registration and answers its value in its
+wrapped. `take_if_registered(key)` does the same only while the source has not
+been signalled, and answers `.None` once it has, so a program can withdraw a
+source exactly when it is not ready (§6 evicts idle connections by it).
+`take(key)` withdraws one registration and answers its value in its
 **own type**: taking the answer key gives back the endpoint and taking a
 timer's key gives back its message. `close` answers a `Vec[M]` of every
 registration still held, wrapped, for a set whose keys the program did not
@@ -437,6 +443,7 @@ and each successful swap is the transition's linearization point.
 | registered | signalled | the source: a peer entering `send` or `choose` (under the session's lock, after filling the slot), a body returning (under the task's lock), a descriptor event of the current generation, a timer's expiry; the set's user event (`EVFILT_USER`, an `eventfd` write) is posted after the swap |
 | signalled | delivered | `next`: it swaps the earliest-signalled registration, then clears the mark and moves the value out wrapped; one `next` delivers one value |
 | registered or signalled | withdrawn | `take` or `close`: the swap, then the mark is cleared and the value moved out |
+| registered | withdrawn | `take_if_registered`: the swap fails, and answers `.None`, if the source was signalled first |
 
 - **No lost wakeup.** Registration publishes its mark before it checks the
   source (the slot full, the body returned, `readiness` answering `Now`, the timer
@@ -494,6 +501,75 @@ decide it:
 
 So `close` keeps `Vec[M]` for the uniform case, and a program with
 heterogeneous losers takes them by key.
+
+#### 4.5 Operating-system signals as a source
+
+**Decision: a signal is a wait-set source, and graceful shutdown is part of
+phase 2** (the maintainer, 2026-11-07), so a server waits on its connections,
+its timers and a shutdown signal in one `next`:
+
+```linea
+enum Serving { Ready(Reading), Done(Served), Stop }
+
+var waiting = task.WaitSet[Serving].open()
+let stop = &waiting.signal(.Terminate, Serving.Stop)?   // refused when the launcher ignores SIGTERM
+```
+
+- **Which signals.** `io.Signal` names `Terminate` (`SIGTERM`), `Interrupt`
+  (`SIGINT`), `Hangup` (`SIGHUP`), `User1` and `User2` (`SIGUSR1`,
+  `SIGUSR2`). Every other signal is outside the source: `SIGSEGV` and
+  `SIGBUS` belong to the runtime's fault handler (0250 §11), `SIGPIPE` to its
+  write path (`runtime/pipe_signal.h`), `SIGKILL` and `SIGSTOP` cannot be
+  caught, `SIGCHLD` waits for a process record, and the timer signals are not
+  offered, since timers are `after`.
+- **Delivery.** While at least one registration for a signal exists, the
+  runtime's signal router has a handler installed for it with `SA_SIGINFO`,
+  `SA_ONSTACK` and `SA_RESTART`. The handler is async-signal-safe and does
+  three things: it increments the signal's 64-bit delivery count with a
+  lock-free atomic, writes one byte to the router's wake descriptor (a pipe
+  on macOS, an `eventfd` on Linux, both nonblocking, a full pipe being already
+  awake), and restores `errno`. Nothing else runs in the handler. Every wait
+  set holding a signal registration also watches the wake descriptor; the first
+  to see it readable drains it under the router's lock, reads each count, and
+  swaps every registration of each signal whose count moved from `registered`
+  to `signalled`, posting each set's user event (§4.2). One delivery
+  therefore wakes every registration for that signal, in every set, which is
+  what shutdown across a dispatcher and its helpers needs.
+- **Coalescing.** As POSIX signals do, deliveries coalesce. A registration
+  records the signal's count when it is made and is signalled by the first
+  count past it, once, however many deliveries arrive before `next` delivers
+  it; like a timer it fires once, and a program that wants the next delivery
+  registers again. A delivery made before a registration existed does not
+  signal it: deliveries are not queued for registrations to come.
+- **Masking.** The runtime blocks none of these signals on any thread and
+  changes no thread's mask for them. A delivery lands on whichever thread the
+  kernel chooses that does not block it (a carrier, a task's thread, a pool
+  thread, a host thread), and the handler is the same on every one. Every
+  thread the runtime makes has an alternate signal stack, so on those threads
+  the handler runs there, beside the fault handler, which it never interrupts
+  in a way that matters: it touches only the router's count and descriptor.
+  `SA_RESTART` and the runtime's own `EINTR` retries (§1) keep an interrupted
+  system call from surfacing.
+- **Disposition, and what a registration owns.** A registration owns its
+  message and one share of the signal's disposition. The first registration
+  of a signal saves the action in place and installs the router's handler; the
+  last one withdrawn, delivered or closed restores the saved action. So the
+  default action returns once nobody waits, and a second `SIGTERM` after a
+  shutdown has been delivered and not registered again ends the process as it
+  would have, the conventional second Ctrl-C. Registration is refused, with
+  `io.SignalError.Ignored`, when the saved action is `SIG_IGN`: the launcher
+  asked for the signal to be ignored (`nohup` ignores `SIGHUP`), and the
+  program decides whether to override that. When the saved action is a
+  handler a host installed, the router calls it after counting, with the same
+  arguments, so an embedding host still sees its signal. Carriers need nothing
+  of their own: on a loop, a fiber parked in `next` has its set's
+  kernel queue armed on its carrier's poller, and the wake descriptor is in
+  that queue.
+- **The deadlock argument.** A signal is the world: a registration waits on no
+  task, as a timer does (§5).
+- **Simulation.** Inside a simulation (§12) the router is replaced by
+  `world.deliver(.Terminate)`, which advances the same counts with no real
+  signal, so shutdown is tested deterministically.
 
 #### 4.4 Prerequisite of phase 2: no job waits on a task
 
@@ -573,10 +649,27 @@ also needs a time budget after which a running fiber is asked to yield, and
 the compiler must poll on every path that can run unboundedly (loop
 back-edges, recursion through function entries, long runtime calls such as a
 large copy). Until both exist and are verified, the theorem stays
-conditional. Under fibers the promise of 0250
-§9 is therefore conditional: **if every fiber reaches a park point within
-finite time**. The guide states it, and Open question 3 asks whether safe-point
-preemption should make it unconditional before fibers serve by default.
+conditional.
+
+**Decision: conditional progress first; time budgets and yield points before
+fibers become the default.** Phase 4 introduces opt-in pinned fibers with
+cooperative scheduling. Scheduler progress is conditional on every runnable
+fiber eventually reaching a suspension point, and this limitation is stated in
+the language's progress guarantees (the semantics document and the guide).
+After measuring the cooperative implementation, the runtime gains scheduler
+time budgets and the compiler gains yield points. That design must specify
+yield points on every potentially unbounded Linea path (loop back-edges,
+recursion through function entries), the scheduler's mechanism for requesting
+a yield once a fiber's budget expires, how generated code observes the
+request, and the explicit exceptions: foreign calls and any other code the
+compiler does not instrument. A time budget plus safe points gives bounded
+cooperative preemption of instrumented Linea code, not preemption of
+arbitrary native code; a fiber looping inside C cannot be stopped by Linea's
+polls. Fibers do not become the default substrate anywhere until scheduler
+fairness for instrumented Linea code is established and tested, and blocking
+foreign code stays under its own contract (§9). Under fibers the promise of
+0250 §9 is therefore conditional: **if every fiber reaches a park point within
+finite time**.
 
 **Property 3** is assumed for the world and for foreign calls as their own
 contracts say. A foreign call that never returns stops its task, and the
@@ -631,12 +724,22 @@ the rules marked new.
   `400`.
 - **Body framing.** `Content-Length` of decimal digits frames the body; a
   sign, a letter, an empty value or a trailing control character is `400`,
-  and a value past `max_body_bytes` (or past 64 bits) is `413`. Repeated
-  `Content-Length` headers that agree are accepted as one, as RFC 9112 §6.3
-  permits and the parser does now; disagreeing ones are `400`.
+  and a value past `max_body_bytes` (or past 64 bits) is `413`.
   `Transfer-Encoding` alone is `501`; beside `Content-Length` it is `400`. A
   request with neither has an empty body. A body shorter than its length when
   the connection ends is `400`.
+- **Decision: agreeing `Content-Length` duplicates stay accepted** (the
+  maintainer, 2026-11-07). Linea accepts several `Content-Length` headers
+  when every value is a valid nonnegative decimal integer that does not
+  overflow and all of them parse to the same number, as RFC 9112 §6.3 permits
+  and the parser's tests already hold. They are normalized to one canonical
+  body length before framing, so every component reads one length.
+  Disagreeing, malformed or overflowing values are `400` and close the
+  connection; a request carrying both `Transfer-Encoding` and
+  `Content-Length` is `400` and closes. A comma-separated list in one header
+  (`Content-Length: 5, 5`) is not a decimal integer to the parser and is
+  refused as malformed; this record does not widen the parser to accept it.
+  Persistent connections use exactly the framing rules nonpersistent ones do.
 - **New: what follows a response.** Every refusal above closes the connection
   after its answer. When a handler returns without reading the whole body, the
   server reads and discards the rest within `max_body_bytes` and the read
@@ -652,8 +755,9 @@ the rules marked new.
   request makes the returned reader ready at once.
 - **New: response framing.** A response is framed by `Content-Length` when its
   length is known. A streamed response of unknown length is followed by
-  closing the connection, as every response is now. Chunked requests and
-  responses are a later change.
+  closing the connection, as every response is now. **Chunked request bodies
+  are the next HTTP change after phase 3** (the maintainer, 2026-11-07), and
+  never beside `Content-Length`; chunked responses come with them.
 - **New: limits per request.** Every limit applies to each request of a
   connection afresh. `first_byte_timeout_ms` bounds the wait for a
   connection's first request; `read_timeout_ms` bounds each request from its
@@ -668,18 +772,26 @@ Each idle reader is registered beside an `after` timer and the dispatcher
 keeps both keys: a reader that becomes ready has its timer taken; a timer that
 fires has its reader taken by key and closed.
 
-At `open_connections`, when the listener is ready and some connection is idle,
-the dispatcher **evicts the idle connection that has been idle longest**: it
-takes it by key and closes it, then accepts. Without eviction, idle
-keep-alive clients could hold the whole budget while new clients waited in the
-backlog with no request in progress. A request that a client sends at the
-moment its idle connection is closed is lost to the server, as with any
-server's close of an idle keep-alive connection; RFC 9112 §9.3.1 lets a client
-retry an idempotent request on a connection closed before any response.
-When no connection is idle and the budget is full, the dispatcher withdraws
-the listener from its set by its key, so new connections wait in the kernel's
-backlog, and registers it again when a connection closes. Ready readers that
-find no free serving task wait in a queue bounded by `open_connections`.
+**Decision: evict the longest-idle connection when a newcomer needs the
+room** (the maintainer, 2026-11-07). The dispatcher keeps watching the
+listener's readiness at `open_connections`. When the budget is exhausted and a
+new client is waiting, it closes the keep-alive connection that has been idle
+longest and accepts the newcomer, so idle clients cannot hold the whole
+budget while new ones wait with no request in progress. Only a genuinely idle
+connection is evictable: never one being served, and never an idle one already
+marked ready, whose registration is signalled by request bytes in the kernel or
+in its buffer. The dispatcher withdraws a candidate with
+`take_if_registered(key)`, which swaps only `registered` to `withdrawn` and
+answers `.None` for a registration already signalled, so the readiness check
+and the eviction are one atomic step. If no connection is evictable, the
+listener is withdrawn by its key and the dispatcher stops accepting until a
+connection closes; the kernel backlog provides the backpressure. Idle timeouts
+stay, and reclaim connections when no new client arrives. A request a client
+sends in the instant its idle connection is evicted is lost to the server, as
+with any server's close of an idle keep-alive connection; RFC 9112 §9.3.1 lets
+a client retry an idempotent request on a connection closed before any
+response. Ready readers that find no free serving task wait in a queue bounded
+by `open_connections`.
 
 `serve` takes `L: net.Acceptor + io.Pollable`. `ScriptedListener` implements
 `io.Pollable` by forwarding to the listener it wraps, so the tests that script
@@ -773,8 +885,15 @@ is joined by `close` as a thread is.
 
 ### 8. A loop lasts until exit for now, and `Io` names it
 
-`io.Io` is a concrete copyable value, an opaque number the runtime hands out.
-It holds no borrow, so it is `Owned` and `Shareable`:
+`io.Io` is a concrete copyable value the runtime hands out. It holds no
+borrow, so it is `Owned` and `Shareable`. Its representation is a **stable
+loop identity**: an index into the runtime's loop table and the slot's
+generation, never a pointer, and every use looks the loop up and checks the
+generation. While loops last until exit no lookup can fail; the check is
+there from the first phase so that a scoped loop (§8.2) or an ended
+simulation (§12) can come later without changing the public model, and a
+stale `Io` then traps with `linea: an Io names a loop that has ended` instead
+of reaching freed carriers.
 
 - `io.system()` names the system: a task started on it is a thread of its own,
   and its operations are performed in place. It is stateless and open, as
@@ -783,28 +902,62 @@ It holds no borrow, so it is `Owned` and `Shareable`:
   could not (a thread, a mapping or the poller refused). A loop is `n`
   carriers, each with its own poller, deadline heap and run queue, and a pool
   for modules that block (§9). It lasts until the process exits; while it has
-  no fiber its threads wait and run nothing.
+  no fiber its threads wait and run nothing. Each loop keeps its carriers,
+  pollers and pool until exit, so a program opens its loops once; opening
+  loops repeatedly is a resource leak by design in these phases.
+- **`carriers:` is always written** and must be positive; it is a resource
+  size and is never derived silently. `env.available_parallelism()` answers
+  the processors this process may run on, for a program that wants a count
+  from its environment (`io.Loop.open(carriers: env.available_parallelism())`):
+  on Linux the CPUs of the process's affinity mask (`sched_getaffinity`),
+  lowered to a cgroup's CPU quota where one is set (cgroup v2 `cpu.max`,
+  quota divided by period, rounded up), and on macOS the active processor
+  count (`hw.activecpu`, since macOS offers no hard affinity). It answers at
+  least 1, and it is read when called, not cached, since a container's quota
+  can change.
 
 `Io` is passed where tasks are started, as an allocator is passed where memory
 is taken: `task.start(body, on: loop)`, `task.prepare_in(allocator, body,
-stack:, on: loop)`, and `http.serve(..., on: loop)`, each defaulting to
-`io.system()`, so every existing call keeps its meaning and a server written
-for threads serves on fibers by one argument. A handler never names an `Io`.
+stack:, on: loop)`, and `http.serve(..., on: loop)`. Each defaults to
+`io.current()`, the `Io` the starting task runs on: the system for every task
+that is a thread, so every existing call keeps its meaning; the loop for a
+fiber, so a fiber's children and a server started from a fiber stay on its
+loop; the simulation inside `Simulation.run` (§12). A server written for
+threads serves on fibers by one argument. A handler never names an `Io`.
 `task.Policy` still decides how much independent work runs at once; `Io`
 decides what a task runs on.
 
-A descriptor does not store an `Io`. How an operation waits is decided by the
-task that waits: a thread performs it in place, a fiber arms it on its own
-carrier's poller (§8.1). A descriptor's stored `Io` would either repeat that or
-contradict it, as when a fiber of one loop reads a connection accepted by a
-fiber of another (Open question 1).
+**Decision: `Io` is passed only where tasks start; a descriptor does not carry
+it** (the maintainer, 2026-11-07). The execution substrate is a property of
+the task that performs the I/O, not of the descriptor: a thread performs an
+operation in place, a fiber arms it on its own carrier's poller (§8.1). So
+ownership and execution stay orthogonal (a `net.Connection` owns a socket,
+not a scheduler); a connection accepted on loop A and sent through a session
+to a fiber of loop B is simply used by B's poller; no two execution
+authorities can disagree about one descriptor; and descriptors gain no field
+and no lifetime. `task.Policy` decides concurrency, `Io` the substrate, and
+linear ownership access.
 
-**Lifetime and shutdown.** A loop lasts until the process exits. This is
-the initial restriction, chosen for the phases of this record, not a property
-of loops: a host process that embeds Linea, an isolated test runtime, or a
-subsystem retired at run time needs a loop it can end, and §8.2 keeps that as
-the direction. A loop that is never closed is the simplest shape that is
-sound now. Its carriers run only fibers that `Slot.start` started and their
+- **Invariant.** A descriptor has no outstanding operation and no poller
+  registration when its ownership moves to another task: the runtime retires
+  every registration of its previous context before the descriptor is used on
+  another carrier (the move rule below).
+- **Caveat.** A poller chosen by the task does not make every descriptor
+  operation nonblocking. A regular file cannot be polled, and foreign
+  libraries and other blocking calls still need the blocking pool (§9), or a
+  backend that completes them (io_uring, phase 7).
+
+**Decision: process-lifetime loops initially** (the maintainer, 2026-11-07).
+Loops remain alive until process exit in the first implementation. This is an
+implementation restriction, not a permanent decision: it avoids new lifetime
+rules while the fiber substrate and the poller are established. Scoped,
+closable loops are deferred, not rejected (§8.2). Because descriptors do not
+carry `Io`, a future scoped loop can put its lifetime dependency on task
+handles and other loop-bound resources alone, and the stable loop identities
+above keep the runtime from assuming that a loop never ends. Embedding Linea
+in a host process and reclaiming a loop's resources are acknowledged
+limitations of the initial implementation. A loop that is never closed is the
+simplest shape that is sound now. Its carriers run only fibers that `Slot.start` started and their
 handles join, and a pool thread runs only calls a fiber is parked in, so
 nothing on them outlives the lends it reads, which is what [T-ThreadStart]
 protects. At exit every task has been joined, since `main` returns only after
@@ -927,15 +1080,20 @@ lock queued: waits that threads finish and a bounded pool would not. The
 threads in use are bounded by the calls in progress plus the persistent
 leases.
 
-**When a pool thread cannot be made.** A call whose public contract can say so
-answers a recoverable error: the runtime's own blocking functions answer an
-`io.IoError` of category `ResourceExhausted` from `fs` and name lookup, as
-they answer a refused descriptor. A call into a user module whose `extern`
-result has no failure to put it in traps with `linea: the blocking pool could
-not start a thread` in the first phase that builds the pool; running it on the
-carrier instead could hold up the fiber it waits for. A manifest form that
-lets a module say how its calls report this is the later answer (Open
-question 6).
+**Decision: when a pool thread cannot be made, phase 5 traps** (the
+maintainer, 2026-11-07). The pool reuses idle threads and makes one only when
+none is idle, never one per call. A standard-library operation whose
+signature can say so answers a recoverable error: the runtime's own blocking
+functions answer an `io.IoError` of category `ResourceExhausted` from `fs`
+and name lookup, as they answer a refused descriptor. A call into a user
+module traps with `linea: the blocking pool could not start a thread`, a
+resource-exhaustion report, and only when the runtime cannot obtain a thread
+to run it on, never because the foreign function answered an ordinary error.
+The call never falls back to running on the carrier, where it could hold up
+the fiber it waits for. Recoverable exhaustion is what a production service
+wants, and it is a supported future direction: a manifest extension that lets
+a user module declare a recoverable pool-acquisition error, delivered through
+the wrapper and leaving the C ABI unchanged. It is deferred, not rejected.
 
 What deadlock freedom means here is scoped by §5: the pool adds no edge to the
 session graph, and it relies on external progress, that a foreign call
@@ -1016,25 +1174,111 @@ owned, and a timer in a set leaves the other sources registered.
 | §5 properties | the semantics document's deadlock clause restated as §5's three properties, with the wait set | — |
 | §6 HTTP | nothing | dispatcher, the policy's new rules, `Limits.open_connections` and `idle_timeout_ms`, eviction |
 | §7 fibers | [T-ThreadStart] names the fiber start; the extern call and callback lowering maintains `foreign_depth` and, for an affine module, `thread_affine` | switch, carriers, the fiber's scheduling state, fault record, sanitizer hooks |
-| §8 loop | nothing new: `Io` is an ordinary copyable type | `io.Io`, `io.Loop`, the `on:` arguments |
+| §8 loop | nothing new: `Io` is an ordinary copyable type | `io.Io` as a stable loop identity, `io.current()`, `io.Loop`, the `on:` arguments, `env.available_parallelism()` |
 | §9 foreign calls | [M-Blocking] for the `blocking` and `thread_affine` keys; trampolines generated for the externs of a module that blocks; the symbol table marks the runtime's blocking functions | the pool, temporary and persistent leases, callback mode |
+| §4.5 signals | nothing | `io.Signal`, `io.SignalError`, `WaitSet.signal`, the runtime's signal router |
+| §12 simulation | nothing | `io.Simulation`, the simulated backend, virtual clock and network |
 | §4.4 prerequisite | if the hole exists, the structural predicate that keeps waitable values out of an owner's state and jobs | — |
 
 Each rule lands in `docs/linea-semantics.md` with the phase that builds it,
 since the compiler may emit no rule name the document does not define.
 
-### 12. Phases
+### 12. A simulated `Io` with a virtual clock
+
+**Decision: a simulated `Io` is designed now and shapes the tests of phases 1
+and 2** (the maintainer, 2026-11-07). A test of a deadline, a timeout or a
+wait set should not sleep, and a race between readiness and expiry should be
+reproduced exactly, not hoped for.
+
+```linea
+test fn a_read_past_its_deadline_times_out() {
+    var sim = io.Simulation.open(seed: 7)
+    let outcome = sim.run(|inout world| {
+        var listener = net.listen(net.loopback(80)).unwrap()
+        var client = net.connect(net.loopback(80)).unwrap()
+        let Accepted { connection: server, address: _ } = &listener.accept().unwrap()
+        var server = server
+        &server.set_deadline(time.Instant.now(), within_ms: 200)
+        &world.advance(time.Duration.from_milliseconds(199))   // virtual time, no sleep
+        ...
+    })
+    sim.close()
+    ...
+}
+```
+
+- **What it is.** `io.Simulation.open(seed:)` answers a linear simulation:
+  a virtual monotonic and wall clock that start at a fixed instant, an
+  in-memory network, and a deterministic source of choices seeded by `seed`.
+  `sim.run(body)` runs `body` with the simulation as the `Io` it runs on
+  (`io.current()`, §8), and every operation the body makes goes to the
+  simulated backend of §1 instead of the system. The body takes the
+  simulation's controls as an `inout` parameter (`world`), through which it
+  advances the clock and delivers signals, so the body never needs the
+  simulation that is running it. `sim.close()` ends it; its
+  loop identity is retired, so a stale `Io` naming it traps (§8). The
+  simulation is the first `Io` that ends, which is why stable identities are
+  in place from phase 1.
+- **The clock.** Inside `run`, `time.Instant.now()` and `time.sleep` read and
+  advance the virtual clock; a deadline or a timer expires when virtual time
+  passes it. Virtual time moves only when the test advances it
+  (`world.advance(d)`) or when every task of the simulation is parked and the
+  earliest deadline is the next event, which the simulation then jumps to. A
+  readiness and an expiry scheduled for the same virtual instant are both
+  observed by the claimant, so §1's tie rules are tested as written.
+- **The network.** `net.listen` and `net.connect` inside `run` make simulated
+  descriptors: entries in the simulation's own table, never real descriptor
+  numbers, so no system call is made on one. Each direction of a connection
+  delivers bytes after a latency, in chunks, with `EAGAIN`, short reads and
+  writes, resets and half-close chosen from the seed within bounds the test
+  sets when it opens the simulation (`network:`). The same seed gives the
+  same trace, and a failing test prints its seed, as the program generator's
+  failures name theirs.
+- **Signals.** `world.deliver(signal)` advances the router's count (§4.5)
+  with no real signal.
+- **Simulated descriptors stay inside.** A simulated descriptor that leaves
+  `run` (returned from the body) names nothing outside it: an operation on it
+  from any other `Io` traps with `linea: a simulated descriptor was used
+  outside its simulation`, and releasing it outside does nothing but forget
+  its table entry.
+- **Tasks.** In phases 1 to 3 every task is a thread, and threads scheduled by
+  the kernel cannot be made deterministic, so `run` admits one task: a `start`
+  inside it traps with `linea: a simulation runs one task until fibers`. A
+  wait set inside `run` still waits on any number of simulated sources, so
+  phase 2's races between timers, descriptors and signals are deterministic;
+  races with a peer task are tested by the C race tests of phase 2 instead.
+  From phase 4, tasks started inside `run` are fibers on the simulation's one
+  carrier, scheduled in an order drawn from the seed, which makes every
+  interleaving of a program's tasks reproducible.
+- **What stays real.** Files, foreign calls and the standard streams are
+  performed for real and take no virtual time; a test that needs them
+  deterministic leaves them out.
+- **Where it lives.** The simulated backend is the runtime's (`runtime/sim.c`,
+  beside the in-place and poller backends), behind the operation interface of
+  §1, so it exercises the same state machine (§2) the real backends do. It
+  is available to every program's tests through `std.io`, not only to the
+  runtime's own.
+
+### 13. Phases
 
 Each phase is one pull request, or two that land together where it says so.
 Each lands green, states which sections it builds, adds its rules to the
 semantics document, and updates `docs/learn` in the chapter a reader would look
 in. Phase 1 does not wait for the questions later phases raise.
 
-1. **Nonblocking I/O and deadlines** (§1, §2 with the in-place backend).
-   `feat(runtime): perform socket operations with deadlines on nonblocking sockets`.
-   *Proves* full socket semantics on nonblocking descriptors and deadlines that
-   never intentionally wait past their time, with no language change and every
-   task still a thread. *Tests:* `net_test.c` and `net_fault_test.c` cases for
+1. **Nonblocking I/O, deadlines and the simulation** (§1, §2 with the
+   in-place and simulated backends, §12 for one task).
+   `feat(runtime): perform socket operations with deadlines on nonblocking sockets`,
+   then `feat(io): run a test against a simulated clock and network`. The
+   second introduces `io.Io`, `io.system()`, `io.current()` and the loop table
+   with its stable identities (§8), since the simulation is the first `Io`
+   besides the system and the first that ends. *Proves* full socket semantics
+   on nonblocking descriptors and deadlines that never intentionally wait past
+   their time, with no language change and every task still a thread. *Tests:*
+   the tie rules and every deadline case run in a simulation, on virtual time,
+   with no sleep, and the `std.net` tests that sleep today move to it; the
+   same seed reproducing the same trace; a simulated descriptor used outside
+   its simulation trapping; and, against the real kernel, `net_test.c` and `net_fault_test.c` cases for
    short reads and writes, `EAGAIN`, `EINTR`, `EINPROGRESS` with `SO_ERROR`,
    resets and half-close on both systems; each tie rule of §1 (a read, an
    accept and a connect whose readiness and expiry coincide); a deadline on
@@ -1057,7 +1301,14 @@ in. Phase 1 does not wait for the questions later phases raise.
    corpus cases for a reply against a timeout, the first of three children,
    and an endpoint at `Send` refused; the semantics' deadlock clause restated;
    examples of a race against a timeout (JavaScript's `Promise.race`) and of a
-   chat room whose room is a dispatcher.
+   chat room whose room is a dispatcher. The wait-set races with timers,
+   descriptors and signals run in a simulation and are deterministic.
+   Signals (§4.5): a `SIGTERM` raised at the process wakes every set holding a
+   registration for it; deliveries coalesce; the saved action is restored when
+   the last registration leaves, so a second `SIGTERM` ends the process;
+   registration under `SIG_IGN` answers `Ignored`; a host handler installed
+   before registration is still called; `world.deliver` does the same with no
+   real signal.
 3. **The HTTP dispatcher and keep-alive on threads** (§6).
    `feat(http): keep connections alive through a dispatcher`. *Proves* that a
    bounded number of serving tasks serves many more kept-alive clients safely.
@@ -1074,10 +1325,12 @@ in. Phase 1 does not wait for the questions later phases raise.
    migration, §8 and §8.1). `test(runtime): hold a context switch to the reference switch`,
    then `feat(runtime): run tasks as fibers pinned to carriers` and
    `feat(io): open a loop and start tasks and servers on it`, landing together.
-   This phase owns the public execution contract: `io.Io`, `io.Loop.open`, the
-   `on:` arguments of `task.start`, `task.prepare_in` and `http.serve`, and
-   socket operations armed on the fiber's carrier, so it lands a usable fiber
-   runtime and not a private one. *Proves* that a task blocked on I/O holds no
+   This phase owns the public execution contract: `io.Loop.open` with
+   `carriers:` and `env.available_parallelism()`, the `on:` arguments of
+   `task.start`, `task.prepare_in` and `http.serve`, and socket operations
+   armed on the fiber's carrier, so it lands a usable fiber runtime and not a
+   private one; tasks inside a simulation become fibers on its one carrier,
+   scheduled from the seed. *Proves* that a task blocked on I/O holds no
    thread. *Tests:* the switch suite against `ucontext`; the fiber state
    machine under forced interleavings (a completion that lands while the fiber
    is Parking, an unpark from another carrier, a wake from a thread task), each
@@ -1212,8 +1465,10 @@ monomorphised. A type parameter on every descriptor and handler
 (`Connection[I]`, `Request[I, A]`), against decision #26, for backends that are
 the runtime's.
 
-**A descriptor that stores its `Io`** (decision #26 as written). Stated in §8
-and Open question 1.
+**A descriptor that stores its `Io`** (decision #26 as written). It would
+repeat or contradict the waiting task's substrate, give a connection a
+scheduler as well as a socket, and need a handoff between substrates when a
+thread or another loop's fiber used it (§8).
 
 **A closable loop now**, statically excluded or waiting at run time (§8.2).
 
@@ -1264,39 +1519,27 @@ with a measured benefit; carriers' stalls are counted instead.
 
 ## Open questions
 
-Settled by this record since the second external review (2026-11-07), and no
-longer open: key identity (§4), the fiber's scheduling state (§3), blocking
-apart from thread affinity (§9), callback mode (§9.1), the cancelling phase
-and the slot table (§2), the tie rules (§1), `io.Pollable` (§4), the move rule
-(§8), the HTTP policy and its limits (§6), the phase 4 and 5 boundary (§12).
-§4.4 is a prerequisite of phase 2 with its verification pending, not a
-question. What needs the user:
+The maintainer answered the ten questions this record asked on 2026-11-07, and
+each answer is written into the section it decides: `Io` only where tasks start
+(§8), conditional progress with budgets and yield points before fibers become
+the default (§5), process-lifetime loops with stable identities (§8),
+eviction of the longest-idle connection when a newcomer waits (§6), agreeing
+`Content-Length` duplicates under strict conditions (§6), a trap in phase 5
+for a pool thread that cannot be made, with recoverable exhaustion as the
+future direction (§9), `carriers:` always written with
+`env.available_parallelism()` (§8), chunked request bodies as the next HTTP
+change (§6), signals as a wait-set source in phase 2 (§4.5), and a simulated
+`Io` shaping phases 1 and 2 (§12). §4.4 is a prerequisite of phase 2 with its
+verification pending.
 
-1. **Whether a descriptor stores its `Io`** (decision #26 as written).
-   Recommended: no (§8), which both external reviews accepted. With a poller
-   per carrier, the waiting task decides how a wait happens, so a stored `Io`
-   would repeat or contradict it.
-2. **Fairness under fibers.** Recommended: accept the conditional theorem for
-   phases 4 to 6, and build unconditional progress (a scheduler time budget and
-   compiler polls on every unboundedly long path, §5) before a fiber loop serves
-   by default anywhere.
-3. **Closable loops** (§8.2). Recommended: process-lifetime loops for these
-   phases; a scoped loop whose `Io` borrows it, carried by task handles, when a
+What this record still leaves open:
+
+1. **The yield-point design** (§5): where polls go, how a budget is requested
+   and observed, and what they cost. Its own record, after phase 4's
+   measurements.
+2. **Scoped loops** (§8.2): the contracts of `on:`, `http.serve` and the
+   combinators for an `Io` that borrows its loop. Its own record, when a
    program needs a loop to end.
-4. **Evicting idle connections at the budget** (§6). Recommended: evict the
-   longest-idle connection for a new one, as specified; the alternative keeps
-   idle clients and refuses new ones until an idle timeout.
-5. **Agreeing duplicate `Content-Length`.** The parser accepts them today, as
-   RFC 9112 permits. Recommended: keep; refusing them is stricter and also
-   permitted.
-6. **A refused pool thread for a user module** (§9). Recommended: trap in phase
-   5; later, a manifest form saying how a module's calls report it.
-7. **`carriers:`.** Recommended: always written, since it is a resource size.
-8. **Chunked requests and responses.** Recommended: the next HTTP change
-   after phase 3.
-9. **Process signals as a wait-set source** (`SIGTERM` for a graceful
-   shutdown). It needs the signal blocked process-wide, which 0250 §11 leaves to
-   the host. Recommended: later, with its own record.
-10. **A simulated `Io` with a virtual clock** for tests. A loop knows when every
-    fiber is parked; threads blocked in the kernel do not. Recommended:
-    consider after phase 4.
+3. **Recoverable pool exhaustion for user modules** (§9): the manifest form
+   and how a wrapper delivers the error.
+4. **`SIGCHLD` as a source**, with the process record that would own a child.
