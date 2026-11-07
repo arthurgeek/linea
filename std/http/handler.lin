@@ -31,6 +31,71 @@ impl[P: Allocator] Handler[(), P] for fn(request: Request[P]) -> Result[Response
     }
 }
 
+// What a handler factory returns: a handler, or a `Result` holding a handler
+// or the reason it could not be made. `serve` builds one handler per serving
+// task by calling a factory and reading its answer through `made`. A factory
+// that cannot fail returns its handler, which `made` answers as `.Ok`. One
+// that opens something for its task, such as a database connection, returns
+// `Result[H, E]`, and serving ends with `ServeError.Handler` carrying the `E`
+// when one of its tasks gets `.Err`.
+pub trait MadeHandler[phantom P: Allocator] {
+    type Handler
+    type Error
+
+    fn made(sink self: Self) -> Result[Self.Handler, Self.Error]
+}
+
+impl[P: Allocator, H: Handler[(), P]] MadeHandler[P] for H {
+    type Handler = H
+    type Error = Never
+
+    fn made(sink self: Self) -> Result[H, Never] {
+        .Ok(self)
+    }
+}
+
+impl[P: Allocator, H: Handler[(), P], E] MadeHandler[P] for Result[H, E] {
+    type Handler = H
+    type Error = E
+
+    fn made(sink self: Self) -> Result[H, E] {
+        self
+    }
+}
+
+// Serving reads a factory's answer through this, as `serve` does.
+fn made_by[R: MadeHandler[mem.SystemAllocator], M: fn() -> R](make_handler: M) -> Result[R.Handler, R.Error] {
+    make_handler().made()
+}
+
+fn greeting_router() -> Router[()] {
+    var router: Router[()] = Router.new()
+    &router.route_raw("GET /hello", greeting).unwrap()
+    router
+}
+
+fn refused_router() -> Result[Router[()], Str] {
+    .Err("the database could not be opened")
+}
+
+test fn a_handler_is_made_as_itself_and_a_result_as_what_it_holds() {
+    defer var made = made_by(greeting_router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    var nothing = ()
+    let sent = new_request(arena.handle(), "GET", "/hello", body: "").unwrap()
+    let response = &made.serve_http(&nothing, sent.request()).unwrap()
+    testing.assert_ok_eq(response.text(), "hello", "the handler a factory returned was not the one made")?
+    let refused = match made_by(refused_router) {
+        Ok(router) => {
+            router.release()
+            ""
+        },
+        Err(reason) => reason,
+    }
+    testing.assert_eq(refused, "the database could not be opened", "the reason a handler was not made changed")?
+    .Ok(())
+}
+
 fn greeting[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
     text(request, "hello")
 }

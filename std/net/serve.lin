@@ -258,8 +258,9 @@ fn serve_connections[L: Acceptor + Owned + Shareable, H: Owned + Shareable + Cop
 
 // What a listener's owning task holds while tasks serve it: the listener, how
 // many connections it has handed out, the most it hands out, the pause after
-// a transient accept failure and when that failure was seen, and the failure
-// that ended accepting.
+// a transient accept failure and when that failure was seen, the failure
+// that ended accepting, and how many serving tasks are still getting ready to
+// serve, which it waits for before accepting anything.
 internal struct Accepting[L] {
     listener: L,
     served: UInt64,
@@ -267,7 +268,12 @@ internal struct Accepting[L] {
     pause_ms: UInt64,
     retried_at: Option[time.Instant],
     stopped: Option[NetError],
+    preparing: UInt64,
 }
+
+// How long a serving task waits before asking again while other tasks are
+// still getting ready to serve.
+let preparing_pause_ms: UInt64 = 1
 
 // What a serving task is handed when it asks for its next connection.
 // `Retried` goes to the one task whose accept failed, which reports it and
@@ -306,14 +312,18 @@ impl[L: Acceptor] Accepting[L] {
     // Keep `listener`, to hand out at most `limit` connections, or any number
     // when that is `.None`.
     internal fn open(sink listener: L, limit: Option[UInt64]) -> Accepting[L] where carries(listener) {
-        .{ listener, served = 0, limit = copy(limit), pause_ms = 0, retried_at = .None, stopped = .None }
+        .{ listener, served = 0, limit = copy(limit), pause_ms = 0, retried_at = .None, stopped = .None, preparing = 0 }
     }
 
     // Accept the next connection, unless accepting has stopped, handed out
-    // the most it may, or is waiting out the pause after a failed accept.
+    // the most it may, is waiting for serving tasks to get ready, or is
+    // waiting out the pause after a failed accept.
     internal fn next(inout self: Self) -> Next {
         if self.stopped.is_some() || reached(self.limit, self.served) {
             return .Stop
+        }
+        if self.preparing > 0 {
+            return .Wait(time.Duration.from_milliseconds(preparing_pause_ms))
         }
         match read self.retried_at {
             Some(at) => {
@@ -342,6 +352,53 @@ impl[L: Acceptor] Accepting[L] {
         }
     }
 
+    // Accept nothing until `count` serving tasks have each called `ready`, or
+    // been given up by `unstarted`, so no task waits in `accept` while
+    // another is still building what it serves with.
+    internal fn expect(inout self: Self, count: UInt64) {
+        self.preparing = count
+    }
+
+    // One serving task is ready to serve, or, when `failed`, could not get
+    // ready. A failed task stops accepting: every later `next` answers
+    // `Stop`, so serving ends without accepting anything more.
+    internal fn ready(inout self: Self, failed: Bool) {
+        if self.preparing > 0 {
+            self.preparing -= 1
+        }
+        if failed {
+            self.limit = .Some(self.served)
+        }
+    }
+
+    // `count` serving tasks that were expected will never run, because the
+    // tasks to run them could not be made.
+    internal fn unstarted(inout self: Self, count: UInt64) {
+        self.preparing = if count < self.preparing {
+            self.preparing - count
+        } else {
+            0
+        }
+    }
+
+    test fn an_acceptor_waits_for_every_expected_task_and_stops_when_one_fails() {
+        let listener = listen(loopback(0)).unwrap()
+        let client = connect(listener.local_address().unwrap()).unwrap()
+        var accepting = Accepting.open(listener, limit: .None)
+        &accepting.expect(3)
+        &accepting.ready(failed: false)
+        let one_preparing = told(&accepting.next())
+        &accepting.unstarted(1)
+        let still_preparing = told(&accepting.next())
+        &accepting.ready(failed: true)
+        let after_a_failure = told(&accepting.next())
+        accepting.finish().unwrap()
+        client.close().unwrap()
+        testing.assert_eq(one_preparing, Told.Waited, "a connection was handed out before every task was ready")?
+        testing.assert_eq(still_preparing, Told.Waited, "a connection was handed out before the last task was ready")?
+        testing.assert_eq(after_a_failure, Told.Stopped, "a connection was handed out after a task failed to get ready")?
+    }
+
     // Two clients wait, so a listener asked too early accepts one and the
     // test fails at `early` instead of blocking at `later`.
     test fn next_asks_the_listener_nothing_until_a_retry_has_waited_its_pause() {
@@ -366,7 +423,7 @@ impl[L: Acceptor] Accepting[L] {
     // The listener, for a thread that serves it alone because its owning
     // task could not be made.
     internal fn close_alone(sink self: Self) -> L where carries(self.listener) {
-        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped: _ } = self
+        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped: _, preparing: _ } = self
         listener
     }
 }
@@ -375,7 +432,7 @@ impl[L: Acceptor + io.Close] Accepting[L] {
     // Close the listener and report the accept failure that ended serving,
     // or the failure to close it.
     internal fn finish(sink self: Self) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
-        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped } = self
+        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped, preparing: _ } = self
         finish(listener, stopped)
     }
 }
@@ -387,7 +444,7 @@ impl[L: Acceptor + io.Close] Accepting[L] {
 // of `count`. Every task started is joined before this returns. When a task
 // cannot be made, the share it would have run is not run and this thread
 // runs its own share alone, so fewer than `count` tasks run, but at least
-// one does.
+// one does, and the acceptor is told that the share's tasks will not run.
 internal fn on_tasks[L: Acceptor + Owned + Shareable, C: Shareable + Copyable, R: Owned, W: Shareable + Copyable + fn(context: C, acceptor: task.Client[Accepting[L]]) -> R, J: Shareable + Copyable + fn(sink first: R, sink second: R) -> R](count: UInt64, acceptor: task.Client[Accepting[L]], context: C, work: W, combine: J) -> R {
     if count <= 1 {
         return work(context, acceptor)
@@ -406,6 +463,7 @@ internal fn on_tasks[L: Acceptor + Owned + Shareable, C: Shareable + Copyable, R
         },
         Err(unstarted) => {
             let Unstarted { body: _, reason: _ } = unstarted
+            acceptor.call([sink half] |inout accepting: Accepting[L]| &accepting.unstarted(half))
             on_tasks[L, C, R, W, J](count - half, acceptor, context, work, combine)
         },
     }
