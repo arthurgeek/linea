@@ -100,7 +100,7 @@ declaration  ::= visibility? "export"? (external | trait | reexport | constant |
                | attribute* visibility? "export"? (function | typedecl) | impl | template_impl | derive_impl
 visibility   ::= "pub" | "internal"
 attribute    ::= "@" attribute_item | "@" "(" attribute_item ("," attribute_item)* ","? ")"
-attribute_item ::= "opaque" | "linear" | "copyable" | "carrier" | "unshareable" | "derive" "(" trait_ref ("," trait_ref)* ","? ")"
+attribute_item ::= "opaque" | "linear" | "copyable" | "carrier" | "unshareable" | "shareable" | "derive" "(" trait_ref ("," trait_ref)* ","? ")"
 constant     ::= "let" name (":" type_name)? "=" expression unwrap?
 function     ::= ("test" "trap"?)? "fn" name generics? "(" parameters? ")" ("->" result)? function_where? block
 signature    ::= "fn" name generics? "(" parameters? ")" ("->" result)? function_where?
@@ -2012,7 +2012,11 @@ grant bounds that trust to the modules a reviewer was told to read
 is declared under the same grant, and one in a module the manifest does not
 list is refused: only a module trusted with C can write raw storage under a
 `read`, which is what makes a type unshareable
-([ADR 0250](adr/0250-tasks-are-structured-through-linear-sessions.md)).
+([ADR 0250](adr/0250-tasks-are-structured-through-linear-sessions.md)). A
+handle marked `@shareable` is declared under the grant too, and refused
+outside it: only a module trusted with C can vouch that C lets two threads
+read an object at once
+([ADR 0260](adr/0260-a-handle-to-a-c-object-is-not-shareable-unless-its-wrapper-vouches.md)).
 
 **[M-Foreign]** Only a module its root's manifest grants `extern` may use
 `std.ffi`: import it, call any function or method `std.ffi` declares, or take
@@ -3055,7 +3059,7 @@ once here. The predicate checks provenance. It neither requests a new
 implementation nor adds a bound to the generated header.
 
 Declaration attributes form a closed set. `@opaque`, `@linear`, `@copyable`,
-`@carrier`, `@unshareable`, and `@derive(Traits...)` may be written separately or
+`@carrier`, `@unshareable`, `@shareable`, and `@derive(Traits...)` may be written separately or
 as items of one `@(...)` group. Every group precedes the struct, enum, or
 newtype it modifies, before ordinary visibility. An empty group, unknown item,
 a repeated policy, `carrier` or `unshareable`, `linear` combined with `copyable`,
@@ -3065,7 +3069,15 @@ marks a type that is not `Shareable` (§5.3); it states no ownership policy and
 is declared only where [M-Extern] grants it. It excludes `copyable` because
 copies of a value reach what it reaches: a copyable type reaches shared state
 through a borrow of an `@unshareable` owner, whose observation every copy
-carries, as `mem.Handle` borrows its `mem.Arena`. `@carrier`
+carries, as `mem.Handle` borrows its `mem.Arena`. `@shareable` marks a
+handle to a C object ([T-ExternHandle]) as `Shareable`: it vouches that C lets
+two threads read the object at once, a promise the compiler believes as it
+believes an `extern` signature. It is declared only where [M-Extern] grants
+it, and only on the innermost handle, a sealed newtype that is not copyable;
+written on a struct or an enum, on a newtype without `opaque`, beside
+`copyable` or `unshareable`, or twice, it violates [S-Entry]. It lifts only
+the handle's own reason: a type holding a `@shareable` handle is `Shareable`
+where its other parts are. `@carrier`
 marks a struct or an enum; it states no ownership policy and combines with
 either. What it means is under the callable source clauses
 ([ADR 0216](adr/0216-a-carrier-type-supplies-its-signatures-default-contract.md)).
@@ -4639,7 +4651,11 @@ written `read`, and believes that each handle is the only one naming its
 object: an `extern` answering a handle answers a new or handed-over object,
 and the module trusted with C never builds a handle from an address another
 handle holds. A handle taken `sink` beside a `read` or plain lend of the same
-handle moves what the call still lends, which is [O-Move].
+handle moves what the call still lends, which is [O-Move]. The innermost
+handle, the sealed one, is not `Shareable` (§5.3) unless its declaration is
+marked `@shareable`, since a read of it may reach C, and C has not said two
+threads may read the object at once
+([ADR 0260](adr/0260-a-handle-to-a-c-object-is-not-shareable-unless-its-wrapper-vouches.md)).
 
 **[T-ExternAgreement]** Every `extern` declaration of one symbol names the one
 function the runtime provides under that symbol, so each module may declare the
@@ -5640,7 +5656,10 @@ parameter unseeded correct.
 
 **Shareable values.** A type is **Shareable** when two tasks may read one value
 of it at once, because no read of it writes. A type is not Shareable when it is
-declared `@unshareable`, or when anything reachable through its fields, variant
+declared `@unshareable`, when it is a handle to an object C holds whose
+declaration is not marked `@shareable` (the innermost handle of
+[T-ExternHandle]: a newtype that is not `copyable`, sealed in a module its
+root's manifest grants `extern`), or when anything reachable through its fields, variant
 payloads, array elements, newtype base, closure environment, the referent of an
 observation, the values an address, storage or slice names, what a
 `mem.Carried` carries, or the callable a `mem.ClosureEntry` stands for, is
@@ -5653,7 +5672,13 @@ takes the handle by `read` and advances the arena's cursor; `mem.Handle`
 borrows its arena, so it, `Vec[UInt8, mem.Handle]` and `borrow mem.Arena` are
 not Shareable;
 `mem.AllocationLog` is `@unshareable` too, since its allocator writes the log
-under a `read`. A type
+under a `read`. A handle to a C object is unshareable because its reads reach
+C, which may keep state inside the object (an error message, a cache, a
+cursor) that a call taking it `read` rewrites: the compiler cannot see C, so
+it does not assume two threads may read one object at once until the
+wrapper vouches with `@shareable`. A record holding the handle, such as a
+wrapper's `Database`, is unshareable through its field. An owning task keeps
+such a value on its own thread, so its client is still Shareable. A type
 parameter is not Shareable unless it is bounded `Shareable` or `Integer`. A
 function value is Shareable, since it names a function and holds nothing a
 closure would capture; a closure is Shareable unless one of its captures is
@@ -6095,7 +6120,8 @@ observe a `Shareable` place: a `read` capture's own observation of its source,
 and every observation a captured value holds, a value moved in by a `sink`
 capture included, one observation at a time. Two readers of a Shareable place
 cannot race, since neither may write it while the handle lives ([O-Borrow]),
-and a place that is not Shareable is written by a read. A value carrying an
+and a place that is not Shareable is written by a read, or reaches an object
+C holds that C has not said two threads may read. A value carrying an
 exclusive lend crosses only as the body's own `inout` capture of the place:
 the body is then the one writer, and the handle keeps every other use of the
 place out until the join. A lend held by another value the body captures, such

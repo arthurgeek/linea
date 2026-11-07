@@ -1234,6 +1234,7 @@ value points at anything; `Shareable` asks whether reading it writes anything:
 | `Str`, `borrow UInt64` | no: each is a view | yes: reading a view writes nothing |
 | `mem.Arena` | yes: it owns its memory and points at nothing | no: acquiring writes its cursor |
 | `mem.Handle`, `Vec[UInt8, mem.Handle]` | no: each borrows its arena | no: each reaches the arena's cursor |
+| A C library's sealed handle | yes: it holds an address | no: C may change the object when it is read, unless the wrapper marks it `@shareable` ([Calling C](11-calling-c.md)) |
 
 ### `@unshareable` — a type whose reads write
 
@@ -1324,8 +1325,9 @@ whole into another owner is read by that owner alone.
 If you know Rust, `T: Shareable` is close to `T: Sync`, a type whose shared
 references may be read from several threads at once, and `@unshareable` is
 close to a type that is `Send` but not `Sync`, such as one built on `Cell`: it
-may move to another owner whole, but not be read by two at once. Linea does not
-run tasks yet; when it does, everything a task reads must be `Shareable`.
+may move to another owner whole, but not be read by two at once. Everything a
+task reads while its creator may read it too must be `Shareable`
+([Tasks and sessions](13-tasks-and-sessions.md)).
 
 ## Saying that only part of the result points at it
 

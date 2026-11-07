@@ -1,0 +1,28 @@
+import std.io
+import std.session
+import std.task
+import counter
+
+use counter.Counter
+use session.Chan
+use session.End
+
+// The counter's handle is declared `@shareable`, so a task may read the
+// counter while `main` reads it too.
+fn main() -> Result[UInt8, io.IoError] {
+    var tally = Counter.open() else |_| {
+        return .Ok(1)
+    }
+    &tally.add(40)
+    let worker = task.start(
+        sink [read tally] |sink me: Chan[End]| {
+            io.println("the task reads {tally.total()}").unwrap()
+            me.close()
+        },
+    ).unwrap()
+    let mine = tally.total()
+    worker.close()
+    tally.close()
+    io.println("main reads {mine}")?
+    .Ok(0)
+}

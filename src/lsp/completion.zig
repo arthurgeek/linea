@@ -3597,8 +3597,8 @@ test "declaration attribute completion offers only closed item names" {
     for (cases) |case| {
         const offered = try offeredAt(gpa, case.text, case.offset);
         defer releaseAll(gpa, offered);
-        try testing.expectEqual(@as(usize, 6), offered.len);
-        for ([_][]const u8{ "opaque", "linear", "copyable", "carrier", "unshareable", "derive" }) |name| {
+        try testing.expectEqual(@as(usize, 7), offered.len);
+        for ([_][]const u8{ "opaque", "linear", "copyable", "carrier", "unshareable", "shareable", "derive" }) |name| {
             try testing.expect(holds(offered, name));
         }
     }

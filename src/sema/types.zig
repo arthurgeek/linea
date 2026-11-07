@@ -394,6 +394,11 @@ pub const Type = union(enum) {
         ownership_policy: OwnershipPolicy = .affine,
         /// Whether its declaration is marked `unshareable`.
         unshareable: bool = false,
+        /// Whether it is the innermost handle to an object C holds, and its
+        /// declaration does not vouch `shareable`: a read of it may reach C,
+        /// which has not said two threads may read the object at once, so it
+        /// is not `Shareable`.
+        foreign: bool = false,
     },
 };
 
@@ -7493,7 +7498,16 @@ pub const Typing = struct {
                 self.closureOf(closure.closure).lends,
             .struct_ => |record| record.unshareable,
             .enum_ => |sum| sum.unshareable,
-            .newtype => |nominal| nominal.unshareable,
+            .newtype => |nominal| nominal.unshareable or nominal.foreign,
+            else => false,
+        };
+    }
+
+    /// Whether `t` is a handle to an object C holds that its declaration does
+    /// not vouch `shareable`, which keeps it from being `Shareable`.
+    pub fn namesForeignObject(self: *const Typing, t: TypeId) bool {
+        return switch (self.get(t)) {
+            .newtype => |nominal| nominal.foreign,
             else => false,
         };
     }
@@ -9477,6 +9491,7 @@ pub const Typing = struct {
                 .newtype => |n| blk: {
                     const made = try self.addNewtype(name, n.ownership_policy, .poison, n.refined, n.lo, n.hi);
                     if (n.unshareable) self.markUnshareable(made);
+                    if (n.foreign) self.markForeignObject(made);
                     break :blk made;
                 },
                 else => return template,
@@ -11222,6 +11237,16 @@ pub const Typing = struct {
             try self.ensureFacts(t);
             try self.settleContainment(&self.connected_facts, .connected);
             return !self.connected_facts.values.items[@intFromEnum(t)];
+        }
+
+        /// Records that the declared newtype `t` is the innermost handle to an
+        /// object C holds and does not vouch `shareable`.
+        pub fn markForeignObject(self: *Builder, t: TypeId) void {
+            switch (self.pool.items[@intFromEnum(t)]) {
+                .newtype => |*nominal| nominal.foreign = true,
+                else => return,
+            }
+            self.unshareable_facts.invalidate(t);
         }
 
         /// Records that the declared type `t` is marked `unshareable`.

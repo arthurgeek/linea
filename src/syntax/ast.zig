@@ -436,6 +436,18 @@ pub const Ast = struct {
         return .none;
     }
 
+    /// The `shareable` item written on a type declaration, or `.none`. It
+    /// vouches that C lets two threads read the object a handle names at
+    /// once, so the handle is `Shareable`. Bounded by the attributes written
+    /// on the declaration.
+    pub fn declShareableToken(self: *const Ast, id: DeclId) TokenId {
+        if (self.declTag(id) != .newtype) return .none;
+        for (self.declAttributeGroups(id)) |group| {
+            for (self.attributeItems(group)) |item| if (item.kind == .shareable) return item.name;
+        }
+        return .none;
+    }
+
     /// How far a declaration's name reaches outside its own module.
     pub fn declVisibility(self: *const Ast, id: DeclId) node.Visibility {
         return self.decls.items(.visibility)[id.index()];

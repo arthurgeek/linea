@@ -2288,6 +2288,37 @@ const Analysis = struct {
         return try std.fmt.allocPrint(self.sink.arena, "`{s}` {s} a `{s}`", .{ parts.items, if (observes) "observes" else "is", name });
     }
 
+    /// The handle to a C object that keeps `ty` from being `Shareable`, where
+    /// one does: followed down the parts the `unshareable` table marks, through
+    /// fields a reader cannot select as well, since the report names the
+    /// handle rather than a path to it. Null where the walk reaches another
+    /// reason first, or a part it does not step into.
+    ///
+    /// **Bound:** each step enters a field held by value, a newtype's base, a
+    /// closure's environment or an observation's referent, and a type is
+    /// entered once, so the walk is as long as the types reachable from `ty`
+    /// along unshareable parts.
+    fn foreignObjectOf(self: *const Analysis, ty: types.TypeId) !?types.TypeId {
+        var seen: std.AutoHashMapUnmanaged(types.TypeId, void) = .empty;
+        defer seen.deinit(self.gpa);
+        var at = ty;
+        while (!self.typing.isShareable(at)) {
+            if ((try seen.getOrPut(self.gpa, at)).found_existing) return null;
+            if (self.typing.namesForeignObject(at)) return at;
+            if (self.typing.unshareableSeed(at)) return null;
+            at = switch (self.typing.get(at)) {
+                .newtype => |nominal| nominal.base,
+                .borrow => |observation| observation.referent,
+                .struct_, .closure => for (0..self.typing.fieldCount(at)) |i| {
+                    const part = self.typing.fieldType(at, @intCast(i));
+                    if (!self.typing.isShareable(part)) break part;
+                } else return null,
+                else => return null,
+            };
+        }
+        return null;
+    }
+
     fn crossingObservation(self: *Analysis, at: ExprId, own: bool, fact: Fact, observed_type: types.TypeId) !void {
         const arena = self.sink.arena;
         const owner = if (fact.origin.place.root != .none)
@@ -2297,10 +2328,22 @@ const Analysis = struct {
         const type_name = try writtenTypeName(arena, self.ast, self.program, self.res, self.typing, self.functionModule(), observed_type);
         // A closure has no name a reader could write, so it is called a closure.
         const subject = if (self.typing.get(observed_type) == .closure) "a closure" else try std.fmt.allocPrint(arena, "a `{s}`", .{type_name});
+        const foreign = try self.foreignObjectOf(observed_type);
+        const unshareable: []const u8 = if (foreign != null) "which names an object C holds" else "which is unshareable";
         const why = if (try self.unshareablePart(observed_type)) |part|
-            try std.fmt.allocPrint(arena, "{s} is not `Shareable`: {s}, which is unshareable", .{ subject, part })
+            try std.fmt.allocPrint(arena, "{s} is not `Shareable`: {s}, {s}", .{ subject, part, unshareable })
+        else if (foreign != null and foreign.? != observed_type)
+            try std.fmt.allocPrint(arena, "{s} is not `Shareable`: it reaches a `{s}`, which names an object C holds", .{ subject, try writtenTypeName(arena, self.ast, self.program, self.res, self.typing, self.functionModule(), foreign.?) })
+        else if (foreign != null)
+            try std.fmt.allocPrint(arena, "{s} is not `Shareable`: it names an object C holds", .{subject})
         else
             try std.fmt.allocPrint(arena, "{s} is not `Shareable`", .{subject});
+        // Nothing says C lets two threads read the object at once; only its
+        // wrapper can say so.
+        const note = if (foreign) |handle|
+            try std.fmt.allocPrint(arena, "C has not said two threads may read this object at once; move it into one task, or keep it in an owning task (`task.own`) and give other tasks its client; if its C library allows concurrent reads, its wrapper may declare `{s}` `@shareable`", .{try writtenTypeName(arena, self.ast, self.program, self.res, self.typing, self.functionModule(), handle)})
+        else
+            "reading this value may change it; move it into one task, or give the task a value that reading never changes";
         const message = if (own)
             try std.fmt.allocPrint(arena, "a task cannot read {s} while its creator may read it too: {s}", .{ owner, why })
         else
@@ -2314,7 +2357,7 @@ const Analysis = struct {
                 .span = self.ast.exprSpan(at),
                 .message = if (own) "this capture is read by the task" else "this capture observes it",
             }}),
-            .notes = try arena.dupe([]const u8, &.{"reading this value may change it; move it into one task, or give the task a value that reading never changes"}),
+            .notes = try arena.dupe([]const u8, &.{note}),
         });
     }
 

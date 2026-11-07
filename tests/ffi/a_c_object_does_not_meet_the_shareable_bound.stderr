@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Shareable`, and `Counter` is not `Shareable`: it holds a `counter.Handle`, which names an object C holds
+  --> tests/ffi/a_c_object_does_not_meet_the_shareable_bound/main.lin:15:18
+   |
+15 |     let status = read_from_any_task(tally)
+   |                  ^^^^^^^^^^^^^^^^^^ `Counter` is not `Shareable`; keep it in one task or in an owning task, declare `counter.Handle` `@shareable` in its wrapper if its C library lets two threads read one object at once, or drop the bound

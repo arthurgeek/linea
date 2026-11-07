@@ -784,6 +784,14 @@ error[O-Borrow]: this operation invalidates a place that a later observation sti
    |                         ------ the observation is still used here
 ```
 
+Reading never writes an array of numbers, so it is `Shareable`. Two kinds of
+value are not. An arena's handle writes the arena's cursor each time it is
+read ([Borrowing](06-borrowing.md)). And a handle to an object C holds may be
+read by C in ways the compiler cannot see, so it is not `Shareable` unless the
+module that wraps the C library vouches for it; [Calling C](11-calling-c.md)
+shows the refusal and the `@shareable` mark. Either kind may still move whole
+into one task, or live in an owning task, below.
+
 ## No data races and no locks
 
 A data race is two threads touching the same memory at once, at least one of

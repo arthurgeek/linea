@@ -849,6 +849,8 @@ fn typecheckInternal(
         const gop = try c.decl_of_type.getOrPut(gpa, t);
         if (!gop.found_existing) gop.value_ptr.* = each.id;
         if (ast.declUnshareableToken(each.id) != .none) c.builder.markUnshareable(t);
+        if (intrinsics.sealsForeignObject(program, ast, each.id) and ast.declShareableToken(each.id) == .none)
+            c.builder.markForeignObject(t);
     }
 
     z_decltypes.end();
@@ -1372,6 +1374,10 @@ fn typecheckInternal(
             if (!m.externs) {
                 const unshareable = ast.declUnshareableToken(d);
                 if (unshareable != .none) try c.reportUngranted(unshareable, "an `@unshareable` type", "drop `@unshareable`");
+                // `@shareable` vouches for C, which only a module trusted
+                // with C can do.
+                const shareable = ast.declShareableToken(d);
+                if (shareable != .none) try c.reportUngranted(shareable, "a `@shareable` handle", "drop `@shareable`");
             }
             if (m.externs and foreign_module != .none and c.current != foreign_module)
                 try c.checkForeignPublished(d, foreign_module);
@@ -11683,7 +11689,15 @@ const Checker = struct {
         const held_name = try self.typeName(held);
         const seed_name = try self.typeName(witness.seed);
         var help = self.unmetBoundHelp(bound);
-        help.another_value = if (which == .shareable) "pass a value that reading never changes" else "pass a value that holds no end of a session";
+        // A handle to a C object is unshareable because nothing says C lets
+        // two threads read the object at once; only its wrapper can say so.
+        const foreign = which == .shareable and self.builder.view().namesForeignObject(witness.seed);
+        help.another_value = if (foreign)
+            try std.fmt.allocPrint(self.sink.arena, "keep it in one task or in an owning task, declare `{s}` `@shareable` in its wrapper if its C library lets two threads read one object at once", .{seed_name})
+        else if (which == .shareable)
+            "pass a value that reading never changes"
+        else
+            "pass a value that holds no end of a session";
         const edit: Edit = if (self.builder.get(witness.seed) == .parameter)
             try self.boundsEdit(spelled, witness.seed)
         else
@@ -11691,9 +11705,12 @@ const Checker = struct {
         const label = try self.unmetLabel(help, edit);
         const file = self.ast.fileOf(at);
 
-        // What the seed itself is, for a declared type: unshareable, an end
-        // of a session, or an erased closure that may hold one.
-        const declared: []const u8 = if (which == .shareable)
+        // What the seed itself is, for a declared type: a handle to a C
+        // object, unshareable, an end of a session, or an erased closure that
+        // may hold one.
+        const declared: []const u8 = if (foreign)
+            "which names an object C holds"
+        else if (which == .shareable)
             "which is unshareable"
         else if (self.builder.declOfType(witness.seed) == self.raw_accesses.endpoint)
             "an end of a session, through which a call could wait on another task"
@@ -11709,7 +11726,9 @@ const Checker = struct {
         if (witness.steps.len == 0) return switch (self.builder.get(witness.seed)) {
             .parameter => self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `{s}`, and `{s}` may stand for a type that is not `{s}`", .{ subject, spelled, held_name, spelled }),
             .callable, .open_type => self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `{s}`, and `{s}` is a function value, which may hold a value that is not `{s}`", .{ subject, spelled, held_name, spelled }),
-            else => if (which == .shareable)
+            else => if (foreign)
+                self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Shareable`, and `{s}` names an object C holds, which C has not said two threads may read at once", .{ subject, held_name })
+            else if (which == .shareable)
                 self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Shareable`, and `{s}` is unshareable", .{ subject, held_name })
             else
                 self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Isolated`, and `{s}` {s}", .{

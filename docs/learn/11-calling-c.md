@@ -381,6 +381,160 @@ error[O-Leak]: `tally` (a linear `Counter`) is still owned when this path leaves
    = help: settle it first with `tally.close()`
 ```
 
+### A C object stays with one task unless its wrapper says otherwise
+
+A task may read what its creator reads when the value is `Shareable`
+([Tasks and sessions](13-tasks-and-sessions.md)). A handle is not: a call that
+takes it `read` promises only that C leaves the object as it was, not that C
+lets two threads into it at once. Many C libraries keep state inside an object
+they hand out by `const` pointer, such as SQLite's last error message, and the
+compiler cannot read C to find out. So a sealed handle that is not `copyable`,
+declared in a module trusted with C, is not `Shareable`, and neither is any
+type that holds one, like `Counter`. Nothing names the library or the type:
+the rule reads `@opaque`, the ownership policy and the manifest's grant, so
+every wrapper is covered the moment it declares its handle.
+
+`shared/linea.json`:
+
+```json
+{ "extern": ["counter"], "native": ["counter/counter.c"] }
+```
+
+`shared/counter/counter.c`:
+
+```c
+#include <stdint.h>
+#include <stdlib.h>
+
+struct counter {
+    int64_t total;
+};
+
+struct counter *counter_open(void) { return calloc(1, sizeof(struct counter)); }
+
+void counter_add(struct counter *counter, int8_t amount) { counter->total += amount; }
+
+int64_t counter_total(const struct counter *counter) { return counter->total; }
+
+void counter_close(struct counter *counter) { free(counter); }
+```
+
+`shared/counter/counter.lin`:
+
+```linea
+// A `struct counter *`, sealed in a newtype only this module can make.
+@(opaque, linear)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+extern fn counter_add(counter: Handle, amount: Int8)
+
+extern fn counter_total(read counter: Handle) -> Int64
+
+extern fn counter_close(sink counter: Handle)
+
+@(opaque, linear)
+struct Counter { handle: Handle }
+
+pub enum OpenError { OutOfMemory }
+
+impl Counter {
+    pub fn open() -> Result[Counter, OpenError] {
+        let address = counter_open()
+        if address == 0 {
+            return .Err(.OutOfMemory)
+        }
+        .Ok(.{ handle = Handle(address) })
+    }
+
+    pub fn add(inout self: Self, amount: Int8) {
+        counter_add(self.handle, amount)
+    }
+
+    pub fn total(self: Self) -> Int64 {
+        counter_total(self.handle)
+    }
+
+    pub fn close(sink self: Self) {
+        let Counter { handle: handle } = self
+        counter_close(handle)
+    }
+}
+```
+
+`shared/main.lin`:
+
+```linea
+import std.io
+import std.session
+import std.task
+import counter
+
+use counter.Counter
+use session.Chan
+use session.End
+
+fn main() -> Result[UInt8, io.IoError] {
+    var tally = Counter.open() else |_| {
+        return .Ok(1)
+    }
+    &tally.add(40)
+    // The task reads the counter while `main` reads it too.
+    let worker = task.start(
+        sink [read tally] |sink me: Chan[End]| {
+            io.println("the task reads {tally.total()}").unwrap()
+            me.close()
+        },
+    ).unwrap()
+    let mine = tally.total()
+    worker.close()
+    tally.close()
+    io.println("main reads {mine}")?
+    .Ok(0)
+}
+```
+
+```
+error[O-Cross]: a task cannot read `tally` while its creator may read it too: a `Counter` is not `Shareable`: it reaches a `counter.Handle`, which names an object C holds
+  --> shared/main.lin:17:20
+   |
+17 |         sink [read tally] |sink me: Chan[End]| {
+   |                    ^^^^^ this capture is read by the task
+   |
+   = help: C has not said two threads may read this object at once; move it into one task, or keep it in an owning task (`task.own`) and give other tasks its client; if its C library allows concurrent reads, its wrapper may declare `counter.Handle` `@shareable`
+```
+
+The help names three ways on. Moving the counter into the task with
+`[sink tally]` leaves one reader. An owning task keeps the counter on its own
+thread and runs each call against it in turn, so C sees one thread whatever
+the library allows ([The owning-task pattern](13-tasks-and-sessions.md#the-owning-task-pattern)).
+And where the C library documents an object as safe to read from several
+threads at once, the wrapper says so on the handle with `@shareable`. This
+counter's `counter_total` only reads a number that nothing changes while a
+`read` of the handle is alive, so the wrapper may vouch for it:
+
+<!-- guide: edit shared/counter/counter.lin 1-3 // A `struct counter *`, sealed in a newtype only this module can make. … type Handle = UInt64 -->
+```linea
+// A `struct counter *`, sealed in a newtype only this module can make.
+// `counter_total` reads the total and writes nothing, so two threads may
+// read one counter at once.
+@(opaque, linear, shareable)
+type Handle = UInt64
+```
+
+```
+the task reads 40
+main reads 40
+```
+
+`@shareable` is a promise the compiler believes, as it believes an `extern`
+signature, so only a module its manifest grants `extern` may write it, and
+only on the sealed handle itself. A record holding a `@shareable` handle is
+`Shareable` where its other fields are. If you know Rust, this is
+`unsafe impl Sync for Handle {}`: the wrapper's author vouches for what the
+compiler cannot see.
+
 ### `inout` passes the address of a value
 
 A parameter declared `inout` crosses as the address of the place it lends,
@@ -1668,6 +1822,11 @@ against the C library's documentation:
 6. C calls a callback only during the call that passed it.
 7. Every length you pass to C, or to `copy_bytes`, is the length of the
    memory it describes.
+8. A handle marked `@shareable` names an object the C library lets two
+   threads read at once, through every `extern` that takes it `read`. Without
+   the mark the compiler keeps each handle to one task at a time. A C pointer
+   kept in a plain integer field rather than in a handle is not followed at
+   all, so keep every C object in a handle.
 
 The compiler holds the rest: an `extern` is private to its module, an
 `extern` answering a `CText` states what it points into, a module that is not

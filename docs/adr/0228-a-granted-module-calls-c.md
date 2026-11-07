@@ -14,7 +14,11 @@ and boundary predicate it shares, and
 question of a library's link line it answers. Extended by
 [0246](0246-a-call-holds-what-it-lends-until-it-runs.md): a handle passed
 `read` and `sink` to one call is [O-Move], and a handle lent to change is a
-mutation of the one [N-Aliased] routine.
+mutation of the one [N-Aliased] routine. Extended by
+[0260](0260-a-handle-to-a-c-object-is-not-shareable-unless-its-wrapper-vouches.md):
+the innermost handle is not `Shareable` unless its declaration is marked
+`@shareable`, which a wrapper writes only where C lets two threads read the
+object at once.
 
 ## Context
 

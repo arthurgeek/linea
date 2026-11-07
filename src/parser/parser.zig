@@ -709,6 +709,7 @@ const Parser = struct {
                 if (attributes.carrier != .none and self.builder.decls.items(.tag)[d.index()] == .newtype) {
                     try self.reportAt(.s_entry, attributes.carrier, "a carrier is a struct or an enum", "a newtype names one existing type; mark a struct or an enum instead");
                 }
+                if (type_target and attributes.shareable != .none) try self.checkShareable(attributes, self.builder.decls.items(.tag)[d.index()] == .newtype);
                 if (type_target) self.builder.markAttachedDeriveTraits(d, attributes.derive_traits);
                 if (type_target and attributes.sealed) {
                     if (visibility != .private) {
@@ -776,7 +777,8 @@ const Parser = struct {
     /// Whether the cursor sits on an attribute word written without its `@`.
     fn atBareAttributeWord(self: *const Parser) bool {
         return self.cursor.at(.keyword_opaque) or self.cursor.at(.keyword_linear) or
-            self.cursor.at(.keyword_copyable) or self.cursor.at(.keyword_carrier) or self.cursor.at(.keyword_unshareable);
+            self.cursor.at(.keyword_copyable) or self.cursor.at(.keyword_carrier) or self.cursor.at(.keyword_unshareable) or
+            self.cursor.at(.keyword_shareable);
     }
 
     /// Reports a bare attribute word and steps over it. Every word
@@ -785,10 +787,12 @@ const Parser = struct {
     fn reportBareAttributeWord(self: *Parser, after_visibility: bool) !void {
         const carrier = self.cursor.at(.keyword_carrier);
         const unshareable = self.cursor.at(.keyword_unshareable);
+        const shareable = self.cursor.at(.keyword_shareable);
         const word = self.cursor.advance();
-        if (carrier or unshareable) {
+        if (carrier or unshareable or shareable) {
             const help = if (after_visibility) "write `@` before this word, ahead of the visibility" else "write `@` before this word";
-            return self.reportAt(.s_entry, word, if (carrier) "carrier is a declaration attribute" else "unshareable is a declaration attribute", help);
+            const message = if (carrier) "carrier is a declaration attribute" else if (unshareable) "unshareable is a declaration attribute" else "shareable is a declaration attribute";
+            return self.reportAt(.s_entry, word, message, help);
         }
         const help = if (after_visibility) "write `@` before this policy, ahead of the visibility" else "write `@` before this policy";
         try self.reportAt(.s_entry, word, "type policies are declaration attributes", help);
@@ -809,6 +813,8 @@ const Parser = struct {
         carrier: TokenId = .none,
         /// The `unshareable` item, where one was written.
         unshareable: TokenId = .none,
+        /// The `shareable` item, where one was written.
+        shareable: TokenId = .none,
     };
 
     fn parseAttributes(self: *Parser) !ParsedAttributes {
@@ -833,7 +839,7 @@ const Parser = struct {
                 try self.reportAt(.s_entry, open, "an attribute group is not empty", "name at least one closed attribute");
             }
             if (open == .none and (self.cursor.atEnd() or self.atDeclaration()) and !self.atAttributeItem() and !self.cursor.at(.keyword_derive)) {
-                try self.reportAt(.s_entry, at, "expected an attribute name after `@`", "use `opaque`, `linear`, `copyable`, `carrier`, `unshareable`, or `derive(...)`");
+                try self.reportAt(.s_entry, at, "expected an attribute name after `@`", "use `opaque`, `linear`, `copyable`, `carrier`, `unshareable`, `shareable`, or `derive(...)`");
                 try self.builder.addAttributeItem(.{
                     .kind = .unknown,
                     .name = at,
@@ -869,6 +875,10 @@ const Parser = struct {
                     kind = .unshareable;
                     if (result.unshareable != .none) try self.reportAt(.s_entry, item_at, "an attribute is written once", "remove the repeated `unshareable`");
                     if (result.unshareable == .none) result.unshareable = item_at;
+                } else if (self.cursor.eat(.keyword_shareable) != null) {
+                    kind = .shareable;
+                    if (result.shareable != .none) try self.reportAt(.s_entry, item_at, "an attribute is written once", "remove the repeated `shareable`");
+                    if (result.shareable == .none) result.shareable = item_at;
                 } else if (self.cursor.eat(.keyword_derive) != null) {
                     kind = .derive;
                     if (!self.cursor.at(.l_paren)) {
@@ -883,7 +893,7 @@ const Parser = struct {
                         if (traits.len() == 0) try self.reportAt(.t_derive, item_at, "a derive request is not empty", "name at least one trait");
                     }
                 } else {
-                    try self.reportAt(.s_entry, item_at, "attribute names are closed", "use `opaque`, `linear`, `copyable`, `carrier`, `unshareable`, or `derive(...)`");
+                    try self.reportAt(.s_entry, item_at, "attribute names are closed", "use `opaque`, `linear`, `copyable`, `carrier`, `unshareable`, `shareable`, or `derive(...)`");
                     // The rest of this item is part of the refused name, up to
                     // the separator or the group's end.
                     if (!self.cursor.at(.comma) and !self.cursor.at(.r_paren) and !self.cursor.atEnd()) _ = self.cursor.advance();
@@ -933,12 +943,25 @@ const Parser = struct {
         result.groups = .{ .start = group_start, .end = self.builder.attributeGroupMark() };
     }
 
+    /// `shareable` vouches for the C object a handle names, and only a sealed
+    /// newtype that is not copyable is a handle: a struct or an enum is
+    /// `Shareable` where its parts are, an unsealed newtype can be made from
+    /// any number, and every copy of a copyable one names the object too.
+    fn checkShareable(self: *Parser, attributes: ParsedAttributes, newtype: bool) !void {
+        const at = attributes.shareable;
+        if (!newtype) return self.reportAt(.s_entry, at, "only a newtype names an object C holds, so `shareable` vouches for nothing here", "a struct or an enum is `Shareable` where its parts are; drop `shareable`");
+        if (attributes.unshareable != .none) return self.reportAt(.s_entry, at, "shareable and unshareable are exclusive", "keep the one that says whether a read of this type writes");
+        if (attributes.saw_copyable) return self.reportAt(.s_entry, at, "a copyable newtype names no object C holds, so `shareable` vouches for nothing", "drop `shareable`; a copyable type is `Shareable` where what it holds is");
+        if (!attributes.sealed) return self.reportAt(.s_entry, at, "only a sealed newtype names an object C holds, so `shareable` vouches for nothing here", "write `opaque` beside it on the handle, or drop `shareable`");
+    }
+
     fn atAttributeItem(self: *const Parser) bool {
         return self.cursor.at(.keyword_opaque) or
             self.cursor.at(.keyword_linear) or
             self.cursor.at(.keyword_copyable) or
             self.cursor.at(.keyword_carrier) or
             self.cursor.at(.keyword_unshareable) or
+            self.cursor.at(.keyword_shareable) or
             (self.cursor.at(.keyword_derive) and self.cursor.peekAt(1) == .l_paren);
     }
 
@@ -1915,6 +1938,7 @@ const Parser = struct {
             .keyword_copyable,
             .keyword_carrier,
             .keyword_unshareable,
+            .keyword_shareable,
             .keyword_test,
             .keyword_template,
             .keyword_derive,
@@ -9712,14 +9736,40 @@ test "an unshareable mark attaches to any type declaration and is written once" 
     try testing.expectEqual(@as(u32, 1), bare.errors);
 }
 
+test "a shareable mark vouches only for a sealed newtype that is not copyable" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const accepted = try parseProgramText(gpa,
+        \\@(opaque, linear, shareable)
+        \\type Handle = UInt64
+        \\@(opaque, shareable)
+        \\type Name = UInt64
+    );
+    try testing.expectEqual(@as(u32, 0), accepted.errors);
+    const refused = [_][]const u8{
+        "@shareable\nstruct Pair { first: UInt64 }\n",
+        "@(opaque, shareable)\nenum Mark { Start, End }\n",
+        "@(linear, shareable)\ntype Unsealed = UInt64\n",
+        "@(opaque, copyable, shareable)\ntype Copied = UInt64\n",
+        "@(opaque, linear, shareable, unshareable)\ntype Both = UInt64\n",
+        "@(opaque, shareable, shareable)\ntype Twice = UInt64\n",
+        "shareable type Bare = UInt64\n",
+    };
+    for (refused) |text| {
+        const got = try parseProgramText(gpa, text);
+        try testing.expectEqual(@as(u32, 1), got.errors);
+    }
+}
+
 test "every word that starts a declaration is consumed when written bare" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
     const words = [_][]const u8{
-        "pub",     "internal", "export", "opaque", "linear", "copyable", "carrier", "unshareable", "test",  "template", "derive",
-        "impl",    "fn",       "import", "use",    "enum",   "struct",   "let",     "type",        "alias", "trait",    "extern",
-        "default", "@",
+        "pub",     "internal", "export",    "opaque", "linear", "copyable", "carrier", "unshareable", "test",  "template", "derive",
+        "impl",    "fn",       "import",    "use",    "enum",   "struct",   "let",     "type",        "alias", "trait",    "extern",
+        "default", "@",        "shareable",
     };
     for (words) |word| {
         // Parsing returns only if recovery steps over the word.

@@ -61,9 +61,20 @@ pub fn isForeignHandle(program: *const ExpandedProgram, ast: *const Ast, pool: a
         };
         const declared = pool.declOfType(at) orelse return false;
         if (ast.declOwnershipPolicy(declared) == .copyable) return false;
-        if (ast.declVisibility(declared) == .opaque_ and program.get(program.moduleOf(declared)).externs) return true;
+        if (sealsForeignObject(program, ast, declared)) return true;
         at = newtype.base;
     }
+}
+
+/// Whether the declaration `d` is the innermost handle to an object C holds:
+/// a newtype that is not `copyable`, sealed in a module its root's manifest
+/// grants `extern`. Only such a module makes one from an address. A read of
+/// the handle may reach C, which has not said two threads may read the object
+/// at once, so the type is not `Shareable` unless its declaration is marked
+/// `shareable`; [T-ExternHandle] and the `unshareable` table both ask here.
+pub fn sealsForeignObject(program: *const ExpandedProgram, ast: *const Ast, d: DeclId) bool {
+    return ast.declTag(d) == .newtype and ast.declOwnershipPolicy(d) != .copyable and
+        ast.declVisibility(d) == .opaque_ and program.get(program.moduleOf(d)).externs;
 }
 
 /// Whether parameter `k` of the `extern` `d`, of type `t`, lends C a handle
