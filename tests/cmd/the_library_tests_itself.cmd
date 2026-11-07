@@ -373,9 +373,12 @@ The library tests itself.
   ok    http.a_form_of_the_most_pairs_is_answered_in_the_smallest_arena
   ok    http.a_generated_id_takes_nothing_from_the_request_allocator
   ok    http.a_get_is_answered_with_a_status_header
+  ok    http.a_handler_a_sequential_server_cannot_make_closes_the_listener
   ok    http.a_handler_cannot_set_the_status_as_a_header
   ok    http.a_handler_error_before_headers_answers_its_status
   ok    http.a_handler_error_is_answered_with_its_status_and_message
+  ok    http.a_handler_is_made_as_itself_and_a_result_as_what_it_holds
+  ok    http.a_handler_one_task_cannot_make_ends_serving_before_anything_is_accepted
   ok    http.a_handlers_own_id_is_replaced
   ok    http.a_head_request_is_answered_with_the_head_alone
   ok    http.a_header_error_displays_its_reason
@@ -390,6 +393,7 @@ The library tests itself.
   ok    http.a_listen_and_serve_error_displays_its_cause
   ok    http.a_listening_server_announces_the_port_it_bound_before_accepting
   ok    http.a_listening_server_answers_on_every_task_it_serves_with
+  ok    http.a_listening_server_whose_handler_cannot_be_made_asks_its_factory_once
   ok    http.a_literal_beats_a_parameter_at_the_same_position
   ok    http.a_logged_router_logs_each_exchange_it_serves
   ok    http.a_malformed_header_is_refused
@@ -566,7 +570,7 @@ The library tests itself.
   ok    http.each_limit_answers_its_status_at_one_past_the_bound
   ok    http.each_request_gets_a_time_ordered_uuid
   ok    http.each_task_routes_path_parameters_through_its_own_router
-  ok    http.either_refused_keeps_a_refusal_from_either_share
+  ok    http.either_unbegun_keeps_a_reason_from_either_share
   ok    http.every_connection_is_answered_503_while_the_parent_refuses_the_arena
   ok    http.every_exchange_returns_its_arena_to_the_parent
   ok    http.every_shape_releases_its_extractors_last_first_and_stops_at_a_refusal
@@ -1200,6 +1204,7 @@ The library tests itself.
   ok    net.a_shut_down_writer_ends_the_peer_input
   ok    net.a_silent_peer_times_out_the_read
   ok    net.an_accept_attempt_retries_failures_with_a_growing_pause_that_a_connection_resets
+  ok    net.an_acceptor_waits_for_every_expected_task_and_stops_when_one_fails
   ok    net.an_address_debugs_its_parts
   ok    net.an_address_displays_as_dotted_octets_and_a_port
   ok    net.an_address_keeps_the_parts_it_was_built_from
@@ -1242,6 +1247,7 @@ The library tests itself.
   ok    option.unwrap_or_returns_some_or_the_eager_fallback
   ok    option.unwrap_returns_some
   ok    option.unwrap_traps_on_none
+  ok    process.raising_the_open_file_limit_twice_answers_the_same_limit
   ok    range.a_descending_inclusive_range_yields_the_end_it_stops_at
   ok    range.a_descending_range_yields_its_values_downwards
   ok    range.a_range_displays_its_source_notation
@@ -1516,4 +1522,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1513 passed, 0 failed
+  1519 passed, 0 failed

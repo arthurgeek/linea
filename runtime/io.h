@@ -54,5 +54,10 @@ long linea_set_mode(int fd, unsigned long mode);
 long linea_publish_at(int parent, unsigned long from, unsigned long from_extent,
                       unsigned long to, unsigned long to_extent, uint8_t replace);
 long linea_unlink_at(int parent, unsigned long at, unsigned long extent);
+/* Raises the soft limit on open descriptors to the hard limit, capped where
+ * the system caps a process (`kern.maxfilesperproc` on macOS), and answers the
+ * soft limit now in force, or a negated errno. A limit the soft limit already
+ * reaches is left alone. */
+long linea_raise_open_files(void);
 
 #endif

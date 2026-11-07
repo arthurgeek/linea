@@ -1,0 +1,34 @@
+import std.io
+import std.testing
+
+// The runtime raises the soft limit on open descriptors toward the hard
+// limit, and answers the soft limit now in force, or a negated errno.
+extern fn linea_raise_open_files() -> Int64
+
+// Raise the number of files and sockets this process may hold open at once
+// as far as the system allows, and return that number. A process starts with
+// a soft limit, which it may raise itself up to a hard limit an administrator
+// sets: a macOS shell starts programs with a soft limit of 256 and a hard
+// limit macOS caps at `kern.maxfilesperproc`, and Linux commonly with 1024
+// and 524288. A server that keeps several files open per serving task, such
+// as a database connection and its log, calls this before it serves, and
+// compares what it gets with what it needs. A limit the soft limit already
+// reaches is left as it is. It fails with an `io.IoError` of operation
+// `Configure` when the system refuses to read or change the limit.
+pub fn raise_open_file_limit() -> Result[UInt64, io.IoError] {
+    let answered = linea_raise_open_files()
+    if answered < 0 {
+        return .Err(io.IoError.from_os(.Configure, Int32(-answered)))
+    }
+    .Ok(UInt64(answered))
+}
+
+// Raising the limit once reaches as far as the system allows, so raising it
+// again answers the same number.
+test fn raising_the_open_file_limit_twice_answers_the_same_limit() {
+    let first = raise_open_file_limit().unwrap()
+    let second = raise_open_file_limit().unwrap()
+    testing.assert(first > 0, "the open-file limit admits no file")?
+    testing.assert_eq(second, first, "raising the limit a second time changed it")?
+    .Ok(())
+}
