@@ -1,0 +1,25 @@
+// A handle held in a field of the returned record still observes the arena
+// this body opened and ends.
+import std.mem
+
+use mem.Arena
+use mem.Handle
+use mem.Lender
+use mem.SystemAllocator
+use mem.system
+
+struct Pair {
+    h: Handle[SystemAllocator],
+    n: UInt8,
+}
+
+fn pair_of_nothing() -> Pair {
+    let arena = Arena.open(system(), 4096)
+    defer arena.release()
+    .{ h = arena.handle(), n = 1 }
+}
+
+fn main() -> UInt8 {
+    let pair = pair_of_nothing()
+    pair.n - 1
+}

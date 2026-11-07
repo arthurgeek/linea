@@ -130,6 +130,7 @@ jobs:
         with:
           path: |
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/examples/outcomes
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/properties/outcomes
           key: outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -215,12 +216,25 @@ jobs:
 
       # A failed assertion or golden comparison still leaves completed program
       # outcomes. The runner checks their content and toolchain keys on reuse.
+      # A checked-library entry is one set of library modules, 19 to 45 MB
+      # (about 21 MB on average). The corpus imports some fifty-five sets,
+      # and reading an entry touches its time, so the sixty-four most
+      # recently used are kept: about 1.4 GB per lane. Each is keyed by the
+      # compiler's own image, so a changed compiler or library misses and
+      # writes anew; the step looks at entries only, never their locks or
+      # temporary files.
+      - name: Keep the newest checked libraries
+        if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
+        run: |
+          dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache"
+          if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
       - name: Save program outcomes
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: |
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/examples/outcomes
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/properties/outcomes
           key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
@@ -296,6 +310,7 @@ jobs:
         with:
           path: |
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/linea-cache
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/examples/outcomes
           key: outcomes-${{ github.job }}-${{ matrix.sanitizer }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
@@ -311,6 +326,19 @@ jobs:
         # runtime and the generated code under the sanitizer.
         run: nix develop --command zig build conformance --release=safe -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB-${{ matrix.sanitizer }}" -Dsanitize=${{ matrix.sanitizer }}
 
+      # A checked-library entry is one set of library modules, 19 to 45 MB
+      # (about 21 MB on average). The corpus imports some fifty-five sets,
+      # and reading an entry touches its time, so the sixty-four most
+      # recently used are kept: about 1.4 GB per lane. Each is keyed by the
+      # compiler's own image, so a changed compiler or library misses and
+      # writes anew; the step looks at entries only, never their locks or
+      # temporary files.
+      - name: Keep the newest checked libraries
+        if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
+        run: |
+          dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/linea-cache"
+          if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
+
       - name: Runtime C tests under ${{ matrix.sanitizer }}
         # The runtime's own C tests, built by `cc` with the sanitizer's
         # runtime linked, so the C the corpus reaches only through programs is
@@ -324,6 +352,7 @@ jobs:
         with:
           path: |
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/linea-cache
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/examples/outcomes
           key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
 
@@ -361,6 +390,7 @@ jobs:
         with:
           path: |
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/examples/outcomes
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/soundness/outcomes
           key: outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -459,12 +489,25 @@ jobs:
       - name: The examples' own tests pass
         run: nix develop --command zig build example-tests -Dwalkers=2
 
+      # A checked-library entry is one set of library modules, 19 to 45 MB
+      # (about 21 MB on average). The corpus imports some fifty-five sets,
+      # and reading an entry touches its time, so the sixty-four most
+      # recently used are kept: about 1.4 GB per lane. Each is keyed by the
+      # compiler's own image, so a changed compiler or library misses and
+      # writes anew; the step looks at entries only, never their locks or
+      # temporary files.
+      - name: Keep the newest checked libraries
+        if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
+        run: |
+          dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache"
+          if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
       - name: Save program outcomes
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: |
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/examples/outcomes
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/soundness/outcomes
           key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}

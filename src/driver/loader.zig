@@ -1,4 +1,5 @@
 const std = @import("std");
+const loader_mod = @This();
 const module_route = @import("../support/module_route.zig");
 const tracy = @import("../support/tracy.zig");
 const symbol_names = @import("../support/symbol.zig");
@@ -161,6 +162,13 @@ pub const LibraryPrefix = struct {
     interner: Interner,
 
     pub fn init(backing: std.mem.Allocator) !LibraryPrefix {
+        return initFor(backing, &.{});
+    }
+
+    /// The prelude's closure and the library modules in `dirs` with what
+    /// they import: the library a fresh load of a program importing those
+    /// modules loads.
+    pub fn initFor(backing: std.mem.Allocator, dirs: []const []const u8) !LibraryPrefix {
         var arena: std.heap.ArenaAllocator = .init(backing);
         errdefer arena.deinit();
         const gpa = arena.allocator();
@@ -179,6 +187,12 @@ pub const LibraryPrefix = struct {
             };
             defer loader.deinit();
             try loader.loadLibrary();
+            // The modules a program's own imports reach, beside the prelude's
+            // closure every program loads.
+            for (dirs) |dir| {
+                if (!libraryHolds(dir)) return error.InvalidLibraryPrefix;
+                _ = try loader.inLibrary(dir);
+            }
             if (sink.hasErrors()) return error.InvalidLibraryPrefix;
             break :blk .{
                 .modules = try loader.modules.toOwnedSlice(gpa),
@@ -232,13 +246,22 @@ pub const CheckedLibrary = struct {
     checked: @import("../sema/typecheck.zig").LibraryPrefix,
     disposals: DisposalPlan,
 
+    /// The prelude's closure, checked: what a program importing nothing
+    /// else from the library loads.
     pub fn init(backing: std.mem.Allocator) !*CheckedLibrary {
+        return initFor(backing, &.{});
+    }
+
+    /// The library modules a fresh load of a program importing `dirs` loads,
+    /// checked. A program resumes from it only where that load is exactly
+    /// these modules (`canResume`).
+    pub fn initFor(backing: std.mem.Allocator, dirs: []const []const u8) !*CheckedLibrary {
         const self = try backing.create(CheckedLibrary);
         errdefer backing.destroy(self);
         self.backing = backing;
         self.arena = std.heap.ArenaAllocator.init(backing);
         errdefer self.arena.deinit();
-        self.sources = try LibraryPrefix.init(backing);
+        self.sources = try LibraryPrefix.initFor(backing, dirs);
         errdefer self.sources.deinit();
         var sink = Sink.init(self.arena.allocator());
         self.resolved = try @import("../sema/resolve.zig").resolveLibraryPrefix(backing, &self.sources.program, &self.sources.interner, &sink);
@@ -272,20 +295,60 @@ pub const CheckedLibrary = struct {
         purpose: Purpose,
         ownership: MemoryOwnership,
     ) !Program {
+        return self.loadInputs(gpa, .{ .memory = ownership }, table, sink, interner, entry, null, files, purpose);
+    }
+
+    /// `loader.loadFromDisk`, with the library's sources in place of
+    /// loading the library where the program can resume from this library.
+    pub fn loadFromDisk(
+        self: *const CheckedLibrary,
+        gpa: std.mem.Allocator,
+        io: std.Io,
+        table: *FileTable,
+        sink: *Sink,
+        interner: *Interner,
+        entry: []const u8,
+        purpose: Purpose,
+    ) !Program {
+        return loadFromDiskWith(gpa, io, table, sink, interner, entry, purpose, true, self);
+    }
+
+    fn loadInputs(
+        self: *const CheckedLibrary,
+        gpa: std.mem.Allocator,
+        input: Input,
+        table: *FileTable,
+        sink: *Sink,
+        interner: *Interner,
+        entry: []const u8,
+        module: ?[]const u8,
+        files: []const InMemoryFile,
+        purpose: Purpose,
+    ) !Program {
         std.debug.assert(table.count() == 0 and interner.count() == 0);
         // The library compiled as itself shares nothing with the copy a
         // prefix holds; it is loaded on its own.
-        if (try isStandard(gpa, files, dirOfEntry(entry))) return loadInputs(gpa, .{ .memory = ownership }, table, sink, interner, entry, null, files, purpose, true, null);
+        if (try isStandard(gpa, files, dirOfEntry(entry))) return loader_mod.loadInputs(gpa, input, table, sink, interner, entry, module, files, purpose, true, null);
         const diagnostic_count = sink.list.items.len;
         const error_count = sink.error_count;
         const warning_count = sink.warning_count;
         interner.* = try Interner.initPrefix(gpa, &self.resolved.interner);
         for (self.sources.table.sources.items) |source| _ = try table.add(gpa, source);
         // Borrow while deciding eligibility: copied source buffers belong to the
-        // caller and cannot be reclaimed through Program or FileTable.
-        var candidate = try loadInputs(gpa, .{ .memory = .borrow }, table, sink, interner, entry, null, files, purpose, true, &self.sources);
-        const compatible = self.resolved.canResume(&candidate, interner);
-        if (compatible and ownership == .borrow) return candidate;
+        // caller and cannot be reclaimed through Program or FileTable. A disk
+        // load owns what it reads, so its candidate is the answer when it can
+        // resume.
+        const candidate_input: Input = switch (input) {
+            .memory => .{ .memory = .borrow },
+            .disk => input,
+        };
+        var candidate = try loader_mod.loadInputs(gpa, candidate_input, table, sink, interner, entry, module, files, purpose, true, &self.sources);
+        const compatible = try self.resolved.canResume(gpa, &candidate, interner);
+        const kept = switch (input) {
+            .memory => |ownership| ownership == .borrow,
+            .disk => true,
+        };
+        if (compatible and kept) return candidate;
         candidate.deinit(gpa);
         interner.deinit(gpa);
         table.deinit(gpa);
@@ -298,7 +361,7 @@ pub const CheckedLibrary = struct {
             interner.* = try Interner.initPrefix(gpa, &self.resolved.interner);
             for (self.sources.table.sources.items) |source| _ = try table.add(gpa, source);
         }
-        return loadInputs(gpa, .{ .memory = ownership }, table, sink, interner, entry, null, files, purpose, true, if (compatible) &self.sources else null);
+        return loader_mod.loadInputs(gpa, input, table, sink, interner, entry, module, files, purpose, true, if (compatible) &self.sources else null);
     }
 
     pub fn checkProgram(
@@ -311,6 +374,19 @@ pub const CheckedLibrary = struct {
         purpose: Purpose,
     ) !Semantics {
         return checkProgramInternal(gpa, scratch, program, source_interner, sink, purpose, self, false);
+    }
+
+    /// `loader.checkWhole`, resuming from this library where the program can.
+    pub fn checkWhole(
+        self: *const CheckedLibrary,
+        gpa: std.mem.Allocator,
+        scratch: std.mem.Allocator,
+        program: *const Program,
+        source_interner: *const Interner,
+        sink: *Sink,
+        purpose: Purpose,
+    ) !Semantics {
+        return checkWholeInternal(gpa, scratch, program, source_interner, sink, purpose, self);
     }
 
     /// Editor analysis prepares complete method lists at written selections.
@@ -725,6 +801,74 @@ pub fn loadFromDisk(
     purpose: Purpose,
     with_library: bool,
 ) !Program {
+    return loadFromDiskWith(gpa, io, table, sink, interner, entry, purpose, with_library, null);
+}
+
+/// The library modules the program at `entry` imports, directly or through
+/// one another, sorted and allocated in `gpa`: the modules beside the
+/// prelude's closure a checked library must hold for the program to resume
+/// from it. Null where the program cannot resume, judged from its own files
+/// loaded without the library, so a program that cannot pays nothing for
+/// reading one; a program that does not load is answered null too, and the
+/// ordinary load reports why.
+pub fn resumableLibraryOf(gpa: std.mem.Allocator, io: std.Io, entry: []const u8, purpose: Purpose) !?[]const []const u8 {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+    var table: FileTable = .empty;
+    var sink = Sink.init(scratch);
+    var interner: Interner = .empty;
+    const program = loadFromDiskWith(scratch, io, &table, &sink, &interner, entry, purpose, false, null) catch return null;
+    return resumableLibraryIn(gpa, &program);
+}
+
+/// `resumableLibraryOf` for a program held in memory.
+pub fn resumableLibraryOfMemory(gpa: std.mem.Allocator, entry: []const u8, files: []const InMemoryFile, purpose: Purpose) !?[]const []const u8 {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+    var table: FileTable = .empty;
+    var sink = Sink.init(scratch);
+    var interner: Interner = .empty;
+    const program = loadFromMemory(scratch, &table, &sink, &interner, entry, files, purpose, false, .borrow) catch return null;
+    return resumableLibraryIn(gpa, &program);
+}
+
+/// The library modules `program`, loaded without the checked library, holds,
+/// sorted, or null where its own files keep it from resuming.
+fn resumableLibraryIn(gpa: std.mem.Allocator, program: *const Program) !?[]const []const u8 {
+    if (!@import("../sema/resolve.zig").applicationMayResume(program)) return null;
+    var dirs: std.ArrayList([]const u8) = .empty;
+    for (program.modules) |module| {
+        if (module.library) try dirs.append(gpa, try gpa.dupe(u8, module.dir));
+    }
+    std.mem.sort([]const u8, dirs.items, {}, struct {
+        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.lessThan);
+    return try dirs.toOwnedSlice(gpa);
+}
+
+/// Whether the embedded library holds a module in `dir`.
+fn libraryHolds(dir: []const u8) bool {
+    for (library.files) |file| {
+        if (std.mem.endsWith(u8, file.path, ".lin") and std.mem.eql(u8, std.fs.path.dirname(file.path) orelse "", dir)) return true;
+    }
+    return false;
+}
+
+fn loadFromDiskWith(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    table: *FileTable,
+    sink: *Sink,
+    interner: *Interner,
+    entry: []const u8,
+    purpose: Purpose,
+    with_library: bool,
+    resumed_from: ?*const CheckedLibrary,
+) !Program {
     // A command line says which it means and is believed. Bounded by the
     // directory the compiler was run in, so a manifest further up names
     // somebody else's program and not this one.
@@ -767,6 +911,7 @@ pub fn loadFromDisk(
         });
     }
 
+    if (resumed_from) |checked| return checked.loadInputs(gpa, .{ .disk = io }, table, sink, interner, given, found.module, files.items, purpose);
     return loadInputs(gpa, .{ .disk = io }, table, sink, interner, given, found.module, files.items, purpose, with_library, null);
 }
 
@@ -3943,7 +4088,7 @@ fn checkProgramInternal(
     prepare_completions: bool,
 ) !Semantics {
     const retained = if (library_prefix) |prefix|
-        if (prefix.resolved.canResume(program, source_interner)) prefix else null
+        if (try prefix.resolved.canResume(gpa, program, source_interner)) prefix else null
     else
         null;
     const z_resolve = tracy.beginZone(@src(), "resolve");
@@ -4024,7 +4169,19 @@ pub fn checkWhole(
     sink: *Sink,
     purpose: Purpose,
 ) !Semantics {
-    var semantics = try checkProgram(gpa, scratch, program, source_interner, sink, purpose);
+    return checkWholeInternal(gpa, scratch, program, source_interner, sink, purpose, null);
+}
+
+fn checkWholeInternal(
+    gpa: std.mem.Allocator,
+    scratch: std.mem.Allocator,
+    program: *const Program,
+    source_interner: *const Interner,
+    sink: *Sink,
+    purpose: Purpose,
+    resumed_from: ?*const CheckedLibrary,
+) !Semantics {
+    var semantics = try checkProgramInternal(gpa, scratch, program, source_interner, sink, purpose, resumed_from, false);
     errdefer semantics.deinit(gpa);
     try checkInstantiations(gpa, &semantics, sink);
     return semantics;
@@ -5417,13 +5574,138 @@ test "checked library session resumes independent application checks" {
     }
 }
 
+test "checked library resumes a program that derives, with the diagnostics and MLIR of a fresh check" {
+    const prelude = try CheckedLibrary.init(testing.allocator);
+    defer prelude.deinit();
+    const with_json = try CheckedLibrary.initFor(testing.allocator, &.{"std/json"});
+    defer with_json.deinit();
+    const texts = [_][]const u8{
+        "@derive(Equatable, Debug)\nstruct Point { x: UInt8, y: UInt8 }\nfn main() -> UInt8 { let a: Point = .{ x = 1, y = 2 }; let b: Point = .{ x = 1, y = 2 }; if a == b { 0 } else { 1 } }",
+        "enum Shade { Light, Dark }\nderive Equatable for Shade\nfn main() -> UInt8 { if Shade.Light == Shade.Dark { 1 } else { 0 } }",
+        "@derive(Equatable)\nstruct Holder { inner: Missing }\nfn main() -> UInt8 { 0 }",
+        // A trait from a library module the prelude does not reach.
+        "import std.json\n@derive(json.Encode)\nstruct Reply { count: UInt8 }\nfn main() -> UInt8 { let _reply: Reply = .{ count = 3 }; 0 }",
+        // A generic type, whose implementation applies where its parameter's
+        // components meet the template's bounds.
+        "@derive(Equatable, Debug)\nstruct Pair[T] { left: T, right: T }\nfn main() -> UInt8 { let a: Pair[UInt8] = .{ left = 1, right = 2 }; let b: Pair[UInt8] = .{ left = 1, right = 2 }; if a == b { 0 } else { 1 } }",
+        // An enum whose cases carry payloads.
+        "@derive(Equatable, Debug)\nenum Reading { Missing, Celsius(Int32), Range(Int32, Int32) }\nfn main() -> UInt8 { let a: Reading = .Range(1, 4); let b: Reading = .Range(1, 4); if a == b and a != Reading.Missing { 0 } else { 1 } }",
+        // The traits the library derives for its own types, derived again
+        // here for an application type.
+        "@derive(Equatable, Equivalent, Hash)\nstruct Key { id: UInt32, tag: UInt8 }\nfn main() -> UInt8 { let a: Key = .{ id = 3, tag = 1 }; let b: Key = .{ id = 3, tag = 1 }; if a == b { 0 } else { 1 } }",
+        // Two modules' worth of generated names: one derive in two forms.
+        "struct Left { a: UInt8 }\nstruct Right { b: Left }\n@derive(Equatable)\nstruct Top { r: Right }\nderive Equatable for Left\nderive Equatable for Right\nfn main() -> UInt8 { let t: Top = .{ r = .{ b = .{ a = 1 } } }; if t == t { 0 } else { 1 } }",
+        // An application template, and a derive of it.
+        "trait Size {\n    fn size(self: Self) -> UInt64\n}\nimpl Size for UInt8 {\n    fn size(self: Self) -> UInt64 { 1 }\n}\ntemplate impl Size where reflect.components: Size {\n    fn size(self: Self) -> UInt64 {\n        var total: UInt64 = 0\n        for component in reflect.components(self) { total += Size.size(component) }\n        total\n    }\n}\n@derive(Size)\nstruct Two { a: UInt8, b: UInt8 }\nfn main() -> UInt8 { let two: Two = .{ a = 1, b = 2 }; if Size.size(two) == 2 { 0 } else { 1 } }",
+        // Refusals: a repeated trait, and a trait with no template.
+        "@derive(Equatable, Equatable)\nstruct Twice { a: UInt8 }\nfn main() -> UInt8 { 0 }",
+        "trait Plain {}\n@derive(Plain)\nstruct Bare { a: UInt8 }\nfn main() -> UInt8 { 0 }",
+        // A second template for a trait the library templates: the
+        // library's is the trait's, wherever the program's is declared.
+        "template impl Equatable where reflect.components: Equatable {\n    fn equals(self: Self, other: Self) -> Bool { true }\n}\nfn main() -> UInt8 { 0 }",
+    };
+    for (texts) |text| {
+        const prefix = if (std.mem.indexOf(u8, text, "import std.json") != null) with_json else prelude;
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var output: [2][]const u8 = undefined;
+        for (0..2) |i| {
+            var table: FileTable = .empty;
+            var sink = Sink.init(gpa);
+            var names: Interner = .empty;
+            const files = &.{
+                InMemoryFile{ .path = "main.lin", .text = text },
+                InMemoryFile{ .path = "linea.json", .text = "{}" },
+            };
+            const program = if (i == 0)
+                try loadFromMemory(gpa, &table, &sink, &names, "main.lin", files, .program, true, .borrow)
+            else
+                try prefix.loadFromMemory(gpa, &table, &sink, &names, "main.lin", files, .program, .borrow);
+            var semantics = if (i == 0)
+                try checkProgram(gpa, testing.allocator, &program, &names, &sink, .program)
+            else
+                try prefix.checkProgram(gpa, testing.allocator, &program, &names, &sink, .program);
+            defer semantics.deinit(gpa);
+            try testing.expectEqual(i == 1, semantics.reused_library);
+            var writer: std.Io.Writer.Allocating = .init(gpa);
+            for (sink.items()) |diagnostic| try writer.writer.print("{?} {s}\n", .{ diagnostic.code, diagnostic.message });
+            if (!sink.hasErrors()) {
+                var module = (try @import("../mir/lower.zig").lowerProgram(gpa, &semantics.expanded, &semantics.res, &semantics.typing, &semantics.disposals, &sink, .program)) orelse return error.TestUnexpectedResult;
+                defer module.deinit(gpa);
+                try table.buildMaps(gpa);
+                try testing.expect(try @import("../backend/mlir.zig").emit(gpa, &writer.writer, &module, &table, &sink, .{}));
+            }
+            output[i] = writer.written();
+        }
+        try testing.expectEqualStrings(output[0], output[1]);
+    }
+}
+
+test "an application resumes unless its own files hold a closure or a generated name" {
+    const prelude = try CheckedLibrary.init(testing.allocator);
+    defer prelude.deinit();
+    const with_io = try CheckedLibrary.initFor(testing.allocator, &.{"std/io"});
+    defer with_io.deinit();
+    const cases = [_]struct { path: []const u8, text: []const u8, resumes: bool }{
+        .{ .path = "main.lin", .text = "fn main() -> UInt8 { 0 }", .resumes = true },
+        // `std.io` holds closures of its own, which are the library's.
+        .{ .path = "main.lin", .text = "import std.io\nfn main() -> UInt8 { io.print(\"hi\\n\"); 0 }", .resumes = true },
+        .{ .path = "main.lin", .text = "fn main() -> UInt8 { let held: UInt8 = 0; let f = [held] || held; f() }", .resumes = false },
+        .{ .path = "main.lin", .text = "fn main() -> UInt8 { let _linea_trait_0: UInt8 = 0; _linea_trait_0 }", .resumes = false },
+        .{ .path = "linea-derive-3.lin", .text = "fn main() -> UInt8 { 0 }", .resumes = false },
+        .{ .path = "linea-derive-x.lin", .text = "fn main() -> UInt8 { 0 }", .resumes = true },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        const files = &.{InMemoryFile{ .path = case.path, .text = case.text }};
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var names: Interner = .empty;
+        const alone = try loadFromMemory(gpa, &table, &sink, &names, case.path, files, .program, true, .borrow);
+        try testing.expectEqual(case.resumes, @import("../sema/resolve.zig").applicationMayResume(&alone));
+        var joined_table: FileTable = .empty;
+        var joined_names: Interner = .empty;
+        const prefix = if (std.mem.indexOf(u8, case.text, "import std.io") != null) with_io else prelude;
+        const joined = try prefix.loadFromMemory(gpa, &joined_table, &sink, &joined_names, case.path, files, .program, .borrow);
+        try testing.expectEqual(case.resumes, (try prefix.resolved.canResume(gpa, &joined, &joined_names)));
+    }
+}
+
+test "a checked library holding a module the program does not load resumes nothing" {
+    // A fresh load of these programs loads neither `std.fs` nor `std.http`,
+    // whose names and implementations would change what a check reports:
+    // `UInt8.from_path` names nothing, and no help offers `import std.http`.
+    const prefix = try CheckedLibrary.initFor(testing.allocator, &.{ "std/fs", "std/http" });
+    defer prefix.deinit();
+    for ([_][]const u8{
+        "fn main() -> UInt8 { let a = UInt8.from_path(3); a }",
+        "import std.json\nfn main() -> UInt8 { 0 }",
+    }) |text| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var names: Interner = .empty;
+        const files = &.{InMemoryFile{ .path = "main.lin", .text = text }};
+        const program = try prefix.loadFromMemory(gpa, &table, &sink, &names, "main.lin", files, .program, .borrow);
+        try testing.expect(!(try prefix.resolved.canResume(gpa, &program, &names)));
+        var semantics = try prefix.checkProgram(gpa, testing.allocator, &program, &names, &sink, .program);
+        defer semantics.deinit(gpa);
+        try testing.expect(!semantics.reused_library);
+    }
+}
+
 test "checked library session matches fresh diagnostics and inferred source" {
     var prefix = try CheckedLibrary.init(testing.allocator);
     defer prefix.deinit();
     const cases = [_]struct { text: []const u8, reused: bool, ambiguous_traversal: bool = false }{
         .{ .text = "fn main() -> UInt8 { missing }", .reused = true },
-        .{ .text = "@derive(Equatable)\nstruct Value {}\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = false },
-        .{ .text = "struct Value {}\nderive Equatable for Value\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = false },
+        .{ .text = "@derive(Equatable)\nstruct Value {}\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = true },
+        .{ .text = "struct Value {}\nderive Equatable for Value\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = true },
         .{ .text =
         \\import std.mem
         \\fn main() -> UInt8 {
@@ -5580,8 +5862,8 @@ test "checked library reuse and fallback preserve emitted MLIR" {
         .{ .text = "fn main() -> UInt8 { var total: UInt8 = 0; while total < 3 { total += 1 }; total }", .reused = true },
         .{ .text = "fn main() -> UInt8 { let n = \"42\".parse[UInt8]().unwrap_or(0); n - 42 }", .reused = true },
         .{ .text = "fn main() -> UInt8 { let held: UInt8 = 7; let apply = [held] || held; apply() }", .reused = false },
-        .{ .text = "@derive(Equatable)\nstruct Value {}\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = false },
-        .{ .text = "struct Value {}\nderive Equatable for Value\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = false },
+        .{ .text = "@derive(Equatable)\nstruct Value {}\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = true },
+        .{ .text = "struct Value {}\nderive Equatable for Value\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = true },
         .{ .text = "export fn square(num: Int32) -> Int32 { num * num }", .reused = true, .library = true },
         .{ .reused = true, .text =
         \\struct Board {
@@ -5800,7 +6082,7 @@ test "checked unused library delegation resumes generic indexing and traversal" 
         var names: Interner = .empty;
         var sink = Sink.init(gpa);
         const program = try prefix.loadFromMemory(gpa, &table, &sink, &names, "main.lin", &application, .program, .borrow);
-        try testing.expect(prefix.resolved.canResume(&program, &names));
+        try testing.expect(try prefix.resolved.canResume(testing.allocator, &program, &names));
         var semantics = if (mode == 0)
             try checkProgram(gpa, gpa, &program, &names, &sink, .program)
         else

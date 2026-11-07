@@ -308,6 +308,15 @@ const tree_sitter_dir = "editor-support/tree-sitter-linea";
 /// Every module that compiles `src/` needs it, not just the runner: the zones
 /// sit in the passes themselves, so any binary that typechecks a program
 /// references the client's symbols and fails to link without it.
+/// The value every step running the compiler or the conformance runner gives
+/// `LINEA_CACHE_DIR`; empty turns the cache off. Set once by `build`.
+var library_cache_dir: []const u8 = "";
+
+/// Points `run` at the build's checked-library cache.
+fn shareLibraryCache(run: *std.Build.Step.Run) void {
+    run.setEnvironmentVariable("LINEA_CACHE_DIR", library_cache_dir);
+}
+
 fn linkTracyClient(b: *std.Build, m: *std.Build.Module, profiling: bool) void {
     if (!profiling) return;
     const tracy_src = b.dependency("tracy_src", .{});
@@ -1199,6 +1208,7 @@ const HeavySteps = struct {
     fn corpus(self: *const HeavySteps, runner_step: *std.Build.Step.Compile, compiler_step: *std.Build.Step.Compile) *std.Build.Step.Run {
         const b = self.b;
         const run = b.addRunArtifact(runner_step);
+        shareLibraryCache(run);
         run.addArg(b.pathFromRoot("tests"));
         // The runner builds and runs generated programs, so it is told where the
         // runtime is and where to put intermediates. It does not run from an
@@ -1256,6 +1266,7 @@ const HeavySteps = struct {
     fn properties(self: *const HeavySteps, runner_step: *std.Build.Step.Compile, compiler_step: *std.Build.Step.Compile) *std.Build.Step.Run {
         const b = self.b;
         const run = b.addRunArtifact(runner_step);
+        shareLibraryCache(run);
         run.addArg(b.pathFromRoot("tests"));
         run.addArgs(&.{ "--properties", "--property-cases", b.pathFromRoot("build/property-cases.txt"), "--every-property" });
         run.addArg("--compiler");
@@ -1275,6 +1286,7 @@ const HeavySteps = struct {
     fn examples(self: *const HeavySteps, runner_step: *std.Build.Step.Compile) *std.Build.Step.Run {
         const b = self.b;
         const run = b.addRunArtifact(runner_step);
+        shareLibraryCache(run);
         run.addArg(b.pathFromRoot("examples"));
         run.addArg("--runtime");
         run.addFileArg(self.checked_runtime_archive);
@@ -1300,6 +1312,7 @@ const HeavySteps = struct {
     fn guide(self: *const HeavySteps, installed: *std.Build.Step) *std.Build.Step.Run {
         const b = self.b;
         const run = b.addRunArtifact(self.guide_gate);
+        shareLibraryCache(run);
         run.addArg(b.pathFromRoot("docs/learn"));
         // The installed compiler finds the runtime beside itself.
         run.addArg(b.getInstallPath(.bin, "linea"));
@@ -1323,6 +1336,7 @@ const HeavySteps = struct {
     fn exampleTests(self: *const HeavySteps, installed: *std.Build.Step) *std.Build.Step.Run {
         const b = self.b;
         const run = b.addRunArtifact(self.example_tests);
+        shareLibraryCache(run);
         run.addArg(b.pathFromRoot("examples"));
         run.addArg(b.getInstallPath(.bin, "linea"));
         run.step.dependOn(installed);
@@ -1420,6 +1434,17 @@ pub fn build(b: *std.Build) void {
         "scratch",
         "Where recorded outcomes and build intermediates go (default: .zig-cache/conformance-scratch)",
     ) orelse b.pathFromRoot(".zig-cache/conformance-scratch");
+
+    // One checked-library cache for every `linea` a step runs and for the
+    // conformance runner itself, inside the build's cache rather than the
+    // user's home: a second run, and every parallel worker of one, reads
+    // the library a first wrote. `off` runs them without it.
+    const library_cache_option = b.option(
+        []const u8,
+        "library-cache",
+        "Where the checked standard library is kept between runs, or `off` (default: linea-cache in the scratch directory)",
+    ) orelse b.pathJoin(&.{ scratch, "linea-cache" });
+    library_cache_dir = if (std.mem.eql(u8, library_cache_option, "off")) "" else b.pathFromRoot(library_cache_option);
 
     const sanitize = b.option(
         Sanitize,
@@ -2013,6 +2038,7 @@ pub fn build(b: *std.Build) void {
     // CI lane. `-Dsoundness-matrix=false` leaves the matrix out of a search
     // over new seeds, since the matrix does not depend on the seed.
     const run_soundness = b.addRunArtifact(conformance);
+    shareLibraryCache(run_soundness);
     run_soundness.addArg(b.pathFromRoot("tests"));
     run_soundness.addArgs(&.{ "--soundness", "--storage-programs", b.fmt("{d}", .{storage_programs}), "--seed", b.fmt("{d}", .{seed}) });
     if (!soundness_matrix) run_soundness.addArg("--skip-matrix");
@@ -2064,6 +2090,7 @@ pub fn build(b: *std.Build) void {
         .whole => null,
         .narrowed => |directory| narrowed: {
             const run_narrowed = b.addRunArtifact(conformance);
+            shareLibraryCache(run_narrowed);
             run_narrowed.addArg(b.pathFromRoot(directory));
             run_narrowed.addArg("--compiler");
             run_narrowed.addFileArg(exe.getEmittedBin());

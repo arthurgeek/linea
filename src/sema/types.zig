@@ -1112,7 +1112,6 @@ const CapabilityFacts = struct {
     /// Seeds `ty` from its policy and records each part it owns as an edge.
     fn recordParts(self: *CapabilityFacts, builder: *Typing.Builder, ty: TypeId) !void {
         const gpa = builder.gpa;
-        const view = builder.view();
         self.recorded.items[ty.index()] = .parts;
         self.first_parts.items[ty.index()] = @intCast(self.edges.items.len);
         switch (builder.get(ty)) {
@@ -1143,9 +1142,9 @@ const CapabilityFacts = struct {
             .closure => |closure| try self.edge(gpa, builder, ty, closure.environment),
             .borrow, .callable, .integer, .open_integer, .open_float, .open_type, .boolean, .float, .unit, .never, .poison => {},
         }
-        if (builder.certified_storage != .none and view.declOfType(ty) == builder.certified_storage) {
-            if (view.instanceOf(ty)) |instance| {
-                const arguments = view.argsOf(instance);
+        if (builder.certified_storage != .none and builder.declOfType(ty) == builder.certified_storage) {
+            if (builder.instanceOf(ty)) |instance| {
+                const arguments = builder.argsOf(instance);
                 if (arguments.len != 0) try self.edge(gpa, builder, ty, arguments[0]);
             } else if (builder.parameters.get(Typing.Builder.parameterKey(builder.certified_storage.index(), 0))) |element| {
                 try self.edge(gpa, builder, ty, @enumFromInt(element));
@@ -1497,10 +1496,9 @@ const BorrowContainment = struct {
     fn eachChild(builder: *Typing.Builder, ty: TypeId, mode: Mode, visit: anytype) std.mem.Allocator.Error!void {
         try eachPart(builder, ty, mode, visit);
         if (carriedArgument(builder, ty)) |carried| try visit.child(.argument, carried);
-        const view = builder.view();
-        const declaration = view.declOfType(ty) orelse return;
-        const instance = view.instanceOf(ty) orelse return;
-        const arguments = view.argsOf(instance);
+        const declaration = builder.declOfType(ty) orelse return;
+        const instance = builder.instanceOf(ty) orelse return;
+        const arguments = builder.argsOf(instance);
         if (arguments.len == 0) return;
         if (declaration == builder.certified_storage or declaration == builder.certified_slice)
             return visit.child(.stored, arguments[0]);
@@ -1523,10 +1521,9 @@ const BorrowContainment = struct {
     /// and keeps an exclusive lend wherever that type could write through it.
     fn carriedArgument(builder: *Typing.Builder, ty: TypeId) ?TypeId {
         if (builder.certified_carried == .none) return null;
-        const view = builder.view();
-        if (view.declOfType(ty) != builder.certified_carried) return null;
-        if (view.instanceOf(ty)) |instance| {
-            const arguments = view.argsOf(instance);
+        if (builder.declOfType(ty) != builder.certified_carried) return null;
+        if (builder.instanceOf(ty)) |instance| {
+            const arguments = builder.argsOf(instance);
             return if (arguments.len != 0) arguments[0] else null;
         }
         const held = builder.parameters.get(Typing.Builder.parameterKey(builder.certified_carried.index(), 0)) orelse return null;
@@ -1535,9 +1532,8 @@ const BorrowContainment = struct {
 
     /// The children `eachChild` hands over other than a type's arguments.
     fn eachPart(builder: *Typing.Builder, ty: TypeId, mode: Mode, visit: anytype) std.mem.Allocator.Error!void {
-        const view = builder.view();
         const typed_storage = builder.certified_storage != .none and
-            view.declOfType(ty) == builder.certified_storage and view.instanceOf(ty) != null;
+            builder.declOfType(ty) == builder.certified_storage and builder.instanceOf(ty) != null;
         switch (builder.get(ty)) {
             .closure => |closure| try visit.child(.environment, closure.environment),
             .borrow => |observation| if (mode != .raw_carriers) try visit.child(.element, observation.referent),
@@ -7027,18 +7023,24 @@ pub const Typing = struct {
     /// every un-settled expression carries, so a scan comparing it would
     /// return whichever declaration failed first.
     pub fn declOfType(self: *const Typing, t: TypeId) ?DeclId {
+        return lookupDeclOfType(self.instance_of, self.instances, self.template_of, self.templates, t);
+    }
+
+    /// `declOfType` over the tables it reads, so an open builder answers
+    /// from its own lists without building a view.
+    fn lookupDeclOfType(instance_of: []const u32, instances: []const Instance, template_of: []const u32, templates: []const Template, t: TypeId) ?DeclId {
         if (t == .poison) return null;
-        if (self.instanceOf(t)) |i| return i.decl;
+        if (lookupInstance(instance_of, instances, t)) |i| return i.decl;
         // A typing that knows of declared types knows which entry declares
         // each: the two tables are filled together, and one without the other
         // answers "no declaration declared it" for every type the program
         // wrote.
-        std.debug.assert(self.templates.len == 0 or self.template_of.len != 0);
+        std.debug.assert(templates.len == 0 or template_of.len != 0);
         const at_id = @intFromEnum(t);
-        if (at_id >= self.template_of.len) return null;
-        const at = self.template_of[at_id];
+        if (at_id >= template_of.len) return null;
+        const at = template_of[at_id];
         if (at == not_a_template) return null;
-        return self.templates[at].decl;
+        return templates[at].decl;
     }
 
     pub fn observationReferent(self: *const Typing, trait: DeclId, held: TypeId) ?TypeId {
@@ -8630,6 +8632,10 @@ pub const Typing = struct {
 
         /// Whether the complete-template refill has run.
         refilled: bool = false,
+        /// How many instantiations a reopened builder took from the typing it
+        /// reopened. Their templates were complete when that typing was
+        /// finished, so the refill writes none of them again.
+        reopened_instances: usize = 0,
         /// How many `fillInstance` calls are running, one inside another: a
         /// member demanded while an instantiation's parts are written is read
         /// for a part, not for a definition.
@@ -8787,6 +8793,11 @@ pub const Typing = struct {
         /// where the type is not one.
         pub fn instanceOf(self: *const Builder, t: TypeId) ?Instance {
             return lookupInstance(self.instance_of.items, self.instances.items, t);
+        }
+
+        /// The declaration a type came from, as `Typing.declOfType` answers it.
+        pub fn declOfType(self: *const Builder, t: TypeId) ?DeclId {
+            return lookupDeclOfType(self.instance_of.items, self.instances.items, self.template_of.items, self.templates.items, t);
         }
 
         /// The head a type reaches implementations through. The finished typing
@@ -10491,7 +10502,7 @@ pub const Typing = struct {
 
             self.refilled = true;
 
-            var i: usize = 0;
+            var i: usize = self.reopened_instances;
             while (i < self.instances.items.len) : (i += 1) {
                 if (self.instances.items[i].parts != .written) continue;
                 try self.fillInstance(@intCast(i));
@@ -13667,6 +13678,7 @@ pub const Typing = struct {
             try b.templates.appendSlice(gpa, t.templates);
             try b.template_of.appendSlice(gpa, t.template_of);
             try b.instances.appendSlice(gpa, t.instances);
+            b.reopened_instances = t.instances.len;
             try b.instance_args.appendSlice(gpa, t.instance_args);
             try b.instance_of.appendSlice(gpa, t.instance_of);
             try b.standins.appendSlice(gpa, t.standins);

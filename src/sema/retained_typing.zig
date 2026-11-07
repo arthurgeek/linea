@@ -12,6 +12,25 @@ const Allocator = std.mem.Allocator;
 /// Do not call Typing.deinit on this borrowed view. Contextual constraints,
 /// capabilities and implementation decisions must be prepared again before
 /// checking additional bodies in the attached program.
+/// The fields of a saved typing `attach` never reads, each left at its
+/// default in the attached one. The implementation, capability and constraint
+/// preparations are prepared again for the attached program. The checker
+/// settles extern symbols over every declaration of the attached program, so a
+/// symbol a later module repeats is grouped with the library's declaration of
+/// it. The capability watch is lent only while declared answers are settled,
+/// and the open types only while a check runs. The call and implementation
+/// indexes are rebuilt from the relocated calls and implementations.
+pub const unread_fields = [_][]const u8{
+    "scoped_capabilities", "prepared_implementations", "implementation_selections", "contextual_constraints", "extern_symbols",
+    "capability_watch",    "open_types",               "call_index",                "impl_index",
+};
+
+/// The layout memos of a typing: each entry is an answer only where its stamp
+/// (`placed_at` against `generation`, `sorted`, a layout's own generation)
+/// says it was computed, and an unstamped entry holds whatever the
+/// allocation held. Every one is computed again when it is first read.
+pub const layout_memo_fields = [_][]const u8{ "laid_out", "offsets", "placed_at", "by_name", "sorted" };
+
 pub fn attach(gpa: Allocator, saved: *const types.Typing, relocation: Relocation) !types.Typing {
     var result = saved.*;
     inline for (std.meta.fields(types.Typing)) |field| {
@@ -63,23 +82,12 @@ fn attachField(comptime field: std.builtin.Type.StructField, gpa: Allocator, sav
         result.declared_traits = try dense(gpa, relocation, .decls, saved.declared_traits, @as([]const types.BoundTrait, &.{}));
     } else if (comptime std.mem.eql(u8, name, "declared_callables")) {
         result.declared_callables = try dense(gpa, relocation, .decls, saved.declared_callables, @as([]const types.TypeId, &.{}));
-    } else if (comptime in(name, &.{ "scoped_capabilities", "prepared_implementations", "implementation_selections", "contextual_constraints" })) {
-        @field(result, name) = .{};
-    } else if (comptime std.mem.eql(u8, name, "extern_symbols")) {
-        // The checker settles extern symbols over every declaration of the
-        // attached program, so a symbol a later module repeats is grouped with
-        // the library's declaration of it. Nothing reads a retained copy.
-        result.extern_symbols = .empty;
-    } else if (comptime std.mem.eql(u8, name, "capability_watch")) {
-        // Lent only while declared answers are settled.
-        result.capability_watch = null;
-    } else if (comptime std.mem.eql(u8, name, "open_types")) {
-        // Lent only while a check runs; a retained typing holds no open integer.
-        result.open_types = null;
-    } else if (comptime in(name, &.{ "laid_out", "offsets", "placed_at", "by_name", "sorted" })) {
+    } else if (comptime in(name, &unread_fields)) {
+        @field(result, name) = field.defaultValue().?;
+    } else if (comptime in(name, &layout_memo_fields)) {
         // These are mutable layout scratch even on an otherwise immutable Typing.
         @field(result, name) = try gpa.dupe(std.meta.Elem(field.type), @field(saved, name));
-    } else if (comptime in(name, &.{ "call_index", "impl_index", "supply_index", "defaults" })) {
+    } else if (comptime in(name, &.{ "supply_index", "defaults" })) {
         // Rebuilt below from relocated semantic records.
     } else if (comptime in(name, &.{
         "capabilities",   "dependency_containment", "writer_containment",    "unshareable_containment", "constant_texts",        "constant_pool",   "constant_materializations", "variants",    "fields",

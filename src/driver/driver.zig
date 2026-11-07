@@ -53,6 +53,7 @@ const Program = @import("../syntax/program.zig").Program;
 const loadFromDisk = @import("loader.zig").loadFromDisk;
 const loadFromMemory = @import("loader.zig").loadFromMemory;
 const checkProgram = @import("loader.zig").checkProgram;
+const library_cache = @import("library_cache.zig");
 const annotated = @import("../fmt/annotated.zig");
 
 pub const exit_ok: u8 = 0;
@@ -619,9 +620,30 @@ pub fn run(process: std.process.Init) !u8 {
     // there is a rule this program broke, and this is a rule the compiler did.
     var defect = false;
 
+    // `check`, `run`, `build` and `test` resume from the checked standard
+    // library the cache holds, where the program allows it. The dumps and
+    // `emit-mlir` compile afresh: a dump prints syntax IDs, and a resumed
+    // program numbers its own after the library's. Whether the program can
+    // resume is read from its own files before the entry, so a program that
+    // cannot reads no entry and hashes no executable; with the cache off,
+    // nothing is asked.
+    const cache_dir = if (is_check or is_run or is_build or is_test)
+        try library_cache.directory(gpa, process.minimal.environ)
+    else
+        null;
+    const checked_library: ?*loader.CheckedLibrary = if (cache_dir) |dir|
+        if (try loader.resumableLibraryOf(gpa, io, file_path, purpose)) |modules| try library_cache.open(process.gpa, io, dir, modules) else null
+    else
+        null;
+    defer if (checked_library) |checked| checked.deinit();
+
     // Every root loads from disk, the standard library's included: its
     // manifest is what makes it the library, wherever it sits.
-    var program = loadFromDisk(gpa, io, &table, &sink, &interner, file_path, purpose, true) catch |e| {
+    const loaded = if (checked_library) |checked|
+        checked.loadFromDisk(gpa, io, &table, &sink, &interner, file_path, purpose)
+    else
+        loadFromDisk(gpa, io, &table, &sink, &interner, file_path, purpose, true);
+    var program = loaded catch |e| {
         // A manifest that was read and says what its root cannot be is not a
         // read failure, so it is said on its own.
         if (e == error.ManifestNamesTheLibrary) {
@@ -733,7 +755,12 @@ pub fn run(process: std.process.Init) !u8 {
             } else {
                 // `run` and `check` differ only in whether the value is printed,
                 // so a file that checks clean is a file that runs.
-                var settled = if (is_check)
+                var settled = if (checked_library) |checked|
+                    if (is_check)
+                        try checked.checkWhole(gpa, process.gpa, &program, &interner, &sink, purpose)
+                    else
+                        try checked.checkProgram(gpa, process.gpa, &program, &interner, &sink, purpose)
+                else if (is_check)
                     try loader.checkWhole(gpa, process.gpa, &program, &interner, &sink, purpose)
                 else
                     try checkProgram(gpa, process.gpa, &program, &interner, &sink, purpose);

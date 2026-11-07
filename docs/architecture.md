@@ -2092,7 +2092,12 @@ ownership disposal plan. Conformance workers share that snapshot and own their
 mutable continuation tables. The language server checks the library once when
 it starts and resumes every module it analyses from it, with the method lists
 an editor's completions read prepared on the continued typing as well. The
-ordinary command-line compiler still performs a fresh compilation.
+command line reads the session from an on-disk cache keyed by the compiler
+binary's SHA-256 (ADR 0257): `driver/library_cache.zig` finds or writes the
+entry, `driver/library_encoding.zig` turns a `CheckedLibrary` into bytes and
+back through `support/serial.zig`, and a missing or damaged entry is checked
+again. A typing's fields `retained_typing.attach` never reads
+(`retained_typing.unread_fields`) are not encoded.
 
 Library source IDs remain a prefix. Generated syntax moves after application
 source through typed, domain-specific relocation; semantic tables relocate their
@@ -2101,10 +2106,24 @@ existing passes continue from these answers. Combined-program coherence,
 application-dependent lookups, and obligations still run; ownership omits only
 the exact declarations already checked in the snapshot.
 
-Reuse eligibility belongs to the resolver. Incompatible graphs, application
-expansions, generated-name collisions, and application closures use ordinary
-loading and checking. Closures require that fallback because generated names
-still depend on allocation order. Returned typing uses the retained allocator,
+A checked library holds the prelude's closure and the library modules a
+program's imports reach (`CheckedLibrary.initFor`); a program resumes only
+from one holding exactly the modules its fresh load loads, and the command
+line keys its entries by that list. A resumed
+application expands its own derives and templates after the library's
+generated declarations, planning from the templates the library planned
+(`Seed.template_plans`). The passes that continue do not walk the library
+again: [T-PolyRec] queries a library call only where a cycle through it passes
+through an application declaration, and the complete-template refill writes
+only the instantiations the application minted.
+
+Reuse eligibility belongs to the resolver. Incompatible graphs,
+generated-name collisions, and application closures use ordinary loading and
+checking. Closures require that fallback because generated names still
+depend on allocation order. What the application's own syntax decides is
+`resolve.applicationMayResume`, which the driver asks of the application
+loaded alone before it reads a cached library and `canResume` asks again of
+the joined program. Returned typing uses the retained allocator,
 not the temporary scratch allocator. The snapshot outlives its continuations;
 no pass owns a global cache or mutates the shared snapshot.
 

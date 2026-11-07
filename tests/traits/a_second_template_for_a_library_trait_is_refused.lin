@@ -1,0 +1,11 @@
+// The library's `Equatable` already has a structural template, so this one
+// is refused where it is written, and the library's derives still use theirs.
+template impl Equatable where reflect.components: Equatable {
+    fn equals(self: Self, other: Self) -> Bool {
+        true
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

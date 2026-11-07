@@ -8,6 +8,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const toolchain = @import("../driver/toolchain.zig");
+const library_cache = @import("../driver/library_cache.zig");
 const hermeticRun = @import("process.zig").run;
 
 pub const Step = struct {
@@ -347,6 +348,10 @@ pub const Environment = struct {
     environ: std.process.Environ,
     runtime: ?[]const u8,
     sanitize: ?[]const u8,
+    /// The directory the compiler keeps its checked standard library in,
+    /// exported as `LINEA_CACHE_DIR`, so a transcript reads and writes the
+    /// walk's cache and never the user's.
+    library_cache: ?[]const u8 = null,
     timeout_seconds: u32 = default_timeout_seconds,
 };
 
@@ -436,6 +441,7 @@ pub fn run(gpa: Allocator, io: Io, env: Environment, transcript: Transcript) !Ra
     // file under it.
     if (env.runtime) |rt| try environ.put(toolchain.runtime_override, try cwd.realPathFileAlloc(io, rt, arena));
     if (env.sanitize) |name| try environ.put(toolchain.sanitize_override, name);
+    if (env.library_cache) |dir| try environ.put(library_cache.directory_variable, try cwd.realPathFileAlloc(io, dir, arena));
 
     var partial: []u8 = &.{};
     var timed_out = false;

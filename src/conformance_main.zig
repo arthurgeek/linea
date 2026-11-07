@@ -34,6 +34,7 @@ const ExprId = node_mod.ExprId;
 const driver = @import("driver/driver.zig");
 const lexer_dump = @import("lexer/dump.zig");
 const annotated = @import("fmt/annotated.zig");
+const library_cache_mod = @import("driver/library_cache.zig");
 const loader = @import("driver/loader.zig");
 const library = @import("driver/library.zig");
 const InMemoryFile = loader.InMemoryFile;
@@ -1067,6 +1068,15 @@ fn checkTranscript(
     var keep = false;
     defer if (!keep) std.Io.Dir.cwd().deleteTree(io, relative) catch {};
     const directory = try std.Io.Dir.cwd().realPathFileAlloc(io, relative, gpa);
+    // One cache for every transcript of the walk, so the first command to
+    // check a program writes the library and the rest read it: the one the
+    // runner was given, which a build shares between runs, or one in the
+    // walk's scratch.
+    const library_cache = if (environ.getPosix(library_cache_mod.directory_variable)) |named|
+        (if (named.len != 0) named else try std.fmt.allocPrint(gpa, "{s}/library-cache", .{scratch}))
+    else
+        try std.fmt.allocPrint(gpa, "{s}/library-cache", .{scratch});
+    try std.Io.Dir.cwd().createDirPath(io, library_cache);
 
     const ran = transcripts.run(gpa, io, .{
         .linea = compiler,
@@ -1075,6 +1085,7 @@ fn checkTranscript(
         .environ = environ,
         .runtime = runtime,
         .sanitize = sanitize,
+        .library_cache = library_cache,
     }, parsed) catch |e| {
         try failures.append(gpa, .{
             .path = case.display_path,
@@ -9345,7 +9356,7 @@ fn runSoundness(
     var outcome_stats: OutcomeStats = .{};
     var cache = try OutcomeCache.init(gpa, io, environ.getPosix("PATH"), scratch_dir, runtime_path, options.sanitize);
     cache.stats = &outcome_stats;
-    const prefix = try loader.CheckedLibrary.init(scratch_backing);
+    const prefix = try library_cache_mod.checkedFor(scratch_backing, io, environ, &.{});
     defer prefix.deinit();
     const settings: SoundnessSettings = .{
         .cache = &cache,
@@ -15701,8 +15712,11 @@ test "layout oracle deduplication reports every rejected original case" {
     defer tmp.cleanup();
     const scratch = try tmp.dir.realPathFileAlloc(testing.io, ".", gpa);
     const cache: OutcomeCache = .{ .dir = scratch, .salt = 0 };
+    var libraries: Libraries = .{ .backing = testing.allocator, .io = testing.io, .environ = .empty, .prelude = test_library.get() };
+    defer libraries.deinit();
     const settings: Settings = .{
         .library = test_library.get(),
+        .libraries = &libraries,
         .cache = &cache,
         .update = false,
         .sanitize = null,
@@ -16748,7 +16762,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
 
     const checked_library = initialized: {
         const started = std.Io.Timestamp.now(io, .awake);
-        const prefix = try loader.CheckedLibrary.init(scratch_backing);
+        const prefix = try library_cache_mod.checkedFor(scratch_backing, io, environ, &.{});
         const elapsed = started.durationTo(std.Io.Timestamp.now(io, .awake));
         std.debug.print("conformance: checked library init wall: {d:.3}ms\n", .{
             @as(f64, @floatFromInt(elapsed.nanoseconds)) / std.time.ns_per_ms,
@@ -16766,8 +16780,11 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         .{ rt, runtime_symbols.checked_archive_name },
     );
     var sanitized_skips: std.atomic.Value(u32) = .init(0);
+    var libraries: Libraries = .{ .backing = scratch_backing, .io = io, .environ = environ, .prelude = checked_library };
+    defer libraries.deinit();
     const settings: Settings = .{
         .library = checked_library,
+        .libraries = &libraries,
         .properties = options.properties,
         .corpus_properties = sanitize == null,
         .levels = options.levels,
@@ -20673,10 +20690,68 @@ fn writeFile(io: std.Io, path: []const u8, data: []const u8) !void {
     try w.interface.flush();
 }
 
+/// The checked libraries cases resume from: one per set of library modules
+/// the cases' imports reach, as the command line keys its entries, each read
+/// from or written to the cache the runner's environment names. Shared by
+/// every walker; a library is built once, under the lock.
+const Libraries = struct {
+    backing: std.mem.Allocator,
+    io: std.Io,
+    environ: std.process.Environ,
+    /// The prelude's closure, for a case importing nothing else.
+    prelude: *const loader.CheckedLibrary,
+    /// Guards `by_modules` alone; a set's library is built under its own
+    /// slot's lock, so walkers needing other sets do not wait on it.
+    mutex: std.Io.Mutex = .init,
+    by_modules: std.StringHashMapUnmanaged(*Slot) = .empty,
+
+    const Slot = struct {
+        mutex: std.Io.Mutex = .init,
+        library: ?*loader.CheckedLibrary = null,
+    };
+
+    /// The library `case` resumes from, as `linea check` would choose it,
+    /// and whether it holds modules beyond the prelude's closure.
+    fn forCase(self: *Libraries, gpa: std.mem.Allocator, case: Case) !struct { library: *const loader.CheckedLibrary, imported: bool } {
+        const modules = (try loader.resumableLibraryOfMemory(gpa, case.entry, try inputsOf(gpa, case), .program)) orelse
+            return .{ .library = self.prelude, .imported = false };
+        if (modules.len == 0) return .{ .library = self.prelude, .imported = false };
+        const key = try std.mem.join(gpa, "\x00", modules);
+        const slot = slot: {
+            self.mutex.lockUncancelable(self.io);
+            defer self.mutex.unlock(self.io);
+            const entry = try self.by_modules.getOrPut(self.backing, key);
+            if (!entry.found_existing) {
+                entry.key_ptr.* = try self.backing.dupe(u8, key);
+                entry.value_ptr.* = try self.backing.create(Slot);
+                entry.value_ptr.*.* = .{};
+            }
+            break :slot entry.value_ptr.*;
+        };
+        slot.mutex.lockUncancelable(self.io);
+        defer slot.mutex.unlock(self.io);
+        if (slot.library == null) {
+            const owned = try self.backing.alloc([]const u8, modules.len);
+            for (owned, modules) |*into, from| into.* = try self.backing.dupe(u8, from);
+            slot.library = try library_cache_mod.checkedFor(self.backing, self.io, self.environ, owned);
+        }
+        return .{ .library = slot.library.?, .imported = true };
+    }
+
+    fn deinit(self: *Libraries) void {
+        var it = self.by_modules.valueIterator();
+        while (it.next()) |slot| if (slot.*.library) |held| held.deinit();
+        self.* = undefined;
+    }
+};
+
 /// What every case's check reads and none of them changes.
 const Settings = struct {
-    /// The checked library every case resumes from.
+    /// The checked library of the prelude's closure, which the editor and the
+    /// generated programs resume from.
     library: *const loader.CheckedLibrary,
+    /// The libraries each case resumes from.
+    libraries: *Libraries,
     properties: bool = false,
     /// Whether every case is held to the frontend and editor properties the
     /// whole corpus is asked: formatting, poison, extents, scopes, hints,
@@ -20942,6 +21017,45 @@ test "recorded MLIR verification accepts native cache proof but retains invalid 
     try testing.expectEqual(@as(usize, 1), failures.items.len);
 }
 
+/// A case checked and lowered without the checked library.
+const FreshCheck = struct {
+    program: Program,
+    semantics: loader.Semantics,
+    lowered: ?MirModule,
+};
+
+/// Checks and lowers `case` afresh, and records a failure where the
+/// diagnostics it reports differ from those the resumed check reported into
+/// `resumed`. Allocated in `gpa`, the case's arena.
+fn freshCheck(
+    gpa: std.mem.Allocator,
+    scratch: std.mem.Allocator,
+    case: Case,
+    resumed_table: *const FileTable,
+    resumed: *const Sink,
+    display_path: []const u8,
+    failures: *std.ArrayList(Failure),
+) !FreshCheck {
+    var table: FileTable = .empty;
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    const program = try loadFromMemory(gpa, &table, &sink, &interner, case.entry, try inputsOf(gpa, case), .program, true, .borrow);
+    try table.buildMaps(gpa);
+    const semantics = try checkProgram(gpa, scratch, &program, &interner, &sink, .program);
+    var fresh_report: std.Io.Writer.Allocating = .init(gpa);
+    try render.renderAll(&fresh_report.writer, &table, &sink, .{ .color = .never });
+    var resumed_report: std.Io.Writer.Allocating = .init(gpa);
+    try render.renderAll(&resumed_report.writer, resumed_table, resumed, .{ .color = .never });
+    if (!std.mem.eql(u8, fresh_report.written(), resumed_report.written())) try failures.append(gpa, .{
+        .path = display_path,
+        .what = "a check resumed from the checked library reported other than a fresh check",
+        .expected = fresh_report.written(),
+        .actual = resumed_report.written(),
+    });
+    const lowered = if (sink.hasErrors()) null else try lower(gpa, &semantics.expanded, &semantics.res, &semantics.typing, &semantics.disposals, &sink, .program);
+    return .{ .program = program, .semantics = semantics, .lowered = lowered };
+}
+
 fn checkCase(
     gpa: std.mem.Allocator,
     scratch_parent: std.mem.Allocator,
@@ -20972,6 +21086,11 @@ fn checkCase(
     var sink = Sink.init(gpa);
     var interner: Interner = .empty;
 
+    // The library `linea check` would resume this case from: the prelude's
+    // closure, or one holding the library modules its imports reach.
+    const chosen = try env.libraries.forCase(gpa, case);
+    const resumed_from = chosen.library;
+
     // Loading, parsing and following imports, which for a case that is one
     // file is loading, parsing and following none. Property: parsing
     // yields a complete tree for any input -- every declaration's body is
@@ -20981,7 +21100,7 @@ fn checkCase(
         const load_zone = tracy.beginZone(@src(), "frontend");
         defer load_zone.end();
         const inputs = try inputsOf(gpa, case);
-        break :loaded try env.library.loadFromMemory(gpa, &table, &sink, &interner, case.entry, inputs, .program, .borrow);
+        break :loaded try resumed_from.loadFromMemory(gpa, &table, &sink, &interner, case.entry, inputs, .program, .borrow);
     };
     try table.buildMaps(gpa);
     const ast = program.ast;
@@ -21084,7 +21203,7 @@ fn checkCase(
         var other_table: FileTable = .empty;
         var other_sink = Sink.init(gpa);
         var other_interner: Interner = .empty;
-        const other = try env.library.loadFromMemory(gpa, &other_table, &other_sink, &other_interner, case.entry, flipped, .program, .borrow);
+        const other = try resumed_from.loadFromMemory(gpa, &other_table, &other_sink, &other_interner, case.entry, flipped, .program, .borrow);
 
         var a: std.Io.Writer.Allocating = .init(gpa);
         try dumpAst(&a.writer, &ast, program.ownDeclarations());
@@ -21139,7 +21258,7 @@ fn checkCase(
     // This must happen before that comparison, or the rendered output is
     // missing everything the later passes reported.
     const semantic_check_zone = tracy.beginZone(@src(), "case.semantic-check");
-    var settled = try env.library.checkProgram(gpa, scratch_parent, &program, &interner, &sink, .program);
+    var settled = try resumed_from.checkProgram(gpa, scratch_parent, &program, &interner, &sink, .program);
     defer settled.deinit(gpa);
     const res = &settled.res;
     const disposals = &settled.disposals;
@@ -21150,13 +21269,34 @@ fn checkCase(
     var rejected = sink.hasErrors();
     var lowered: ?MirModule = null;
 
+    // The dumps print syntax IDs and the order types were minted in, which
+    // a check resumed from the checked library numbers after the whole
+    // library. They are taken from a fresh check of the case, as the command
+    // line takes them, and that check's diagnostics are held to the resumed
+    // one's.
+    const dump_goldens = [_][]const u8{
+        try std.mem.concat(gpa, u8, &.{ stem, ".inferred" }),
+        try std.mem.concat(gpa, u8, &.{ stem, ".mono" }),
+        try std.mem.concat(gpa, u8, &.{ stem, ".mir" }),
+    };
+    const fresh: ?FreshCheck = for (dump_goldens) |golden| {
+        if (!rejected and try readIfExists(io, gpa, golden) != null) break try freshCheck(gpa, scratch_parent, case, &table, &sink, display_path, &w.failures);
+    } else null;
+    // A refused case that resumed from a library holding the modules its
+    // imports reach, the path `linea check` takes for it, is held to a fresh
+    // check's diagnostics too; its `.stderr` golden would not show a
+    // difference only a fresh check makes. Only those: a fresh check costs a
+    // check of the library per case, and a case resuming from the prelude's
+    // closure loads exactly what a fresh load does.
+    if (rejected and chosen.imported) _ = try freshCheck(gpa, scratch_parent, case, &table, &sink, display_path, &w.failures);
+
     // The inferred dump reads the checker's answers back into the
     // source, so it is only meaningful where the checker had answers.
     if (!rejected) {
-        const golden = try std.mem.concat(gpa, u8, &.{ stem, ".inferred" });
+        const golden = dump_goldens[0];
         if (try readIfExists(io, gpa, golden)) |expected| {
             var out: std.Io.Writer.Allocating = .init(gpa);
-            try annotated.dumpInferred(gpa, &out.writer, &ast, res, typing, program.ownDeclarations());
+            try annotated.dumpInferred(gpa, &out.writer, &fresh.?.program.ast, &fresh.?.semantics.res, &fresh.?.semantics.typing, fresh.?.program.ownDeclarations());
             if (try compare(gpa, io, &w.failures, display_path, "inferred", golden, expected, out.written(), env.update, false)) {
                 std.debug.print("updated {s}\n", .{golden});
             }
@@ -21167,10 +21307,10 @@ fn checkCase(
         lower_zone.end();
         rejected = sink.hasErrors();
 
-        const mono_golden = try std.mem.concat(gpa, u8, &.{ stem, ".mono" });
-        if (lowered) |*module| if (try readIfExists(io, gpa, mono_golden)) |expected| {
+        const mono_golden = dump_goldens[1];
+        if (lowered != null) if (try readIfExists(io, gpa, mono_golden)) |expected| {
             var out: std.Io.Writer.Allocating = .init(gpa);
-            try annotated.dumpMono(gpa, &out.writer, &settled.expanded, typing, module);
+            try annotated.dumpMono(gpa, &out.writer, &fresh.?.semantics.expanded, &fresh.?.semantics.typing, &fresh.?.lowered.?);
             if (try compare(gpa, io, &w.failures, display_path, "mono", mono_golden, expected, out.written(), env.update, false)) {
                 std.debug.print("updated {s}\n", .{mono_golden});
             }
@@ -21483,10 +21623,10 @@ fn checkCase(
     var answered_env: Env = undefined;
     if (lowered) |mir| {
         if (!rejected) {
-            const mir_golden = try std.mem.concat(gpa, u8, &.{ stem, ".mir" });
+            const mir_golden = dump_goldens[2];
             if (try readIfExists(io, gpa, mir_golden)) |expected| {
                 var out: std.Io.Writer.Allocating = .init(gpa);
-                try dumpMirModule(&out.writer, &mir);
+                try dumpMirModule(&out.writer, &fresh.?.lowered.?);
                 if (try compare(gpa, io, &w.failures, display_path, "mir", mir_golden, expected, out.written(), env.update, false)) {
                     std.debug.print("updated {s}\n", .{mir_golden});
                 }

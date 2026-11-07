@@ -15,6 +15,7 @@ comptime {
     _ = @import("support/chain.zig");
     _ = @import("support/stamp.zig");
     _ = @import("support/table.zig");
+    _ = @import("support/serial.zig");
     _ = @import("diagnostics/diagnostic.zig");
     _ = @import("diagnostics/sink.zig");
     _ = @import("diagnostics/render.zig");
@@ -60,6 +61,8 @@ comptime {
     _ = @import("support/symbol.zig");
     _ = @import("sema/instantiate.zig");
     _ = @import("driver/loader.zig");
+    _ = @import("driver/library_encoding.zig");
+    _ = @import("driver/library_cache.zig");
     _ = @import("driver/dependencies.zig");
     _ = @import("driver/embedded.zig");
     _ = @import("driver/runner.zig");

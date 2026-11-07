@@ -1,0 +1,5 @@
+error[T-Template]: a trait declares one structural template
+ --> tests/traits/a_second_template_for_a_library_trait_is_refused.lin:3:15
+  |
+3 | template impl Equatable where reflect.components: Equatable {
+  |               ^^^^^^^^^ another template already targets this trait
