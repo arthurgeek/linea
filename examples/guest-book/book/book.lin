@@ -49,8 +49,10 @@ pub struct Entry {
     signed: time.Timestamp,
 }
 
-// An open guest book. Because `Database` is linear, `Book` is linear too: every
-// caller that opens the book must close or release it before returning.
+// An open guest book: one connection to its database. Because `Database` is
+// linear, `Book` is linear too: every caller that opens the book must close or
+// release it before returning. A `Book` is used by one task at a time, and a
+// server opens one for each task that serves requests.
 @(opaque, linear)
 struct Book {
     database: Database,
@@ -71,13 +73,19 @@ fn read_entry(select: Statement) -> Result[Entry, BookError] {
 }
 
 impl Book {
-    // Open the guest book at `path`, creating its file and `entries` table if
-    // neither exists yet. `wait_when_busy` makes two processes signing at
-    // once wait up to two seconds for each other rather than failing with
-    // `SQLITE_BUSY`.
+    // Open a connection to the guest book at `path`, creating its file and
+    // `entries` table if neither exists yet. SQLite lets one connection write
+    // at a time, so `wait_when_busy` makes a connection that finds another
+    // writing wait up to two seconds for it rather than fail with
+    // `SQLITE_BUSY`. `journal_mode=WAL` writes changes to a log beside the
+    // file instead of into it, so readers keep reading the last committed
+    // entries while a signature is written, and no read waits for a write.
+    // The mode is stored in the file, so the first connection sets it for
+    // every later one.
     pub fn open(path: Str) -> Result[Book, BookError] {
         defer var database = Database.open(path)?
         &database.wait_when_busy(2000)?
+        &database.execute("PRAGMA journal_mode=WAL")?
         &database.execute(schema)?
         .Ok(Book { database })
     }
@@ -97,13 +105,54 @@ impl Book {
         .Ok(())
     }
 
-    // Open a fresh guest book in memory, with its `entries` table created.
-    pub fn open_in_memory() -> Result[Book, BookError] {
-        Book.open(":memory:")
+    // Two connections to one file, as two serving tasks hold. While `reading`
+    // is part way through a query, `other` reads the entries too and signs
+    // the book. Without the log `journal_mode=WAL` keeps, that signature
+    // would wait for the read to finish and fail with `SQLITE_BUSY` after the
+    // two seconds `wait_when_busy` allows. The unfinished query keeps reading
+    // the entries as they were when it began.
+    test fn a_read_in_progress_lets_another_connection_read_and_sign() {
+        let stamp = time.now().nanoseconds()
+        defer let path_text = fmt.render_owned("/tmp/linea-guest-book-readers-{stamp}.db").unwrap()
+        let path = fs.Path.from_str(path_text.view()).unwrap()
+        defer {
+            let _ = fs.remove_file(path) else |_| {
+                ()
+            }
+        }
+        defer var reading = Book.open(path_text.view()).unwrap()
+        defer var other = Book.open(path_text.view()).unwrap()
+        &other.sign("Ada", "First").unwrap()
+        &other.sign("Grace", "Second").unwrap()
+        defer var names = reading.database.prepare("SELECT name FROM entries ORDER BY id").unwrap()
+        testing.assert(&names.step().unwrap(), "the first entry was not read")?
+        defer let listed = &other.newest(10).unwrap()
+        testing.assert_eq(listed.length(), UInt64(2), "a second reader did not see both entries")?
+        let signed = match &other.sign("Linus", "Third") {
+            Ok(_) => true,
+            Err(error) => {
+                error.release()
+                false
+            },
+        }
+        testing.assert(signed, "a signature waited for a read in progress")?
+        testing.assert(&names.step().unwrap(), "the second entry was not read")?
+        testing.assert(!&names.step().unwrap(), "a query in progress read an entry signed after it began")?
+        .Ok(())
+    }
+
+    // Open a connection to the guest book kept in the in-memory database
+    // `name`, creating its `entries` table if it does not exist yet. Every
+    // `Book` opened with the same name reaches the same entries until the
+    // last is closed, so a test can open one for each task that serves it.
+    pub fn open_in_memory(name: Str) -> Result[Book, BookError] {
+        defer var database = Database.open_in_memory(name)?
+        &database.execute(schema)?
+        .Ok(Book { database })
     }
 
     test fn open_in_memory_starts_with_no_entries() {
-        defer var book = Book.open_in_memory().unwrap()
+        defer var book = Book.open_in_memory("starts_with_no_entries").unwrap()
         defer let listed = &book.newest(10).unwrap()
         testing.assert_eq(listed.length(), UInt64(0), "a new book was not empty")?
         .Ok(())
@@ -121,7 +170,7 @@ impl Book {
     }
 
     test fn sign_stores_text_holding_quotes_and_sql() {
-        defer var book = Book.open_in_memory().unwrap()
+        defer var book = Book.open_in_memory("sign_stores_text_holding_quotes_and_sql").unwrap()
         &book.sign("O'Connor", "'); DROP TABLE entries; --").unwrap()
         defer let listed = &book.newest(10).unwrap()
         testing.assert_eq(listed.length(), UInt64(1), "the entry was not stored")?
@@ -149,7 +198,7 @@ impl Book {
     }
 
     test fn signing_and_listing_returns_newest_first_up_to_the_limit() {
-        defer var book = Book.open_in_memory().unwrap()
+        defer var book = Book.open_in_memory("signing_and_listing_returns_newest_first_up_to_the_limit").unwrap()
         &book.sign("Ada", "First").unwrap()
         &book.sign("Grace", "Second").unwrap()
         &book.sign("Linus", "Third").unwrap()
@@ -161,7 +210,7 @@ impl Book {
     }
 
     test fn newest_refuses_a_negative_limit() {
-        defer var book = Book.open_in_memory().unwrap()
+        defer var book = Book.open_in_memory("newest_refuses_a_negative_limit").unwrap()
         let refused = match &book.newest(-1) {
             Ok(entries) => {
                 entries.release()
@@ -181,7 +230,7 @@ impl Book {
     }
 
     test fn newest_zero_returns_no_entries() {
-        defer var book = Book.open_in_memory().unwrap()
+        defer var book = Book.open_in_memory("newest_zero_returns_no_entries").unwrap()
         &book.sign("Ada", "Hello").unwrap()
         defer let listed = &book.newest(0).unwrap()
         testing.assert_eq(listed.length(), UInt64(0), "newest(0) returned entries")?
@@ -189,7 +238,7 @@ impl Book {
     }
 
     test fn invalid_timestamps_are_refused_rather_than_faked() {
-        defer var book = Book.open_in_memory().unwrap()
+        defer var book = Book.open_in_memory("invalid_timestamps_are_refused_rather_than_faked").unwrap()
         // Year 10000+ Unix timestamp is outside Linea's representable range.
         let invalid_stamp: Int64 = 300000000000
         var insert = book.database.prepare("INSERT INTO entries (name, message, signed_at) VALUES ('Eve', 'Time traveler', ?1)").unwrap()
@@ -244,7 +293,7 @@ impl Book {
     }
 
     test fn close_consumes_the_book() {
-        let book = Book.open_in_memory().unwrap()
+        let book = Book.open_in_memory("close_consumes_the_book").unwrap()
         book.close()
         .Ok(())
     }

@@ -97,10 +97,11 @@ accepts nothing until every serving task has made its handler.**
    calling thread and a failure closes the listener.
 
 The default policy of `serve` and `listen_and_serve` stays `.Threads(128)`.
-A program whose handlers hold a resource per task chooses its own count: the
-guest book holds two file descriptors per SQLite connection and serves on 32
-tasks, since 128 would pass the 256 descriptors a macOS shell allows by
-default.
+A program whose handlers hold a resource per task keeps that count and makes
+room for it: the guest book holds two file descriptors per SQLite connection,
+so it raises its own open-file limit with `process.raise_open_file_limit`
+before serving, since 128 connections pass the 256 descriptors a macOS shell
+allows by default.
 
 ## Consequences
 

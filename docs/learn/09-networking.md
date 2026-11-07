@@ -987,7 +987,10 @@ fn main() -> UInt8 {
 releases anything after the call. Its error says what stopped it: `Listen`
 when the address could not be opened (a port another program holds, for
 example), and `Serve` carries the `ServeError` that ended serving: `Accept`,
-`Close`, `ArenaTooSmall` or `Memory`. `http.serve` is the same loop for a
+`Close`, `ArenaTooSmall` or `Memory`, or `Handler` when the function that
+builds a serving task's handler returns a `Result` and it is `.Err`, as when
+a task cannot open its database ([A guest book](12-a-guest-book.md#when-a-connection-cannot-be-opened)
+shows one). `http.serve` is the same loop for a
 program that opens the listener itself. A service whose routes share state
 serves through `listen_and_serve_with`, which keeps the state in an owning task
 and returns it when serving ends ([Shared state](#shared-state)); a service
@@ -2307,6 +2310,8 @@ application that runs both ways and stores its entries in SQLite.
 - `http.listen_and_serve(address, make_handler, limits:, policy:)` opens the
   listener, serves on as many tasks as `policy` allows, each with a handler
   `make_handler` builds, and closes and releases everything on every path;
+  `make_handler` returns a handler, or a `Result` holding one when building
+  it can fail, and nothing is accepted until every task has its handler;
   only the address and `make_handler` are required, and `http.serve` is the
   loop for a program that opens the listener itself.
   `listen_and_serve_with(address, make_handler, state)` keeps the state in an
