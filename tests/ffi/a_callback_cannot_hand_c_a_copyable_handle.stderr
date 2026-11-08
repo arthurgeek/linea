@@ -1,0 +1,5 @@
+error[T-ExternHandle]: Linea cannot hand C a `Handle` by value: C may keep or free the object while a copy still names it
+ --> tests/ffi/a_callback_cannot_hand_c_a_copyable_handle/counter/counter.lin:8:30
+  |
+8 | extern fn counter_keep(give: fn(n: Int32) -> Handle) -> Int32
+  |                              ^^^^^^^^^^^^^^^^^^^^^^ answer the address as an integer, and keep the object in a handle that is not `copyable` if C frees or keeps it

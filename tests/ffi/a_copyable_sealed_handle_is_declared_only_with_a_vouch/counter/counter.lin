@@ -1,0 +1,22 @@
+// A copyable sealed newtype over a `struct counter *`. Every copy names the
+// one counter, and a copy moves into any task whole.
+@(opaque, copyable)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+extern fn counter_add(read counter: Handle, amount: Int8)
+
+extern fn counter_total(read counter: Handle) -> Int64
+
+pub fn open() -> Handle {
+    Handle(counter_open())
+}
+
+pub fn add(counter: Handle, amount: Int8) {
+    counter_add(counter, amount)
+}
+
+pub fn total(counter: Handle) -> Int64 {
+    counter_total(counter)
+}

@@ -1,0 +1,34 @@
+// A `struct counter *`, sealed in a generic newtype whose argument says what
+// one step of the counter adds.
+@(opaque, linear)
+type Handle[phantom T] = UInt64
+
+extern fn counter_open() -> UInt64
+
+extern fn counter_add(counter: Handle[Int8], amount: Int8)
+
+extern fn counter_total(read counter: Handle[Int8]) -> Int64
+
+extern fn counter_close(sink counter: Handle[Int8])
+
+@(opaque, linear)
+struct Counter { handle: Handle[Int8] }
+
+impl Counter {
+    pub fn open() -> Counter {
+        .{ handle = Handle(counter_open()) }
+    }
+
+    pub fn add(inout self: Self, amount: Int8) {
+        counter_add(self.handle, amount)
+    }
+
+    pub fn total(self: Self) -> Int64 {
+        counter_total(self.handle)
+    }
+
+    pub fn close(sink self: Self) {
+        let Counter { handle } = self
+        counter_close(handle)
+    }
+}

@@ -1,0 +1,7 @@
+import counter
+
+fn main() -> UInt8 {
+    let tally = counter.open()
+    counter.close(tally)
+    0
+}

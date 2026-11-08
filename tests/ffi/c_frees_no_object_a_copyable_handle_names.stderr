@@ -1,0 +1,15 @@
+error[T-ExternHandle]: every copy of a `Handle` names the same C object, so C may neither keep nor free it
+ --> tests/ffi/c_frees_no_object_a_copyable_handle_names/counter/counter.lin:9:23
+  |
+9 | extern fn counter_add(counter: Handle, amount: Int8)
+  |                       ^^^^^^^ write `read`, so C only reads the object; keep an object C frees or keeps in a handle that is not `copyable`
+error[T-ExternHandle]: every copy of a `Handle` names the same C object, so C may neither keep nor free it
+  --> tests/ffi/c_frees_no_object_a_copyable_handle_names/counter/counter.lin:11:25
+   |
+11 | extern fn counter_total(counter: Handle) -> Int64
+   |                         ^^^^^^^ write `read`, so C only reads the object; keep an object C frees or keeps in a handle that is not `copyable`
+error[T-ExternHandle]: every copy of a `Handle` names the same C object, so C may neither keep nor free it
+  --> tests/ffi/c_frees_no_object_a_copyable_handle_names/counter/counter.lin:13:25
+   |
+13 | extern fn counter_close(counter: Handle)
+   |                         ^^^^^^^ write `read`, so C only reads the object; keep an object C frees or keeps in a handle that is not `copyable`

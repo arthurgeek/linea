@@ -1,0 +1,24 @@
+import std.io
+import std.session
+import std.task
+import ticket
+
+use session.Chan
+use session.End
+
+// A sealed newtype over a number is `Shareable` when it names nothing C
+// holds, so a task may read the ticket while `main` reads it too.
+fn main() -> Result[UInt8, io.IoError] {
+    let held = ticket.issue(7)
+    let worker = task.start(
+        sink [read held] |sink me: Chan[End]| {
+            io.println("the task reads {ticket.number(held)}").unwrap()
+            me.close()
+        },
+    ).unwrap()
+    let mine = ticket.number(held)
+    worker.close()
+    let redeemed = ticket.redeem(held)
+    io.println("main reads {mine} and redeems {redeemed}")?
+    .Ok(0)
+}

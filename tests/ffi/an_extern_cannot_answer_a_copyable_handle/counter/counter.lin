@@ -1,0 +1,16 @@
+// C answers a new counter as a copyable handle, so nothing the compiler tracks
+// owns the counter, and every copy would name it however long it lives.
+@(opaque, copyable, shareable)
+type Handle = UInt64
+
+extern fn counter_open() -> Handle
+
+extern fn counter_total(read counter: Handle) -> Int64
+
+pub fn open() -> Handle {
+    counter_open()
+}
+
+pub fn total(counter: Handle) -> Int64 {
+    counter_total(counter)
+}

@@ -1,0 +1,20 @@
+// A ticket is a number this module seals. No module of this program is
+// trusted with C, so the number names nothing C holds, and reading it writes
+// nothing.
+@(opaque, linear)
+type Ticket = UInt64
+
+pub fn issue(number: UInt64) -> Ticket {
+    Ticket(number)
+}
+
+pub fn number(ticket: Ticket) -> UInt64 {
+    match read ticket {
+        Ticket(number) => number,
+    }
+}
+
+pub fn redeem(sink ticket: Ticket) -> UInt64 {
+    let Ticket(number) = ticket
+    number
+}

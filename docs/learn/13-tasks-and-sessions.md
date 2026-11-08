@@ -784,6 +784,14 @@ error[O-Borrow]: this operation invalidates a place that a later observation sti
    |                         ------ the observation is still used here
 ```
 
+Reading never writes an array of numbers, so it is `Shareable`. Two kinds of
+value are not. An arena's handle writes the arena's cursor each time it is
+read ([Borrowing](06-borrowing.md)). And a handle to an object C holds may be
+read by C in ways the compiler cannot see, so it is not `Shareable` unless the
+module that wraps the C library vouches for it; [Calling C](11-calling-c.md)
+shows the refusal and the `@shareable` mark. Either kind may still move whole
+into one task, or live in an owning task, below.
+
 ## No data races and no locks
 
 A data race is two threads touching the same memory at once, at least one of
@@ -1133,6 +1141,15 @@ an **owning task** that holds it, and a `task.Client` reaches it: the client's
 `call` runs the closure it is given on the owning task, against the state, one
 call at a time, and answers what the closure answers. No other task touches
 the state, so there is nothing to lock.
+
+An owning task runs every call on its own thread, one at a time, which is
+what a C object that is not safe for two threads needs. Some C libraries ask
+more: that one thread create, use and destroy each object. A value made by
+`main` and moved into `task.own` was created on `main`'s thread, so for such
+a library the owning task must open the object itself, in its first call,
+and close it before it ends. Being `Shareable` or not says nothing about
+threads either way: a value that is not `Shareable` still moves whole to
+another task.
 
 `owning_task.lin`:
 

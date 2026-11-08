@@ -1,0 +1,44 @@
+// A `struct counter *` is an address, which this module keeps in a sealed
+// newtype over `UInt64`. `counter_total` reads the counter's total and writes
+// nothing, and only `counter_add`, which takes the handle to change it, writes
+// one, so two threads may read one counter at once. `@shareable` states that
+// promise; the compiler believes it, as it believes the `extern` declarations.
+@(opaque, linear, shareable)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+extern fn counter_add(counter: Handle, amount: Int8)
+
+extern fn counter_total(read counter: Handle) -> Int64
+
+extern fn counter_close(sink counter: Handle)
+
+// A running total kept by the C library. It must be closed.
+@(opaque, linear)
+struct Counter { handle: Handle }
+
+pub enum OpenError { OutOfMemory }
+
+impl Counter {
+    pub fn open() -> Result[Counter, OpenError] {
+        let address = counter_open()
+        if address == 0 {
+            return .Err(.OutOfMemory)
+        }
+        .Ok(.{ handle = Handle(address) })
+    }
+
+    pub fn add(inout self: Self, amount: Int8) {
+        counter_add(self.handle, amount)
+    }
+
+    pub fn total(self: Self) -> Int64 {
+        counter_total(self.handle)
+    }
+
+    pub fn close(sink self: Self) {
+        let Counter { handle: handle } = self
+        counter_close(handle)
+    }
+}

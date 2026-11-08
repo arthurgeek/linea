@@ -156,6 +156,7 @@ fn kindOf(tag: token.Tag) ?Kind {
         .keyword_copyable,
         .keyword_carrier,
         .keyword_unshareable,
+        .keyword_shareable,
         .keyword_test,
         .keyword_trap,
         .keyword_phantom,

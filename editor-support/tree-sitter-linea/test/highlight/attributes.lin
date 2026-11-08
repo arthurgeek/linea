@@ -20,3 +20,6 @@ struct Session { user: Str }
 @unshareable
 // ^ keyword.storage.modifier
 struct Cursor { at: UInt64 }
+@(opaque, shareable)
+//        ^ keyword.storage.modifier
+type Handle = UInt64

@@ -189,7 +189,9 @@ itself. How the `extern` takes the handle says what C does with the object:
 
 A handle is not `copyable`: a `copyable` sealed type is an ordinary value at
 the boundary, because a copy would still name the object after C changed or
-freed it through another. A newtype the program wraps around a handle is a
+freed it through another. For the same reason C takes a copyable sealed type
+only `read`, and a trusted module declares one only with `@shareable`, which
+a later section explains. A newtype the program wraps around a handle is a
 handle too, so a label around a library's handle is lent to C the same way.
 And an `extern` whose answer lives inside an object, written
 `where borrows(handle)`, takes that object as a handle, never as a bare
@@ -380,6 +382,371 @@ error[O-Leak]: `tally` (a linear `Counter`) is still owned when this path leaves
    |
    = help: settle it first with `tally.close()`
 ```
+
+### A C object stays with one task unless its wrapper says otherwise
+
+A task may read what its creator reads when the value is `Shareable`
+([Tasks and sessions](13-tasks-and-sessions.md)). A handle is not: a call that
+takes it `read` promises only that C leaves the object as it was, not that C
+lets two threads into it at once. Many C libraries keep state inside an object
+they hand out by `const` pointer, such as SQLite's last error message, and the
+compiler cannot read C to find out. So a sealed handle that is not `copyable`,
+declared in a module trusted with C, is not `Shareable`, and neither is any
+type that holds one, like `Counter`. Nothing names the library or the type:
+the rule reads `@opaque`, the ownership policy and the manifest's grant, so
+every wrapper is covered the moment it declares its handle.
+
+`shared/linea.json`:
+
+```json
+{ "extern": ["counter"], "native": ["counter/counter.c"] }
+```
+
+`shared/counter/counter.c`:
+
+```c
+#include <stdint.h>
+#include <stdlib.h>
+
+struct counter {
+    int64_t total;
+};
+
+struct counter *counter_open(void) { return calloc(1, sizeof(struct counter)); }
+
+void counter_add(struct counter *counter, int8_t amount) { counter->total += amount; }
+
+int64_t counter_total(const struct counter *counter) { return counter->total; }
+
+void counter_close(struct counter *counter) { free(counter); }
+```
+
+`shared/counter/counter.lin`:
+
+```linea
+// A `struct counter *`, sealed in a newtype only this module can make.
+@(opaque, linear)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+extern fn counter_add(counter: Handle, amount: Int8)
+
+extern fn counter_total(read counter: Handle) -> Int64
+
+extern fn counter_close(sink counter: Handle)
+
+@(opaque, linear)
+struct Counter { handle: Handle }
+
+pub enum OpenError { OutOfMemory }
+
+impl Counter {
+    pub fn open() -> Result[Counter, OpenError] {
+        let address = counter_open()
+        if address == 0 {
+            return .Err(.OutOfMemory)
+        }
+        .Ok(.{ handle = Handle(address) })
+    }
+
+    pub fn add(inout self: Self, amount: Int8) {
+        counter_add(self.handle, amount)
+    }
+
+    pub fn total(self: Self) -> Int64 {
+        counter_total(self.handle)
+    }
+
+    pub fn close(sink self: Self) {
+        let Counter { handle: handle } = self
+        counter_close(handle)
+    }
+}
+```
+
+`shared/main.lin`:
+
+```linea
+import std.io
+import std.session
+import std.task
+import counter
+
+use counter.Counter
+use session.Chan
+use session.End
+
+fn main() -> Result[UInt8, io.IoError] {
+    var tally = Counter.open() else |_| {
+        return .Ok(1)
+    }
+    &tally.add(40)
+    // The task reads the counter while `main` reads it too.
+    let worker = task.start(
+        sink [read tally] |sink me: Chan[End]| {
+            io.println("the task reads {tally.total()}").unwrap()
+            me.close()
+        },
+    ).unwrap()
+    let mine = tally.total()
+    worker.close()
+    tally.close()
+    io.println("main reads {mine}")?
+    .Ok(0)
+}
+```
+
+```
+error[O-Cross]: a task cannot read `tally` while its creator may read it too: a `Counter` is not `Shareable`: it reaches a `counter.Handle`, which names an object C holds
+  --> shared/main.lin:17:20
+   |
+17 |         sink [read tally] |sink me: Chan[End]| {
+   |                    ^^^^^ this capture is read by the task
+   |
+   = help: C has not said two threads may read this object at once; move it into one task, or keep it in an owning task (`task.own`) and give other tasks its client, or, if the C library guarantees concurrent access is safe for every operation its wrapper exposes through shared reads, mark `counter.Handle` `@shareable` in that trusted wrapper
+```
+
+The help names three ways on. Moving the counter into the task with
+`[sink tally]` leaves one reader. An owning task keeps the counter on its own
+thread and runs each call against it in turn, so C never sees two threads
+use the counter at once ([The owning-task pattern](13-tasks-and-sessions.md#the-owning-task-pattern)).
+A library that needs one thread to create, use and destroy each object asks
+more: the owning task must open the object itself.
+And where the C library documents an object as safe to read from several
+threads at once, the wrapper says so on the handle with `@shareable`. This
+counter's `counter_total` only reads a number that nothing changes while a
+`read` of the handle is alive, so the wrapper may vouch for it:
+
+<!-- guide: edit shared/counter/counter.lin 1-3 // A `struct counter *`, sealed in a newtype only this module can make. … type Handle = UInt64 -->
+```linea
+// A `struct counter *`, sealed in a newtype only this module can make.
+// `counter_total` reads the total and writes nothing, so two threads may
+// read one counter at once.
+@(opaque, linear, shareable)
+type Handle = UInt64
+```
+
+```
+the task reads 40
+main reads 40
+```
+
+`@shareable` certifies concurrent access and nothing more: it says nothing
+about how long the object lives, and nothing about which thread may use it.
+It is a promise the compiler believes, as it believes an `extern` signature, so only a module its manifest grants `extern` may write it, and
+only on the sealed handle itself. A record holding a `@shareable` handle is
+`Shareable` where its other fields are. If you know Rust, this is
+`unsafe impl Sync for Handle {}`: the wrapper's author vouches for what the
+compiler cannot see.
+
+A `copyable` sealed type is a different promise. Every copy names the same C
+object, and a copy moves into any task whole, so the compiler has no single
+owner to follow. Two rules keep such a type sound. C may take it only `read`:
+neither keeping it nor freeing it, since another copy would still name the
+object afterwards. And no `extern` answers one, since nothing would own what C
+handed over. A wrapper whose C object must be freed keeps it in a handle that
+is not `copyable`, as `Counter` above does. This wrapper hands out copies and
+then frees through one of them:
+
+`freed/linea.json`:
+
+```json
+{ "extern": ["counter"], "native": ["counter/counter.c"] }
+```
+
+`freed/counter/counter.c`:
+
+```c
+#include <stdint.h>
+#include <stdlib.h>
+
+struct counter {
+    int64_t total;
+};
+
+struct counter *counter_open(void) { return calloc(1, sizeof(struct counter)); }
+
+int64_t counter_total(const struct counter *counter) { return counter->total; }
+
+void counter_close(struct counter *counter) { free(counter); }
+```
+
+`freed/counter/counter.lin`:
+
+```linea
+// Every copy of a `Handle` names the one counter.
+@(opaque, copyable, shareable)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+extern fn counter_total(read counter: Handle) -> Int64
+
+extern fn counter_close(counter: Handle)
+
+pub fn open() -> Handle {
+    Handle(counter_open())
+}
+
+pub fn total(counter: Handle) -> Int64 {
+    counter_total(counter)
+}
+
+pub fn close(counter: Handle) {
+    counter_close(counter)
+}
+```
+
+`freed/main.lin`:
+
+```linea
+import std.io
+import counter
+
+fn main() -> Result[UInt8, io.IoError] {
+    let tally = counter.open()
+    let other = copy(tally)
+    counter.close(tally)
+    // `other` still names the counter `close` freed.
+    io.println("{counter.total(other)}")?
+    .Ok(0)
+}
+```
+
+```
+error[T-ExternHandle]: every copy of a `Handle` names the same C object, so C may neither keep nor free it
+ --> freed/counter/counter.lin:9:25
+  |
+9 | extern fn counter_close(counter: Handle)
+  |                         ^^^^^^^ write `read`, so C only reads the object; keep an object C frees or keeps in a handle that is not `copyable`
+```
+
+A copyable handle fits an object that lives as long as the program, such as
+one counter C keeps in a static variable and updates atomically. Its
+`extern`s take the handle `read`, and its declaration says `@shareable`,
+because any number of threads may use the counter through their copies:
+
+`copied/linea.json`:
+
+```json
+{ "extern": ["counter"], "native": ["counter/counter.c"] }
+```
+
+`copied/counter/counter.c`:
+
+```c
+#include <stdint.h>
+
+struct counter {
+    int64_t total;
+};
+
+// The one counter lives for the whole program, so no handle to it dangles.
+static struct counter shared;
+
+struct counter *counter_open(void) { return &shared; }
+
+void counter_add(struct counter *counter, int8_t amount) {
+    __atomic_fetch_add(&counter->total, amount, __ATOMIC_SEQ_CST);
+}
+
+int64_t counter_total(const struct counter *counter) {
+    return __atomic_load_n(&counter->total, __ATOMIC_SEQ_CST);
+}
+```
+
+`copied/counter/counter.lin`:
+
+```linea
+// A copyable sealed newtype over a `struct counter *`. Every copy names the
+// one counter, and a copy moves into any task whole. The counter lives for
+// the whole program, and `counter_add` and `counter_total` update and read it
+// atomically, so any number of threads may use it at once, which
+// `@shareable` states. C only reads the handle, never keeping or freeing the
+// counter, which `read` states.
+@(opaque, copyable, shareable)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+extern fn counter_add(read counter: Handle, amount: Int8)
+
+extern fn counter_total(read counter: Handle) -> Int64
+
+pub fn open() -> Handle {
+    Handle(counter_open())
+}
+
+pub fn add(counter: Handle, amount: Int8) {
+    counter_add(counter, amount)
+}
+
+pub fn total(counter: Handle) -> Int64 {
+    counter_total(counter)
+}
+```
+
+`copied/main.lin`:
+
+```linea
+import std.io
+import std.session
+import std.task
+import counter
+
+use session.Chan
+use session.End
+
+// Two tasks add to one counter through copies of its handle. The wrapper
+// vouches that C's counter is safe for two threads at once.
+fn main() -> Result[UInt8, io.IoError] {
+    let tally = counter.open()
+    let other = copy(tally)
+    let worker = task.start(
+        sink [sink other] |sink me: Chan[End]| {
+            for _ in 0..1000 {
+                counter.add(other, 1)
+            }
+            me.close()
+        },
+    ).unwrap()
+    for _ in 0..1000 {
+        counter.add(tally, 1)
+    }
+    worker.close()
+    io.println("{counter.total(tally)}")?
+    .Ok(0)
+}
+```
+
+```
+2000
+```
+
+In a module trusted with C, a copyable sealed newtype is declared only with
+`@shareable`, since the compiler cannot keep its object to one task. Without
+the mark:
+
+<!-- guide: edit copied/counter/counter.lin 7 @(opaque, copyable, shareable) -->
+```linea
+@(opaque, copyable)
+```
+
+```
+error[T-ExternHandle]: a copyable sealed newtype in a module trusted with C names its object from every copy, and a copy reaches any task
+ --> copied/counter/counter.lin:8:6
+  |
+8 | type Handle = UInt64
+  |      ^^^^^^ declare it `@shareable` if C lets two threads use the object at once, or drop `copyable` so the compiler keeps the object to one task at a time
+```
+
+`std.io`'s `Descriptor` is such a type. It wraps a file descriptor it never
+closes, so whatever owns the descriptor keeps it open while a copy is used,
+and POSIX lets two threads read and write one descriptor at once, though two
+readers then consume different parts of the stream. A static object is only
+one way to outlive every copy; a reference count C keeps, or an owner that
+stays open, works as well, and the wrapper is the one that promises it.
 
 ### `inout` passes the address of a value
 
@@ -1668,6 +2035,20 @@ against the C library's documentation:
 6. C calls a callback only during the call that passed it.
 7. Every length you pass to C, or to `copy_bytes`, is the length of the
    memory it describes.
+8. Every C object reachable from more than one task, by a read or through a
+   copy, is kept in a non-copyable handle, or the wrapper is sure its read
+   paths are safe for concurrent use. The compiler keeps a handle to one task
+   at a time, but a C pointer kept in a plain integer field of a record is not
+   followed at all. And a handle moved whole into a task is accepted, so a C
+   object that must be created, used and destroyed on one thread is created
+   inside an owning task, which then runs every call on that thread.
+9. A handle marked `@shareable` names an object the C library lets two
+   threads read at once, through every `extern` that takes it. A copyable
+   sealed newtype must be marked `@shareable` in a trusted module, and the
+   mark then promises that any number of threads may use the object through
+   its copies at once, and that the object is never freed while a copy
+   lives: C takes the newtype only `read`, and the wrapper never frees the
+   object through an address it took out of one.
 
 The compiler holds the rest: an `extern` is private to its module, an
 `extern` answering a `CText` states what it points into, a module that is not

@@ -1,0 +1,18 @@
+import counter
+
+use counter.Counter
+
+// `Shareable` admits a value two tasks may read at once. A counter is read
+// through C, which has not said it allows that.
+fn read_from_any_task[T: Shareable](_value: T) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let tally = Counter.open() else |_| {
+        return 1
+    }
+    let status = read_from_any_task(tally)
+    tally.close()
+    status
+}

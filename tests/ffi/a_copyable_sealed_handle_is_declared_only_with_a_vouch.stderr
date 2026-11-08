@@ -1,0 +1,5 @@
+error[T-ExternHandle]: a copyable sealed newtype in a module trusted with C names its object from every copy, and a copy reaches any task
+ --> tests/ffi/a_copyable_sealed_handle_is_declared_only_with_a_vouch/counter/counter.lin:4:6
+  |
+4 | type Handle = UInt64
+  |      ^^^^^^ declare it `@shareable` if C lets two threads use the object at once, or drop `copyable` so the compiler keeps the object to one task at a time

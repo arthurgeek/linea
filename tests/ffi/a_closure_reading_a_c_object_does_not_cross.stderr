@@ -1,0 +1,7 @@
+error[O-Cross]: a task cannot read `reader` while its creator may read it too: a closure is not `Shareable`: `tally` observes a `Counter`, which reaches a `counter.Handle`, which names an object C holds
+  --> tests/ffi/a_closure_reading_a_c_object_does_not_cross/main.lin:17:20
+   |
+17 |         sink [read reader] |sink me: Chan[End]| {
+   |                    ^^^^^^ this capture is read by the task
+   |
+   = help: C has not said two threads may read this object at once; move it into one task, or keep it in an owning task (`task.own`) and give other tasks its client, or, if the C library guarantees concurrent access is safe for every operation its wrapper exposes through shared reads, mark `counter.Handle` `@shareable` in that trusted wrapper

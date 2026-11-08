@@ -1,0 +1,21 @@
+// `@shareable` vouches for the C object a sealed newtype names. A struct is
+// shareable where its fields are, an unsealed newtype names no C object, and
+// `unshareable` says the opposite.
+@shareable
+struct _Pair {
+    first: UInt64,
+    second: UInt64,
+}
+
+@(linear, shareable)
+type _Unsealed = UInt64
+
+@(opaque, linear, shareable, unshareable)
+type _Both = UInt64
+
+@(opaque, linear, shareable, shareable)
+type _Twice = UInt64
+
+fn main() -> UInt8 {
+    0
+}

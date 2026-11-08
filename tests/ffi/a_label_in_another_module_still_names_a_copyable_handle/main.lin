@@ -1,0 +1,15 @@
+import counter
+
+use counter.Handle
+
+// A label this module puts around the library's copyable handle names the
+// same counter, so C may take it only `read` too.
+type Label = Handle
+
+extern fn counter_close(counter: Label)
+
+fn main() -> UInt8 {
+    let tally = Label(counter.open())
+    counter_close(tally)
+    0
+}

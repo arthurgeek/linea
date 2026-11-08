@@ -1,10 +1,11 @@
 import std.ffi
 
 // A copy of a copyable type names the same object, so it is not a handle:
-// `read` says nothing about it, and text read from the object cannot be tied
-// to it, since changing the object through one copy would leave text read
-// through another dangling.
-@(opaque, copyable)
+// text read from the object cannot be tied to it, since changing the object
+// through one copy would leave text read through another dangling, and C may
+// neither answer one nor take one except `read`. The C library lets several
+// threads use one object at once, which `@shareable` states.
+@(opaque, copyable, shareable)
 type Name = UInt64
 
 extern fn named_open() -> Name

@@ -28,7 +28,10 @@ use mem.Lender
 
 // A `sqlite3 *` connection pointer C allocated. `@opaque` keeps the address
 // inside this module, and `@linear` makes every connection reach
-// `sqlite3_close_v2`.
+// `sqlite3_close_v2`. A handle is not `Shareable`, and this one is not marked
+// `@shareable`: SQLite rewrites a connection's error message on every call,
+// so two threads reading one connection would race on it. A program keeps its
+// `Database` in one task, or in an owning task its other tasks call.
 @(opaque, linear)
 type DatabaseHandle = UInt64
 

@@ -1,0 +1,16 @@
+// A copyable sealed newtype over a `struct counter *`.
+@(opaque, copyable, shareable)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+// C keeps or frees what the callback answers, while a copy may still name it.
+extern fn counter_keep(give: fn(n: Int32) -> Handle) -> Int32
+
+fn give(_n: Int32) -> Handle {
+    Handle(counter_open())
+}
+
+pub fn go() -> UInt8 {
+    UInt8(counter_keep(give))
+}

@@ -1,0 +1,22 @@
+import std.io
+import std.session
+import std.task
+import ticket
+
+use session.Chan
+use session.End
+
+// A copy of the ticket moves into the task while `main` reads its own.
+fn main() -> Result[UInt8, io.IoError] {
+    let mine = ticket.issue(7)
+    let theirs = copy(mine)
+    let worker = task.start(
+        sink [sink theirs] |sink me: Chan[End]| {
+            io.println("the task holds ticket {ticket.number(theirs)}").unwrap()
+            me.close()
+        },
+    ).unwrap()
+    worker.close()
+    io.println("main holds ticket {ticket.number(mine)}")?
+    .Ok(0)
+}

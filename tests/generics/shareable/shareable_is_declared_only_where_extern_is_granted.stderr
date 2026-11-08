@@ -1,0 +1,5 @@
+error[M-Extern]: a `@shareable` handle is declared only in a module its root's manifest grants, and linea.json does not list "."
+ --> tests/generics/shareable/shareable_is_declared_only_where_extern_is_granted.lin:3:19
+  |
+3 | @(opaque, linear, shareable)
+  |                   ^^^^^^^^^ list this module under "extern" in linea.json to trust it with C, or drop `@shareable`

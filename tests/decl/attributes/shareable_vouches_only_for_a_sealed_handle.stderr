@@ -1,0 +1,20 @@
+error[S-Entry]: only a newtype names an object C holds, so `shareable` vouches for nothing here
+ --> tests/decl/attributes/shareable_vouches_only_for_a_sealed_handle/main.lin:4:2
+  |
+4 | @shareable
+  |  ^^^^^^^^^ a struct or an enum is `Shareable` where its parts are; drop `shareable`
+error[S-Entry]: only a sealed newtype names an object C holds, so `shareable` vouches for nothing here
+  --> tests/decl/attributes/shareable_vouches_only_for_a_sealed_handle/main.lin:10:11
+   |
+10 | @(linear, shareable)
+   |           ^^^^^^^^^ write `opaque` beside it on the handle, or drop `shareable`
+error[S-Entry]: shareable and unshareable are exclusive
+  --> tests/decl/attributes/shareable_vouches_only_for_a_sealed_handle/main.lin:13:19
+   |
+13 | @(opaque, linear, shareable, unshareable)
+   |                   ^^^^^^^^^ keep the one that says whether a read of this type writes
+error[S-Entry]: an attribute is written once
+  --> tests/decl/attributes/shareable_vouches_only_for_a_sealed_handle/main.lin:16:30
+   |
+16 | @(opaque, linear, shareable, shareable)
+   |                              ^^^^^^^^^ remove the repeated `shareable`

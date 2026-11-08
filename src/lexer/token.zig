@@ -123,6 +123,7 @@ pub const Tag = enum(u8) {
     keyword_copyable,
     keyword_carrier,
     keyword_unshareable,
+    keyword_shareable,
     keyword_test,
     keyword_trap,
     keyword_phantom,
