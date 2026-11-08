@@ -12,7 +12,7 @@ and [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) (`Carried[H]` i
 type argument is superseded by
 [0255](0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md),
 and the owning-task clause of §9 by
-[0262](0262-an-owning-task-holds-nothing-that-waits.md).
+[0261](0261-an-owning-task-holds-nothing-that-waits.md).
 
 **What is built.** Stages 0 to 4 of §16 exist: `mem.Carried[H]` (§12), which
 every other clause rests on; the `Protocol` trait with its combinators in

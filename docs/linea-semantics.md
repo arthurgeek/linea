@@ -5682,7 +5682,7 @@ An owning task (`task.own`) bounds its state `S: Owned + Isolated`, and a call
 the only values the owning task's thread reaches, and the job's release runs
 there before its caller is answered, so with neither holding an endpoint a call
 never waits on a task that is itself waiting for a call queued behind it
-([ADR 0262](adr/0262-an-owning-task-holds-nothing-that-waits.md)). A job holding
+([ADR 0261](adr/0261-an-owning-task-holds-nothing-that-waits.md)). A job holding
 a record that waits on a session when released, or a state holding an endpoint,
 an owner or a closure capturing one, is [T-Bound] at the `own` or `call` that
 takes it. A job may still start a task of its own and join it, since that

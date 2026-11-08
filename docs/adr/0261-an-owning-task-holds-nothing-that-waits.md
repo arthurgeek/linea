@@ -1,4 +1,4 @@
-# 262. An owning task holds nothing that waits
+# 261. An owning task holds nothing that waits
 
 Status: Accepted — 2026-11-07. Supersedes the owning-task clause of
 [0250](0250-tasks-are-structured-through-linear-sessions.md) §9 and the
