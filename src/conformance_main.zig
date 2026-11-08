@@ -21131,17 +21131,17 @@ fn checkResumedEmission(
     failures: *std.ArrayList(Failure),
 ) !void {
     var check = fresh orelse try freshCheck(gpa, scratch, case, resumed_table, resumed, display_path, failures);
-    // A fresh check that refused the case has already failed, by the
-    // diagnostics it reported.
-    const module = check.lowered orelse return;
+    // The resumed check accepted and emitted the case, so a fresh check that
+    // refused it, in its passes or in instance discovery, or whose module the
+    // backend refused, disagrees with it.
     var ir: std.Io.Writer.Allocating = .init(gpa);
-    const emitted = !check.sink.hasErrors() and try emitMlir(gpa, &ir.writer, &module, &check.table, &check.sink, .{});
+    const emitted = if (check.lowered) |*module| try emitMlir(gpa, &ir.writer, module, &check.table, &check.sink, .{}) else false;
     if (!emitted) {
         var why: std.Io.Writer.Allocating = .init(gpa);
         try render.renderAll(&why.writer, &check.table, &check.sink, .{ .color = .never });
         return failures.append(gpa, .{
             .path = display_path,
-            .what = "a fresh check refused to lower or emit a case the check resumed from the checked library emitted",
+            .what = "a fresh check refused a case the check resumed from the checked library emitted",
             .expected = "the module the resumed check emitted",
             .actual = why.written(),
         });
@@ -21828,8 +21828,13 @@ fn checkCase(
 
                 // Property: a case resumed from a library holding the
                 // modules its imports reach, the path `linea build` takes
-                // for it, emits what a fresh check of it emits.
-                if (chosen.imported and env.sanitize == null and (env.narrowed or comparesResumedEmission(display_path))) {
+                // for it, emits what a fresh check of it emits. Asked only
+                // where the check did resume, since one that fell back to
+                // checking the library itself has nothing to compare, and of
+                // every case whose dump goldens already took a fresh check,
+                // where the comparison costs one emission.
+                const sampled = fresh != null or env.narrowed or comparesResumedEmission(display_path);
+                if (chosen.imported and settled.reused_library and env.sanitize == null and sampled) {
                     try checkResumedEmission(gpa, scratch_parent, case, fresh, &table, &sink, ir.written(), display_path, &w.failures);
                     resumed_emission_compared = true;
                 }
