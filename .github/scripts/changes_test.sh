@@ -5,7 +5,8 @@
 #
 # The repository holds a base commit B, a pull request of a code commit C
 # (touching `src/mir/`) and a documentation commit D on top of it, a
-# `--no-ff` merge of D into B as the commit a pull request run tests, a
+# `--no-ff` merge of D into B as the commit a pull request run tests, the
+# same pull request with a guide commit G on top of C instead, a
 # pull request of a documentation commit E alone on B, and two commits pushed
 # to main after B: code P1 and documentation P2.
 #
@@ -62,6 +63,11 @@ D=$(commit AGENTS.md docs)
 git checkout -q --detach "$B"
 git merge -q --no-ff -m merge "$D"
 merge=$(git rev-parse HEAD)
+git checkout -q --detach "$C"
+G=$(commit docs/learn/01-basics.md guide)
+git checkout -q --detach "$B"
+git merge -q --no-ff -m merge-guide "$G"
+merge_guide=$(git rev-parse HEAD)
 git checkout -q --detach "$B"
 E=$(commit AGENTS.md docs-alone)
 git checkout -q --detach "$B"
@@ -71,7 +77,7 @@ git checkout -q main
 P1=$(commit src/other.zig pushed-code)
 P2=$(commit README.md pushed-docs)
 
-lanes=(check "sanitize (address)" "sanitize (thread)" optimised sweep fuzz-mir)
+lanes=(check "sanitize (address)" "sanitize (thread)" "optimised (unit)" "optimised (corpus)" "optimised (soundness)" sweep fuzz-mir)
 
 # Records at commit $1 a run, suite $2, whose `changes` run $3 recorded the
 # annotations given after it, and in which every lane passed except those
@@ -122,7 +128,9 @@ expect() {
 expect_lanes() {
   expect check "$1"
   expect sanitize "$2"
-  expect optimised "$3"
+  expect optimised-unit "$3"
+  expect optimised-corpus "$3"
+  expect optimised-soundness "$3"
   expect sweep "$4"
   expect fuzz-mir "$5"
 }
@@ -149,6 +157,28 @@ expect_lanes run inherit inherit inherit inherit
 FAILED="sanitize (thread)" record "$C" 2 20 "pull_request $B"
 run_pr "a lane that failed in one attempt and passed in another" "$D" "$merge"
 expect_lanes inherit inherit inherit inherit inherit
+
+# Each optimised job is a lane of its own: the one that failed reruns, and
+# the two that passed inherit.
+reset
+FAILED="optimised (corpus)" record "$C" 1 10 "pull_request $B"
+run_pr "one optimised job failed at the green commit" "$D" "$merge"
+expect optimised-unit inherit
+expect optimised-corpus run
+expect optimised-soundness inherit
+
+# The guide is read by `check` and `optimised-unit` alone, so an edit to it
+# reruns those two and the rest inherit.
+reset
+record "$C" 1 10 "pull_request $B"
+run_pr "a guide edit after a green commit" "$G" "$merge_guide"
+expect check run
+expect sanitize inherit
+expect optimised-unit run
+expect optimised-corpus inherit
+expect optimised-soundness inherit
+expect sweep inherit
+expect fuzz-mir inherit
 
 # A pass against another base proves nothing about this one; the diff
 # against the base decides, and it holds code under `src/mir/`.
