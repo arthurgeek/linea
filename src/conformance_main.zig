@@ -20764,28 +20764,55 @@ const Libraries = struct {
             defer self.mutex.unlock(self.io);
             const entry = try self.by_modules.getOrPut(self.backing, key);
             if (!entry.found_existing) {
-                entry.key_ptr.* = try self.backing.dupe(u8, key);
-                entry.value_ptr.* = try self.backing.create(Slot);
-                entry.value_ptr.*.* = .{};
+                // An entry is filled whole or removed, so `deinit` frees
+                // only keys and slots this map owns.
+                errdefer self.by_modules.removeByPtr(entry.key_ptr);
+                const owned_key = try self.backing.dupe(u8, key);
+                errdefer self.backing.free(owned_key);
+                const created = try self.backing.create(Slot);
+                created.* = .{};
+                entry.key_ptr.* = owned_key;
+                entry.value_ptr.* = created;
             }
             break :slot entry.value_ptr.*;
         };
         slot.mutex.lockUncancelable(self.io);
         defer slot.mutex.unlock(self.io);
-        if (slot.library == null) {
-            const owned = try self.backing.alloc([]const u8, modules.len);
-            for (owned, modules) |*into, from| into.* = try self.backing.dupe(u8, from);
-            slot.library = try library_cache_mod.checkedFor(self.backing, self.io, self.environ, owned);
-        }
+        // The library copies the module names it keeps, so `modules` may be
+        // the case's own.
+        if (slot.library == null) slot.library = try library_cache_mod.checkedFor(self.backing, self.io, self.environ, modules);
         return .{ .library = slot.library.?, .imported = true };
     }
 
     fn deinit(self: *Libraries) void {
-        var it = self.by_modules.valueIterator();
-        while (it.next()) |slot| if (slot.*.library) |held| held.deinit();
+        var it = self.by_modules.iterator();
+        while (it.next()) |entry| {
+            if (entry.value_ptr.*.library) |held| held.deinit();
+            self.backing.destroy(entry.value_ptr.*);
+            self.backing.free(entry.key_ptr.*);
+        }
+        self.by_modules.deinit(self.backing);
         self.* = undefined;
     }
 };
+
+test "the libraries cases resume from are released with the walk" {
+    var libraries: Libraries = .{ .backing = testing.allocator, .io = testing.io, .environ = .empty, .prelude = test_library.get() };
+    defer libraries.deinit();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const case: Case = .{
+        .display_path = "uses_uuid.lin",
+        .stem = "uses_uuid",
+        .entry = "uses_uuid.lin",
+        .files = &.{.{ .path = "uses_uuid.lin", .text = "import std.uuid\n\nfn main() {}\n" }},
+    };
+    const first = try libraries.forCase(arena.allocator(), case);
+    try testing.expect(first.imported);
+    // A second case importing the same modules resumes from the same library.
+    const second = try libraries.forCase(arena.allocator(), case);
+    try testing.expectEqual(first.library, second.library);
+}
 
 /// What every case's check reads and none of them changes.
 const Settings = struct {
