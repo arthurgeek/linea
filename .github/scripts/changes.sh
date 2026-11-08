@@ -14,8 +14,8 @@
 #                                          request's run at HEAD, from the check
 #                                          runs that had finished before it
 #
-# A lane is one of check, sanitize-address, sanitize-thread, optimised, sweep
-# and fuzz-mir. Its decision is
+# A lane is one of check, sanitize-address, sanitize-thread, optimised-unit,
+# optimised-corpus, optimised-soundness, sweep and fuzz-mir. Its decision is
 #
 #   run      the lane runs, and `merge-ready` requires it to pass;
 #   inherit  a commit of this history passed the lane against the same base,
@@ -33,7 +33,7 @@
 #   a  Markdown no gate reads;
 #   b  Markdown a gate reads: the guide (`docs/learn/`), the decision index
 #      (`docs/adr/`) and the semantics (`docs/linea-semantics.md`), which only
-#      `check` and `optimised` read, through the documentation gates, the
+#      `check` and `optimised-unit` read, through the documentation gates, the
 #      guide and the unit tests;
 #   c  anything else, the corpus under `tests/` included, Markdown or not:
 #      every walk reads it.
@@ -47,21 +47,21 @@
 # `examples/`. A path built at run time from other values escapes it.
 #
 # Where the lane has a green commit, the diff from that commit to the head
-# decides: class a inherits every lane, class b runs `check` and `optimised`
-# and inherits the rest, class c runs every lane. `fuzz-mir` runs when that
-# diff touches what it guards, or when it is class c and the pull request's
-# change touches what it guards or is unknown, and inherits otherwise, so
-# every head of a pull request touching what it guards is fuzzed. Where the
-# lane has no green commit, the diff against the pull request's base decides:
-# a change of class a skips the lane, any other runs it, and `fuzz-mir` runs
-# only when the change touches what it guards. Where neither diff exists, the
-# lane runs.
+# decides: class a inherits every lane, class b runs `check` and
+# `optimised-unit` and inherits the rest, class c runs every lane.
+# `fuzz-mir` runs when that diff touches what it guards, or when it is class c
+# and the pull request's change touches what it guards or is unknown, and
+# inherits otherwise, so every head of a pull request touching what it guards
+# is fuzzed. Where the lane has no green commit, the diff against the pull
+# request's base decides: a change of class a skips the lane, any other runs
+# it, and `fuzz-mir` runs only when the change touches what it guards. Where
+# neither diff exists, the lane runs.
 #
 # When the check runs cannot be read, no lane has a green commit, and each is
 # decided by the base diff alone.
 set -u -o pipefail
 
-lanes="check sanitize-address sanitize-thread optimised sweep fuzz-mir"
+lanes="check sanitize-address sanitize-thread optimised-unit optimised-corpus optimised-soundness sweep fuzz-mir"
 gated_docs='^docs/learn/.*\.md$|^docs/adr/.*\.md$|^docs/linea-semantics\.md$'
 mir_paths='^src/(mir|ownership|sema)/|^src/driver/loader\.zig$|^src/conformance/(generate|storage)\.zig$'
 # How many commits of the history are searched for a green one, newest first.
@@ -78,6 +78,7 @@ check_name() {
   case "$1" in
     sanitize-address) echo "sanitize (address)" ;;
     sanitize-thread) echo "sanitize (thread)" ;;
+    optimised-*) echo "optimised (${1#optimised-})" ;;
     *) echo "$1" ;;
   esac
 }
@@ -115,7 +116,7 @@ decide() {
     fi
     case "$(classify "$since_green")" in
       a) echo inherit ;;
-      b) case "$lane" in check|optimised) echo run ;; *) echo inherit ;; esac ;;
+      b) case "$lane" in check|optimised-unit) echo run ;; *) echo inherit ;; esac ;;
       c) echo run ;;
     esac
   elif [ "$since_base" = - ]; then

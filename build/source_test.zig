@@ -55,7 +55,19 @@ test "runtime archive members have stable names and separate linkage" {
 test "CI outcome snapshots preserve restore and save contracts" {
     const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(workflow);
-    for ([_][]const u8{ "check", "sanitize", "optimised" }) |job_name| {
+    // Each job that records outcomes keeps them in directories of its own
+    // under the scratch directory: the corpus's, the checked-library entries
+    // its walks read, and the examples', and beside them what only that job
+    // walks -- the recompilation properties in `check` and the generated
+    // storage programs in `optimised-soundness`, which walks no corpus.
+    const jobs = [_]struct { name: []const u8, dirs: []const []const u8 }{
+        .{ .name = "check", .dirs = &.{ "/outcomes", "/linea-cache", "/examples/outcomes", "/properties/outcomes" } },
+        .{ .name = "sanitize", .dirs = &.{ "/outcomes", "/linea-cache", "/examples/outcomes" } },
+        .{ .name = "optimised-corpus", .dirs = &.{ "/outcomes", "/linea-cache", "/examples/outcomes" } },
+        .{ .name = "optimised-soundness", .dirs = &.{ "/linea-cache", "/soundness/outcomes" } },
+    };
+    for (jobs) |entry| {
+        const job_name = entry.name;
         const job = try workflowJob(workflow, job_name);
         const restore = outcomeStep(job, "actions/cache/restore@v4") orelse return error.MissingRestoreStep;
         const save = outcomeStep(job, "actions/cache/save@v4") orelse return error.MissingSaveStep;
@@ -85,25 +97,15 @@ test "CI outcome snapshots preserve restore and save contracts" {
         const prefix_tail = restore[prefix_start..];
         const prefixes = prefix_tail[0 .. std.mem.indexOf(u8, prefix_tail, "\n\n") orelse prefix_tail.len];
         try testing.expectEqualStrings(expected_prefixes, std.mem.trim(u8, prefixes, " \n"));
-        // `check` also walks the recompilation properties and `optimised` also
-        // runs the soundness step; each keeps its recorded outcomes in a
-        // directory of its own beside the corpus's.
-        const extra = if (std.mem.eql(u8, job_name, "check"))
-            "\n            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/properties/outcomes"
-        else if (std.mem.eql(u8, job_name, "optimised"))
-            "\n            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/soundness/outcomes"
-        else
-            "";
-        // Each lane also keeps the checked-library entries its walks read,
-        // beside the outcomes and under the same key.
-        const expected_paths = try std.mem.concat(testing.allocator, u8, &.{
-            "${{ env.LINEA_SCRATCH }}-${{ github.job }}", lane, "/outcomes\n            ",
-            "${{ env.LINEA_SCRATCH }}-${{ github.job }}", lane, "/linea-cache\n            ",
-            "${{ env.LINEA_SCRATCH }}-${{ github.job }}", lane, "/examples/outcomes",
-            extra,
-        });
-        defer testing.allocator.free(expected_paths);
-        try testing.expectEqualStrings(expected_paths, std.mem.trim(u8, paths, " \n"));
+        var expected_paths: std.ArrayList(u8) = .empty;
+        defer expected_paths.deinit(testing.allocator);
+        for (entry.dirs, 0..) |dir, i| {
+            if (i > 0) try expected_paths.appendSlice(testing.allocator, "\n            ");
+            try expected_paths.appendSlice(testing.allocator, "${{ env.LINEA_SCRATCH }}-${{ github.job }}");
+            try expected_paths.appendSlice(testing.allocator, lane);
+            try expected_paths.appendSlice(testing.allocator, dir);
+        }
+        try testing.expectEqualStrings(expected_paths.items, std.mem.trim(u8, paths, " \n"));
     }
 }
 
@@ -127,19 +129,15 @@ test "CI runs the unit tests named slow in a lane every pull request requires" {
     const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(workflow);
     // `check` skips them on every event but a push to main, which runs no
-    // `optimised` lane; `optimised` runs every unit test, unfiltered and with
-    // safety checks, on every other event, and a pull request cannot merge
-    // without it. A weekly or manual run also runs them ReleaseFast.
+    // optimised lane; `optimised-unit` runs every unit test, unfiltered and
+    // with safety checks, on every other event, and a pull request cannot
+    // merge without it. A weekly or manual run also runs them ReleaseFast.
     try testing.expectEqual(@as(usize, 1), std.mem.count(u8, workflow, " -Dslow-tests="));
     try testing.expectEqualStrings(
         "nice -n 10 nix develop --command zig build test -j4 -Dsequential -Dsafe-runner -Dguide=${{ github.event_name == 'push' }} -Dslow-tests=${{ github.event_name == 'push' }} -Dscratch=\"$LINEA_SCRATCH-$GITHUB_JOB\"",
         try onlyLineWith(try workflowJob(workflow, "check"), "zig build test "),
     );
-    const optimised = try workflowJob(workflow, "optimised");
-    try testing.expectEqualStrings(
-        "if: ${{ needs.changes.outputs.optimised == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}",
-        try onlyLineWith(optimised, "if: ${{ needs.changes"),
-    );
+    const unit = try workflowJob(workflow, "optimised-unit");
     // The whole step, so a step-level `if:` or `continue-on-error:` cannot
     // turn it off.
     try testing.expectEqualStrings(
@@ -148,7 +146,7 @@ test "CI runs the unit tests named slow in a lane every pull request requires" {
         \\          .github/scripts/resource-log.sh follow & follower=$!
         \\          trap 'kill "$follower" 2>/dev/null || true' EXIT
         \\          nice -n 10 nix develop --command zig build test-unit --release=safe -j4 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
-    , try stepText(optimised, "Unit tests, optimised"));
+    , try stepText(unit, "Unit tests, optimised"));
     // The unit tests against compiler code built as `-Drelease` builds it,
     // weekly and on a manual run.
     try testing.expectEqualStrings(
@@ -158,14 +156,28 @@ test "CI runs the unit tests named slow in a lane every pull request requires" {
         \\          .github/scripts/resource-log.sh follow & follower=$!
         \\          trap 'kill "$follower" 2>/dev/null || true' EXIT
         \\          nice -n 10 nix develop --command zig build test-unit --release=fast -j4 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
-    , try stepText(optimised, "Unit tests, ReleaseFast"));
-    // `merge-ready` requires `optimised` wherever `changes` said to run it,
-    // and `changes` keeps it from running only where a commit passed it
-    // against the same base and nothing it reads changed since.
+    , try stepText(unit, "Unit tests, ReleaseFast"));
+}
+
+test "CI runs the optimised corpus and the soundness property in lanes every pull request requires" {
+    const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(workflow);
+    // Each whole step, so a step-level `if:` or `continue-on-error:` cannot
+    // turn it off.
     try testing.expectEqualStrings(
-        "judge optimised \"$WANT_OPTIMISED\" \"$OPTIMISED\"",
-        try onlyLineWith(try workflowJob(workflow, "merge-ready"), "judge optimised "),
-    );
+        \\      - name: Conformance suite, optimised
+        \\        run: |
+        \\          .github/scripts/resource-log.sh follow & follower=$!
+        \\          trap 'kill "$follower" 2>/dev/null || true' EXIT
+        \\          nice -n 10 nix develop --command zig build conformance --release=fast -j4 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+    , try stepText(try workflowJob(workflow, "optimised-corpus"), "Conformance suite, optimised"));
+    try testing.expectEqualStrings(
+        \\      - name: Soundness matrix and generated storage programs
+        \\        run: |
+        \\          .github/scripts/resource-log.sh follow & follower=$!
+        \\          trap 'kill "$follower" 2>/dev/null || true' EXIT
+        \\          nice -n 10 nix develop --command zig build soundness --release=fast -j1 -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+    , try stepText(try workflowJob(workflow, "optimised-soundness"), "Soundness matrix and generated storage programs"));
 }
 
 /// The step of `job` named `name`: its `- name:` line and every line after it
@@ -225,7 +237,9 @@ test "CI lanes run on the decision changes makes for each of them" {
     const lanes = [_]struct { job: []const u8, @"if": []const u8 }{
         .{ .job = "check", .@"if" = "${{ needs.changes.outputs.check == 'run' && !github.event.pull_request.draft }}" },
         .{ .job = "sanitize", .@"if" = "${{ needs.changes.outputs.sanitize == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}" },
-        .{ .job = "optimised", .@"if" = "${{ needs.changes.outputs.optimised == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}" },
+        .{ .job = "optimised-unit", .@"if" = "${{ needs.changes.outputs.optimised-unit == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}" },
+        .{ .job = "optimised-corpus", .@"if" = "${{ needs.changes.outputs.optimised-corpus == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}" },
+        .{ .job = "optimised-soundness", .@"if" = "${{ needs.changes.outputs.optimised-soundness == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}" },
         .{ .job = "sweep", .@"if" = "${{ needs.changes.outputs.sweep == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}" },
         .{ .job = "fuzz-mir", .@"if" = "${{ github.event_name == 'pull_request' && !github.event.pull_request.draft && needs.changes.outputs.fuzz-mir == 'run' }}" },
     };
@@ -238,6 +252,21 @@ test "CI lanes run on the decision changes makes for each of them" {
     }
     // A sanitizer the script finds inherited is left out of the matrix.
     try testing.expect(std.mem.indexOf(u8, try workflowJob(workflow, "sanitize"), "        exclude: ${{ fromJSON(needs.changes.outputs.sanitize-exclude) }}\n") != null);
+    // `merge-ready` waits for every lane it judges, so each result it reads
+    // is the job's own.
+    try testing.expectEqualStrings(
+        "needs: [changes, check, sanitize, optimised-unit, optimised-corpus, optimised-soundness, fuzz, fuzz-mir]",
+        try onlyLineWith(merge_ready, "    needs: ["),
+    );
+    // A lane inherits through the check run of the job that runs it, which
+    // GitHub names after the job's `name:`; the script names each the same.
+    try testing.expect(std.mem.indexOf(u8, script, "    optimised-*) echo \"optimised (${1#optimised-})\" ;;\n") != null);
+    for ([_][]const u8{ "unit", "corpus", "soundness" }) |part| {
+        var buffer: [64]u8 = undefined;
+        const job = try std.fmt.bufPrint(buffer[0..32], "optimised-{s}", .{part});
+        const name = try std.fmt.bufPrint(buffer[32..], "    name: optimised ({s})\n", .{part});
+        try testing.expect(std.mem.startsWith(u8, try workflowJob(workflow, job), name));
+    }
     // The whole step, so a lane `changes` said to run cannot pass without
     // passing, and one it said to keep cannot pass by running and failing.
     try testing.expectEqualStrings(
@@ -248,21 +277,25 @@ test "CI lanes run on the decision changes makes for each of them" {
         \\          CHANGES: ${{ needs.changes.result }}
         \\          WANT_CHECK: ${{ needs.changes.outputs.check }}
         \\          WANT_SANITIZE: ${{ needs.changes.outputs.sanitize }}
-        \\          WANT_OPTIMISED: ${{ needs.changes.outputs.optimised }}
+        \\          WANT_OPTIMISED_UNIT: ${{ needs.changes.outputs.optimised-unit }}
+        \\          WANT_OPTIMISED_CORPUS: ${{ needs.changes.outputs.optimised-corpus }}
+        \\          WANT_OPTIMISED_SOUNDNESS: ${{ needs.changes.outputs.optimised-soundness }}
         \\          WANT_FUZZ_MIR: ${{ needs.changes.outputs.fuzz-mir }}
         \\          CHECK: ${{ needs.check.result }}
         \\          SANITIZE: ${{ needs.sanitize.result }}
-        \\          OPTIMISED: ${{ needs.optimised.result }}
+        \\          OPTIMISED_UNIT: ${{ needs.optimised-unit.result }}
+        \\          OPTIMISED_CORPUS: ${{ needs.optimised-corpus.result }}
+        \\          OPTIMISED_SOUNDNESS: ${{ needs.optimised-soundness.result }}
         \\          FUZZ: ${{ needs.fuzz.result }}
         \\          FUZZ_MIR: ${{ needs.fuzz-mir.result }}
         \\        run: |
-        \\          echo "changes: $CHANGES (check=$WANT_CHECK, sanitize=$WANT_SANITIZE, optimised=$WANT_OPTIMISED, fuzz-mir=$WANT_FUZZ_MIR)"
-        \\          echo "check: $CHECK, sanitize: $SANITIZE, optimised: $OPTIMISED, fuzz: $FUZZ, fuzz-mir: $FUZZ_MIR"
+        \\          echo "changes: $CHANGES (check=$WANT_CHECK, sanitize=$WANT_SANITIZE, optimised-unit=$WANT_OPTIMISED_UNIT, optimised-corpus=$WANT_OPTIMISED_CORPUS, optimised-soundness=$WANT_OPTIMISED_SOUNDNESS, fuzz-mir=$WANT_FUZZ_MIR)"
+        \\          echo "check: $CHECK, sanitize: $SANITIZE, optimised-unit: $OPTIMISED_UNIT, optimised-corpus: $OPTIMISED_CORPUS, optimised-soundness: $OPTIMISED_SOUNDNESS, fuzz: $FUZZ, fuzz-mir: $FUZZ_MIR"
         \\          if [ "$CHANGES" != success ]; then
         \\            echo "which lanes the change needs is unknown, so no lane can be judged"
         \\            exit 1
         \\          fi
-        \\          case " $CHECK $SANITIZE $OPTIMISED $FUZZ $FUZZ_MIR " in
+        \\          case " $CHECK $SANITIZE $OPTIMISED_UNIT $OPTIMISED_CORPUS $OPTIMISED_SOUNDNESS $FUZZ $FUZZ_MIR " in
         \\            *" failure "*|*" cancelled "*)
         \\              echo "a lane failed or was cancelled"
         \\              exit 1 ;;
@@ -294,7 +327,9 @@ test "CI lanes run on the decision changes makes for each of them" {
         \\          }
         \\          judge check "$WANT_CHECK" "$CHECK"
         \\          judge sanitize "$WANT_SANITIZE" "$SANITIZE"
-        \\          judge optimised "$WANT_OPTIMISED" "$OPTIMISED"
+        \\          judge optimised-unit "$WANT_OPTIMISED_UNIT" "$OPTIMISED_UNIT"
+        \\          judge optimised-corpus "$WANT_OPTIMISED_CORPUS" "$OPTIMISED_CORPUS"
+        \\          judge optimised-soundness "$WANT_OPTIMISED_SOUNDNESS" "$OPTIMISED_SOUNDNESS"
         \\          judge fuzz-mir "$WANT_FUZZ_MIR" "$FUZZ_MIR"
         \\          case "$EVENT" in
         \\            pull_request|push) ;;
@@ -351,7 +386,7 @@ fn expectDecision(want: []const u8, lane: []const u8, since_green: ?[]const u8, 
     }
 }
 
-const ci_lanes = [_][]const u8{ "check", "sanitize-address", "sanitize-thread", "optimised", "sweep", "fuzz-mir" };
+const ci_lanes = [_][]const u8{ "check", "sanitize-address", "sanitize-thread", "optimised-unit", "optimised-corpus", "optimised-soundness", "sweep", "fuzz-mir" };
 
 test "a lane inherits a green commit across Markdown no gate reads" {
     for (ci_lanes) |lane| {
@@ -363,7 +398,7 @@ test "a lane inherits a green commit across Markdown no gate reads" {
 test "Markdown a gate reads reruns only the lanes that read it" {
     for ([_][]const u8{ "docs/learn/03-errors.md\n", "docs/adr/README.md\n", "docs/linea-semantics.md\nAGENTS.md\n" }) |changed| {
         for (ci_lanes) |lane| {
-            const reads = std.mem.eql(u8, lane, "check") or std.mem.eql(u8, lane, "optimised");
+            const reads = std.mem.eql(u8, lane, "check") or std.mem.eql(u8, lane, "optimised-unit");
             try expectDecision(if (reads) "run" else "inherit", lane, changed, null);
         }
     }

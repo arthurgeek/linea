@@ -65,8 +65,8 @@ until it is green.
   the joined Debug compiler/conformance root and the build-source binary. It
   skips every integration gate: corpus and example walks, sweeps, and
   tree-sitter checks. The unit tests run once, in the mode the build selects;
-  the `optimised` CI lane runs them again under ReleaseSafe, and weekly under
-  ReleaseFast too.
+  the `optimised-unit` CI lane runs them again under ReleaseSafe, and weekly
+  under ReleaseFast too.
 - `zig build sweep -Drelease -Dsweep-filter=<substring>` runs only the cost
   dimensions whose names contain the text. Use the narrowest match while
   iterating; run the unfiltered sweep before declaring a performance-sensitive
@@ -226,9 +226,9 @@ zig build fuzz --release=safe --fuzz=100 -Dfuzz-filter=fuzz-slow:
 ```
 
 CI runs the first weekly; the second runs locally when changing what the
-storage generator writes. The extra soundness seeds in `optimised` check the
-same property: a fixed window on a pull request, and a window that moves with
-the run number on the weekly and manual runs.
+storage generator writes. The extra soundness seeds in `optimised-soundness`
+check the same property: a fixed window on a pull request, and a window that
+moves with the run number on the weekly and manual runs.
 
 `check` passes `-Dsafe-runner`, which builds the conformance runner ReleaseSafe
 while the compiler under test and the unit tests stay Debug.
@@ -250,16 +250,20 @@ the `fuzz-slow:` tests.
 CI runs on GitHub's hosted runners, from `.github/workflows/ci.yml`. A pull
 request merges into `main` once `merge-ready`, the one required status, is
 green on its final commit. A draft pull request runs nothing. A ready pull
-request runs `check`, `sanitize`, `optimised`, `sweep` and, when the change
-touches `src/mir`, `src/ownership`, `src/sema` (which holds the type tables),
-`src/driver/loader.zig` or the program generator, `fuzz-mir`, which fuzzes
-the MIR verifier. A push to `main` runs `check`. A manual run and the weekly
-schedule run every lane and `fuzz`, which runs every `fuzz:` target and keeps
-the inputs each clean search reached for the next. `optimised` also
-runs soundness, over the default seeds and over sixteen more: a fixed window
-on a pull request, and one that moves with the run number on a weekly or
-manual run. It runs the unit tests ReleaseSafe on every run, and on a weekly
-or manual run ReleaseFast too, the level `-Drelease` builds for users.
+request runs `check`, `sanitize`, the three optimised lanes, `sweep` and,
+when the change touches `src/mir`, `src/ownership`, `src/sema` (which holds
+the type tables), `src/driver/loader.zig` or the program generator,
+`fuzz-mir`, which fuzzes the MIR verifier. A push to `main` runs `check`. A
+manual run and the weekly schedule run every lane and `fuzz`, which runs
+every `fuzz:` target and keeps the inputs each clean search reached for the
+next. The optimised lanes are three jobs on three runners, side by side:
+`optimised-unit` runs the unit tests ReleaseSafe on every run, and on a
+weekly or manual run ReleaseFast too, the level `-Drelease` builds for users,
+then the guide and the library's and examples' own tests; `optimised-corpus`
+runs the corpus and the examples' transcripts against a ReleaseFast compiler;
+and `optimised-soundness` runs soundness against the same, over the default
+seeds and over sixteen more: a fixed window on a pull request, and one that
+moves with the run number on a weekly or manual run.
 
 A first job, `changes`, decides lane by lane, through
 `.github/scripts/changes.sh`, whether each lane runs. It walks back from the
@@ -270,9 +274,9 @@ records its event and base as a `tested base` annotation on `changes`, read
 back through the check-runs API. When the diff from that commit to the head
 is Markdown no gate reads, the lane inherits the pass and does not run.
 Markdown a gate reads (`docs/learn/`, `docs/adr/`, `docs/linea-semantics.md`)
-reruns only `check` and `optimised`, which read it through the documentation
-gates, the guide and the unit tests; anything else, `tests/` included, reruns
-the lane, and `fuzz-mir` reruns on any code change of a pull request that
+reruns only `check` and `optimised-unit`, which read it through the
+documentation gates, the guide and the unit tests; anything else, `tests/`
+included, reruns the lane, and `fuzz-mir` reruns on any code change of a pull request that
 touches what it guards. A lane passed at a commit when any attempt of its job
 there succeeded. So a lane that failed reruns while the lanes that passed are
 kept, as long as nothing they read changed. A lane with no such commit falls
@@ -291,35 +295,36 @@ or `examples/`. A path built at run time from other values escapes it. The
 run still starts, so
 `merge-ready` always reports. `merge-ready` fails when a lane failed or was
 cancelled, and when a lane `changes` said to run did not pass: `check`,
-`sanitize`, `optimised` and `fuzz-mir` on a pull request; `check` on a push;
+`sanitize`, the three optimised lanes and `fuzz-mir` on a pull request; `check` on a push;
 and `fuzz` too on a weekly or manual run. A lane `changes` found inherited or
 not needed counts as passed only if it was skipped. A draft pull request is
 never ready. `sweep` reads a clock, so its failure is visible but does not
 block.
 
 Outside a push to `main`, `check` passes `-Dguide=false` and leaves the guide,
-the library's own tests and the examples' own tests to `optimised`, which runs
-them with the Debug compiler; a push to `main` runs them in `check`. It also
-passes `-Dslow-tests=false` there and leaves the `slow:` unit tests to
-`optimised`, which runs every unit test under ReleaseSafe, so bounds, overflow
-and `std.debug.assert` checks and the testing allocator's checks still hold;
-a push to `main` runs them in `check`.
+the library's own tests and the examples' own tests to `optimised-unit`,
+which runs them with the Debug compiler; a push to `main` runs them in
+`check`. It also passes `-Dslow-tests=false` there and leaves the `slow:` unit
+tests to `optimised-unit`, which runs every unit test under ReleaseSafe, so
+bounds, overflow and `std.debug.assert` checks and the testing allocator's
+checks still hold; a push to `main` runs them in `check`.
 `-Dsequential` runs a test suite's heavy steps (the compiles of the compiler,
 the conformance runner and the unit tests, the unit tests and the corpus walks)
 one after another, unit tests first, through copies only that suite reaches;
-`check` passes it to `test`, and `optimised` runs `test-unit` and
-`conformance` as separate builds with it, so no two heavy steps share the
-runner's memory. A push to a pull request or to `main` cancels the run it
-supersedes. Only the unfiltered `test` verifies the whole graph; a narrowed
-conformance directory is the development tool.
+`check` passes it to `test`, and `optimised-unit` and `optimised-corpus` pass
+it to `test-unit` and `conformance`, each on a runner of its own, so no two
+heavy steps share a runner's memory. A push to a pull request or to `main`
+cancels the run it supersedes. Only the unfiltered `test` verifies the whole
+graph; a narrowed conformance directory is the development tool.
 
 ### Soundness, sanitizers and optimisation levels
 
 `zig build soundness` holds the language's memory promise to generated
-programs. It is its own step: `test`, `test-corpus` and `conformance` do not run
-it, and the `optimised` CI lane does. Run it inside `nix develop` when changing
-the ownership checker, the MIR verifier or the storage model; a warm run takes
-about a minute with an optimised runner and six with a debug one.
+programs. It is its own step: `test`, `test-corpus` and `conformance` do not
+run it, and the `optimised-soundness` CI lane does. Run it inside
+`nix develop` when changing the ownership checker, the MIR verifier or the
+storage model; a warm run takes about a minute with an optimised runner and
+six with a debug one.
 
 The soundness matrix (`src/conformance/matrix.zig`) meets every operation that
 may move, grow or free a `Vec`, a `Map`, a fixed array or an `[inout]`-lent
