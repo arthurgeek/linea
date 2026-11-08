@@ -477,16 +477,16 @@ fn usage_error(cmd: cli.Command) -> UInt8 {
     64
 }
 
-// Print `error` and the help of the command the arguments reached to
-// standard error, and return the exit status: 1 when memory ran out,
-// otherwise 64, the conventional status for a usage mistake.
+// Print `error` to standard error, with the help of the command the error
+// is about, and return the exit status: 1 when memory ran out, otherwise 64,
+// the conventional status for a usage mistake.
 fn report(cmd: cli.Command, args: env.Args, error: cli.CliError) -> UInt8 {
     io.eprintln("error: {error}")
     if match read error { Allocation(_) => true, _ => false } {
         return 1
     }
     var cursor = cli.ArgCursor.new(args)
-    let help = cmd.help_for_arguments(&cursor) else |reason| {
+    let help = cmd.help_for_arguments(&cursor, error) else |reason| {
         let refused: cli.CliError = .Allocation(reason)
         io.eprintln("error: {refused}")
         return 1
@@ -694,6 +694,37 @@ status 1:
 ```
 $ linea run tcp_echo.lin -- send 64541 hi
 cannot connect to port 64541: Connect failed (ConnectionRefused) after 0 bytes; errno 61
+```
+
+A mistake on the command line prints the error and the help of the command it
+is about, and exits with status 64. `report` hands `help_for_arguments` the
+same arguments and the error; it reads the arguments again and stops where the
+parse refused them. `send` without a message is a mistake in `send`, so the
+help is that of `send`:
+
+<!-- guide: unchecked a session at a terminal -->
+```
+$ linea run tcp_echo.lin -- send 64541
+error: missing required argument 'message'
+usage: tcp_echo send <port> <message>...
+
+send messages to an echo server
+```
+
+An option `tcp_echo` does not declare, written before `send`, is refused before
+`send` is read, so the help is that of `tcp_echo`, which lists its commands:
+
+<!-- guide: unchecked a session at a terminal -->
+```
+$ linea run tcp_echo.lin -- --verbose send 64541 hi
+error: unrecognized option '--verbose'
+usage: tcp_echo <command>
+
+Echo text over TCP
+
+commands:
+  serve <port> [clients]      listen for and echo connections
+  send <port> <message>...    send messages to an echo server
 ```
 
 ### Bounding what a client can do
