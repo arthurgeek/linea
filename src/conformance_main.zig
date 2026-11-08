@@ -20799,18 +20799,26 @@ const Libraries = struct {
 test "the libraries cases resume from are released with the walk" {
     var libraries: Libraries = .{ .backing = testing.allocator, .io = testing.io, .environ = .empty, .prelude = test_library.get() };
     defer libraries.deinit();
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
     const case: Case = .{
         .display_path = "uses_uuid.lin",
         .stem = "uses_uuid",
         .entry = "uses_uuid.lin",
         .files = &.{.{ .path = "uses_uuid.lin", .text = "import std.uuid\n\nfn main() {}\n" }},
     };
-    const first = try libraries.forCase(arena.allocator(), case);
+    // Each case's arena is released before the library is read, as a walk
+    // releases it, so the library holds nothing of the case's.
+    var first_case = std.heap.ArenaAllocator.init(testing.allocator);
+    const first = try libraries.forCase(first_case.allocator(), case);
+    first_case.deinit();
     try testing.expect(first.imported);
+    const holds_uuid = for (first.library.sources.program.modules) |module| {
+        if (std.mem.eql(u8, module.dir, "std/uuid")) break true;
+    } else false;
+    try testing.expect(holds_uuid);
     // A second case importing the same modules resumes from the same library.
-    const second = try libraries.forCase(arena.allocator(), case);
+    var second_case = std.heap.ArenaAllocator.init(testing.allocator);
+    defer second_case.deinit();
+    const second = try libraries.forCase(second_case.allocator(), case);
     try testing.expectEqual(first.library, second.library);
 }
 
