@@ -1548,9 +1548,11 @@ fn namesLibrary(text: []const u8) bool {
 }
 
 /// Whether `text` names a C source below the manifest's directory: a relative
-/// path ending in `.c` with no `..` and no empty part.
+/// path ending in `.c` with no `..` and no empty part, spelled with letters,
+/// digits and `_.+-/`, so a C file including it holds nothing else.
 fn namesSource(text: []const u8) bool {
     if (!std.mem.endsWith(u8, text, ".c") or text.len <= 2) return false;
+    for (text) |c| if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '.' or c == '+' or c == '-' or c == '/')) return false;
     var parts = std.mem.splitScalar(u8, text, '/');
     while (parts.next()) |part| {
         if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return false;
@@ -1683,6 +1685,7 @@ test "a manifest names the C a program builds and links" {
     try testing.expectError(error.ManifestNativeNotSource, declaredFromText(gpa, "{ \"extern\": [\".\"], \"native\": [\"../outside.c\"] }"));
     try testing.expectError(error.ManifestNativeNotSource, declaredFromText(gpa, "{ \"extern\": [\".\"], \"native\": [\"/abs.c\"] }"));
     try testing.expectError(error.ManifestNativeNotSource, declaredFromText(gpa, "{ \"extern\": [\".\"], \"native\": [\"shim.h\"] }"));
+    try testing.expectError(error.ManifestNativeNotSource, declaredFromText(gpa, "{ \"extern\": [\".\"], \"native\": [\"a.c\\\"\\nint f(void);\\n/* .c\"] }"));
     try testing.expectError(error.ManifestLinksWithoutExtern, declaredFromText(gpa, "{ \"link\": [\"sqlite3\"] }"));
 
     const declaring = try declaredFromText(gpa, "{ \"extern\": [\"store\"], \"headers\": [\"sqlite3.h\", \"store/shim.h\"] }");
