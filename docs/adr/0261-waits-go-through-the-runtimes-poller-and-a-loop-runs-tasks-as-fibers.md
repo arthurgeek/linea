@@ -593,9 +593,18 @@ recorded before the fix, and the predicate's leaves are read from the
 library's declarations, so a waitable type added later is covered. The fix
 lands on its own, independently of this record.
 
-> **Verification result (pending):** _to be filled by the separate check
-> against the compiler: whether the program described above is accepted
-> today, the corpus case that shows it, and the fix's change._
+> **Verification result:** the hole was real. A clerk task wrapped its own
+> endpoint in a record whose `Release` sends and then waits, and called the
+> owner with a job capturing it; the creator's next call queued behind that
+> release, so neither side could move. `linea check` accepted the program and
+> it deadlocked at run time (`tests/tasks/a_call_cannot_hold_an_endpoint`).
+> Endpoints held in the state itself (in an `Option`, a record, a `Vec`, a
+> closure, or another owner) were accepted too
+> (`tests/tasks/an_owning_task_holds_nothing_that_waits`). The fix is ADR 0262:
+> a built-in bound, `Isolated`, decided by a containment table over the edges
+> `Shareable` follows and seeded by `session.Chan` through its declaration;
+> `task.own`, `Owner` and `Client` take `S: Owned + Isolated` and `call` takes
+> `F: Owned + Isolated + Release`. Phase 2 builds on that rule.
 
 ### 5. Three properties, each with its own argument
 
