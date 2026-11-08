@@ -9,7 +9,14 @@
 // - no `reset`, so a compiled statement is run once and finished;
 // - no transaction helper (`execute("BEGIN")` works);
 // - no busy handler beyond `wait_when_busy`;
-// - no backup, user functions, extensions or threads.
+// - no backup, user functions or extensions.
+//
+// A connection may be used by one thread at a time, and a program that reads
+// and writes from several threads opens one connection for each. `open`
+// refuses with `SingleThreaded` when the linked SQLite was compiled with
+// `SQLITE_THREADSAFE=0`, which is unsafe to call from more than one thread
+// even with a connection per thread. The builds macOS and the common Linux
+// distributions ship are compiled with 1 or 2, and both are safe for that.
 import std.ffi
 import std.fmt
 import std.fs
@@ -50,6 +57,11 @@ extern fn sqlite3_errmsg(read database: DatabaseHandle) -> ffi.CText where borro
 // `sqlite3_errcode` returns the result code of the most recent call on
 // `database`, which is `SQLITE_NOMEM` after a column read ran out of memory.
 extern fn sqlite3_errcode(read database: DatabaseHandle) -> Int32
+
+// `sqlite3_threadsafe` returns the `SQLITE_THREADSAFE` the library was
+// compiled with: 0 when it takes no locks of its own, 1 or 2 when separate
+// connections may be used from separate threads at once.
+extern fn sqlite3_threadsafe() -> Int32
 
 // Taken without `read`, a handle parameter lends the object to C as `inout`
 // does: the connection must sit in a place that may change, and any `CText`
@@ -95,6 +107,9 @@ let done: Int32 = 101
 // `SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE`.
 let read_write_create: Int32 = 6
 
+// `SQLITE_OPEN_URI`, which reads the filename as a `file:` URI.
+let uri_filename: Int32 = 64
+
 // `SQLITE_NOMEM`.
 let out_of_memory: Int32 = 7
 
@@ -122,6 +137,8 @@ pub enum Error {
     OutOfMemory,
     TrailingSql,
     EmptySql,
+    SingleThreaded,
+    InvalidName,
 }
 
 impl Display for Error {
@@ -143,6 +160,8 @@ impl Display for Error {
             OutOfMemory => "out of memory".fmt(&w),
             TrailingSql => "prepare takes one statement, and text follows it".fmt(&w),
             EmptySql => "the SQL string contains no statement".fmt(&w),
+            SingleThreaded => "the linked SQLite was compiled with SQLITE_THREADSAFE=0".fmt(&w),
+            InvalidName => "an in-memory database name holds only ASCII letters, digits, `-` and `_`".fmt(&w),
         }
     }
 }
@@ -175,17 +194,19 @@ struct Statement {
 }
 
 impl Database {
-    // Open the database file at `path` for reading and writing, creating it
-    // if it does not exist.
-    pub fn open(path: Str) -> Result[Database, Error] {
-        let filename = ffi.CString.open(path) else |failure| {
+    // Open `filename_text` with the `sqlite3_open_v2` flags `flags`.
+    fn open_flagged(filename_text: Str, flags: Int32) -> Result[Database, Error] {
+        if sqlite3_threadsafe() == 0 {
+            return .Err(.SingleThreaded)
+        }
+        let filename = ffi.CString.open(filename_text) else |failure| {
             return .Err(match failure {
                 InteriorNul(offset) => .InteriorNul(offset),
                 Allocation(_) => .OutOfMemory,
             })
         }
         var address: UInt64 = 0
-        let code = sqlite3_open_v2(filename.text(), &address, read_write_create, 0)
+        let code = sqlite3_open_v2(filename.text(), &address, flags, 0)
         filename.release()
         if address == 0 {
             return .Err(.OutOfMemory)
@@ -197,6 +218,19 @@ impl Database {
             return .Err(.Refused(code, message))
         }
         .Ok(database)
+    }
+
+    // The SQLite this library links is the one every test runs against, so
+    // this checks that a connection per thread is safe there.
+    test fn the_linked_sqlite_allows_a_connection_per_thread() {
+        testing.assert(sqlite3_threadsafe() != 0, "the linked SQLite was compiled with SQLITE_THREADSAFE=0")?
+        .Ok(())
+    }
+
+    // Open the database file at `path` for reading and writing, creating it
+    // if it does not exist.
+    pub fn open(path: Str) -> Result[Database, Error] {
+        Database.open_flagged(path, read_write_create)
     }
 
     test fn open_creates_a_file_database_and_waits_when_busy() {
@@ -211,14 +245,65 @@ impl Database {
         .Ok(())
     }
 
-    // Open a private database in memory that vanishes when closed.
-    pub fn open_in_memory() -> Result[Database, Error] {
-        Database.open(":memory:")
+    // Open the in-memory database `name`. Every connection this process
+    // opens with the same name reaches the same database, which the first
+    // creates and which is gone once the last is closed. The connections
+    // share one cache, so a connection reading a table makes another writing
+    // it fail with `SQLITE_LOCKED` at once rather than wait. `name` is
+    // written into a `file:` URI, so it holds only ASCII letters, digits,
+    // `-` and `_`.
+    pub fn open_in_memory(name: Str) -> Result[Database, Error] {
+        if name.length() == 0 {
+            return .Err(.InvalidName)
+        }
+        for at in 0..name.length() {
+            let byte = name.byte(at).unwrap()
+            let letter = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+            let digit = byte >= 48 && byte <= 57
+            if !(letter || digit || byte == 45 || byte == 95) {
+                return .Err(.InvalidName)
+            }
+        }
+        defer let uri = fmt.render_owned("file:{name}?mode=memory&cache=shared") else |_| {
+            return .Err(.OutOfMemory)
+        }
+        Database.open_flagged(uri.view(), read_write_create + uri_filename)
     }
 
     test fn open_in_memory_starts_an_empty_database() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("starts-empty").unwrap()
         testing.assert_eq(database.changes(), Int64(0), "a fresh database reported changes")?
+        .Ok(())
+    }
+
+    test fn connections_opened_with_one_name_share_the_database() {
+        defer var writer = Database.open_in_memory("shared_by_name").unwrap()
+        &writer.execute("CREATE TABLE items (name TEXT NOT NULL); INSERT INTO items VALUES ('notebook');").unwrap()
+        defer var reader = Database.open_in_memory("shared_by_name").unwrap()
+        defer var count = reader.prepare("SELECT COUNT(*) FROM items").unwrap()
+        testing.assert(&count.step().unwrap(), "COUNT answered no row")?
+        testing.assert_eq(count.integer(0).unwrap(), Int64(1), "the second connection did not see the first one's row")?
+        .Ok(())
+    }
+
+    test fn a_name_outside_letters_digits_dashes_and_underscores_is_refused() {
+        for read name in ["", "a?b", "a/b", "a b", "a%20b"] {
+            let refused = match Database.open_in_memory(name) {
+                Ok(database) => {
+                    database.close()
+                    false
+                },
+                Err(error) => {
+                    let invalid = match read error {
+                        InvalidName => true,
+                        _ => false,
+                    }
+                    error.release()
+                    invalid
+                },
+            }
+            testing.assert(refused, "an in-memory database name that is not a plain word was accepted")?
+        }
         .Ok(())
     }
 
@@ -230,8 +315,9 @@ impl Database {
         .Refused(code, self.message())
     }
 
-    // Wait up to `milliseconds` when another process holds a lock on the
-    // database, instead of failing at once with `SQLITE_BUSY`.
+    // Wait up to `milliseconds` when another connection, in this process or
+    // another, holds the lock on the database a write needs, instead of
+    // failing at once with `SQLITE_BUSY`.
     pub fn wait_when_busy(inout self: Self, milliseconds: Int32) -> Result[(), Error] {
         let code = sqlite3_busy_timeout(self.handle, milliseconds)
         if code != ok {
@@ -241,7 +327,7 @@ impl Database {
     }
 
     test fn wait_when_busy_sets_the_timeout() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("wait_when_busy_sets_the_timeout").unwrap()
         &database.wait_when_busy(1000).unwrap()
         .Ok(())
     }
@@ -267,7 +353,7 @@ impl Database {
     }
 
     test fn execute_runs_a_script_of_several_statements() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("execute_runs_a_script_of_several_statements").unwrap()
         &database.execute("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (10); INSERT INTO t VALUES (20);").unwrap()
         defer var count = database.prepare("SELECT SUM(n) FROM t").unwrap()
         testing.assert(&count.step().unwrap(), "SUM answered no row")?
@@ -306,7 +392,7 @@ impl Database {
     }
 
     test fn prepare_refuses_a_misspelt_statement_and_trailing_sql() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("prepare_refuses_a_misspelt_statement_and_trailing_sql").unwrap()
         defer let misspelt = match database.prepare("SELEC 1") {
             Ok(statement) => {
                 statement.finish()
@@ -339,7 +425,7 @@ impl Database {
     }
 
     test fn prepare_refuses_empty_sql_and_comments() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("prepare_refuses_empty_sql_and_comments").unwrap()
         let empty = match database.prepare("") {
             Ok(statement) => {
                 statement.finish()
@@ -381,7 +467,7 @@ impl Database {
     }
 
     test fn changes_counts_the_rows_an_insert_added() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("changes_counts_the_rows_an_insert_added").unwrap()
         &database.execute("CREATE TABLE t (name TEXT); INSERT INTO t VALUES ('a'), ('b');").unwrap()
         testing.assert_eq(database.changes(), Int64(2), "changes did not count the two inserted rows")?
         .Ok(())
@@ -396,7 +482,7 @@ impl Database {
     }
 
     test fn close_consumes_the_connection_once_its_statements_finish() {
-        let database = Database.open_in_memory().unwrap()
+        let database = Database.open_in_memory("close_consumes_the_connection_once_its_statements_finish").unwrap()
         let statement = database.prepare("SELECT 1").unwrap()
         statement.finish()
         database.close()
@@ -434,7 +520,7 @@ impl Statement {
     }
 
     test fn bind_text_preserves_a_nul_byte_inside_the_string() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("bind_text_preserves_a_nul_byte_inside_the_string").unwrap()
         &database.execute("CREATE TABLE t (name TEXT);").unwrap()
         defer var insert = database.prepare("INSERT INTO t VALUES (?1)").unwrap()
         &insert.bind_text(1, "a\u{0}b").unwrap()
@@ -460,7 +546,7 @@ impl Statement {
     }
 
     test fn binding_parameter_zero_is_refused() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("binding_parameter_zero_is_refused").unwrap()
         &database.execute("CREATE TABLE t (n INTEGER, s TEXT);").unwrap()
         defer var insert = database.prepare("INSERT INTO t VALUES (?1, ?2)").unwrap()
         let text_is_refused = match &insert.bind_text(0, "val") {
@@ -491,7 +577,7 @@ impl Statement {
     }
 
     test fn bind_integer_binds_a_64_bit_value() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("bind_integer_binds_a_64_bit_value").unwrap()
         &database.execute("CREATE TABLE t (n INTEGER);").unwrap()
         defer var insert = database.prepare("INSERT INTO t VALUES (?1)").unwrap()
         &insert.bind_integer(1, 9000000000).unwrap()
@@ -516,7 +602,7 @@ impl Statement {
     }
 
     test fn step_walks_each_row_and_then_answers_false() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("step_walks_each_row_and_then_answers_false").unwrap()
         &database.execute("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (1), (2);").unwrap()
         defer var select = database.prepare("SELECT n FROM t ORDER BY n").unwrap()
         testing.assert(&select.step().unwrap(), "first row missing")?
@@ -534,7 +620,7 @@ impl Statement {
     }
 
     test fn run_reports_a_constraint_with_sqlite_s_sentence() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("run_reports_a_constraint_with_sqlite_s_sentence").unwrap()
         &database.execute("CREATE TABLE t (name TEXT NOT NULL);").unwrap()
         defer var insert = database.prepare("INSERT INTO t VALUES (NULL)").unwrap()
         defer let refused = match &insert.run() {
@@ -602,7 +688,7 @@ impl Statement {
 
     test fn text_in_copies_into_an_arena_and_refuses_null() {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("text_in_copies_into_an_arena_and_refuses_null").unwrap()
         &database.execute("CREATE TABLE t (name TEXT); INSERT INTO t VALUES ('Ada'), (NULL);").unwrap()
         defer var select = database.prepare("SELECT name FROM t").unwrap()
         testing.assert(&select.step().unwrap(), "first row")?
@@ -625,7 +711,7 @@ impl Statement {
     }
 
     test fn text_in_reads_an_empty_value_as_empty_text() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("text_in_reads_an_empty_value_as_empty_text").unwrap()
         defer var select = database.prepare("SELECT '', x''").unwrap()
         testing.assert(&select.step().unwrap(), "no row")?
         defer let empty_text = select.text(0).unwrap()
@@ -642,7 +728,7 @@ impl Statement {
     }
 
     test fn text_reads_a_column_into_a_system_string() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("text_reads_a_column_into_a_system_string").unwrap()
         &database.execute("CREATE TABLE t (name TEXT NOT NULL); INSERT INTO t VALUES ('Grace');").unwrap()
         defer var select = database.prepare("SELECT name FROM t").unwrap()
         testing.assert(&select.step().unwrap(), "no row")?
@@ -671,7 +757,7 @@ impl Statement {
     }
 
     test fn integer_reads_a_value_and_refuses_null() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("integer_reads_a_value_and_refuses_null").unwrap()
         &database.execute("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (42), (NULL);").unwrap()
         defer var select = database.prepare("SELECT n FROM t").unwrap()
         testing.assert(&select.step().unwrap(), "first row")?
@@ -693,7 +779,7 @@ impl Statement {
     }
 
     test fn column_out_of_bounds_is_refused() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("column_out_of_bounds_is_refused").unwrap()
         &database.execute("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (1);").unwrap()
         defer var select = database.prepare("SELECT n FROM t").unwrap()
         testing.assert(&select.step().unwrap(), "no row")?
@@ -728,7 +814,7 @@ impl Statement {
     }
 
     test fn column_count_reports_number_of_columns() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("column_count_reports_number_of_columns").unwrap()
         &database.execute("CREATE TABLE t (a INTEGER, b TEXT, c INTEGER);").unwrap()
         defer var select = database.prepare("SELECT a, b, c FROM t").unwrap()
         testing.assert_eq(select.column_count(), UInt32(3), "column count changed")?
@@ -736,7 +822,7 @@ impl Statement {
     }
 
     test fn integer_converts_numeric_text_according_to_sqlite_rules() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("integer_converts_numeric_text_according_to_sqlite_rules").unwrap()
         &database.execute("CREATE TABLE t (s TEXT); INSERT INTO t VALUES ('42');").unwrap()
         defer var select = database.prepare("SELECT s FROM t").unwrap()
         testing.assert(&select.step().unwrap(), "no row")?
@@ -754,7 +840,7 @@ impl Statement {
     }
 
     test fn finish_consumes_the_statement() {
-        defer var database = Database.open_in_memory().unwrap()
+        defer var database = Database.open_in_memory("finish_consumes_the_statement").unwrap()
         let statement = database.prepare("SELECT 1").unwrap()
         statement.finish()
         .Ok(())

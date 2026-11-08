@@ -54,8 +54,9 @@ An unsupported method answers 405, and an unknown path answers 404.
   $ { kill -TERM $server; wait $server; } 2>/dev/null; echo "the server stopped with status $?"
   the server stopped with status 143
 
-When SQLite cannot open the database file, its sentence is written to standard
-error and the program exits 1 before listening.
+When SQLite cannot open the database file, preparing it fails before any
+serving task starts: the sentence is written to standard error and the
+program exits 1 before it listens.
 
   $ GUEST_BOOK_DATABASE=missing/dir/guests.db ./book 0
   guest-book: unable to open database file (SQLite code 14)

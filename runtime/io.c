@@ -12,11 +12,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/random.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #if defined(__linux__)
 #include <sys/syscall.h>
+#endif
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
 #endif
 
 /* The runtime's scalar address ABI targets LP64 Linux and macOS. */
@@ -306,4 +310,36 @@ long linea_unlink_at(int parent, unsigned long at, unsigned long extent) {
     if (invalid != 0) return -(long)invalid;
     /* unlinkat does not block; Linux and macOS document no EINTR for it. */
     return unlinkat(parent, (const char *)(uintptr_t)at, 0) == 0 ? 0 : -(long)errno;
+}
+
+/* An unlimited hard limit is capped here on a system that names no smaller
+ * cap of its own. 2^20 is a choice, not a guarantee: it is Linux's default
+ * `fs.nr_open`, which an administrator may set lower, and then raising the
+ * soft limit this far fails with the errno `setrlimit` gives. */
+static const rlim_t linea_most_open_files = (rlim_t)1 << 20;
+
+long linea_raise_open_files(void) {
+    struct rlimit limit;
+    if (getrlimit(RLIMIT_NOFILE, &limit) != 0) return -(long)errno;
+    rlim_t ceiling = limit.rlim_max;
+    if (ceiling == RLIM_INFINITY) ceiling = linea_most_open_files;
+#if defined(__APPLE__)
+    /* macOS refuses a soft limit above `kern.maxfilesperproc`, which its
+     * hard limit, often unlimited, does not reflect. */
+    int per_process = 0;
+    size_t size = sizeof(per_process);
+    if (sysctlbyname("kern.maxfilesperproc", &per_process, &size, NULL, 0) == 0 && per_process > 0 && (rlim_t)per_process < ceiling) {
+        ceiling = (rlim_t)per_process;
+    }
+#endif
+    /* A soft limit above the ceiling, unlimited included, does not let the
+     * process open more than the ceiling, so it is answered as the ceiling
+     * and left as it is. */
+    if (limit.rlim_cur != RLIM_INFINITY && limit.rlim_cur < ceiling) {
+        limit.rlim_cur = ceiling;
+        if (setrlimit(RLIMIT_NOFILE, &limit) != 0) return -(long)errno;
+    }
+    rlim_t in_force = limit.rlim_cur == RLIM_INFINITY || limit.rlim_cur > ceiling ? ceiling : limit.rlim_cur;
+    if (in_force > (rlim_t)LONG_MAX) return LONG_MAX;
+    return (long)in_force;
 }

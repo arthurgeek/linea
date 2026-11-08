@@ -380,6 +380,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_set_mode", .parameters = &.{ descriptor, p(.u64) }, .result = .i64, .declared_by = fs_mode },
     .{ .symbol = "linea_publish_at", .parameters = &.{ descriptor, bytes_at, p(.u64), bytes_at, p(.u64), p(.u8) }, .result = .i64, .declared_by = mem_files },
     .{ .symbol = "linea_unlink_at", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_files },
+    .{ .symbol = "linea_raise_open_files", .parameters = &.{}, .result = .i64, .declared_by = .granted },
     .{ .symbol = "linea_net_listen", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = net_listener },
     .{ .symbol = "linea_net_accept", .parameters = &.{descriptor}, .result = .i64, .answers = .descriptor, .declared_by = net_listener },
     .{ .symbol = "linea_net_connect", .parameters = &.{p(.u64)}, .result = .i64, .answers = .descriptor, .declared_by = net_connection },

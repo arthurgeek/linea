@@ -1,0 +1,26 @@
+// A handler factory may answer a handler or a `Result` holding one, and
+// `http.MadeHandler` reads the two apart because no `Result` is a handler.
+// A program cannot make one: `Result` and `Handler` both belong to the
+// library.
+import std.http
+
+use http.Handler
+
+@copyable
+enum Unread {
+    Missing,
+}
+
+impl Release for Unread {
+    fn release(sink _self: Self) {}
+}
+
+impl[P: Allocator] Handler[(), P] for Result[http.Router[(), P], Unread] {
+    fn serve_http(inout _self: Self, inout _state: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+        http.text(request, "ok")
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

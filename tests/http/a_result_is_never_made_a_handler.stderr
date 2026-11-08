@@ -1,0 +1,17 @@
+error[T-Impl]: an implementation's head is the constructor applied to its own parameters
+  --> tests/http/a_result_is_never_made_a_handler.lin:18:39
+   |
+18 | impl[P: Allocator] Handler[(), P] for Result[http.Router[(), P], Unread] {
+   |                                       ^^^^^^ receiver arguments are distinct bare parameters in declaration order
+error[M-Impl]: `Result` is declared in `result`
+  --> tests/http/a_result_is_never_made_a_handler.lin:18:39
+   |
+18 | impl[P: Allocator] Handler[(), P] for Result[http.Router[(), P], Unread] {
+   |                                       ^^^^^^ the library declares both `Result` and `Handler`; wrap it in a type this program declares that implements `Handler`
+error[T-Impl]: these two both answer `MadeHandler[P]` for `Result[H, E]`
+ --> std/http/handler.lin:L:C
+  |
+L | impl[P: Allocator, H: Handler[(), P]] MadeHandler[P] for H {
+  |                                       ----------- the other implementation
+L | impl[P: Allocator, H: Handler[(), P], E] MadeHandler[P] for Result[H, E] {
+  |                                          ^^^^^^^^^^^ no instantiation may answer to two implementations of one trait

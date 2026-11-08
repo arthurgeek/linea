@@ -1,0 +1,5 @@
+error[O-Copy]: `http.ServeError[String[mem.SystemAllocator]]` does not permit copying
+ --> tests/http/a_serve_error_carrying_owned_text_is_not_copied.lin:7:16
+  |
+7 |     let kept = copy(unopened)
+  |                ^^^^^^^^^^^^^^ move the value, or declare a copyable representation

@@ -1,0 +1,46 @@
+import std.io
+import std.testing
+
+// The runtime raises the soft limit on open descriptors toward the hard
+// limit, and answers how many the process may now open, or a negated errno.
+extern fn linea_raise_open_files() -> Int64
+
+// Raise the number of files and sockets this process may hold open at once
+// as far as the system allows, and return that number. A process starts with
+// a soft limit, which it may raise itself up to a hard limit an administrator
+// sets: a macOS shell starts programs with a soft limit of 256 and a hard
+// limit macOS caps at `kern.maxfilesperproc`, and Linux commonly with 1024
+// and 524288. A server that keeps several files open per serving task, such
+// as a database connection and its log, calls this before it serves, and
+// compares what it gets with what it needs. A soft limit already at or above
+// what the system allows, unlimited included, is left as it is, and the number
+// returned is still what the system allows. Where the hard limit is
+// unlimited and the system names no cap of its own, the cap is 2^20, a
+// choice rather than a promise the kernel makes. It fails with an
+// `io.IoError` of operation `Configure` when the system refuses to read or
+// change the limit.
+//
+// The limit is the whole process's, so only a program raises it: a library
+// that did would change what every other part of the program may open.
+pub fn raise_open_file_limit() -> Result[UInt64, io.IoError] {
+    let answered = linea_raise_open_files()
+    if answered < 0 {
+        return .Err(io.IoError.from_os(.Configure, Int32(-answered)))
+    }
+    .Ok(UInt64(answered))
+}
+
+// Raising the limit once reaches as far as the system allows, so raising it
+// again answers the same number. The test raises the limit of the process
+// that runs every test in this library, and no test here depends on a low
+// one; the transcript
+// tests/cmd/the_open_file_limit_is_never_above_what_the_process_may_open.cmd
+// checks the answer in processes of its own, started with the soft limit
+// already raised or unlimited.
+test fn raising_the_open_file_limit_twice_answers_the_same_limit() {
+    let first = raise_open_file_limit().unwrap()
+    let second = raise_open_file_limit().unwrap()
+    testing.assert(first > 0, "the open-file limit admits no file")?
+    testing.assert_eq(second, first, "raising the limit a second time changed it")?
+    .Ok(())
+}

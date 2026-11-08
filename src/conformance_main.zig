@@ -1035,6 +1035,9 @@ const CommandCase = struct {
     text: []const u8,
     stem: []const u8,
     display_path: []const u8,
+    /// Whether the transcript runs alone among the transcripts that also set
+    /// this, because it leaves a server running under the thread sanitizer.
+    serves_alone: bool = false,
 };
 
 /// Runs one transcript case and compares its rendering, with the outputs that
@@ -17264,10 +17267,19 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
                     continue;
                 }
                 markRulesTranscriptRecords(text, &rules_reached);
+                // Under the thread sanitizer, memory `calloc` answers on a
+                // thread other than the main one is resident at once, so each
+                // of a server's 128 serving tasks holds all of its 48 MiB
+                // request arena: one server holds about 6 GB, where the
+                // address sanitizer leaves the same arenas untouched. Three at once outgrow a 16 GB runner, so
+                // under it a transcript that leaves a server running waits
+                // for any other such transcript to finish.
+                const thread_sanitized = if (sanitize) |name| std.mem.eql(u8, name, "thread") else false;
                 try commands.append(gpa, .{
                     .text = text,
                     .stem = stem,
                     .display_path = display,
+                    .serves_alone = thread_sanitized and transcripts.startsABackgroundJob(parsed),
                 });
             }
 
@@ -17294,6 +17306,9 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
                 const cmd_work = try gpa.alloc(Work, cmd_workers);
                 for (cmd_work) |*w| w.* = .{};
 
+                // Held by a transcript whose `serves_alone` is set.
+                var serving: std.Io.Mutex = .init;
+
                 // Held by the caller for the reason the walkers' are: a
                 // `Failure` is allocated from one.
                 const Commands = struct {
@@ -17306,6 +17321,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
                         root_: []const u8,
                         scratch_: []const u8,
                         items: []const CommandCase,
+                        serving_: *std.Io.Mutex,
                         w: *Work,
                         arena: *std.heap.ArenaAllocator,
                         me: usize,
@@ -17329,6 +17345,8 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
                             defer zone.end();
                             zone.setText(items[at].display_path);
                             zone.setValue(at);
+                            if (items[at].serves_alone) serving_.lockUncancelable(io_);
+                            defer if (items[at].serves_alone) serving_.unlock(io_);
                             checkTranscript(per_command.allocator(), io_, &w.failures, compiler_, environ_, runtime_, sanitize_, root_, scratch_, items[at], update_) catch |err| {
                                 std.debug.print("conformance: {s}: {s}\n", .{ items[at].display_path, @errorName(err) });
                                 std.process.exit(1);
@@ -17344,12 +17362,12 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
                 };
 
                 if (cmd_workers == 1) {
-                    Commands.run(io, compiler, environ, runtime_path, sanitize, checkout_root, cmd_scratch, commands.items, &cmd_work[0], &cmd_arenas[0], 0, 1, update);
+                    Commands.run(io, compiler, environ, runtime_path, sanitize, checkout_root, cmd_scratch, commands.items, &serving, &cmd_work[0], &cmd_arenas[0], 0, 1, update);
                 } else {
                     const threads = try gpa.alloc(std.Thread, cmd_workers);
                     for (threads, 0..) |*t, me| {
                         t.* = try std.Thread.spawn(compiler_stack.spawn_config, Commands.run, .{
-                            io, compiler, environ, runtime_path, sanitize, checkout_root, cmd_scratch, commands.items, &cmd_work[me], &cmd_arenas[me], me, cmd_workers, update,
+                            io, compiler, environ, runtime_path, sanitize, checkout_root, cmd_scratch, commands.items, &serving, &cmd_work[me], &cmd_arenas[me], me, cmd_workers, update,
                         });
                     }
                     for (threads) |t| t.join();
