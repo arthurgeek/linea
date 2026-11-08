@@ -2016,9 +2016,10 @@ directory, and the outcome cache keys on their bytes.
 
 ### Prototype check — `src/driver/prototypes.zig`
 
-Holds every `extern` naming a C function to the prototype its root's C
-declarations give it ([T-ExternPrototype], ADR 0262). It runs in the driver
-for `check`, `build`, `run` and `test`, and in the conformance runner, after
+Holds every `extern` naming a C function, and every `export` its root's C
+declares, to the prototype its root's C declarations give it
+([T-ExternPrototype], ADR 0262). It runs in the driver for `check`, `build`,
+`run`, `test` and `emit-mlir`, and in the conformance runner, after
 the semantic passes accepted the program and before lowering, because it
 starts a process, which no pass may. The loader records each root's C
 declarations on `RootFacts` (`native`, `headers`, `manifest_dir`).
@@ -2026,8 +2027,11 @@ declarations on `RootFacts` (`native`, `headers`, `manifest_dir`).
 `types.foreignScalar`, the answer the backend also writes the C types from,
 so what is checked and what is emitted cannot drift. `toolchain.describeC`
 asks `cc` for the type tree of a pointer to each declared function, one C
-file per header list or `native` source; the check reads the tree through its
-sugar and compares positions by representation. The language server does not
+file per header list or `native` source, with a line naming each function's
+symbol and one that `cc` refuses where the function is `static`; a second
+file asks for the width of each enumeration the trees name. The check reads
+the trees through their sugar and compares positions by representation, for
+every C declaration of the function. The language server does not
 run it.
 
 A build links one of two runtime archives that differ only in the allocator.

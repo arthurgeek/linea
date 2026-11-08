@@ -605,22 +605,30 @@ pub const Described = struct {
 pub fn describeC(gpa: std.mem.Allocator, io: std.Io, include_dir: []const u8, path: []const u8, prefix: []const u8) !?Described {
     const filter = try std.fmt.allocPrint(gpa, "-ast-dump-filter={s}", .{prefix});
     defer gpa.free(filter);
-    const result = std.process.run(gpa, io, .{ .argv = &.{
-        Tool.cc.command(),
-        "-fsyntax-only",
-        "-w",
-        "-fno-color-diagnostics",
-        "-fno-caret-diagnostics",
-        "-I",
-        include_dir,
-        "-Xclang",
-        "-ast-dump",
-        "-Xclang",
-        "-ast-dump-decl-types",
-        "-Xclang",
-        filter,
-        path,
-    } }) catch |err| switch (err) {
+    const result = std.process.run(gpa, io, .{
+        .argv = &.{
+            Tool.cc.command(),
+            "-fsyntax-only",
+            // No warning is read, apart from the one that says a function the
+            // probe refers to from an inline function of external linkage is
+            // `static`.
+            "-Wno-everything",
+            "-Werror=static-in-inline",
+            "-fno-color-diagnostics",
+            "-fno-caret-diagnostics",
+            // A name nothing declares is not read as a similar one that is.
+            "-fno-spell-checking",
+            "-I",
+            include_dir,
+            "-Xclang",
+            "-ast-dump",
+            "-Xclang",
+            "-ast-dump-decl-types",
+            "-Xclang",
+            filter,
+            path,
+        },
+    }) catch |err| switch (err) {
         error.FileNotFound => return null,
         else => return err,
     };

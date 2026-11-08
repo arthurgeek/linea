@@ -32,9 +32,12 @@ pub const Prototype = struct {
     params: []const Value,
     /// Null where the function answers nothing.
     result: ?Value,
+    /// Whether the declaration answers `ffi.Errno[R]`, of which C returns
+    /// the `R` `result` describes.
+    errno: bool = false,
 };
 
-/// The prototype the `extern` `decl` implies, allocated in `arena`, or null
+/// The prototype the `extern` or `export` `decl` implies, allocated in `arena`, or null
 /// where its signature names a type that does not cross, which [T-Extern] or
 /// [T-ExternCallback] has already refused.
 pub fn externPrototype(arena: std.mem.Allocator, typing: *const Typing, decl: DeclId) std.mem.Allocator.Error!?Prototype {
@@ -63,9 +66,10 @@ pub fn externPrototype(arena: std.mem.Allocator, typing: *const Typing, decl: De
     }
     // An `extern` answering `ffi.Errno[R]` returns `R` from C, and the runtime
     // reads `errno` after it.
-    const answered = typing.raw_accesses.errnoValue(typing, signature.result) orelse signature.result;
+    const errno = typing.raw_accesses.errnoValue(typing, signature.result);
+    const answered = errno orelse signature.result;
     const result: ?Value = if (answered == .unit) null else .{ .scalar = types_mod.foreignScalar(typing, answered) orelse return null };
-    return .{ .params = values, .result = result };
+    return .{ .params = values, .result = result, .errno = errno != null };
 }
 
 /// Whether the `inout` parameter of type `ty` is the context one of the

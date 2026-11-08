@@ -36,12 +36,25 @@ manifest names its own. Naming headers needs a grant, as `native` and `link`
 do ([M-Extern]).
 
 **Every `extern` naming a C function is held to its prototype
-([T-ExternPrototype]).** That is every `extern` of a granted module outside the
-standard library whose symbol is not in the runtime's `linea_` namespace,
-which [T-ExternRuntime] holds to the compiler's own table; the standard
-library declares no other C. A declaration no C declaration of its root
-declares is refused, so the check has no opt-out: the only way to call C is a
-granted `extern`, and every one is compared.
+([T-ExternPrototype]).** That is every `extern` of a granted module, the
+standard library's included, except two kinds the compiler's own tables
+answer for: a symbol in the runtime's `linea_` namespace, which
+[T-ExternRuntime] holds to the runtime's signatures, and a storage primitive
+named in `RawAccesses`, whose calls lowering replaces. A declaration no C
+declaration of its root declares is refused, so the check has no opt-out:
+the only way to call C is a granted `extern`, and every one is compared.
+
+**Every C declaration of the function is compared**, the header list and
+each `native` source, since C code calling the function may have been built
+with any of them. A function C gives no symbol, because it is `static` or
+`static inline`, is refused, and so is one C reaches under another symbol than
+its name, through an `__asm__` label, `overloadable` or a macro.
+
+**An `export` is held to the same table wherever its root's C declares it.**
+C code of the root calling an exported function trusts its own declaration of
+it as the Linea program trusts an `extern`, so the promise is the same in the
+other direction. An export C does not declare is not refused: a library's
+caller declares it elsewhere.
 
 **What lowering passes at each position is the implied C type.** The table is
 read from the compiler, not restated: `types.foreignScalar` answers what a
@@ -50,7 +63,7 @@ type crosses as, the backend writes the C type from that answer, and
 
 | Linea position | C accepts |
 | --- | --- |
-| an `IntN` or `UIntN`, or an unrefined newtype over one | an integer of N bits and the same signedness; for 32 bits, an `enum` |
+| an `IntN` or `UIntN`, or an unrefined newtype over one | an integer of N bits and the same signedness, or an `enum` the C compiler gives that width and signedness |
 | a `UInt64`, or a newtype over one: a handle, `ffi.CText`, `ffi.Bytes`, `ffi.CTextList` | also any pointer, since a pointer crosses as its 64-bit address |
 | a `Float64` | `double` |
 | `inout` of one of these | a pointer to a type that position would accept by value |
@@ -63,10 +76,14 @@ The comparison is by representation, not by C's type identity. C's `int64_t`
 is `long` on Linux and `long long` on macOS, and SQLite's `sqlite3_int64` is
 `long long` on both, so C's own compatibility rule would refuse a correct
 declaration on one platform and accept it on the other; both are 64-bit signed
-integers, passed alike. Plain `char` is held to the target's signedness. A
-variadic function, one declared without a prototype, `bool`, a structure by
-value, `float` and `long double` match nothing, and a name the header defines
-as a macro is refused, since C code calling it may reach another function.
+integers, passed alike. The widths of C's integer types and the signedness of
+plain `char` are the target's. An enumeration's width and signedness are the
+C compiler's choice from its values or its fixed underlying type, so the
+compiler asks for them; an enumeration nothing names, whose width cannot be
+asked for, matches nothing. A function C declares with a calling convention
+other than its own, such as `preserve_none`, a variadic function, one declared
+without a prototype, `bool`, a structure by value, `float` and `long double`
+match nothing.
 
 **`read` does not require `const`.** A `read` handle promises that C only
 reads the object ([T-ExternHandle]), and C's `const` on the pointee says less
@@ -77,21 +94,31 @@ with it to the wrapper, as 0228 does.
 
 **The C compiler describes each prototype.** For each of a root's C
 declarations, the header list or one `native` source, the driver writes one C
-file that includes it and declares a pointer to each `extern`'s function:
+file that includes it and, for each function, names its symbol, takes its
+address and refers to it from an inline function of external linkage:
 
 ```c
 #include <sqlite3.h>
+extern __typeof__(sqlite3_close_v2) sqlite3_close_v2 __asm__("_sqlite3_close_v2");
 static __typeof__(sqlite3_close_v2) *const linea_probe_0_3 = &sqlite3_close_v2;
+inline void linea_probe_0_3_linkage(void) { (void)&sqlite3_close_v2; }
 ```
 
-`cc -fsyntax-only` reads it and prints each probe's type tree with every
-typedef resolved (`-ast-dump -ast-dump-decl-types`, filtered to the probes).
-The compiler reads the tree, discarding sugar and qualifiers, and compares
-each position. A probe naming a function nothing declares is an error at the
-probe, which reads as undeclared; any other error, such as a header `cc`
-cannot find, refuses every `extern` of the root with `cc`'s own words.
+`cc -fsyntax-only -Wno-everything -Werror=static-in-inline` reads it and
+prints each probe's type tree with every typedef resolved (`-ast-dump
+-ast-dump-decl-types`, filtered to the probes). The symbol line is refused
+where C gives the function another symbol ("conflicting asm label"), and the
+inline function where the function is `static`. The compiler reads the tree,
+discarding sugar and qualifiers, keeps the calling convention each function
+type names (`cdecl` is C's own on every supported target), and compares each
+position. Where a tree names an enumeration, a second file declares
+`static char probe[sizeof(T)][((T)-1 < 0) + 1];` for each, and the array's
+dimensions are its width and signedness. A probe naming a function nothing
+declares is an error at the probe, which reads as undeclared; any other
+error, such as a header `cc` cannot find, refuses every `extern` of the root
+with `cc`'s own words.
 
-**When.** `linea check`, `build`, `run` and `test` hold the declarations once
+**When.** `linea check`, `build`, `run`, `test` and `emit-mlir` hold the declarations once
 the semantic passes accept the program, before lowering, and so does the
 conformance runner, over a case's C files written to its scratch directory.
 The language server does not, because it checks on every edit and the check
@@ -110,16 +137,20 @@ error[T-ExternPrototype]: C declares `void counter_add(struct counter *, int8_t)
 ## Consequences
 
 - A wrong width, a missing or extra parameter, `inout` against a value, a
-  plain parameter against an address C writes through, a wrong result and a
-  callback C calls another way are refused wherever they are written, in a
-  program's module or a library's.
+  plain parameter against an address C writes through, a wrong result, an
+  enumeration of another width, another calling convention, a `static`
+  function, another symbol and a callback C calls another way are refused
+  wherever they are written, in a program's module or a library's, and for
+  every C declaration of the function the root names.
+- An export the root's own C declares with another prototype is refused.
 - A project calling the C library writes the header under `"headers"`;
   a project calling its own C has nothing to add, since its `native` sources
   declare what they define. Writing the shim's prototypes in a header the shim
   includes lets `cc` hold the definition to the header too.
 - Each command that would build a program reading C starts one `cc` per C
-  declaration of each root that declares an `extern`: about a tenth of a
-  second with SQLite's header. The result is not cached. A key covering what
+  declaration of each root that declares an `extern`, and a second where a
+  prototype names an enumeration: about a tenth of a second each with
+  SQLite's header. The result is not cached. A key covering what
   `cc` read would have to follow every file the headers include and the
   environment that chooses the include path, and a stale entry would accept
   a declaration the current header refuses.

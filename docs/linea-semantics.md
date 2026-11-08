@@ -4694,30 +4694,40 @@ kept in an owning task by its wrapper
 ([ADR 0260](adr/0260-a-handle-to-a-c-object-is-not-shareable-unless-its-wrapper-vouches.md)).
 
 **[T-ExternPrototype]** An `extern` of a granted module naming a C function,
-any symbol outside the runtime's `linea_` namespace, which [T-ExternRuntime]
-holds instead, is held to the prototype its own root's C declarations give
-that function: the root's `"native"` sources and the `"headers"` its manifest
-names. A function none of them declares is refused, and so is every `extern`
-of a root whose C declarations the C compiler cannot read, with the reason it
-gives. Each position of C's prototype must be what lowering passes there,
-compared by representation rather than by C's type identity: for an `IntN`
-or `UIntN`, or an unrefined newtype over one, an integer of `N` bits and the
-same signedness, or for 32 bits an `enum`; for a `UInt64` or a newtype over
+the standard library's included, is held to the prototype its own root's C
+declarations give that function: the root's `"native"` sources and the
+`"headers"` its manifest names. Two kinds of `extern` are held to the
+compiler's own tables instead: a symbol in the runtime's `linea_` namespace
+([T-ExternRuntime]), and a storage primitive of the standard library whose
+calls lowering replaces. A function none of the C declarations declares is
+refused, and so is every `extern` of a root whose C declarations the C
+compiler cannot read, with the reason it gives. Every C declaration that
+declares the function is compared, and the function must have its name as
+its symbol: one C declares `static`, or reaches under another symbol through
+an `__asm__` label, `overloadable` or a macro of its name, is refused. An
+`export` is held to the same rules wherever its root's C declarations declare
+it, and is not refused where they do not. Each position of C's prototype
+must be what lowering passes there, compared by representation rather than
+by C's type identity: for an `IntN` or `UIntN`, or an unrefined newtype over
+one, an integer of `N` bits and the same signedness, or an `enum` the C
+compiler gives that width and signedness; for a `UInt64` or a newtype over
 one, which is how a handle, `ffi.CText`, `ffi.Bytes` and `ffi.CTextList`
 cross, also any pointer; for a `Float64`, `double`; for an `inout` parameter,
 a pointer to a type the parameter's type would match by value; for a
 callback's context, `void *`; for a callback, a pointer to a function whose
 prototype is held to the callback's by the same rules; for `ffi.Errno[R]`,
-what `R` matches; and for no result, `void`. C's `long` and `long long` are
-both 64-bit integers, and plain `char` has the target's signedness. The
-number of parameters must be C's; a variadic function, one declared without a
-prototype, and C's `bool`, `float`, `long double` and a structure by value
-match nothing, and a name the C declarations define as a macro is refused. A
-`read` parameter does not require a `const` pointee: what C does through the
-address remains the wrapper's promise ([T-ExternHandle]). The check runs for
-`linea check`, `build`, `run` and `test` once the program is otherwise
-accepted, and reads each prototype from the C compiler, which describes a
-pointer to each declared function after including each C declaration
+what `R` matches; and for no result, `void`. The widths of C's integer types
+and the signedness of plain `char` are the target's, so `long` and
+`long long` are both 64-bit integers on every supported target. The number of
+parameters must be C's, and the function must use C's own calling
+convention; a variadic function, one declared without a prototype, an `enum`
+no type name names, and C's `bool`, `float`, `long double` and a structure by
+value match nothing. A `read` parameter does not require a `const` pointee:
+what C does through the address remains the wrapper's promise
+([T-ExternHandle]). The check runs for `linea check`, `build`, `run`, `test`
+and `emit-mlir` once the program is otherwise accepted, and reads each
+prototype from the C compiler, which describes a pointer to each declared
+function after including each C declaration
 ([ADR 0262](adr/0262-a-hand-written-c-declaration-is-held-to-the-c-compilers-prototype.md)).
 
 **[T-ExternAgreement]** Every `extern` declaration of one symbol names the one

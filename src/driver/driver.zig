@@ -772,7 +772,7 @@ pub fn run(process: std.process.Init) !u8 {
                 defer settled.deinit(gpa);
                 // Every command that would build the program holds its C
                 // declarations to the C compiler's prototypes first.
-                if ((is_check or is_run or is_build or is_test) and !sink.hasErrors()) {
+                if ((is_check or is_run or is_build or is_test or is_emit_mlir) and !sink.hasErrors()) {
                     try prototypes.check(gpa, io, &settled, &sink, .{ .scratch = scratchDir(process.minimal.environ) });
                 }
                 const res = &settled.res;

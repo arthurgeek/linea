@@ -5,4 +5,4 @@ error[T-ExternPrototype]: C declares `double geometry_area(int64_t, int64_t)`, a
   |                                                         ^^^^^ C answers `double`
   |
   = note: `geometry_area` is declared by `geometry/geometry.c`
-  = help: declare the result `Float64`, the Linea type of C's `double`
+  = help: declare the result `Float64`, or a newtype over it, the Linea type of C's `double`
