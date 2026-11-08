@@ -17,6 +17,10 @@ The library tests itself.
   ok    cli.has_next_reports_available_tokens
   ok    cli.help_command_reports_active_help_target
   ok    cli.help_for_arguments_shows_the_command_a_refused_parse_reached
+  ok    cli.help_for_arguments_shows_the_command_missing_a_requirement
+  ok    cli.help_for_arguments_shows_the_command_that_declares_a_refused_value
+  ok    cli.help_for_arguments_shows_the_command_whose_argument_was_refused
+  ok    cli.help_for_arguments_shows_the_command_whose_value_was_refused_when_names_repeat
   ok    cli.is_help_reports_help_request
   ok    cli.is_supplied_distinguishes_user_options_from_defaults
   ok    cli.new_creates_cursor_from_args
@@ -1524,4 +1528,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1521 passed, 0 failed
+  1525 passed, 0 failed
