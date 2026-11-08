@@ -2,4 +2,4 @@ error[T-Bound]: `T` requires `Shareable`, and `Option[Counter]` is not `Shareabl
   --> tests/ffi/an_optional_c_object_does_not_meet_the_shareable_bound/main.lin:13:18
    |
 13 |     let status = read_from_any_task(held)
-   |                  ^^^^^^^^^^^^^^^^^^ `Option[Counter]` is not `Shareable`; keep it in one task or in an owning task, or, if its C library lets two threads read one object at once, declare `counter.Handle` `@shareable` in its wrapper, or drop the bound
+   |                  ^^^^^^^^^^^^^^^^^^ `Option[Counter]` is not `Shareable`; keep it in one task or in an owning task, or, if the C library guarantees concurrent access is safe for every operation its wrapper exposes through shared reads, mark `counter.Handle` `@shareable` in that trusted wrapper, or drop the bound

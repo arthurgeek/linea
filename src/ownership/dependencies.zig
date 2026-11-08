@@ -2323,7 +2323,7 @@ const Analysis = struct {
         // Nothing says C lets two threads read the object at once; only its
         // wrapper can say so, on the handle's declaration.
         const note = if (foreign != null)
-            try std.fmt.allocPrint(arena, "C has not said two threads may read this object at once; move it into one task, or keep it in an owning task (`task.own`) and give other tasks its client, or, if its C library allows concurrent reads, declare `{s}` `@shareable` in its wrapper", .{declarationName(handle_name)})
+            try std.fmt.allocPrint(arena, "C has not said two threads may read this object at once; move it into one task, or keep it in an owning task (`task.own`) and give other tasks its client, or, if the C library guarantees concurrent access is safe for every operation its wrapper exposes through shared reads, mark `{s}` `@shareable` in that trusted wrapper", .{declarationName(handle_name)})
         else
             "reading this value may change it; move it into one task, or give the task a value that reading never changes";
         const message = if (own)

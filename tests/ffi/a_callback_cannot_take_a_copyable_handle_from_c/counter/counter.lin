@@ -1,0 +1,25 @@
+// A copyable sealed newtype over a `struct counter *`.
+@(opaque, copyable, shareable)
+type Handle = UInt64
+
+extern fn counter_total(read counter: Handle) -> Int64
+
+pub struct Keep { held: Option[Handle] }
+
+// C shows the callback a counter it frees once the callback returns, so a
+// copy the callback keeps would name freed memory.
+extern fn counter_each(visit: fn(inout keep: Keep, h: Handle) -> Int32, inout keep: Keep) -> Int32
+
+fn remember(inout keep: Keep, h: Handle) -> Int32 {
+    keep.held = .Some(copy(h))
+    0
+}
+
+pub fn go() -> Int64 {
+    var keep = Keep { held = .None }
+    let _r = counter_each(remember, &keep)
+    match read keep.held {
+        Some(h) => counter_total(h),
+        None => 0,
+    }
+}

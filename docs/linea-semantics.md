@@ -4663,11 +4663,21 @@ copy names what the sealed number names and crosses to any task whole, so no
 rule about readers keeps two threads apart, and the wrapper must vouch that C
 allows concurrent use; without the mark it is [T-ExternHandle]. Since every
 copy names the object, the object must outlive every copy: an `extern` takes
-such a newtype, or a newtype the program wraps around one, only as a `read`
-parameter, which promises that C neither keeps nor frees the object, and
-answers none; any other convention, or a result of that type, is
-[T-ExternHandle]. A wrapper whose C object is freed keeps it in a handle that
-is not `copyable`. The compiler also believes that a wrapper keeps every C
+such a newtype, or a newtype wrapped around one at any depth (sealed or not,
+copyable or not, a linear wrapper included, since it does not own what the
+copies name), only as a `read` parameter, which promises that C neither
+keeps nor frees the object. It crosses at no other position: not as an
+`extern`'s result, nor as the `R` of an `ffi.Errno[R]` result, nor as a
+parameter or result of a callback an `extern` takes, nor as a parameter or
+result of an exported function; each is [T-ExternHandle]. The `inout` context
+an `extern` lends a callback is exempt: C receives the address of the Linea
+place, not the value, and hands it back only during the call. A wrapper whose
+C object is freed keeps it in a handle that is not `copyable`. Safe Linea code
+cannot violate the lifetime and concurrency invariants of a correctly
+implemented wrapper, and a module granted `extern` is trusted to preserve
+them: `Shareable` and `@shareable` concern concurrent reads only, not
+lifetime and not thread affinity, so a value that is not Shareable may still
+move whole to another task. The compiler also believes that a wrapper keeps every C
 object reachable from more than one task, by a read or through a copy, in a
 non-copyable handle, or that its read paths are safe for concurrent use, and
 that it never frees the object a copyable sealed newtype names through an

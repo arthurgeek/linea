@@ -1,0 +1,11 @@
+import std.io
+import counter
+
+// `tally` still names the counter that closing `owned` frees.
+fn main() -> Result[UInt8, io.IoError] {
+    let tally = counter.open()
+    let owned = counter.own(copy(tally))
+    counter.close(owned)
+    io.println("{counter.total(tally)}")?
+    .Ok(0)
+}

@@ -504,13 +504,15 @@ error[O-Cross]: a task cannot read `tally` while its creator may read it too: a 
 17 |         sink [read tally] |sink me: Chan[End]| {
    |                    ^^^^^ this capture is read by the task
    |
-   = help: C has not said two threads may read this object at once; move it into one task, or keep it in an owning task (`task.own`) and give other tasks its client, or, if its C library allows concurrent reads, declare `counter.Handle` `@shareable` in its wrapper
+   = help: C has not said two threads may read this object at once; move it into one task, or keep it in an owning task (`task.own`) and give other tasks its client, or, if the C library guarantees concurrent access is safe for every operation its wrapper exposes through shared reads, mark `counter.Handle` `@shareable` in that trusted wrapper
 ```
 
 The help names three ways on. Moving the counter into the task with
 `[sink tally]` leaves one reader. An owning task keeps the counter on its own
-thread and runs each call against it in turn, so C sees one thread whatever
-the library allows ([The owning-task pattern](13-tasks-and-sessions.md#the-owning-task-pattern)).
+thread and runs each call against it in turn, so C never sees two threads
+use the counter at once ([The owning-task pattern](13-tasks-and-sessions.md#the-owning-task-pattern)).
+A library that needs one thread to create, use and destroy each object asks
+more: the owning task must open the object itself.
 And where the C library documents an object as safe to read from several
 threads at once, the wrapper says so on the handle with `@shareable`. This
 counter's `counter_total` only reads a number that nothing changes while a
@@ -530,8 +532,9 @@ the task reads 40
 main reads 40
 ```
 
-`@shareable` is a promise the compiler believes, as it believes an `extern`
-signature, so only a module its manifest grants `extern` may write it, and
+`@shareable` certifies concurrent access and nothing more: it says nothing
+about how long the object lives, and nothing about which thread may use it.
+It is a promise the compiler believes, as it believes an `extern` signature, so only a module its manifest grants `extern` may write it, and
 only on the sealed handle itself. A record holding a `@shareable` handle is
 `Shareable` where its other fields are. If you know Rust, this is
 `unsafe impl Sync for Handle {}`: the wrapper's author vouches for what the
@@ -738,9 +741,12 @@ error[T-ExternHandle]: a copyable sealed newtype in a module trusted with C name
   |      ^^^^^^ declare it `@shareable` if C lets two threads use the object at once, or drop `copyable` so the compiler keeps the object to one task at a time
 ```
 
-`std.io`'s `Descriptor` is such a type: it wraps a file descriptor it never
-closes, and every operation on a descriptor is one system call the kernel
-completes whole.
+`std.io`'s `Descriptor` is such a type. It wraps a file descriptor it never
+closes, so whatever owns the descriptor keeps it open while a copy is used,
+and POSIX lets two threads read and write one descriptor at once, though two
+readers then consume different parts of the stream. A static object is only
+one way to outlive every copy; a reference count C keeps, or an owner that
+stays open, works as well, and the wrapper is the one that promises it.
 
 ### `inout` passes the address of a value
 
@@ -2034,8 +2040,8 @@ against the C library's documentation:
    paths are safe for concurrent use. The compiler keeps a handle to one task
    at a time, but a C pointer kept in a plain integer field of a record is not
    followed at all. And a handle moved whole into a task is accepted, so a C
-   object that must stay on the thread that created it belongs in an owning
-   task.
+   object that must be created, used and destroyed on one thread is created
+   inside an owning task, which then runs every call on that thread.
 9. A handle marked `@shareable` names an object the C library lets two
    threads read at once, through every `extern` that takes it. A copyable
    sealed newtype must be marked `@shareable` in a trusted module, and the

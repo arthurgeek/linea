@@ -1,0 +1,30 @@
+// A copyable sealed newtype over a `struct counter *`.
+@(opaque, copyable, shareable)
+type Handle = UInt64
+
+// A linear wrapper around a copyable handle does not own the counter: every
+// copy of the handle inside it still names the counter.
+@(opaque, linear)
+type Owned = Handle
+
+extern fn counter_open() -> UInt64
+
+extern fn counter_total(read counter: Handle) -> Int64
+
+extern fn counter_close(sink counter: Owned)
+
+pub fn open() -> Handle {
+    Handle(counter_open())
+}
+
+pub fn own(sink counter: Handle) -> Owned {
+    Owned(counter)
+}
+
+pub fn total(counter: Handle) -> Int64 {
+    counter_total(counter)
+}
+
+pub fn close(sink counter: Owned) {
+    counter_close(counter)
+}

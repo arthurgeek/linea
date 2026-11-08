@@ -94,11 +94,15 @@ pub fn copiesUnvouchedForeignObject(program: *const ExpandedProgram, ast: *const
 }
 
 /// Whether `t` names a C object through a `copyable` newtype sealed under a
-/// grant: it is one, or a newtype the program wraps around one. Every copy
-/// names the same object, so the object must outlive every copy: C may take
-/// it only `read`, neither keeping nor freeing it, and no `extern` answers
-/// one ([T-ExternHandle]). A sealed newtype that is not copyable is a handle
-/// instead, which ownership keeps to one place.
+/// grant, at any layer: it is one, or a newtype wrapped around one, sealed or
+/// not, copyable or not. Every copy of the copyable layer names the same
+/// object, so the object must outlive every copy, and a wrapper around it,
+/// even a linear one, does not own it: C may take any of them only `read`,
+/// neither keeping nor freeing the object, and none crosses from C or back to
+/// it by value ([T-ExternHandle]).
+///
+/// **Bound:** each step enters a newtype's base, so the walk is as deep as
+/// `t`'s newtypes nest.
 pub fn namesCopiedForeignObject(program: *const ExpandedProgram, ast: *const Ast, pool: anytype, t: TypeId) bool {
     var at = t;
     while (true) {
@@ -108,7 +112,7 @@ pub fn namesCopiedForeignObject(program: *const ExpandedProgram, ast: *const Ast
             else => return false,
         };
         const declared = pool.declOfType(at) orelse return false;
-        if (sealedUnderGrant(program, ast, declared)) return ast.declOwnershipPolicy(declared) == .copyable;
+        if (sealedUnderGrant(program, ast, declared) and ast.declOwnershipPolicy(declared) == .copyable) return true;
         at = newtype.base;
     }
 }

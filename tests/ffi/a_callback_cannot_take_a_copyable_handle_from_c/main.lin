@@ -1,0 +1,7 @@
+import std.io
+import counter
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{counter.go()}")?
+    .Ok(0)
+}

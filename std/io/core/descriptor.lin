@@ -3,10 +3,14 @@ import std.mem
 
 // A Descriptor wraps a borrowed file descriptor for byte and text I/O.
 // Creating or discarding the wrapper does not close the descriptor.
-// `@shareable` says that two threads may use one descriptor at once: every
-// operation on it is one system call (`read`, `write`, `close`), and the
-// kernel completes each call on a descriptor whole, so concurrent calls
-// interleave but never corrupt the descriptor itself.
+// `@shareable` says that two threads may use one descriptor at once. POSIX
+// allows concurrent `read` and `write` calls on one descriptor, and the
+// kernel keeps the descriptor's own state consistent, but the calls may still
+// interfere with each other's meaning: two readers consume different parts of
+// a stream, and two writers interleave their bytes. A Descriptor never closes
+// what it wraps, so whatever owns the descriptor, such as an open file or the
+// process for its standard streams, must keep it open for as long as any
+// copy is used; a closed number may be reused for another file.
 @(opaque, copyable, shareable)
 type Descriptor = Int32
 

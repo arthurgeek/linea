@@ -1,0 +1,15 @@
+// A copyable sealed newtype over an address C holds. C calls an exported
+// function, so what it takes comes from C and what it answers goes to C, and
+// either way a copy would name an object nothing the compiler tracks keeps
+// alive.
+@(opaque, copyable, shareable)
+type Handle = UInt64
+
+export fn counter_peek(counter: Handle) -> Int32 {
+    let Handle(address) = copy(counter)
+    Int32(address % 2)
+}
+
+export fn counter_make() -> Handle {
+    Handle(0)
+}

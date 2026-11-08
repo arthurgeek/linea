@@ -1,0 +1,17 @@
+import std.ffi
+
+// A copyable sealed newtype over a `struct counter *`.
+@(opaque, copyable, shareable)
+type Handle = UInt64
+
+extern fn counter_total(read counter: Handle) -> Int64
+
+// An `ffi.Errno[Handle]` hands Linea the handle C answered, which nothing the
+// compiler tracks keeps alive.
+extern fn counter_make() -> ffi.Errno[Handle]
+
+pub fn go() -> UInt8 {
+    let made = counter_make()
+    let h = made.value()
+    UInt8(counter_total(h))
+}

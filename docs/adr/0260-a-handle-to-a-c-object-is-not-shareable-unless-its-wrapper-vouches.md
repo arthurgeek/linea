@@ -53,6 +53,30 @@ make the wrapper promise to use it.
 
 ## Decision
 
+**The contract.** Safe Linea code cannot violate the lifetime and concurrency
+invariants of a correctly implemented foreign wrapper; modules granted
+`extern` are trusted to preserve those invariants. The compiler proves what
+it can read: who holds a handle, which task reads it, which conventions C
+receives a copyable sealed value under. The wrapper promises what only C's
+documentation can say: that an object outlives every copy naming it, that
+`@shareable` operations are safe under concurrent use, that C keeps or frees
+nothing behind an integer it was handed. This is the line Rust draws at an
+`unsafe impl Sync`: the author of the implementation vouches, and every
+caller relies on it.
+
+| Guarantee | Who keeps it |
+| --- | --- |
+| Exclusive ownership | the compiler, through linear and affine types |
+| Concurrent reads | the compiler through `Shareable`, the wrapper through `@shareable` |
+| Lifetime of a C object | ownership of its handle, and the wrapper for copyable values |
+| Thread affinity | the wrapper and the program's choice of where a task runs |
+| A correct wrapper | the module granted `extern`, which a reviewer reads |
+
+`Shareable` and `@shareable` say only whether two tasks may read at once.
+They say nothing about lifetime, and nothing about thread affinity: a value
+that is not `Shareable` may still move whole to another task, and
+`@shareable` never means a thread-affine object may migrate.
+
 **A wrapper keeps C objects in handles, and the compiler holds handles to
 one task at a time.** The innermost handle of
 [T-ExternHandle], a newtype that is not `copyable` and is sealed (`@opaque`)
@@ -76,9 +100,13 @@ covered the moment it follows 0228's shape.
 `@shareable`** ([T-ExternHandle]). Every copy names whatever the sealed number
 names and reaches any task, so the compiler cannot keep its object to one
 thread; the wrapper must vouch that C allows it, or drop `copyable` and let
-the handle rule above hold. std declares one: `io.core.Descriptor`, which is
-`@shareable` because each operation on a descriptor is one system call the
-kernel completes whole.
+the handle rule above hold. std declares one: `io.core.Descriptor`. POSIX
+lets two threads call `read` and `write` on one descriptor at once and keeps
+the descriptor's own state consistent; the calls may still interfere in
+meaning, two readers consuming different parts of a stream, and whatever owns
+the descriptor must keep it open while any copy is used, since a closed number
+may be reused. `@shareable` vouches for the first; the second is the owner's
+lifetime promise, not something `@shareable` or `read` establishes.
 
 **A copyable sealed newtype crosses to C only `read`, and no `extern`
 answers one** ([T-ExternHandle]). Its object must outlive every copy, and
@@ -87,12 +115,38 @@ handle by value in `counter_close` let a copy read the counter after it was
 freed. So an `extern` takes such a newtype, or a newtype wrapped around one,
 only as a `read` parameter, which for this type promises that C neither keeps
 nor frees the object, and an `extern` answering one is refused, since what C
-handed over would have no owner. `intrinsics.namesCopiedForeignObject` decides
-the type, from the same three declaration facts. A C object that is freed
-lives in a non-copyable handle; a copyable sealed newtype fits an object that
-lives as long as the program, such as `io.core.Descriptor`'s borrowed
-descriptors, which std never closes through one: a file closes the raw
-descriptor it owns.
+handed over would have no owner. The same holds at every position a value
+crosses: an `extern`'s parameters and its result, the `R` an `ffi.Errno[R]`
+answer carries, a callback's parameters (C hands them to Linea) and its
+result (Linea hands it to C), and an exported function's parameters and
+result. Only a `read` parameter of an `extern` admits one.
+`intrinsics.namesCopiedForeignObject` decides the type, from the same three
+declaration facts, at any layer of newtypes: a newtype wrapped around a
+copyable sealed newtype names the same object, whether the wrapper is sealed
+or not, copyable or not, in the same module or another. A linear wrapper
+around one does not own the object, since copies of the inner value may
+still name it, so it crosses only `read` too. The reverse, a copyable
+newtype around a handle, is refused already: a copyable type cannot own a
+value that cannot be copied ([O-Universe]).
+
+**The callback context is exempt.** An `extern`'s `inout` context parameter,
+the one a callback receives first, may be of a copyable sealed type. C
+receives the address of the Linea place that holds the value, never the value
+itself, and hands that address back only during the call (0228's promise
+that C calls a callback only during the call that passed it). The callback
+reads the place through an `inout` parameter, so any copy it makes is a copy
+of a value the program already held, under the same lifetime promise as
+every other copy. A context retained by C past the call, or used from
+another thread, breaks 0228's promise, which no rule over the program's
+types can see. A C object that is freed
+lives in a non-copyable handle. A copyable sealed newtype fits an object
+that outlives every copy by some means the wrapper guarantees: one that lives
+as long as the program, a reference count C keeps, or a descriptor its owner
+keeps open, as `io.core.Descriptor`'s borrowed descriptors are, which std
+never closes through one: a file closes the raw descriptor it owns. A wrapper
+that takes the address out of one and frees it through an `extern` taking an
+integer breaks that guarantee where the compiler cannot see it; that is the
+wrapper's responsibility, as every integer it hands C is.
 
 **What the rule closes, and what it does not.** It closes the canonical shape
 0228 prescribes, under one more promise the wrapper makes: every C object
@@ -103,7 +157,11 @@ holding an address in a plain integer field, or a granted root keeping C state
 in a sealed newtype of a library that is not granted, is outside the rule and
 inside that promise. A handle moved whole into another task is accepted, so a
 C library whose objects must stay on the thread that created them is not
-modelled either; such a wrapper keeps its objects in an owning task.
+modelled either. An owning task runs every call against its state on one
+thread, which serialises access, but a value made elsewhere and moved in was
+created on another thread: a library that needs one thread for creation, use
+and destruction is satisfied only when the owning task creates the object
+itself, and destroys it before it ends.
 
 **A wrapper vouches with `@shareable`.** A C library that documents an object
 as safe for concurrent reads is declared so on the handle:
@@ -132,8 +190,9 @@ from, so an optional, a vector or a closure holding a counter names the same
 handle in both. [O-Cross] says "a `Counter` is not `Shareable`: it reaches a
 `counter.Handle`, which names an object C holds", and both helps offer the
 edits that answer it: move the value into one task, keep it in an owning task
-and hand other tasks its client, or, where the C library allows concurrent
-reads, declare the handle's declaration `@shareable` in its wrapper.
+and hand other tasks its client, or, if the C library guarantees concurrent
+access is safe for every operation the wrapper exposes through shared reads,
+mark the handle's declaration `@shareable` in that trusted wrapper.
 
 **What a wrapper vouches for**, added to 0228's list:
 
@@ -149,10 +208,26 @@ reads, declare the handle's declaration `@shareable` in its wrapper.
 
 ## Consequences
 
-- An owning task is the ordinary way to use a C object from many tasks. Its
-  state lives on one thread and every call runs there in turn, so C sees one
-  thread whatever the library promises, and `task.own(counter)` is accepted
-  for an unshareable counter as for an arena.
+- An owning task is the ordinary way to use a C object from many tasks. Every
+  call runs against its state on the owning task's thread, one at a time, so
+  C never sees two threads use the object at once, and `task.own(counter)` is
+  accepted for an unshareable counter as for an arena. It does not by itself
+  satisfy a library that needs creation, use and destruction on one thread;
+  the owning task must create the object for that.
+- `@shareable` is independent of `copyable`, as `Sync` is of `Copy`: a linear
+  `@shareable` handle may be read by two tasks and closed once both have
+  joined, which `tests/ffi/a_shareable_c_object_is_read_by_two_tasks` runs.
+- **Known over-refusal.** The rule classifies by the declaring module's grant,
+  not by what the value names: every non-copyable sealed newtype in a granted
+  module is a handle, so a logical token such as
+  `@(opaque, linear) type TransactionId = UInt64` there is unshareable, and
+  every copyable sealed newtype there must carry `@shareable` even when it is
+  a plain number. The conservative default keeps a forgotten handle from
+  slipping through. The options, left open: keep the implicit rule; an
+  explicit `@foreign` marker on what names a C object; the implicit rule plus
+  a narrowly scoped trusted exemption for a value that names nothing, tested
+  never to reclassify a real handle; or a separate declaration form for C
+  objects.
 - A handle moved whole into a task is still accepted: only that task reads it.
   A C library whose objects belong to the thread that made them is not
   modelled; its wrapper keeps them in an owning task.

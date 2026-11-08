@@ -1,0 +1,10 @@
+// A copyable sealed newtype over a `struct counter *`, which C never frees
+// through one.
+@(opaque, copyable, shareable)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+pub fn open() -> Handle {
+    Handle(counter_open())
+}

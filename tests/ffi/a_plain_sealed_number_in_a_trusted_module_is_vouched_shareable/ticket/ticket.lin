@@ -1,0 +1,14 @@
+// A ticket number this module seals. The module is trusted with C, so a
+// copyable sealed newtype here is declared only with `@shareable`; a ticket
+// names nothing C holds, so any number of threads may use one at once.
+@(opaque, copyable, shareable)
+type Ticket = UInt64
+
+pub fn issue(number: UInt64) -> Ticket {
+    Ticket(number)
+}
+
+pub fn number(ticket: Ticket) -> UInt64 {
+    let Ticket(number) = copy(ticket)
+    number
+}

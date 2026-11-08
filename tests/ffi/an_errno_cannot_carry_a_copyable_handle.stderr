@@ -1,0 +1,5 @@
+error[T-ExternHandle]: an `extern` cannot answer a `Handle`: every copy would name an object nothing the compiler tracks keeps alive
+  --> tests/ffi/an_errno_cannot_carry_a_copyable_handle/counter/counter.lin:11:11
+   |
+11 | extern fn counter_make() -> ffi.Errno[Handle]
+   |           ^^^^^^^^^^^^ answer the address as an integer, and build the value where the wrapper knows the object outlives every copy

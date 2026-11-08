@@ -1142,6 +1142,15 @@ an **owning task** that holds it, and a `task.Client` reaches it: the client's
 call at a time, and answers what the closure answers. No other task touches
 the state, so there is nothing to lock.
 
+An owning task runs every call on its own thread, one at a time, which is
+what a C object that is not safe for two threads needs. Some C libraries ask
+more: that one thread create, use and destroy each object. A value made by
+`main` and moved into `task.own` was created on `main`'s thread, so for such
+a library the owning task must open the object itself, in its first call,
+and close it before it ends. Being `Shareable` or not says nothing about
+threads either way: a value that is not `Shareable` still moves whole to
+another task.
+
 `owning_task.lin`:
 
 ```linea

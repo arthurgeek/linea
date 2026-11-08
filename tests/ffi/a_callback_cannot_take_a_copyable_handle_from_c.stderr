@@ -1,0 +1,5 @@
+error[T-ExternHandle]: C cannot hand Linea a `Handle`: every copy would name an object nothing the compiler tracks keeps alive
+  --> tests/ffi/a_callback_cannot_take_a_copyable_handle_from_c/counter/counter.lin:11:31
+   |
+11 | extern fn counter_each(visit: fn(inout keep: Keep, h: Handle) -> Int32, inout keep: Keep) -> Int32
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ take the address as an integer, and build the value where the wrapper knows the object outlives every copy

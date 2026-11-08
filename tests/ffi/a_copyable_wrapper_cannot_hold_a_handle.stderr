@@ -1,0 +1,10 @@
+error[O-Universe]: a copyable declaration owns `counter.Handle`, which cannot be copied
+ --> tests/ffi/a_copyable_wrapper_cannot_hold_a_handle/counter/counter.lin:7:15
+  |
+7 | type Copied = Handle
+  |               ^^^^^^ remove `copyable`, or hold a copyable part
+error[S-Entry]: `@shareable` vouches only for this declaration, and its base `Handle` is not `Shareable`, so the type stays unshareable
+ --> tests/ffi/a_copyable_wrapper_cannot_hold_a_handle/counter/counter.lin:6:21
+  |
+6 | @(opaque, copyable, shareable)
+  |                     ^^^^^^^^^ vouch on the type that keeps the base unshareable, or drop `shareable`

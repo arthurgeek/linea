@@ -1,0 +1,5 @@
+error[T-ExternHandle]: every copy of a `Owned` names the same C object, so C may neither keep nor free it
+  --> tests/ffi/a_linear_wrapper_does_not_own_what_a_copyable_handle_names/counter/counter.lin:14:25
+   |
+14 | extern fn counter_close(sink counter: Owned)
+   |                         ^^^^ write `read`, so C only reads the object; keep an object C frees or keeps in a handle that is not `copyable`

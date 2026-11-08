@@ -4,4 +4,4 @@ error[O-Cross]: a task cannot read `held` while its creator may read it too: a `
 24 |         sink [read held] |sink me: Chan[End]| {
    |                    ^^^^ this capture is read by the task
    |
-   = help: C has not said two threads may read this object at once; move it into one task, or keep it in an owning task (`task.own`) and give other tasks its client, or, if its C library allows concurrent reads, declare `counter.Handle` `@shareable` in its wrapper
+   = help: C has not said two threads may read this object at once; move it into one task, or keep it in an owning task (`task.own`) and give other tasks its client, or, if the C library guarantees concurrent access is safe for every operation its wrapper exposes through shared reads, mark `counter.Handle` `@shareable` in that trusted wrapper

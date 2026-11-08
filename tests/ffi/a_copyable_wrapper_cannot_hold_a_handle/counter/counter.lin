@@ -1,0 +1,20 @@
+// A handle owns its counter, so no copyable type may hold one: a copy would
+// name the counter after its owner freed it.
+@(opaque, linear)
+type Handle = UInt64
+
+@(opaque, copyable, shareable)
+type Copied = Handle
+
+extern fn counter_open() -> UInt64
+
+extern fn counter_close(sink counter: Handle)
+
+pub fn open() -> Copied {
+    Copied(Handle(counter_open()))
+}
+
+pub fn close(sink counter: Copied) {
+    let Copied(handle) = counter
+    counter_close(handle)
+}
