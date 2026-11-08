@@ -3,7 +3,7 @@
 //! A test is named `slow:` when it takes ten seconds or more in a Debug unit
 //! binary. `-Dslow-tests=false` builds the binary with those tests skipped,
 //! for the Debug `check` lane, which leaves them to the ReleaseSafe run of the
-//! same tests in `optimised`. Every other build runs them.
+//! same tests in `optimised-unit`. Every other build runs them.
 //!
 //! This file is the one reader of the `test_options` module.
 

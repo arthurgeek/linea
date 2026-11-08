@@ -60,9 +60,12 @@ test "CI outcome snapshots preserve restore and save contracts" {
     // its walks read, and the examples', and beside them what only that job
     // walks -- the recompilation properties in `check` and the generated
     // storage programs in `optimised-soundness`, which walks no corpus.
+    // `optimised-unit` records no outcome and keeps only the checked-library
+    // entries the guide reads.
     const jobs = [_]struct { name: []const u8, dirs: []const []const u8 }{
         .{ .name = "check", .dirs = &.{ "/outcomes", "/linea-cache", "/examples/outcomes", "/properties/outcomes" } },
         .{ .name = "sanitize", .dirs = &.{ "/outcomes", "/linea-cache", "/examples/outcomes" } },
+        .{ .name = "optimised-unit", .dirs = &.{"/linea-cache"} },
         .{ .name = "optimised-corpus", .dirs = &.{ "/outcomes", "/linea-cache", "/examples/outcomes" } },
         .{ .name = "optimised-soundness", .dirs = &.{ "/linea-cache", "/soundness/outcomes" } },
     };
@@ -157,6 +160,22 @@ test "CI runs the unit tests named slow in a lane every pull request requires" {
         \\          trap 'kill "$follower" 2>/dev/null || true' EXIT
         \\          nice -n 10 nix develop --command zig build test-unit --release=fast -j4 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
     , try stepText(unit, "Unit tests, ReleaseFast"));
+    // What `check` leaves to this lane outside a push to main, each whole,
+    // with the Debug compiler.
+    try testing.expectEqualStrings(
+        \\      - name: The guide's programs print what it shows
+        \\        run: nix develop --command zig build guide -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+    , try stepText(unit, "The guide's programs print what it shows"));
+    try testing.expectEqualStrings(
+        \\      - name: The library's own tests pass
+        \\        run: nix develop --command zig build run -- test std
+    , try stepText(unit, "The library's own tests pass"));
+    try testing.expectEqualStrings(
+        \\      - name: The examples' own tests pass
+        \\        run: nix develop --command zig build example-tests -Dwalkers=2
+    , try stepText(unit, "The examples' own tests pass"));
+    try expectPrunesCheckedLibraries(unit);
+    try testing.expectEqualStrings("timeout-minutes: 75", try onlyLineWith(unit, "timeout-minutes:"));
 }
 
 test "CI runs the optimised corpus and the soundness property in lanes every pull request requires" {
@@ -171,6 +190,8 @@ test "CI runs the optimised corpus and the soundness property in lanes every pul
         \\          trap 'kill "$follower" 2>/dev/null || true' EXIT
         \\          nice -n 10 nix develop --command zig build conformance --release=fast -j4 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
     , try stepText(try workflowJob(workflow, "optimised-corpus"), "Conformance suite, optimised"));
+    try expectPrunesCheckedLibraries(try workflowJob(workflow, "optimised-corpus"));
+    try testing.expectEqualStrings("timeout-minutes: 120", try onlyLineWith(try workflowJob(workflow, "optimised-corpus"), "timeout-minutes:"));
     try testing.expectEqualStrings(
         \\      - name: Soundness matrix and generated storage programs
         \\        run: |
@@ -178,6 +199,92 @@ test "CI runs the optimised corpus and the soundness property in lanes every pul
         \\          trap 'kill "$follower" 2>/dev/null || true' EXIT
         \\          nice -n 10 nix develop --command zig build soundness --release=fast -j1 -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
     , try stepText(try workflowJob(workflow, "optimised-soundness"), "Soundness matrix and generated storage programs"));
+    // A pull request checks the fixed window after the default seeds, and a
+    // weekly or manual run a window that moves with the run number.
+    try testing.expectEqualStrings(
+        \\      - name: Generated storage programs over further seeds
+        \\        env:
+        \\          ROTATE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        \\        run: |
+        \\          .github/scripts/resource-log.sh follow & follower=$!
+        \\          trap 'kill "$follower" 2>/dev/null || true' EXIT
+        \\          if [ "$ROTATE" = true ]; then seed=$(( GITHUB_RUN_NUMBER * 16 )); else seed=16; fi
+        \\          echo "storage program seeds $seed..$(( seed + 15 ))"
+        \\          nice -n 10 nix develop --command zig build soundness --release=fast -j1 -Dsoundness-matrix=false -Dseed=$seed -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+    , try stepText(try workflowJob(workflow, "optimised-soundness"), "Generated storage programs over further seeds"));
+    try expectPrunesCheckedLibraries(try workflowJob(workflow, "optimised-soundness"));
+    try testing.expectEqualStrings("timeout-minutes: 60", try onlyLineWith(try workflowJob(workflow, "optimised-soundness"), "timeout-minutes:"));
+}
+
+/// Holds `job` to pruning its checked-library entries to the sixty-four most
+/// recently used before it saves them, whenever it saves them.
+fn expectPrunesCheckedLibraries(job: []const u8) !void {
+    try testing.expectEqualStrings(
+        \\      - name: Keep the newest checked libraries
+        \\        if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
+        \\        run: |
+        \\          dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache"
+        \\          if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
+    , try stepText(job, "Keep the newest checked libraries"));
+}
+
+test "CI runs what reads gated Markdown only in lanes such Markdown reruns" {
+    const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(workflow);
+    const build_zig = try std.Io.Dir.cwd().readFileAlloc(testing.io, "build.zig", testing.allocator, .limited(1 << 22));
+    defer testing.allocator.free(build_zig);
+    // The build steps that read the guide, the decision index or the
+    // semantics: the guide gate, and each suite that runs the documentation
+    // gates and the unit tests (`source`) or the guide.
+    const suites = [_]struct { suite: test_roots.Suite, step: []const u8 }{
+        .{ .suite = .full, .step = "test" },
+        .{ .suite = .corpus, .step = "test-corpus" },
+        .{ .suite = .support, .step = "test-support" },
+        .{ .suite = .unit, .step = "test-unit" },
+        .{ .suite = .conformance, .step = "conformance" },
+        .{ .suite = .fuzz, .step = "fuzz" },
+    };
+    var reading: std.ArrayList([]const u8) = .empty;
+    defer reading.deinit(testing.allocator);
+    try reading.append(testing.allocator, "guide");
+    for (suites) |entry| {
+        var buffer: [64]u8 = undefined;
+        const declared = try std.fmt.bufPrint(&buffer, ".{{ test_roots.Suite.{s}, \"{s}\",", .{ @tagName(entry.suite), entry.step });
+        try testing.expect(std.mem.indexOf(u8, build_zig, declared) != null);
+        const selected = test_roots.select(.{ .suite = entry.suite, .optimize = .Debug, .filtered = false });
+        if (selected.source or selected.guide) try reading.append(testing.allocator, entry.step);
+    }
+    // Every job running one of them must be a lane a change to that
+    // Markdown reruns, or the change would merge on a pass that never read it.
+    var found: usize = 0;
+    const jobs_start = (std.mem.indexOf(u8, workflow, "\njobs:\n") orelse return error.MissingJobs) + "\njobs:\n".len;
+    var lines = std.mem.splitScalar(u8, workflow[jobs_start..], '\n');
+    while (lines.next()) |line| {
+        if (line.len < 4 or !std.mem.startsWith(u8, line, "  ") or line[2] == ' ' or line[2] == '#' or line[line.len - 1] != ':') continue;
+        const job_name = line[2 .. line.len - 1];
+        const job = try workflowJob(workflow, job_name);
+        var at: usize = 0;
+        while (std.mem.indexOfPos(u8, job, at, "zig build ")) |start| {
+            at = start + "zig build ".len;
+            const end = std.mem.indexOfAnyPos(u8, job, at, " \n") orelse job.len;
+            const step = job[at..end];
+            for (reading.items) |name| {
+                if (!std.mem.eql(u8, name, step)) continue;
+                found += 1;
+                const decision = laneDecision(job_name, "docs/learn/01-basics.md\n", null) catch |err| {
+                    std.debug.print("{s} runs `zig build {s}` and is no lane changes.sh decides\n", .{ job_name, step });
+                    return err;
+                };
+                defer testing.allocator.free(decision);
+                if (!std.mem.eql(u8, decision, "run\n")) {
+                    std.debug.print("{s} runs `zig build {s}`, and a guide edit {s}", .{ job_name, step, decision });
+                    return error.GatedMarkdownInherited;
+                }
+            }
+        }
+    }
+    // `check`'s suite, and the unit tests and the guide of `optimised-unit`.
+    try testing.expect(found >= 3);
 }
 
 /// The step of `job` named `name`: its `- name:` line and every line after it

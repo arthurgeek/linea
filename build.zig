@@ -1410,8 +1410,8 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     // `zig build` stays a debug build for the edit-compile loop, and
     // `zig build -Drelease` is the distributed one. The unit tests run in the
-    // mode the build selects: Debug here, ReleaseSafe in the optimised CI lane
-    // and, on its weekly and manual runs, ReleaseFast too.
+    // mode the build selects: Debug here, ReleaseSafe in the `optimised-unit`
+    // CI lane and, on its weekly and manual runs, ReleaseFast too.
     const optimize = test_roots.optimizeMode(b.release_mode, b.option(bool, "release", "optimize for end users"));
 
     // Where recorded outcomes and build intermediates go.
@@ -1562,9 +1562,9 @@ pub fn build(b: *std.Build) void {
     ) orelse false;
 
     // The guide compiles and runs about two hundred programs with the Debug
-    // compiler. A pull request's `check` run leaves it to the `optimised` lane,
-    // which runs before the pull request merges, and passes `-Dguide=false`;
-    // everywhere else `test` runs it.
+    // compiler. A pull request's `check` run leaves it to the `optimised-unit`
+    // lane, which runs before the pull request merges, and passes
+    // `-Dguide=false`; everywhere else `test` runs it.
     const guide_in_test = b.option(
         bool,
         "guide",
@@ -1574,9 +1574,9 @@ pub fn build(b: *std.Build) void {
     // The unit tests named `slow:` take ten seconds or more each in a Debug
     // binary and together most of its run. A pull request's `check` run builds
     // its Debug unit tests with them skipped and passes `-Dslow-tests=false`,
-    // because the `optimised` lane runs every unit test under ReleaseSafe,
-    // which keeps Debug's safety checks and assertions, before the pull
-    // request merges; everywhere else they run.
+    // because the `optimised-unit` lane runs every unit test under
+    // ReleaseSafe, which keeps Debug's safety checks and assertions, before
+    // the pull request merges; everywhere else they run.
     const slow_tests = b.option(
         bool,
         "slow-tests",
@@ -2067,8 +2067,8 @@ pub fn build(b: *std.Build) void {
     // what is accepted reaches the toolchain. A program that declares a
     // closure checks the library again, which is most of the cost: about a
     // minute with an optimised runner and six with a debug one, even with
-    // every outcome cached. So it is a step of its own, run by the optimised
-    // CI lane. `-Dsoundness-matrix=false` leaves the matrix out of a search
+    // every outcome cached. So it is a step of its own, run by the
+    // `optimised-soundness` CI lane. `-Dsoundness-matrix=false` leaves the matrix out of a search
     // over new seeds, since the matrix does not depend on the seed.
     const run_soundness = b.addRunArtifact(conformance);
     shareLibraryCache(run_soundness);

@@ -81,7 +81,7 @@ jobs:
 
   check:
     # A draft pull request runs nothing. A ready pull request runs `check`
-    # beside `sanitize`, the three `optimised` lanes and, when it applies,
+    # beside `sanitize`, the three optimised lanes and, when it applies,
     # `fuzz-mir`; a push to main runs `check` alone; a manual run and the
     # weekly schedule run it beside every other lane. It is skipped where
     # `changes` finds it inherited or not needed.
@@ -394,9 +394,9 @@ jobs:
     # 17 minutes, their compile included, and the guide, the library's tests
     # and the examples' tests 8.5 more, the Debug compiler's compile included:
     # about 27 minutes on a pull request, and about 45 on a weekly or manual
-    # run, whose ReleaseFast unit tests took 18.5. Nothing here reads recorded
-    # outcomes, so a cold run takes as long as a warm one; the bound is there
-    # for a stall.
+    # run, whose ReleaseFast unit tests took 18.5. Only the guide reads a
+    # cache, the checked-library entries, so a cold run takes about as long
+    # as a warm one; the bound is there for a stall.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
@@ -407,6 +407,20 @@ jobs:
         with:
           primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
+
+      # The guide reads the checked-library entries its programs import,
+      # under a key of this job's own, so no two jobs race to save one key.
+      # Nothing here records program outcomes.
+      - name: Restore program outcomes
+        id: outcomes_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache
+          key: outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-
+            outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
 
       # A runner that stops answering the server takes its job log with it, so
       # the memory, disk and largest processes are sampled every 20 seconds
@@ -480,6 +494,21 @@ jobs:
       # lies outside every root's reach, and when examples/ holds a symlink.
       - name: The examples' own tests pass
         run: nix develop --command zig build example-tests -Dwalkers=2
+
+      # The checked-library entries the guide read, kept as the corpus job
+      # keeps its own.
+      - name: Keep the newest checked libraries
+        if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
+        run: |
+          dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache"
+          if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
+      - name: Save program outcomes
+        if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache
+          key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
 
       - name: Keep the resource log
         if: always()
@@ -889,7 +918,7 @@ jobs:
   #   `changes` said `run`; a draft runs nothing and is not ready;
   # - on a push to main, `check` where `changes` said `run`;
   # - on a manual or scheduled run, `check`, `sanitize` and the three
-  #   `optimised` lanes, which `changes` always runs there, and `fuzz`.
+  #   optimised lanes, which `changes` always runs there, and `fuzz`.
   #
   # A lane `changes` found inherited or not needed counts as passed only when
   # it was skipped. `sweep` reads a clock, so it reports on its own and is not
