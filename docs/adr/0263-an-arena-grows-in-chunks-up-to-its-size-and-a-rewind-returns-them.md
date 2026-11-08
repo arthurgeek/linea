@@ -71,9 +71,10 @@ and further chunks from its parent only as reservations need them:
   over another arena's handle takes its whole size at open, as before: a
   buffer disposed into an arena is not handed out again until that arena is
   rewound, so chunks given back to it would only use it up, and a loop that
-  rewinds the inner arena would drain the outer one. `Allocator.reclaims()`
-  says which: it answers true by default, false for an arena's handle, and a
-  log answers what its backing does.
+  rewinds the inner arena would drain the outer one. `Allocator.reclaims()`,
+  which every allocator implements, says which: true for the system
+  allocator, false for an arena's handle, and a log answers what its backing
+  does.
 
 The first chunk keeps the arena's words (bytes handed out, the current
 chunk's address, length and cursor, how many later chunks it holds) and a
