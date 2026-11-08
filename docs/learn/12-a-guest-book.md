@@ -530,6 +530,46 @@ error:
 guest-book: a serving task's handler could not be made: unable to open database file (SQLite code 14)
 ```
 
+The error a factory returns travels from the serving task that met it to the
+call of `listen_and_serve`, and when two tasks fail, the second error is
+released. So it must own everything it holds (`Owned`), may be sent to another
+task (`Shareable`), and implements `Release`. `BookError` is all three: its
+`sqlite.Error` copies SQLite's sentence into a `String`, and it derives
+`Release`. A `Str` is a view of text the factory does not own, and is
+refused:
+
+`routes_from_a_file.lin`:
+
+```linea
+import std.http
+import std.net
+
+fn routes() -> Result[http.Router[()], Str] {
+    .Err("the routes could not be read")
+}
+
+fn main() -> UInt8 {
+    let _ = http.listen_and_serve(net.loopback(8080), routes) else |_| {
+        return 1
+    }
+    0
+}
+```
+
+```text
+error[T-Bound]: `R.Error` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+    --> routes_from_a_file.lin:9:18
+     |
+9    |     let _ = http.listen_and_serve(net.loopback(8080), routes) else |_| {
+     |                  ^^^^^^^^^^^^^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds
+    ::: std/http/serve.lin
+1129 | ... ler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
+     |                                                                 ------- required by this `where` clause
+```
+
+An enum of its own reasons, declared `@derive(Release)` (and `Display`, so
+`main` can print it), or an owned `String`, is accepted.
+
 ### Room for a connection on every task
 
 Each connection keeps two files open, the database and its write-ahead log,

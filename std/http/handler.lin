@@ -37,7 +37,9 @@ impl[P: Allocator] Handler[(), P] for fn(request: Request[P]) -> Result[Response
 // that cannot fail returns its handler, which `made` answers as `.Ok`. One
 // that opens something for its task, such as a database connection, returns
 // `Result[H, E]`, and serving ends with `ServeError.Handler` carrying the `E`
-// when one of its tasks gets `.Err`.
+// when one of its tasks gets `.Err`. Serving takes an `E` that is `Owned`,
+// `Shareable` and implements `Release`: it is sent from the task that met it,
+// and when two tasks fail the second one's is released.
 pub trait MadeHandler[phantom P: Allocator] {
     type Handler
     type Error
@@ -63,7 +65,22 @@ impl[P: Allocator, H: Handler[(), P], E] MadeHandler[P] for Result[H, E] {
     }
 }
 
-// Serving reads a factory's answer through this, as `serve` does.
+// Why a test's handler factory could not make a handler.
+@(copyable, derive(Equatable, Debug, Release))
+enum Unopened {
+    NoDatabase,
+}
+
+impl Display for Unopened {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            NoDatabase => &w.write_str("no database"),
+        }
+    }
+}
+
+// What a factory made, read as a serving task reads it. The test below calls
+// this, so that `P` is the system allocator when it is not written.
 fn made_by[R: MadeHandler[mem.SystemAllocator], M: fn() -> R](make_handler: M) -> Result[R.Handler, R.Error] {
     make_handler().made()
 }
@@ -74,8 +91,8 @@ fn greeting_router() -> Router[()] {
     router
 }
 
-fn refused_router() -> Result[Router[()], Str] {
-    .Err("the database could not be opened")
+fn refused_router() -> Result[Router[()], Unopened] {
+    .Err(.NoDatabase)
 }
 
 test fn a_handler_is_made_as_itself_and_a_result_as_what_it_holds() {
@@ -88,11 +105,11 @@ test fn a_handler_is_made_as_itself_and_a_result_as_what_it_holds() {
     let refused = match made_by(refused_router) {
         Ok(router) => {
             router.release()
-            ""
+            false
         },
-        Err(reason) => reason,
+        Err(reason) => reason == Unopened.NoDatabase,
     }
-    testing.assert_eq(refused, "the database could not be opened", "the reason a handler was not made changed")?
+    testing.assert(refused, "the reason a handler was not made changed")?
     .Ok(())
 }
 

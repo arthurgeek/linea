@@ -990,7 +990,8 @@ example), and `Serve` carries the `ServeError` that ended serving: `Accept`,
 `Close`, `ArenaTooSmall` or `Memory`, or `Handler` when the function that
 builds a serving task's handler returns a `Result` and it is `.Err`, as when
 a task cannot open its database ([A guest book](12-a-guest-book.md#when-a-connection-cannot-be-opened)
-shows one). `http.serve` is the same loop for a
+shows one). Such an error must be `Owned`, `Shareable` and implement
+`Release`, since it is sent from the task that met it. `http.serve` is the same loop for a
 program that opens the listener itself. A service whose routes share state
 serves through `listen_and_serve_with`, which keeps the state in an owning task
 and returns it when serving ends ([Shared state](#shared-state)); a service

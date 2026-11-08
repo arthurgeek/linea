@@ -2,7 +2,7 @@ import std.io
 import std.testing
 
 // The runtime raises the soft limit on open descriptors toward the hard
-// limit, and answers the soft limit now in force, or a negated errno.
+// limit, and answers how many the process may now open, or a negated errno.
 extern fn linea_raise_open_files() -> Int64
 
 // Raise the number of files and sockets this process may hold open at once
@@ -12,8 +12,9 @@ extern fn linea_raise_open_files() -> Int64
 // limit macOS caps at `kern.maxfilesperproc`, and Linux commonly with 1024
 // and 524288. A server that keeps several files open per serving task, such
 // as a database connection and its log, calls this before it serves, and
-// compares what it gets with what it needs. A limit the soft limit already
-// reaches is left as it is. It fails with an `io.IoError` of operation
+// compares what it gets with what it needs. A soft limit already at or above
+// what the system allows, unlimited included, is left as it is, and the number
+// returned is still what the system allows. It fails with an `io.IoError` of operation
 // `Configure` when the system refuses to read or change the limit.
 pub fn raise_open_file_limit() -> Result[UInt64, io.IoError] {
     let answered = linea_raise_open_files()

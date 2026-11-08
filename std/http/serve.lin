@@ -417,20 +417,6 @@ test fn a_policy_of_no_threads_is_refused_and_closes_the_listener() {
     .Ok(())
 }
 
-// Why a test's handler factory could not make a handler.
-@(copyable, derive(Equatable, Debug, Release))
-enum Unopened {
-    NoDatabase,
-}
-
-impl Display for Unopened {
-    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
-        match read self {
-            NoDatabase => &w.write_str("no database"),
-        }
-    }
-}
-
 // Count a factory call in `tally` and answer how many there have been.
 fn counted(tally: task.Client[Tally]) -> UInt64 {
     tally.call(

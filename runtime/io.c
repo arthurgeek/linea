@@ -331,10 +331,14 @@ long linea_raise_open_files(void) {
         ceiling = (rlim_t)per_process;
     }
 #endif
+    /* A soft limit above the ceiling, unlimited included, does not let the
+     * process open more than the ceiling, so it is answered as the ceiling
+     * and left as it is. */
     if (limit.rlim_cur != RLIM_INFINITY && limit.rlim_cur < ceiling) {
         limit.rlim_cur = ceiling;
         if (setrlimit(RLIMIT_NOFILE, &limit) != 0) return -(long)errno;
     }
-    if (limit.rlim_cur == RLIM_INFINITY || limit.rlim_cur > (rlim_t)LONG_MAX) return LONG_MAX;
-    return (long)limit.rlim_cur;
+    rlim_t in_force = limit.rlim_cur == RLIM_INFINITY || limit.rlim_cur > ceiling ? ceiling : limit.rlim_cur;
+    if (in_force > (rlim_t)LONG_MAX) return LONG_MAX;
+    return (long)in_force;
 }

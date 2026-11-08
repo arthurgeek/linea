@@ -312,8 +312,9 @@ impl Database {
         .Refused(code, self.message())
     }
 
-    // Wait up to `milliseconds` when another process holds a lock on the
-    // database, instead of failing at once with `SQLITE_BUSY`.
+    // Wait up to `milliseconds` when another connection, in this process or
+    // another, holds the lock on the database a write needs, instead of
+    // failing at once with `SQLITE_BUSY`.
     pub fn wait_when_busy(inout self: Self, milliseconds: Int32) -> Result[(), Error] {
         let code = sqlite3_busy_timeout(self.handle, milliseconds)
         if code != ok {
