@@ -1,0 +1,5 @@
+import levels
+
+fn main() -> UInt8 {
+    UInt8(levels.pick(1) + levels.raise(1))
+}

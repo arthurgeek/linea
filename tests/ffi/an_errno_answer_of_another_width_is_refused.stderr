@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `long long failing_call(void)`, and this declaration calls it as `int32_t failing_call(void)`
+ --> tests/ffi/an_errno_answer_of_another_width_is_refused/failing/failing.lin:4:29
+  |
+4 | extern fn failing_call() -> ffi.Errno[Int32]
+  |                             ^^^^^^^^^^^^^^^^ C answers `long long`
+  |
+  = note: `failing_call` is declared by `failing/failing.c`
+  = help: declare the result `ffi.Errno[Int64]`, the Linea type of C's `long long` beside `errno`

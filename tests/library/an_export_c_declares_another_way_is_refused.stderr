@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `long long scale(long long)`, and this export defines it as `int32_t scale(int32_t)`
+ --> tests/library/an_export_c_declares_another_way_is_refused/main.lin:4:24
+  |
+4 | export fn scale(value: Int32) -> Int32 {
+  |                        ^^^^^ C takes `long long` here
+  |
+  = note: `scale` is declared by `scale.c`
+  = help: declare `value` as `Int64`, or a newtype over it, the Linea type of C's `long long`

@@ -1,0 +1,9 @@
+import std.io
+import colours
+
+fn main() -> Result[UInt8, io.IoError] {
+    let after_blue = colours.next(2)
+    let flipped = colours.flip(-1)
+    io.println("{after_blue} {flipped}")?
+    .Ok(0)
+}

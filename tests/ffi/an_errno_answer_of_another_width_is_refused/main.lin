@@ -1,0 +1,5 @@
+import failing
+
+fn main() -> UInt8 {
+    UInt8(failing.call() + 1)
+}

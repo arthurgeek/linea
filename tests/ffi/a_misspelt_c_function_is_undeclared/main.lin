@@ -1,0 +1,6 @@
+// `stdlib.h` declares `labs`, and nothing declares `lab`.
+extern fn lab(value: Int64) -> Int64
+
+fn main() -> UInt8 {
+    UInt8(lab(-7))
+}
