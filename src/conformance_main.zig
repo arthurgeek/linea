@@ -1578,6 +1578,12 @@ const Property = enum {
     /// there rather than a second time.
     range_exhaustive,
 
+    /// A case resumed from a checked library holding the modules its imports
+    /// reach emits the module a fresh check of it emits. Asked of a sample of
+    /// the accepted cases that resume from such a library, since each costs
+    /// a check of the whole library (`resumed_emission_stride`).
+    resumed_emission,
+
     /// The fewest files this property must be asked about. See
     /// `Transform.floor`.
     ///
@@ -1611,6 +1617,7 @@ const Property = enum {
             .walk_named => 5,
             .walk_loops => 50,
             .help_edits => 50,
+            .resumed_emission => 1,
         };
     }
 
@@ -1647,6 +1654,7 @@ const Property = enum {
             .walk_loops,
             .range_exhaustive,
             .help_edits,
+            .resumed_emission,
             => corpus.cases,
         };
     }
@@ -1715,6 +1723,7 @@ const Property = enum {
             .walk_loops,
             .range_exhaustive,
             .help_edits,
+            .resumed_emission,
             => "case",
             .command => "command",
             .deterministic, .held_once => "session",
@@ -1757,6 +1766,7 @@ const Property = enum {
             .walk_loops => "every walk answers as the loop it stands for",
             .range_exhaustive => "a range pattern's exhaustiveness is the type's own bounds",
             .help_edits => "a help's edit, applied, removes the error it was written for",
+            .resumed_emission => "a case resumed from a library of the modules its imports reach emits what a fresh check emits",
         };
     }
 };
@@ -21064,6 +21074,10 @@ const FreshCheck = struct {
     program: Program,
     semantics: loader.Semantics,
     lowered: ?MirModule,
+    /// The source table and diagnostics of the fresh check, which emitting
+    /// `lowered` reads and reports into.
+    table: FileTable,
+    sink: Sink,
 };
 
 /// Checks and lowers `case` afresh, and records a failure where the
@@ -21095,7 +21109,92 @@ fn freshCheck(
         .actual = resumed_report.written(),
     });
     const lowered = if (sink.hasErrors()) null else try lower(gpa, &semantics.expanded, &semantics.res, &semantics.typing, &semantics.disposals, &sink, .program);
-    return .{ .program = program, .semantics = semantics, .lowered = lowered };
+    return .{ .program = program, .semantics = semantics, .lowered = lowered, .table = table, .sink = sink };
+}
+
+/// Records a failure where the MLIR `resumed_ir`, emitted by a check of
+/// `case` resumed from a library holding the modules its imports reach,
+/// differs from what a fresh check of `case` emits. The emitted module is
+/// everything typing, instance discovery and lowering decided that reaches
+/// the program, and the emitter numbers nothing by source table or type
+/// order, so the two are equal byte for byte. `fresh` is reused where the
+/// case's dump goldens already took one.
+fn checkResumedEmission(
+    gpa: std.mem.Allocator,
+    scratch: std.mem.Allocator,
+    case: Case,
+    fresh: ?FreshCheck,
+    resumed_table: *const FileTable,
+    resumed: *const Sink,
+    resumed_ir: []const u8,
+    display_path: []const u8,
+    failures: *std.ArrayList(Failure),
+) !void {
+    var check = fresh orelse try freshCheck(gpa, scratch, case, resumed_table, resumed, display_path, failures);
+    // A fresh check that refused the case has already failed, by the
+    // diagnostics it reported.
+    const module = check.lowered orelse return;
+    var ir: std.Io.Writer.Allocating = .init(gpa);
+    const emitted = !check.sink.hasErrors() and try emitMlir(gpa, &ir.writer, &module, &check.table, &check.sink, .{});
+    if (!emitted) {
+        var why: std.Io.Writer.Allocating = .init(gpa);
+        try render.renderAll(&why.writer, &check.table, &check.sink, .{ .color = .never });
+        return failures.append(gpa, .{
+            .path = display_path,
+            .what = "a fresh check refused to lower or emit a case the check resumed from the checked library emitted",
+            .expected = "the module the resumed check emitted",
+            .actual = why.written(),
+        });
+    }
+    if (std.mem.eql(u8, ir.written(), resumed_ir)) return;
+    const line = firstDifferingLine(ir.written(), resumed_ir);
+    try failures.append(gpa, .{
+        .path = display_path,
+        .what = "a case resumed from the checked library emitted other than a fresh check",
+        .expected = try std.fmt.allocPrint(gpa, "line {d}: {s}", .{ line.number, line.fresh }),
+        .actual = try std.fmt.allocPrint(gpa, "line {d}: {s}", .{ line.number, line.resumed }),
+    });
+}
+
+/// One in this many of the accepted cases resuming from a library of the
+/// modules their imports reach is compared against a fresh check
+/// (`checkResumedEmission`). A fresh check checks the whole library again,
+/// about two seconds of processor time in a Debug runner, so comparing every
+/// such case adds a quarter to a third to a walk of `tests/ffi` or
+/// `tests/mem`; one in eight adds a few percent.
+const resumed_emission_stride = 8;
+
+/// Whether the case named `display_path` is one of the sample compared
+/// against a fresh check. Read from its path alone, so a walk of any
+/// directory holding a case compares it, and a failure reproduces in a walk
+/// of that case alone, which compares every case.
+fn comparesResumedEmission(display_path: []const u8) bool {
+    return std.hash.Wyhash.hash(0, display_path) % resumed_emission_stride == 0;
+}
+
+/// The first line, counted from one, at which `fresh` and `resumed` differ,
+/// and that line of each; a text that ended there gives an empty line.
+fn firstDifferingLine(fresh: []const u8, resumed: []const u8) struct { number: usize, fresh: []const u8, resumed: []const u8 } {
+    var a = std.mem.splitScalar(u8, fresh, '\n');
+    var b = std.mem.splitScalar(u8, resumed, '\n');
+    var number: usize = 1;
+    while (true) : (number += 1) {
+        const x = a.next();
+        const y = b.next();
+        if (x == null and y == null) return .{ .number = number, .fresh = "", .resumed = "" };
+        if (x == null or y == null or !std.mem.eql(u8, x.?, y.?)) return .{ .number = number, .fresh = x orelse "", .resumed = y orelse "" };
+    }
+}
+
+test "the first differing line of two modules names both lines" {
+    const line = firstDifferingLine("module {\n  a\n}\n", "module {\n  b\n}\n");
+    try testing.expectEqual(@as(usize, 2), line.number);
+    try testing.expectEqualStrings("  a", line.fresh);
+    try testing.expectEqualStrings("  b", line.resumed);
+    const shorter = firstDifferingLine("module {\n}\n", "module {\n");
+    try testing.expectEqual(@as(usize, 2), shorter.number);
+    try testing.expectEqualStrings("}", shorter.fresh);
+    try testing.expectEqualStrings("", shorter.resumed);
 }
 
 fn checkCase(
@@ -21663,6 +21762,7 @@ fn checkCase(
     // written out as loops to answer alike.
     var answered: ?RanAs = null;
     var answered_env: Env = undefined;
+    var resumed_emission_compared = false;
     if (lowered) |mir| {
         if (!rejected) {
             const mir_golden = dump_goldens[2];
@@ -21724,6 +21824,14 @@ fn checkCase(
                     if (try compareSize(gpa, io, &w.failures, display_path, size_golden, expected, ir.written(), size_update)) |change| {
                         std.debug.print("updated {s}: {s}\n", .{ size_golden, change });
                     }
+                }
+
+                // Property: a case resumed from a library holding the
+                // modules its imports reach, the path `linea build` takes
+                // for it, emits what a fresh check of it emits.
+                if (chosen.imported and env.sanitize == null and (env.narrowed or comparesResumedEmission(display_path))) {
+                    try checkResumedEmission(gpa, scratch_parent, case, fresh, &table, &sink, ir.written(), display_path, &w.failures);
+                    resumed_emission_compared = true;
                 }
 
                 float_literals_survive = try checkFloatRoundTrip(gpa, &w.failures, display_path, &ast, &table, &case, ir.written());
@@ -21980,6 +22088,7 @@ fn checkCase(
     const finish_zone = tracy.beginZone(@src(), "case.finish");
     defer finish_zone.end();
     tally(&w.properties, &w.passed_over, .float_round_trip, float_literals_survive);
+    tally(&w.properties, &w.passed_over, .resumed_emission, resumed_emission_compared);
 
     // The three properties about what a walk does with what it walks. Each
     // reads the program's own tree -- the types are what say a Linear element
