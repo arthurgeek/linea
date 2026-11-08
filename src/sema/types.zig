@@ -324,6 +324,10 @@ pub const Type = union(enum) {
         /// be read by two tasks at once, so the parameter seeds no unshareable
         /// part.
         shareable: bool = false,
+        /// Whether its bounds promise `Isolated`: no admitted argument holds
+        /// an end of a session, so the parameter seeds nothing a call to an
+        /// owning task could wait through.
+        isolated: bool = false,
         /// The traits its bounds name, by declaration, and the arguments each
         /// was written with.
         ///
@@ -1384,7 +1388,12 @@ const BorrowContainment = struct {
     /// over the edges `writers` follows, a type declared `unshareable`, a
     /// callable or open type that could be one, or a type parameter not
     /// bounded `Shareable`.
-    const Mode = enum { raw_carriers, writers, unshareable };
+    /// `connected` answers whether a value of the type may hold an end of a
+    /// session, which is what `Isolated` refuses: whether it reaches, over the
+    /// edges `unshareable` follows, `session.Chan`, an erased `mem.Closure`
+    /// or an open type that could hold one, or a type parameter not bounded
+    /// `Isolated`.
+    const Mode = enum { raw_carriers, writers, unshareable, connected };
     const none = std.math.maxInt(u32);
     const Edge = struct { owner: TypeId, next: u32 };
     values: std.ArrayList(bool) = .empty,
@@ -1495,7 +1504,9 @@ const BorrowContainment = struct {
     /// cannot disagree about what a type contains.
     fn eachChild(builder: *Typing.Builder, ty: TypeId, mode: Mode, visit: anytype) std.mem.Allocator.Error!void {
         try eachPart(builder, ty, mode, visit);
-        if (carriedArgument(builder, ty)) |carried| try visit.child(.argument, carried);
+        // A `mem.Carried[H]` carries what an `H` may carry and holds no `H`,
+        // so nothing reached through it can wait on another task.
+        if (mode != .connected) if (carriedArgument(builder, ty)) |carried| try visit.child(.argument, carried);
         const declaration = builder.declOfType(ty) orelse return;
         const instance = builder.instanceOf(ty) orelse return;
         const arguments = builder.argsOf(instance);
@@ -1658,6 +1669,7 @@ const BorrowContainment = struct {
                 else => {},
             },
             .unshareable => if (view.unshareableSeed(ty)) try self.mark(gpa, ty),
+            .connected => if (view.connectedSeed(ty)) try self.mark(gpa, ty),
             .raw_carriers => if (view.directDependencySeed(ty)) try self.mark(gpa, ty),
         }
     }
@@ -2979,17 +2991,19 @@ pub fn freeBoundTraits(gpa: std.mem.Allocator, traits: []const BoundTrait) void 
 
 /// What an implementation's parameter demands of whatever binds it.
 ///
-/// The two built-in bounds decided by a containment table rather than by an
-/// implementation: `Owned`, over the dependency table, and `Shareable`, over
-/// the `unshareable` one.
+/// The three built-in bounds decided by a containment table rather than by an
+/// implementation: `Owned`, over the dependency table, `Shareable`, over
+/// the `unshareable` one, and `Isolated`, over the `connected` one.
 pub const Containment = enum {
     owned,
     shareable,
+    isolated,
 
     pub fn spelled(self: Containment) []const u8 {
         return switch (self) {
             .owned => "Owned",
             .shareable => "Shareable",
+            .isolated => "Isolated",
         };
     }
 };
@@ -3010,6 +3024,8 @@ pub const Demand = struct {
     owned: bool = false,
     /// Whether the argument must be `Shareable`.
     shareable: bool = false,
+    /// Whether the argument must be `Isolated`.
+    isolated: bool = false,
 };
 
 /// A demand a bound refusal reported unmet: what `ty` was told it lacks.
@@ -4736,6 +4752,7 @@ pub const ImplIndex = struct {
         if (demand.integer and !pool.isIntegerWithin(within, given)) return false;
         if (demand.owned and try pool.mayCarryDependencies(given)) return false;
         if (demand.shareable and !try pool.isShareable(given)) return false;
+        if (demand.isolated and !try pool.isIsolated(given)) return false;
         for (demand.traits) |required| {
             const args = try decided.gpa.alloc(TypeId, required.args.len);
             defer decided.gpa.free(args);
@@ -7481,6 +7498,26 @@ pub const Typing = struct {
         };
     }
 
+    /// Whether `t` itself may hold an end of a session, through which a call
+    /// to an owning task could wait on another task: `session.Chan`, every
+    /// task's handle included; `mem.Closure`, which erases the callable it
+    /// holds; an open type, which may stand for a closure holding anything; a
+    /// closure whose descriptor is not recorded; or a type parameter whose
+    /// bounds promise neither `Isolated` nor the integer family. A function
+    /// value names a function and holds nothing, so it is isolated.
+    pub fn connectedSeed(self: *const Typing, t: TypeId) bool {
+        switch (self.get(t)) {
+            .parameter => |p| return !(p.isolated or p.integer),
+            .open_type => return true,
+            .callable => return false,
+            .closure => |closure| return closure.closure.index() >= self.closures.len,
+            else => {},
+        }
+        const declaration = self.declOfType(t) orelse return false;
+        return declaration != .none and
+            (declaration == self.raw_accesses.endpoint or declaration == self.raw_accesses.closure);
+    }
+
     fn directDependencySeed(self: *const Typing, t: TypeId) bool {
         switch (self.get(t)) {
             .borrow => return true,
@@ -7598,7 +7635,6 @@ pub const Typing = struct {
         std.debug.assert(index < self.unshareable_containment.len);
         return !self.unshareable_containment[index];
     }
-
     test "an Owned or Integer parameter carries nothing, and a carrier names its path" {
         const gpa = testing.allocator;
         var builder = try Builder.init(gpa);
@@ -8447,6 +8483,7 @@ pub const Typing = struct {
         dependency_facts: BorrowContainment = .{},
         writer_facts: BorrowContainment = .{},
         unshareable_facts: BorrowContainment = .{},
+        connected_facts: BorrowContainment = .{},
         certified_storage: DeclId = .none,
         certified_buffer: DeclId = .none,
         certified_slice: DeclId = .none,
@@ -8465,6 +8502,12 @@ pub const Typing = struct {
         /// `mem.ClosureEntry`: its instance at a callable type is the entry
         /// signature an erased closure is called through.
         certified_closure_entry: DeclId = .none,
+        /// `mem.Closure`, which erases the callable it holds, and
+        /// `session.Chan`, an end of a session: the two declarations the
+        /// `connected` table seeds, since a call to an owning task could wait
+        /// on another task through either.
+        certified_closure: DeclId = .none,
+        certified_endpoint: DeclId = .none,
         /// `Typing.tuple_decls`: the declarations whose instances are spelled
         /// as tuples.
         tuple_decls: [node.max_tuple_arity - 1]DeclId = [_]DeclId{DeclId.none} ** (node.max_tuple_arity - 1),
@@ -9615,6 +9658,7 @@ pub const Typing = struct {
                 @intFromBool(promise.integer),
                 @intFromBool(promise.owned),
                 @intFromBool(promise.shareable),
+                @intFromBool(promise.isolated),
                 @intCast(promise.traits.len),
             });
             for (promise.traits) |bound| {
@@ -9719,11 +9763,11 @@ pub const Typing = struct {
         }
 
         /// Appends a settled reference promised through a parameter, renamed,
-        /// and which of `Owned` and `Shareable` it was promised.
+        /// and which of `Owned`, `Shareable` and `Isolated` it was promised.
         fn encodePromise(self: *const Builder, pieces: *std.ArrayList(u32), standin: TypeId, args: []const TypeId) std.mem.Allocator.Error!void {
             try self.encodeRenamed(pieces, standin, args);
             const promise = self.get(standin).parameter;
-            try pieces.append(self.gpa, @as(u32, @intFromBool(promise.owned)) | @as(u32, @intFromBool(promise.shareable)) << 1);
+            try pieces.append(self.gpa, @as(u32, @intFromBool(promise.owned)) | @as(u32, @intFromBool(promise.shareable)) << 1 | @as(u32, @intFromBool(promise.isolated)) << 2);
         }
 
         /// Whether the sorted `members` holds `member`.
@@ -9871,6 +9915,7 @@ pub const Typing = struct {
             self.capability_facts.dirty = true;
             self.dependency_facts.invalidateAll();
             self.unshareable_facts.invalidateAll();
+            self.connected_facts.invalidateAll();
         }
 
         /// Decides again the shape of each position listed under `parameter`,
@@ -10564,6 +10609,7 @@ pub const Typing = struct {
                     try self.dependency_facts.noteFilled(self.gpa, inst.ty);
                     try self.writer_facts.noteFilled(self.gpa, inst.ty);
                     try self.unshareable_facts.noteFilled(self.gpa, inst.ty);
+                    try self.connected_facts.noteFilled(self.gpa, inst.ty);
                 }
                 try self.queueShellParts(&pending, inst.ty, .through_wrappers);
             }
@@ -10767,6 +10813,7 @@ pub const Typing = struct {
             self.dependency_facts.invalidate(t);
             self.writer_facts.invalidate(t);
             self.unshareable_facts.invalidate(t);
+            self.connected_facts.invalidate(t);
 
             const e = &self.pool.items[@intFromEnum(t)].enum_;
             const variant_at = e.first_variant + i;
@@ -10861,6 +10908,7 @@ pub const Typing = struct {
             try self.dependency_facts.replaced(self.gpa, owner, old, new, same_callable, raw_storage_part);
             try self.writer_facts.replaced(self.gpa, owner, old, new, same_callable, false);
             try self.unshareable_facts.replaced(self.gpa, owner, old, new, same_callable, false);
+            try self.connected_facts.replaced(self.gpa, owner, old, new, same_callable, false);
         }
 
         /// The first cycle among inline parts, or null. Asked once, after every
@@ -11078,6 +11126,7 @@ pub const Typing = struct {
             self.dependency_facts.deinit(self.gpa);
             self.writer_facts.deinit(self.gpa);
             self.unshareable_facts.deinit(self.gpa);
+            self.connected_facts.deinit(self.gpa);
 
             self.borrowed_types.deinit(self.gpa);
             self.borrowed_types = .empty;
@@ -11150,6 +11199,10 @@ pub const Typing = struct {
                     parameter.shareable = true;
                     self.unshareable_facts.invalidate(t);
                 },
+                .isolated => {
+                    parameter.isolated = true;
+                    self.connected_facts.invalidate(t);
+                },
             }
             var root = t;
             while (self.standinOf(root)) |standin| root = standin.held;
@@ -11162,6 +11215,13 @@ pub const Typing = struct {
             try self.ensureFacts(t);
             try self.settleContainment(&self.unshareable_facts, .unshareable);
             return !self.unshareable_facts.values.items[@intFromEnum(t)];
+        }
+
+        /// Whether `t` is `Isolated`, over the `connected` containment table.
+        pub fn isIsolated(self: *Builder, t: TypeId) !bool {
+            try self.ensureFacts(t);
+            try self.settleContainment(&self.connected_facts, .connected);
+            return !self.connected_facts.values.items[@intFromEnum(t)];
         }
 
         /// Records that the declared type `t` is marked `unshareable`.
@@ -11197,6 +11257,18 @@ pub const Typing = struct {
             return self.witness(gpa, t, .unshareable);
         }
 
+        /// Why `t` is not `Isolated`: the parts walked from `t` to an end of a
+        /// session, an erased closure or open type that may hold one, or a
+        /// type parameter not bounded `Isolated`, over the edges the
+        /// `connected` table is built from. Null where `t` is isolated. Owned
+        /// by the caller.
+        ///
+        /// **Bound:** each type reachable from `t` is entered once.
+        pub fn connectedWitness(self: *Builder, gpa: std.mem.Allocator, t: TypeId) !?DependencyWitness {
+            if (try self.isIsolated(t)) return null;
+            return self.witness(gpa, t, .connected);
+        }
+
         fn witness(self: *Builder, gpa: std.mem.Allocator, t: TypeId, mode: BorrowContainment.Mode) !?DependencyWitness {
             var search: WitnessSearch = .{ .builder = self, .gpa = gpa, .mode = mode };
             defer search.visited.deinit(gpa);
@@ -11211,7 +11283,8 @@ pub const Typing = struct {
         const WitnessSearch = struct {
             builder: *Builder,
             gpa: std.mem.Allocator,
-            /// `raw_carriers` or `unshareable`: the table whose answer is explained.
+            /// `raw_carriers`, `unshareable` or `connected`: the table whose
+            /// answer is explained.
             mode: BorrowContainment.Mode,
             visited: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
             steps: std.ArrayList(ContainmentStep) = .empty,
@@ -11220,7 +11293,11 @@ pub const Typing = struct {
 
             /// The table whose answer is explained.
             fn facts(search: *const WitnessSearch) *BorrowContainment {
-                return if (search.mode == .unshareable) &search.builder.unshareable_facts else &search.builder.dependency_facts;
+                return switch (search.mode) {
+                    .unshareable => &search.builder.unshareable_facts,
+                    .connected => &search.builder.connected_facts,
+                    else => &search.builder.dependency_facts,
+                };
             }
 
             /// The seed reached from `ty`, with `steps` holding the path to it.
@@ -11230,7 +11307,12 @@ pub const Typing = struct {
             fn from(search: *WitnessSearch, ty: TypeId) std.mem.Allocator.Error!?TypeId {
                 if ((try search.visited.getOrPut(search.gpa, ty)).found_existing) return null;
                 const typing = search.builder.view();
-                if (if (search.mode == .unshareable) typing.unshareableSeed(ty) else typing.directDependencySeed(ty)) return ty;
+                const seeded = switch (search.mode) {
+                    .unshareable => typing.unshareableSeed(ty),
+                    .connected => typing.connectedSeed(ty),
+                    else => typing.directDependencySeed(ty),
+                };
+                if (seeded) return ty;
                 if (search.builder.alikeSource(ty) != null) {
                     try search.builder.ensureFilled(ty);
                     try search.builder.settleContainment(search.facts(), search.mode);
@@ -11791,7 +11873,7 @@ pub const Typing = struct {
         pub fn view(self: *const Builder) Typing {
             return .{
                 .constant_pool = self.constant_pool.*,
-                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .address = self.certified_address, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .protocol_step = self.certified_protocol_step, .closure_entry_type = self.certified_closure_entry, .foreign_views = self.certified_foreign_views },
+                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .address = self.certified_address, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .protocol_step = self.certified_protocol_step, .closure_entry_type = self.certified_closure_entry, .closure = self.certified_closure, .endpoint = self.certified_endpoint, .foreign_views = self.certified_foreign_views },
                 .tuple_decls = self.tuple_decls,
                 .implementation_selections = self.implementation_selections,
                 .closure_release = self.closure_release,
@@ -13331,6 +13413,7 @@ pub const Typing = struct {
                 try self.settleContainment(&self.dependency_facts, .raw_carriers);
                 try self.settleContainment(&self.writer_facts, .writers);
                 try self.settleContainment(&self.unshareable_facts, .unshareable);
+                try self.settleContainment(&self.connected_facts, .connected);
                 if (written == self.parts_written) break;
             }
         }
@@ -13455,6 +13538,9 @@ pub const Typing = struct {
             const unshareable_containment = try self.unshareable_facts.values.toOwnedSlice(self.gpa);
             self.unshareable_facts.deinit(self.gpa);
             errdefer self.gpa.free(unshareable_containment);
+            // Only the checker asks whether a type is `Isolated`, so the
+            // table is not kept in the finished pool.
+            self.connected_facts.deinit(self.gpa);
 
             const owned_contracts = try self.owned_contracts.toOwnedSlice(self.gpa);
             errdefer {
@@ -13508,7 +13594,7 @@ pub const Typing = struct {
                 .constant_pool = constant_pool,
                 // The certified declarations, as `view` answers them, so a pass
                 // reading the finished pool asks what the builder answered.
-                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .address = self.certified_address, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .protocol_step = self.certified_protocol_step, .closure_entry_type = self.certified_closure_entry, .foreign_views = self.certified_foreign_views },
+                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .address = self.certified_address, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .protocol_step = self.certified_protocol_step, .closure_entry_type = self.certified_closure_entry, .closure = self.certified_closure, .endpoint = self.certified_endpoint, .foreign_views = self.certified_foreign_views },
                 .implementation_selections = implementation_selections,
                 .closure_release = self.closure_release,
                 .tuple_decls = self.tuple_decls,
@@ -13617,6 +13703,8 @@ pub const Typing = struct {
             b.certified_protocol_step = t.raw_accesses.protocol_step;
             b.certified_foreign_views = t.raw_accesses.foreign_views;
             b.certified_closure_entry = t.raw_accesses.closure_entry_type;
+            b.certified_closure = t.raw_accesses.closure;
+            b.certified_endpoint = t.raw_accesses.endpoint;
             b.tuple_decls = t.tuple_decls;
             b.implementations_settled = true;
             b.implementation_selections = try t.implementation_selections.clone(gpa);
@@ -13718,7 +13806,7 @@ pub const Typing = struct {
             // class.
             for (t.standins) |s| {
                 const promise = b.get(s.ty).parameter;
-                if (!promise.owned and !promise.shareable) continue;
+                if (!promise.owned and !promise.shareable and !promise.isolated) continue;
                 var root = s.held;
                 while (b.standinOf(root)) |held| root = held.held;
                 if (b.get(root) != .parameter) continue;

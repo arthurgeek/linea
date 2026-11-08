@@ -1,0 +1,70 @@
+import std.mem
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+struct Desk {
+    line: Chan[Send[UInt64, End]],
+}
+
+// Start a task that waits for one number, and answer the end that sends it.
+fn listener() -> Chan[Send[UInt64, End]] {
+    task.prepare(
+        sink [] |sink me: Chan[Recv[UInt64, End]]| {
+            let (_, done) = me.recv()
+            done.close()
+        },
+    ).unwrap().start().detach()
+}
+
+// Answer a value that holds no end of a session.
+fn isolated[T: Isolated](sink value: T) -> T {
+    value
+}
+
+// An owning task's state is reached by every call it runs, so it holds
+// nothing through which a call could wait on another task: no end of a
+// session, alone or in an option, a record, a vector or a closure, and no
+// other owning task. An erased closure is not `Isolated` either, since its
+// type does not say what it holds.
+fn main() -> UInt8 {
+    let kept: Option[Chan[Send[UInt64, End]]] = .Some(listener())
+    let first = task.own(kept).unwrap()
+    match first.close() {
+        Some(line) => line.send(1).close(),
+        None => {},
+    }
+
+    let second = task.own(Desk { line = listener() }).unwrap()
+    let Desk { line } = second.close()
+    line.send(2).close()
+
+    var lines: mem.Vec[Chan[Send[UInt64, End]]] = mem.Vec.new()
+    &lines.push(listener()).unwrap()
+    let third = task.own(lines).unwrap()
+    var back = third.close()
+    loop {
+        let line = &back.pop() else {
+            break
+        }
+        line.send(3).close()
+    }
+    back.finish().unwrap()
+
+    let held = listener()
+    let ring = sink [sink held] || held.send(4).close()
+    let fourth = task.own(ring).unwrap()
+    fourth.close()()
+
+    let erased: mem.Closure[fn() -> UInt64] = mem.Closure.open(|| UInt64(5)).unwrap()
+    isolated(erased).release()
+
+    let inner = task.own(UInt64(0)).unwrap()
+    let outer = task.own(inner).unwrap()
+    let _ = outer.close().close()
+    0
+}

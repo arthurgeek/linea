@@ -1,0 +1,42 @@
+import std.mem
+import std.session
+import std.text
+
+fn keep_apart[T: Isolated](_value: T) -> UInt64 {
+    1
+}
+
+// An Isolated parameter, or an Integer one, meets the bound itself.
+fn pass[T: Isolated](value: T) -> UInt64 {
+    keep_apart(value)
+}
+
+fn count[N: Integer](value: N) -> UInt64 {
+    keep_apart(value)
+}
+
+// A label holds text and a number, and no end of a session.
+struct Label {
+    text: Str,
+    width: UInt64,
+}
+
+fn double(n: UInt64) -> UInt64 {
+    n * 2
+}
+
+fn main() -> UInt8 {
+    let number = UInt64(7)
+    let owned = text.String.new()
+    let values: Vec[UInt8] = Vec.new()
+    let label = Label { text = "bench", width = 5 }
+    let held: mem.Carried[UInt64] = .{}
+    // A carried endpoint type holds no endpoint.
+    let carried_end: mem.Carried[session.Chan[session.End]] = .{}
+    let maybe: Option[UInt64] = .Some(3)
+    let scaled = [number] || number * 3
+    let total = keep_apart(number) + keep_apart("door") + keep_apart(owned) + keep_apart(values) + keep_apart(label) + keep_apart(borrow number) + keep_apart(held) + keep_apart(carried_end) + keep_apart(maybe) + keep_apart(scaled) + keep_apart(double) + pass(number) + count(UInt8(2))
+    owned.release()
+    values.release()
+    UInt8(total)
+}

@@ -1,0 +1,55 @@
+error[T-Bound]: `S` requires `Isolated`, and `Option[Chan[Send[UInt64, End], ()]]` is not `Isolated`: `Some` is a `Chan[Send[UInt64, End], ()]`, an end of a session, through which a call could wait on another task
+  --> tests/tasks/an_owning_task_holds_nothing_that_waits.lin:36:22
+   |
+36 |     let first = task.own(kept).unwrap()
+   |                      ^^^ `Option[Chan[Send[UInt64, End], ()]]` is not `Isolated`; pass a value that holds no end of a session
+error[T-Bound]: `S` requires `Isolated`, and `Option[Chan[Send[UInt64, End], ()]]` is not `Isolated`: `Some` is a `Chan[Send[UInt64, End], ()]`, an end of a session, through which a call could wait on another task
+  --> tests/tasks/an_owning_task_holds_nothing_that_waits.lin:37:17
+   |
+37 |     match first.close() {
+   |                 ^^^^^ `Option[Chan[Send[UInt64, End], ()]]` is not `Isolated`; pass a value that holds no end of a session
+error[T-Bound]: `S` requires `Isolated`, and `Desk` is not `Isolated`: `line` is a `Chan[Send[UInt64, End], ()]`, an end of a session, through which a call could wait on another task
+  --> tests/tasks/an_owning_task_holds_nothing_that_waits.lin:42:23
+   |
+42 |     let second = task.own(Desk { line = listener() }).unwrap()
+   |                       ^^^ `Desk` is not `Isolated`; pass a value that holds no end of a session
+error[T-Bound]: `S` requires `Isolated`, and `Desk` is not `Isolated`: `line` is a `Chan[Send[UInt64, End], ()]`, an end of a session, through which a call could wait on another task
+  --> tests/tasks/an_owning_task_holds_nothing_that_waits.lin:43:32
+   |
+43 |     let Desk { line } = second.close()
+   |                                ^^^^^ `Desk` is not `Isolated`; pass a value that holds no end of a session
+error[T-Bound]: `S` requires `Isolated`, and `Vec[Chan[Send[UInt64, End], ()], mem.SystemAllocator]` is not `Isolated`: it holds a `Chan[Send[UInt64, End], ()]`, an end of a session, through which a call could wait on another task
+  --> tests/tasks/an_owning_task_holds_nothing_that_waits.lin:48:22
+   |
+48 |     let third = task.own(lines).unwrap()
+   |                      ^^^ `Vec[Chan[Send[UInt64, End], ()], mem.SystemAllocator]` is not `Isolated`; pass a value that holds no end of a session
+error[T-Bound]: `S` requires `Isolated`, and `Vec[Chan[Send[UInt64, End], ()], mem.SystemAllocator]` is not `Isolated`: it holds a `Chan[Send[UInt64, End], ()]`, an end of a session, through which a call could wait on another task
+  --> tests/tasks/an_owning_task_holds_nothing_that_waits.lin:49:22
+   |
+49 |     var back = third.close()
+   |                      ^^^^^ `Vec[Chan[Send[UInt64, End], ()], mem.SystemAllocator]` is not `Isolated`; pass a value that holds no end of a session
+error[T-Bound]: `S` requires `Isolated`, and `<closure>` is not `Isolated`: `held` is a `Chan[Send[UInt64, End], ()]`, an end of a session, through which a call could wait on another task
+  --> tests/tasks/an_owning_task_holds_nothing_that_waits.lin:60:23
+   |
+60 |     let fourth = task.own(ring).unwrap()
+   |                       ^^^ `<closure>` is not `Isolated`; pass a value that holds no end of a session
+error[T-Bound]: `S` requires `Isolated`, and `<closure>` is not `Isolated`: `held` is a `Chan[Send[UInt64, End], ()]`, an end of a session, through which a call could wait on another task
+  --> tests/tasks/an_owning_task_holds_nothing_that_waits.lin:61:12
+   |
+61 |     fourth.close()()
+   |            ^^^^^ `<closure>` is not `Isolated`; pass a value that holds no end of a session
+error[T-Bound]: `T` requires `Isolated`, and `mem.Closure[fn() -> UInt64, mem.SystemAllocator]` may hold an end of a session
+  --> tests/tasks/an_owning_task_holds_nothing_that_waits.lin:64:5
+   |
+64 |     isolated(erased).release()
+   |     ^^^^^^^^ `mem.Closure[fn() -> UInt64, mem.SystemAllocator]` is not `Isolated`; pass a value that holds no end of a session, or drop the bound
+error[T-Bound]: `S` requires `Isolated`, and `task.Owner[UInt64]` is not `Isolated`: it holds a `Chan[Recv[UInt64, End], ()]`, an end of a session, through which a call could wait on another task
+  --> tests/tasks/an_owning_task_holds_nothing_that_waits.lin:67:22
+   |
+67 |     let outer = task.own(inner).unwrap()
+   |                      ^^^ `task.Owner[UInt64]` is not `Isolated`; pass a value that holds no end of a session
+error[T-Bound]: `S` requires `Isolated`, and `task.Owner[UInt64]` is not `Isolated`: it holds a `Chan[Recv[UInt64, End], ()]`, an end of a session, through which a call could wait on another task
+  --> tests/tasks/an_owning_task_holds_nothing_that_waits.lin:68:19
+   |
+68 |     let _ = outer.close().close()
+   |                   ^^^^^ `task.Owner[UInt64]` is not `Isolated`; pass a value that holds no end of a session
