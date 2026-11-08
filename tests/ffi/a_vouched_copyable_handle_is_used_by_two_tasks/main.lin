@@ -23,8 +23,6 @@ fn main() -> Result[UInt8, io.IoError] {
         counter.add(tally, 1)
     }
     worker.close()
-    let total = counter.total(tally)
-    counter.close(tally)
-    io.println("{total}")?
+    io.println("{counter.total(tally)}")?
     .Ok(0)
 }

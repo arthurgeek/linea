@@ -1729,6 +1729,110 @@ pub const DependencyWitness = struct {
     }
 };
 
+/// The path from a type to a part that explains a containment answer: what
+/// lets it hold a dependency (`raw_carriers`), keeps it from being
+/// `Shareable` (`unshareable`) or keeps it from being `Isolated`
+/// (`connected`). It walks the edges `BorrowContainment.eachChild`
+/// walks, along the parts the matching table marks, so a witness never
+/// disagrees with the answer it explains. `Source` is the open builder or the
+/// finished typing. An alike instantiation on the path has no parts of its
+/// own: the builder writes them as the path enters it, so the path names the
+/// parts at the instantiation's own arguments, while a finished typing steps to
+/// the representative whose parts answer for it.
+///
+/// **Bound:** each type reachable from the start is entered once.
+fn WitnessSearch(comptime Source: type) type {
+    const open = Source == *Typing.Builder;
+    return struct {
+        const Search = @This();
+
+        source: Source,
+        gpa: std.mem.Allocator,
+        /// `raw_carriers`, `unshareable` or `connected`: the table whose
+        /// answer is explained.
+        mode: BorrowContainment.Mode,
+        visited: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
+        steps: std.ArrayList(ContainmentStep) = .empty,
+        parts: std.ArrayList(TypeId) = .empty,
+        found: ?TypeId = null,
+
+        fn run(source: Source, gpa: std.mem.Allocator, t: TypeId, mode: BorrowContainment.Mode) !?DependencyWitness {
+            // A finished typing keeps the `unshareable` answer only.
+            if (!open) std.debug.assert(mode == .unshareable);
+            var search: Search = .{ .source = source, .gpa = gpa, .mode = mode };
+            defer search.visited.deinit(gpa);
+            defer search.steps.deinit(gpa);
+            defer search.parts.deinit(gpa);
+            const seed = try search.from(t) orelse return null;
+            const steps = try search.steps.toOwnedSlice(gpa);
+            errdefer gpa.free(steps);
+            return .{ .steps = steps, .parts = try search.parts.toOwnedSlice(gpa), .seed = seed };
+        }
+
+        /// The builder's table whose answer is explained.
+        fn facts(search: *const Search) *BorrowContainment {
+            return switch (search.mode) {
+                .unshareable => &search.source.unshareable_facts,
+                .connected => &search.source.connected_facts,
+                else => &search.source.dependency_facts,
+            };
+        }
+
+        /// Whether the table whose answer is explained marks `part`.
+        fn marked(search: *const Search, part: TypeId) bool {
+            if (open) return search.facts().values.items[@intFromEnum(part)];
+            return !search.source.isShareable(part);
+        }
+
+        /// Whether `ty` itself explains the answer.
+        fn isSeed(search: *const Search, ty: TypeId) bool {
+            if (open) {
+                const view = search.source.view();
+                return seedIn(&view, search.mode, ty);
+            }
+            return seedIn(search.source, search.mode, ty);
+        }
+
+        fn seedIn(typing: *const Typing, mode: BorrowContainment.Mode, ty: TypeId) bool {
+            return switch (mode) {
+                .unshareable => typing.unshareableSeed(ty),
+                .connected => typing.connectedSeed(ty),
+                else => typing.directDependencySeed(ty),
+            };
+        }
+
+        /// The seed reached from `ty`, with `steps` holding the path to it.
+        fn from(search: *Search, ty: TypeId) std.mem.Allocator.Error!?TypeId {
+            if ((try search.visited.getOrPut(search.gpa, ty)).found_existing) return null;
+            if (search.isSeed(ty)) return ty;
+            if (open) {
+                if (search.source.alikeSource(ty) != null) {
+                    try search.source.ensureFilled(ty);
+                    try search.source.settleContainment(search.facts(), search.mode);
+                }
+            } else if (search.source.isShell(ty)) {
+                if (search.source.alikeSource(ty)) |representative| try search.child(.argument, representative);
+                return search.found;
+            }
+            try BorrowContainment.eachChild(search.source, ty, search.mode, search);
+            return search.found;
+        }
+
+        fn child(search: *Search, step: ContainmentStep, part: TypeId) std.mem.Allocator.Error!void {
+            if (search.found != null) return;
+            if (!search.marked(part)) return;
+            try search.steps.append(search.gpa, step);
+            try search.parts.append(search.gpa, part);
+            if (try search.from(part)) |seed| {
+                search.found = seed;
+                return;
+            }
+            _ = search.steps.pop();
+            _ = search.parts.pop();
+        }
+    };
+}
+
 pub const PathSelector = union(enum) { field: StringId, observed };
 
 fn sameSelectors(a: []const PathSelector, b: []const PathSelector) bool {
@@ -7680,53 +7784,14 @@ pub const Typing = struct {
     /// unshareable, over the edges the `unshareable` table was built from and
     /// along the parts that table marks. An alike instantiation steps to its
     /// representative, whose parts answer for it. Null where `t` is
-    /// shareable. Owned by the caller.
+    /// shareable. Owned by the caller. The search is the one the builder's
+    /// `unshareableWitness` runs.
     ///
     /// **Bound:** each type reachable from `t` is entered once.
     pub fn unshareableWitness(self: *const Typing, gpa: std.mem.Allocator, t: TypeId) !?DependencyWitness {
         if (self.isShareable(t)) return null;
-        var search: FinishedWitnessSearch = .{ .typing = self, .gpa = gpa };
-        defer search.visited.deinit(gpa);
-        defer search.steps.deinit(gpa);
-        defer search.parts.deinit(gpa);
-        const seed = try search.from(t) orelse return null;
-        const steps = try search.steps.toOwnedSlice(gpa);
-        errdefer gpa.free(steps);
-        return .{ .steps = steps, .parts = try search.parts.toOwnedSlice(gpa), .seed = seed };
+        return WitnessSearch(*const Typing).run(self, gpa, t, .unshareable);
     }
-
-    const FinishedWitnessSearch = struct {
-        typing: *const Typing,
-        gpa: std.mem.Allocator,
-        visited: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
-        steps: std.ArrayList(ContainmentStep) = .empty,
-        parts: std.ArrayList(TypeId) = .empty,
-        found: ?TypeId = null,
-
-        fn from(search: *FinishedWitnessSearch, ty: TypeId) std.mem.Allocator.Error!?TypeId {
-            if ((try search.visited.getOrPut(search.gpa, ty)).found_existing) return null;
-            if (search.typing.unshareableSeed(ty)) return ty;
-            if (search.typing.isShell(ty)) {
-                if (search.typing.alikeSource(ty)) |representative| try search.child(.argument, representative);
-                return search.found;
-            }
-            try BorrowContainment.eachChild(search.typing, ty, .unshareable, search);
-            return search.found;
-        }
-
-        fn child(search: *FinishedWitnessSearch, step: ContainmentStep, part: TypeId) std.mem.Allocator.Error!void {
-            if (search.found != null) return;
-            if (search.typing.isShareable(part)) return;
-            try search.steps.append(search.gpa, step);
-            try search.parts.append(search.gpa, part);
-            if (try search.from(part)) |seed| {
-                search.found = seed;
-                return;
-            }
-            _ = search.steps.pop();
-            _ = search.parts.pop();
-        }
-    };
 
     /// Whether `t` is `Shareable`: whether two tasks may read one value of it
     /// at once, as the builder's `isShareable` answered while checking.
@@ -11381,70 +11446,8 @@ pub const Typing = struct {
         }
 
         fn witness(self: *Builder, gpa: std.mem.Allocator, t: TypeId, mode: BorrowContainment.Mode) !?DependencyWitness {
-            var search: WitnessSearch = .{ .builder = self, .gpa = gpa, .mode = mode };
-            defer search.visited.deinit(gpa);
-            defer search.steps.deinit(gpa);
-            defer search.parts.deinit(gpa);
-            const seed = try search.from(t) orelse return null;
-            const steps = try search.steps.toOwnedSlice(gpa);
-            errdefer gpa.free(steps);
-            return .{ .steps = steps, .parts = try search.parts.toOwnedSlice(gpa), .seed = seed };
+            return WitnessSearch(*Builder).run(self, gpa, t, mode);
         }
-
-        const WitnessSearch = struct {
-            builder: *Builder,
-            gpa: std.mem.Allocator,
-            /// `raw_carriers`, `unshareable` or `connected`: the table whose
-            /// answer is explained.
-            mode: BorrowContainment.Mode,
-            visited: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
-            steps: std.ArrayList(ContainmentStep) = .empty,
-            parts: std.ArrayList(TypeId) = .empty,
-            found: ?TypeId = null,
-
-            /// The table whose answer is explained.
-            fn facts(search: *const WitnessSearch) *BorrowContainment {
-                return switch (search.mode) {
-                    .unshareable => &search.builder.unshareable_facts,
-                    .connected => &search.builder.connected_facts,
-                    else => &search.builder.dependency_facts,
-                };
-            }
-
-            /// The seed reached from `ty`, with `steps` holding the path to it.
-            ///
-            /// An alike instantiation on the path has its parts written, so
-            /// the path names the parts at its own arguments.
-            fn from(search: *WitnessSearch, ty: TypeId) std.mem.Allocator.Error!?TypeId {
-                if ((try search.visited.getOrPut(search.gpa, ty)).found_existing) return null;
-                const typing = search.builder.view();
-                const seeded = switch (search.mode) {
-                    .unshareable => typing.unshareableSeed(ty),
-                    .connected => typing.connectedSeed(ty),
-                    else => typing.directDependencySeed(ty),
-                };
-                if (seeded) return ty;
-                if (search.builder.alikeSource(ty) != null) {
-                    try search.builder.ensureFilled(ty);
-                    try search.builder.settleContainment(search.facts(), search.mode);
-                }
-                try BorrowContainment.eachChild(search.builder, ty, search.mode, search);
-                return search.found;
-            }
-
-            fn child(search: *WitnessSearch, step: ContainmentStep, part: TypeId) std.mem.Allocator.Error!void {
-                if (search.found != null) return;
-                if (!search.facts().values.items[@intFromEnum(part)]) return;
-                try search.steps.append(search.gpa, step);
-                try search.parts.append(search.gpa, part);
-                if (try search.from(part)) |seed| {
-                    search.found = seed;
-                    return;
-                }
-                _ = search.steps.pop();
-                _ = search.parts.pop();
-            }
-        };
 
         /// A callable requirement's signature: `signature`, whose result may
         /// also carry what the callable itself carries. A callback meeting a

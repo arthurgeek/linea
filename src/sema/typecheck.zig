@@ -19808,10 +19808,6 @@ const Checker = struct {
         return false;
     }
 
-    /// Refuses `what`, written at `at` in the current module, which only a
-    /// module its root's manifest grants `extern` may declare. The manifest
-    /// and the module are spelled as that manifest writes them: a library's
-    /// module is reached through the library's name, which its manifest omits.
     /// [T-ExternHandle] on a newtype sealed in a module trusted with C. A
     /// `copyable` one names its object from every copy, and a copy crosses to
     /// any task whole, so it is declared only with `@shareable`, the wrapper's
@@ -19848,6 +19844,10 @@ const Checker = struct {
         );
     }
 
+    /// Refuses `what`, written at `at` in the current module, which only a
+    /// module its root's manifest grants `extern` may declare. The manifest
+    /// and the module are spelled as that manifest writes them: a library's
+    /// module is reached through the library's name, which its manifest omits.
     fn reportUngranted(self: *Checker, at: TokenId, what: []const u8, otherwise: []const u8) std.mem.Allocator.Error!void {
         const module = self.program.get(self.current);
         const roots = self.program.source.roots;
@@ -20688,24 +20688,58 @@ const Checker = struct {
             }
         }
 
-        // `read` says C leaves a handle's object as it was, which is a promise
-        // only about a handle ([T-ExternHandle]).
+        // `read` says C leaves a handle's object as it was, or that C neither
+        // keeps nor frees the object a copyable sealed newtype names, which
+        // are promises only about those ([T-ExternHandle]). Every copy of a
+        // copyable sealed newtype names its object, so C takes one only
+        // `read`, and no `extern` answers one: the object must outlive every
+        // copy, and nothing the compiler tracks keeps it alive.
         if (category == .t_extern) {
             const pool = self.builder.view();
+            const signature: ?types_mod.CallableSignature = switch (self.builder.get(self.decl_signatures.get(d))) {
+                .callable => |callable| callable,
+                else => null,
+            };
+            const signature_params: []const types_mod.CallableParam = if (signature) |held| self.builder.callableParams(held) else &.{};
             for (self.ast.declParams(d), 0..) |p, k| {
                 const t = try self.declaredParamType(d, k);
-                const marked = p.convention == .read and self.ast.paramConventionToken(p) != .none;
-                if (marked and t != .poison and !intrinsics.isForeignHandle(self.program, self.ast, &pool, t)) {
-                    const token = self.ast.paramConventionToken(p);
+                if (t == .poison) continue;
+                const written = self.ast.paramConventionToken(p);
+                const marked = p.convention == .read and written != .none;
+                const copied = intrinsics.namesCopiedForeignObject(self.program, self.ast, &pool, t);
+                if (marked and !copied and !intrinsics.isForeignHandle(self.program, self.ast, &pool, t)) {
                     try self.sink.addError(
                         .s_entry,
-                        self.ast.fileOf(token),
-                        self.ast.tokenSpan(token),
-                        "`read` on an `extern` parameter marks a handle, a newtype sealed in a module trusted with C that is not `copyable`, whose object C only reads",
+                        self.ast.fileOf(written),
+                        self.ast.tokenSpan(written),
+                        "`read` on an `extern` parameter marks a handle, or a copyable sealed newtype, whose object C neither keeps nor frees",
                         "omit `read`; parameters are read by default",
                     );
                 }
+                if (copied and !marked and !self.isCallbackContext(signature_params, t)) {
+                    const at = if (written != .none) written else p.name;
+                    try self.sink.addErrorFmt(
+                        .t_extern_handle,
+                        self.ast.fileOf(at),
+                        self.ast.tokenSpan(at),
+                        "write `read`, so C only reads the object; keep an object C frees or keeps in a handle that is not `copyable`",
+                        "every copy of a `{s}` names the same C object, so C may neither keep nor free it",
+                        .{try self.typeName(t)},
+                    );
+                }
             }
+            if (signature) |held| if (intrinsics.namesCopiedForeignObject(self.program, self.ast, &pool, held.result)) {
+                const answered = held.result;
+                const at = self.ast.declName(d);
+                try self.sink.addErrorFmt(
+                    .t_extern_handle,
+                    self.ast.fileOf(at),
+                    self.ast.tokenSpan(at),
+                    "answer the address as an integer, and build the value where the wrapper knows the object outlives every copy",
+                    "an `extern` cannot answer a `{s}`: every copy would name an object nothing the compiler tracks keeps alive",
+                    .{try self.typeName(answered)},
+                );
+            };
             try self.checkForeignViewSources(d);
         }
 

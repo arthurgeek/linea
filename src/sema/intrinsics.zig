@@ -93,6 +93,26 @@ pub fn copiesUnvouchedForeignObject(program: *const ExpandedProgram, ast: *const
         ast.declShareableToken(d) == .none;
 }
 
+/// Whether `t` names a C object through a `copyable` newtype sealed under a
+/// grant: it is one, or a newtype the program wraps around one. Every copy
+/// names the same object, so the object must outlive every copy: C may take
+/// it only `read`, neither keeping nor freeing it, and no `extern` answers
+/// one ([T-ExternHandle]). A sealed newtype that is not copyable is a handle
+/// instead, which ownership keeps to one place.
+pub fn namesCopiedForeignObject(program: *const ExpandedProgram, ast: *const Ast, pool: anytype, t: TypeId) bool {
+    var at = t;
+    while (true) {
+        if (at == .poison) return false;
+        const newtype = switch (pool.get(at)) {
+            .newtype => |newtype| newtype,
+            else => return false,
+        };
+        const declared = pool.declOfType(at) orelse return false;
+        if (sealedUnderGrant(program, ast, declared)) return ast.declOwnershipPolicy(declared) == .copyable;
+        at = newtype.base;
+    }
+}
+
 /// Whether parameter `k` of the `extern` `d`, of type `t`, lends C a handle
 /// it may change: a handle taken by a plain lend, without `read`. C receives
 /// the handle by value, so the call lends the argument's place as `inout`

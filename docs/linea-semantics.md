@@ -4637,7 +4637,8 @@ sealed (`@opaque`) in a module its root's manifest grants `extern`, in any root,
 or a newtype over a handle. An `extern` parameter whose type is a handle names
 an object C holds, whichever root's `extern` takes it. A `copyable` newtype is
 never a handle. Written `read`, the parameter promises that C only reads the
-object. Only an `extern` may write `read` on a parameter, and only on a handle;
+object. Only an `extern` may write `read` on a parameter, and only on a handle
+or on a copyable sealed newtype, described below;
 on any other parameter it is redundant
 ([S-Entry]). A handle parameter taken by a plain lend, without `read`, lets C
 change or free the object, so a call lends its argument's place exclusively,
@@ -4660,10 +4661,17 @@ threads may read the object at once. A `copyable` newtype sealed in a module
 its root's manifest grants `extern` is declared only with `@shareable`: every
 copy names what the sealed number names and crosses to any task whole, so no
 rule about readers keeps two threads apart, and the wrapper must vouch that C
-allows concurrent use; without the mark it is [T-ExternHandle]. The compiler
-also believes that a wrapper keeps every C object a read could reach from
-another thread in a non-copyable handle, or that its read paths are safe for
-concurrent use: an address kept in a plain integer field of a record, or C
+allows concurrent use; without the mark it is [T-ExternHandle]. Since every
+copy names the object, the object must outlive every copy: an `extern` takes
+such a newtype, or a newtype the program wraps around one, only as a `read`
+parameter, which promises that C neither keeps nor frees the object, and
+answers none; any other convention, or a result of that type, is
+[T-ExternHandle]. A wrapper whose C object is freed keeps it in a handle that
+is not `copyable`. The compiler also believes that a wrapper keeps every C
+object reachable from more than one task, by a read or through a copy, in a
+non-copyable handle, or that its read paths are safe for concurrent use, and
+that it never frees the object a copyable sealed newtype names through an
+address it took out of one: an address kept in a plain integer field of a record, or C
 state a granted root keeps in a sealed newtype of a library that is not
 granted, is not followed. A handle moved whole into another task is
 accepted, so a C object that must stay on the thread that created it is
@@ -5691,9 +5699,9 @@ cursor) that a call taking it `read` rewrites: the compiler cannot see C, so
 it does not assume two threads may read one object at once until the
 wrapper vouches with `@shareable`. A record holding the handle, such as a
 wrapper's `Database`, is unshareable through its field. The rule follows
-handles only: a wrapper keeps every C object a read could reach from another
-thread in a non-copyable handle, or vouches that its read paths are safe for
-concurrent use ([T-ExternHandle]). An owning task keeps
+handles only: a wrapper keeps every C object reachable from more than one
+task, by a read or through a copy, in a non-copyable handle, or vouches that
+its read paths are safe for concurrent use ([T-ExternHandle]). An owning task keeps
 such a value on its own thread, so its client is still Shareable. A type
 parameter is not Shareable unless it is bounded `Shareable` or `Integer`. A
 function value is Shareable, since it names a function and holds nothing a

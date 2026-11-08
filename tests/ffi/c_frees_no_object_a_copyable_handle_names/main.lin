@@ -1,0 +1,12 @@
+import std.io
+import counter
+
+// `other` still names the counter after `close` frees it.
+fn main() -> Result[UInt8, io.IoError] {
+    let tally = counter.open()
+    let other = copy(tally)
+    counter.close(tally)
+    counter.add(other, 1)
+    io.println("{counter.total(other)}")?
+    .Ok(0)
+}

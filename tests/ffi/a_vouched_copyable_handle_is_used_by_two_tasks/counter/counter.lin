@@ -1,17 +1,17 @@
 // A copyable sealed newtype over a `struct counter *`. Every copy names the
-// one counter, and a copy moves into any task whole. `counter_add` and
-// `counter_total` update and read the total atomically, so two threads may
-// use one counter at once, which `@shareable` states.
+// one counter, and a copy moves into any task whole. The counter lives for
+// the whole program, and `counter_add` and `counter_total` update and read it
+// atomically, so any number of threads may use it at once, which
+// `@shareable` states. C only reads the handle, never keeping or freeing the
+// counter, which `read` states.
 @(opaque, copyable, shareable)
 type Handle = UInt64
 
 extern fn counter_open() -> UInt64
 
-extern fn counter_add(counter: Handle, amount: Int8)
+extern fn counter_add(read counter: Handle, amount: Int8)
 
-extern fn counter_total(counter: Handle) -> Int64
-
-extern fn counter_close(counter: Handle)
+extern fn counter_total(read counter: Handle) -> Int64
 
 pub fn open() -> Handle {
     Handle(counter_open())
@@ -23,10 +23,4 @@ pub fn add(counter: Handle, amount: Int8) {
 
 pub fn total(counter: Handle) -> Int64 {
     counter_total(counter)
-}
-
-// Free the counter. A copy of the handle still names it, so no copy may be
-// used afterwards.
-pub fn close(counter: Handle) {
-    counter_close(counter)
 }

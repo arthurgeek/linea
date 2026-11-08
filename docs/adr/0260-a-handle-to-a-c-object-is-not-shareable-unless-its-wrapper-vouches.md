@@ -80,10 +80,25 @@ the handle rule above hold. std declares one: `io.core.Descriptor`, which is
 `@shareable` because each operation on a descriptor is one system call the
 kernel completes whole.
 
+**A copyable sealed newtype crosses to C only `read`, and no `extern`
+answers one** ([T-ExternHandle]). Its object must outlive every copy, and
+nothing the compiler tracks keeps it alive: a wrapper that took a copyable
+handle by value in `counter_close` let a copy read the counter after it was
+freed. So an `extern` takes such a newtype, or a newtype wrapped around one,
+only as a `read` parameter, which for this type promises that C neither keeps
+nor frees the object, and an `extern` answering one is refused, since what C
+handed over would have no owner. `intrinsics.namesCopiedForeignObject` decides
+the type, from the same three declaration facts. A C object that is freed
+lives in a non-copyable handle; a copyable sealed newtype fits an object that
+lives as long as the program, such as `io.core.Descriptor`'s borrowed
+descriptors, which std never closes through one: a file closes the raw
+descriptor it owns.
+
 **What the rule closes, and what it does not.** It closes the canonical shape
-0228 prescribes, under one more promise the wrapper makes: every C object a
-read could reach from another thread is kept in a non-copyable handle, or the
-wrapper vouches that its read paths are safe for concurrent use. A record
+0228 prescribes, under one more promise the wrapper makes: every C object
+reachable from more than one task, by a read or through a copy, is kept in a
+non-copyable handle, or the wrapper vouches that its read paths are safe for
+concurrent use. A record
 holding an address in a plain integer field, or a granted root keeping C state
 in a sealed newtype of a library that is not granted, is outside the rule and
 inside that promise. A handle moved whole into another task is accepted, so a
@@ -122,13 +137,15 @@ reads, declare the handle's declaration `@shareable` in its wrapper.
 
 **What a wrapper vouches for**, added to 0228's list:
 
-- every C object a read could reach from another thread is kept in a
-  non-copyable handle, or the wrapper vouches that its read paths are safe for
-  concurrent use;
+- every C object reachable from more than one task, by a read or through a
+  copy, is kept in a non-copyable handle, or the wrapper vouches that its
+  read paths are safe for concurrent use;
 - a handle declared `@shareable` names an object that C lets two threads use
   at once through every `extern` the wrapper declares on it, and a copyable
   sealed newtype declared `@shareable` names one that C lets any number of
-  threads use at once through every copy.
+  threads use at once through every copy, and that is never freed while a
+  copy lives: the wrapper never frees it through an address it took out of
+  one.
 
 ## Consequences
 
@@ -176,6 +193,13 @@ promise would sit in a form that is refused everywhere else and could be
 written away from the declaration it vouches for. An attribute sits on the
 handle, beside `@opaque` and `@linear`, where a reviewer reading the wrapper
 against its C header looks.
+
+**Refusing every copyable sealed newtype under a grant.** A wrapper would
+then lose the plain value it needs for an object C never frees, such as a
+borrowed file descriptor, and std's `Descriptor` would have to become a
+handle every reader borrows. Holding the copyable type to `read` at the
+boundary keeps those uses and refuses only the ones that could free or keep
+the object.
 
 **Keeping the rule in the wrapper**, by taking every C call `inout`. That is
 what made the guest book safe, and nothing checks it: a wrapper that adds one
