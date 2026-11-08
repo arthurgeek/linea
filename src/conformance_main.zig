@@ -9405,15 +9405,18 @@ fn runSoundness(
     for (arenas) |*it| it.* = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer for (arenas) |*it| it.deinit();
     var next: std.atomic.Value(usize) = .init(0);
-    const threads = try gpa.alloc(std.Thread, walkers);
-    defer gpa.free(threads);
-    var spawned: usize = 0;
-    errdefer for (threads[0..spawned]) |thread| thread.join();
-    for (threads, arenas) |*thread, *arena| {
-        thread.* = try std.Thread.spawn(compiler_stack.spawn_config, SoundnessWalk.run, .{ io, settings, jobs.items, results, arena, &next });
-        spawned += 1;
+    {
+        const threads = try gpa.alloc(std.Thread, walkers);
+        defer gpa.free(threads);
+        // Joined as the block ends, whether every walker started or a spawn
+        // failed, so an error after the walk cannot join them a second time.
+        var spawned: usize = 0;
+        defer for (threads[0..spawned]) |thread| thread.join();
+        for (threads, arenas) |*thread, *arena| {
+            thread.* = try std.Thread.spawn(compiler_stack.spawn_config, SoundnessWalk.run, .{ io, settings, jobs.items, results, arena, &next });
+            spawned += 1;
+        }
     }
-    for (threads) |thread| thread.join();
 
     var failures: std.ArrayList(Failure) = .empty;
     defer failures.deinit(gpa);
@@ -16952,10 +16955,20 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
             Walk.run(io, settings, cases, &work[0], &case_timings[0], &arenas[0], &next_case, &counted, began);
         } else {
             const threads = try gpa.alloc(std.Thread, walkers);
+            var spawned: usize = 0;
+            // The walkers read the libraries, the cases and the work lists
+            // this function frees as it returns, so a failed spawn is reported
+            // only once the walkers already started have finished. Claiming
+            // past the last case stops each after the case it holds.
+            errdefer {
+                next_case.store(cases.len, .monotonic);
+                for (threads[0..spawned]) |t| t.join();
+            }
             for (threads, 0..) |*t, me| {
                 t.* = try std.Thread.spawn(compiler_stack.spawn_config, Walk.run, .{
                     io, settings, cases, &work[me], &case_timings[me], &arenas[me], &next_case, &counted, began,
                 });
+                spawned += 1;
             }
             for (threads) |t| t.join();
         }
@@ -17388,10 +17401,17 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
                     Commands.run(io, compiler, environ, runtime_path, sanitize, checkout_root, cmd_scratch, commands.items, &serving, &cmd_work[0], &cmd_arenas[0], 0, 1, update);
                 } else {
                     const threads = try gpa.alloc(std.Thread, cmd_workers);
+                    var spawned: usize = 0;
+                    // The workers read the commands and the work lists this
+                    // function frees as it returns, so a failed spawn is
+                    // reported only once the workers already started have
+                    // finished.
+                    errdefer for (threads[0..spawned]) |t| t.join();
                     for (threads, 0..) |*t, me| {
                         t.* = try std.Thread.spawn(compiler_stack.spawn_config, Commands.run, .{
                             io, compiler, environ, runtime_path, sanitize, checkout_root, cmd_scratch, commands.items, &serving, &cmd_work[me], &cmd_arenas[me], me, cmd_workers, update,
                         });
+                        spawned += 1;
                     }
                     for (threads) |t| t.join();
                 }
@@ -20040,11 +20060,15 @@ test "native outcome: builds sharing a scratch name each record their own progra
             .{ .status = @intCast(10 + 2 * round) },
             .{ .status = @intCast(11 + 2 * round) },
         };
-        var threads: [2]std.Thread = undefined;
-        for (&threads, &builds) |*thread, *build| {
-            thread.* = try std.Thread.spawn(compiler_stack.spawn_config, Build.run, .{ build, root, runtime, &cache });
+        {
+            var threads: [2]std.Thread = undefined;
+            var spawned: usize = 0;
+            defer for (threads[0..spawned]) |thread| thread.join();
+            for (&threads, &builds) |*thread, *build| {
+                thread.* = try std.Thread.spawn(compiler_stack.spawn_config, Build.run, .{ build, root, runtime, &cache });
+                spawned += 1;
+            }
         }
-        for (threads) |thread| thread.join();
 
         for (builds) |build| {
             if (build.failed) |err| return err;
