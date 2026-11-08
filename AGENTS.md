@@ -261,17 +261,41 @@ on a pull request, and one that moves with the run number on a weekly or
 manual run. It runs the unit tests ReleaseSafe on every run, and on a weekly
 or manual run ReleaseFast too, the level `-Drelease` builds for users.
 
-A first job, `changes`, diffs the change against the pull request's base or
-the commit a push replaced. A change to Markdown alone skips every lane,
-except Markdown a gate reads: `docs/learn/`, `docs/linea-semantics.md`,
-`docs/adr/` and `tests/`. The run still starts, so `merge-ready` always
-reports. `merge-ready` fails when a lane failed or was cancelled, and when a
-lane the event requires did not pass: `check`, `sanitize`, `optimised` and,
-when it applies, `fuzz-mir` on a pull request; `check` on a push; `check`,
-`sanitize`, `optimised` and `fuzz` on a weekly or manual run. A lane skipped
-because the change is documentation alone counts as passed. A draft pull
-request is never ready. `sweep` reads a clock, so its failure is visible but
-does not block.
+A first job, `changes`, decides lane by lane, through
+`.github/scripts/changes.sh`, whether each lane runs. It walks back from the
+head through the pull request's commits, or main's, to the newest commit
+where that lane passed against the same base: the base-branch commit a pull
+request was merged into for its run, or the pushed commit itself. Each run
+records its event and base as a `tested base` annotation on `changes`, read
+back through the check-runs API. When the diff from that commit to the head
+is Markdown no gate reads, the lane inherits the pass and does not run.
+Markdown a gate reads (`docs/learn/`, `docs/adr/`, `docs/linea-semantics.md`)
+reruns only `check` and `optimised`, which read it through the documentation
+gates, the guide and the unit tests; anything else, `tests/` included, reruns
+the lane, and `fuzz-mir` reruns on any code change of a pull request that
+touches what it guards. A lane passed at a commit when any attempt of its job
+there succeeded. So a lane that failed reruns while the lanes that passed are
+kept, as long as nothing they read changed. A lane with no such commit falls
+back on the diff against the pull request's base: Markdown alone outside what
+a gate reads skips it, anything else runs it. A push to main with no such
+commit runs `check`, and a scheduled or manual run runs every lane. When the
+check runs cannot be read, no lane has such a commit, and each is decided as
+if none had passed it. A push that cancels a run leaves its commit with no
+pass, so the next run looks past it. A build-source test holds the class a
+exemption: it refuses a Markdown string literal in `build.zig` or a
+non-test file of `build/` (any literal ending in `.md`, or naming `docs` or
+a path under it) outside the paths above and `tests/`, save `README.md`,
+which the guide gate reads inside `docs/learn`; an `@embedFile` of Markdown
+anywhere in `src/`; and an `embed` of Markdown in a `.lin` file under `std/`
+or `examples/`. A path built at run time from other values escapes it. The
+run still starts, so
+`merge-ready` always reports. `merge-ready` fails when a lane failed or was
+cancelled, and when a lane `changes` said to run did not pass: `check`,
+`sanitize`, `optimised` and `fuzz-mir` on a pull request; `check` on a push;
+and `fuzz` too on a weekly or manual run. A lane `changes` found inherited or
+not needed counts as passed only if it was skipped. A draft pull request is
+never ready. `sweep` reads a clock, so its failure is visible but does not
+block.
 
 Outside a push to `main`, `check` passes `-Dguide=false` and leaves the guide,
 the library's own tests and the examples' own tests to `optimised`, which runs

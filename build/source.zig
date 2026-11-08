@@ -103,6 +103,80 @@ pub fn quotedIn(gpa: std.mem.Allocator, text: []const u8) []const []const u8 {
     return found.toOwnedSlice(gpa) catch @panic("out of memory");
 }
 
+/// The Markdown files and documentation paths the string literals of `text`
+/// name, in the order they are written: a literal holding no space that ends
+/// in `.md` and is more than the extension, whatever directory it is read
+/// against, or that is `docs` or names something under `docs/`, so a path
+/// joined from parts is caught by its `docs` part.
+///
+/// CI keeps a lane from running when only Markdown it does not read changed,
+/// so what a build step or a gate reads is held to the paths
+/// `.github/scripts/changes.sh` classes as read. A comment line is prose and
+/// a multiline string is a fixture, so neither is read, and a character
+/// literal holding a quote opens no string.
+pub fn markdownPaths(gpa: std.mem.Allocator, text: []const u8) []const []const u8 {
+    var found: std.ArrayList([]const u8) = .empty;
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        const code = std.mem.trimStart(u8, line, " ");
+        if (std.mem.startsWith(u8, code, "//") or std.mem.startsWith(u8, code, "\\\\")) continue;
+        var at: usize = 0;
+        while (at < line.len) : (at += 1) {
+            if (std.mem.startsWith(u8, line[at..], "'\"'")) {
+                at += 2;
+                continue;
+            }
+            if (line[at] != '"') continue;
+            var end = at + 1;
+            while (end < line.len and line[end] != '"') : (end += 1) {
+                if (line[end] == '\\') end += 1;
+            }
+            if (end >= line.len) break;
+            const literal = line[at + 1 .. end];
+            at = end;
+            if (std.mem.indexOfAny(u8, literal, " \t") != null) continue;
+            const markdown = std.mem.endsWith(u8, literal, ".md") and literal.len > ".md".len;
+            // Written as the directory with its slash, so this line names no
+            // path of its own.
+            const docs_dir = "docs/";
+            const docs = std.mem.eql(u8, literal, docs_dir[0 .. docs_dir.len - 1]) or
+                (literal.len > docs_dir.len and std.mem.startsWith(u8, literal, docs_dir));
+            if (markdown or docs) found.append(gpa, literal) catch @panic("out of memory");
+        }
+    }
+    return found.toOwnedSlice(gpa) catch @panic("out of memory");
+}
+
+/// The Markdown files `text` embeds through `call`, `@embedFile(` in Zig or
+/// `embed(` in Linea, in the order they are written: the literal the call is
+/// given, where it ends in `.md`. A call whose name is the tail of a longer
+/// name is another call.
+pub fn embeddedMarkdown(gpa: std.mem.Allocator, text: []const u8, call: []const u8) []const []const u8 {
+    var found: std.ArrayList([]const u8) = .empty;
+    var at: usize = 0;
+    while (std.mem.indexOfPos(u8, text, at, call)) |start| {
+        at = start + call.len;
+        if (start > 0 and partOfAName(text[start - 1])) continue;
+        if (at >= text.len or text[at] != '"') continue;
+        const end = std.mem.indexOfScalarPos(u8, text, at + 1, '"') orelse break;
+        const literal = text[at + 1 .. end];
+        if (std.mem.endsWith(u8, literal, ".md")) found.append(gpa, literal) catch @panic("out of memory");
+        at = end + 1;
+    }
+    return found.toOwnedSlice(gpa) catch @panic("out of memory");
+}
+
+/// Whether a lane that reads Markdown may read `path`: the guide, the
+/// decision index, the semantics and the corpus, which CI reruns the reading
+/// lanes for when they change.
+pub fn markdownIsGated(path: []const u8) bool {
+    for ([_][]const u8{ "docs/learn", "docs/adr", "tests" }) |dir| {
+        if (std.mem.eql(u8, path, dir)) return true;
+        if (std.mem.startsWith(u8, path, dir) and path[dir.len] == '/') return true;
+    }
+    return std.mem.eql(u8, path, "docs/linea-semantics.md");
+}
+
 /// The first quoted string on the line holding `at`, or null where that line
 /// holds none.
 ///

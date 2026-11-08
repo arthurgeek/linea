@@ -2,8 +2,8 @@ name: CI
 
 on:
   # No `paths` filter: `merge-ready` is the required status, and a run that
-  # never starts never reports it. The `changes` job decides instead whether
-  # anything but documentation changed.
+  # never starts never reports it. The `changes` job decides instead which
+  # lanes the change needs.
   push:
     branches: [main]
   pull_request:
@@ -25,68 +25,66 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Whether anything but documentation changed, against the pull request's
-  # base or the commit a push to main replaced. A change to Markdown alone
-  # runs no lane, except the Markdown a gate reads: the guide compiles its
-  # programs, and the semantics, the decision index and the corpus are
-  # checked against the compiler. A scheduled or manual run, or
-  # a diff that cannot be computed, runs every lane.
+  # Which lanes this run needs, lane by lane; `.github/scripts/changes.sh`
+  # decides and documents the rule. A lane inherits when a commit of this
+  # history passed it against the same base and nothing the lane reads changed
+  # since: Markdown no gate reads leaves every lane alone, and the guide, the
+  # decision index and the semantics are read only by `check` and `optimised`.
+  # A lane passed at a commit when any attempt of its job there succeeded. A
+  # pull request's base is the base-branch commit it was merged into for the
+  # run, and a push's is the commit itself; each run records its own as a
+  # `tested base` annotation, which a later run reads back through the
+  # check-runs API. The search starts at the head and walks back through the
+  # pull request's commits, or main's, so a lane that failed at the newest
+  # commit is found green at an older one or not at all, and a push that
+  # cancelled an earlier run looks past the cancelled commit.
   #
-  # `mir` says whether the change touches what `fuzz-mir` guards: lowering,
-  # ownership, checking and the type tables (`src/sema`), the loader that runs
-  # them in order, or the program generator.
+  # A lane with no green commit falls back on the diff against the pull
+  # request's base: a change to Markdown alone, outside what a gate reads,
+  # skips it, and anything else runs it. `fuzz-mir` runs only when the change
+  # touches what it guards: lowering, ownership, checking and the type tables
+  # (`src/sema`), the loader that runs them in order, or the program
+  # generator; with a green commit it also reruns on any code change of such a
+  # pull request, so every head of one is fuzzed. A push to main with no green
+  # commit runs `check`, and a scheduled or manual run runs every lane. When
+  # the check runs cannot be read, no lane has a green commit: each is decided
+  # as above, so a pull request of documentation alone still skips its lanes
+  # and a push still runs `check` alone.
   changes:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
     outputs:
-      code: ${{ steps.diff.outputs.code }}
-      mir: ${{ steps.diff.outputs.mir }}
+      check: ${{ steps.lanes.outputs.check }}
+      sanitize: ${{ steps.lanes.outputs.sanitize }}
+      sanitize-exclude: ${{ steps.lanes.outputs.sanitize-exclude }}
+      optimised: ${{ steps.lanes.outputs.optimised }}
+      sweep: ${{ steps.lanes.outputs.sweep }}
+      fuzz-mir: ${{ steps.lanes.outputs.fuzz-mir }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: What the change touches
-        id: diff
+      - name: Which lanes the change needs
+        id: lanes
         env:
+          GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PUSH_BEFORE: ${{ github.event.before }}
-        run: |
-          case "$EVENT" in
-            pull_request) base=$PR_BASE ;;
-            push) base=$PUSH_BEFORE ;;
-            *) base= ;;
-          esac
-          list="$RUNNER_TEMP/changed"
-          # `--no-renames` lists a renamed file under both names, so moving
-          # code into a Markdown path still counts as changing code.
-          if [ -z "$base" ] || ! git -c core.quotePath=false diff --no-renames --name-only "$base...$GITHUB_SHA" > "$list"; then
-            echo "no base to compare against: every lane runs"
-            { echo "code=true"; echo "mir=true"; } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "files changed since $base:"
-          cat "$list"
-          if grep -qvE '\.md$' "$list" || grep -qE '^(docs/learn/|docs/adr/|tests/)|^docs/linea-semantics\.md$' "$list"; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "only documentation changed: no lane runs"
-            echo "code=false" >> "$GITHUB_OUTPUT"
-          fi
-          if grep -qE '^src/(mir|ownership|sema)/|^src/driver/loader\.zig$|^src/conformance/(generate|storage)\.zig$' "$list"; then
-            echo "mir=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "mir=false" >> "$GITHUB_OUTPUT"
-          fi
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: .github/scripts/changes.sh ci
 
   check:
     # A draft pull request runs nothing. A ready pull request runs `check`
     # beside `sanitize`, `optimised` and, when it applies, `fuzz-mir`; a push
     # to main runs `check` alone; a manual run and the weekly schedule run it
-    # beside every other lane. A change to documentation alone skips it.
+    # beside every other lane. It is skipped where `changes` finds it
+    # inherited or not needed.
     needs: changes
-    if: ${{ needs.changes.outputs.code == 'true' && !github.event.pull_request.draft }}
+    if: ${{ needs.changes.outputs.check == 'run' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     # Measured on the four-vCPU runner in November 2026, with recorded
     # outcomes restored: the test step took 92 minutes on a pull request when
@@ -272,10 +270,10 @@ jobs:
   # a constant.
   sanitize:
     # A ready pull request runs this lane, and so do manual runs and the
-    # weekly schedule. A push to main and a change to documentation alone
-    # skip it.
+    # weekly schedule. A push to main skips it, and so does a run where
+    # `changes` finds it inherited or not needed.
     needs: changes
-    if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'push' && !github.event.pull_request.draft }}
+    if: ${{ needs.changes.outputs.sanitize == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     strategy:
@@ -287,6 +285,8 @@ jobs:
         # list and the enum disagree, so no entry can be dropped by
         # forgetting.
         sanitizer: [address, thread]
+        # A sanitizer whose run `changes` found inherited, or not needed.
+        exclude: ${{ fromJSON(needs.changes.outputs.sanitize-exclude) }}
     steps:
       - uses: actions/checkout@v7
 
@@ -367,10 +367,10 @@ jobs:
   # results must remain defined and independent of compiler optimization.
   optimised:
     # A ready pull request runs this lane, and so do manual runs and the
-    # weekly schedule. A push to main and a change to documentation alone
-    # skip it.
+    # weekly schedule. A push to main skips it, and so does a run where
+    # `changes` finds it inherited or not needed.
     needs: changes
-    if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'push' && !github.event.pull_request.draft }}
+    if: ${{ needs.changes.outputs.optimised == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     # Every case builds once, and the unit tests build a ReleaseSafe compiler
     # that holds several gigabytes while it links. One step at a time, so the
@@ -567,7 +567,7 @@ jobs:
     # read it: it times passes against a clock, and a slow shared runner can
     # fail it without a regression. A failure stays visible on the run.
     needs: changes
-    if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'push' && !github.event.pull_request.draft }}
+    if: ${{ needs.changes.outputs.sweep == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -728,11 +728,11 @@ jobs:
   # The one fuzz target that runs before a pull request merges: a module
   # lowered from a program the compiler accepted must verify. A ready pull
   # request runs it when its change touches what the target guards, as
-  # `changes` reports in `mir`. The weekly `fuzz` already runs this target
+  # `changes` reports in `fuzz-mir`. The weekly `fuzz` already runs this target
   # among the others, so scheduled and manual runs do not repeat it here.
   fuzz-mir:
     needs: changes
-    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft && needs.changes.outputs.mir == 'true' }}
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft && needs.changes.outputs.fuzz-mir == 'run' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -763,18 +763,17 @@ jobs:
 
   # The one status the ruleset on main requires, so it runs on every event and
   # always reports. It fails when any lane it reads failed or was cancelled,
-  # and when a lane the event requires did not pass:
+  # and when a lane `changes` said to run did not pass:
   #
-  # - a pull request requires `check`, `sanitize` and `optimised`, and
-  #   `fuzz-mir` when the change touches what it guards; a draft runs nothing
-  #   and is not ready;
-  # - a push to main requires `check`;
-  # - a manual or scheduled run requires `check`, `sanitize`, `optimised` and
-  #   `fuzz`.
+  # - on a pull request, `check`, `sanitize`, `optimised` and `fuzz-mir`, each
+  #   where `changes` said `run`; a draft runs nothing and is not ready;
+  # - on a push to main, `check` where `changes` said `run`;
+  # - on a manual or scheduled run, `check`, `sanitize`, `optimised`, which
+  #   `changes` always runs there, and `fuzz`.
   #
-  # A lane the event does not require, or that a change to documentation
-  # alone skipped, counts as passed; a skipped lane the event requires fails.
-  # `sweep` reads a clock, so it reports on its own and is not read here.
+  # A lane `changes` found inherited or not needed counts as passed only when
+  # it was skipped. `sweep` reads a clock, so it reports on its own and is not
+  # read here.
   merge-ready:
     needs: [changes, check, sanitize, optimised, fuzz, fuzz-mir]
     if: ${{ always() }}
@@ -787,18 +786,20 @@ jobs:
           EVENT: ${{ github.event_name }}
           DRAFT: ${{ github.event.pull_request.draft || false }}
           CHANGES: ${{ needs.changes.result }}
-          CODE: ${{ needs.changes.outputs.code }}
-          MIR: ${{ needs.changes.outputs.mir }}
+          WANT_CHECK: ${{ needs.changes.outputs.check }}
+          WANT_SANITIZE: ${{ needs.changes.outputs.sanitize }}
+          WANT_OPTIMISED: ${{ needs.changes.outputs.optimised }}
+          WANT_FUZZ_MIR: ${{ needs.changes.outputs.fuzz-mir }}
           CHECK: ${{ needs.check.result }}
           SANITIZE: ${{ needs.sanitize.result }}
           OPTIMISED: ${{ needs.optimised.result }}
           FUZZ: ${{ needs.fuzz.result }}
           FUZZ_MIR: ${{ needs.fuzz-mir.result }}
         run: |
-          echo "changes: $CHANGES (code=$CODE, mir=$MIR)"
+          echo "changes: $CHANGES (check=$WANT_CHECK, sanitize=$WANT_SANITIZE, optimised=$WANT_OPTIMISED, fuzz-mir=$WANT_FUZZ_MIR)"
           echo "check: $CHECK, sanitize: $SANITIZE, optimised: $OPTIMISED, fuzz: $FUZZ, fuzz-mir: $FUZZ_MIR"
           if [ "$CHANGES" != success ]; then
-            echo "what the change touches is unknown, so no lane can be judged"
+            echo "which lanes the change needs is unknown, so no lane can be judged"
             exit 1
           fi
           case " $CHECK $SANITIZE $OPTIMISED $FUZZ $FUZZ_MIR " in
@@ -810,30 +811,33 @@ jobs:
             echo "a draft pull request runs no lane"
             exit 1
           fi
-          required=()
-          if [ "$CODE" = true ]; then
-            case "$EVENT" in
-              pull_request) required=(check sanitize optimised) ;;
-              push) required=(check) ;;
-              *) required=(check sanitize optimised fuzz) ;;
-            esac
-          fi
-          if [ "$EVENT" = pull_request ] && [ "$MIR" = true ]; then
-            required+=(fuzz-mir)
-          fi
-          [ "${#required[@]}" -gt 0 ] || { echo "only documentation changed: no lane is required"; exit 0; }
           status=0
-          for lane in "${required[@]}"; do
-            case "$lane" in
-              check) result=$CHECK ;;
-              sanitize) result=$SANITIZE ;;
-              optimised) result=$OPTIMISED ;;
-              fuzz) result=$FUZZ ;;
-              fuzz-mir) result=$FUZZ_MIR ;;
+          judge() {
+            local lane=$1 want=$2 result=$3
+            case "$want" in
+              run)
+                if [ "$result" != success ]; then
+                  echo "$lane had to run and was $result"
+                  status=1
+                fi ;;
+              inherit|skip)
+                if [ "$result" != skipped ]; then
+                  echo "$lane was $want and still ran: $result"
+                  status=1
+                else
+                  echo "$lane: $want"
+                fi ;;
+              *)
+                echo "changes named no decision for $lane"
+                status=1 ;;
             esac
-            if [ "$result" != success ]; then
-              echo "$lane is required on $EVENT and was $result"
-              status=1
-            fi
-          done
+          }
+          judge check "$WANT_CHECK" "$CHECK"
+          judge sanitize "$WANT_SANITIZE" "$SANITIZE"
+          judge optimised "$WANT_OPTIMISED" "$OPTIMISED"
+          judge fuzz-mir "$WANT_FUZZ_MIR" "$FUZZ_MIR"
+          case "$EVENT" in
+            pull_request|push) ;;
+            *) judge fuzz run "$FUZZ" ;;
+          esac
           exit "$status"
