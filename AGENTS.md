@@ -65,7 +65,8 @@ until it is green.
   the joined Debug compiler/conformance root and the build-source binary. It
   skips every integration gate: corpus and example walks, sweeps, and
   tree-sitter checks. The unit tests run once, in the mode the build selects;
-  the `optimised` CI lane runs them again under ReleaseSafe.
+  the `optimised` CI lane runs them again under ReleaseSafe, and weekly under
+  ReleaseFast too.
 - `zig build sweep -Drelease -Dsweep-filter=<substring>` runs only the cost
   dimensions whose names contain the text. Use the narrowest match while
   iterating; run the unfiltered sweep before declaring a performance-sensitive
@@ -257,7 +258,8 @@ schedule run every lane and `fuzz`, which runs every `fuzz:` target and keeps
 the inputs each clean search reached for the next. `optimised` also
 runs soundness, over the default seeds and over sixteen more: a fixed window
 on a pull request, and one that moves with the run number on a weekly or
-manual run.
+manual run. It runs the unit tests ReleaseSafe on every run, and on a weekly
+or manual run ReleaseFast too, the level `-Drelease` builds for users.
 
 A first job, `changes`, diffs the change against the pull request's base or
 the commit a push replaced. A change to Markdown alone skips every lane,

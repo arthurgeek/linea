@@ -1410,7 +1410,8 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     // `zig build` stays a debug build for the edit-compile loop, and
     // `zig build -Drelease` is the distributed one. The unit tests run in the
-    // mode the build selects: Debug here, ReleaseSafe in the optimised CI lane.
+    // mode the build selects: Debug here, ReleaseSafe in the optimised CI lane
+    // and, on its weekly and manual runs, ReleaseFast too.
     const optimize = test_roots.optimizeMode(b.release_mode, b.option(bool, "release", "optimize for end users"));
 
     // Where recorded outcomes and build intermediates go.

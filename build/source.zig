@@ -343,10 +343,11 @@ pub const slow_tests_file = "support/slow_tests.zig";
 /// Where a file's tests break the pairing between a `slow:` name and the
 /// statement that skips the test: a test named `slow:` whose first statement
 /// is not `slow_test_gate`, the identifier `skipUnlessRun` anywhere else, in
-/// whatever form it is called or aliased, and an `@import("test_options")`
+/// whatever form it is called or aliased, the string `"skipUnlessRun"`, which
+/// `@field` reaches the declaration through, and an `@import("test_options")`
 /// outside `slow_tests_file`, which would read the option without the call.
 ///
-/// The name is what `-Dtest-filter=slow:` selects and what a reader sees in a
+/// The name is what `-Dtest-filter=test.slow:` selects and what a reader sees in a
 /// run's output; the statement is what `-Dslow-tests=false` skips. Each alone
 /// is a test that runs where its name says it does not, or the reverse.
 pub fn slowTestMismatches(gpa: std.mem.Allocator, file: SourceFile) []const []const u8 {
@@ -380,9 +381,15 @@ pub fn slowTestMismatches(gpa: std.mem.Allocator, file: SourceFile) []const []co
     for (tags, 0..) |tag, i| {
         const token: std.zig.Ast.TokenIndex = @intCast(i);
         switch (tag) {
-            .identifier => {
+            // An identifier, or a string that `@field` turns into one.
+            .identifier, .string_literal => {
                 const slice = tree.tokenSlice(token);
-                const name = if (std.mem.startsWith(u8, slice, "@\"")) slice[2 .. slice.len - 1] else slice;
+                const name = if (tag == .string_literal)
+                    slice[1 .. slice.len - 1]
+                else if (std.mem.startsWith(u8, slice, "@\""))
+                    slice[2 .. slice.len - 1]
+                else
+                    slice;
                 if (!std.mem.eql(u8, name, "skipUnlessRun")) continue;
                 if (std.mem.indexOfScalar(std.zig.Ast.TokenIndex, gates.items, token) != null) continue;
                 const line = tree.tokenLocation(0, token).line + 1;

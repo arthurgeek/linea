@@ -360,11 +360,11 @@ jobs:
           key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
 
   # The corpus against a ReleaseFast compiler and the unit tests built
-  # ReleaseSafe. `check` covers the corpus and the compiler's unit tests in
-  # Debug; this lane is the optimised build of both, and the only lane of a
-  # pull request that runs the unit tests named `slow:`, which `check` skips
-  # there. Linea results must remain defined and independent of compiler
-  # optimization.
+  # ReleaseSafe, and on a weekly or manual run built ReleaseFast as well.
+  # `check` covers the corpus and the compiler's unit tests in Debug; this
+  # lane is the optimised build of both, and the only lane of a pull request
+  # that runs the unit tests named `slow:`, which `check` skips there. Linea
+  # results must remain defined and independent of compiler optimization.
   optimised:
     # A ready pull request runs this lane, and so do manual runs and the
     # weekly schedule. A push to main and a change to documentation alone
@@ -374,8 +374,10 @@ jobs:
     runs-on: ubuntu-24.04
     # Every case builds once, and the unit tests build a ReleaseSafe compiler
     # that holds several gigabytes while it links. One step at a time, so the
-    # bound covers the three steps run end to end.
-    timeout-minutes: 120
+    # bound covers the steps run end to end: about 95 minutes on a pull
+    # request, and about 20 more on a weekly or manual run, which also runs
+    # the unit tests ReleaseFast.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
 
@@ -428,6 +430,18 @@ jobs:
           .github/scripts/resource-log.sh follow & follower=$!
           trap 'kill "$follower" 2>/dev/null || true' EXIT
           nice -n 10 nix develop --command zig build test-unit --release=safe -j4 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+
+      # The unit tests again against compiler code built ReleaseFast, as
+      # `-Drelease` builds it for users, where a defect that safety checks
+      # would trap instead runs on. Weekly and on a manual run only: a pull
+      # request runs the ReleaseSafe build above and the corpus against a
+      # ReleaseFast compiler below.
+      - name: Unit tests, ReleaseFast
+        if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
+        run: |
+          .github/scripts/resource-log.sh follow & follower=$!
+          trap 'kill "$follower" 2>/dev/null || true' EXIT
+          nice -n 10 nix develop --command zig build test-unit --release=fast -j4 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
 
       - name: Conformance suite, optimised
         run: |

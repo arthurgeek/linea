@@ -129,7 +129,7 @@ test "CI runs the unit tests named slow in a lane every pull request requires" {
     // `check` skips them on every event but a push to main, which runs no
     // `optimised` lane; `optimised` runs every unit test, unfiltered and with
     // safety checks, on every other event, and a pull request cannot merge
-    // without it.
+    // without it. A weekly or manual run also runs them ReleaseFast.
     try testing.expectEqual(@as(usize, 1), std.mem.count(u8, workflow, " -Dslow-tests="));
     try testing.expectEqualStrings(
         "nice -n 10 nix develop --command zig build test -j4 -Dsequential -Dsafe-runner -Dguide=${{ github.event_name == 'push' }} -Dslow-tests=${{ github.event_name == 'push' }} -Dscratch=\"$LINEA_SCRATCH-$GITHUB_JOB\"",
@@ -140,14 +140,43 @@ test "CI runs the unit tests named slow in a lane every pull request requires" {
         "if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'push' && !github.event.pull_request.draft }}",
         try onlyLineWith(optimised, "if: ${{ needs.changes"),
     );
+    // The whole step, so a step-level `if:` or `continue-on-error:` cannot
+    // turn it off.
     try testing.expectEqualStrings(
-        "nice -n 10 nix develop --command zig build test-unit --release=safe -j4 -Dsequential -Dscratch=\"$LINEA_SCRATCH-$GITHUB_JOB\"",
-        try onlyLineWith(optimised, "zig build test-unit"),
-    );
+        \\      - name: Unit tests, optimised
+        \\        run: |
+        \\          .github/scripts/resource-log.sh follow & follower=$!
+        \\          trap 'kill "$follower" 2>/dev/null || true' EXIT
+        \\          nice -n 10 nix develop --command zig build test-unit --release=safe -j4 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+    , try stepText(optimised, "Unit tests, optimised"));
+    // The unit tests against compiler code built as `-Drelease` builds it,
+    // weekly and on a manual run.
+    try testing.expectEqualStrings(
+        \\      - name: Unit tests, ReleaseFast
+        \\        if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
+        \\        run: |
+        \\          .github/scripts/resource-log.sh follow & follower=$!
+        \\          trap 'kill "$follower" 2>/dev/null || true' EXIT
+        \\          nice -n 10 nix develop --command zig build test-unit --release=fast -j4 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+    , try stepText(optimised, "Unit tests, ReleaseFast"));
     try testing.expectEqualStrings(
         "pull_request) required=(check sanitize optimised) ;;",
         try onlyLineWith(try workflowJob(workflow, "merge-ready"), "pull_request) "),
     );
+}
+
+/// The step of `job` named `name`: its `- name:` line and every line after it
+/// indented past it, without the final line break.
+fn stepText(job: []const u8, name: []const u8) ![]const u8 {
+    var marker_buffer: [128]u8 = undefined;
+    const marker = try std.fmt.bufPrint(&marker_buffer, "      - name: {s}\n", .{name});
+    const start = std.mem.indexOf(u8, job, marker) orelse return error.MissingStep;
+    if (std.mem.indexOfPos(u8, job, start + marker.len, marker) != null) return error.SeveralSteps;
+    var end = start + marker.len;
+    while (end < job.len and std.mem.startsWith(u8, job[end..], "        ")) {
+        end = if (std.mem.indexOfScalarPos(u8, job, end, '\n')) |line_end| line_end + 1 else job.len;
+    }
+    return std.mem.trimEnd(u8, job[start..end], "\n");
 }
 
 /// The one line of `text` holding `needle`, without its indentation.
@@ -480,12 +509,17 @@ test "a test that skips itself in another form is refused unless named slow" {
         \\    if (!@import("test_options").slow_tests) return error.SkipZigTest;
         \\}
         \\
+        \\test "skips through a field named by a string" {
+        \\    try @field(slow_tests, "skipUnlessRun")();
+        \\}
+        \\
     ;
     const mismatches = source.slowTestMismatches(gpa, .{ .path = "conformance_main.zig", .text = evasions });
-    try testing.expectEqual(@as(usize, 3), mismatches.len);
+    try testing.expectEqual(@as(usize, 4), mismatches.len);
     try testing.expectEqualStrings("line 4: `skipUnlessRun` is named where it is not the first statement, `try slow_tests.skipUnlessRun();`, of a test named `slow:`", mismatches[0]);
     try testing.expectEqualStrings("line 8: `skipUnlessRun` is named where it is not the first statement, `try slow_tests.skipUnlessRun();`, of a test named `slow:`", mismatches[1]);
     try testing.expectEqualStrings("line 12: `@import(\"test_options\")` is written outside `support/slow_tests.zig`", mismatches[2]);
+    try testing.expectEqualStrings("line 16: `skipUnlessRun` is named where it is not the first statement, `try slow_tests.skipUnlessRun();`, of a test named `slow:`", mismatches[3]);
 
     // Named `slow:`, the same forms are refused for the opening they lack.
     const named =
