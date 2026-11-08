@@ -432,9 +432,10 @@ struct Ctx {
 }
 
 impl Ctx {
-    // Open the serving task's connection to the guest book at `path`.
-    fn open(path: Str) -> Result[Ctx, BookError] {
-        .Ok(Ctx { book = Book.open(path)?, proxy_trust = proxy_trust() })
+    // Open the serving task's connection to the guest book at `path`, which
+    // `Book.initialize` has prepared.
+    fn connect(path: Str) -> Result[Ctx, BookError] {
+        .Ok(Ctx { book = Book.connect(path)?, proxy_trust = proxy_trust() })
     }
 ```
 
@@ -451,25 +452,39 @@ fn home(inout ctx: Ctx, request: http.Request) -> Result[http.Response, http.Err
 ```
 
 SQLite lets many connections read one database at once and one write at a
-time. `Book.open` sets the connection up for that, in
-`examples/guest-book/book/book.lin`:
+time. `examples/guest-book/book/book.lin` prepares the database for that
+once, with `Book.initialize`:
 
 <!-- guide: excerpt examples/guest-book/book/book.lin -->
 ```linea
-    // Open a connection to the guest book at `path`, creating its file and
-    // `entries` table if neither exists yet. SQLite lets one connection write
-    // at a time, so `wait_when_busy` makes a connection that finds another
-    // writing wait up to two seconds for it rather than fail with
-    // `SQLITE_BUSY`. `journal_mode=WAL` writes changes to a log beside the
-    // file instead of into it, so readers keep reading the last committed
-    // entries while a signature is written, and no read waits for a write.
-    // The mode is stored in the file, so the first connection sets it for
-    // every later one.
-    pub fn open(path: Str) -> Result[Book, BookError] {
+    // Prepare the guest book at `path` for every connection a server will
+    // open: create its file and `entries` table if neither exists yet, and
+    // switch it to the write-ahead log. `journal_mode=WAL` writes changes to a
+    // log beside the file instead of into it, so readers keep reading the
+    // last committed entries while a signature is written, and no read waits
+    // for a write. Both are stored in the file, and changing the journal mode
+    // needs the file to itself, so a server calls this once, before it starts
+    // the tasks that each `connect`.
+    pub fn initialize(path: Str) -> Result[(), BookError] {
         defer var database = Database.open(path)?
         &database.wait_when_busy(2000)?
         &database.execute("PRAGMA journal_mode=WAL")?
         &database.execute(schema)?
+        .Ok(())
+    }
+```
+
+and each serving task then opens its connection with `Book.connect`:
+
+<!-- guide: excerpt examples/guest-book/book/book.lin -->
+```linea
+    // Open a connection to the guest book at `path`, which `initialize` has
+    // prepared. SQLite lets one connection write at a time, so
+    // `wait_when_busy` makes a connection that finds another writing wait up
+    // to two seconds for it rather than fail with `SQLITE_BUSY`.
+    pub fn connect(path: Str) -> Result[Book, BookError] {
+        defer var database = Database.open(path)?
+        &database.wait_when_busy(2000)?
         .Ok(Book { database })
     }
 ```
@@ -482,8 +497,9 @@ when it began, and the two never wait for each other. Signatures still go
 one at a time: `wait_when_busy(2000)` sets SQLite's busy timeout
 (`sqlite3_busy_timeout`), so a connection that finds another one writing
 retries for up to two seconds instead of failing at once with `SQLITE_BUSY`.
-A test in `book.lin` holds a query open on one connection while a second
-reads and signs, and fails without the `PRAGMA` line.
+Two tests in `book.lin` hold a query open on one connection while another
+signs, one on the same thread and one with the signing connection on a task
+of its own, and both fail without the `PRAGMA` line.
 
 A connection is safe on one thread at a time, as long as the SQLite library
 was built to allow threads at all. The wrapper checks that once per
@@ -512,23 +528,52 @@ state that every request changes needs. For a database that is itself built
 for several connections, it would make every read wait for the one before
 it.
 
-### When a connection cannot be opened
+### Starting in order
 
-Opening a connection can fail, for instance when the directory of
-`GUEST_BOOK_DATABASE` does not exist. The closure that builds each task's
-handler therefore returns a `Result`: the `Ctx.open` result, with `map`
-turning an opened `Ctx` into the logged router and keeping a `BookError` as
-it is. `http.listen_and_serve` accepts a closure that returns either a
-handler or a `Result` holding one. Nothing is accepted until every serving
-task has made its handler; when one cannot, serving stops before the first
-connection and `listen_and_serve` answers
-`ListenAndServeError.Serve(.Handler(error))`, which `main` writes to standard
-error:
+A server whose tasks each hold a resource starts in three steps. First it
+prepares what every task shares; then each task makes its own resources; only
+then does it accept a connection. Creating the table and switching to the
+write-ahead log are the shared part: they change the file, and changing the
+journal mode needs the file to itself, so 128 tasks doing it at once would
+wait on one another. `main` does it once, before it serves:
+
+<!-- guide: excerpt examples/guest-book/main.lin -->
+```linea
+    let path = database_path()
+    // Creating the table and switching the file to the write-ahead log happen
+    // once, here, before any task opens a connection.
+    let _ = Book.initialize(path) else |error| {
+        io.eprintln("guest-book: {error}")
+        error.release()
+        return 1
+    }
+```
+
+A database that cannot be opened at all, for instance because the directory
+of `GUEST_BOOK_DATABASE` does not exist, stops the program here:
 
 <!-- guide: unchecked output from tests/cmd/guest_book/refuses_what_it_should.cmd -->
 ```text
-guest-book: a serving task's handler could not be made: unable to open database file (SQLite code 14)
+guest-book: unable to open database file (SQLite code 14)
 ```
+
+The serving tasks' own step is the closure `http.listen_and_serve` calls on
+each of them, and the third step is `listen_and_serve`'s: it accepts nothing
+until every task has made its handler.
+
+### When a connection cannot be opened
+
+Opening a task's connection can still fail after the database is prepared,
+for instance when the process runs out of file descriptors. The closure that
+builds each task's handler therefore returns a `Result`: the `Ctx.connect`
+result, with `map` turning a connected `Ctx` into the logged router and
+keeping a `BookError` as it is. `http.listen_and_serve` accepts a closure
+that returns either a handler or a `Result` holding one. Nothing is accepted
+until every serving task has made its handler; when one cannot, serving
+stops before the first connection and `listen_and_serve` answers
+`ListenAndServeError.Serve(.Handler(error))`, which `main` writes to standard
+error as `guest-book: a serving task's handler could not be made:` followed
+by SQLite's sentence.
 
 The error a factory returns travels from the serving task that met it to the
 call of `listen_and_serve`, and when two tasks fail, the second error is
@@ -563,7 +608,7 @@ error[T-Bound]: `R.Error` requires `Owned`, and `Str` can carry a borrow: it hol
 9    |     let _ = http.listen_and_serve(net.loopback(8080), routes) else |_| {
      |                  ^^^^^^^^^^^^^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds
     ::: std/http/serve.lin
-1129 | ... ler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
+1173 | ... ler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
      |                                                                 ------- required by this `where` clause
 ```
 
@@ -599,8 +644,13 @@ before it serves:
 ```linea
     // A macOS shell starts a program allowed 256 open files, too few for a
     // connection on every serving task, so the guest book raises its own
-    // limit as far as the system allows, and stops here when that is still
-    // too few rather than fail once some tasks have opened their connections.
+    // limit as far as the system allows. A library leaves the limit to the
+    // program, since it is the whole process's. `files_needed` is an
+    // estimate: SQLite may open a temporary file for a large query, so a
+    // request can still fail for want of a descriptor, and answers 500 like
+    // any other storage failure. Stopping here when even the estimate does
+    // not fit says why at once, rather than as one task's failure to open
+    // its connection.
     let files_needed = serving_tasks * files_per_task + files_besides_tasks
     let open_files = process.raise_open_file_limit() else |error| {
         io.eprintln("guest-book: cannot raise the open-file limit: {error}")
@@ -613,9 +663,10 @@ before it serves:
 ```
 
 `process.raise_open_file_limit` raises the soft limit to the hard one, or to
-`kern.maxfilesperproc` on macOS, and answers the limit now in force. When
-that is still too few, the guest book stops before it listens and says so,
-rather than serve on the tasks whose connections happened to open:
+`kern.maxfilesperproc` on macOS, and answers how many files the process may
+now open. When that is still too few, the guest book stops before it listens
+and says so, rather than serve on the tasks whose connections happened to
+open:
 
 <!-- guide: unchecked output from tests/cmd/guest_book/serves_under_a_low_open_file_limit.cmd -->
 ```text
@@ -624,6 +675,15 @@ guest-book: serving needs 389 open files, and this process may open 200; raise t
 
 Rust's standard library has no such call; a Rust server raises the limit
 through the `libc` crate's `setrlimit`, or asks its users to run `ulimit -n`.
+
+The limit belongs to the whole process, so only a program raises it; a
+library that did would change what every other part of the program may
+open. And 389 is an estimate, not a promise: SQLite may open a temporary
+file for a large query, so a request can still fail for want of a
+descriptor while the server runs. The guest book answers that as it answers
+any storage failure, with a 500, and what guarantees that serving starts
+only once every task's connection is open is that nothing is accepted until
+each task has made its handler.
 
 The tests share a database between connections too.
 `Book.open_in_memory(name)` opens the in-memory database `name`, which every
@@ -785,10 +845,20 @@ fn main() -> UInt8 {
         return 2
     }
     checked.release()
+    // The guest book starts in three steps: it prepares what every task
+    // shares, the room for open files and the database file, then each
+    // serving task opens its own connection, and only then is a connection
+    // accepted.
+    //
     // A macOS shell starts a program allowed 256 open files, too few for a
     // connection on every serving task, so the guest book raises its own
-    // limit as far as the system allows, and stops here when that is still
-    // too few rather than fail once some tasks have opened their connections.
+    // limit as far as the system allows. A library leaves the limit to the
+    // program, since it is the whole process's. `files_needed` is an
+    // estimate: SQLite may open a temporary file for a large query, so a
+    // request can still fail for want of a descriptor, and answers 500 like
+    // any other storage failure. Stopping here when even the estimate does
+    // not fit says why at once, rather than as one task's failure to open
+    // its connection.
     let files_needed = serving_tasks * files_per_task + files_besides_tasks
     let open_files = process.raise_open_file_limit() else |error| {
         io.eprintln("guest-book: cannot raise the open-file limit: {error}")
@@ -799,15 +869,22 @@ fn main() -> UInt8 {
         return 1
     }
     let path = database_path()
+    // Creating the table and switching the file to the write-ahead log happen
+    // once, here, before any task opens a connection.
+    let _ = Book.initialize(path) else |error| {
+        io.eprintln("guest-book: {error}")
+        error.release()
+        return 1
+    }
     // Each serving task builds its own handler with this closure: a router
     // lent the task's own `Ctx` by `http.with_state`, inside `http.logged`.
     // Opening the task's connection can fail, so the closure returns the
-    // `Result` of `Ctx.open`, whose `map` turns an opened `Ctx` into the
+    // `Result` of `Ctx.connect`, whose `map` turns an opened `Ctx` into the
     // handler and keeps a `BookError` as it is. When one task's is `.Err`,
     // serving ends before accepting anything and reports it. The routes were
     // checked above, so registering them again cannot fail.
     let serving = [sink logger, path] || {
-        Ctx.open(path).map(
+        Ctx.connect(path).map(
             [sink logger = copy(logger)] |sink ctx: Ctx| {
                 var router: http.Router[Ctx] = http.Router.new()
                 routes(&router).unwrap()

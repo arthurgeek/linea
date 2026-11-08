@@ -166,9 +166,10 @@ struct Ctx {
 }
 
 impl Ctx {
-    // Open the serving task's connection to the guest book at `path`.
-    fn open(path: Str) -> Result[Ctx, BookError] {
-        .Ok(Ctx { book = Book.open(path)?, proxy_trust = proxy_trust() })
+    // Open the serving task's connection to the guest book at `path`, which
+    // `Book.initialize` has prepared.
+    fn connect(path: Str) -> Result[Ctx, BookError] {
+        .Ok(Ctx { book = Book.connect(path)?, proxy_trust = proxy_trust() })
     }
 
     // Open a connection to the in-memory guest book `name`, for tests, which
@@ -262,10 +263,20 @@ fn main() -> UInt8 {
         return 2
     }
     checked.release()
+    // The guest book starts in three steps: it prepares what every task
+    // shares, the room for open files and the database file, then each
+    // serving task opens its own connection, and only then is a connection
+    // accepted.
+    //
     // A macOS shell starts a program allowed 256 open files, too few for a
     // connection on every serving task, so the guest book raises its own
-    // limit as far as the system allows, and stops here when that is still
-    // too few rather than fail once some tasks have opened their connections.
+    // limit as far as the system allows. A library leaves the limit to the
+    // program, since it is the whole process's. `files_needed` is an
+    // estimate: SQLite may open a temporary file for a large query, so a
+    // request can still fail for want of a descriptor, and answers 500 like
+    // any other storage failure. Stopping here when even the estimate does
+    // not fit says why at once, rather than as one task's failure to open
+    // its connection.
     let files_needed = serving_tasks * files_per_task + files_besides_tasks
     let open_files = process.raise_open_file_limit() else |error| {
         io.eprintln("guest-book: cannot raise the open-file limit: {error}")
@@ -276,15 +287,22 @@ fn main() -> UInt8 {
         return 1
     }
     let path = database_path()
+    // Creating the table and switching the file to the write-ahead log happen
+    // once, here, before any task opens a connection.
+    let _ = Book.initialize(path) else |error| {
+        io.eprintln("guest-book: {error}")
+        error.release()
+        return 1
+    }
     // Each serving task builds its own handler with this closure: a router
     // lent the task's own `Ctx` by `http.with_state`, inside `http.logged`.
     // Opening the task's connection can fail, so the closure returns the
-    // `Result` of `Ctx.open`, whose `map` turns an opened `Ctx` into the
+    // `Result` of `Ctx.connect`, whose `map` turns an opened `Ctx` into the
     // handler and keeps a `BookError` as it is. When one task's is `.Err`,
     // serving ends before accepting anything and reports it. The routes were
     // checked above, so registering them again cannot fail.
     let serving = [sink logger, path] || {
-        Ctx.open(path).map(
+        Ctx.connect(path).map(
             [sink logger = copy(logger)] |sink ctx: Ctx| {
                 var router: http.Router[Ctx] = http.Router.new()
                 routes(&router).unwrap()

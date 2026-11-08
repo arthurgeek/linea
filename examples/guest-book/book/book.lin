@@ -5,10 +5,16 @@ import sqlite
 import std.fmt
 import std.fs
 import std.mem
+import std.session
+import std.task
 import std.testing
 import std.time
+import std.uuid
 
 use mem.Lender
+use session.Chan
+use session.End
+use session.Send
 use sqlite.Database
 use sqlite.Statement
 
@@ -72,36 +78,123 @@ fn read_entry(select: Statement) -> Result[Entry, BookError] {
     .Ok(Entry { name, message, signed })
 }
 
+// A test's own database file, named by a random UUID, so tests that run at
+// once never share one.
+fn scratch_path() -> String {
+    fmt.render_owned("/tmp/linea-guest-book-{uuid.Uuid.v4()}.db").unwrap()
+}
+
+// Remove a test's database at `path`, with the write-ahead log and its index
+// that SQLite keeps beside it while a connection is open.
+fn remove_database(path: Str) {
+    for read suffix in ["", "-wal", "-shm"] {
+        defer let name = fmt.render_owned("{path}{suffix}").unwrap()
+        let file = fs.Path.from_str(name.view()).unwrap()
+        let _ = fs.remove_file(file) else |_| {
+            ()
+        }
+    }
+}
+
+// The serving tasks a server starts by default, each with a connection.
+let tasks_at_once: UInt64 = 128
+
+// One of `tasks_at_once` tasks: open a connection to the book at `path`, read
+// the entries, and answer whether both succeeded.
+fn open_alongside_the_others(sink path: String) -> Bool {
+    defer let owned = path
+    var book = Book.connect(owned.view()) else |error| {
+        error.release()
+        return false
+    }
+    let listed = match &book.newest(1) {
+        Ok(entries) => {
+            entries.release()
+            true
+        },
+        Err(error) => {
+            error.release()
+            false
+        },
+    }
+    book.close()
+    listed
+}
+
 impl Book {
-    // Open a connection to the guest book at `path`, creating its file and
-    // `entries` table if neither exists yet. SQLite lets one connection write
-    // at a time, so `wait_when_busy` makes a connection that finds another
-    // writing wait up to two seconds for it rather than fail with
-    // `SQLITE_BUSY`. `journal_mode=WAL` writes changes to a log beside the
-    // file instead of into it, so readers keep reading the last committed
-    // entries while a signature is written, and no read waits for a write.
-    // The mode is stored in the file, so the first connection sets it for
-    // every later one.
-    pub fn open(path: Str) -> Result[Book, BookError] {
+    // Prepare the guest book at `path` for every connection a server will
+    // open: create its file and `entries` table if neither exists yet, and
+    // switch it to the write-ahead log. `journal_mode=WAL` writes changes to a
+    // log beside the file instead of into it, so readers keep reading the
+    // last committed entries while a signature is written, and no read waits
+    // for a write. Both are stored in the file, and changing the journal mode
+    // needs the file to itself, so a server calls this once, before it starts
+    // the tasks that each `connect`.
+    pub fn initialize(path: Str) -> Result[(), BookError] {
         defer var database = Database.open(path)?
         &database.wait_when_busy(2000)?
         &database.execute("PRAGMA journal_mode=WAL")?
         &database.execute(schema)?
+        .Ok(())
+    }
+
+    test fn initialize_creates_the_entries_table_in_a_file() {
+        defer let path = scratch_path()
+        defer {
+            remove_database(path.view())
+        }
+        Book.initialize(path.view()).unwrap()
+        var book = Book.connect(path.view()).unwrap()
+        &book.sign("Ada", "First note").unwrap()
+        book.close()
+        .Ok(())
+    }
+
+    // Open a connection to the guest book at `path`, which `initialize` has
+    // prepared. SQLite lets one connection write at a time, so
+    // `wait_when_busy` makes a connection that finds another writing wait up
+    // to two seconds for it rather than fail with `SQLITE_BUSY`.
+    pub fn connect(path: Str) -> Result[Book, BookError] {
+        defer var database = Database.open(path)?
+        &database.wait_when_busy(2000)?
         .Ok(Book { database })
     }
 
-    test fn open_creates_the_entries_table_in_a_file() {
-        let stamp = time.now().nanoseconds()
-        defer let path_text = fmt.render_owned("/tmp/linea-guest-book-{stamp}.db").unwrap()
-        let path = fs.Path.from_str(path_text.view()).unwrap()
+    test fn a_connection_reads_what_another_signed() {
+        defer let path = scratch_path()
         defer {
-            let _ = fs.remove_file(path) else |_| {
-                ()
+            remove_database(path.view())
+        }
+        Book.initialize(path.view()).unwrap()
+        defer var signing = Book.connect(path.view()).unwrap()
+        defer var reading = Book.connect(path.view()).unwrap()
+        &signing.sign("Ada", "First note").unwrap()
+        defer let listed = &reading.newest(10).unwrap()
+        testing.assert_eq(listed.length(), UInt64(1), "a second connection did not see the signature")?
+        .Ok(())
+    }
+
+    // As many connections as a server's serving tasks open at once, each on
+    // a thread of its own, to one file `initialize` prepared: every one opens
+    // and reads.
+    test fn every_serving_task_opens_its_connection_at_once() {
+        defer let path = scratch_path()
+        defer {
+            remove_database(path.view())
+        }
+        Book.initialize(path.view()).unwrap()
+        var paths: Vec[String] = Vec.new()
+        for _ in 0..tasks_at_once {
+            &paths.push(path.view().to_owned().unwrap()).unwrap()
+        }
+        defer let answered = task.map(.Threads(tasks_at_once), paths, open_alongside_the_others)
+        var succeeded: UInt64 = 0
+        for read ok in answered.as_slice() {
+            if ok {
+                succeeded += 1
             }
         }
-        var book = Book.open(path_text.view()).unwrap()
-        &book.sign("Ada", "First note").unwrap()
-        book.close()
+        testing.assert_eq(succeeded, tasks_at_once, "a connection opened at the same time as the others failed")?
         .Ok(())
     }
 
@@ -112,16 +205,13 @@ impl Book {
     // two seconds `wait_when_busy` allows. The unfinished query keeps reading
     // the entries as they were when it began.
     test fn a_read_in_progress_lets_another_connection_read_and_sign() {
-        let stamp = time.now().nanoseconds()
-        defer let path_text = fmt.render_owned("/tmp/linea-guest-book-readers-{stamp}.db").unwrap()
-        let path = fs.Path.from_str(path_text.view()).unwrap()
+        defer let path = scratch_path()
         defer {
-            let _ = fs.remove_file(path) else |_| {
-                ()
-            }
+            remove_database(path.view())
         }
-        defer var reading = Book.open(path_text.view()).unwrap()
-        defer var other = Book.open(path_text.view()).unwrap()
+        Book.initialize(path.view()).unwrap()
+        defer var reading = Book.connect(path.view()).unwrap()
+        defer var other = Book.connect(path.view()).unwrap()
         &other.sign("Ada", "First").unwrap()
         &other.sign("Grace", "Second").unwrap()
         defer var names = reading.database.prepare("SELECT name FROM entries ORDER BY id").unwrap()
@@ -137,6 +227,50 @@ impl Book {
         }
         testing.assert(signed, "a signature waited for a read in progress")?
         testing.assert(&names.step().unwrap(), "the second entry was not read")?
+        testing.assert(!&names.step().unwrap(), "a query in progress read an entry signed after it began")?
+        .Ok(())
+    }
+
+    // Two connections on two threads, as two serving tasks hold them. This
+    // thread keeps a query part way through on its connection while a task
+    // signs through its own, and the task sends back over its session
+    // whether the signature was written; the query, still open, reads the
+    // entries as they were when it began.
+    test fn a_task_signs_while_another_thread_holds_a_read_open() {
+        defer let path = scratch_path()
+        defer {
+            remove_database(path.view())
+        }
+        Book.initialize(path.view()).unwrap()
+        defer var reading = Book.connect(path.view()).unwrap()
+        &reading.sign("Ada", "First").unwrap()
+        defer var names = reading.database.prepare("SELECT name FROM entries ORDER BY id").unwrap()
+        testing.assert(&names.step().unwrap(), "the first entry was not read")?
+        let writer_path = path.view()
+        let body = sink [writer_path] |sink me: Chan[Send[Bool, End]]| {
+            let signed = match Book.connect(writer_path) {
+                Ok(connected) => {
+                    var book = connected
+                    let written = match &book.sign("Grace", "From another thread") {
+                        Ok(_) => true,
+                        Err(error) => {
+                            error.release()
+                            false
+                        },
+                    }
+                    book.close()
+                    written
+                },
+                Err(error) => {
+                    error.release()
+                    false
+                },
+            }
+            me.send(signed).close()
+        }
+        let (signed, done) = task.start(body).unwrap().recv()
+        done.close()
+        testing.assert(signed, "a signature on another thread waited for a read in progress")?
         testing.assert(!&names.step().unwrap(), "a query in progress read an entry signed after it began")?
         .Ok(())
     }
