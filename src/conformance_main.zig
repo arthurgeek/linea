@@ -9405,15 +9405,18 @@ fn runSoundness(
     for (arenas) |*it| it.* = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer for (arenas) |*it| it.deinit();
     var next: std.atomic.Value(usize) = .init(0);
-    const threads = try gpa.alloc(std.Thread, walkers);
-    defer gpa.free(threads);
-    var spawned: usize = 0;
-    errdefer for (threads[0..spawned]) |thread| thread.join();
-    for (threads, arenas) |*thread, *arena| {
-        thread.* = try std.Thread.spawn(compiler_stack.spawn_config, SoundnessWalk.run, .{ io, settings, jobs.items, results, arena, &next });
-        spawned += 1;
+    {
+        const threads = try gpa.alloc(std.Thread, walkers);
+        defer gpa.free(threads);
+        // Joined as the block ends, whether every walker started or a spawn
+        // failed, so an error after the walk cannot join them a second time.
+        var spawned: usize = 0;
+        defer for (threads[0..spawned]) |thread| thread.join();
+        for (threads, arenas) |*thread, *arena| {
+            thread.* = try std.Thread.spawn(compiler_stack.spawn_config, SoundnessWalk.run, .{ io, settings, jobs.items, results, arena, &next });
+            spawned += 1;
+        }
     }
-    for (threads) |thread| thread.join();
 
     var failures: std.ArrayList(Failure) = .empty;
     defer failures.deinit(gpa);
@@ -16952,10 +16955,20 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
             Walk.run(io, settings, cases, &work[0], &case_timings[0], &arenas[0], &next_case, &counted, began);
         } else {
             const threads = try gpa.alloc(std.Thread, walkers);
+            var spawned: usize = 0;
+            // The walkers read the libraries, the cases and the work lists
+            // this function frees as it returns, so a failed spawn is reported
+            // only once the walkers already started have finished. Claiming
+            // past the last case stops each after the case it holds.
+            errdefer {
+                next_case.store(cases.len, .monotonic);
+                for (threads[0..spawned]) |t| t.join();
+            }
             for (threads, 0..) |*t, me| {
                 t.* = try std.Thread.spawn(compiler_stack.spawn_config, Walk.run, .{
                     io, settings, cases, &work[me], &case_timings[me], &arenas[me], &next_case, &counted, began,
                 });
+                spawned += 1;
             }
             for (threads) |t| t.join();
         }
@@ -17388,10 +17401,17 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
                     Commands.run(io, compiler, environ, runtime_path, sanitize, checkout_root, cmd_scratch, commands.items, &serving, &cmd_work[0], &cmd_arenas[0], 0, 1, update);
                 } else {
                     const threads = try gpa.alloc(std.Thread, cmd_workers);
+                    var spawned: usize = 0;
+                    // The workers read the commands and the work lists this
+                    // function frees as it returns, so a failed spawn is
+                    // reported only once the workers already started have
+                    // finished.
+                    errdefer for (threads[0..spawned]) |t| t.join();
                     for (threads, 0..) |*t, me| {
                         t.* = try std.Thread.spawn(compiler_stack.spawn_config, Commands.run, .{
                             io, compiler, environ, runtime_path, sanitize, checkout_root, cmd_scratch, commands.items, &serving, &cmd_work[me], &cmd_arenas[me], me, cmd_workers, update,
                         });
+                        spawned += 1;
                     }
                     for (threads) |t| t.join();
                 }
@@ -20040,11 +20060,15 @@ test "native outcome: builds sharing a scratch name each record their own progra
             .{ .status = @intCast(10 + 2 * round) },
             .{ .status = @intCast(11 + 2 * round) },
         };
-        var threads: [2]std.Thread = undefined;
-        for (&threads, &builds) |*thread, *build| {
-            thread.* = try std.Thread.spawn(compiler_stack.spawn_config, Build.run, .{ build, root, runtime, &cache });
+        {
+            var threads: [2]std.Thread = undefined;
+            var spawned: usize = 0;
+            defer for (threads[0..spawned]) |thread| thread.join();
+            for (&threads, &builds) |*thread, *build| {
+                thread.* = try std.Thread.spawn(compiler_stack.spawn_config, Build.run, .{ build, root, runtime, &cache });
+                spawned += 1;
+            }
         }
-        for (threads) |thread| thread.join();
 
         for (builds) |build| {
             if (build.failed) |err| return err;
@@ -20764,28 +20788,63 @@ const Libraries = struct {
             defer self.mutex.unlock(self.io);
             const entry = try self.by_modules.getOrPut(self.backing, key);
             if (!entry.found_existing) {
-                entry.key_ptr.* = try self.backing.dupe(u8, key);
-                entry.value_ptr.* = try self.backing.create(Slot);
-                entry.value_ptr.*.* = .{};
+                // An entry is filled whole or removed, so `deinit` frees
+                // only keys and slots this map owns.
+                errdefer self.by_modules.removeByPtr(entry.key_ptr);
+                const owned_key = try self.backing.dupe(u8, key);
+                errdefer self.backing.free(owned_key);
+                const created = try self.backing.create(Slot);
+                created.* = .{};
+                entry.key_ptr.* = owned_key;
+                entry.value_ptr.* = created;
             }
             break :slot entry.value_ptr.*;
         };
         slot.mutex.lockUncancelable(self.io);
         defer slot.mutex.unlock(self.io);
-        if (slot.library == null) {
-            const owned = try self.backing.alloc([]const u8, modules.len);
-            for (owned, modules) |*into, from| into.* = try self.backing.dupe(u8, from);
-            slot.library = try library_cache_mod.checkedFor(self.backing, self.io, self.environ, owned);
-        }
+        // The library copies the module names it keeps, so `modules` may be
+        // the case's own.
+        if (slot.library == null) slot.library = try library_cache_mod.checkedFor(self.backing, self.io, self.environ, modules);
         return .{ .library = slot.library.?, .imported = true };
     }
 
     fn deinit(self: *Libraries) void {
-        var it = self.by_modules.valueIterator();
-        while (it.next()) |slot| if (slot.*.library) |held| held.deinit();
+        var it = self.by_modules.iterator();
+        while (it.next()) |entry| {
+            if (entry.value_ptr.*.library) |held| held.deinit();
+            self.backing.destroy(entry.value_ptr.*);
+            self.backing.free(entry.key_ptr.*);
+        }
+        self.by_modules.deinit(self.backing);
         self.* = undefined;
     }
 };
+
+test "the libraries cases resume from are released with the walk" {
+    var libraries: Libraries = .{ .backing = testing.allocator, .io = testing.io, .environ = .empty, .prelude = test_library.get() };
+    defer libraries.deinit();
+    const case: Case = .{
+        .display_path = "uses_uuid.lin",
+        .stem = "uses_uuid",
+        .entry = "uses_uuid.lin",
+        .files = &.{.{ .path = "uses_uuid.lin", .text = "import std.uuid\n\nfn main() {}\n" }},
+    };
+    // Each case's arena is released before the library is read, as a walk
+    // releases it, so the library holds nothing of the case's.
+    var first_case = std.heap.ArenaAllocator.init(testing.allocator);
+    const first = try libraries.forCase(first_case.allocator(), case);
+    first_case.deinit();
+    try testing.expect(first.imported);
+    const holds_uuid = for (first.library.sources.program.modules) |module| {
+        if (std.mem.eql(u8, module.dir, "std/uuid")) break true;
+    } else false;
+    try testing.expect(holds_uuid);
+    // A second case importing the same modules resumes from the same library.
+    var second_case = std.heap.ArenaAllocator.init(testing.allocator);
+    defer second_case.deinit();
+    const second = try libraries.forCase(second_case.allocator(), case);
+    try testing.expectEqual(first.library, second.library);
+}
 
 /// What every case's check reads and none of them changes.
 const Settings = struct {
