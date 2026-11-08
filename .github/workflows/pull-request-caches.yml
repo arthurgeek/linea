@@ -1,0 +1,38 @@
+name: Pull request caches
+
+# A run of a pull request saves its caches under `refs/pull/N/merge`, which
+# only that pull request's runs can restore. Once it closes nothing can read
+# them, yet they stay until the repository's 10 GB are spent and the least
+# recently used go, which are main's: the only caches a new pull request can
+# restore. So closing a pull request deletes every cache under its ref.
+#
+# A workflow of its own, not a job in `ci.yml`: a `closed` trigger there would
+# start the whole CI workflow, its `changes` job and `merge-ready` included,
+# on every close, and share the concurrency group of the pull request's runs.
+# Nothing here is a required status.
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  delete-caches:
+    # A pull request from a fork gets a token that cannot delete; its caches
+    # are left to eviction.
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # No checkout: the step runs `gh` alone, so no code of the pull request
+    # runs with this token.
+    permissions:
+      actions: write
+    steps:
+      # `--all` lists every page of the ref's caches before deleting them, and
+      # `--succeed-on-no-caches` makes a pull request that saved none pass.
+      - name: Delete the caches only this pull request could restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: refs/pull/${{ github.event.pull_request.number }}/merge
+        run: gh cache delete --all --ref "$REF" --succeed-on-no-caches

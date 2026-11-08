@@ -75,8 +75,11 @@ test "CI outcome snapshots preserve restore and save contracts" {
         const restore = outcomeStep(job, "actions/cache/restore@v4") orelse return error.MissingRestoreStep;
         const save = outcomeStep(job, "actions/cache/save@v4") orelse return error.MissingSaveStep;
         try testing.expectEqualStrings("outcomes_restore", source.between(restore, "id: ", "\n").?);
+        // Every step that runs something sits between the restore and the
+        // save, save the one after the save that deletes older caches.
         const first_run = std.mem.indexOf(u8, job, "\n        run:") orelse return error.MissingRunStep;
-        const last_run = std.mem.lastIndexOf(u8, job, "\n        run:").?;
+        const prune = std.mem.indexOf(u8, job, "\n      - name: Delete the lane's older caches on this ref\n") orelse return error.MissingPruneStep;
+        const last_run = std.mem.lastIndexOf(u8, job[0..prune], "\n        run:").?;
         try testing.expect(@intFromPtr(restore.ptr) < @intFromPtr(job.ptr) + first_run);
         try testing.expect(@intFromPtr(job.ptr) + last_run < @intFromPtr(save.ptr));
         try testing.expectEqualStrings(
@@ -226,6 +229,137 @@ fn expectPrunesCheckedLibraries(job: []const u8) !void {
         \\          dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache"
         \\          if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
     , try stepText(job, "Keep the newest checked libraries"));
+}
+
+test "CI deletes each lane's older caches on its own ref after it saves" {
+    const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(workflow);
+    // Every save is followed by a prune, so a save added without one fails
+    // here.
+    try testing.expectEqual(@as(usize, 6), std.mem.count(u8, workflow, "uses: actions/cache/save@v4"));
+    try testing.expectEqual(@as(usize, 6), std.mem.count(u8, workflow, "run: .github/scripts/prune-caches.sh "));
+    const lanes = [_]struct { job: []const u8, save: []const u8, prune: []const u8 }{
+        .{ .job = "check", .save = "Save program outcomes", .prune = outcome_prune },
+        .{ .job = "sanitize", .save = "Save program outcomes", .prune = outcome_prune },
+        .{ .job = "optimised-unit", .save = "Save program outcomes", .prune = outcome_prune },
+        .{ .job = "optimised-corpus", .save = "Save program outcomes", .prune = outcome_prune },
+        .{ .job = "optimised-soundness", .save = "Save program outcomes", .prune = outcome_prune },
+        .{ .job = "fuzz", .save = "Keep the inputs this search reached", .prune = fuzz_prune },
+    };
+    for (lanes) |lane| {
+        const job = try workflowJob(workflow, lane.job);
+        // The job's token may delete caches and read the repository, nothing
+        // more.
+        const permissions = "\n    permissions:\n      actions: write\n      contents: read\n    ";
+        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, job, "\n    permissions:"));
+        const granted = std.mem.indexOf(u8, job, permissions) orelse return error.MissingPermissions;
+        try testing.expect(job[granted + permissions.len] != ' ');
+        // The token reaches the prune step alone: the checkout writes none
+        // into the git config the code under test can read, and no other
+        // step is handed it.
+        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, job, "actions/checkout@"));
+        try testing.expect(std.mem.indexOf(u8, job, "      - uses: actions/checkout@v7\n        with:\n          persist-credentials: false\n") != null);
+        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, job, "github.token"));
+        // The prune is the step after the save, run whenever the save ran,
+        // whole so that its condition, its key and its ref cannot drift.
+        const save = try stepText(job, lane.save);
+        try testing.expect(std.mem.indexOf(u8, save, "uses: actions/cache/save@v4\n") != null);
+        const save_end = @intFromPtr(save.ptr) + save.len - @intFromPtr(job.ptr);
+        const prune_start = std.mem.indexOf(u8, job, lane.prune) orelse {
+            std.debug.print("{s} does not prune after its save as pinned\n", .{lane.job});
+            return error.MissingPruneStep;
+        };
+        try testing.expect(save_end < prune_start);
+        try testing.expect(std.mem.indexOf(u8, job[save_end..prune_start], "\n      - ") == null);
+        // The key the prune keeps is the key the save wrote.
+        const saved_key = source.between(job[save_end - save.len ..], "          key: ", "\n").?;
+        try testing.expectEqualStrings(saved_key, source.between(lane.prune, "          KEY: ", "\n").?);
+    }
+    // The fuzz inputs' key ends in the suffix its prune strips, as each
+    // outcome key ends in the commit and the run, so what is left is the
+    // prefix the restore falls back on.
+    try testing.expectEqualStrings(
+        "fuzz-inputs-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        source.between(try stepText(try workflowJob(workflow, "fuzz"), "Restore the inputs earlier searches reached"), "          key: ", "\n").?,
+    );
+}
+
+const outcome_prune =
+    \\      - name: Delete the lane's older caches on this ref
+    \\        if: ${{ !cancelled() && steps.outcomes_save.outcome == 'success' }}
+    \\        env:
+    \\          GH_TOKEN: ${{ github.token }}
+    \\          KEY: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
+    \\        run: .github/scripts/prune-caches.sh "$KEY" "$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+    \\
+;
+
+const fuzz_prune =
+    \\      - name: Delete the older fuzz inputs on this ref
+    \\        if: ${{ !cancelled() && steps.fuzz_save.outcome == 'success' }}
+    \\        env:
+    \\          GH_TOKEN: ${{ github.token }}
+    \\          KEY: fuzz-inputs-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+    \\        run: .github/scripts/prune-caches.sh "$KEY" "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+    \\
+;
+
+test "prune-caches deletes only a lane's older caches on the run's own ref" {
+    // A `gh` answering from files, covering older attempts and commits,
+    // another ref and another lane, a newer save by a concurrent run, a key
+    // that was not saved, failures to list and to delete, and arguments that
+    // name no prefix.
+    const result = try std.process.run(testing.allocator, testing.io, .{
+        .argv = &.{ "bash", ".github/scripts/prune-caches_test.sh" },
+    });
+    defer testing.allocator.free(result.stdout);
+    defer testing.allocator.free(result.stderr);
+    if (!std.meta.eql(result.term, std.process.Child.Term{ .exited = 0 })) {
+        std.debug.print("{s}{s}", .{ result.stdout, result.stderr });
+        return error.TestUnexpectedResult;
+    }
+}
+
+test "CI deletes a closed pull request's caches without running its code" {
+    const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/pull-request-caches.yml", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(workflow);
+    // Everything from the trigger on, whole: the `closed` trigger alone, a
+    // token that may delete caches and nothing else, no checkout, and a
+    // delete scoped to the pull request's own ref.
+    try testing.expectEqualStrings(
+        \\on:
+        \\  pull_request:
+        \\    types: [closed]
+        \\
+        \\permissions: {}
+        \\
+        \\jobs:
+        \\  delete-caches:
+        \\    # A pull request from a fork gets a token that cannot delete; its caches
+        \\    # are left to eviction.
+        \\    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        \\    runs-on: ubuntu-24.04
+        \\    timeout-minutes: 10
+        \\    # No checkout: the step runs `gh` alone, so no code of the pull request
+        \\    # runs with this token.
+        \\    permissions:
+        \\      actions: write
+        \\    steps:
+        \\      # `--all` lists every page of the ref's caches before deleting them, and
+        \\      # `--succeed-on-no-caches` makes a pull request that saved none pass.
+        \\      - name: Delete the caches only this pull request could restore
+        \\        env:
+        \\          GH_TOKEN: ${{ github.token }}
+        \\          GH_REPO: ${{ github.repository }}
+        \\          REF: refs/pull/${{ github.event.pull_request.number }}/merge
+        \\        run: gh cache delete --all --ref "$REF" --succeed-on-no-caches
+        \\
+    , workflow[(std.mem.indexOf(u8, workflow, "\non:\n") orelse return error.MissingTrigger) + 1 ..]);
+    // The CI workflow, whose `merge-ready` is the required status, does not
+    // start on a close.
+    const ci = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(ci);
+    try testing.expectEqualStrings("types: [opened, synchronize, reopened, ready_for_review]", try onlyLineWith(ci, "    types: ["));
 }
 
 test "CI runs what reads gated Markdown only in lanes such Markdown reruns" {

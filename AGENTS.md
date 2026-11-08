@@ -265,6 +265,14 @@ and `optimised-soundness` runs soundness against the same, over the default
 seeds and over sixteen more: a fixed window on a pull request, and one that
 moves with the run number on a weekly or manual run.
 
+Each run of a lane saves its cache under a key of its own, stored under the
+run's ref. After each save, `.github/scripts/prune-caches.sh` deletes that
+lane's older caches on the same ref, so every ref keeps the newest per lane;
+closing a pull request deletes every cache under its `refs/pull/N/merge`
+(`.github/workflows/pull-request-caches.yml`), which only its own runs could
+restore. That keeps the repository under GitHub's 10 GB, past which eviction
+drops main's caches, the only ones a new pull request can restore.
+
 A first job, `changes`, decides lane by lane, through
 `.github/scripts/changes.sh`, whether each lane runs. It walks back from the
 head through the pull request's commits, or main's, to the newest commit
