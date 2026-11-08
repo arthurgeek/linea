@@ -2,7 +2,9 @@
 
 Status: Proposed — 2026-10-27, rewritten 2026-10-31 to record what is built.
 Complements [0250](0250-tasks-are-structured-through-linear-sessions.md) and
-extends [0154](0154-sockets-and-http-follow-go.md) (`http.serve`).
+extends [0154](0154-sockets-and-http-follow-go.md) (`http.serve`). The clause
+of §4 that bounds a job `Owned` alone is superseded by
+[0262](0262-an-owning-task-holds-nothing-that-waits.md).
 
 ## Context
 

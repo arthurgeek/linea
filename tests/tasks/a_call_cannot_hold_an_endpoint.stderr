@@ -1,0 +1,5 @@
+error[T-Bound]: `F` requires `Isolated`, and `<closure>` is not `Isolated`: `_desk.line` is a `Chan[Send[Bool, Recv[UInt64, End]], ()]`, an end of a session, through which a call could wait on another task
+  --> tests/tasks/a_call_cannot_hold_an_endpoint.lin:32:21
+   |
+32 |             counter.call([sink _desk = desk] |inout n: UInt64| n += 1)
+   |                     ^^^^ `<closure>` is not `Isolated`; pass a value that holds no end of a session

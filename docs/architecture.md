@@ -1078,6 +1078,14 @@ mark is copied from a template to each instance, so an instantiation of an
 the checker reads the answer yet, so the table is not kept in the finished
 `Typing`.
 
+A fourth table, `connected_facts`, answers `Isolated` over the same edges in
+`connected` mode. Its seeds are the declarations `RawAccesses` names as
+`session.Chan` (`endpoint`) and `mem.Closure` (`closure`), an open type, a
+closure whose descriptor is not recorded, and a type parameter whose record says
+neither `Isolated` nor `Integer`. The checker refuses an `Isolated` argument by
+asking `isIsolated`, and `connectedWitness` finds the path the refusal names.
+Only the checker reads it, so `finish` drops it.
+
 For an instantiated certified `Storage[T, A]`, containment follows its logical
 element T and separate allocator field A instead of following the optional raw
 backing Buffer field. This lets a system-allocated scalar Vec remain independent
