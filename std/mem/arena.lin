@@ -1,13 +1,31 @@
+import std.mem.address
 import std.testing
 
-// An Arena hands out pieces of one backing buffer, and they are released
-// together with the arena. Acquiring advances the arena's cursor through a
-// `read` of its handle, so an arena is `unshareable`: two tasks reading one would
-// both write that cursor.
+// An Arena hands out pieces of memory it takes from its parent allocator, and
+// they are released together with the arena. Its size is a limit: it hands out
+// at most that size less an eight-byte cursor, counted as one block of that
+// size would count it. An arena of at most `arena_first_chunk_bytes` takes
+// exactly its size from the parent when it opens. A larger arena takes a first
+// chunk of `arena_first_chunk_bytes` when it opens and further chunks only as
+// reservations need them, so it holds what was used rather than its size.
+// Acquiring advances the arena's cursor, and may acquire a chunk, through a
+// `read` of its handle, so an arena is `unshareable`: two tasks reading one
+// would both write that cursor.
 @(opaque, unshareable)
 struct Arena[H: Allocator] {
-    /// None if allocation failed; subsequent acquire calls then return Oom.
-    slab: Option[Buffer[H]],
+    /// The first chunk. None if the parent refused it; every acquisition then
+    /// returns Oom.
+    first: Option[Buffer[H]],
+    /// The size the arena was opened with.
+    limit: UInt64,
+    /// Where the first chunk keeps the buffers of the chunks acquired after
+    /// it, `slots` of them at most. An arena that takes its whole size at
+    /// opening has no slots.
+    chunks: Address[Buffer[H]],
+    slots: UInt64,
+    /// Where the first chunk's reservations start, after its words and, in
+    /// an arena that grows, its table.
+    start: UInt64,
 }
 
 // A Handle allocates from an arena it borrows. Live handles prevent the
@@ -24,11 +42,41 @@ struct Handle[H: Allocator = SystemAllocator] {
 }
 
 impl[H: Allocator] Arena[H] {
-    // Reserve size bytes from h. If that fails, acquire calls return Oom.
-    pub fn open(h: H, size: UInt64) -> Arena[H] where carries(.slab.Some: h) {
-        match h.acquire(size) {
-            Err(_) => .{ slab = .None },
-            Ok(b) => .{ slab = .Some(b) },
+    // Open an arena of `size` bytes over `h`: take all of them from `h` when
+    // they are at most `arena_first_chunk_bytes`, and otherwise a first chunk
+    // of that many, taking the rest only as reservations need it. If `h`
+    // refuses, every acquisition from the arena returns Oom.
+    pub fn open(h: H, size: UInt64) -> Arena[H] where carries(.first.Some: h) {
+        if size <= arena_first_chunk_bytes {
+            return match h.acquire(size) {
+                Err(_) => .{ first = .None, limit = size, chunks = address.nowhere(), slots = 0, start = arena_header },
+                Ok(b) => .{ first = .Some(b), limit = size, chunks = address.nowhere(), slots = 0, start = arena_header },
+            }
+        }
+        let slots = arena_growth_slots(size)
+        let shape: SlotType[Buffer[H]] = .Type
+        // Reservations start at the next multiple of eight after the table.
+        let table_end = arena_table + slots * slot_stride(shape)
+        let start = (table_end + arena_header - 1) / arena_header * arena_header
+        // A parent whose buffers take more room than usual gets a first chunk
+        // that still holds the table of later chunks.
+        let first = if start > arena_first_chunk_bytes {
+            start
+        } else {
+            arena_first_chunk_bytes
+        }
+        match h.acquire(first) {
+            Err(_) => .{ first = .None, limit = size, chunks = address.nowhere(), slots, start },
+            Ok(acquired) => {
+                var b = acquired
+                let at = b.at
+                let length = b.len
+                &b.store(arena_cursor, start)
+                &b.store(arena_chunk_at, at)
+                &b.store(arena_chunk_len, length)
+                let chunks: Address[Buffer[H]] = address_in(b, arena_table)
+                .{ first = .Some(b), limit = size, chunks, slots, start }
+            },
         }
     }
 
@@ -128,8 +176,9 @@ impl[H: Allocator] Arena[H] {
     }
 
     test fn an_arena_the_backing_refused_refuses_everything() {
-        // The largest byte count cannot be reserved as one addressable allocation.
-        let arena = Arena.open(system(), UInt64.max)
+        // The log refuses its first acquisition, the arena's first chunk.
+        defer let log = AllocationLog.open(system(), 1).unwrap()
+        let arena = Arena.open(log.allocator(), 64)
         let a = arena.handle()
 
         var handed = false
@@ -144,9 +193,61 @@ impl[H: Allocator] Arena[H] {
 
         arena.release()
 
-        testing.assert(!handed, "an arena holding no slab handed out storage")?
+        testing.assert(!handed, "an arena holding no first chunk handed out storage")?
 
         .Ok(())
+    }
+
+    test fn a_reservation_larger_than_the_first_chunk_is_handed_out_whole() {
+        defer let log = AllocationLog.open(system(), 0).unwrap()
+        defer let arena = Arena.open(log.allocator(), 1048576)
+        var large = arena.handle().acquire(200000).unwrap()
+        let fresh = large.load(0) == 0 && large.load(199992) == 0
+        &large.store(0, 5)
+        &large.store(199992, 6)
+        let kept = large.load(0) == 5 && large.load(199992) == 6
+        let length = large.length()
+        large.release()
+        testing.assert(fresh, "a large reservation was handed out holding something")?
+        testing.assert(kept, "a large reservation lost what was stored in it")?
+        testing.assert_eq(length, UInt64(200000), "a large reservation is not as long as it was asked for")?
+        testing.assert_eq(log.acquired(), UInt64(2), "a reservation past the first chunk took other than one more chunk")?
+    }
+
+    test fn a_parent_refusing_a_chunk_refuses_the_reservation_that_needed_it() {
+        // The log accepts the first chunk and refuses the next acquisition.
+        defer let log = AllocationLog.open(system(), 2).unwrap()
+        defer let arena = Arena.open(log.allocator(), 1048576)
+        let refused = arena.handle().acquire(131072).is_err()
+        let small = arena.handle().acquire(64).is_ok()
+        testing.assert(refused, "a reservation the parent refused a chunk for was handed out")?
+        testing.assert(small, "a refused chunk stopped the first chunk handing out storage")?
+    }
+
+    test fn a_chunked_arena_hands_out_exactly_its_size_less_the_cursor() {
+        // The eight-byte cursor leaves 262144 bytes to hand out.
+        defer let arena = Arena.open(system(), 262152)
+        let handle = arena.handle()
+        let first = handle.acquire(196608).is_ok()
+        let past = handle.acquire(65537).is_err()
+        let rest = handle.acquire(65536).is_ok()
+        let full = handle.acquire(0).is_err()
+        testing.assert(first, "a chunked arena refused what it holds")?
+        testing.assert(past, "a chunked arena handed out more than its size")?
+        testing.assert(rest, "a chunked arena refused its last bytes")?
+        testing.assert(full, "a full chunked arena handed out an empty reservation")?
+    }
+
+    test fn a_buffer_from_a_later_chunk_is_disposed_into_its_arena() {
+        defer let log = AllocationLog.open(system(), 0).unwrap()
+        defer let arena = Arena.open(log.allocator(), 1048576)
+        let small = arena.handle().acquire(16).unwrap()
+        let large = arena.handle().acquire(131072).unwrap()
+        let middle = arena.handle().acquire(300000).unwrap()
+        middle.release()
+        large.release()
+        small.release()
+        testing.assert(log.acquired() >= 2, "the reservations fit in the first chunk")?
     }
 
     test fn an_arena_refuses_what_it_cannot_hold() {
@@ -211,23 +312,36 @@ impl[H: Allocator] Arena[H] {
         .Ok(())
     }
 
-    // Take back everything the arena handed out so its whole slab can be
-    // handed out again. Reservations are zeroed when handed out only because
-    // the unused part of the slab is kept zeroed, so rewinding zeroes the
-    // bytes that were used and no others: its cost is what was used, not the
-    // slab's size. It takes the arena `inout`, so no handle or allocation
-    // from it can still be live.
+    // Take back everything the arena handed out. Reservations are zeroed
+    // when handed out only because the unused part of the first chunk is
+    // kept zeroed, so rewinding zeroes the bytes of the first chunk that were
+    // used and no others, and gives every later chunk back to the parent,
+    // which hands out zeroed bytes: its cost is what was used, not the
+    // arena's size, and the arena then holds its first chunk alone. It takes
+    // the arena `inout`, so no handle or allocation from it can still be live.
     pub fn rewind(inout self: Self) {
-        match read self.slab {
+        match read self.first {
             None => {},
-            Some(buffer) => {
-                let used = linea_raw_load(buffer.at, buffer.len, 0)
-                var offset: UInt64 = 0
-                while offset < used {
-                    linea_raw_store(buffer.at, buffer.len, arena_header + offset, 0)
-                    offset += arena_header
+            Some(first) => {
+                if self.slots == 0 {
+                    let used = linea_raw_load(first.at, first.len, arena_used)
+                    arena_zero(first, arena_header, arena_header + used)
+                    linea_raw_store(first.at, first.len, arena_used, 0)
+                    return
                 }
-                linea_raw_store(buffer.at, buffer.len, 0, 0)
+                let start = self.start
+                let end = if linea_raw_load(first.at, first.len, arena_grown) == 0 {
+                    linea_raw_load(first.at, first.len, arena_cursor)
+                } else {
+                    linea_raw_load(first.at, first.len, arena_first_end)
+                }
+                arena_zero(first, start, end)
+                arena_give_back(self, first)
+                linea_raw_store(first.at, first.len, arena_used, 0)
+                linea_raw_store(first.at, first.len, arena_cursor, start)
+                linea_raw_store(first.at, first.len, arena_chunk_at, first.at)
+                linea_raw_store(first.at, first.len, arena_chunk_len, first.len)
+                linea_raw_store(first.at, first.len, arena_first_end, 0)
             },
         }
     }
@@ -252,22 +366,130 @@ impl[H: Allocator] Arena[H] {
         testing.assert(twice, "rewinding an empty arena lost its slab")?
         .Ok(())
     }
-}
 
-impl[H: Allocator] Release for Arena[H] {
-    // Return the backing buffer after dependent allocations have been disposed.
-    fn release(sink self: Self) {
-        let Arena { slab: slab } = self
-        match slab {
-            None => {},
-            Some(buffer) => buffer.release(),
-        }
+    test fn rewinding_gives_back_every_chunk_but_the_first() {
+        defer let log = AllocationLog.open(system(), 0).unwrap()
+        var arena = Arena.open(log.allocator(), 1048576)
+        let opened = log.live_bytes()
+        var large = arena.handle().acquire(524288).unwrap()
+        &large.store(0, 3)
+        large.release()
+        let grown = log.live_bytes()
+        &arena.rewind()
+        let rewound = log.live_bytes()
+        let again = arena.handle().acquire(524288).unwrap()
+        let zeroed = again.load(0) == 0
+        again.release()
+        &arena.rewind()
+        arena.release()
+        testing.assert_eq(opened, arena_first_chunk_bytes, "opening an arena took other than its first chunk")?
+        testing.assert(grown > opened, "a reservation past the first chunk took nothing from the parent")?
+        testing.assert_eq(rewound, opened, "rewinding kept a chunk past the first")?
+        testing.assert(zeroed, "a chunk acquired after rewinding held what was stored before")?
+        testing.assert(log.all_disposed(), "releasing the arena kept a chunk")?
     }
 }
 
-// The shared UInt64 cursor occupies the first eight bytes, outside every
-// allocation. Reservations use the same eight-byte alignment as Buffer.
+impl[H: Allocator] Release for Arena[H] {
+    // Give every chunk back to the parent after dependent allocations have
+    // been disposed.
+    fn release(sink self: Self) {
+        match read self.first {
+            None => {},
+            Some(first) => arena_give_back(self, first),
+        }
+        let Arena { first, limit: _, chunks: _, slots: _, start: _ } = self
+        first.release()
+    }
+}
+
+// An arena larger than this takes a first chunk of this many bytes when it
+// opens, and the rest of its size only as reservations need it. 64 KiB holds
+// the three 4 KiB buffers of an HTTP exchange and what a small request and its
+// answer reserve, so a server answering small requests takes nothing more from
+// its parent.
+internal let arena_first_chunk_bytes: UInt64 = 65536
+
+// Reservations use the same eight-byte alignment as Buffer. An arena that
+// takes its whole size when it opens keeps its cursor, the bytes handed out,
+// in its first eight bytes, outside every allocation, and that cursor counts
+// against its size.
 let arena_header: UInt64 = 8
+
+// An arena that grows keeps these UInt64 words at the start of its first
+// chunk: the bytes handed out in all, counted as one block of the arena's size
+// would count them; where the next reservation goes, as an offset into the
+// current chunk; the current chunk's address and length; how many later
+// chunks it holds; and where the first chunk's reservations ended once a
+// reservation moved past it. The table of later chunks' buffers follows them,
+// and the first chunk's reservations follow the table.
+let arena_used: UInt64 = 0
+
+let arena_cursor: UInt64 = 8
+
+let arena_chunk_at: UInt64 = 16
+
+let arena_chunk_len: UInt64 = 24
+
+let arena_grown: UInt64 = 32
+
+let arena_first_end: UInt64 = 40
+
+let arena_table: UInt64 = 48
+
+// How many chunks an arena of `size` bytes may acquire after its first. A
+// reservation that does not fit in the current chunk acquires a chunk of at
+// least the reservation, twice the current chunk's length, or, when that is
+// more than the arena can still hand out, exactly what it can: that chunk
+// holds the rest of the arena, so it is the last. Every chunk before the last
+// is at least twice the one before it and at most the `size - 8` bytes the
+// arena hands out, so there are at most `log2((size - 8) / first chunk)` of
+// them, and the slots count those and the last. A 48 MiB arena has 10.
+fn arena_growth_slots(size: UInt64) -> UInt64 {
+    let capacity = size - arena_header
+    var chunk = arena_first_chunk_bytes
+    var slots: UInt64 = 1
+    while chunk <= capacity / 2 {
+        chunk = chunk * 2
+        slots += 1
+    }
+    slots
+}
+
+// The table of the later chunks a growing arena holds, as typed storage over
+// the first chunk's bytes. The storage owns no buffer of its own.
+fn arena_table_of[H: Allocator](owner: Arena[H], first: Buffer[H]) -> Storage[Buffer[H], H] where carries(first) {
+    let shape: SlotType[Buffer[H]] = .Type
+    .{ buffer = .None, allocator = copy(first.allocator), at = copy(owner.chunks), len = owner.slots * slot_stride(shape) }
+}
+
+// Zero the words of `buffer` from offset `from` up to `to`.
+fn arena_zero[H: Allocator](buffer: Buffer[H], from: UInt64, to: UInt64) {
+    var offset = from
+    while offset < to {
+        linea_raw_store(buffer.at, buffer.len, offset, 0)
+        offset += arena_header
+    }
+}
+
+// Give the chunks a growing arena acquired after `first` back to its parent,
+// the last first, and record that it holds none.
+fn arena_give_back[H: Allocator](owner: Arena[H], first: Buffer[H]) {
+    if owner.slots == 0 {
+        return
+    }
+    let shape: SlotType[Buffer[H]] = .Type
+    let stride = slot_stride(shape)
+    var table = arena_table_of(owner, first)
+    var index = linea_raw_load(first.at, first.len, arena_grown)
+    while index > 0 {
+        index -= 1
+        let chunk: Buffer[H] = slot_take(&table, index * stride)
+        chunk.release()
+    }
+    table.dispose()
+    linea_raw_store(first.at, first.len, arena_grown, 0)
+}
 
 impl[H: Allocator] Lender for Arena[H] {
     type Handle = Handle[H]
@@ -285,14 +507,17 @@ struct ArenaReservation {
 }
 
 // Reserve `size` bytes, rounded up to eight, by advancing the cursor, or
-// answer None when the arena cannot hold them. Only the private cursor is
-// mutable through a handle. Allocated bytes are disjoint from the header and
-// remain untouched by subsequent reservations.
+// answer None when the arena cannot hold them. A growing arena whose current
+// chunk cannot hold them acquires a chunk from the parent, and a parent that
+// refuses answers None too. Only the private words of the first chunk and its
+// table of chunks are mutable through a handle. Allocated bytes are disjoint
+// from the header and the table and remain untouched by subsequent
+// reservations, and a reservation never spans two chunks.
 fn arena_reserve[H: Allocator](owner: Arena[H], size: UInt64) -> Option[ArenaReservation] where carries() {
-    match read owner.slab {
+    match read owner.first {
         None => .None,
-        Some(buffer) => {
-            if buffer.len < arena_header || size > buffer.len || size > UInt64.max - (arena_header - 1) {
+        Some(first) => {
+            if owner.limit < arena_header || size > owner.limit || size > UInt64.max - (arena_header - 1) {
                 return .None
             }
             // Empty reservations still occupy one aligned slot. Other sizes
@@ -302,16 +527,91 @@ fn arena_reserve[H: Allocator](owner: Arena[H], size: UInt64) -> Option[ArenaRes
             } else {
                 (size + arena_header - 1) / arena_header * arena_header
             }
-            let used = linea_raw_load(buffer.at, buffer.len, 0)
-            let available = buffer.len - arena_header
+            let used = linea_raw_load(first.at, first.len, arena_used)
+            let available = owner.limit - arena_header
             if used > available || want > available - used {
                 return .None
             }
-            let at = buffer.at + arena_header + used
-            linea_raw_store(buffer.at, buffer.len, 0, used + want)
-            return .Some(.{ at = at, allocated = want })
+            if owner.slots == 0 {
+                let at = first.at + arena_header + used
+                linea_raw_store(first.at, first.len, arena_used, used + want)
+                return .Some(.{ at = at, allocated = want })
+            }
+            let cursor = linea_raw_load(first.at, first.len, arena_cursor)
+            let chunk_len = linea_raw_load(first.at, first.len, arena_chunk_len)
+            if cursor <= chunk_len && want <= chunk_len - cursor {
+                let at = linea_raw_load(first.at, first.len, arena_chunk_at) + cursor
+                linea_raw_store(first.at, first.len, arena_cursor, cursor + want)
+                linea_raw_store(first.at, first.len, arena_used, used + want)
+                return .Some(.{ at = at, allocated = want })
+            }
+            let remaining = available - used
+            let doubled = if chunk_len > remaining / 2 {
+                remaining
+            } else {
+                chunk_len * 2
+            }
+            let next = if want > doubled {
+                want
+            } else {
+                doubled
+            }
+            let chunk = first.allocator.acquire(next) else |_| {
+                return .None
+            }
+            let grown = linea_raw_load(first.at, first.len, arena_grown)
+            if grown == 0 {
+                linea_raw_store(first.at, first.len, arena_first_end, cursor)
+            }
+            let at = chunk.at
+            linea_raw_store(first.at, first.len, arena_chunk_at, at)
+            linea_raw_store(first.at, first.len, arena_chunk_len, chunk.len)
+            linea_raw_store(first.at, first.len, arena_cursor, want)
+            linea_raw_store(first.at, first.len, arena_used, used + want)
+            linea_raw_store(first.at, first.len, arena_grown, grown + 1)
+            let shape: SlotType[Buffer[H]] = .Type
+            var table = arena_table_of(owner, first)
+            slot_put(&table, grown * slot_stride(shape), chunk)
+            table.dispose()
+            .Some(.{ at = at, allocated = want })
         },
     }
+}
+
+// Answer whether `allocated` bytes at `at` lie within `length` bytes at
+// `base`, starting no lower than `lowest` bytes into them.
+fn arena_within(base: UInt64, length: UInt64, lowest: UInt64, at: UInt64, allocated: UInt64) -> Bool {
+    if at < base || lowest > length {
+        return false
+    }
+    let offset = at - base
+    offset >= lowest && offset <= length && allocated <= length - offset
+}
+
+// Answer whether a reservation of `allocated` bytes at `at` lies within one of
+// the arena's chunks, outside its words and its table. It looks through at
+// most `owner.slots` chunks after the first, a number bounded by the log of
+// the arena's size.
+fn arena_holds[H: Allocator](owner: Arena[H], first: Buffer[H], at: UInt64, allocated: UInt64) -> Bool {
+    if arena_within(first.at, first.len, owner.start, at, allocated) {
+        return true
+    }
+    // Each chunk's buffer is taken out of its slot to read where it lies and
+    // put back unchanged.
+    let shape: SlotType[Buffer[H]] = .Type
+    let stride = slot_stride(shape)
+    let grown = linea_raw_load(first.at, first.len, arena_grown)
+    var table = arena_table_of(owner, first)
+    var found = false
+    var index: UInt64 = 0
+    while !found && index < grown {
+        let chunk: Buffer[H] = slot_take(&table, index * stride)
+        found = arena_within(chunk.at, chunk.len, 0, at, allocated)
+        slot_put(&table, index * stride, chunk)
+        index += 1
+    }
+    table.dispose()
+    found
 }
 
 impl[H: Allocator] Allocator for Handle[H] {
@@ -337,11 +637,10 @@ impl[H: Allocator] Allocator for Handle[H] {
     // Keep extent checks before discarding a reservation; reclamation is collective.
     fn dispose(sink b: Buffer[Handle[H]]) {
         let Buffer { at: at, len: length, allocated: allocated, allocator: allocator, obligation: _ } = b
-        match read allocator.owner.slab {
+        match read allocator.owner.first {
             None => panic("an allocation has no backing arena"),
-            Some(buffer) => {
-                let offset = at - buffer.at
-                if offset < arena_header || offset > buffer.len || allocated > buffer.len - offset || length > allocated {
+            Some(first) => {
+                if length > allocated || !arena_holds(*allocator.owner, first, at, allocated) {
                     panic("an allocation lies outside its backing arena")
                 }
             },

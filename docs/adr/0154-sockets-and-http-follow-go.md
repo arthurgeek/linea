@@ -11,6 +11,10 @@ Status: Accepted — 2026-09-24. Builds on
 Extended by [0180](0180-state-is-lent-down-through-every-handler.md).
 Its subtree clause, that a path ending in `/` matches every path beneath it,
 is superseded by [0222](0222-a-route-pattern-matches-its-own-path.md).
+Its arena-memory clause, that `serve` acquires the arena's whole slab of
+`limits.request_arena_bytes` once (the "5 MiB by default" it states) and that
+a rewind keeps the slab, zeroing what an exchange used, is superseded by
+[0263](0263-an-arena-grows-in-chunks-up-to-its-size-and-a-rewind-returns-them.md).
 
 ## Context
 
