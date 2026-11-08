@@ -1,0 +1,40 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+// A desk holds one end of a session. Releasing it sends a ready signal and
+// waits for a number from the other end.
+struct Desk {
+    line: Chan[Send[Bool, Recv[UInt64, End]]],
+}
+
+impl Release for Desk {
+    fn release(sink self: Self) {
+        let Desk { line } = self
+        let (_, done) = line.send(true).recv()
+        done.close()
+    }
+}
+
+// A call's job runs on the owning task and is released there, so it cannot
+// hold a desk: releasing the desk would wait for `main`'s number, while
+// `main` waits for its own call, queued behind that job.
+fn main() -> UInt8 {
+    let tally = task.own(UInt64(0)).unwrap()
+    let counter = tally.client()
+    let clerk = task.prepare(
+        sink [sink counter = copy(counter)] |sink me: Chan[Send[Bool, Recv[UInt64, End]]]| {
+            let desk = Desk { line = me }
+            counter.call([sink _desk = desk] |inout n: UInt64| n += 1)
+        },
+    ).unwrap().start()
+    let (_, rest) = clerk.recv()
+    let seen = counter.call(|inout n: UInt64| n)
+    rest.send(seen).close()
+    let _ = tally.close()
+    0
+}

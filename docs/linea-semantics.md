@@ -3455,6 +3455,11 @@ path to the part that is not shareable, such as a field holding a
 `mem.Handle`, the `@unshareable` type it reaches, or the type parameter
 not bounded `Shareable`. `Shareable` is written, promised in a `where` clause
 and refused on an enclosing declaration's parameter exactly as `Owned` is.
+The `Isolated` bound admits a type whose values hold no end of a session
+(§5.3), decided and refused the same way: the refusal names the path to the
+`session.Chan` it reaches, the erased `mem.Closure` that may hold one, or the
+type parameter not bounded `Isolated`, and is written, promised and refused on
+an enclosing declaration's parameter exactly as `Owned` is.
 `Owned` is written on a type parameter, inline or in its declaration's own
 `where` clause, or in that clause on an associated type read through one of the
 declaration's own parameters: `where I.Item: Owned` under `[I: Iterator]`, or
@@ -3469,8 +3474,8 @@ type read through an enclosing declaration's parameter, such as an
 implementation's `S` in a method's `where S.Item: Integer`, is [T-Bound], and
 the help is to write it where `S` is declared.
 
-`Copyable`, `Discardable`, `Linear`, `Integer`, `Owned` and `Shareable` are
-decided by the compiler, and an implementation of one, such as
+`Copyable`, `Discardable`, `Linear`, `Integer`, `Owned`, `Shareable` and
+`Isolated` are decided by the compiler, and an implementation of one, such as
 `impl Owned for Label`, is
 [T-Bound]. A program that declares a trait of one of those names implements its
 own trait.
@@ -3579,8 +3584,8 @@ Repeating an explicit capability bound, or explicitly restating one already
 inherited through a trait, is rejected at the declaration. An explicit
 Discardable bound is redundant when Copyable is already required. Linear adds no
 capability requirement and cannot add information beside Copyable or
-Discardable. `Owned` or `Shareable` written twice on one parameter, or beside
-`Integer`, which implies both, is rejected the same way. Reaching a capability through two different trait bounds does not
+Discardable. `Owned`, `Shareable` or `Isolated` written twice on one parameter,
+or beside `Integer`, which implies all three, is rejected the same way. Reaching a capability through two different trait bounds does not
 make either trait redundant: each trait also grants its own operations.
 Diagnostics identify the bounded name and the redundant requirement, including
 an inherited source where applicable.
@@ -5658,6 +5663,30 @@ is not Shareable, and `borrow UInt64` is Shareable and not Owned. It is
 independent of copying too: a `mem.Handle` is copyable, and every copy borrows
 the one arena and reaches its cursor. Being unshareable restricts only observation: an unshareable
 value moves, copies and settles as its declaration says.
+
+**Isolated values.** A type is **Isolated** when no value of it holds an end of
+a session, so nothing reached through it can make its holder wait on another
+task. A type is not Isolated when it is `session.Chan`, which every endpoint and
+every task's handle is, or `mem.Closure`, whose type does not say what the
+callable it erased holds, or when anything reachable through it over the edges
+Shareable follows is not, except what a `mem.Carried` carries: it holds no
+value of its argument, so a `Carried[Chan[P]]` is Isolated. A `task.Owner` holds the handle of its task, so it is
+not Isolated, and neither is a `task.Client`, which observes one. A type
+parameter is not Isolated unless it is bounded `Isolated` or `Integer`; a
+function value is Isolated, and a closure is Isolated unless one of its
+captures is not. Being Isolated is independent of being Owned and Shareable: a
+detached endpoint `Chan[P, ()]` is Owned and Shareable, and is not Isolated.
+
+An owning task (`task.own`) bounds its state `S: Owned + Isolated`, and a call
+(`Client.call`) bounds its job `F: Owned + Isolated`. The job and the state are
+the only values the owning task's thread reaches, and the job's release runs
+there before its caller is answered, so with neither holding an endpoint a call
+never waits on a task that is itself waiting for a call queued behind it
+([ADR 0261](adr/0261-an-owning-task-holds-nothing-that-waits.md)). A job holding
+a record that waits on a session when released, or a state holding an endpoint,
+an owner or a closure capturing one, is [T-Bound] at the `own` or `call` that
+takes it. A job may still start a task of its own and join it, since that
+task's body captures only what the job owns.
 
 **Carried dependencies.** `mem.Carried[H]` is a zero-sized field type that
 carries every dependency a value of `H` may carry, read observations and

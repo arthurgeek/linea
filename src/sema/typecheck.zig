@@ -479,6 +479,8 @@ fn typecheckInternal(
     c.builder.certified_carried = c.raw_accesses.carried;
     c.builder.certified_foreign_views = c.raw_accesses.foreign_views;
     c.builder.certified_closure_entry = c.raw_accesses.closure_entry_type;
+    c.builder.certified_closure = c.raw_accesses.closure;
+    c.builder.certified_endpoint = c.raw_accesses.endpoint;
     c.raw_accesses.protocol_dual = c.protocol_dual orelse .none;
     c.raw_accesses.protocol_step = c.protocol_step orelse .none;
     c.builder.certified_protocol_dual = c.raw_accesses.protocol_dual;
@@ -1036,6 +1038,7 @@ fn typecheckInternal(
             c.builder.pool.items[row[k].index()].parameter.integer = integerDemandedBy(ast, resolution, bounds, reaches);
             c.builder.pool.items[row[k].index()].parameter.owned = containmentBound(ast, resolution, bounds, .owned) != null;
             c.builder.pool.items[row[k].index()].parameter.shareable = containmentBound(ast, resolution, bounds, .shareable) != null;
+            c.builder.pool.items[row[k].index()].parameter.isolated = containmentBound(ast, resolution, bounds, .isolated) != null;
         }
     }
 
@@ -1844,7 +1847,7 @@ fn capabilityDemand(
                 .discardable => &discardable,
                 .unrestricted => &unrestricted,
             },
-            .trait, .integer, .owned, .shareable, .unknown => continue,
+            .trait, .integer, .owned, .shareable, .isolated, .unknown => continue,
         };
         if (source.written == .none) {
             source.written = b.named.name;
@@ -1865,7 +1868,7 @@ fn capabilityDemand(
                     .discardable => &discardable,
                     .unrestricted => &unrestricted,
                 },
-                .trait, .integer, .owned, .shareable, .unknown => continue,
+                .trait, .integer, .owned, .shareable, .isolated, .unknown => continue,
             };
             if (source.through == node.DeclId.none) source.through = trait;
         }
@@ -1916,6 +1919,7 @@ fn containmentNamed(which: Containment) std.meta.Tag(resolve_mod.Bound) {
     return switch (which) {
         .owned => .owned,
         .shareable => .shareable,
+        .isolated => .isolated,
     };
 }
 
@@ -6401,6 +6405,7 @@ const Checker = struct {
                         const which: Containment = switch (resolve_mod.boundNames(self.ast, requirement.named.name, traitAt(self.ast, self.res, requirement.named.name))) {
                             .owned => .owned,
                             .shareable => .shareable,
+                            .isolated => .isolated,
                             else => continue,
                         };
                         try self.promiseWritten(d, written, resolved, requirement.named.name, .{ .bound = which }, &promised, &promises);
@@ -6440,6 +6445,7 @@ const Checker = struct {
                         .integer = integerDemandedBy(self.ast, self.res, requirements, traits),
                         .owned = containmentBound(self.ast, self.res, requirements, .owned) != null,
                         .shareable = containmentBound(self.ast, self.res, requirements, .shareable) != null,
+                        .isolated = containmentBound(self.ast, self.res, requirements, .isolated) != null,
                     },
                 });
             }
@@ -6511,6 +6517,7 @@ const Checker = struct {
                 if (!self.ownsSubject(d, settled)) continue;
                 if (demand.owned or demand.integer) try promises.append(self.gpa, .{ .subject = settled, .which = .owned });
                 if (demand.shareable or demand.integer) try promises.append(self.gpa, .{ .subject = settled, .which = .shareable });
+                if (demand.isolated or demand.integer) try promises.append(self.gpa, .{ .subject = settled, .which = .isolated });
             }
             try self.promiseHeld(promises.items);
         }
@@ -11657,38 +11664,59 @@ const Checker = struct {
         );
     }
 
-    /// Refuses `held` for the `Shareable` bound written at `bound`, naming the
-    /// parts walked from it to what is not shareable: a type declared
-    /// `unshareable`, a function value, or a type parameter not bounded
-    /// `Shareable`. The path is found over the edges the `unshareable` table was
-    /// computed from, and stops where `reportNotOwned`'s does or at an
-    /// observation, whose referent is named as what it observes.
-    fn reportNotShareable(self: *Checker, subject: []const u8, held: TypeId, bound: TokenId, at: TokenId, span: Span) std.mem.Allocator.Error!void {
-        const witness = (try self.builder.unshareableWitness(self.gpa, held)) orelse unreachable;
+    /// Refuses `held` for the `Shareable` or `Isolated` bound written at
+    /// `bound`, naming the parts walked from it to what the bound refuses: for
+    /// `Shareable`, a type declared `unshareable`; for `Isolated`, an end of a
+    /// session or an erased closure; for both, a function value or a type
+    /// parameter not bounded by it. The path is found over the edges the
+    /// bound's table was computed from, and stops where `reportNotOwned`'s
+    /// does or at an observation, whose referent is named as what it observes.
+    fn reportNotContained(self: *Checker, which: Containment, subject: []const u8, held: TypeId, bound: TokenId, at: TokenId, span: Span) std.mem.Allocator.Error!void {
+        std.debug.assert(which != .owned);
+        const witness = (if (which == .shareable)
+            try self.builder.unshareableWitness(self.gpa, held)
+        else
+            try self.builder.connectedWitness(self.gpa, held)) orelse unreachable;
         defer witness.deinit(self.gpa);
-        if (self.refused_containment_subjects.contains(.{ .decl = self.generic, .subject = witness.seed, .which = .shareable })) return;
+        if (self.refused_containment_subjects.contains(.{ .decl = self.generic, .subject = witness.seed, .which = which })) return;
+        const spelled = which.spelled();
         const held_name = try self.typeName(held);
         const seed_name = try self.typeName(witness.seed);
         var help = self.unmetBoundHelp(bound);
-        help.another_value = "pass a value that reading never changes";
+        help.another_value = if (which == .shareable) "pass a value that reading never changes" else "pass a value that holds no end of a session";
         const edit: Edit = if (self.builder.get(witness.seed) == .parameter)
-            try self.boundsEdit("Shareable", witness.seed)
+            try self.boundsEdit(spelled, witness.seed)
         else
-            .{ .refused = .{ .reason = try std.fmt.allocPrint(self.sink.arena, "`{s}` is not `Shareable`", .{held_name}), .instead = null } };
+            .{ .refused = .{ .reason = try std.fmt.allocPrint(self.sink.arena, "`{s}` is not `{s}`", .{ held_name, spelled }), .instead = null } };
         const label = try self.unmetLabel(help, edit);
         const file = self.ast.fileOf(at);
 
+        // What the seed itself is, for a declared type: unshareable, an end
+        // of a session, or an erased closure that may hold one.
+        const declared: []const u8 = if (which == .shareable)
+            "which is unshareable"
+        else if (self.builder.declOfType(witness.seed) == self.raw_accesses.endpoint)
+            "an end of a session, through which a call could wait on another task"
+        else
+            "which may hold an end of a session";
         // The seed as a sentence names it: a type parameter bare, any other
         // type with its article.
         const what: []const u8 = switch (self.builder.get(witness.seed)) {
-            .parameter => try std.fmt.allocPrint(self.sink.arena, "`{s}`, which may stand for a type that is not `Shareable`", .{seed_name}),
-            .callable, .open_type => try std.fmt.allocPrint(self.sink.arena, "{s} `{s}`, a function value, which may hold a value that is not `Shareable`", .{ article.before(seed_name), seed_name }),
-            else => try std.fmt.allocPrint(self.sink.arena, "{s} `{s}`, which is unshareable", .{ article.before(seed_name), seed_name }),
+            .parameter => try std.fmt.allocPrint(self.sink.arena, "`{s}`, which may stand for a type that is not `{s}`", .{ seed_name, spelled }),
+            .callable, .open_type => try std.fmt.allocPrint(self.sink.arena, "{s} `{s}`, a function value, which may hold a value that is not `{s}`", .{ article.before(seed_name), seed_name, spelled }),
+            else => try std.fmt.allocPrint(self.sink.arena, "{s} `{s}`, {s}", .{ article.before(seed_name), seed_name, declared }),
         };
         if (witness.steps.len == 0) return switch (self.builder.get(witness.seed)) {
-            .parameter => self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Shareable`, and `{s}` may stand for a type that is not `Shareable`", .{ subject, held_name }),
-            .callable, .open_type => self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Shareable`, and `{s}` is a function value, which may hold a value that is not `Shareable`", .{ subject, held_name }),
-            else => self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Shareable`, and `{s}` is unshareable", .{ subject, held_name }),
+            .parameter => self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `{s}`, and `{s}` may stand for a type that is not `{s}`", .{ subject, spelled, held_name, spelled }),
+            .callable, .open_type => self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `{s}`, and `{s}` is a function value, which may hold a value that is not `{s}`", .{ subject, spelled, held_name, spelled }),
+            else => if (which == .shareable)
+                self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Shareable`, and `{s}` is unshareable", .{ subject, held_name })
+            else
+                self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Isolated`, and `{s}` {s}", .{
+                    subject,
+                    held_name,
+                    if (self.builder.declOfType(witness.seed) == self.raw_accesses.endpoint) "is an end of a session, through which a call could wait on another task" else "may hold an end of a session",
+                }),
         };
 
         // A path is named as far as the reader can select it; an
@@ -11717,8 +11745,8 @@ const Checker = struct {
             file,
             span,
             label,
-            "`{s}` requires `Shareable`, and `{s}` is not `Shareable`: it {s}",
-            .{ subject, held_name, tail },
+            "`{s}` requires `{s}`, and `{s}` is not `{s}`: it {s}",
+            .{ subject, spelled, held_name, spelled, tail },
         );
         const path = try self.witnessPath(witness.steps[0..visible]);
         if (visible == witness.steps.len) return self.sink.addErrorFmt(
@@ -11726,8 +11754,8 @@ const Checker = struct {
             file,
             span,
             label,
-            "`{s}` requires `Shareable`, and `{s}` is not `Shareable`: `{s}` is {s}",
-            .{ subject, held_name, path, what },
+            "`{s}` requires `{s}`, and `{s}` is not `{s}`: `{s}` is {s}",
+            .{ subject, spelled, held_name, spelled, path, what },
         );
         const part_name = try self.typeName(witness.parts[visible - 1]);
         try self.sink.addErrorFmt(
@@ -11735,8 +11763,8 @@ const Checker = struct {
             file,
             span,
             label,
-            "`{s}` requires `Shareable`, and `{s}` is not `Shareable`: `{s}` is {s} `{s}`, which {s}",
-            .{ subject, held_name, path, article.before(part_name), part_name, tail },
+            "`{s}` requires `{s}`, and `{s}` is not `{s}`: `{s}` is {s} `{s}`, which {s}",
+            .{ subject, spelled, held_name, spelled, path, article.before(part_name), part_name, tail },
         );
     }
 
@@ -11899,7 +11927,14 @@ const Checker = struct {
             if (mode == .ask) return true;
             if (self.builder.view().mentionsOpenType(held)) return true;
             try self.noteRefused(at);
-            try self.reportNotShareable(subject, held, bound, at, span);
+            try self.reportNotContained(.shareable, subject, held, bound, at, span);
+            return true;
+        };
+        if (containmentBound(self.ast, self.res, bounds, .isolated)) |bound| if (held != .poison and !try self.builder.isIsolated(held)) {
+            if (mode == .ask) return true;
+            if (self.builder.view().mentionsOpenType(held)) return true;
+            try self.noteRefused(at);
+            try self.reportNotContained(.isolated, subject, held, bound, at, span);
             return true;
         };
         if (try self.builder.meetsCapabilityWithin(self.generic, held, requirement)) return false;
@@ -12022,7 +12057,7 @@ const Checker = struct {
     fn namesATrait(self: *const Checker, bound: TokenId) bool {
         return switch (resolve_mod.boundNames(self.ast, bound, traitAt(self.ast, self.res, bound))) {
             .trait => true,
-            .capability, .integer, .owned, .shareable, .unknown => false,
+            .capability, .integer, .owned, .shareable, .isolated, .unknown => false,
         };
     }
 
@@ -12038,7 +12073,7 @@ const Checker = struct {
             const ast = self.checker.ast;
             return switch (resolve_mod.boundNames(ast, tok, traitAt(ast, self.checker.res, tok))) {
                 .trait => |d| d,
-                .capability, .integer, .owned, .shareable, .unknown => null,
+                .capability, .integer, .owned, .shareable, .isolated, .unknown => null,
             };
         }
 
@@ -13775,7 +13810,7 @@ const Checker = struct {
         // A trait signature's `Self` is bounded by the trait's supertrait
         // list, which may not name `Owned`.
         if (self.builder.standinOf(parameter) == null and std.mem.eql(u8, name, "Self")) {
-            if (std.mem.eql(u8, required, "Owned") or std.mem.eql(u8, required, "Shareable"))
+            if (std.mem.eql(u8, required, "Owned") or std.mem.eql(u8, required, "Shareable") or std.mem.eql(u8, required, "Isolated"))
                 return .{ .refused = .{ .reason = try std.fmt.allocPrint(self.sink.arena, "a trait's `Self` cannot be bounded `{s}`", .{required}), .instead = null } };
             return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to the trait's supertraits", .{required}) };
         }
@@ -31000,6 +31035,7 @@ const Checker = struct {
                     .integer = integerDemandedBy(self.ast, self.res, requirements, traits),
                     .owned = containmentBound(self.ast, self.res, requirements, .owned) != null,
                     .shareable = containmentBound(self.ast, self.res, requirements, .shareable) != null,
+                    .isolated = containmentBound(self.ast, self.res, requirements, .isolated) != null,
                 },
             };
             filled += 1;
@@ -31735,7 +31771,7 @@ const Checker = struct {
             const own = self.ast.declBounds(d);
             if (own.len > 0) {
                 try self.reportCapabilityDemand(own, self.ast.declName(d));
-                for ([_]Containment{ .owned, .shareable }) |which| {
+                for ([_]Containment{ .owned, .shareable, .isolated }) |which| {
                     if (containmentBound(self.ast, self.res, own, which)) |bound| try self.sink.addErrorFmt(
                         .t_bound,
                         self.ast.fileOf(bound),
@@ -31764,9 +31800,9 @@ const Checker = struct {
         };
     }
 
-    /// Records an `Owned` or `Shareable` promise a declaration's `where`
-    /// clause makes about a written subject, or refuses it. An `Integer`
-    /// clause promises both.
+    /// Records an `Owned`, `Shareable` or `Isolated` promise a declaration's
+    /// `where` clause makes about a written subject, or refuses it. An
+    /// `Integer` clause promises all three.
     ///
     /// The seed reads `Owned` and `Shareable` from the record of the
     /// parameter a type stands for, so a promise holds only for a subject
@@ -31783,15 +31819,16 @@ const Checker = struct {
         written: node.TypeRef,
         subject: TypeId,
         bound: TokenId,
-        /// The bound written: `Owned` or `Shareable`, or `Integer`, which
-        /// promises both and may be written beside either.
+        /// The bound written: `Owned`, `Shareable` or `Isolated`, or
+        /// `Integer`, which promises all three and may be written beside
+        /// any of them.
         written_as: union(enum) { bound: Containment, integer },
         /// The subjects `d`'s clauses have promised so far, by bound.
         promised: *std.AutoHashMapUnmanaged(Promise, void),
         /// The promises to record once every clause of `d` is read.
         promises: *std.ArrayList(Promise),
     ) std.mem.Allocator.Error!void {
-        const implied = [_]Containment{ .owned, .shareable };
+        const implied = [_]Containment{ .owned, .shareable, .isolated };
         const named: []const Containment = switch (written_as) {
             .bound => |*which| which[0..1],
             .integer => &implied,
@@ -31868,7 +31905,7 @@ const Checker = struct {
         // and a bound on that list is a token that is there.
         const at = if (named != .none) named else bounds[0].named.name;
 
-        for ([_]Containment{ .owned, .shareable }) |which| {
+        for ([_]Containment{ .owned, .shareable, .isolated }) |which| {
             const first = containmentBound(self.ast, self.res, bounds, which) orelse continue;
             for (bounds) |bound| {
                 if (bound.kind != .named or bound.named.name == first) continue;
@@ -32212,6 +32249,7 @@ const Checker = struct {
             .integer => if (got_name != .integer) return false,
             .owned => if (got_name != .owned) return false,
             .shareable => if (got_name != .shareable) return false,
+            .isolated => if (got_name != .isolated) return false,
             .trait => |wanted| switch (got_name) {
                 .trait => |got| if (wanted != got) return false,
                 else => return false,

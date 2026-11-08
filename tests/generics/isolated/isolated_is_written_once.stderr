@@ -1,0 +1,10 @@
+error[T-Bound]: `T` is bounded `Isolated` twice
+ --> tests/generics/isolated/isolated_is_written_once.lin:1:10
+  |
+1 | fn twice[T: Isolated + Isolated](sink value: T) -> T {
+  |          ^ drop one of the two bounds
+error[T-Bound]: Integer already includes Isolated
+ --> tests/generics/isolated/isolated_is_written_once.lin:6:12
+  |
+6 | fn counted[N: Integer + Isolated](sink value: N) -> N {
+  |            ^ drop the redundant Isolated bound

@@ -215,7 +215,7 @@ pub fn serve[L: Acceptor + io.Close, H: inout fn(sink connection: Connection, pe
 // `handler` is shared by `read`, so it must satisfy `Shareable`. Every
 // started worker task is joined before `serve_workers` returns. When the task
 // that keeps the listener cannot be made, this thread serves alone.
-pub fn serve_workers[L: Acceptor + io.Close + Owned + Shareable, H: Owned + Shareable + Copyable + fn(sink connection: Connection, peer: Address)](sink listener: L, handler: H, policy: task.Policy = .Threads(128), connections: Option[UInt64] = .None) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+pub fn serve_workers[L: Acceptor + io.Close + Owned + Shareable + Isolated, H: Owned + Shareable + Copyable + fn(sink connection: Connection, peer: Address)](sink listener: L, handler: H, policy: task.Policy = .Threads(128), connections: Option[UInt64] = .None) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
     let workers = match copy(policy) {
         Sequential => 1,
         Threads(count) => count,
@@ -245,7 +245,7 @@ fn both_served(sink _first: (), sink _second: ()) {}
 
 // One worker of `serve_workers`: hand each connection the listener's owning
 // task gives out to `handler`, until it says to stop.
-fn serve_connections[L: Acceptor + Owned + Shareable, H: Owned + Shareable + Copyable + fn(sink connection: Connection, peer: Address)](handler: H, acceptor: task.Client[Accepting[L]]) {
+fn serve_connections[L: Acceptor + Owned + Shareable + Isolated, H: Owned + Shareable + Copyable + fn(sink connection: Connection, peer: Address)](handler: H, acceptor: task.Client[Accepting[L]]) {
     var serving = true
     while serving {
         match acceptor.call(|inout accepting: Accepting[L]| &accepting.next()) {
@@ -448,7 +448,7 @@ impl[L: Acceptor + io.Close] Accepting[L] {
 // one does, and the acceptor is told that the share's tasks will not run.
 // Each task is given a stack of `stack` bytes; a test asks for one no
 // system can give, so that no task can be made.
-internal fn on_tasks[L: Acceptor + Owned + Shareable, C: Shareable + Copyable, R: Owned, W: Shareable + Copyable + fn(context: C, acceptor: task.Client[Accepting[L]]) -> R, J: Shareable + Copyable + fn(sink first: R, sink second: R) -> R](count: UInt64, acceptor: task.Client[Accepting[L]], context: C, work: W, combine: J, stack: UInt64 = task.default_stack_bytes) -> R {
+internal fn on_tasks[L: Acceptor + Owned + Shareable + Isolated, C: Shareable + Copyable, R: Owned, W: Shareable + Copyable + fn(context: C, acceptor: task.Client[Accepting[L]]) -> R, J: Shareable + Copyable + fn(sink first: R, sink second: R) -> R](count: UInt64, acceptor: task.Client[Accepting[L]], context: C, work: W, combine: J, stack: UInt64 = task.default_stack_bytes) -> R {
     if count <= 1 {
         return work(context, acceptor)
     }
@@ -473,7 +473,7 @@ internal fn on_tasks[L: Acceptor + Owned + Shareable, C: Shareable + Copyable, R
 }
 
 // `take_ticket` numbers the tasks that call it, one to however many there are.
-fn take_ticket[L: Acceptor + Owned + Shareable](_context: (), acceptor: task.Client[Accepting[L]]) -> UInt64 {
+fn take_ticket[L: Acceptor + Owned + Shareable + Isolated](_context: (), acceptor: task.Client[Accepting[L]]) -> UInt64 {
     acceptor.call(
         |inout accepting: Accepting[L]| {
             accepting.served += 1
@@ -505,7 +505,7 @@ test fn on_tasks_answers_what_every_task_answered() {
 // One serving task the acceptor expects: report that it is ready, then ask
 // for a connection until it is handed one, told to stop, or has asked 2000
 // times, and answer whether it was handed one.
-fn ready_then_served[L: Acceptor + Owned + Shareable](_context: (), acceptor: task.Client[Accepting[L]]) -> Bool {
+fn ready_then_served[L: Acceptor + Owned + Shareable + Isolated](_context: (), acceptor: task.Client[Accepting[L]]) -> Bool {
     acceptor.call(|inout accepting: Accepting[L]| &accepting.ready(failed: false))
     var asked: UInt64 = 0
     while asked < 2000 {

@@ -1222,3 +1222,50 @@ error[T-Bound]: `F` requires `Owned`, and `<closure>` can carry a borrow: `count
 11 |     counter.call(
    |             ^^^^ `<closure>` is not `Owned`; pass a value whose type owns everything it holds
 ```
+
+The owning task's state, and every closure a call gives it, must also be
+`Isolated`: hold no end of a session. A call waits while the calls queued
+before it run, so if one of them could wait on another task through a session,
+and that task were itself waiting for a call queued behind it, the two would
+wait for each other forever. An endpoint, a task's handle, an `Owner` and
+anything holding one are not `Isolated`, so they are refused as an owning
+task's state or in a call's closure. Keep endpoints in the task that started
+the other task, and give the owning task only the data the tasks share:
+
+`holding_an_endpoint.lin`:
+
+```linea
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Recv
+
+fn main() -> UInt8 {
+    // The task waits for one number.
+    let listener = task.prepare(
+        sink [] |sink me: Chan[Recv[UInt64, End]]| {
+            let (_, done) = me.recv()
+            done.close()
+        },
+    ).unwrap().start().detach()
+    // The owning task's state would be the end that sends the number.
+    let desk = task.own(listener).unwrap()
+    desk.close().send(7).close()
+    0
+}
+```
+
+```
+error[T-Bound]: `S` requires `Isolated`, and `Chan[session.Send[UInt64, End], ()]` is an end of a session, through which a call could wait on another task
+  --> holding_an_endpoint.lin:17:21
+   |
+17 |     let desk = task.own(listener).unwrap()
+   |                     ^^^ `Chan[session.Send[UInt64, End], ()]` is not `Isolated`; pass a value that holds no end of a session
+error[T-Bound]: `S` requires `Isolated`, and `Chan[session.Send[UInt64, End], ()]` is an end of a session, through which a call could wait on another task
+  --> holding_an_endpoint.lin:18:10
+   |
+18 |     desk.close().send(7).close()
+   |          ^^^^^ `Chan[session.Send[UInt64, End], ()]` is not `Isolated`; pass a value that holds no end of a session
+```

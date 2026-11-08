@@ -19,7 +19,7 @@ extern fn linea_owner_free(queue: UInt64)
 // What an owning task's thread runs: it receives its state and its call
 // queue, runs each call against the state until the queue closes, and sends
 // the state back.
-fn run_owner[S: Owned](sink me: Chan[Recv[(S, UInt64), Send[S, End]]]) {
+fn run_owner[S: Owned + Isolated](sink me: Chan[Recv[(S, UInt64), Send[S, End]]]) {
     let ((state, queue), rest) = me.recv()
     var held = state
     var serving = true
@@ -39,7 +39,7 @@ fn run_owner[S: Owned](sink me: Chan[Recv[(S, UInt64), Send[S, End]]]) {
 // A running owning task. `close` joins it and answers its state. It is linear,
 // so a program cannot drop it while its task runs.
 @(opaque, linear)
-struct Owner[S: Owned] {
+struct Owner[S: Owned + Isolated] {
     queue: UInt64,
     handle: Chan[Recv[S, End]],
 }
@@ -52,7 +52,7 @@ pub struct Unowned[S] {
 
 // Start a task that owns `state`. It fails when the task's call queue, its
 // thread or its stack cannot be made, and hands the state back then.
-pub fn own[S: Owned](sink state: S) -> Result[Owner[S], Unowned[S]] {
+pub fn own[S: Owned + Isolated](sink state: S) -> Result[Owner[S], Unowned[S]] {
     // `linea_owner_open` answers zero where the queue's record cannot be
     // allocated, before any thread exists.
     let queue = linea_owner_open()
@@ -81,7 +81,7 @@ test fn an_owning_task_hands_its_state_back_when_closed() {
     testing.assert_eq(state, UInt64(41), "the state came back changed")?
 }
 
-impl[S: Owned] Owner[S] {
+impl[S: Owned + Isolated] Owner[S] {
     // A client of this owning task. It borrows the owner, so `close` cannot
     // run while a client is still used, and every task holding one must be
     // joined first.
@@ -119,7 +119,7 @@ impl[S: Owned] Owner[S] {
 
 // Releasing an owning task closes it and releases its state, so a program
 // that reads the state only through clients may `defer let` the owner.
-impl[S: Owned + Release] Release for Owner[S] {
+impl[S: Owned + Isolated + Release] Release for Owner[S] {
     fn release(sink self: Self) {
         self.close().release()
     }
@@ -134,13 +134,13 @@ test fn releasing_an_owner_joins_its_task() {
 // How a task reaches an owning task's state. Copies of a client reach the
 // same owner, so each task that calls it takes its own copy.
 @(opaque, copyable)
-struct Client[S: Owned] {
+struct Client[S: Owned + Isolated] {
     owner: borrow Owner[S],
 }
 
 // Releasing a client releases nothing: it borrows its owning task and holds
 // nothing of its own.
-impl[S: Owned] Release for Client[S] {
+impl[S: Owned + Isolated] Release for Client[S] {
     fn release(sink self: Self) {
         let Client { owner: _ } = self
     }
@@ -155,13 +155,13 @@ test fn releasing_a_client_leaves_its_owner_serving() {
     testing.assert_eq(state, UInt64(3), "releasing a client changed the state")?
 }
 
-impl[S: Owned] Client[S] {
+impl[S: Owned + Isolated] Client[S] {
     // Run `job` against the owner's state on the owner's thread, and answer
     // what it answers. Calls from every client run one at a time, in the
     // order they reach the owner. `job` moves to another thread, so what it
     // captures must be owned: it cannot hold a client, whose call could wait
     // on the task running it.
-    pub fn call[R: Owned, F: Owned + Release + fn(inout state: S) -> R](self: Self, sink job: F) -> R {
+    pub fn call[R: Owned, F: Owned + Isolated + Release + fn(inout state: S) -> R](self: Self, sink job: F) -> R {
         mem.call_owner[S, R, F](self.owner.queue, job)
     }
 

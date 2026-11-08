@@ -139,6 +139,9 @@ pub const RawAccesses = struct {
     /// stored callable's address and length appended.
     closure: DeclId = .none,
     closure_entry_type: DeclId = .none,
+    /// `session.Chan`, an end of a session and every task's handle: a value
+    /// holding one may wait on another task, so it is not `Isolated`.
+    endpoint: DeclId = .none,
     /// `Closure.open_in` and `Closure.open`, whose callback must be callable
     /// as the closure's `S`. The second opens in the system allocator.
     closure_open_in: DeclId = .none,
@@ -196,6 +199,7 @@ pub const RawAccesses = struct {
             .place = rawAccessDecl(program, ast, "slot_place", 3),
             .closure = program.libraryDeclIn("mem", "Closure") orelse .none,
             .closure_entry_type = program.libraryDeclIn("mem", "ClosureEntry") orelse .none,
+            .endpoint = program.libraryDeclIn("session", "Chan") orelse .none,
             .closure_open_in = memberOf(program, ast, "mem", "Closure", "open_in"),
             .closure_open = memberOf(program, ast, "mem", "Closure", "open"),
             .closure_entry = rawAccessDecl(program, ast, "closure_entry", 1),

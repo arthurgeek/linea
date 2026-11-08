@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Isolated`, and `S.Item` may stand for a type that is not `Isolated`
+  --> tests/generics/isolated/an_associated_type_is_bounded_isolated_in_a_where_clause.lin:27:5
+   |
+27 |     keep_apart(&source.take())
+   |     ^^^^^^^^^^ add `where S.Item: Isolated`, or drop the bound
