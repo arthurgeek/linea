@@ -175,12 +175,15 @@ jobs:
       #
       # On a pull request the guide, the library's own tests and the examples'
       # own tests are left to the `optimised` lane, which runs beside this one;
-      # a push to main runs them here.
+      # a push to main runs them here. So are the unit tests named `slow:`
+      # (`-Dslow-tests=false`), each ten seconds or more in a Debug binary and
+      # together most of its run: `optimised` runs every unit test, those
+      # included, under ReleaseFast.
       - name: Unit tests and conformance suite
         run: |
           .github/scripts/resource-log.sh follow & follower=$!
           trap 'kill "$follower" 2>/dev/null || true' EXIT
-          nice -n 10 nix develop --command zig build test -j4 -Dsequential -Dsafe-runner -Dguide=${{ github.event_name == 'push' }} -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+          nice -n 10 nix develop --command zig build test -j4 -Dsequential -Dsafe-runner -Dguide=${{ github.event_name == 'push' }} -Dslow-tests=${{ github.event_name == 'push' }} -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
 
       # The library's own tests, asserted by their exit status rather than by a
       # transcript. The suite already runs this command as a case, and that case
@@ -358,7 +361,8 @@ jobs:
 
   # The corpus and unit tests against a ReleaseFast compiler. `check` covers
   # the corpus and the compiler's unit tests in Debug; this lane is the
-  # optimised build of both.
+  # optimised build of both, and the only lane of a pull request that runs the
+  # unit tests named `slow:`, which `check` skips there.
   # Linea results must remain defined and independent of compiler optimization.
   optimised:
     # A ready pull request runs this lane, and so do manual runs and the

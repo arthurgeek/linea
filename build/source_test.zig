@@ -56,17 +56,7 @@ test "CI outcome snapshots preserve restore and save contracts" {
     const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(workflow);
     for ([_][]const u8{ "check", "sanitize", "optimised" }) |job_name| {
-        const marker = try std.fmt.allocPrint(testing.allocator, "\n  {s}:\n", .{job_name});
-        defer testing.allocator.free(marker);
-        const job_start = (std.mem.indexOf(u8, workflow, marker) orelse return error.MissingJob) + marker.len;
-        var job_end = job_start;
-        while (job_end < workflow.len) {
-            const line_end = std.mem.indexOfScalarPos(u8, workflow, job_end, '\n') orelse workflow.len;
-            const line = workflow[job_end..line_end];
-            if (line.len > 2 and std.mem.startsWith(u8, line, "  ") and line[2] != ' ') break;
-            job_end = @min(line_end + 1, workflow.len);
-        }
-        const job = workflow[job_start..job_end];
+        const job = try workflowJob(workflow, job_name);
         const restore = outcomeStep(job, "actions/cache/restore@v4") orelse return error.MissingRestoreStep;
         const save = outcomeStep(job, "actions/cache/save@v4") orelse return error.MissingSaveStep;
         try testing.expectEqualStrings("outcomes_restore", source.between(restore, "id: ", "\n").?);
@@ -115,6 +105,37 @@ test "CI outcome snapshots preserve restore and save contracts" {
         defer testing.allocator.free(expected_paths);
         try testing.expectEqualStrings(expected_paths, std.mem.trim(u8, paths, " \n"));
     }
+}
+
+/// The text of the job `name` in the workflow, from the line after its key to
+/// the next key at the same indentation.
+fn workflowJob(workflow: []const u8, name: []const u8) ![]const u8 {
+    var marker_buffer: [64]u8 = undefined;
+    const marker = try std.fmt.bufPrint(&marker_buffer, "\n  {s}:\n", .{name});
+    const job_start = (std.mem.indexOf(u8, workflow, marker) orelse return error.MissingJob) + marker.len;
+    var job_end = job_start;
+    while (job_end < workflow.len) {
+        const line_end = std.mem.indexOfScalarPos(u8, workflow, job_end, '\n') orelse workflow.len;
+        const line = workflow[job_end..line_end];
+        if (line.len > 2 and std.mem.startsWith(u8, line, "  ") and line[2] != ' ') break;
+        job_end = @min(line_end + 1, workflow.len);
+    }
+    return workflow[job_start..job_end];
+}
+
+test "CI runs the unit tests named slow in a lane every pull request requires" {
+    const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(workflow);
+    // `check` skips them on every event but a push to main, which runs no
+    // `optimised` lane; `optimised` runs them under ReleaseFast, with the rest
+    // of the unit tests, on every other event.
+    const check = try workflowJob(workflow, "check");
+    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, check, " -Dslow-tests="));
+    try testing.expect(std.mem.indexOf(u8, check, "zig build test -j4 -Dsequential -Dsafe-runner -Dguide=${{ github.event_name == 'push' }} -Dslow-tests=${{ github.event_name == 'push' }} ") != null);
+    const optimised = try workflowJob(workflow, "optimised");
+    try testing.expect(std.mem.indexOf(u8, optimised, "zig build test-unit --release=fast ") != null);
+    try testing.expect(std.mem.indexOf(u8, optimised, "github.event_name != 'push'") != null);
+    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, workflow, " -Dslow-tests="));
 }
 
 fn outcomeStep(job: []const u8, action: []const u8) ?[]const u8 {
@@ -369,6 +390,51 @@ test "a container holding tests is reached only where a comptime block names it"
     const still = source.unreachedNestedTests(gpa, all_named);
     try testing.expectEqual(@as(usize, 1), still.len);
     try testing.expectEqualStrings("a container no name reaches, line 29", still[0]);
+}
+
+test "a test is named slow exactly where it opens by skipping itself" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const paired =
+        \\test "slow: compiles every program" {
+        \\    try slow_tests.skipUnlessRun();
+        \\    try compileEverything();
+        \\}
+        \\
+        \\test "parses one line" {
+        \\    try parseOne();
+        \\}
+        \\
+        \\test {}
+        \\
+    ;
+    try testing.expectEqual(@as(usize, 0), source.slowTestMismatches(gpa, paired).len);
+
+    const broken =
+        \\test "slow: skips nothing" {
+        \\    try compileEverything();
+        \\}
+        \\
+        \\test "slow: skips too late" {
+        \\    try compileEverything();
+        \\    try slow_tests.skipUnlessRun();
+        \\}
+        \\
+        \\test "named for a quick run" {
+        \\    try slow_tests.skipUnlessRun();
+        \\}
+        \\
+        \\test "slow: empty" {}
+        \\
+    ;
+    const mismatches = source.slowTestMismatches(gpa, broken);
+    try testing.expectEqual(@as(usize, 5), mismatches.len);
+    try testing.expectEqualStrings("line 1: a test named `slow:` does not open with `try slow_tests.skipUnlessRun();`", mismatches[0]);
+    try testing.expectEqualStrings("line 5: a test named `slow:` does not open with `try slow_tests.skipUnlessRun();`", mismatches[1]);
+    try testing.expectEqualStrings("line 10: a test opens with `try slow_tests.skipUnlessRun();` and is not named `slow:`", mismatches[2]);
+    try testing.expectEqualStrings("line 14: a test named `slow:` does not open with `try slow_tests.skipUnlessRun();`", mismatches[3]);
+    try testing.expectEqualStrings("`try slow_tests.skipUnlessRun();` is written where it is not a test's first statement", mismatches[4]);
 }
 
 test "an import is resolved against the file that writes it" {

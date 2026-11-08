@@ -1,4 +1,5 @@
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
 const module_route = @import("../support/module_route.zig");
 const builtin = @import("builtin");
 const tracy = @import("../support/tracy.zig");
@@ -39925,7 +39926,8 @@ test "postfix checking and finalization release allocations on failure" {
     try testing.checkAllAllocationFailures(gpa, typecheckOnly, .{.{ .resolved = &res }});
 }
 
-test "checking that fails part-way gives back what it took" {
+test "slow: checking that fails part-way gives back what it took" {
+    try slow_tests.skipUnlessRun();
     // Every other test here asks what checking owns when it succeeds. The
     // checker allocates five tables before it exists and several more while it
     // runs, and a failure at any one of them leaves the ones before it holding

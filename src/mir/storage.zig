@@ -10,6 +10,7 @@
 //! in this file, and never a difference of opinion.
 
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
 const testing = std.testing;
 
 const Span = @import("../support/span.zig").Span;
@@ -3134,7 +3135,8 @@ test "a write at a computed index inside the whole slot ends an observation of i
     try expectRefused(try computedWriteBesideObservation(testing.allocator, null), "%10 uses %9 after %8 wrote the storage it observes");
 }
 
-test "a dominator tree as deep as the function has blocks is walked" {
+test "slow: a dominator tree as deep as the function has blocks is walked" {
+    try slow_tests.skipUnlessRun();
     const gpa = testing.allocator;
     var b = Builder.init(gpa);
     defer b.deinit();
@@ -3561,7 +3563,8 @@ pub fn retainedViewsProgram(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
-test "the phase does no more allocation work than views retained in one holder are worth" {
+test "slow: the phase does no more allocation work than views retained in one holder are worth" {
+    try slow_tests.skipUnlessRun();
     try expectLinearWork(retainedViewsProgram);
 }
 

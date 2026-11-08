@@ -1,4 +1,5 @@
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
 const testing = std.testing;
 
 const tracy = @import("../support/tracy.zig");
@@ -17807,7 +17808,8 @@ fn resolveOnly(gpa: std.mem.Allocator, ctx: struct { ast: *const Ast, generated_
     }
 }
 
-test "generated sources survive resolution and release partial expansion on allocation failure" {
+test "slow: generated sources survive resolution and release partial expansion on allocation failure" {
+    try slow_tests.skipUnlessRun();
     const gpa = testing.allocator;
     const source: Source = .{ .path = "linea-derive-0.lin", .text =
         \\trait Structural { fn value(self: Self) -> UInt8 }

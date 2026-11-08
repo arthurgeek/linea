@@ -236,6 +236,13 @@ Name every test that calls `std.testing.fuzz` with the `fuzz:` prefix, or
 `fuzz-slow:` when one input compiles whole programs against the checked library
 and twenty thousand runs would take hours.
 
+Name a unit test `slow:` when it takes ten seconds or more in a Debug unit
+binary, and make `try slow_tests.skipUnlessRun();` its first statement
+(`src/support/slow_tests.zig`); `build.zig` refuses either without the other.
+`-Dslow-tests=false` builds the unit tests with those skipped; the default runs
+them, so an unfiltered `zig build test` still runs every test, and
+`-Dtest-filter=slow:` selects them alone.
+
 CI runs on GitHub's hosted runners, from `.github/workflows/ci.yml`. A pull
 request merges into `main` once `merge-ready`, the one required status, is
 green on its final commit. A draft pull request runs nothing. A ready pull
@@ -263,7 +270,10 @@ does not block.
 
 Outside a push to `main`, `check` passes `-Dguide=false` and leaves the guide,
 the library's own tests and the examples' own tests to `optimised`, which runs
-them with the Debug compiler; a push to `main` runs them in `check`.
+them with the Debug compiler; a push to `main` runs them in `check`. It also
+passes `-Dslow-tests=false` there and leaves the `slow:` unit tests to
+`optimised`, which runs every unit test under ReleaseFast; a push to `main`
+runs them in `check`.
 `-Dsequential` runs a test suite's heavy steps (the compiles of the compiler,
 the conformance runner and the unit tests, the unit tests and the corpus walks)
 one after another, unit tests first, through copies only that suite reaches;

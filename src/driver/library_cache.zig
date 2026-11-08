@@ -28,6 +28,7 @@
 //! whole entry or none, whichever of several writers renames last.
 
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
 const builtin = @import("builtin");
 const testing = std.testing;
 const Sha256 = std.crypto.hash.sha2.Sha256;
@@ -351,7 +352,8 @@ fn evict(io: std.Io, cache: std.Io.Dir) !void {
     if (count > kept_entries) cache.deleteFile(io, &entries[0].name) catch {};
 }
 
-test "checked library cache: a missing, damaged or foreign entry is checked again and rewritten" {
+test "slow: checked library cache: a missing, damaged or foreign entry is checked again and rewritten" {
+    try slow_tests.skipUnlessRun();
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const dir = try std.fmt.allocPrint(testing.allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});

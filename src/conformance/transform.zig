@@ -1,4 +1,5 @@
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
 const testing = std.testing;
 
 const Source = @import("../support/source.zig").Source;
@@ -880,7 +881,8 @@ test writeOutDeferLet {
     ));
 }
 
-test "a defer let and the pair it is written out as reach one verdict" {
+test "slow: a defer let and the pair it is written out as reach one verdict" {
+    try slow_tests.skipUnlessRun();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
@@ -3949,7 +3951,8 @@ test "capture renaming includes a library callback's local binders" {
     try testing.expect(std.mem.indexOf(u8, got, "let _zz") != null);
 }
 
-test "every rewrite that holds a program's meaning applies to some generated program" {
+test "slow: every rewrite that holds a program's meaning applies to some generated program" {
+    try slow_tests.skipUnlessRun();
     // One program's compilations at a time: each application checks the
     // program, and the postfix rewrite checks it again beside the library, so
     // an arena kept across the seeds would hold every one of them at once.
