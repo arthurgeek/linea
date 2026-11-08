@@ -1354,7 +1354,10 @@ in. Phase 1 does not wait for the questions later phases raise.
    *Proves* that SQLite and files run from fibers without holding a carrier,
    through typed trampolines, and that a thread-affine library keeps its
    thread. *Tests:* the guest book on a loop with SQLite declared
-   `"blocking"`; a FIFO read and write between two fibers; ten thousand fibers
+   `"blocking"`, each serving fiber owning its own connection (ADR 0259):
+   operations on one connection never run on two threads at once, and a
+   connection's calls keep whatever thread SQLite's threading mode requires;
+   a FIFO read and write between two fibers; ten thousand fibers
    that each make one blocking call holding no pool thread afterwards; a C
    library that checks its thread identity across calls, declared
    `"thread_affine"`; a callback during a pool call that performs a session
