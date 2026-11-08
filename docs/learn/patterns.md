@@ -275,7 +275,10 @@ ok    a_schema_reads_options_in_every_spelling
 `--` ends options and subcommands, so `notes -- --loud` takes `--loud` as the
 title, and `--format=--x` attaches a value that starts with `--`. `--help` or
 `-h` asks for help, and `cmd.format_help(borrow matches)` writes it for the
-deepest subcommand the arguments reached.
+deepest subcommand the arguments reached. After a refused parse,
+`cmd.help_for_arguments(&cursor, error)` reads the same arguments again and
+writes the help of the command the error is about: the one the parse stopped
+in, so `notes --frmat json add` shows the options of `notes`, not of `add`.
 
 Flags, options with defaults, optional and variadic positionals, and
 subcommands keep their definitions in one place. The [notes example](../../examples/notes/)
