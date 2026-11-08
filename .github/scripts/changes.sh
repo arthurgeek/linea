@@ -22,6 +22,12 @@
 #            and nothing the lane reads changed since, so it does not run;
 #   skip     the lane has nothing to check on this event or this change.
 #
+# A lane is green at a commit when any attempt of its check run there
+# concluded success, in a run whose `changes` job recorded the same event and
+# base as this one. Each run records them as a `tested base` annotation
+# (`pull_request SHA` or `push SHA`): for a pull request, the base-branch
+# commit it was merged into; for a push, the commit itself.
+#
 # The changed paths fall into three classes:
 #
 #   a  Markdown no gate reads;
@@ -32,15 +38,23 @@
 #   c  anything else, the corpus under `tests/` included, Markdown or not:
 #      every walk reads it.
 #
-# A list's class is the highest class of any path in it.
+# A list's class is the highest class of any path in it. A build-source test
+# refuses a build step or embed that reads Markdown outside class b's paths
+# and `tests/`, so class a stays unread.
 #
 # Where the lane has a green commit, the diff from that commit to the head
 # decides: class a inherits every lane, class b runs `check` and `optimised`
-# and inherits the rest, class c runs every lane. `fuzz-mir` runs whenever the
-# diff touches what it guards, and inherits otherwise. Where it has none, the
-# diff against the pull request's base decides as it always has: a change of
-# class a skips the lane, any other runs it, and `fuzz-mir` runs only when the
-# change touches what it guards. Where neither diff exists, the lane runs.
+# and inherits the rest, class c runs every lane. `fuzz-mir` runs when that
+# diff touches what it guards, or when it is class c and the pull request's
+# change touches what it guards or is unknown, and inherits otherwise, so
+# every head of a pull request touching what it guards is fuzzed. Where the
+# lane has no green commit, the diff against the pull request's base decides:
+# a change of class a skips the lane, any other runs it, and `fuzz-mir` runs
+# only when the change touches what it guards. Where neither diff exists, the
+# lane runs.
+#
+# When the check runs cannot be read, no lane has a green commit, and each is
+# decided by the base diff alone.
 set -u -o pipefail
 
 lanes="check sanitize-address sanitize-thread optimised sweep fuzz-mir"
@@ -48,6 +62,12 @@ gated_docs='^docs/learn/.*\.md$|^docs/adr/.*\.md$|^docs/linea-semantics\.md$'
 mir_paths='^src/(mir|ownership|sema)/|^src/driver/loader\.zig$|^src/conformance/(generate|storage)\.zig$'
 # How many commits of the history are searched for a green one, newest first.
 depth=50
+
+# Set by `dry-run` alone: the base it assumes, whether it accepts a run that
+# recorded none, and the time after which a check run is not yet known.
+dry_tested_base=
+dry_accept_unrecorded=
+dry_as_of=
 
 # The name GitHub gives a lane's check run.
 check_name() {
@@ -80,7 +100,13 @@ decide() {
   esac
   if [ "$since_green" != - ]; then
     if [ "$lane" = fuzz-mir ]; then
-      if touches_mir "$since_green"; then echo run; else echo inherit; fi
+      if touches_mir "$since_green"; then
+        echo run
+      elif [ "$(classify "$since_green")" = c ] && { [ "$since_base" = - ] || touches_mir "$since_base"; }; then
+        echo run
+      else
+        echo inherit
+      fi
       return
     fi
     case "$(classify "$since_green")" in
@@ -99,23 +125,35 @@ decide() {
   fi
 }
 
-# The event and base a run in check suite $1 recorded, through the `tested
-# base` annotation its `changes` job writes (`pull_request SHA`, `push SHA`);
-# empty where no run of the suite recorded one. Fails when the API does.
+# The event and base the runs of check suite $1 recorded; empty where none
+# did, and where a run recorded two or the runs disagree, since a second
+# annotation can only come from text the run printed and does not vouch for.
+# Answered once per suite. Fails when the API does.
 suite_base() {
-  local suite=$1 id recorded
-  for id in $(awk -F'\t' -v s="$suite" '$1 == s && $2 == "changes" { print $4 }' "$runs"); do
-    recorded=$(gh api "repos/$GITHUB_REPOSITORY/check-runs/$id/annotations" \
-      --jq '.[] | select(.title == "tested base") | .message') || return 1
-    if [ -n "$recorded" ]; then
-      echo "$recorded" | head -n 1
-      return 0
+  local suite=$1 id memo=$tmp/suite-$1 found=$tmp/found-$1
+  if [ ! -e "$memo" ]; then
+    : > "$found"
+    for id in $(awk -F'\t' -v s="$suite" '$1 == s && $2 == "changes" { print $4 }' "$runs"); do
+      gh api "repos/$GITHUB_REPOSITORY/check-runs/$id/annotations" \
+        --jq '.[] | select(.title == "tested base") | .message' > "$tmp/annotations" || return 1
+      if [ "$(wc -l < "$tmp/annotations")" -gt 1 ]; then
+        echo refused >> "$found"
+      else
+        cat "$tmp/annotations" >> "$found"
+      fi
+    done
+    if [ "$(sort -u "$found" | wc -l)" -eq 1 ] && ! grep -qx refused "$found"; then
+      head -n 1 "$found" > "$memo"
+    else
+      : > "$memo"
     fi
-  done
+  fi
+  cat "$memo"
 }
 
 # Writes `LANE SHA` to $greens for each lane that passed at a commit of the
-# history, newest first, against the base the commit is held to. Fails when
+# history, newest first, against the base the commit is held to, and `LANE
+# SHA assumed` where dry-run accepted a run that recorded no base. Fails when
 # the API does, leaving no green commit for any lane.
 find_greens() {
   local commit expected lane name suite recorded
@@ -131,11 +169,14 @@ find_greens() {
     for lane in $lanes; do
       grep -q "^$lane " "$greens" && continue
       name=$(check_name "$lane")
-      for suite in $(awk -F'\t' -v n="$name" -v t="${AS_OF:-}" \
+      for suite in $(awk -F'\t' -v n="$name" -v t="$dry_as_of" \
         '$2 == n && $3 == "success" && (t == "" || $5 < t) { print $1 }' "$runs" | sort -u); do
         recorded=$(suite_base "$suite") || { : > "$greens"; return 1; }
-        if [ "$recorded" = "$expected" ] || { [ -z "$recorded" ] && [ "${ACCEPT_UNRECORDED_BASE:-}" = 1 ]; }; then
+        if [ "$recorded" = "$expected" ]; then
           echo "$lane $commit" >> "$greens"
+          break
+        elif [ -z "$recorded" ] && [ "$dry_accept_unrecorded" = 1 ]; then
+          echo "$lane $commit assumed" >> "$greens"
           break
         fi
       done
@@ -146,7 +187,7 @@ find_greens() {
 }
 
 ci() {
-  local tmp lane decision green since_base=- out
+  local lane decision green assumed since_base=- out token base_label
   tmp=$(mktemp -d "${RUNNER_TEMP:-/tmp}/changes.XXXXXX")
   runs=$tmp/runs
   greens=$tmp/greens
@@ -158,7 +199,7 @@ ci() {
       head=$HEAD_SHA
       # The pull request is tested merged into the base branch: the merge
       # commit's first parent is the base this run tests.
-      tested_base=${TESTED_BASE:-$(git rev-parse "$GITHUB_SHA^1")}
+      tested_base=${dry_tested_base:-$(git rev-parse "$GITHUB_SHA^1")}
       walk=(--max-count="$depth" "$head" "^$tested_base")
       # `--no-renames` lists a renamed file under both names, so moving code
       # into a Markdown path still counts as changing code.
@@ -177,13 +218,15 @@ ci() {
       walk=()
       ;;
   esac
+  base_label=$tested_base
+  [ -n "$dry_tested_base" ] && base_label="$tested_base (assumed: where the head leaves origin/main)"
   # The event is part of what is recorded: a pull request's lanes check what a
   # push's do not, and a push's `check` runs the guide and the library's and
   # the examples' own tests, which a scheduled or manual run's leaves out.
   echo "::notice title=tested base::$EVENT $tested_base"
 
   if [ "${#walk[@]}" -gt 0 ] && ! find_greens; then
-    echo "the check runs could not be read: no lane inherits"
+    echo "the check runs could not be read: each lane is decided as if no commit had passed it"
   fi
 
   local sanitize=skip exclude=""
@@ -198,12 +241,13 @@ ci() {
     case "$EVENT:$lane" in
       pull_request:*|push:check)
         green=$(awk -v l="$lane" '$1 == l { print $2 }' "$greens")
+        assumed=$(awk -v l="$lane" '$1 == l && $3 == "assumed" { print "; no base recorded there, assumed the same" }' "$greens")
         if [ -n "$green" ] && git -c core.quotePath=false diff --no-renames --name-only "$green" "$head" > "$tmp/since-$lane"; then
           decision=$(decide "$lane" "$tmp/since-$lane" "$since_base")
-          echo "$lane: passed at $green against $tested_base; changed since: $(classify "$tmp/since-$lane" | sed 's/^/class /'): $decision"
+          echo "$lane: passed at $green against $base_label$assumed; changed since: class $(classify "$tmp/since-$lane"): $decision"
         else
           decision=$(decide "$lane" - "$since_base")
-          echo "$lane: no commit passed it against $tested_base: $decision"
+          echo "$lane: no commit passed it against $base_label: $decision"
         fi
         ;;
     esac
@@ -220,8 +264,13 @@ ci() {
     esac
   done
   if [ "$since_base" != - ]; then
+    # The names are the pull request's own, so the runner reads no workflow
+    # command among them: a file named like `::notice ...` stays a name.
+    token=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
     echo "files changed since $PR_BASE:"
+    echo "::stop-commands::$token"
     cat "$since_base"
+    echo "::$token::"
   fi
   {
     echo "sanitize=$sanitize"
@@ -232,21 +281,24 @@ ci() {
 
 # What `ci` would have decided for the pull request's run at HEAD, read from
 # the check runs that had finished when HEAD's first run started. The base is
-# taken to be where HEAD leaves `origin/main`, and a run that recorded no base
-# is accepted against it, so runs from before the record existed can be read.
+# assumed to be where HEAD leaves `origin/main`, and a run that recorded no
+# base is accepted against it, so runs from before the record existed can be
+# read; the output says where it assumed either.
 dry_run() {
   local pr=$1 sha
   sha=$(git rev-parse "$2") || return 1
-  export EVENT=pull_request HEAD_SHA=$sha GITHUB_SHA=$sha ACCEPT_UNRECORDED_BASE=1
+  export EVENT=pull_request HEAD_SHA=$sha GITHUB_SHA=$sha
   export GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}
-  PR_BASE=$(git merge-base "$sha" origin/main) && TESTED_BASE=$PR_BASE || return 1
-  export PR_BASE TESTED_BASE
-  AS_OF=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$sha/check-runs?filter=all&per_page=100" \
+  PR_BASE=$(git merge-base "$sha" origin/main) || return 1
+  export PR_BASE
+  dry_tested_base=$PR_BASE
+  dry_accept_unrecorded=1
+  dry_as_of=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$sha/check-runs?filter=all&per_page=100" \
     --jq '.check_runs[].started_at' | sort | head -n 1)
   # A commit pushed together with a later one has no run; its committer date
   # stands in for when it would have started.
-  export AS_OF=${AS_OF:-$(TZ=UTC git log -1 --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd "$sha")}
-  echo "pull request #$pr at $sha, as of ${AS_OF}:"
+  dry_as_of=${dry_as_of:-$(TZ=UTC git log -1 --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd "$sha")}
+  echo "pull request #$pr at $sha, as of ${dry_as_of}:"
   GITHUB_OUTPUT=/dev/stdout ci
 }
 

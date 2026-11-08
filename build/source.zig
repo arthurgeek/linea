@@ -103,6 +103,57 @@ pub fn quotedIn(gpa: std.mem.Allocator, text: []const u8) []const []const u8 {
     return found.toOwnedSlice(gpa) catch @panic("out of memory");
 }
 
+/// The Markdown files and documentation directories the string literals of
+/// `text` name, in the order they are written: a literal holding no space
+/// that ends in `.md` and holds a `/`, or that names something under `docs/`.
+///
+/// CI keeps a lane from running when only Markdown it does not read changed,
+/// so what a build step, a gate or an embedded file reads is held to the
+/// paths `.github/scripts/changes.sh` classes as read. A path is found where
+/// the build names it, as a literal; a bare file name is read relative to a
+/// directory named elsewhere, and that directory is the literal held. A
+/// comment line is prose and a multiline string is a fixture, so neither is
+/// read, and a character literal holding a quote opens no string.
+pub fn markdownPaths(gpa: std.mem.Allocator, text: []const u8) []const []const u8 {
+    var found: std.ArrayList([]const u8) = .empty;
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        const code = std.mem.trimStart(u8, line, " ");
+        if (std.mem.startsWith(u8, code, "//") or std.mem.startsWith(u8, code, "\\\\")) continue;
+        var at: usize = 0;
+        while (at < line.len) : (at += 1) {
+            if (std.mem.startsWith(u8, line[at..], "'\"'")) {
+                at += 2;
+                continue;
+            }
+            if (line[at] != '"') continue;
+            var end = at + 1;
+            while (end < line.len and line[end] != '"') : (end += 1) {
+                if (line[end] == '\\') end += 1;
+            }
+            if (end >= line.len) break;
+            const literal = line[at + 1 .. end];
+            at = end;
+            if (std.mem.indexOfAny(u8, literal, " \t") != null) continue;
+            const markdown = std.mem.endsWith(u8, literal, ".md") and std.mem.indexOfScalar(u8, literal, '/') != null;
+            const docs = literal.len > "docs/".len and std.mem.startsWith(u8, literal, "docs/");
+            if (markdown or docs) found.append(gpa, literal) catch @panic("out of memory");
+        }
+    }
+    return found.toOwnedSlice(gpa) catch @panic("out of memory");
+}
+
+/// Whether a lane that reads Markdown may read `path`: the guide, the
+/// decision index, the semantics and the corpus, which CI reruns the reading
+/// lanes for when they change.
+pub fn markdownIsGated(path: []const u8) bool {
+    for ([_][]const u8{ "docs/learn", "docs/adr", "tests" }) |dir| {
+        if (std.mem.eql(u8, path, dir)) return true;
+        if (std.mem.startsWith(u8, path, dir) and path[dir.len] == '/') return true;
+    }
+    return std.mem.eql(u8, path, "docs/linea-semantics.md");
+}
+
 /// The first quoted string on the line holding `at`, or null where that line
 /// holds none.
 ///

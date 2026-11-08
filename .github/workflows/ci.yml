@@ -30,7 +30,8 @@ jobs:
   # history passed it against the same base and nothing the lane reads changed
   # since: Markdown no gate reads leaves every lane alone, and the guide, the
   # decision index and the semantics are read only by `check` and `optimised`.
-  # A pull request's base is the base-branch commit it was merged into for the
+  # A lane passed at a commit when any attempt of its job there succeeded. A
+  # pull request's base is the base-branch commit it was merged into for the
   # run, and a push's is the commit itself; each run records its own as a
   # `tested base` annotation, which a later run reads back through the
   # check-runs API. The search starts at the head and walks back through the
@@ -43,9 +44,12 @@ jobs:
   # skips it, and anything else runs it. `fuzz-mir` runs only when the change
   # touches what it guards: lowering, ownership, checking and the type tables
   # (`src/sema`), the loader that runs them in order, or the program
-  # generator. A push to main with no green commit runs `check`, a scheduled
-  # or manual run runs every lane, and so does any run whose check runs cannot
-  # be read.
+  # generator; with a green commit it also reruns on any code change of such a
+  # pull request, so every head of one is fuzzed. A push to main with no green
+  # commit runs `check`, and a scheduled or manual run runs every lane. When
+  # the check runs cannot be read, no lane has a green commit: each is decided
+  # as above, so a pull request of documentation alone still skips its lanes
+  # and a push still runs `check` alone.
   changes:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

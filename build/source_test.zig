@@ -219,31 +219,104 @@ test "CI lanes run on the decision changes makes for each of them" {
     try testing.expect(std.mem.indexOf(u8, script, "echo \"::notice title=tested base::$EVENT $tested_base\"") != null);
     try testing.expect(std.mem.indexOf(u8, script, "select(.title == \"tested base\")") != null);
 
-    // Each lane runs only where `changes` said `run`, and `merge-ready`
-    // judges it against the same output.
+    // Each lane runs only where `changes` said `run`, and never on a draft;
+    // the whole line, so a condition dropped from it fails here.
     const merge_ready = try workflowJob(workflow, "merge-ready");
-    const lanes = [_]struct { job: []const u8, want: []const u8 }{
-        .{ .job = "check", .want = "WANT_CHECK" },
-        .{ .job = "sanitize", .want = "WANT_SANITIZE" },
-        .{ .job = "optimised", .want = "WANT_OPTIMISED" },
-        .{ .job = "sweep", .want = "" },
-        .{ .job = "fuzz-mir", .want = "WANT_FUZZ_MIR" },
+    const lanes = [_]struct { job: []const u8, @"if": []const u8 }{
+        .{ .job = "check", .@"if" = "${{ needs.changes.outputs.check == 'run' && !github.event.pull_request.draft }}" },
+        .{ .job = "sanitize", .@"if" = "${{ needs.changes.outputs.sanitize == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}" },
+        .{ .job = "optimised", .@"if" = "${{ needs.changes.outputs.optimised == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}" },
+        .{ .job = "sweep", .@"if" = "${{ needs.changes.outputs.sweep == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}" },
+        .{ .job = "fuzz-mir", .@"if" = "${{ github.event_name == 'pull_request' && !github.event.pull_request.draft && needs.changes.outputs.fuzz-mir == 'run' }}" },
     };
     for (lanes) |lane| {
         var buffer: [256]u8 = undefined;
         const output = try std.fmt.bufPrint(&buffer, "      {s}: ${{{{ steps.lanes.outputs.{s} }}}}\n", .{ lane.job, lane.job });
         try testing.expect(std.mem.indexOf(u8, changes, output) != null);
-        const condition = try std.fmt.bufPrint(&buffer, "needs.changes.outputs.{s} == 'run'", .{lane.job});
-        const @"if" = source.between(try workflowJob(workflow, lane.job), "\n    if: ${{ ", " }}\n") orelse return error.MissingCondition;
-        try testing.expect(std.mem.indexOf(u8, @"if", condition) != null);
-        if (lane.want.len == 0) continue;
-        const want = try std.fmt.bufPrint(&buffer, "{s}: ${{{{ needs.changes.outputs.{s} }}}}\n", .{ lane.want, lane.job });
-        try testing.expect(std.mem.indexOf(u8, merge_ready, want) != null);
-        const judged = try std.fmt.bufPrint(&buffer, "judge {s} \"${s}\"", .{ lane.job, lane.want });
-        try testing.expect(std.mem.indexOf(u8, merge_ready, judged) != null);
+        const condition = source.between(try workflowJob(workflow, lane.job), "\n    if: ", "\n") orelse return error.MissingCondition;
+        try testing.expectEqualStrings(lane.@"if", condition);
     }
     // A sanitizer the script finds inherited is left out of the matrix.
     try testing.expect(std.mem.indexOf(u8, try workflowJob(workflow, "sanitize"), "        exclude: ${{ fromJSON(needs.changes.outputs.sanitize-exclude) }}\n") != null);
+    // The whole step, so a lane `changes` said to run cannot pass without
+    // passing, and one it said to keep cannot pass by running and failing.
+    try testing.expectEqualStrings(
+        \\      - name: Every lane the event requires passed
+        \\        env:
+        \\          EVENT: ${{ github.event_name }}
+        \\          DRAFT: ${{ github.event.pull_request.draft || false }}
+        \\          CHANGES: ${{ needs.changes.result }}
+        \\          WANT_CHECK: ${{ needs.changes.outputs.check }}
+        \\          WANT_SANITIZE: ${{ needs.changes.outputs.sanitize }}
+        \\          WANT_OPTIMISED: ${{ needs.changes.outputs.optimised }}
+        \\          WANT_FUZZ_MIR: ${{ needs.changes.outputs.fuzz-mir }}
+        \\          CHECK: ${{ needs.check.result }}
+        \\          SANITIZE: ${{ needs.sanitize.result }}
+        \\          OPTIMISED: ${{ needs.optimised.result }}
+        \\          FUZZ: ${{ needs.fuzz.result }}
+        \\          FUZZ_MIR: ${{ needs.fuzz-mir.result }}
+        \\        run: |
+        \\          echo "changes: $CHANGES (check=$WANT_CHECK, sanitize=$WANT_SANITIZE, optimised=$WANT_OPTIMISED, fuzz-mir=$WANT_FUZZ_MIR)"
+        \\          echo "check: $CHECK, sanitize: $SANITIZE, optimised: $OPTIMISED, fuzz: $FUZZ, fuzz-mir: $FUZZ_MIR"
+        \\          if [ "$CHANGES" != success ]; then
+        \\            echo "which lanes the change needs is unknown, so no lane can be judged"
+        \\            exit 1
+        \\          fi
+        \\          case " $CHECK $SANITIZE $OPTIMISED $FUZZ $FUZZ_MIR " in
+        \\            *" failure "*|*" cancelled "*)
+        \\              echo "a lane failed or was cancelled"
+        \\              exit 1 ;;
+        \\          esac
+        \\          if [ "$EVENT" = pull_request ] && [ "$DRAFT" = true ]; then
+        \\            echo "a draft pull request runs no lane"
+        \\            exit 1
+        \\          fi
+        \\          status=0
+        \\          judge() {
+        \\            local lane=$1 want=$2 result=$3
+        \\            case "$want" in
+        \\              run)
+        \\                if [ "$result" != success ]; then
+        \\                  echo "$lane had to run and was $result"
+        \\                  status=1
+        \\                fi ;;
+        \\              inherit|skip)
+        \\                if [ "$result" != skipped ]; then
+        \\                  echo "$lane was $want and still ran: $result"
+        \\                  status=1
+        \\                else
+        \\                  echo "$lane: $want"
+        \\                fi ;;
+        \\              *)
+        \\                echo "changes named no decision for $lane"
+        \\                status=1 ;;
+        \\            esac
+        \\          }
+        \\          judge check "$WANT_CHECK" "$CHECK"
+        \\          judge sanitize "$WANT_SANITIZE" "$SANITIZE"
+        \\          judge optimised "$WANT_OPTIMISED" "$OPTIMISED"
+        \\          judge fuzz-mir "$WANT_FUZZ_MIR" "$FUZZ_MIR"
+        \\          case "$EVENT" in
+        \\            pull_request|push) ;;
+        \\            *) judge fuzz run "$FUZZ" ;;
+        \\          esac
+        \\          exit "$status"
+    , try stepText(merge_ready, "Every lane the event requires passed"));
+}
+
+test "changes decides each lane from the check runs of the history" {
+    // A scratch repository and a `gh` answering from files, covering a base
+    // that matches, one that does not or was never recorded, an API that
+    // fails, a run on the base itself, pushes and a scheduled run.
+    const result = try std.process.run(testing.allocator, testing.io, .{
+        .argv = &.{ "bash", ".github/scripts/changes_test.sh" },
+    });
+    defer testing.allocator.free(result.stdout);
+    defer testing.allocator.free(result.stderr);
+    if (!std.meta.eql(result.term, std.process.Child.Term{ .exited = 0 })) {
+        std.debug.print("{s}{s}", .{ result.stdout, result.stderr });
+        return error.TestUnexpectedResult;
+    }
 }
 
 /// What `changes.sh decide` prints for `lane`, given the paths changed since
@@ -296,14 +369,30 @@ test "Markdown a gate reads reruns only the lanes that read it" {
     }
 }
 
-test "anything else reruns every lane, and fuzz-mir only what it guards" {
+test "anything else reruns every lane" {
     for ([_][]const u8{ "tests/cmd/README.md\n", "build.zig\n", "docs/learn/notes.txt\n", "AGENTS.md\nsrc/sema/types.zig\n" }) |changed| {
         for (ci_lanes) |lane| {
-            const guarded = std.mem.indexOf(u8, changed, "src/sema/") != null;
-            const want = if (!std.mem.eql(u8, lane, "fuzz-mir") or guarded) "run" else "inherit";
-            try expectDecision(want, lane, changed, null);
+            if (std.mem.eql(u8, lane, "fuzz-mir")) continue;
+            try expectDecision("run", lane, changed, "src/main.zig\n");
         }
     }
+}
+
+test "fuzz-mir reruns on any code change of a pull request that touches what it guards" {
+    // Code it guards, changed since the green commit.
+    try expectDecision("run", "fuzz-mir", "src/mir/lower.zig\n", "src/mir/lower.zig\n");
+    try expectDecision("run", "fuzz-mir", "src/sema/types.zig\n", null);
+    // Other code, on a pull request whose change touches what it guards: the
+    // head is fuzzed again, as every head of such a pull request is.
+    try expectDecision("run", "fuzz-mir", "build.zig\n", "src/mir/lower.zig\nbuild.zig\n");
+    try expectDecision("run", "fuzz-mir", "std/http/request_ids.lin\n", "src/driver/loader.zig\n");
+    // Other code where the base diff is unknown.
+    try expectDecision("run", "fuzz-mir", "build.zig\n", null);
+    // Other code on a pull request that touches nothing it guards.
+    try expectDecision("inherit", "fuzz-mir", "build.zig\n", "build.zig\n");
+    // Documentation alone, whatever the pull request touches.
+    try expectDecision("inherit", "fuzz-mir", "AGENTS.md\n", "src/mir/lower.zig\n");
+    try expectDecision("inherit", "fuzz-mir", "docs/learn/03-errors.md\n", "src/mir/lower.zig\n");
 }
 
 test "a lane with no green commit is decided by the diff against the base" {
@@ -316,6 +405,63 @@ test "a lane with no green commit is decided by the diff against the base" {
         // Without either diff every lane runs.
         try expectDecision("run", lane, null, null);
     }
+}
+
+test "a Markdown path is a literal the build names, outside comments and fixtures" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const text =
+        \\    const semantics = b.path("docs/linea-semantics.md");
+        \\    run.addArg(b.pathFromRoot("docs/learn"));
+        \\    // read(b, io, "docs/formatting.md") is prose
+        \\    const page = read(b, io, "std/README.md");
+        \\    if (c == '"') read(b, io, "docs/architecture.md");
+        \\    @panic("no table in docs/linea-semantics.md");
+        \\    const name = "README.md";
+        \\    \\"examples/notes.md"
+        \\
+    ;
+    const found = source.markdownPaths(arena.allocator(), text);
+    try testing.expectEqual(@as(usize, 4), found.len);
+    try testing.expectEqualStrings("docs/linea-semantics.md", found[0]);
+    try testing.expectEqualStrings("docs/learn", found[1]);
+    try testing.expectEqualStrings("std/README.md", found[2]);
+    try testing.expectEqualStrings("docs/architecture.md", found[3]);
+}
+
+test "only the guide, the decision index, the semantics and the corpus are Markdown a lane reads" {
+    for ([_][]const u8{ "docs/learn", "docs/learn/README.md", "docs/adr/README.md", "docs/linea-semantics.md", "tests/cmd/README.md" }) |path|
+        try testing.expect(source.markdownIsGated(path));
+    for ([_][]const u8{ "docs", "docs/architecture.md", "docs/learner/x.md", "std/README.md", "tests.md", "AGENTS.md" }) |path|
+        try testing.expect(!source.markdownIsGated(path));
+}
+
+test "the build reads no Markdown that CI lets a lane skip" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const io = testing.io;
+    var sources: std.ArrayList([]const u8) = .empty;
+    try sources.append(gpa, "build.zig");
+    var dir = try std.Io.Dir.cwd().openDir(io, "build", .{ .iterate = true });
+    defer dir.close(io);
+    var entries = dir.iterate();
+    while (try entries.next(io)) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".zig")) continue;
+        // A test file's literals are its cases' fixtures.
+        if (std.mem.endsWith(u8, entry.name, "_test.zig")) continue;
+        try sources.append(gpa, try std.fmt.allocPrint(gpa, "build/{s}", .{entry.name}));
+    }
+    var ungated: usize = 0;
+    for (sources.items) |path| {
+        const text = try std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(1 << 22));
+        for (source.markdownPaths(gpa, text)) |named| {
+            if (source.markdownIsGated(named)) continue;
+            std.debug.print("{s} reads {s}, which CI lets every lane skip; read it from a path .github/scripts/changes.sh classes as read, or class it so\n", .{ path, named });
+            ungated += 1;
+        }
+    }
+    try testing.expectEqual(@as(usize, 0), ungated);
 }
 
 test "explicit release modes preserve their requested safety and size policy" {
