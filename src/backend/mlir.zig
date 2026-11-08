@@ -508,20 +508,22 @@ fn emitEntryWrapper(w: *std.Io.Writer, module: *const Module, sanitize: ?Sanitiz
 
 /// The width one exported parameter or answer crosses the boundary in.
 ///
-/// The type a value crosses the C boundary as: its storage representation,
+/// The type a value crosses the C boundary as: `types.foreignScalar`'s answer,
 /// which for an integer is the declared width rather than the width the body
 /// computes in. That width is an implementation choice about where overflow is
 /// caught, and publishing it would make this module's calling convention
-/// something every caller has to match forever.
+/// something every caller has to match forever. The same answer is what
+/// [T-ExternPrototype] holds a C prototype to.
 ///
 /// Only an integer, a `Float64` or a newtype over one reaches here: the
 /// checker refused every other type ([T-Extern], [T-Export]), so another
 /// representation is a compiler defect rather than a signature to print.
 fn foreignTypeOf(module: *const Module, ty: TypeId) []const u8 {
-    const representation = module.representationOf(ty).storage;
-    if (representation != .code_pointer and !types_mod.crossesForeign(&module.types, ty))
+    // A callback crosses as the address of its C-callable entry.
+    if (module.representationOf(ty).storage == .code_pointer) return "!llvm.ptr";
+    const scalar = types_mod.foreignScalar(&module.types, ty) orelse
         std.debug.panic("compiler defect: a type the checker refused crosses the foreign boundary", .{});
-    return switch (representation) {
+    return switch (scalar) {
         .integer => |integer| switch (integer.bits) {
             8 => "i8",
             16 => "i16",
@@ -529,10 +531,7 @@ fn foreignTypeOf(module: *const Module, ty: TypeId) []const u8 {
             64 => "i64",
             else => std.debug.panic("compiler defect: a {d}-bit integer crosses the foreign boundary", .{integer.bits}),
         },
-        .float => |bits| if (bits == 64) "f64" else std.debug.panic("compiler defect: a {d}-bit float crosses the foreign boundary", .{bits}),
-        // A callback crosses as the address of its C-callable entry.
-        .code_pointer => "!llvm.ptr",
-        else => std.debug.panic("compiler defect: this type does not cross the foreign boundary", .{}),
+        .float64 => "f64",
     };
 }
 

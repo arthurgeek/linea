@@ -2165,25 +2165,39 @@ fn sameContractPath(a: ContractPath, b: ContractPath) bool {
     return std.meta.eql(a.root, b.root) and sameSelectors(a.fields, b.fields);
 }
 
-/// Whether a value of `t` crosses a foreign boundary ([T-Extern],
-/// [T-Export]): an integer of 8, 16, 32 or 64 bits, a `Float64`, or an
-/// unrefined newtype over one. Every bit pattern of these is a value on both
-/// sides, so nothing C hands back can be a value Linea does not define. A
-/// refined newtype is refused because C could hand back a value outside its
-/// range; a newtype's ownership policy is the declaration's to state with its
-/// parameter convention. The checker refuses a signature by this answer and
-/// the backend holds what it renders to it, so `pool` is a pool being built or
-/// a finished one.
-pub fn crossesForeign(pool: anytype, t: TypeId) bool {
-    if (t == .f64) return true;
+/// What a value crosses a foreign boundary as: an integer of a width and
+/// signedness, or a `Float64`. The checker refuses a signature naming any
+/// other type ([T-Extern], [T-Export]), the backend writes the C type each of
+/// these is, and [T-ExternPrototype] holds a C prototype to the same answer.
+pub const ForeignScalar = union(enum) {
+    integer: struct { bits: u8, signed: bool },
+    float64,
+};
+
+/// How a value of `t` crosses a foreign boundary, or null where it does not:
+/// an integer of 8, 16, 32 or 64 bits, a `Float64`, or an unrefined newtype
+/// over one, which crosses as its base. Every bit pattern of these is a value
+/// on both sides, so nothing C hands back can be a value Linea does not
+/// define. A refined newtype is refused because C could hand back a value
+/// outside its range; a newtype's ownership policy is the declaration's to
+/// state with its parameter convention. `pool` is a pool being built or a
+/// finished one.
+pub fn foreignScalar(pool: anytype, t: TypeId) ?ForeignScalar {
+    if (t == .f64) return .float64;
     if (t.integerInfo()) |info| return switch (info.bits) {
-        8, 16, 32, 64 => true,
-        else => false,
+        8, 16, 32, 64 => .{ .integer = .{ .bits = info.bits, .signed = info.signed } },
+        else => null,
     };
     return switch (pool.get(t)) {
-        .newtype => |newtype| !newtype.refined and crossesForeign(pool, newtype.base),
-        else => false,
+        .newtype => |newtype| if (newtype.refined) null else foreignScalar(pool, newtype.base),
+        else => null,
     };
+}
+
+/// Whether a value of `t` crosses a foreign boundary ([T-Extern],
+/// [T-Export]), as `foreignScalar` answers it.
+pub fn crossesForeign(pool: anytype, t: TypeId) bool {
+    return foreignScalar(pool, t) != null;
 }
 
 fn dependencyFreeScalar(pool: anytype, ty: TypeId) bool {
