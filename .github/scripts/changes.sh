@@ -39,8 +39,12 @@
 #      every walk reads it.
 #
 # A list's class is the highest class of any path in it. A build-source test
-# refuses a build step or embed that reads Markdown outside class b's paths
-# and `tests/`, so class a stays unread.
+# holds class a unread: it refuses a Markdown string literal in `build.zig` or
+# a non-test file of `build/` (one ending in `.md`, or naming `docs` or a path
+# under it) outside class b's paths and `tests/`, save `README.md`, which the
+# guide gate reads inside `docs/learn`; an `@embedFile` of Markdown anywhere in
+# `src/`; and an `embed` of Markdown in a `.lin` file under `std/` or
+# `examples/`. A path built at run time from other values escapes it.
 #
 # Where the lane has a green commit, the diff from that commit to the head
 # decides: class a inherits every lane, class b runs `check` and `optimised`

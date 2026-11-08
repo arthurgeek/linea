@@ -378,7 +378,7 @@ test "anything else reruns every lane" {
     }
 }
 
-test "fuzz-mir reruns on any code change of a pull request that touches what it guards" {
+test "the fuzz-mir lane reruns on any code change of a pull request that touches what it guards" {
     // Code it guards, changed since the green commit.
     try expectDecision("run", "fuzz-mir", "src/mir/lower.zig\n", "src/mir/lower.zig\n");
     try expectDecision("run", "fuzz-mir", "src/sema/types.zig\n", null);
@@ -417,30 +417,67 @@ test "a Markdown path is a literal the build names, outside comments and fixture
         \\    const page = read(b, io, "std/README.md");
         \\    if (c == '"') read(b, io, "docs/architecture.md");
         \\    @panic("no table in docs/linea-semantics.md");
-        \\    const name = "README.md";
+        \\    const agents = dir.readFileAlloc(io, "AGENTS.md", gpa, .unlimited);
+        \\    const formatting = b.pathJoin(&.{ "docs", "formatting.md" });
+        \\    if (std.mem.endsWith(u8, name, ".md")) continue;
         \\    \\"examples/notes.md"
         \\
     ;
     const found = source.markdownPaths(arena.allocator(), text);
-    try testing.expectEqual(@as(usize, 4), found.len);
-    try testing.expectEqualStrings("docs/linea-semantics.md", found[0]);
-    try testing.expectEqualStrings("docs/learn", found[1]);
-    try testing.expectEqualStrings("std/README.md", found[2]);
-    try testing.expectEqualStrings("docs/architecture.md", found[3]);
+    const want = [_][]const u8{ "docs/linea-semantics.md", "docs/learn", "std/README.md", "docs/architecture.md", "AGENTS.md", "docs", "formatting.md" };
+    try testing.expectEqual(want.len, found.len);
+    for (want, found) |w, f| try testing.expectEqualStrings(w, f);
+}
+
+test "an embedded Markdown file is the literal an embed call is given" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const zig =
+        \\const notes = @embedFile("notes.md");
+        \\const toolchain = @embedFile("driver/toolchain.zig");
+        \\const semantics = @embedFile("semantics");
+        \\
+    ;
+    const embedded = source.embeddedMarkdown(gpa, zig, "@embedFile(");
+    try testing.expectEqual(@as(usize, 1), embedded.len);
+    try testing.expectEqualStrings("notes.md", embedded[0]);
+    const lin =
+        \\let notes = embed("../docs/notes.md")
+        \\let page = embed("page.html")
+        \\let other = reembed("x.md")
+        \\
+    ;
+    const linea = source.embeddedMarkdown(gpa, lin, "embed(");
+    try testing.expectEqual(@as(usize, 1), linea.len);
+    try testing.expectEqualStrings("../docs/notes.md", linea[0]);
 }
 
 test "only the guide, the decision index, the semantics and the corpus are Markdown a lane reads" {
     for ([_][]const u8{ "docs/learn", "docs/learn/README.md", "docs/adr/README.md", "docs/linea-semantics.md", "tests/cmd/README.md" }) |path|
         try testing.expect(source.markdownIsGated(path));
-    for ([_][]const u8{ "docs", "docs/architecture.md", "docs/learner/x.md", "std/README.md", "tests.md", "AGENTS.md" }) |path|
+    for ([_][]const u8{ "docs", "docs/architecture.md", "docs/learner/x.md", "std/README.md", "tests.md", "AGENTS.md", "README.md" }) |path|
         try testing.expect(!source.markdownIsGated(path));
 }
+
+/// Markdown literals the build names that are not paths of their own, each
+/// with what it is read against.
+const markdown_names_allowed = [_]struct { name: []const u8, why: []const u8 }{
+    // `build/guide_gate.zig` reads it inside the guide's directory, and
+    // `build/source.zig` compares names listed there against it: the guide's
+    // index, `docs/learn/README.md`.
+    .{ .name = "README.md", .why = "the guide's index, read inside docs/learn" },
+};
 
 test "the build reads no Markdown that CI lets a lane skip" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
     const io = testing.io;
+    var ungated: usize = 0;
+
+    // Literals in `build.zig` and the gates under `build/`. A test file's
+    // literals are its cases' fixtures.
     var sources: std.ArrayList([]const u8) = .empty;
     try sources.append(gpa, "build.zig");
     var dir = try std.Io.Dir.cwd().openDir(io, "build", .{ .iterate = true });
@@ -448,17 +485,39 @@ test "the build reads no Markdown that CI lets a lane skip" {
     var entries = dir.iterate();
     while (try entries.next(io)) |entry| {
         if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".zig")) continue;
-        // A test file's literals are its cases' fixtures.
         if (std.mem.endsWith(u8, entry.name, "_test.zig")) continue;
         try sources.append(gpa, try std.fmt.allocPrint(gpa, "build/{s}", .{entry.name}));
     }
-    var ungated: usize = 0;
     for (sources.items) |path| {
         const text = try std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(1 << 22));
-        for (source.markdownPaths(gpa, text)) |named| {
+        named: for (source.markdownPaths(gpa, text)) |named| {
             if (source.markdownIsGated(named)) continue;
+            for (markdown_names_allowed) |allowed| if (std.mem.eql(u8, named, allowed.name)) continue :named;
             std.debug.print("{s} reads {s}, which CI lets every lane skip; read it from a path .github/scripts/changes.sh classes as read, or class it so\n", .{ path, named });
             ungated += 1;
+        }
+    }
+
+    // What the compiler embeds, and what the library and the examples embed.
+    // The compiler's gated documents reach it as named modules, so no
+    // `@embedFile` of Markdown is read by a path.
+    const trees = [_]struct { dir: []const u8, extension: []const u8, call: []const u8 }{
+        .{ .dir = "src", .extension = ".zig", .call = "@embedFile(" },
+        .{ .dir = "std", .extension = ".lin", .call = "embed(" },
+        .{ .dir = "examples", .extension = ".lin", .call = "embed(" },
+    };
+    for (trees) |tree| {
+        var root = try std.Io.Dir.cwd().openDir(io, tree.dir, .{ .iterate = true });
+        defer root.close(io);
+        var walker = try root.walk(gpa);
+        defer walker.deinit();
+        while (try walker.next(io)) |entry| {
+            if (entry.kind != .file or !std.mem.endsWith(u8, entry.basename, tree.extension)) continue;
+            const text = try root.readFileAlloc(io, entry.path, gpa, .limited(1 << 24));
+            for (source.embeddedMarkdown(gpa, text, tree.call)) |named| {
+                std.debug.print("{s}/{s} embeds {s}, which CI lets every lane skip\n", .{ tree.dir, entry.path, named });
+                ungated += 1;
+            }
         }
     }
     try testing.expectEqual(@as(usize, 0), ungated);

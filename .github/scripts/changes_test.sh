@@ -16,6 +16,10 @@
 # each annotations call to `$FAKE/calls`.
 set -u -o pipefail
 
+# The scratch repository is its own: a hook or a caller's environment that
+# points git at another repository, or a global hook, must not reach it.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
+
 script=$(cd "$(dirname "$0")" && pwd)/changes.sh
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -43,7 +47,7 @@ exit 0
 EOF
 chmod +x "$FAKE/bin/gh"
 
-git() { command git -C "$repo" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false "$@"; }
+git() { command git -C "$repo" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false -c core.hooksPath=/dev/null "$@"; }
 commit() {
   mkdir -p "$repo/$(dirname "$1")"
   echo "$2" > "$repo/$1"
@@ -176,6 +180,13 @@ run_pr "a suite with two tested bases" "$D" "$merge"
 expect_lanes run run run run run
 grep -q '^::stop-commands::' "$work/log" ||
   { echo "$case_name: the changed files are listed without stop-commands"; failures=$((failures + 1)); }
+
+# A run whose own annotations name its base twice, the same both times,
+# printed one of them from text it does not vouch for.
+reset
+record "$C" 1 10 "pull_request $B" "pull_request $B"
+run_pr "a run recording the same tested base twice" "$D" "$merge"
+expect_lanes run run run run run
 
 # When the check runs cannot be read, each lane is decided by the base diff.
 reset

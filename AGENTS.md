@@ -281,9 +281,14 @@ a gate reads skips it, anything else runs it. A push to main with no such
 commit runs `check`, and a scheduled or manual run runs every lane. When the
 check runs cannot be read, no lane has such a commit, and each is decided as
 if none had passed it. A push that cancels a run leaves its commit with no
-pass, so the next run looks past it. A build-source test refuses a build step
-or embed that reads Markdown outside the paths above and `tests/`, so
-documentation elsewhere stays unread by every lane. The run still starts, so
+pass, so the next run looks past it. A build-source test holds the class a
+exemption: it refuses a Markdown string literal in `build.zig` or a
+non-test file of `build/` (any literal ending in `.md`, or naming `docs` or
+a path under it) outside the paths above and `tests/`, save `README.md`,
+which the guide gate reads inside `docs/learn`; an `@embedFile` of Markdown
+anywhere in `src/`; and an `embed` of Markdown in a `.lin` file under `std/`
+or `examples/`. A path built at run time from other values escapes it. The
+run still starts, so
 `merge-ready` always reports. `merge-ready` fails when a lane failed or was
 cancelled, and when a lane `changes` said to run did not pass: `check`,
 `sanitize`, `optimised` and `fuzz-mir` on a pull request; `check` on a push;

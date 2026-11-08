@@ -103,17 +103,17 @@ pub fn quotedIn(gpa: std.mem.Allocator, text: []const u8) []const []const u8 {
     return found.toOwnedSlice(gpa) catch @panic("out of memory");
 }
 
-/// The Markdown files and documentation directories the string literals of
-/// `text` name, in the order they are written: a literal holding no space
-/// that ends in `.md` and holds a `/`, or that names something under `docs/`.
+/// The Markdown files and documentation paths the string literals of `text`
+/// name, in the order they are written: a literal holding no space that ends
+/// in `.md` and is more than the extension, whatever directory it is read
+/// against, or that is `docs` or names something under `docs/`, so a path
+/// joined from parts is caught by its `docs` part.
 ///
 /// CI keeps a lane from running when only Markdown it does not read changed,
-/// so what a build step, a gate or an embedded file reads is held to the
-/// paths `.github/scripts/changes.sh` classes as read. A path is found where
-/// the build names it, as a literal; a bare file name is read relative to a
-/// directory named elsewhere, and that directory is the literal held. A
-/// comment line is prose and a multiline string is a fixture, so neither is
-/// read, and a character literal holding a quote opens no string.
+/// so what a build step or a gate reads is held to the paths
+/// `.github/scripts/changes.sh` classes as read. A comment line is prose and
+/// a multiline string is a fixture, so neither is read, and a character
+/// literal holding a quote opens no string.
 pub fn markdownPaths(gpa: std.mem.Allocator, text: []const u8) []const []const u8 {
     var found: std.ArrayList([]const u8) = .empty;
     var lines = std.mem.splitScalar(u8, text, '\n');
@@ -135,10 +135,33 @@ pub fn markdownPaths(gpa: std.mem.Allocator, text: []const u8) []const []const u
             const literal = line[at + 1 .. end];
             at = end;
             if (std.mem.indexOfAny(u8, literal, " \t") != null) continue;
-            const markdown = std.mem.endsWith(u8, literal, ".md") and std.mem.indexOfScalar(u8, literal, '/') != null;
-            const docs = literal.len > "docs/".len and std.mem.startsWith(u8, literal, "docs/");
+            const markdown = std.mem.endsWith(u8, literal, ".md") and literal.len > ".md".len;
+            // Written as the directory with its slash, so this line names no
+            // path of its own.
+            const docs_dir = "docs/";
+            const docs = std.mem.eql(u8, literal, docs_dir[0 .. docs_dir.len - 1]) or
+                (literal.len > docs_dir.len and std.mem.startsWith(u8, literal, docs_dir));
             if (markdown or docs) found.append(gpa, literal) catch @panic("out of memory");
         }
+    }
+    return found.toOwnedSlice(gpa) catch @panic("out of memory");
+}
+
+/// The Markdown files `text` embeds through `call`, `@embedFile(` in Zig or
+/// `embed(` in Linea, in the order they are written: the literal the call is
+/// given, where it ends in `.md`. A call whose name is the tail of a longer
+/// name is another call.
+pub fn embeddedMarkdown(gpa: std.mem.Allocator, text: []const u8, call: []const u8) []const []const u8 {
+    var found: std.ArrayList([]const u8) = .empty;
+    var at: usize = 0;
+    while (std.mem.indexOfPos(u8, text, at, call)) |start| {
+        at = start + call.len;
+        if (start > 0 and partOfAName(text[start - 1])) continue;
+        if (at >= text.len or text[at] != '"') continue;
+        const end = std.mem.indexOfScalarPos(u8, text, at + 1, '"') orelse break;
+        const literal = text[at + 1 .. end];
+        if (std.mem.endsWith(u8, literal, ".md")) found.append(gpa, literal) catch @panic("out of memory");
+        at = end + 1;
     }
     return found.toOwnedSlice(gpa) catch @panic("out of memory");
 }
