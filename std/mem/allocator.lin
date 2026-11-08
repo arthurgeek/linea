@@ -71,6 +71,12 @@ pub trait Allocator: Copyable {
     fn acquire(self: Self, size: UInt64) -> Result[Buffer[Self], Oom] where carries(.Ok: self)
 
     fn dispose(sink b: Buffer[Self])
+
+    // Answer whether disposing a buffer makes its bytes available to later
+    // acquisitions. An arena's handle answers false: what it hands out comes
+    // back only when the arena is rewound or released. `Arena.open` reads it
+    // to decide whether growing in chunks can give memory back.
+    fn reclaims(self: Self) -> Bool
 }
 
 // A lender provides an allocator handle that owns none of the memory it hands
@@ -84,6 +90,11 @@ pub trait Lender {
 
 impl Allocator for SystemAllocator {
     type Obligation = SystemAllocation
+
+    // A disposed buffer is freed, so its memory can be handed out again.
+    fn reclaims(_self: Self) -> Bool {
+        true
+    }
 
     // Allocate size zeroed bytes, or return Oom. A zero address means failure,
     // including for a request of zero bytes.

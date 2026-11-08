@@ -43,11 +43,15 @@ struct Handle[H: Allocator = SystemAllocator] {
 
 impl[H: Allocator] Arena[H] {
     // Open an arena of `size` bytes over `h`: take all of them from `h` when
-    // they are at most `arena_first_chunk_bytes`, and otherwise a first chunk
-    // of that many, taking the rest only as reservations need it. If `h`
-    // refuses, every acquisition from the arena returns Oom.
+    // they are at most `arena_first_chunk_bytes` or when `h` does not reclaim
+    // what is disposed into it, as another arena's handle does not, and
+    // otherwise a first chunk of `arena_first_chunk_bytes`, taking the rest
+    // only as reservations need it. A chunk given back to an arena would stay
+    // used until that arena is rewound, so an arena over an arena takes its
+    // size once and rewinds it in place. If `h` refuses, every acquisition
+    // from the arena returns Oom.
     pub fn open(h: H, size: UInt64) -> Arena[H] where carries(.first.Some: h) {
-        if size <= arena_first_chunk_bytes {
+        if size <= arena_first_chunk_bytes || !h.reclaims() {
             return match h.acquire(size) {
                 Err(_) => .{ first = .None, limit = size, chunks = address.nowhere(), slots = 0, start = arena_header },
                 Ok(b) => .{ first = .Some(b), limit = size, chunks = address.nowhere(), slots = 0, start = arena_header },
@@ -196,6 +200,34 @@ impl[H: Allocator] Arena[H] {
         testing.assert(!handed, "an arena holding no first chunk handed out storage")?
 
         .Ok(())
+    }
+
+    // An arena gives nothing back when a buffer is disposed into it, so an
+    // arena over it takes its whole size at once, as it holds exactly what
+    // the outer arena gave it.
+    test fn an_arena_over_an_arena_takes_its_whole_size_from_it() {
+        // The outer arena hands out 200008 bytes: the inner arena's size.
+        defer let outer = Arena.open(system(), 200016)
+        defer let inner = Arena.open(outer.handle(), 200008)
+        let first = inner.handle().acquire(100000).is_ok()
+        let second = inner.handle().acquire(100000).is_ok()
+        testing.assert(!outer.handle().reclaims(), "an arena's handle reclaims what is disposed into it")?
+        testing.assert(system().reclaims(), "the system allocator does not reclaim what is disposed into it")?
+        testing.assert(first, "an arena over an arena refused its first reservation")?
+        testing.assert(second, "an arena over an arena needed more of the outer arena than its size")?
+    }
+
+    test fn an_arena_over_an_arena_is_rewound_in_place() {
+        defer let outer = Arena.open(system(), 1048576)
+        defer var inner = Arena.open(outer.handle(), 262144)
+        var accepted: UInt64 = 0
+        for _ in 0..10 {
+            if inner.handle().acquire(200000).is_ok() {
+                accepted += 1
+            }
+            &inner.rewind()
+        }
+        testing.assert_eq(accepted, UInt64(10), "rewinding an arena over an arena took more of the outer arena")?
     }
 
     test fn a_reservation_larger_than_the_first_chunk_is_handed_out_whole() {
@@ -616,6 +648,12 @@ fn arena_holds[H: Allocator](owner: Arena[H], first: Buffer[H], at: UInt64, allo
 
 impl[H: Allocator] Allocator for Handle[H] {
     type Obligation = ()
+
+    // A disposed reservation's bytes come back only when the arena is rewound
+    // or released.
+    fn reclaims(_self: Self) -> Bool {
+        false
+    }
 
     // A reservation owns disjoint zeroed bytes and retains this handle's owner.
     fn acquire(self: Self, size: UInt64) -> Result[Buffer[Handle[H]], Oom] {

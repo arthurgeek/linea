@@ -413,6 +413,11 @@ struct SharedRefusingAllocation[H: Allocator] {
 impl[H: Allocator] Allocator for SharedRefusingAllocator[H] {
     type Obligation = SharedRefusingAllocation[H]
 
+    // A logged buffer is disposed into the backing, which decides.
+    fn reclaims(self: Self) -> Bool {
+        self.backing.reclaims()
+    }
+
     fn acquire(self: Self, size: UInt64) -> Result[Buffer[Self], Oom] {
         if self.log.call([sink size] |inout state: SharedLogState| &state.attempt(size)) {
             return .Err(.Exhausted)

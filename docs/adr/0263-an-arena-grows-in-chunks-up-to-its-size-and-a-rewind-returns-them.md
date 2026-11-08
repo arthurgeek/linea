@@ -30,7 +30,7 @@ life of the server:
   128-task server held about 906 MB on Linux and 911 MB on macOS, and still
   held it after 10,000 small requests that followed.
 - Under the thread sanitizer, whose `calloc` touches every page it answers
-  on a thread other than the main one, each 128-task server held about
+  on a serving task's thread, each 128-task server held about
   6.3 GB from the start, which is why the conformance runner lets only one
   serving transcript run at a time under that sanitizer.
 
@@ -66,9 +66,14 @@ and further chunks from its parent only as reservations need them:
   handler runs out of arena is answered 500. Opening still acquires the first
   chunk, so a parent that refuses it leaves an arena that refuses everything,
   which `serve` answers 503, as before.
-- Every chunk comes from the arena's parent, so an arena over an arena, a test
-  log or a shared log grows through it exactly as one over the system
-  allocator.
+- Every chunk comes from the arena's parent, so an arena over a test log or a
+  shared log grows through it as one over the system allocator does. An arena
+  over another arena's handle takes its whole size at open, as before: a
+  buffer disposed into an arena is not handed out again until that arena is
+  rewound, so chunks given back to it would only use it up, and a loop that
+  rewinds the inner arena would drain the outer one. `Allocator.reclaims()`
+  says which: it answers true by default, false for an arena's handle, and a
+  log answers what its backing does.
 
 The first chunk keeps the arena's words (bytes handed out, the current
 chunk's address, length and cursor, how many later chunks it holds) and a

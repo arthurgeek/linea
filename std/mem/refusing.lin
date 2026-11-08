@@ -222,6 +222,11 @@ struct RefusingAllocation[H: Allocator] {
 impl[H: Allocator] Allocator for RefusingAllocator[H] {
     type Obligation = RefusingAllocation[H]
 
+    // A logged buffer is disposed into the backing, which decides.
+    fn reclaims(self: Self) -> Bool {
+        self.log.backing.reclaims()
+    }
+
     fn acquire(self: Self, size: UInt64) -> Result[Buffer[Self], Oom] {
         let attempt = linea_raw_load(self.log.buffer.at, self.log.buffer.len, log_attempts) + 1
         linea_raw_store(self.log.buffer.at, self.log.buffer.len, log_attempts, attempt)

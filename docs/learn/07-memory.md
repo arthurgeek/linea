@@ -572,7 +572,10 @@ An arena's size is a limit on what it hands out, not memory it takes all at
 once. An arena of up to 64 KiB takes its whole size when it opens. A larger
 one takes a first chunk of 64 KiB, and more from its allocator only when a
 piece no longer fits: a new chunk at least as large as the piece and at least
-twice the chunk before it. A piece never spans two chunks. `rewind` gives every
+twice the chunk before it, or all the arena can still hand out when that is
+less. A piece never spans two chunks. An arena opened over another arena's
+handle takes its whole size at once, since memory given back to an arena is
+not used again until that arena is rewound. `rewind` gives every
 chunk but the first back, so an arena that once held a large piece holds 64
 KiB again afterwards. `mem.AllocationLog` counts what the arena takes from the
 system allocator, and `live_bytes` answers how much of it the arena holds:

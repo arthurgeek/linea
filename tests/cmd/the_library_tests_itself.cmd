@@ -1080,6 +1080,8 @@ The library tests itself.
   ok    mem.allocator_hands_out_buffers_the_log_records
   ok    mem.an_arena_backs_another_arena
   ok    mem.an_arena_hands_out_storage_and_gives_the_slab_back
+  ok    mem.an_arena_over_an_arena_is_rewound_in_place
+  ok    mem.an_arena_over_an_arena_takes_its_whole_size_from_it
   ok    mem.an_arena_refuses_what_it_cannot_hold
   ok    mem.an_arena_the_backing_refused_refuses_everything
   ok    mem.an_empty_buffer_is_allocated_rather_than_refused
@@ -1532,4 +1534,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1529 passed, 0 failed
+  1531 passed, 0 failed
