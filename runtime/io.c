@@ -313,8 +313,9 @@ long linea_unlink_at(int parent, unsigned long at, unsigned long extent) {
 }
 
 /* An unlimited hard limit is capped here on a system that names no smaller
- * cap of its own: 2^20 is Linux's default `fs.nr_open`, the most descriptors
- * it lets one process hold. */
+ * cap of its own. 2^20 is a choice, not a guarantee: it is Linux's default
+ * `fs.nr_open`, which an administrator may set lower, and then raising the
+ * soft limit this far fails with the errno `setrlimit` gives. */
 static const rlim_t linea_most_open_files = (rlim_t)1 << 20;
 
 long linea_raise_open_files(void) {

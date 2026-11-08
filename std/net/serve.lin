@@ -1,4 +1,5 @@
 import std.io
+import std.mem
 import std.session
 import std.task
 import std.testing
@@ -445,18 +446,20 @@ impl[L: Acceptor + io.Close] Accepting[L] {
 // cannot be made, the share it would have run is not run and this thread
 // runs its own share alone, so fewer than `count` tasks run, but at least
 // one does, and the acceptor is told that the share's tasks will not run.
-internal fn on_tasks[L: Acceptor + Owned + Shareable, C: Shareable + Copyable, R: Owned, W: Shareable + Copyable + fn(context: C, acceptor: task.Client[Accepting[L]]) -> R, J: Shareable + Copyable + fn(sink first: R, sink second: R) -> R](count: UInt64, acceptor: task.Client[Accepting[L]], context: C, work: W, combine: J) -> R {
+// Each task is given a stack of `stack` bytes; a test asks for one no
+// system can give, so that no task can be made.
+internal fn on_tasks[L: Acceptor + Owned + Shareable, C: Shareable + Copyable, R: Owned, W: Shareable + Copyable + fn(context: C, acceptor: task.Client[Accepting[L]]) -> R, J: Shareable + Copyable + fn(sink first: R, sink second: R) -> R](count: UInt64, acceptor: task.Client[Accepting[L]], context: C, work: W, combine: J, stack: UInt64 = task.default_stack_bytes) -> R {
     if count <= 1 {
         return work(context, acceptor)
     }
     let half = count / 2
-    let body = sink [half, sink acceptor = copy(acceptor), sink context = copy(context), sink work = copy(work), sink combine = copy(combine)] |sink me: session.Chan[session.Send[R, session.End]]| {
-        me.send(on_tasks[L, C, R, W, J](half, acceptor, context, work, combine)).close()
+    let body = sink [half, stack, sink acceptor = copy(acceptor), sink context = copy(context), sink work = copy(work), sink combine = copy(combine)] |sink me: session.Chan[session.Send[R, session.End]]| {
+        me.send(on_tasks[L, C, R, W, J](half, acceptor, context, work, combine, stack)).close()
     }
-    match task.prepare(body) {
+    match task.prepare_in(mem.system(), body, stack) {
         Ok(slot) => {
             let started = slot.start()
-            let mine = on_tasks[L, C, R, W, J](count - half, acceptor, context, work, combine)
+            let mine = on_tasks[L, C, R, W, J](count - half, acceptor, context, work, combine, stack)
             let (theirs, done) = started.recv()
             done.close()
             combine(theirs, mine)
@@ -464,7 +467,7 @@ internal fn on_tasks[L: Acceptor + Owned + Shareable, C: Shareable + Copyable, R
         Err(unstarted) => {
             let Unstarted { body: _, reason: _ } = unstarted
             acceptor.call([sink half] |inout accepting: Accepting[L]| &accepting.unstarted(half))
-            on_tasks[L, C, R, W, J](count - half, acceptor, context, work, combine)
+            on_tasks[L, C, R, W, J](count - half, acceptor, context, work, combine, stack)
         },
     }
 }
@@ -497,6 +500,51 @@ test fn on_tasks_answers_what_every_task_answered() {
     let total = on_tasks(4, owner.client(), (), take_ticket[Listener], add_tickets)
     owner.close().finish().unwrap()
     testing.assert_eq(total, UInt64(10), "a task's answer was dropped")?
+}
+
+// One serving task the acceptor expects: report that it is ready, then ask
+// for a connection until it is handed one, told to stop, or has asked 2000
+// times, and answer whether it was handed one.
+fn ready_then_served[L: Acceptor + Owned + Shareable](_context: (), acceptor: task.Client[Accepting[L]]) -> Bool {
+    acceptor.call(|inout accepting: Accepting[L]| &accepting.ready(failed: false))
+    var asked: UInt64 = 0
+    while asked < 2000 {
+        match acceptor.call(|inout accepting: Accepting[L]| told(&accepting.next())) {
+            Connected => return true,
+            Stopped => return false,
+            Retried => {},
+            Waited => time.sleep(time.Duration.from_milliseconds(1)),
+        }
+        asked += 1
+    }
+    false
+}
+
+fn either_served(sink first: Bool, sink second: Bool) -> Bool {
+    first || second
+}
+
+// No task can be made with a stack of 2^62 bytes, so of the four tasks the
+// acceptor expects only the calling thread's runs. The three that never run
+// are reported as unstarted, so the one that does is handed the waiting
+// client rather than waiting forever for the others to get ready.
+test fn tasks_that_cannot_be_made_do_not_hold_up_the_one_that_runs() {
+    let listener = listen(loopback(0)).unwrap()
+    let client = connect(listener.local_address().unwrap()).unwrap()
+    let owner = match task.own(Accepting.open(listener, limit: .Some(1))) {
+        Ok(owner) => owner,
+        Err(Unowned { state, reason: _ }) => {
+            state.finish().unwrap()
+            panic("the listener's owning task could not be made")
+        },
+    }
+    let acceptor = owner.client()
+    acceptor.call(|inout accepting: Accepting[Listener]| &accepting.expect(4))
+    let impossible_stack: UInt64 = 4611686018427387904
+    let served = on_tasks(4, acceptor, (), ready_then_served[Listener], either_served, stack: impossible_stack)
+    owner.close().finish().unwrap()
+    client.close().unwrap()
+    testing.assert(served, "the task that ran waited for tasks that were never made")?
 }
 
 test fn serve_workers_handles_connections_concurrently() {

@@ -631,6 +631,7 @@ The library tests itself.
   ok    http.the_unreserved_bytes_are_letters_digits_and_four_marks
   ok    http.transfer_encoding_is_not_implemented
   ok    http.transient_accept_failures_are_retried_until_a_connection_is_served
+  ok    http.two_tasks_failing_with_owned_reasons_report_one_and_release_the_other
   ok    http.unescaping_keeps_bytes_that_are_not_utf8
   ok    http.whitespace_around_pairs_is_tolerated_and_names_match_exactly
   ok    http.with_state_lends_its_state_to_every_request
@@ -1221,6 +1222,7 @@ The library tests itself.
   ok    net.serve_workers_handles_connections_concurrently
   ok    net.serve_workers_sequential_policy
   ok    net.serving_no_connections_returns_at_once_and_closes_the_listener
+  ok    net.tasks_that_cannot_be_made_do_not_hold_up_the_one_that_runs
   ok    net.the_accept_pause_doubles_to_one_second
   ok    net.the_handler_reads_from_each_connection_and_names_its_peer
   ok    net.transient_accept_failures_are_retried_until_a_connection_is_served
@@ -1522,4 +1524,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1519 passed, 0 failed
+  1521 passed, 0 failed

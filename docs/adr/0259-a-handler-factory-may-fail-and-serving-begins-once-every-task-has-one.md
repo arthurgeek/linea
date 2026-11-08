@@ -66,15 +66,19 @@ accepts nothing until every serving task has made its handler.**
 
    The two implementations are disjoint by the rule that a bare parameter
    bounded by a trait does not overlap a constructor no implementation of the
-   trait answers for: nothing implements `Handler` for `Result`.
+   trait answers for: nothing implements `Handler` for `Result`. A program
+   cannot add one, since both belong to the library ([M-Impl]), nor a second
+   `MadeHandler` for a handler of its own ([T-Impl]); two corpus cases in
+   `tests/http/` hold both refusals.
 
 2. **The failure reaches the error.** `ServeError[E = Never]` gains
    `Handler(E)`, and `ListenAndServeError[E = Never]` carries
    `Serve(ServeError[E])`. The default, a type parameter's default of
    [0215](0215-a-type-parameter-may-default-its-argument.md), keeps
    `http.ServeError` written alone meaning the failures of an infallible
-   factory, which is every annotation written before. Both are `Display` when `E` is, and copyable when `E` is.
-   `E` must be `Owned`, `Shareable` (it is sent from the task that met it)
+   factory, which is every annotation written before. Both are `Display`
+   when `E` is, and copyable only when `E` is: a `ServeError[String]` is
+   moved, and copying it is [O-Copy], which a corpus case holds. `E` must be `Owned`, `Shareable` (it is sent from the task that met it)
    and `Release` (when two tasks fail, the second reason is released).
 
 3. **Serving begins once every task has its handler.** The listener's owning
@@ -87,6 +91,18 @@ accepts nothing until every serving task has made its handler.**
    `Memory`, for a refused 503 buffer). Since no task is waiting in `accept`
    while another is still getting ready, the stop is never queued behind a
    blocked `accept`.
+
+   The barrier holds one invariant: **every expected serving task
+   contributes exactly one startup outcome, on every path that does not end
+   the process.** A task that takes its 503 buffer and makes its handler
+   reports ready; one whose buffer `parent` refuses, or whose factory
+   answers `.Err`, reports failed, after releasing what it took; a share of
+   tasks `task.prepare` could not start is reported by the task that tried
+   to start it, before that task runs its own share. A trap ends the process,
+   so it leaves no barrier waiting. Tests inject each recoverable failure:
+   a refused discard buffer, a factory that fails on one task, and tasks
+   that cannot be made (a stack no system gives), and check that serving
+   ends instead of waiting.
 
 4. **`listen_and_serve` asks the factory first on the calling thread.** It
    already made one handler to announce the bound address as
@@ -105,16 +121,36 @@ allows by default.
 
 ## Consequences
 
-- The guest book opens one SQLite connection per serving task, in WAL mode
-  with a busy timeout, so reads run in parallel and only signatures wait on
-  one another. A database that cannot be opened ends serving with
-  `guest-book: a serving task's handler could not be made: unable to open
-  database file (SQLite code 14)` before a connection is accepted.
+- The guest book starts in the order a server with per-task resources
+  needs: it prepares what every task shares (it raises the open-file limit,
+  then initializes the database once: the table and the switch to the
+  write-ahead log, which needs the file to itself), then each serving task
+  opens its own connection, and only then is a connection accepted. Reads
+  run in parallel and only signatures wait on one another. A database file
+  that cannot be opened stops the program at initialization; a connection a
+  task cannot open ends serving with `guest-book: a serving task's handler
+  could not be made: ...` before a connection is accepted.
+- The 389 files the guest book checks for before serving are an estimate:
+  three per task (the database, its log, a client's socket) and five more.
+  SQLite may open other files, a temporary one for a large sort, so the
+  check does not replace handling a failure to open one while serving,
+  which the guest book answers with a 500. The barrier is what guarantees
+  serving starts only with every task's connection open. The limit is the
+  whole process's, so only a program raises it, never a library.
 - Every infallible factory in the library, the examples and the guide is
   unchanged. Annotations of `http.ServeError` and `http.ListenAndServeError`
   keep their meaning through the default.
 - A server with many tasks starts serving only once the slowest factory has
-  returned. Each waiting task asks again after a millisecond.
+  returned. Each waiting task asks again after a millisecond. That polling
+  is the barrier's only cost while it waits; the park primitive of ADR 0261
+  is where a readiness barrier that wakes the waiting tasks once replaces
+  it.
+- `listen_and_serve` makes one handler more than it has serving tasks, to
+  tell it `Event.Listening`, and releases it at once. For the guest book that
+  is one SQLite connection opened and closed before serving, and a factory
+  may succeed for the announcement and then fail on a serving task. Telling
+  a listener-level observer of the server's lifecycle, apart from the
+  handlers, would remove the extra handler; it is left for later.
 - A factory that takes long, or blocks, delays the first accepted connection
   for every task. A factory is meant to build a handler and open what it
   needs, not to wait on clients.

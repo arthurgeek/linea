@@ -14,8 +14,14 @@ extern fn linea_raise_open_files() -> Int64
 // as a database connection and its log, calls this before it serves, and
 // compares what it gets with what it needs. A soft limit already at or above
 // what the system allows, unlimited included, is left as it is, and the number
-// returned is still what the system allows. It fails with an `io.IoError` of operation
-// `Configure` when the system refuses to read or change the limit.
+// returned is still what the system allows. Where the hard limit is
+// unlimited and the system names no cap of its own, the cap is 2^20, a
+// choice rather than a promise the kernel makes. It fails with an
+// `io.IoError` of operation `Configure` when the system refuses to read or
+// change the limit.
+//
+// The limit is the whole process's, so only a program raises it: a library
+// that did would change what every other part of the program may open.
 pub fn raise_open_file_limit() -> Result[UInt64, io.IoError] {
     let answered = linea_raise_open_files()
     if answered < 0 {
@@ -25,7 +31,12 @@ pub fn raise_open_file_limit() -> Result[UInt64, io.IoError] {
 }
 
 // Raising the limit once reaches as far as the system allows, so raising it
-// again answers the same number.
+// again answers the same number. The test raises the limit of the process
+// that runs every test in this library, and no test here depends on a low
+// one; the transcript
+// tests/cmd/the_open_file_limit_is_never_above_what_the_process_may_open.cmd
+// checks the answer in processes of its own, started with the soft limit
+// already raised or unlimited.
 test fn raising_the_open_file_limit_twice_answers_the_same_limit() {
     let first = raise_open_file_limit().unwrap()
     let second = raise_open_file_limit().unwrap()

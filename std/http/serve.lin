@@ -455,6 +455,50 @@ test fn a_handler_one_task_cannot_make_ends_serving_before_anything_is_accepted(
     .Ok(())
 }
 
+// Why a test's handler could not be made, in text the error owns, so it is
+// neither copyable nor discardable.
+@derive(Release)
+struct Unreadable {
+    reason: String[mem.SystemAllocator],
+}
+
+// Two of four tasks fail to make their handlers, each with an error that
+// owns its text. Serving ends with one of them as `Handler`, the other one
+// is released when the two tasks' answers are joined, and every handler that
+// was made is released.
+test fn two_tasks_failing_with_owned_reasons_report_one_and_release_the_other() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    defer let tables = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    let owner = task.own(Tally { visits = 0 }).unwrap()
+    let counter = owner.client()
+    let routes = tables.allocator()
+    let made = [sink counter, sink routes] || -> Result[LoggedRouter, Unreadable] where carries(counter, routes) {
+        if counted(counter) % 2 == 0 {
+            .Err(Unreadable { reason = "the routes could not be read".to_owned().unwrap() })
+        } else {
+            .Ok(exchanges_router(routes))
+        }
+    }
+    let served = serve_in(tables.allocator(), listener, made, policy: .Threads(4))
+    let tally = owner.close()
+    let reported = match served {
+        Err(Handler(error)) => {
+            let worded = error.reason.view() == "the routes could not be read"
+            error.release()
+            worded
+        },
+        Err(other) => {
+            other.release()
+            false
+        },
+        Ok(_) => false,
+    }
+    testing.assert(reported, "a handler that could not be made did not end serving with its reason")?
+    testing.assert(tally.visits >= 2, "a task did not ask the factory for its handler")?
+    testing.assert(tables.all_disposed(), "a handler that was made was not released")?
+    .Ok(())
+}
+
 fn no_database() -> Result[Router[()], Unopened] {
     .Err(.NoDatabase)
 }

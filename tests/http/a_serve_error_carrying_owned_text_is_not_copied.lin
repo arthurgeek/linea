@@ -1,0 +1,11 @@
+// `http.ServeError[E]` is copyable only when the reason `E` a handler
+// factory failed with is: one carrying a `String` is moved and released.
+import std.http
+
+fn main() -> UInt8 {
+    let unopened: http.ServeError[String] = .Handler("no database".to_owned().unwrap())
+    let kept = copy(unopened)
+    unopened.release()
+    kept.release()
+    0
+}
