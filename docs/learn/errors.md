@@ -53,6 +53,7 @@ for the code in brackets to reach the rule itself.
 | `T-Dual` | error | Copying, settling and sealing: [Protocols: tags that name each other](04-copying-settling-and-sealing.md#protocols-tags-that-name-each-other) | [§4 Types](../linea-semantics.md#4-types), at `[T-Dual]` |
 | `T-ExternCallback` | error | Calling C: [Callbacks: C calling Linea](11-calling-c.md#callbacks-c-calling-linea) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternCallback]` |
 | `T-ExternHandle` | error | Calling C: [A C object stays with one task unless its wrapper says otherwise](11-calling-c.md#a-c-object-stays-with-one-task-unless-its-wrapper-says-otherwise) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternHandle]` |
+| `T-ExternPrototype` | error | Calling C: [The compiler holds each `extern` to C's prototype](11-calling-c.md#the-compiler-holds-each-extern-to-cs-prototype) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternPrototype]` |
 | `T-For` | error | Iterating: [Four ways to walk](05-iterating.md#four-ways-to-walk) | [§4 Types](../linea-semantics.md#4-types), at `[T-For]` |
 | `T-Format` | error | Text: [Format specs: laying a value out](08-text.md#format-specs-laying-a-value-out) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[T-Format]` |
 | `T-Impl` | error | Copying, settling and sealing: [Protocols: tags that name each other](04-copying-settling-and-sealing.md#protocols-tags-that-name-each-other) | [§4 Types](../linea-semantics.md#4-types), at `[T-Impl]` |
