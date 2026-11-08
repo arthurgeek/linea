@@ -1,0 +1,27 @@
+import std.session
+import std.task
+import counter
+
+use counter.Counter
+use session.Chan
+use session.End
+
+// An optional counter holds the counter's handle in its payload, so a task
+// cannot read it while `main` may read it too.
+fn main() -> UInt8 {
+    let held: Option[Counter] = match Counter.open() { Ok(c) => .Some(c), Err(_) => .None }
+    let worker = task.start(
+        sink [read held] |sink me: Chan[End]| {
+            match read held {
+                Some(c) => {
+                    let _t = c.total()
+                },
+                None => {},
+            }
+            me.close()
+        },
+    ).unwrap()
+    worker.close()
+    match held { Some(c) => c.close(), None => {} }
+    0
+}

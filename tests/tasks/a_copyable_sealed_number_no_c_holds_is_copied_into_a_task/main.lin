@@ -1,0 +1,22 @@
+import std.io
+import std.session
+import std.task
+import seat
+
+use session.Chan
+use session.End
+
+// A copy of the seat moves into the task while `main` keeps its own.
+fn main() -> Result[UInt8, io.IoError] {
+    let mine = seat.assign(12)
+    let theirs = copy(mine)
+    let worker = task.start(
+        sink [sink theirs] |sink me: Chan[End]| {
+            io.println("the task holds seat {seat.number(theirs)}").unwrap()
+            me.close()
+        },
+    ).unwrap()
+    worker.close()
+    io.println("main holds seat {seat.number(mine)}")?
+    .Ok(0)
+}

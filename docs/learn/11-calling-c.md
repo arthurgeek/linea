@@ -189,7 +189,8 @@ itself. How the `extern` takes the handle says what C does with the object:
 
 A handle is not `copyable`: a `copyable` sealed type is an ordinary value at
 the boundary, because a copy would still name the object after C changed or
-freed it through another. A newtype the program wraps around a handle is a
+freed it through another. In a trusted module such a type also needs
+`@shareable`, which a later section explains. A newtype the program wraps around a handle is a
 handle too, so a label around a library's handle is lent to C the same way.
 And an `extern` whose answer lives inside an object, written
 `where borrows(handle)`, takes that object as a handle, never as a bare
@@ -502,7 +503,7 @@ error[O-Cross]: a task cannot read `tally` while its creator may read it too: a 
 17 |         sink [read tally] |sink me: Chan[End]| {
    |                    ^^^^^ this capture is read by the task
    |
-   = help: C has not said two threads may read this object at once; move it into one task, or keep it in an owning task (`task.own`) and give other tasks its client; if its C library allows concurrent reads, its wrapper may declare `counter.Handle` `@shareable`
+   = help: C has not said two threads may read this object at once; move it into one task, or keep it in an owning task (`task.own`) and give other tasks its client, or, if its C library allows concurrent reads, declare `counter.Handle` `@shareable` in its wrapper
 ```
 
 The help names three ways on. Moving the counter into the task with
@@ -534,6 +535,121 @@ only on the sealed handle itself. A record holding a `@shareable` handle is
 `Shareable` where its other fields are. If you know Rust, this is
 `unsafe impl Sync for Handle {}`: the wrapper's author vouches for what the
 compiler cannot see.
+
+A `copyable` sealed type needs the mark even more. Every copy names the same
+C object, and a copy moves into any task whole, so the compiler has no reader
+to keep apart from another. In a module trusted with C, a copyable sealed
+newtype is therefore declared only with `@shareable`. This wrapper hands out
+copies of a counter whose `counter_add` is not safe for two threads:
+
+`copied/linea.json`:
+
+```json
+{ "extern": ["counter"], "native": ["counter/counter.c"] }
+```
+
+`copied/counter/counter.c`:
+
+```c
+#include <stdint.h>
+#include <stdlib.h>
+
+struct counter {
+    int64_t total;
+};
+
+struct counter *counter_open(void) { return calloc(1, sizeof(struct counter)); }
+
+void counter_add(struct counter *counter, int8_t amount) { counter->total += amount; }
+
+int64_t counter_total(const struct counter *counter) { return counter->total; }
+
+void counter_close(struct counter *counter) { free(counter); }
+```
+
+`copied/counter/counter.lin`:
+
+```linea
+// A copyable sealed newtype over a `struct counter *`. Every copy names the
+// one counter, and a copy moves into any task whole.
+@(opaque, copyable)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+extern fn counter_add(counter: Handle, amount: Int8)
+
+extern fn counter_total(counter: Handle) -> Int64
+
+extern fn counter_close(counter: Handle)
+
+pub fn open() -> Handle {
+    Handle(counter_open())
+}
+
+pub fn add(counter: Handle, amount: Int8) {
+    counter_add(counter, amount)
+}
+
+pub fn total(counter: Handle) -> Int64 {
+    counter_total(counter)
+}
+
+// Free the counter. A copy of the handle still names it, so no copy may be
+// used afterwards.
+pub fn close(counter: Handle) {
+    counter_close(counter)
+}
+```
+
+`copied/main.lin`:
+
+```linea
+import std.io
+import std.session
+import std.task
+import counter
+
+use session.Chan
+use session.End
+
+// Two tasks add to one counter through copies of its handle, and C's
+// `counter_add` is not safe for two threads at once.
+fn main() -> Result[UInt8, io.IoError] {
+    let tally = counter.open()
+    let other = copy(tally)
+    let worker = task.start(
+        sink [sink other] |sink me: Chan[End]| {
+            for _ in 0..1000 {
+                counter.add(other, 1)
+            }
+            me.close()
+        },
+    ).unwrap()
+    for _ in 0..1000 {
+        counter.add(tally, 1)
+    }
+    worker.close()
+    let total = counter.total(tally)
+    counter.close(tally)
+    io.println("{total}")?
+    .Ok(0)
+}
+```
+
+```
+error[T-ExternHandle]: a copyable sealed newtype in a module trusted with C names its object from every copy, and a copy reaches any task
+ --> copied/counter/counter.lin:4:6
+  |
+4 | type Handle = UInt64
+  |      ^^^^^^ declare it `@shareable` if C lets two threads use the object at once, or drop `copyable` so the compiler keeps the object to one task at a time
+```
+
+Dropping `copyable` makes `Handle` an ordinary handle, which the compiler
+keeps to one task at a time. `@shareable` is right only where the C library
+says its object is safe for concurrent use; `std.io`'s `Descriptor` is one,
+since every operation on a file descriptor is one system call the kernel
+completes whole.
 
 ### `inout` passes the address of a value
 
@@ -1822,11 +1938,17 @@ against the C library's documentation:
 6. C calls a callback only during the call that passed it.
 7. Every length you pass to C, or to `copy_bytes`, is the length of the
    memory it describes.
-8. A handle marked `@shareable` names an object the C library lets two
-   threads read at once, through every `extern` that takes it `read`. Without
-   the mark the compiler keeps each handle to one task at a time. A C pointer
-   kept in a plain integer field rather than in a handle is not followed at
-   all, so keep every C object in a handle.
+8. Every C object a read could reach from another thread is kept in a
+   non-copyable handle, or the wrapper is sure its read paths are safe for
+   concurrent use. The compiler keeps a handle to one task at a time, but a C
+   pointer kept in a plain integer field of a record is not followed at all.
+   And a handle moved whole into a task is accepted, so a C object that must
+   stay on the thread that created it belongs in an owning task.
+9. A handle marked `@shareable` names an object the C library lets two
+   threads read at once, through every `extern` that takes it. A copyable
+   sealed newtype must be marked `@shareable` in a trusted module, and the
+   mark then promises that any number of threads may use the object through
+   its copies at once.
 
 The compiler holds the rest: an `extern` is private to its module, an
 `extern` answering a `CText` states what it points into, a module that is not

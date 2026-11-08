@@ -6,8 +6,9 @@ struct Label {
     text: ffi.CString,
 }
 
-// The text a label lends, sealed so only this module reads it.
-@(opaque, copyable)
+// The text a label lends, sealed so only this module reads it. Reading the
+// text from several threads at once writes nothing, which `@shareable` states.
+@(opaque, copyable, shareable)
 type Name = ffi.CText
 
 impl Label {

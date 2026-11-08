@@ -1,0 +1,31 @@
+import std.mem
+import std.session
+import std.task
+import counter
+
+use counter.Counter
+use mem.PushFailure
+use session.Chan
+use session.End
+
+// A vector of counters holds each counter's handle in its storage, so a task
+// cannot read the vector while `main` may read it too.
+fn main() -> UInt8 {
+    defer var held: mem.Vec[Counter] = mem.Vec.new()
+    let opened = Counter.open() else |_| {
+        return 1
+    }
+    let _ = &held.push(opened) else |failure| {
+        let PushFailure { reason: _, value } = failure
+        value.release()
+        return 1
+    }
+    let worker = task.start(
+        sink [read held] |sink me: Chan[End]| {
+            let _n = held.length()
+            me.close()
+        },
+    ).unwrap()
+    worker.close()
+    0
+}

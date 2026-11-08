@@ -1,0 +1,16 @@
+import counter
+
+use counter.Counter
+
+// An optional counter is `Shareable` only where the counter is, and the
+// counter holds a handle C has not said two threads may read.
+fn read_from_any_task[T: Shareable](_value: T) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let held: Option[Counter] = match Counter.open() { Ok(c) => .Some(c), Err(_) => .None }
+    let status = read_from_any_task(held)
+    match held { Some(c) => c.close(), None => {} }
+    status
+}

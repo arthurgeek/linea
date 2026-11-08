@@ -1081,7 +1081,10 @@ one is part of an alike instantiation's shape, as an `Owned` one is, and an
 mark is copied from a template to each instance, so an instantiation of an
 `@unshareable` declaration, or of a handle, is unshareable whatever its
 arguments. The finished `Typing` keeps the answer as `unshareable_containment`,
-which ownership reads for [O-Cross].
+which ownership reads for [O-Cross], and `Typing.unshareableWitness` walks the
+same edges over it: `BorrowContainment.eachChild` takes the open builder or
+the finished typing alike, so the handle [O-Cross] names is the one
+[T-Bound]'s `Builder.unshareableWitness` names.
 
 A fourth table, `connected_facts`, answers `Isolated` over the same edges in
 `connected` mode. Its seeds are the declarations `RawAccesses` names as

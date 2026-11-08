@@ -1503,54 +1503,87 @@ const BorrowContainment = struct {
         argument,
     };
 
+    /// The library declarations whose instances hold what their arguments
+    /// name, read from an open builder or from a finished typing.
+    const Certified = struct {
+        storage: DeclId,
+        slice: DeclId,
+        address: DeclId,
+        carried: DeclId,
+        closure_entry: DeclId,
+
+        fn of(source: anytype) Certified {
+            if (@TypeOf(source) == *Typing.Builder) return .{
+                .storage = source.certified_storage,
+                .slice = source.certified_slice,
+                .address = source.certified_address,
+                .carried = source.certified_carried,
+                .closure_entry = source.certified_closure_entry,
+            };
+            const raw = source.raw_accesses;
+            return .{ .storage = raw.storage, .slice = raw.slice, .address = raw.address, .carried = raw.carried, .closure_entry = raw.closure_entry_type };
+        }
+    };
+
     /// Every part `ty` holds whose dependencies `ty` holds too, in `mode`,
     /// handed to `visit.child(step, part)`. The containment table is built
     /// over these edges and a witness path is found over them, so the two
-    /// cannot disagree about what a type contains.
-    fn eachChild(builder: *Typing.Builder, ty: TypeId, mode: Mode, visit: anytype) std.mem.Allocator.Error!void {
-        try eachPart(builder, ty, mode, visit);
+    /// cannot disagree about what a type contains. `source` is the open
+    /// builder or the finished `Typing`, which answer every question asked
+    /// here alike.
+    fn eachChild(source: anytype, ty: TypeId, mode: Mode, visit: anytype) std.mem.Allocator.Error!void {
+        const certified = Certified.of(source);
+        try eachPart(source, ty, mode, visit);
         // A `mem.Carried[H]` carries what an `H` may carry and holds no `H`,
         // so nothing reached through it can wait on another task.
-        if (mode != .connected) if (carriedArgument(builder, ty)) |carried| try visit.child(.argument, carried);
-        const declaration = builder.declOfType(ty) orelse return;
-        const instance = builder.instanceOf(ty) orelse return;
-        const arguments = builder.argsOf(instance);
+        if (mode != .connected) if (carriedArgument(source, ty)) |carried| try visit.child(.argument, carried);
+        const declaration = source.declOfType(ty) orelse return;
+        const instance = source.instanceOf(ty) orelse return;
+        const arguments = source.argsOf(instance);
         if (arguments.len == 0) return;
-        if (declaration == builder.certified_storage or declaration == builder.certified_slice)
+        if (declaration == certified.storage or declaration == certified.slice)
             return visit.child(.stored, arguments[0]);
         // An address is a number, and the storage that owns its bytes
         // carries the dependencies of what is kept there; what those values
         // may write through or may not share is the address's as well.
-        if (declaration == builder.certified_address) {
+        if (declaration == certified.address) {
             if (mode != .raw_carriers) try visit.child(.stored, arguments[0]);
             return;
         }
         // The entry a closure is called through is its callable's signature;
         // what it may carry is the closure's contract, which `raw_carriers`
         // reads from there.
-        if (mode != .raw_carriers and declaration == builder.certified_closure_entry) try visit.child(.argument, arguments[0]);
+        if (mode != .raw_carriers and declaration == certified.closure_entry) try visit.child(.argument, arguments[0]);
     }
 
     /// The type whose dependencies a `mem.Carried` type holds without holding
     /// a value of it: its argument, or its own parameter in the declaration.
     /// Both tables follow it, so a holder carries what that type may carry
     /// and keeps an exclusive lend wherever that type could write through it.
-    fn carriedArgument(builder: *Typing.Builder, ty: TypeId) ?TypeId {
-        if (builder.certified_carried == .none) return null;
-        if (builder.declOfType(ty) != builder.certified_carried) return null;
-        if (builder.instanceOf(ty)) |instance| {
-            const arguments = builder.argsOf(instance);
+    ///
+    /// A finished typing keeps no index of a declaration's own parameters, so
+    /// it answers only for an instance: the declaration's own type is read
+    /// only inside `mem.Carried`'s module, whose parameter seeds everything
+    /// itself.
+    fn carriedArgument(source: anytype, ty: TypeId) ?TypeId {
+        const carried = Certified.of(source).carried;
+        if (carried == .none) return null;
+        if (source.declOfType(ty) != carried) return null;
+        if (source.instanceOf(ty)) |instance| {
+            const arguments = source.argsOf(instance);
             return if (arguments.len != 0) arguments[0] else null;
         }
-        const held = builder.parameters.get(Typing.Builder.parameterKey(builder.certified_carried.index(), 0)) orelse return null;
+        if (@TypeOf(source) != *Typing.Builder) return null;
+        const held = source.parameters.get(Typing.Builder.parameterKey(carried.index(), 0)) orelse return null;
         return @enumFromInt(held);
     }
 
     /// The children `eachChild` hands over other than a type's arguments.
-    fn eachPart(builder: *Typing.Builder, ty: TypeId, mode: Mode, visit: anytype) std.mem.Allocator.Error!void {
-        const typed_storage = builder.certified_storage != .none and
-            builder.declOfType(ty) == builder.certified_storage and builder.instanceOf(ty) != null;
-        switch (builder.get(ty)) {
+    fn eachPart(source: anytype, ty: TypeId, mode: Mode, visit: anytype) std.mem.Allocator.Error!void {
+        const storage = Certified.of(source).storage;
+        const typed_storage = storage != .none and
+            source.declOfType(ty) == storage and source.instanceOf(ty) != null;
+        switch (source.get(ty)) {
             .closure => |closure| try visit.child(.environment, closure.environment),
             .borrow => |observation| if (mode != .raw_carriers) try visit.child(.element, observation.referent),
             .parameter => {},
@@ -1569,15 +1602,15 @@ const BorrowContainment = struct {
                     // describe their dependencies without that raw erasure.
                     if (typed_storage and index == 0 and mode == .raw_carriers) continue;
                     const at = record.first_field + index;
-                    try visit.child(.{ .field = builder.fields.items(.name)[at] }, builder.fields.items(.ty)[at]);
+                    try visit.child(.{ .field = source.fields.items(.name)[at] }, source.fields.items(.ty)[at]);
                 }
             },
             .enum_ => |sum| {
                 for (sum.first_variant..sum.first_variant + sum.variant_count) |variant| {
-                    const first = builder.variants.items(.first_field)[variant];
-                    const len = builder.variants.items(.field_count)[variant];
-                    const name = builder.variants.items(.name)[variant];
-                    for (first..first + len) |at| try visit.child(.{ .variant = name }, builder.fields.items(.ty)[at]);
+                    const first = source.variants.items(.first_field)[variant];
+                    const len = source.variants.items(.field_count)[variant];
+                    const name = source.variants.items(.name)[variant];
+                    for (first..first + len) |at| try visit.child(.{ .variant = name }, source.fields.items(.ty)[at]);
                 }
             },
             else => {},
@@ -7641,6 +7674,59 @@ pub const Typing = struct {
         std.debug.assert(index < self.writer_containment.len);
         return self.writer_containment[index];
     }
+
+    /// Why `t` is not `Shareable`, as the builder's `unshareableWitness`
+    /// answered while checking: the parts walked from `t` to what keeps it
+    /// unshareable, over the edges the `unshareable` table was built from and
+    /// along the parts that table marks. An alike instantiation steps to its
+    /// representative, whose parts answer for it. Null where `t` is
+    /// shareable. Owned by the caller.
+    ///
+    /// **Bound:** each type reachable from `t` is entered once.
+    pub fn unshareableWitness(self: *const Typing, gpa: std.mem.Allocator, t: TypeId) !?DependencyWitness {
+        if (self.isShareable(t)) return null;
+        var search: FinishedWitnessSearch = .{ .typing = self, .gpa = gpa };
+        defer search.visited.deinit(gpa);
+        defer search.steps.deinit(gpa);
+        defer search.parts.deinit(gpa);
+        const seed = try search.from(t) orelse return null;
+        const steps = try search.steps.toOwnedSlice(gpa);
+        errdefer gpa.free(steps);
+        return .{ .steps = steps, .parts = try search.parts.toOwnedSlice(gpa), .seed = seed };
+    }
+
+    const FinishedWitnessSearch = struct {
+        typing: *const Typing,
+        gpa: std.mem.Allocator,
+        visited: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
+        steps: std.ArrayList(ContainmentStep) = .empty,
+        parts: std.ArrayList(TypeId) = .empty,
+        found: ?TypeId = null,
+
+        fn from(search: *FinishedWitnessSearch, ty: TypeId) std.mem.Allocator.Error!?TypeId {
+            if ((try search.visited.getOrPut(search.gpa, ty)).found_existing) return null;
+            if (search.typing.unshareableSeed(ty)) return ty;
+            if (search.typing.isShell(ty)) {
+                if (search.typing.alikeSource(ty)) |representative| try search.child(.argument, representative);
+                return search.found;
+            }
+            try BorrowContainment.eachChild(search.typing, ty, .unshareable, search);
+            return search.found;
+        }
+
+        fn child(search: *FinishedWitnessSearch, step: ContainmentStep, part: TypeId) std.mem.Allocator.Error!void {
+            if (search.found != null) return;
+            if (search.typing.isShareable(part)) return;
+            try search.steps.append(search.gpa, step);
+            try search.parts.append(search.gpa, part);
+            if (try search.from(part)) |seed| {
+                search.found = seed;
+                return;
+            }
+            _ = search.steps.pop();
+            _ = search.parts.pop();
+        }
+    };
 
     /// Whether `t` is `Shareable`: whether two tasks may read one value of it
     /// at once, as the builder's `isShareable` answered while checking.

@@ -943,15 +943,13 @@ const Parser = struct {
         result.groups = .{ .start = group_start, .end = self.builder.attributeGroupMark() };
     }
 
-    /// `shareable` vouches for the C object a handle names, and only a sealed
-    /// newtype that is not copyable is a handle: a struct or an enum is
-    /// `Shareable` where its parts are, an unsealed newtype can be made from
-    /// any number, and every copy of a copyable one names the object too.
+    /// `shareable` vouches for the C object a sealed newtype names: a struct
+    /// or an enum is `Shareable` where its parts are, and an unsealed newtype
+    /// can be made from any number, so it names no object.
     fn checkShareable(self: *Parser, attributes: ParsedAttributes, newtype: bool) !void {
         const at = attributes.shareable;
         if (!newtype) return self.reportAt(.s_entry, at, "only a newtype names an object C holds, so `shareable` vouches for nothing here", "a struct or an enum is `Shareable` where its parts are; drop `shareable`");
         if (attributes.unshareable != .none) return self.reportAt(.s_entry, at, "shareable and unshareable are exclusive", "keep the one that says whether a read of this type writes");
-        if (attributes.saw_copyable) return self.reportAt(.s_entry, at, "a copyable newtype names no object C holds, so `shareable` vouches for nothing", "drop `shareable`; a copyable type is `Shareable` where what it holds is");
         if (!attributes.sealed) return self.reportAt(.s_entry, at, "only a sealed newtype names an object C holds, so `shareable` vouches for nothing here", "write `opaque` beside it on the handle, or drop `shareable`");
     }
 
@@ -9736,7 +9734,7 @@ test "an unshareable mark attaches to any type declaration and is written once" 
     try testing.expectEqual(@as(u32, 1), bare.errors);
 }
 
-test "a shareable mark vouches only for a sealed newtype that is not copyable" {
+test "a shareable mark vouches only for a sealed newtype" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
@@ -9745,13 +9743,14 @@ test "a shareable mark vouches only for a sealed newtype that is not copyable" {
         \\type Handle = UInt64
         \\@(opaque, shareable)
         \\type Name = UInt64
+        \\@(opaque, copyable, shareable)
+        \\type Descriptor = Int32
     );
     try testing.expectEqual(@as(u32, 0), accepted.errors);
     const refused = [_][]const u8{
         "@shareable\nstruct Pair { first: UInt64 }\n",
         "@(opaque, shareable)\nenum Mark { Start, End }\n",
         "@(linear, shareable)\ntype Unsealed = UInt64\n",
-        "@(opaque, copyable, shareable)\ntype Copied = UInt64\n",
         "@(opaque, linear, shareable, unshareable)\ntype Both = UInt64\n",
         "@(opaque, shareable, shareable)\ntype Twice = UInt64\n",
         "shareable type Bare = UInt64\n",

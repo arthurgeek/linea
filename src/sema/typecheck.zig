@@ -1379,6 +1379,7 @@ fn typecheckInternal(
                 const shareable = ast.declShareableToken(d);
                 if (shareable != .none) try c.reportUngranted(shareable, "a `@shareable` handle", "drop `@shareable`");
             }
+            if (m.externs) try c.checkSealedHandle(d);
             if (m.externs and foreign_module != .none and c.current != foreign_module)
                 try c.checkForeignPublished(d, foreign_module);
             if (c.program.publishesExport(d)) try c.checkExport(d);
@@ -11693,7 +11694,7 @@ const Checker = struct {
         // two threads read the object at once; only its wrapper can say so.
         const foreign = which == .shareable and self.builder.view().namesForeignObject(witness.seed);
         help.another_value = if (foreign)
-            try std.fmt.allocPrint(self.sink.arena, "keep it in one task or in an owning task, declare `{s}` `@shareable` in its wrapper if its C library lets two threads read one object at once", .{seed_name})
+            try std.fmt.allocPrint(self.sink.arena, "keep it in one task or in an owning task, or, if its C library lets two threads read one object at once, declare `{s}` `@shareable` in its wrapper", .{seed_name[0 .. std.mem.indexOfScalar(u8, seed_name, '[') orelse seed_name.len]})
         else if (which == .shareable)
             "pass a value that reading never changes"
         else
@@ -19811,6 +19812,42 @@ const Checker = struct {
     /// module its root's manifest grants `extern` may declare. The manifest
     /// and the module are spelled as that manifest writes them: a library's
     /// module is reached through the library's name, which its manifest omits.
+    /// [T-ExternHandle] on a newtype sealed in a module trusted with C. A
+    /// `copyable` one names its object from every copy, and a copy crosses to
+    /// any task whole, so it is declared only with `@shareable`, the wrapper's
+    /// promise that C lets threads use the object at once. And `@shareable`
+    /// lifts only the declaration's own reason, so on a newtype whose base is
+    /// not `Shareable` it changes nothing and is refused ([S-Entry]).
+    fn checkSealedHandle(self: *Checker, d: DeclId) std.mem.Allocator.Error!void {
+        if (intrinsics.copiesUnvouchedForeignObject(self.program, self.ast, d)) {
+            self.reportAtToken(
+                .t_extern_handle,
+                self.ast.declName(d),
+                "a copyable sealed newtype in a module trusted with C names its object from every copy, and a copy reaches any task",
+                "declare it `@shareable` if C lets two threads use the object at once, or drop `copyable` so the compiler keeps the object to one task at a time",
+                null,
+            );
+            return;
+        }
+        const shareable = self.ast.declShareableToken(d);
+        if (shareable == .none or !intrinsics.sealedUnderGrant(self.program, self.ast, d)) return;
+        const t = self.type_of_decl.get(d);
+        if (t == .poison) return;
+        const base = switch (self.builder.get(t)) {
+            .newtype => |nominal| nominal.base,
+            else => return,
+        };
+        if (base == .poison or try self.builder.isShareable(base)) return;
+        const base_name = try self.typeName(base);
+        self.reportAtToken(
+            .s_entry,
+            shareable,
+            try std.fmt.allocPrint(self.sink.arena, "`@shareable` vouches only for this declaration, and its base `{s}` is not `Shareable`, so the type stays unshareable", .{base_name}),
+            "vouch on the type that keeps the base unshareable, or drop `shareable`",
+            null,
+        );
+    }
+
     fn reportUngranted(self: *Checker, at: TokenId, what: []const u8, otherwise: []const u8) std.mem.Allocator.Error!void {
         const module = self.program.get(self.current);
         const roots = self.program.source.roots;

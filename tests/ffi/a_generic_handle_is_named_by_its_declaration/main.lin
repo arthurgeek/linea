@@ -1,0 +1,23 @@
+import std.session
+import std.task
+import counter
+
+use counter.Counter
+use session.Chan
+use session.End
+
+// The counter's handle is generic. The help names the declaration a wrapper
+// would mark, not one of its instances.
+fn main() -> UInt8 {
+    let tally = Counter.open()
+    let worker = task.start(
+        sink [read tally] |sink me: Chan[End]| {
+            let _t = tally.total()
+            me.close()
+        },
+    ).unwrap()
+    let _m = tally.total()
+    worker.close()
+    tally.close()
+    0
+}

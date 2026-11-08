@@ -1,0 +1,13 @@
+// A seat number this module seals. No module of this program is trusted with
+// C, so the number names nothing C holds, and copies of it may go anywhere.
+@(opaque, copyable)
+type Seat = UInt64
+
+pub fn assign(number: UInt64) -> Seat {
+    Seat(number)
+}
+
+pub fn number(seat: Seat) -> UInt64 {
+    let Seat(number) = copy(seat)
+    number
+}

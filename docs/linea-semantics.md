@@ -3070,14 +3070,16 @@ is declared only where [M-Extern] grants it. It excludes `copyable` because
 copies of a value reach what it reaches: a copyable type reaches shared state
 through a borrow of an `@unshareable` owner, whose observation every copy
 carries, as `mem.Handle` borrows its `mem.Arena`. `@shareable` marks a
-handle to a C object ([T-ExternHandle]) as `Shareable`: it vouches that C lets
-two threads read the object at once, a promise the compiler believes as it
-believes an `extern` signature. It is declared only where [M-Extern] grants
-it, and only on the innermost handle, a sealed newtype that is not copyable;
-written on a struct or an enum, on a newtype without `opaque`, beside
-`copyable` or `unshareable`, or twice, it violates [S-Entry]. It lifts only
-the handle's own reason: a type holding a `@shareable` handle is `Shareable`
-where its other parts are. `@carrier`
+sealed newtype that names a C object ([T-ExternHandle]) as safe for several
+threads: on a handle it vouches that C lets two threads read the object at
+once, and on a copyable sealed newtype that C lets any number of threads use
+the object through its copies, a promise the compiler believes as it believes
+an `extern` signature. It is declared only where [M-Extern] grants it, and
+only on a sealed newtype; written on a struct or an enum, on a newtype
+without `opaque`, on a sealed newtype whose base is not `Shareable` (the type
+would stay unshareable), beside `unshareable`, or twice, it violates
+[S-Entry]. It lifts only the declaration's own reason: a type holding a
+`@shareable` handle is `Shareable` where its other parts are. `@carrier`
 marks a struct or an enum; it states no ownership policy and combines with
 either. What it means is under the callable source clauses
 ([ADR 0216](adr/0216-a-carrier-type-supplies-its-signatures-default-contract.md)).
@@ -4654,7 +4656,18 @@ handle holds. A handle taken `sink` beside a `read` or plain lend of the same
 handle moves what the call still lends, which is [O-Move]. The innermost
 handle, the sealed one, is not `Shareable` (§5.3) unless its declaration is
 marked `@shareable`, since a read of it may reach C, and C has not said two
-threads may read the object at once
+threads may read the object at once. A `copyable` newtype sealed in a module
+its root's manifest grants `extern` is declared only with `@shareable`: every
+copy names what the sealed number names and crosses to any task whole, so no
+rule about readers keeps two threads apart, and the wrapper must vouch that C
+allows concurrent use; without the mark it is [T-ExternHandle]. The compiler
+also believes that a wrapper keeps every C object a read could reach from
+another thread in a non-copyable handle, or that its read paths are safe for
+concurrent use: an address kept in a plain integer field of a record, or C
+state a granted root keeps in a sealed newtype of a library that is not
+granted, is not followed. A handle moved whole into another task is
+accepted, so a C object that must stay on the thread that created it is
+kept in an owning task by its wrapper
 ([ADR 0260](adr/0260-a-handle-to-a-c-object-is-not-shareable-unless-its-wrapper-vouches.md)).
 
 **[T-ExternAgreement]** Every `extern` declaration of one symbol names the one
@@ -5677,7 +5690,10 @@ C, which may keep state inside the object (an error message, a cache, a
 cursor) that a call taking it `read` rewrites: the compiler cannot see C, so
 it does not assume two threads may read one object at once until the
 wrapper vouches with `@shareable`. A record holding the handle, such as a
-wrapper's `Database`, is unshareable through its field. An owning task keeps
+wrapper's `Database`, is unshareable through its field. The rule follows
+handles only: a wrapper keeps every C object a read could reach from another
+thread in a non-copyable handle, or vouches that its read paths are safe for
+concurrent use ([T-ExternHandle]). An owning task keeps
 such a value on its own thread, so its client is still Shareable. A type
 parameter is not Shareable unless it is bounded `Shareable` or `Integer`. A
 function value is Shareable, since it names a function and holds nothing a

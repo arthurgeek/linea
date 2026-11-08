@@ -1,6 +1,5 @@
-// `@shareable` lifts what makes a handle unshareable: a sealed newtype that
-// is not copyable names an object C holds. A struct is shareable where its
-// fields are, an unsealed or copyable newtype names no C object, and
+// `@shareable` vouches for the C object a sealed newtype names. A struct is
+// shareable where its fields are, an unsealed newtype names no C object, and
 // `unshareable` says the opposite.
 @shareable
 struct _Pair {
@@ -10,9 +9,6 @@ struct _Pair {
 
 @(linear, shareable)
 type _Unsealed = UInt64
-
-@(opaque, copyable, shareable)
-type _Copied = UInt64
 
 @(opaque, linear, shareable, unshareable)
 type _Both = UInt64
