@@ -1,0 +1,13 @@
+// `labs` comes from the C library, which `stdlib.h` declares; `score_double`
+// from this program's own C, which `score/score.h` declares.
+extern fn labs(value: Int64) -> Int64
+
+extern fn score_double(points: Int32) -> Int32
+
+pub fn distance(from: Int64, to: Int64) -> Int64 {
+    labs(to - from)
+}
+
+pub fn doubled(points: Int32) -> Int32 {
+    score_double(points)
+}

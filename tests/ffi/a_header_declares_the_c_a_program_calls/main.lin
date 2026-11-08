@@ -1,0 +1,9 @@
+import std.io
+import score
+
+fn main() -> Result[UInt8, io.IoError] {
+    let gap = score.distance(10, 3)
+    let bonus = score.doubled(21)
+    io.println("{gap} {bonus}")?
+    .Ok(0)
+}

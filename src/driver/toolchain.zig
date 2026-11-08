@@ -587,6 +587,46 @@ pub fn checkC(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !?Failure {
     return runTool(gpa, io, .cc, &.{ Tool.cc.command(), "-fsyntax-only", path });
 }
 
+/// What `cc` printed while reading one C file for the type of every probe
+/// declaration in it.
+pub const Described = struct {
+    /// The type trees of the declarations whose names begin `prefix`.
+    dump: []const u8,
+    /// What `cc` reported, one diagnostic per line.
+    reports: []const u8,
+};
+
+/// Reads the C file at `path` with `cc` and answers the type tree of every
+/// declaration whose name begins with `prefix`, or null where `cc` could not
+/// be started. Nothing is produced. `include_dir` is searched first for an
+/// `#include`. A refusal is not a failure here: a probe naming a function no
+/// header declares is refused while the others are described, and the caller
+/// reads both streams.
+pub fn describeC(gpa: std.mem.Allocator, io: std.Io, include_dir: []const u8, path: []const u8, prefix: []const u8) !?Described {
+    const filter = try std.fmt.allocPrint(gpa, "-ast-dump-filter={s}", .{prefix});
+    defer gpa.free(filter);
+    const result = std.process.run(gpa, io, .{ .argv = &.{
+        Tool.cc.command(),
+        "-fsyntax-only",
+        "-w",
+        "-fno-color-diagnostics",
+        "-fno-caret-diagnostics",
+        "-I",
+        include_dir,
+        "-Xclang",
+        "-ast-dump",
+        "-Xclang",
+        "-ast-dump-decl-types",
+        "-Xclang",
+        filter,
+        path,
+    } }) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    return .{ .dump = result.stdout, .reports = result.stderr };
+}
+
 fn runTool(
     gpa: std.mem.Allocator,
     io: std.Io,

@@ -1,0 +1,7 @@
+error[T-ExternPrototype]: the C declarations this root names cannot be read, so `labs` cannot be held to its prototype: 'nowhere/missing.h' file not found
+ --> tests/ffi/a_header_the_c_compiler_cannot_find_is_refused/main.lin:1:11
+  |
+1 | extern fn labs(value: Int64) -> Int64
+  |           ^^^^ held to the prototype its root's C declarations give it
+  |
+  = help: correct `headers` or `native` in linea.json, or install the C library whose header it names

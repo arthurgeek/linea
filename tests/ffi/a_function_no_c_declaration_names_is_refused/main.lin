@@ -1,0 +1,6 @@
+// `labs` is declared by `stdlib.h`, which the manifest does not name.
+extern fn labs(value: Int64) -> Int64
+
+fn main() -> UInt8 {
+    UInt8(labs(-7))
+}

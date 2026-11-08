@@ -19,6 +19,10 @@ mutation of the one [N-Aliased] routine. Extended by
 the innermost handle is not `Shareable` unless its declaration is marked
 `@shareable`, which a wrapper writes only where C lets two threads read the
 object at once.
+Extended by
+[0262](0262-a-hand-written-c-declaration-is-held-to-the-c-compilers-prototype.md):
+every `extern` naming a C function is held to the prototype its root's
+`native` sources or `"headers"` give it.
 
 ## Context
 

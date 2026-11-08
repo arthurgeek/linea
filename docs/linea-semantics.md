@@ -1833,8 +1833,13 @@ standard library's manifest is
 `"native"` lists C sources, relative to the manifest, that a build compiles
 with the same `cc` at the same level and links into the program, and `"link"`
 lists libraries the build links, each a name `cc` takes after `-l`
-(`["sqlite3"]`). Either requires an `"extern"` grant, since only a granted
-module can call what they build. A library may name both, its sources relative
+(`["sqlite3"]`). `"headers"` lists C headers as `#include <...>` takes
+them (`["sqlite3.h", "store/shim.h"]`): a relative path ending in `.h` with no
+`..`, searched first in the manifest's directory and then on the C compiler's
+include path. The `native` sources and the headers are the root's C
+declarations, which [T-ExternPrototype] holds its `extern` declarations to.
+Each requires an `"extern"` grant, since only a granted module can call what
+they build or declare. A library may name both, its sources relative
 to its own manifest: a program builds and links the C of every root it loads,
 its own first and then each dependency's in the order the dependency graph
 numbers them; a source named twice is built once, and libraries keep each
@@ -4687,6 +4692,33 @@ granted, is not followed. A handle moved whole into another task is
 accepted, so a C object that must stay on the thread that created it is
 kept in an owning task by its wrapper
 ([ADR 0260](adr/0260-a-handle-to-a-c-object-is-not-shareable-unless-its-wrapper-vouches.md)).
+
+**[T-ExternPrototype]** An `extern` of a granted module naming a C function,
+any symbol outside the runtime's `linea_` namespace, which [T-ExternRuntime]
+holds instead, is held to the prototype its own root's C declarations give
+that function: the root's `"native"` sources and the `"headers"` its manifest
+names. A function none of them declares is refused, and so is every `extern`
+of a root whose C declarations the C compiler cannot read, with the reason it
+gives. Each position of C's prototype must be what lowering passes there,
+compared by representation rather than by C's type identity: for an `IntN`
+or `UIntN`, or an unrefined newtype over one, an integer of `N` bits and the
+same signedness, or for 32 bits an `enum`; for a `UInt64` or a newtype over
+one, which is how a handle, `ffi.CText`, `ffi.Bytes` and `ffi.CTextList`
+cross, also any pointer; for a `Float64`, `double`; for an `inout` parameter,
+a pointer to a type the parameter's type would match by value; for a
+callback's context, `void *`; for a callback, a pointer to a function whose
+prototype is held to the callback's by the same rules; for `ffi.Errno[R]`,
+what `R` matches; and for no result, `void`. C's `long` and `long long` are
+both 64-bit integers, and plain `char` has the target's signedness. The
+number of parameters must be C's; a variadic function, one declared without a
+prototype, and C's `bool`, `float`, `long double` and a structure by value
+match nothing, and a name the C declarations define as a macro is refused. A
+`read` parameter does not require a `const` pointee: what C does through the
+address remains the wrapper's promise ([T-ExternHandle]). The check runs for
+`linea check`, `build`, `run` and `test` once the program is otherwise
+accepted, and reads each prototype from the C compiler, which describes a
+pointer to each declared function after including each C declaration
+([ADR 0262](adr/0262-a-hand-written-c-declaration-is-held-to-the-c-compilers-prototype.md)).
 
 **[T-ExternAgreement]** Every `extern` declaration of one symbol names the one
 function the runtime provides under that symbol, so each module may declare the

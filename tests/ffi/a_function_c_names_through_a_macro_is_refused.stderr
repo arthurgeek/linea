@@ -1,0 +1,7 @@
+error[T-ExternPrototype]: `tally_add` is a macro in C, so C code calling it reaches what the macro expands to, not the symbol this declaration names
+ --> tests/ffi/a_function_c_names_through_a_macro_is_refused/tally/tally.lin:2:11
+  |
+2 | extern fn tally_add(total: Int64, amount: Int64) -> Int64
+  |           ^^^^^^^^^ a macro has no prototype to hold this to
+  |
+  = help: declare the function the macro expands to, or call it through a C function in `native`

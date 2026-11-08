@@ -1,0 +1,6 @@
+import swap
+
+fn main() -> UInt8 {
+    swap.bump(41)
+    0
+}

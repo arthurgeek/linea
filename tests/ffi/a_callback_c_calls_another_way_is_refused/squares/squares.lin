@@ -1,0 +1,16 @@
+struct Tally { total: Int64 }
+
+// C calls `visit` with an `int64_t` square, which this callback reads as an
+// `Int32`.
+extern fn squares_visit(count: Int32, visit: fn(inout tally: Tally, square: Int32) -> Int32, inout tally: Tally) -> Int32
+
+fn add_square(inout tally: Tally, square: Int32) -> Int32 {
+    tally.total += Int64(square)
+    0
+}
+
+pub fn sum(count: Int32) -> Int64 {
+    var tally = Tally { total = 0 }
+    let _visited = squares_visit(count, add_square, &tally)
+    tally.total
+}

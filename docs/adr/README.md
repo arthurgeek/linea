@@ -103,7 +103,7 @@ true of a different implementation.
 | [0226](0226-float32-is-a-second-binary-floating-point-width.md) | Float32 is a second binary floating-point width | Accepted; extends 0018 and 0152; extended by 0249 |
 | [0249](0249-a-float-has-a-total-order-and-a-computed-nan-is-canonical.md) | A float has a total order, and a computed NaN is canonical | Accepted; extends 0013, 0143, 0150 and 0226 |
 | [0156](0156-every-declaration-of-an-extern-symbol-is-one-function.md) | Every declaration of an extern symbol is one function | Accepted; extends 0068 |
-| [0228](0228-a-granted-module-calls-c.md) | A granted module calls C | Accepted; supersedes clauses of 0068, 0150 and 0171; extends 0013, 0101 and 0229; extended by 0246 and 0260 |
+| [0228](0228-a-granted-module-calls-c.md) | A granted module calls C | Accepted; supersedes clauses of 0068, 0150 and 0171; extends 0013, 0101 and 0229; extended by 0246, 0260 and 0262 |
 | [0151](0151-a-named-structure-literal-carries-a-written-type.md) | A named structure literal carries a written type | Accepted; refines 0041; extended by 0183 |
 | [0183](0183-a-structure-literal-may-take-its-other-fields-from-a-base.md) | A structure literal may take its other fields from a base | Accepted; extends 0151 and 0140 |
 | [0152](0152-an-integer-literals-type-is-settled-by-its-uses.md) | An integer literal's type is settled by its uses | Accepted; extends 0018, partially supersedes 0092; extended by 0176 and 0226; method-call fallback refined by 0192 |
@@ -164,6 +164,7 @@ true of a different implementation.
 | [0259](0259-a-handler-factory-may-fail-and-serving-begins-once-every-task-has-one.md) | A handler factory may fail, and serving begins once every task has its handler | Accepted; extends 0253 |
 | [0255](0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md) | An erased value is reached through an address that names its type | Accepted; supersedes the writer containment clause of 0193, the `Shareable` containment clause of 0250, the direct runtime call clause of 0171 and the granted-address, corpus and skip clauses of 0197; extends 0254 |
 | [0260](0260-a-handle-to-a-c-object-is-not-shareable-unless-its-wrapper-vouches.md) | A handle to a C object is not `Shareable` unless its wrapper vouches | Accepted; extends 0228 and 0250 |
+| [0262](0262-a-hand-written-c-declaration-is-held-to-the-c-compilers-prototype.md) | A hand-written C declaration is held to the C compiler's prototype | Accepted; extends 0228 |
 | [0126](0126-observations-project-referent-places-transparently.md) | Observations project referent places transparently | Accepted; supersedes projection syntax of 0123; extends 0088 |
 | [0127](0127-constants-retain-distinct-values-and-infer-their-types.md) | Constants infer initializer types and retain distinct integer, boolean and text values | Accepted; extends 0020 and 0059, supersedes the representation decision in 0078; extended by 0140, 0146 and 0157 |
 | [0140](0140-aggregate-constants-retain-checked-construction-plans.md) | Aggregate constants retain shared data and checked construction plans | Accepted; extends 0020, 0059 and 0127; extended by 0157, 0183 and 0227; materialization clause superseded by 0178; unit-expression clause superseded by 0188 |

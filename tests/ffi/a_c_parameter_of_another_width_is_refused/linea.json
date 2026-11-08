@@ -1,0 +1,1 @@
+{ "extern": ["tally"], "native": ["tally/tally.c"] }

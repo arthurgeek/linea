@@ -2014,6 +2014,22 @@ runtime archive and `-l<name>` after it. The conformance runner carries a
 case's C files with its source and writes them under the build's scratch
 directory, and the outcome cache keys on their bytes.
 
+### Prototype check — `src/driver/prototypes.zig`
+
+Holds every `extern` naming a C function to the prototype its root's C
+declarations give it ([T-ExternPrototype], ADR 0262). It runs in the driver
+for `check`, `build`, `run` and `test`, and in the conformance runner, after
+the semantic passes accepted the program and before lowering, because it
+starts a process, which no pass may. The loader records each root's C
+declarations on `RootFacts` (`native`, `headers`, `manifest_dir`).
+`sema/foreign.zig` builds the prototype a declaration implies from
+`types.foreignScalar`, the answer the backend also writes the C types from,
+so what is checked and what is emitted cannot drift. `toolchain.describeC`
+asks `cc` for the type tree of a pointer to each declared function, one C
+file per header list or `native` source; the check reads the tree through its
+sugar and compares positions by representation. The language server does not
+run it.
+
 A build links one of two runtime archives that differ only in the allocator.
 `liblinea_rt_checked.a` compiles `runtime/linea_rt.c` with
 `LINEA_CHECK_STORAGE`, which gives every allocation pages of its own followed

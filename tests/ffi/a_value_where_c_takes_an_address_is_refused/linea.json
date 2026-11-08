@@ -1,0 +1,1 @@
+{ "extern": ["swap"], "native": ["swap/swap.c"] }

@@ -1,0 +1,6 @@
+// `tally_add` is a macro in the header, so no C function of that name exists.
+extern fn tally_add(total: Int64, amount: Int64) -> Int64
+
+pub fn add(total: Int64, amount: Int64) -> Int64 {
+    tally_add(total, amount)
+}

@@ -1,0 +1,5 @@
+extern fn labs(value: Int64) -> Int64
+
+fn main() -> UInt8 {
+    UInt8(labs(-7))
+}

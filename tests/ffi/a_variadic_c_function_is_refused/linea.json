@@ -1,0 +1,1 @@
+{ "extern": ["sums"], "native": ["sums/sums.c"] }

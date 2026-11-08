@@ -50,6 +50,7 @@ const lowerTree = @import("mir/lower.zig").lowerTree;
 const mlir_backend = @import("backend/mlir.zig");
 const emitMlir = mlir_backend.emit;
 const toolchain = @import("driver/toolchain.zig");
+const prototypes = @import("driver/prototypes.zig");
 const edges = @import("mir/edges.zig");
 const storage_mod = @import("mir/storage.zig");
 const Inst = @import("mir/mir.zig").Inst;
@@ -19354,9 +19355,13 @@ fn compareRewrittenRun(
 /// the rules and not where they point, because a rewrite moves the text a span
 /// indexes, and not the message, which quotes what the rewrite spelled.
 fn rulesNamedBy(gpa: std.mem.Allocator, sink: *const Sink) ![]const u8 {
+    return rulesNamedIn(gpa, sink.items());
+}
+
+fn rulesNamedIn(gpa: std.mem.Allocator, diagnostics: []const Diagnostic) ![]const u8 {
     var names: std.ArrayList([]const u8) = .empty;
     defer names.deinit(gpa);
-    for (sink.items()) |d| {
+    for (diagnostics) |d| {
         if (d.severity == .note) continue;
         try names.append(gpa, if (d.code) |c| c.ruleName() else "(no rule)");
     }
@@ -21139,6 +21144,31 @@ fn freshCheck(
     return .{ .program = program, .semantics = semantics, .lowered = lowered };
 }
 
+/// [T-ExternPrototype] for a case loaded from memory: its C files are written
+/// beneath the scratch directory at their paths in the case, which is the
+/// directory its roots' manifests and sources are named relative to.
+fn checkPrototypes(gpa: std.mem.Allocator, io: std.Io, scratch_dir: []const u8, case: Case, settled: *const loader.Semantics, sink: *Sink) !void {
+    var declares = false;
+    for (settled.expanded.source.modules) |module| declares = declares or (module.externs and !module.library);
+    if (!declares) return;
+    const dir = try toolchain.uniqueTarget(gpa, io, scratch_dir, "case-c-files");
+    defer gpa.free(dir);
+    try std.Io.Dir.cwd().createDirPath(io, dir);
+    defer std.Io.Dir.cwd().deleteTree(io, dir) catch {};
+    for (case.native.files) |file| {
+        const path = try std.fs.path.join(gpa, &.{ dir, file.path });
+        defer gpa.free(path);
+        if (std.fs.path.dirname(path)) |parent| try std.Io.Dir.cwd().createDirPath(io, parent);
+        const written = try std.Io.Dir.cwd().createFile(io, path, .{});
+        defer written.close(io);
+        var buf: [4096]u8 = undefined;
+        var w = written.writer(io, &buf);
+        try w.interface.writeAll(file.text);
+        try w.interface.flush();
+    }
+    try prototypes.check(gpa, io, settled, sink, .{ .base = dir, .scratch = dir });
+}
+
 fn checkCase(
     gpa: std.mem.Allocator,
     scratch_parent: std.mem.Allocator,
@@ -21373,6 +21403,17 @@ fn checkCase(
     // closure loads exactly what a fresh load does.
     if (rejected and chosen.imported) _ = try freshCheck(gpa, scratch_parent, case, &table, &sink, display_path, &w.failures);
 
+    // The command line holds every `extern` to its C prototype once the
+    // semantic passes accept the program, and so does the corpus, over the
+    // case's C files written where `cc` can read them.
+    const before_prototypes = sink.items().len;
+    var refused_by_prototypes = false;
+    if (!rejected) {
+        try checkPrototypes(gpa, io, env.scratch_dir, case, &settled, &sink);
+        rejected = sink.hasErrors();
+        refused_by_prototypes = rejected;
+    }
+
     // The inferred dump reads the checker's answers back into the
     // source, so it is only meaningful where the checker had answers.
     if (!rejected) {
@@ -21404,7 +21445,9 @@ fn checkCase(
     };
     // Taken before the backend runs, which reports nothing about the source:
     // what a rewrite of the walks is compared against is what the passes said.
-    const rules_named = try rulesNamedBy(gpa, &sink);
+    // A rewrite is checked by the semantic passes alone, so a case only
+    // [T-ExternPrototype] refused is compared as the passes accepted it.
+    const rules_named = try rulesNamedIn(gpa, if (refused_by_prototypes) sink.items()[0..before_prototypes] else sink.items());
     semantic_check_zone.end();
 
     // Property: a use lies inside the region of source its binding belongs

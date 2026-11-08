@@ -47,6 +47,7 @@ const emitMlir = mlir_backend.emit;
 const toolchain = @import("toolchain.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
 const loader = @import("loader.zig");
+const prototypes = @import("prototypes.zig");
 const library = @import("library.zig");
 
 const Program = @import("../syntax/program.zig").Program;
@@ -694,6 +695,10 @@ pub fn run(process: std.process.Init) !u8 {
                 "  the {s} names under `link` something other than a library name, such as \"sqlite3\" for -lsqlite3\n",
                 .{loader.manifest_name},
             ),
+            error.ManifestHeaderNotHeader => try stderr_w.print(
+                "  the {s} names under `headers` something other than a C header as an include names it, such as \"sqlite3.h\" or \"store/shim.h\"\n",
+                .{loader.manifest_name},
+            ),
             error.ManifestLinksWithoutExtern => try stderr_w.print(
                 "  the {s} names C to build or link but grants no module `extern`, so nothing could call it\n",
                 .{loader.manifest_name},
@@ -765,6 +770,11 @@ pub fn run(process: std.process.Init) !u8 {
                 else
                     try checkProgram(gpa, process.gpa, &program, &interner, &sink, purpose);
                 defer settled.deinit(gpa);
+                // Every command that would build the program holds its C
+                // declarations to the C compiler's prototypes first.
+                if ((is_check or is_run or is_build or is_test) and !sink.hasErrors()) {
+                    try prototypes.check(gpa, io, &settled, &sink, .{ .scratch = scratchDir(process.minimal.environ) });
+                }
                 const res = &settled.res;
                 const typing = &settled.typing;
                 const disposals = &settled.disposals;

@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `int32_t limits_clamp(int32_t, int32_t, int32_t)`, and this declaration calls it as `int32_t limits_clamp(int32_t, int32_t)`
+ --> tests/ffi/a_missing_c_parameter_is_refused/limits/limits.lin:2:11
+  |
+2 | extern fn limits_clamp(value: Int32, low: Int32) -> Int32
+  |           ^^^^^^^^^^^^ C takes 3 parameters, and this declares 2
+  |
+  = note: `limits_clamp` is declared by `limits/limits.c`
+  = help: declare one parameter for each of the 3 C takes, in its order

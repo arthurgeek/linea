@@ -1,0 +1,5 @@
+import tally
+
+fn main() -> UInt8 {
+    UInt8(tally.add(40, 2))
+}
