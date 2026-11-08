@@ -1,4 +1,5 @@
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
 const testing = std.testing;
 
 const source_mod = @import("../support/source.zig");
@@ -4110,7 +4111,8 @@ test "a generated program with an array formats and re-parses" {
     try testing.expect(try seedsContaining(gpa, 200, "; 1]") + try seedsContaining(gpa, 200, "; 2]") > 0);
 }
 
-test "generated newtypes admit the arithmetic rejection mutation" {
+test "slow: generated newtypes admit the arithmetic rejection mutation" {
+    try slow_tests.skipUnlessRun();
     const mutation = @import("mutate.zig");
     var applied: u32 = 0;
     const seeds = 32;

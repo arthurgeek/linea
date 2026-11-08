@@ -1,4 +1,5 @@
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
 const testing = std.testing;
 
 const ast_mod = @import("../syntax/ast.zig");
@@ -1113,7 +1114,8 @@ fn buildFieldsWithFailures(gpa: std.mem.Allocator, checked: *const analysis_mod.
     defer fields.deinit(gpa);
 }
 
-test "transparent fields release partial indexes on allocation failure" {
+test "slow: transparent fields release partial indexes on allocation failure" {
+    try slow_tests.skipUnlessRun();
     const gpa = testing.allocator;
     const text = "struct Entry { value: UInt8 }\nfn main() -> UInt8 { let entry: Entry = .{ value = 3 }; entry.value }";
     var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
@@ -1127,7 +1129,8 @@ fn buildUsesWithFailures(gpa: std.mem.Allocator, checked: *const analysis_mod.An
     defer uses.deinit(gpa);
 }
 
-test "record shorthand releases partial local indexes on allocation failure" {
+test "slow: record shorthand releases partial local indexes on allocation failure" {
+    try slow_tests.skipUnlessRun();
     const gpa = testing.allocator;
     const text = "struct Entry { value: UInt8 }\nfn main() -> UInt8 { let value: UInt8 = 3; let entry: Entry = .{ value }; entry.value }";
     var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
@@ -1190,7 +1193,8 @@ test "an inherent member used as a function value keeps its member uses" {
     try testing.expectEqual(@as(usize, 2), checked.uses.of(declaration).len);
 }
 
-test "use binding families release partial indexes on allocation failure" {
+test "slow: use binding families release partial indexes on allocation failure" {
+    try slow_tests.skipUnlessRun();
     const gpa = testing.allocator;
     var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{
         .{ .path = "app/main.lin", .text = "import values\nuse values.Entry\nfn main() -> UInt8 { let entry = Entry { value = 3 }; entry.value }" },

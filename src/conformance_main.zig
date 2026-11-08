@@ -1,4 +1,5 @@
 const std = @import("std");
+const slow_tests = @import("support/slow_tests.zig");
 const builtin = @import("builtin");
 const tracy = @import("support/tracy.zig");
 const compiler_stack = @import("support/stack.zig");
@@ -2175,7 +2176,8 @@ fn checkWalkLends(
     return any;
 }
 
-test "lending walk probes preserve names used only by the original body" {
+test "slow: lending walk probes preserve names used only by the original body" {
+    try slow_tests.skipUnlessRun();
     const walks = [_]struct { convention: []const u8, body: []const u8 }{
         .{ .convention = "read", .body = "total += value + bonus" },
         .{ .convention = "inout", .body = "value += bonus\ntotal += value" },
@@ -3494,7 +3496,8 @@ test "parameter head coherence sweeps retain disjoint cross-head implementations
     }
 }
 
-test "coherence lookup preparation grows with written receivers" {
+test "slow: coherence lookup preparation grows with written receivers" {
+    try slow_tests.skipUnlessRun();
     inline for (.{ false, true }) |later_argument| {
         const small = try coherenceModule(testing.allocator, 64, true, later_argument);
         defer testing.allocator.free(small);
@@ -4769,7 +4772,8 @@ fn refusalCodesHere(gpa: std.mem.Allocator, text: []const u8) ![]const diagnosti
     return codes.toOwnedSlice(gpa);
 }
 
-test "a chain of a thousand declared answers is accepted and one of a thousand and one is refused once, in either order" {
+test "slow: a chain of a thousand declared answers is accepted and one of a thousand and one is refused once, in either order" {
+    try slow_tests.skipUnlessRun();
     for (std.enums.values(AnswerChain)) |shape| for (std.enums.values(ChainOrder)) |order| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
@@ -4779,7 +4783,8 @@ test "a chain of a thousand declared answers is accepted and one of a thousand a
     };
 }
 
-test "a chain of thirty thousand delegations or substituted parameters is refused once, in either order" {
+test "slow: a chain of thirty thousand delegations or substituted parameters is refused once, in either order" {
+    try slow_tests.skipUnlessRun();
     for ([_]AnswerChain{ .delegated_elements, .substituted_parameters }) |shape| for (std.enums.values(ChainOrder)) |order| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
@@ -4885,7 +4890,8 @@ fn codeBefore(_: void, a: diagnostic.Code, b: diagnostic.Code) bool {
     return @intFromEnum(a) < @intFromEnum(b);
 }
 
-test "a part asking about a type that holds the part's own holder is refused in every declaration order" {
+test "slow: a part asking about a type that holds the part's own holder is refused in every declaration order" {
+    try slow_tests.skipUnlessRun();
     // Two types, with an earlier question about the holder.
     try expectEveryOrder(pick_trait ++ chooser_impl ++ pad_impl, &.{
         "struct _Zed {\n    z: Pad[Ay].Out,\n}\n",
@@ -4940,7 +4946,8 @@ const linear_holder_decls = [_][]const u8{
     "struct V {\n    s: Chooser[R].Out,\n}\n",
 };
 
-test "a part asking about a holder of a linear part is refused in every declaration order" {
+test "slow: a part asking about a holder of a linear part is refused in every declaration order" {
+    try slow_tests.skipUnlessRun();
     const lin = "@linear\nstruct Lin {\n    v: UInt8,\n}\n\n";
     try expectRefusedEveryOrder(pick_trait ++ lin ++ chooser_impl, &(linear_holder_decls ++ [_][]const u8{
         "impl Pick for D {\n    type Out = UInt8\n}\n",
@@ -4954,7 +4961,8 @@ test "a part asking about a holder of a linear part is refused in every declarat
     }), 48, &.{ .t_bound, .t_impl });
 }
 
-test "parts asking an unbounded implementation about their holder are accepted in every declaration order" {
+test "slow: parts asking an unbounded implementation about their holder are accepted in every declaration order" {
+    try slow_tests.skipUnlessRun();
     try expectEveryOrder(pick_trait ++ pad_impl, &.{
         "struct _Zed {\n    z: Pad[X].Out,\n}\n",
         "struct X {\n    y0: Y0,\n    y1: Y1,\n    y2: Y2,\n}\n",
@@ -5132,7 +5140,8 @@ fn promisedMembersModule(comptime promise: MemberPromise) fn (std.mem.Allocator,
     }.make;
 }
 
-test "nested templates and templates selecting the next are accepted" {
+test "slow: nested templates and templates selecting the next are accepted" {
+    try slow_tests.skipUnlessRun();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
@@ -5176,11 +5185,17 @@ test "a capability question reads through an owned type nested forty-five thousa
     try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, out.written()));
 }
 
-test "a capability question reads through types held only as arguments, two hundred thousand deep" {
+test "slow: a capability question reads through types held only as arguments, two hundred thousand deep" {
+    try slow_tests.skipUnlessRun();
     // `N0` holds `N1` only as the argument of `Marker[N1]`, which has no part
     // of that type, so `N1` is asked about after the walk through `N0` ends,
-    // and so on down the chain. Two hundred thousand is past what a frame per
-    // argument would fit on the compiler's stack in a Debug build.
+    // and so on down the chain.
+    //
+    // The check runs on a 3 MiB stack. A Debug check of this program uses
+    // about 1.5 MiB of it whatever the depth, and a frame per argument, at
+    // least 16 bytes for a return address and a saved frame pointer, needs
+    // 3.2 MB for two hundred thousand, so recursion overflows the stack at
+    // every optimisation level.
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
@@ -5198,7 +5213,7 @@ test "a capability question reads through types held only as arguments, two hund
     for (0..depth - 1) |i| try w.print("struct N{d} {{\n    x: Marker[N{d}],\n}}\n\n", .{ i, i + 1 });
     try w.print("struct N{d} {{\n    x: UInt8,\n}}\n\n", .{depth - 1});
     try w.writeAll("fn main() -> UInt8 {\n    let reading: M.Reading = 3\n    reading\n}\n");
-    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, out.written()));
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try (try compiler_stack.runWithin(3 << 20, refusalCodesHere, .{ gpa, out.written() })));
 }
 
 /// A borrowed carrier with `n` field paths, moved through `n` bindings.
@@ -7099,7 +7114,8 @@ fn sweepSelected(name: []const u8, filter: ?[]const u8) bool {
     return std.mem.indexOf(u8, name, wanted) != null;
 }
 
-test "every sweep dimension compiles at a small size" {
+test "slow: every sweep dimension compiles at a small size" {
+    try slow_tests.skipUnlessRun();
     // The sweep runs in its own CI lane, after a pull request is otherwise
     // ready, and a generator the language has moved away from fails there
     // as a timing gate. Each one is compiled here at a size small enough to
@@ -10006,7 +10022,8 @@ test "session errors retain earlier logs and updates" {
     try testing.expectEqualStrings(expected, output.written());
 }
 
-test "workspace workers preserve serial results" {
+test "slow: workspace workers preserve serial results" {
+    try slow_tests.skipUnlessRun();
     var tmp = testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     const files = [_]struct { path: []const u8, text: []const u8 }{
@@ -11674,7 +11691,8 @@ test "case LSP properties share one analysis independent of the compiler" {
     try testing.expectEqual(@as(usize, 0), failures.items.len);
 }
 
-test "rename validation preserves compiler diagnostics and manifest semantics" {
+test "slow: rename validation preserves compiler diagnostics and manifest semantics" {
+    try slow_tests.skipUnlessRun();
     const body = "fn main() -> UInt8 {\n    let value: UInt8 = 1\n    value + probe()\n}\n";
     const valid_probe = "fn probe() -> UInt8 { 0 }\n";
     for (0..5) |fixture| {
@@ -16154,7 +16172,8 @@ test "sweep sample mode rejects every incompatible runner mode" {
     }
 }
 
-test "a narrowed corpus checks its cases without requiring whole-corpus coverage" {
+test "slow: a narrowed corpus checks its cases without requiring whole-corpus coverage" {
+    try slow_tests.skipUnlessRun();
     var directory = testing.tmpDir(.{});
     defer directory.cleanup();
     try directory.dir.createDirPath(testing.io, "cases");
@@ -16224,7 +16243,8 @@ const LayoutFixture = struct {
     }
 };
 
-test "an example's goldens are read from tests/examples under its own name" {
+test "slow: an example's goldens are read from tests/examples under its own name" {
+    try slow_tests.skipUnlessRun();
     var fixture: LayoutFixture = try .init();
     defer fixture.deinit();
     try fixture.write("examples/value.lin", fixture.text);
@@ -16246,7 +16266,8 @@ test "an example's goldens are read from tests/examples under its own name" {
     try testing.expectError(error.FileNotFound, fixture.directory.dir.access(testing.io, "examples/value.fmt", .{}));
 }
 
-test "a case recording a storage report fails unrun, and an update keeps its golden" {
+test "slow: a case recording a storage report fails unrun, and an update keeps its golden" {
+    try slow_tests.skipUnlessRun();
     var fixture: LayoutFixture = try .init();
     defer fixture.deinit();
     const recorded = "trap\nlinea: storage was freed twice\n";
@@ -16288,7 +16309,8 @@ test "a golden beside an example is refused" {
     try testing.expectEqual(@as(u8, 1), try fixture.run("examples/value.lin", &.{}));
 }
 
-test "an example's golden with no example is an orphan, and no case of the corpus" {
+test "slow: an example's golden with no example is an orphan, and no case of the corpus" {
+    try slow_tests.skipUnlessRun();
     var fixture: LayoutFixture = try .init();
     defer fixture.deinit();
     try fixture.write("examples/value.lin", fixture.text);
@@ -16305,7 +16327,8 @@ test "an example's golden with no example is an orphan, and no case of the corpu
     try testing.expectEqual(@as(u8, 1), try fixture.run("examples/silent.lin", &.{}));
 }
 
-test "a walk that selects nothing, or cannot run its transcripts, fails" {
+test "slow: a walk that selects nothing, or cannot run its transcripts, fails" {
+    try slow_tests.skipUnlessRun();
     var fixture: LayoutFixture = try .init();
     defer fixture.deinit();
     try fixture.write("tests/prose/README.md", "Nothing to run.\n");
@@ -18695,7 +18718,8 @@ const Built = struct {
     foreign: Foreign = .{},
 };
 
-test "lowered modules release literal bytes and functions on allocation failure" {
+test "slow: lowered modules release literal bytes and functions on allocation failure" {
+    try slow_tests.skipUnlessRun();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();

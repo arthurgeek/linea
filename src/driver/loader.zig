@@ -1,4 +1,5 @@
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
 const loader_mod = @This();
 const module_route = @import("../support/module_route.zig");
 const tracy = @import("../support/tracy.zig");
@@ -3648,7 +3649,8 @@ test "the program's root is module zero, whatever else was loaded" {
     }
 }
 
-test "buffered I/O loads only through an explicit import" {
+test "slow: buffered I/O loads only through an explicit import" {
+    try slow_tests.skipUnlessRun();
     const gpa = testing.allocator;
     for ([_]bool{ false, true }) |explicit_io| {
         var arena = std.heap.ArenaAllocator.init(gpa);
@@ -5574,7 +5576,8 @@ test "checked library session resumes independent application checks" {
     }
 }
 
-test "checked library resumes a program that derives, with the diagnostics and MLIR of a fresh check" {
+test "slow: checked library resumes a program that derives, with the diagnostics and MLIR of a fresh check" {
+    try slow_tests.skipUnlessRun();
     const prelude = try CheckedLibrary.init(testing.allocator);
     defer prelude.deinit();
     const with_json = try CheckedLibrary.initFor(testing.allocator, &.{"std/json"});
@@ -5674,7 +5677,8 @@ test "an application resumes unless its own files hold a closure or a generated 
     }
 }
 
-test "a checked library holding a module the program does not load resumes nothing" {
+test "slow: a checked library holding a module the program does not load resumes nothing" {
+    try slow_tests.skipUnlessRun();
     // A fresh load of these programs loads neither `std.fs` nor `std.http`,
     // whose names and implementations would change what a check reports:
     // `UInt8.from_path` names nothing, and no help offers `import std.http`.
@@ -5699,7 +5703,8 @@ test "a checked library holding a module the program does not load resumes nothi
     }
 }
 
-test "checked library session matches fresh diagnostics and inferred source" {
+test "slow: checked library session matches fresh diagnostics and inferred source" {
+    try slow_tests.skipUnlessRun();
     var prefix = try CheckedLibrary.init(testing.allocator);
     defer prefix.deinit();
     const cases = [_]struct { text: []const u8, reused: bool, ambiguous_traversal: bool = false }{
@@ -5854,7 +5859,8 @@ test "checked library session retains typing after scratch reset" {
     try testing.expectEqual(@import("../sema/types.zig").TypeId.u8, semantics.typing.exprType(body));
 }
 
-test "checked library reuse and fallback preserve emitted MLIR" {
+test "slow: checked library reuse and fallback preserve emitted MLIR" {
+    try slow_tests.skipUnlessRun();
     var prefix = try CheckedLibrary.init(testing.allocator);
     defer prefix.deinit();
     const Case = struct { text: []const u8, reused: bool, library: bool = false };
@@ -6171,7 +6177,8 @@ test "the View certificate holds its carried field to mem.Carried of its element
     }
 }
 
-test "checked construction derives survive library reuse and fallback" {
+test "slow: checked construction derives survive library reuse and fallback" {
+    try slow_tests.skipUnlessRun();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();

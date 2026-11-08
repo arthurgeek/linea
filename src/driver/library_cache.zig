@@ -28,6 +28,7 @@
 //! whole entry or none, whichever of several writers renames last.
 
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
 const builtin = @import("builtin");
 const testing = std.testing;
 const Sha256 = std.crypto.hash.sha2.Sha256;
@@ -124,7 +125,7 @@ fn openWaiting(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest,
     var cache = std.Io.Dir.cwd().createDirPathOpen(io, dir, .{ .open_options = .{ .iterate = true } }) catch return null;
     defer cache.close(io);
     const lock_name = try std.fmt.allocPrint(scratch, "{s}.lock", .{name});
-    const lock = cache.createFile(io, lock_name, .{ .truncate = false }) catch return null;
+    const lock = createLock(io, cache, lock_name) catch return null;
     defer lock.close(io);
     if (!(lock.tryLock(io, .exclusive) catch return null)) {
         // Said to a person watching, never into captured output, where
@@ -152,6 +153,23 @@ fn openWaiting(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, key: Digest,
     write(io, cache, scratch, name, key, payload) catch return library;
     evict(io, cache) catch {};
     return library;
+}
+
+/// Opens the lock file `name` in `cache`, creating it where it is missing.
+///
+/// On macOS an open that creates a file can fail with `ENOENT` while another
+/// thread or process creates the same name, though the directory is there:
+/// of three threads creating one new name at once, most attempts see it. The
+/// file exists once that open returns, so the open is tried again, a few
+/// times in case the lock is removed as an orphan in between.
+fn createLock(io: std.Io, cache: std.Io.Dir, name: []const u8) std.Io.File.OpenError!std.Io.File {
+    var attempts: usize = 0;
+    while (true) : (attempts += 1) {
+        return cache.createFile(io, name, .{ .truncate = false }) catch |err| switch (err) {
+            error.FileNotFound => if (attempts < 3) continue else err,
+            else => err,
+        };
+    }
 }
 
 /// The library the entry `name` holds, or null where it is missing or
@@ -351,7 +369,8 @@ fn evict(io: std.Io, cache: std.Io.Dir) !void {
     if (count > kept_entries) cache.deleteFile(io, &entries[0].name) catch {};
 }
 
-test "checked library cache: a missing, damaged or foreign entry is checked again and rewritten" {
+test "slow: checked library cache: a missing, damaged or foreign entry is checked again and rewritten" {
+    try slow_tests.skipUnlessRun();
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const dir = try std.fmt.allocPrint(testing.allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});
@@ -442,7 +461,7 @@ test "checked library cache: of commands missing one entry at once, one writes i
     for (threads) |thread| thread.join();
     var encodings: [3][]u8 = undefined;
     for (&openers, &encodings) |opener, *bytes| {
-        const library = opener.result.?;
+        const library = opener.result orelse return error.TestExpectedLibrary;
         bytes.* = try encoding.encode(testing.allocator, library);
         library.deinit();
     }

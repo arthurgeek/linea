@@ -27,6 +27,7 @@
 //! matrix -- and is held to being refused, or to running clean.
 
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
 const testing = std.testing;
 
 const choices_mod = @import("choices.zig");
@@ -1372,7 +1373,8 @@ test "every storage program the fuzzer found still passes" {
     }
 }
 
-test "the fuzz property holds over seeds whose mutants keep a walk across an operation" {
+test "slow: the fuzz property holds over seeds whose mutants keep a walk across an operation" {
+    try slow_tests.skipUnlessRun();
     // Seeds 3, 10, 12, 13 and 15 each write a mutant that changes a vector or
     // a map while a walk over it continues, the shape a walk's own
     // invalidation is what refuses.

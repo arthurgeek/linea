@@ -10,6 +10,8 @@
 //! in this file, and never a difference of opinion.
 
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
+const compiler_stack = @import("../support/stack.zig");
 const testing = std.testing;
 
 const Span = @import("../support/span.zig").Span;
@@ -3134,7 +3136,8 @@ test "a write at a computed index inside the whole slot ends an observation of i
     try expectRefused(try computedWriteBesideObservation(testing.allocator, null), "%10 uses %9 after %8 wrote the storage it observes");
 }
 
-test "a dominator tree as deep as the function has blocks is walked" {
+test "slow: a dominator tree as deep as the function has blocks is walked" {
+    try slow_tests.skipUnlessRun();
     const gpa = testing.allocator;
     var b = Builder.init(gpa);
     defer b.deinit();
@@ -3147,6 +3150,11 @@ test "a dominator tree as deep as the function has blocks is walked" {
     const exit = try b.addBlock();
     // Each block observes the slot and branches on to the next or out, so
     // every block's dominator is the one before it.
+    //
+    // The check runs on a 512 KiB stack. A Debug check of this function uses
+    // about 85 KiB of it, and a frame per block, at least 16 bytes for a
+    // return address and a saved frame pointer, needs 960 KB for sixty
+    // thousand, so recursion overflows the stack at every optimisation level.
     for (blocks, 0..) |block, i| {
         const a = try addrOf(&b, block, big);
         const view = try b.addCall(block, .value, .u64, Span.empty, Shapes.reads, &.{a});
@@ -3157,7 +3165,7 @@ test "a dominator tree as deep as the function has blocks is walked" {
     }
     const k = try constant(&b, exit, 0);
     try ret(&b, exit, k);
-    try expectAccepted(try Shapes.callees(gpa, try b.finish(blocks[0], .from(0))));
+    try (try compiler_stack.runWithin(512 << 10, expectAccepted, .{try Shapes.callees(gpa, try b.finish(blocks[0], .from(0)))}));
 }
 
 test "an edge into a loop other than at its dominating block is reported" {
@@ -3561,7 +3569,8 @@ pub fn retainedViewsProgram(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
-test "the phase does no more allocation work than views retained in one holder are worth" {
+test "slow: the phase does no more allocation work than views retained in one holder are worth" {
+    try slow_tests.skipUnlessRun();
     try expectLinearWork(retainedViewsProgram);
 }
 

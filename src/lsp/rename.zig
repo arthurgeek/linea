@@ -1,4 +1,5 @@
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
 const testing = std.testing;
 const lsp = @import("lsp");
 
@@ -2131,7 +2132,8 @@ test "explicit read capture rename separates shorthand source and alias" {
     }
 }
 
-test "capture recovery fields rename with aliases and preserve local binders" {
+test "slow: capture recovery fields rename with aliases and preserve local binders" {
+    try slow_tests.skipUnlessRun();
     const gpa = testing.allocator;
     const text =
         \\struct Other { value: UInt8 }
@@ -2233,7 +2235,8 @@ const construction_closure_rename_program =
     \\}
 ;
 
-test "construction recipe closure names rename contracts and direct call labels" {
+test "slow: construction recipe closure names rename contracts and direct call labels" {
+    try slow_tests.skipUnlessRun();
     const gpa = testing.allocator;
     const text = construction_closure_rename_program;
     var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");

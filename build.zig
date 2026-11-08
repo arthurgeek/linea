@@ -1119,6 +1119,22 @@ fn checkTreeIsTidy(b: *std.Build, tree: Tree, failed: *bool) void {
         }
     }
 
+    // A unit test named `slow:` that does not skip itself under
+    // `-Dslow-tests=false`, a test that skips itself, or reads the option,
+    // under another name.
+    //
+    // Only the tree the unit-test binary is built from: the build tree's own
+    // cases quote the statement inside strings.
+    if (tree.joined != null) for (files) |f| {
+        if (std.mem.indexOf(u8, f.text, "test \"slow: ") == null and
+            std.mem.indexOf(u8, f.text, "skipUnlessRun") == null and
+            std.mem.indexOf(u8, f.text, "test_options") == null) continue;
+        for (source.slowTestMismatches(b.allocator, f)) |mismatch| {
+            std.debug.print("slow test: {s}/{s}, {s}\n", .{ tree.dir, f.path, mismatch });
+            failed.* = true;
+        }
+    };
+
     // A declaration nobody names.
     //
     // [N-Unused] makes this an error in the language this compiler implements,
@@ -1394,7 +1410,8 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     // `zig build` stays a debug build for the edit-compile loop, and
     // `zig build -Drelease` is the distributed one. The unit tests run in the
-    // mode the build selects: Debug here, ReleaseFast in the optimised CI lane.
+    // mode the build selects: Debug here, ReleaseSafe in the optimised CI lane
+    // and, on its weekly and manual runs, ReleaseFast too.
     const optimize = test_roots.optimizeMode(b.release_mode, b.option(bool, "release", "optimize for end users"));
 
     // Where recorded outcomes and build intermediates go.
@@ -1553,6 +1570,20 @@ pub fn build(b: *std.Build) void {
         "guide",
         "Run the guide gate as part of `test` (default: true)",
     ) orelse true;
+
+    // The unit tests named `slow:` take ten seconds or more each in a Debug
+    // binary and together most of its run. A pull request's `check` run builds
+    // its Debug unit tests with them skipped and passes `-Dslow-tests=false`,
+    // because the `optimised` lane runs every unit test under ReleaseSafe,
+    // which keeps Debug's safety checks and assertions, before the pull
+    // request merges; everywhere else they run.
+    const slow_tests = b.option(
+        bool,
+        "slow-tests",
+        "Run the unit tests named `slow:` (default: true)",
+    ) orelse true;
+    const test_options = b.addOptions();
+    test_options.addOption(bool, "slow_tests", slow_tests);
 
     // Every case that runs, built again at every other optimisation level and
     // held to answering alike. Off by default because it builds each case six
@@ -1989,6 +2020,7 @@ pub fn build(b: *std.Build) void {
         });
         addCompilerAssets(module, runtime_source, semantics, library, corpus, lsp_kit, tracy_options);
         addConformanceAssets(b, module);
+        module.addOptions("test_options", test_options);
         linkTracyClient(b, module, profiling);
         break :joined module;
     };
@@ -2003,6 +2035,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     addCompilerAssets(fuzz_module, runtime_source, semantics, library, corpus, lsp_kit, tracy_options);
+    fuzz_module.addOptions("test_options", test_options);
     linkTracyClient(b, fuzz_module, profiling);
     // Every fuzz target by default. A target whose one input compiles whole
     // programs is named `fuzz-slow:` so it can be searched apart with a run

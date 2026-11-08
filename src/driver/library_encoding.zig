@@ -12,6 +12,7 @@
 //! below only as far as a caller has matched the writer's identity.
 
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
 const testing = std.testing;
 const serial = @import("../support/serial.zig");
 const loader = @import("loader.zig");
@@ -301,7 +302,8 @@ test "checked library encoding: a table's length the input cannot back is corrup
     }
 }
 
-test "checked library encoding: a decoded library checks and emits every program as a freshly checked one does" {
+test "slow: checked library encoding: a decoded library checks and emits every program as a freshly checked one does" {
+    try slow_tests.skipUnlessRun();
     const fresh = try CheckedLibrary.init(testing.allocator);
     defer fresh.deinit();
     const bytes = try encode(testing.allocator, fresh);

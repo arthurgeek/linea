@@ -26,6 +26,12 @@ fn ReturnOf(comptime function: anytype) type {
 /// returns what it returns. Where the thread cannot be started the call runs
 /// on the caller's stack, which is the stack the caller already had.
 pub fn run(comptime function: anytype, args: anytype) ReturnOf(function) {
+    return runWithin(compiler_stack_bytes, function, args) catch @call(.auto, function, args);
+}
+
+/// Calls `function(args)` on a thread with `stack_bytes` of stack and returns
+/// what it returns, or the error that kept the thread from starting.
+pub fn runWithin(stack_bytes: usize, comptime function: anytype, args: anytype) std.Thread.SpawnError!ReturnOf(function) {
     const Args = @TypeOf(args);
     const Job = struct {
         args: Args,
@@ -36,7 +42,7 @@ pub fn run(comptime function: anytype, args: anytype) ReturnOf(function) {
         }
     };
     var job: Job = .{ .args = args };
-    const thread = std.Thread.spawn(spawn_config, Job.go, .{&job}) catch return @call(.auto, function, args);
+    const thread = try std.Thread.spawn(.{ .stack_size = stack_bytes }, Job.go, .{&job});
     thread.join();
     return job.result;
 }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const slow_tests = @import("../support/slow_tests.zig");
 const testing = std.testing;
 
 const Source = @import("../support/source.zig").Source;
@@ -781,7 +782,8 @@ fn hold(
     if (failed) return error.CoverageTableIsWrong;
 }
 
-test "every construct the table calls generated is generated" {
+test "slow: every construct the table calls generated is generated" {
+    try slow_tests.skipUnlessRun();
     const seen = try sweep(testing.allocator, 400);
     try hold(Expr.Tag, reachOfExpr, seen.exprs, "syntax");
     try hold(node.Stmt.Tag, reachOfStmt, seen.stmts, "statements");
