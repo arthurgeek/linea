@@ -1,9 +1,9 @@
 # 261. Waits go through the runtime's poller, and a loop runs tasks as fibers
 
-Status: Proposed — 2026-11-07, revised the same day after two external
-reviews. The number is provisional: two branches in
-flight may take 0259 and 0260, and this record is renumbered to the next free
-number when it lands. Nothing is built. Once built, it would change these
+Status: Proposed — 2026-11-07. The number is provisional: 0259 and 0260 may be
+taken by branches in flight (0259 by PR #50), and this record is renumbered to
+the next free number when it lands. It builds on [0262](0262-an-owning-task-holds-nothing-that-waits.md), which is on
+another branch (PR #49). Nothing is built. Once built, it would change these
 sentences of existing records:
 
 - [0250](0250-tasks-are-structured-through-linear-sessions.md) §6, "Waiting on
@@ -39,24 +39,24 @@ Where this record narrows one, the row says so.
 | I/O blocks today; `runtime/net.c` polls only to finish an interrupted `connect`. A fiber substrate needs nonblocking descriptors and a poller, or pins its carrier. | `concurrency-discussion.md` §2 item 3 and §5.4 |
 | Zig 0.16's staging, a blocking backend first and evented backends later behind one `Io` value, is the model. | `concurrency-discussion.md`, comparison table; Zig 0.16.0 `lib/std/Io.zig` |
 | CPU parallelism (`task.Policy`) and I/O waiting (`Io`) are separate capabilities, and the event loop is its own pillar. | `executor-and-policy-design.md` §9, §10; decisions #23, #26 |
-| `Io` is a capability passed like an allocator, and a handler never takes an `io` parameter. Replaced in part by §8 (the maintainer, 2026-11-07): `Io` is passed where tasks start; a descriptor does not carry it, has no outstanding operation or registration when its ownership moves, and is not made nonblocking by the task's poller where its kind cannot be polled. | decisions #26 |
+| `Io` is a capability passed like an allocator, and a handler never takes an `io` parameter. Replaced in part by §8: `Io` is passed where tasks start; a descriptor does not carry it, has no outstanding operation or registration when its ownership moves, and is not made nonblocking by the task's poller where its kind cannot be polled. | decisions #26 |
 | `Allocator`, `Io`, `Policy` and sessions are four orthogonal resource capabilities; the process heap has open stateless naming. | decisions #28; [0095](0095-the-system-allocator-is-named-rather-than-received.md) |
 | No task is stopped from outside. A deadline is stated where a task waits; cancellation is a protocol branch; deadline scopes and cancellation tokens that propagate implicitly are rejected. | decisions #3, #14; 0250 §3, §7 and Alternatives |
 | No unjoined thread: only `Slot.start` may start Linea code on a thread of its own. | [0253](0253-independent-work-runs-through-an-explicit-executor-policy.md) §3, [T-ThreadStart] |
 | No set of tasks waits on each other forever: the task graph is a forest and a blocked task waits on its own edges. Every later blocking operation must say what it does to that argument. Copyable senders to a mailbox broke it. | 0250 §9 and §6; decisions, "External review, and keeping deadlock freedom" |
+| An owning task's state and its jobs are `Isolated`: they hold no session endpoint, so a job never waits on a task. | [0262](0262-an-owning-task-holds-nothing-that-waits.md), on another branch (PR #49) |
 | A linear-sender inbox merging children's streams, with timers as producers that wait on no task, keeps the forest. | decisions #13 (revised), #16 |
 | `http.serve` is concurrent by default on `.Threads(128)`, with a handler per serving task. | 0253 §5; `CLAUDE.md` |
 | A foreign call is made through a granted module's `extern`; a callback with a context is called during the call, on the calling thread. | [0228](0228-a-granted-module-calls-c.md), [0229](0229-an-application-depends-on-a-library-by-path.md), [T-ExternCallback] |
 | Non-blocking I/O, asynchronous I/O, timeouts and cancellation were deferred by the socket and text designs. | `linea-design/specs/2026-09-23-tcp-http-server-design.md` §3, "Out of scope"; `2026-09-08-owned-text-borrows-and-io-design.md`, "Deferred" |
-| The poller is the runtime's own C over direct system calls (kqueue, epoll, later io_uring), no event-loop library, shaped around completion; Windows is not a target. | the maintainer, 2026-11-07 |
+| The poller is the runtime's own C over direct system calls (kqueue, epoll, later io_uring), no event-loop library, shaped around completion; Windows is not a target. | this record |
 
 What is new here: the operation and its state machine (§1, §2), the fiber's
 scheduling state (§3), the wait set, its keys and its registration protocol
-(§4), the theorem split into three properties (§5), the dispatcher and its
+(§4), operating-system signals as a source (§4.5), the theorem split into three properties (§5), the dispatcher and its
 HTTP/1.1 policy (§6), pinned fibers and the migration invariant (§7), the loop
 and `Io` (§8), blocking and thread-affine foreign calls and callback mode
-(§9), operating-system signals as a source (§4.5), a simulated `Io` (§12),
-and the phases (§13).
+(§9), a simulated `Io` (§12), and the phases (§13).
 
 ## Context
 
@@ -91,6 +91,7 @@ Four things users ask for cannot be written on that substrate, or not well:
 | `Future.cancel` and `error.Canceled` at every cancellation point | none: a deadline where a task waits, and a protocol's stop branch (§10) |
 | `Io.Select(U)` waits for the first of several tasks | `task.WaitSet[M]` waits on descriptors, endpoints, handles and timers, and keeps what did not fire (§4) |
 | `operate`, `Batch` and `Io.Timeout` submit operations with deadlines | every wait is an operation with a deadline, through one completion-shaped interface (§1) |
+| tests run against a real backend, with real time | a simulated `Io` with a virtual clock and network runs tests deterministically from a seed (§12) |
 
 What transfers is the colour replaced by a value, a blocking first backend
 with evented ones behind the same surface, and completion-shaped operations.
@@ -282,7 +283,12 @@ void linea_unpark(struct linea_park *p);
 Session rendezvous, `close`'s join, the owning task's call queue,
 `recv_until`, the wait set and `linea_io_perform` all use it. On a thread a
 park is the condition-variable wait `runtime/task.c` already does, under the
-lock of the record being waited on. On a fiber it is the machine below.
+lock of the record being waited on, except in a wait set's `next`: on a
+thread, `next` waits in the set's own kernel queue (`kevent`, `epoll_wait`)
+with its deadline heap's nearest deadline as the timeout, and the set's user
+event wakes it for the sources the kernel does not see, a session's peer, a
+body's return and a signal's router (§4.2, §4.5). On a fiber it is the
+machine below.
 
 **An operation's machine and a fiber's machine are separate.** §2 decides who
 completes an operation and when; this one decides when the fiber that waits
@@ -366,15 +372,16 @@ The sources:
   [T-UnknownOperation];
 - `returned(handle, wrap)`: a handle at `End`, ready when the body has
   returned;
-- `after(duration, message)`: a timer.
+- `after(duration, message)`: a timer;
+- `signal(sig, wrap)`: an operating-system signal (§4.5).
 
 `next` waits until a source is ready, delivers exactly one, and answers it
-wrapped. `take_if_registered(key)` does the same only while the source has not
-been signalled, and answers `.None` once it has, so a program can withdraw a
-source exactly when it is not ready (§6 evicts idle connections by it).
-`take(key)` withdraws one registration and answers its value in its
+wrapped. `take(key)` withdraws one registration and answers its value in its
 **own type**: taking the answer key gives back the endpoint and taking a
-timer's key gives back its message. `close` answers a `Vec[M]` of every
+timer's key gives back its message. `take_if_registered(key)` does the same
+only while the source has not been signalled, and answers `.None` once it has,
+so a program can withdraw a source exactly when it is not ready (§6 evicts idle
+connections by it). `close` answers a `Vec[M]` of every
 registration still held, wrapped, for a set whose keys the program did not
 keep. An empty set answers `.None` from `next` without waiting.
 
@@ -439,8 +446,8 @@ and each successful swap is the transition's linearization point.
 
 | From | To | By |
 | --- | --- | --- |
-| — | registered | `received`, `returned`, `readable`, `writable`, `after`: the value's bytes move into the set, then the source's mark is published, then the source is checked once (below) |
-| registered | signalled | the source: a peer entering `send` or `choose` (under the session's lock, after filling the slot), a body returning (under the task's lock), a descriptor event of the current generation, a timer's expiry; the set's user event (`EVFILT_USER`, an `eventfd` write) is posted after the swap |
+| — | registered | `received`, `returned`, `readable`, `writable`, `after`, `signal`: the value's bytes move into the set, then the source's mark is published, then the source is checked once (below) |
+| registered | signalled | the source: a peer entering `send` or `choose` (under the session's lock, after filling the slot), a body returning (under the task's lock), a descriptor event of the current generation, a timer's expiry, a signal's count passing the one the registration recorded (§4.5); the set's user event (`EVFILT_USER`, an `eventfd` write) is posted after the swap |
 | signalled | delivered | `next`: it swaps the earliest-signalled registration, then clears the mark and moves the value out wrapped; one `next` delivers one value |
 | registered or signalled | withdrawn | `take` or `close`: the swap, then the mark is cleared and the value moved out |
 | registered | withdrawn | `take_if_registered`: the swap fails, and answers `.None`, if the source was signalled first |
@@ -480,7 +487,10 @@ and each successful swap is the transition's linearization point.
 A set carries the dependencies of what it holds exactly as a `mem.Vec[M]` of
 the same values does, so a set holding a handle whose body read the parent's
 values keeps those values reserved until the handle leaves the set and is
-closed. A set holding such a value is not `Owned`.
+closed. A set holding such a value is not `Owned`. `WaitSet[M]` exposes `M` to
+the containment tables, so a set holding an endpoint or a handle is not
+`Isolated` ([0262](0262-an-owning-task-holds-nothing-that-waits.md)): it cannot be an owning task's state or be captured by
+a job.
 
 #### 4.3 What `close` answers
 
@@ -502,17 +512,37 @@ decide it:
 So `close` keeps `Vec[M]` for the uniform case, and a program with
 heterogeneous losers takes them by key.
 
+#### 4.4 Prerequisite of phase 2: no job waits on a task
+
+0250 §9's argument for an owning task rests on a job never waiting on a task.
+That was not enforced: `task.own` bounded the state by `Owned` and `call` the
+job by `Owned + Release`, which a detached endpoint (`Chan[P, ()]`) meets. A
+clerk task wrapped its own endpoint in a record whose `Release` sends and then
+waits, and called the owner with a job capturing it; the creator's next call
+queued behind that release, so neither side could move, and `linea check`
+accepted it (`tests/tasks/a_call_cannot_hold_an_endpoint`). Endpoints held in
+the state itself, in an `Option`, a record, a `Vec`, a closure or another
+owner, were accepted too (`tests/tasks/an_owning_task_holds_nothing_that_waits`).
+
+[0262](0262-an-owning-task-holds-nothing-that-waits.md) closes it with a built-in bound, `Isolated`, decided by a
+containment table over the edges `Shareable` follows and seeded by
+`session.Chan` through its declaration: `task.own`, `Owner` and `Client` take
+`S: Owned + Isolated`, and `call` takes `F: Owned + Isolated + Release`. A wait
+set holding an endpoint or a handle is not `Isolated` (§4.2), so the rule covers
+it with no addition here. Phase 2 begins once 0262 has landed.
+
 #### 4.5 Operating-system signals as a source
 
-**Decision: a signal is a wait-set source, and graceful shutdown is part of
-phase 2** (the maintainer, 2026-11-07), so a server waits on its connections,
-its timers and a shutdown signal in one `next`:
+**Decision: a signal is a wait-set source, built in phase 2**, so a program
+waits on its connections, its timers and a shutdown signal in one `next`;
+`http.serve` uses it to shut down gracefully by default from phase 3 (§6.1):
 
 ```linea
-enum Serving { Ready(Reading), Done(Served), Stop }
+// `Reading` and `Served` are the dispatcher's types of §6.
+enum Woke { Ready(Reading), Done(Served), Stop(io.SignalShare) }
 
-var waiting = task.WaitSet[Serving].open()
-let stop = &waiting.signal(.Terminate, Serving.Stop)?   // refused when the launcher ignores SIGTERM
+var waiting = task.WaitSet[Woke].open()
+let stop = &waiting.signal(.Terminate, |share| Woke.Stop(share))?   // refused when SIGTERM is ignored
 ```
 
 - **Which signals.** `io.Signal` names `Terminate` (`SIGTERM`), `Interrupt`
@@ -522,7 +552,7 @@ let stop = &waiting.signal(.Terminate, Serving.Stop)?   // refused when the laun
   write path (`runtime/pipe_signal.h`), `SIGKILL` and `SIGSTOP` cannot be
   caught, `SIGCHLD` waits for a process record, and the timer signals are not
   offered, since timers are `after`.
-- **Delivery.** While at least one registration for a signal exists, the
+- **Delivery.** While at least one share of a signal exists (below), the
   runtime's signal router has a handler installed for it with `SA_SIGINFO`,
   `SA_ONSTACK` and `SA_RESTART`. The handler is async-signal-safe and does
   three things: it increments the signal's 64-bit delivery count with a
@@ -539,7 +569,7 @@ let stop = &waiting.signal(.Terminate, Serving.Stop)?   // refused when the laun
   records the signal's count when it is made and is signalled by the first
   count past it, once, however many deliveries arrive before `next` delivers
   it; like a timer it fires once, and a program that wants the next delivery
-  registers again. A delivery made before a registration existed does not
+  registers again, with `signal_with` to keep a delivered share (below). A delivery made before a registration existed does not
   signal it: deliveries are not queued for registrations to come.
 - **Masking.** The runtime blocks none of these signals on any thread and
   changes no thread's mask for them. A delivery lands on whichever thread the
@@ -550,61 +580,36 @@ let stop = &waiting.signal(.Terminate, Serving.Stop)?   // refused when the laun
   in a way that matters: it touches only the router's count and descriptor.
   `SA_RESTART` and the runtime's own `EINTR` retries (§1) keep an interrupted
   system call from surfacing.
-- **Disposition, and what a registration owns.** A registration owns its
-  message and one share of the signal's disposition. The first registration
-  of a signal saves the action in place and installs the router's handler; the
-  last one withdrawn, delivered or closed restores the saved action. So the
-  default action returns once nobody waits, and a second `SIGTERM` after a
-  shutdown has been delivered and not registered again ends the process as it
-  would have, the conventional second Ctrl-C. Registration is refused, with
-  `io.SignalError.Ignored`, when the saved action is `SIG_IGN`: the launcher
-  asked for the signal to be ignored (`nohup` ignores `SIGHUP`), and the
-  program decides whether to override that. When the saved action is a
-  handler a host installed, the router calls it after counting, with the same
-  arguments, so an embedding host still sees its signal. Carriers need nothing
-  of their own: on a loop, a fiber parked in `next` has its set's
-  kernel queue armed on its carrier's poller, and the wake descriptor is in
-  that queue.
+- **Disposition, and what a registration owns.** A signal registration holds
+  a linear `io.SignalShare`: one share of the signal's disposition. The first
+  share of a signal saves the action in place and installs the router's
+  handler; the saved action is restored only when no share of that signal
+  remains. `wrap` receives the share, so a delivered message carries it: the
+  share moves into the message, and the handler stays installed until the
+  program settles the message's share (`share.settle()`, or its release) or
+  registers again with it (`waiting.signal_with(share, wrap)`), which moves the
+  same share into a new registration and leaves no window in which the saved
+  action is back. A registration taken or closed answers its share undelivered
+  (`share.delivered()` tells the two apart). So the saved action returns once
+  no registration and no unsettled delivered message remain, and a second
+  signal that arrives after that ends the process as it would have without
+  Linea, the conventional second signal.
+- **An ignored signal cannot be overridden.** Registration is refused with
+  `io.SignalError.Ignored` when the saved action is `SIG_IGN`. The launcher
+  asked for the signal to be ignored (`nohup` ignores `SIGHUP`, a supervisor
+  may ignore `SIGINT`), and a Linea program cannot override that: it learns the
+  signal is ignored and carries on without it.
+- **A host's handler.** When the saved action is a handler a host installed,
+  the router calls it after counting, with the same arguments, so an embedding
+  host still sees its signal.
+- **Carriers** need nothing of their own: on a loop, a fiber parked in `next`
+  has its set's kernel queue armed on its carrier's poller, and the wake
+  descriptor is in that queue.
 - **The deadlock argument.** A signal is the world: a registration waits on no
   task, as a timer does (§5).
 - **Simulation.** Inside a simulation (§12) the router is replaced by
   `world.deliver(.Terminate)`, which advances the same counts with no real
   signal, so shutdown is tested deterministically.
-
-#### 4.4 Prerequisite of phase 2: no job waits on a task
-
-0250 §9's argument for an owning task rests on a job never waiting on a task.
-A job reaches only the owner's state and its own captures, so neither may hold
-anything a job can wait on. `task.own` bounds the state by `Owned` and `call`
-bounds the job by `Owned + Release`, and a detached endpoint
-(`Chan[P, ()]`) appears to satisfy `Owned`. If it does, a program can already
-put an endpoint in an owner's state and have a job `recv` on it while the
-peer's progress depends on another job queued to the same owner: a wait the
-argument rules out and the compiler accepts. Phase 2 does not begin until this
-is settled, since a wait set holding an endpoint would inherit the hole.
-
-**If the hole exists, the rule is:** a structural predicate, computed from
-fields as `Shareable` is, that is false for `session.Chan` and so for every
-value holding one (a handle, a wait set holding either, an aggregate holding
-any of them); `task.own` requires it of its state and `call` of its job. A
-program that puts a waitable value in an owner's state or a job is refused at
-the call, naming the field that holds it. The refusal is a corpus case
-recorded before the fix, and the predicate's leaves are read from the
-library's declarations, so a waitable type added later is covered. The fix
-lands on its own, independently of this record.
-
-> **Verification result:** the hole was real. A clerk task wrapped its own
-> endpoint in a record whose `Release` sends and then waits, and called the
-> owner with a job capturing it; the creator's next call queued behind that
-> release, so neither side could move. `linea check` accepted the program and
-> it deadlocked at run time (`tests/tasks/a_call_cannot_hold_an_endpoint`).
-> Endpoints held in the state itself (in an `Option`, a record, a `Vec`, a
-> closure, or another owner) were accepted too
-> (`tests/tasks/an_owning_task_holds_nothing_that_waits`). The fix is ADR 0262:
-> a built-in bound, `Isolated`, decided by a containment table over the edges
-> `Shareable` follows and seeded by `session.Chan` through its declaration;
-> `task.own`, `Owner` and `Client` take `S: Owned + Isolated` and `call` takes
-> `F: Owned + Isolated + Release`. Phase 2 builds on that rule.
 
 ### 5. Three properties, each with its own argument
 
@@ -705,9 +710,7 @@ to a free serving task. A serving task answers one request and sends the
 reader back as `Idle`, or reports it `Closed`. The dispatcher waits on busy
 endpoints with `received` in the same set and keeps free ones, whose next
 operation is its own `choose`, in a vector. An idle reader that already holds
-the next request's bytes is ready on registration (its `readiness` is `Now`). Ready
-readers that find no free serving task wait in a queue the dispatcher keeps,
-bounded by the connection limit below. When serving ends, the dispatcher takes
+the next request's bytes is ready on registration (its `readiness` is `Now`).  When serving ends, the dispatcher takes
 the end branch on every serving task, which answers what its share reported
 (`ServeError.Memory` when it could not take its buffers, as 0253 §5 reports
 now), and closes it.
@@ -737,14 +740,13 @@ the rules marked new.
   `Transfer-Encoding` alone is `501`; beside `Content-Length` it is `400`. A
   request with neither has an empty body. A body shorter than its length when
   the connection ends is `400`.
-- **Decision: agreeing `Content-Length` duplicates stay accepted** (the
-  maintainer, 2026-11-07). Linea accepts several `Content-Length` headers
+- **Decision: agreeing `Content-Length` duplicates stay accepted**. Linea accepts several `Content-Length` headers
   when every value is a valid nonnegative decimal integer that does not
   overflow and all of them parse to the same number, as RFC 9112 §6.3 permits
   and the parser's tests already hold. They are normalized to one canonical
   body length before framing, so every component reads one length.
-  Disagreeing, malformed or overflowing values are `400` and close the
-  connection; a request carrying both `Transfer-Encoding` and
+  Disagreeing or malformed values are `400`; an overflowing value is `413`,
+  as a length past every body limit; each closes the connection; a request carrying both `Transfer-Encoding` and
   `Content-Length` is `400` and closes. A comma-separated list in one header
   (`Content-Length: 5, 5`) is not a decimal integer to the parser and is
   refused as malformed; this record does not widen the parser to accept it.
@@ -765,7 +767,7 @@ the rules marked new.
 - **New: response framing.** A response is framed by `Content-Length` when its
   length is known. A streamed response of unknown length is followed by
   closing the connection, as every response is now. **Chunked request bodies
-  are the next HTTP change after phase 3** (the maintainer, 2026-11-07), and
+  are the next HTTP change after phase 3**, and
   never beside `Content-Length`; chunked responses come with them.
 - **New: limits per request.** Every limit applies to each request of a
   connection afresh. `first_byte_timeout_ms` bounds the wait for a
@@ -782,7 +784,7 @@ keeps both keys: a reader that becomes ready has its timer taken; a timer that
 fires has its reader taken by key and closed.
 
 **Decision: evict the longest-idle connection when a newcomer needs the
-room** (the maintainer, 2026-11-07). The dispatcher keeps watching the
+room**. The dispatcher keeps watching the
 listener's readiness at `open_connections`. When the budget is exhausted and a
 new client is waiting, it closes the keep-alive connection that has been idle
 longest and accepts the newcomer, so idle clients cannot hold the whole
@@ -802,7 +804,8 @@ a client retry an idempotent request on a connection closed before any
 response. Ready readers that find no free serving task wait in a queue bounded
 by `open_connections`.
 
-`serve` takes `L: net.Acceptor + io.Pollable`. `ScriptedListener` implements
+`serve`'s listener bound gains `io.Pollable`, to
+`L: net.Acceptor + io.Pollable`. `ScriptedListener` implements
 `io.Pollable` by forwarding to the listener it wraps, so the tests that script
 accept failures keep working. The policy still bounds the serving tasks and
 `.Threads(128)` stays the default; an idle connection holds a registration,
@@ -817,6 +820,54 @@ never handed between workers as a descriptor number. The dispatcher's set
 holds the serving tasks' handles, so it carries what their bodies capture (the
 `make_handler`, a parent allocator, a client of the shared state) by §4.2's
 rule, until serving ends.
+
+#### 6.1 A server shuts down gracefully on `SIGTERM` and `SIGINT`
+
+**Decision: graceful shutdown is on by default.** Every server stops
+gracefully on `SIGTERM` and `SIGINT` unless told otherwise. `http.serve`,
+`serve_in`, `listen_and_serve` and `listen_and_serve_with` take
+`shutdown: http.Shutdown = .OnSignals`; `.Manual` leaves both signals alone.
+
+With `.OnSignals`, the dispatcher registers `Terminate` and `Interrupt` in its
+own set (§4.5) when serving begins. A registration refused as `Ignored` is
+left out: that signal is ignored, and the server serves on without it. When
+either signal is delivered, the dispatcher:
+
+1. withdraws the listener by its key and accepts nothing more; connections
+   that complete the handshake afterwards wait in the backlog and are reset
+   when the listener closes;
+2. settles the delivered message's share and withdraws the other signal's
+   registration, so the saved actions return at once and a second `SIGTERM`
+   or `SIGINT` during the drain ends the process as it would have (§4.5);
+3. finishes every request in flight: a serving task answering a request
+   completes it, and a reader whose request bytes have already arrived (ready
+   in the set or queued for a serving task) is served too; each of these
+   responses carries `Connection: close`;
+4. closes every idle connection, taking the idle readers out of the set by
+   `close`, and closes a reader that turns ready after the signal without
+   serving it;
+5. takes the end branch on every serving task, joins them, closes the
+   listener, and returns.
+
+`serve` then answers `.Ok(())`, as it does when it reaches `Limits.connections`:
+a stop the program asked for is not a failure, and a failure found while
+draining (a serving task that could not take its buffers, the listener's close)
+is answered as it is now. The drain is bounded by what bounds every request:
+`read_timeout_ms` and `write_timeout_ms` end a slow client, and a handler that
+computes forever holds the drain as it holds any request.
+
+- **A program that registers the signals itself.** Deliveries reach every
+  registration (§4.5), so the program's own set wakes as the server's does,
+  and the server still drains. A program that wants to decide when the server
+  stops passes `.Manual`; `serve` then registers nothing, and the program's
+  registrations alone own the dispositions.
+- **`.Sequential`.** The dispatcher is the serving thread. A signal is a source
+  in the same set; the dispatcher sees it at its next `next`, after it has
+  answered the request it is serving, then drains as above. A long request
+  delays the reaction by its own length.
+- **Embedding.** In a host process the registrations chain to a handler the
+  host installed (§4.5); a host that owns its signals passes `.Manual`.
+- **Phases.** The signal source is phase 2; `serve`'s use of it is phase 3.
 
 ### 7. A fiber is a task on a fixed, guard-paged stack
 
@@ -898,11 +949,11 @@ is joined by `close` as a thread is.
 borrow, so it is `Owned` and `Shareable`. Its representation is a **stable
 loop identity**: an index into the runtime's loop table and the slot's
 generation, never a pointer, and every use looks the loop up and checks the
-generation. While loops last until exit no lookup can fail; the check is
-there from the first phase so that a scoped loop (§8.2) or an ended
-simulation (§12) can come later without changing the public model, and a
-stale `Io` then traps with `linea: an Io names a loop that has ended` instead
-of reaching freed carriers.
+generation. A loop's lookup cannot fail while loops last until exit; a
+simulation's can from phase 1, since a simulation ends (§12), which is why the
+check exists from the first phase. A stale `Io` traps with `linea: an Io names
+a loop that has ended` instead of reaching freed carriers, and a scoped loop
+(§8.2) can come later without changing the public model.
 
 - `io.system()` names the system: a task started on it is a thread of its own,
   and its operations are performed in place. It is stateless and open, as
@@ -937,7 +988,7 @@ threads serves on fibers by one argument. A handler never names an `Io`.
 decides what a task runs on.
 
 **Decision: `Io` is passed only where tasks start; a descriptor does not carry
-it** (the maintainer, 2026-11-07). The execution substrate is a property of
+it**. The execution substrate is a property of
 the task that performs the I/O, not of the descriptor: a thread performs an
 operation in place, a fiber arms it on its own carrier's poller (§8.1). So
 ownership and execution stay orthogonal (a `net.Connection` owns a socket,
@@ -956,7 +1007,7 @@ linear ownership access.
   libraries and other blocking calls still need the blocking pool (§9), or a
   backend that completes them (io_uring, phase 7).
 
-**Decision: process-lifetime loops initially** (the maintainer, 2026-11-07).
+**Decision: process-lifetime loops initially**.
 Loops remain alive until process exit in the first implementation. This is an
 implementation restriction, not a permanent decision: it avoids new lifetime
 rules while the fiber substrate and the poller are established. Scoped,
@@ -992,24 +1043,6 @@ inactive, and its slot's generation discards any event still queued (§2).
 | a foreign call in progress while `main` returns | cannot happen | the fiber making it is joined first; if the call never returns, neither does the join (§5, property 3) |
 | `loop.close()` | not offered in these phases | §8.2 |
 
-#### 8.2 Closable loops, a future direction
-
-Two shapes of `loop.close()` were weighed for these phases:
-
-- *Static exclusion*: `loop.io()` borrows the loop, so [O-Borrow] refuses
-  `close` while anything holds the `Io`. Since descriptors no longer store an
-  `Io`, only what is started on the loop would carry the borrow: task handles,
-  which already carry their bodies' dependencies through `mem.Carried`. This
-  is the shape a scoped or closable loop should take. It is deferred because
-  an `Io` that borrows is not `Owned`, so a body that starts more fibers on the
-  loop must capture it by `read`, and the `on:` arguments, `http.serve` and
-  the generic combinators would each need their contracts written for a
-  borrowed capability; that is a change of its own, made when a program needs
-  a loop to end.
-- *Run-time waiting*: `close` waits for the loop's fibers and registrations to
-  end. A task that closes a loop while holding a handle of a fiber on it waits
-  on itself, which the language promises cannot happen. Rejected.
-
 #### 8.1 Who owns a poller
 
 Each carrier owns its poller (a kqueue or an epoll descriptor), its deadline
@@ -1034,6 +1067,24 @@ carrier, so no other thread registers, rearms or removes them.
   carrier's poller. When migration arrives, a set moves with its fiber and is
   armed on the new carrier, so no registration ever moves between pollers.
 - **Shutdown.** None in these phases: a loop lasts until exit (§8.2).
+
+#### 8.2 Closable loops, a future direction
+
+Two shapes of `loop.close()` were weighed for these phases:
+
+- *Static exclusion*: `loop.io()` borrows the loop, so [O-Borrow] refuses
+  `close` while anything holds the `Io`. Since descriptors no longer store an
+  `Io`, only what is started on the loop would carry the borrow: task handles,
+  which already carry their bodies' dependencies through `mem.Carried`. This
+  is the shape a scoped or closable loop should take. It is deferred because
+  an `Io` that borrows is not `Owned`, so a body that starts more fibers on the
+  loop must capture it by `read`, and the `on:` arguments, `http.serve` and
+  the generic combinators would each need their contracts written for a
+  borrowed capability; that is a change of its own, made when a program needs
+  a loop to end.
+- *Run-time waiting*: `close` waits for the loop's fibers and registrations to
+  end. A task that closes a loop while holding a handle of a fiber on it waits
+  on itself, which the language promises cannot happen. Rejected.
 
 ### 9. Foreign calls that block or keep thread state
 
@@ -1089,8 +1140,7 @@ lock queued: waits that threads finish and a bounded pool would not. The
 threads in use are bounded by the calls in progress plus the persistent
 leases.
 
-**Decision: when a pool thread cannot be made, phase 5 traps** (the
-maintainer, 2026-11-07). The pool reuses idle threads and makes one only when
+**Decision: when a pool thread cannot be made, phase 5 traps**. The pool reuses idle threads and makes one only when
 none is idle, never one per call. A standard-library operation whose
 signature can say so answers a recoverable error: the runtime's own blocking
 functions answer an `io.IoError` of category `ResourceExhausted` from `fs`
@@ -1107,8 +1157,12 @@ the wrapper and leaving the C ABI unchanged. It is deferred, not rejected.
 What deadlock freedom means here is scoped by §5: the pool adds no edge to the
 session graph, and it relies on external progress, that a foreign call
 returns. A call that never returns stops its fiber and every join above it.
-This is not the worker pool 0253 rejected, which ran a body after the lends it
-read had ended: a pool thread runs only a call its fiber is parked in. A call
+The pool runs no Linea body of its own. A pool thread runs only `invoke` for a
+call whose fiber is parked holding the call's lends, and the callbacks C makes
+during that call (§9.1), so it is outside the worker pool 0253 §3 rejected,
+which ran a body after the lends it read had ended. Its threads are started by
+the runtime's pool, not by a [T-ThreadStart] symbol, because they never run a
+body that outlives its caller. A call
 cannot be cut short at a deadline, since C holds the arguments; a deadline is
 checked before the call and after it returns. A program that keeps its
 database in an owning task, as 0253 §4 teaches, makes its calls from one task.
@@ -1180,14 +1234,14 @@ owned, and a timer in a set leaves the other sources registered.
 | --- | --- | --- |
 | §1–§3 operations, parks | nothing | nonblocking sockets, `linea_io_perform` with its state machine, the deadline heap, `linea_park` |
 | §4 wait set | nothing new: registration states are implementation heads, a key is an ordinary copyable type, and what a set carries follows `mem.Vec`'s rule | `task.WaitSet`, `task.Registered`, `io.Pollable`, the runtime set and its protocol |
+| §4.4 prerequisite | none here; 0262's `Isolated` applies, and a set holding an endpoint or a handle is not `Isolated` | — |
+| §4.5 signals | nothing | `io.Signal`, `io.SignalError`, `io.SignalShare`, `WaitSet.signal` and `signal_with`, the runtime's signal router |
 | §5 properties | the semantics document's deadlock clause restated as §5's three properties, with the wait set | — |
-| §6 HTTP | nothing | dispatcher, the policy's new rules, `Limits.open_connections` and `idle_timeout_ms`, eviction |
+| §6 HTTP | nothing | dispatcher, the policy's new rules, `Limits.open_connections` and `idle_timeout_ms`, eviction, `shutdown:` and graceful shutdown |
 | §7 fibers | [T-ThreadStart] names the fiber start; the extern call and callback lowering maintains `foreign_depth` and, for an affine module, `thread_affine` | switch, carriers, the fiber's scheduling state, fault record, sanitizer hooks |
 | §8 loop | nothing new: `Io` is an ordinary copyable type | `io.Io` as a stable loop identity, `io.current()`, `io.Loop`, the `on:` arguments, `env.available_parallelism()` |
 | §9 foreign calls | [M-Blocking] for the `blocking` and `thread_affine` keys; trampolines generated for the externs of a module that blocks; the symbol table marks the runtime's blocking functions | the pool, temporary and persistent leases, callback mode |
-| §4.5 signals | nothing | `io.Signal`, `io.SignalError`, `WaitSet.signal`, the runtime's signal router |
 | §12 simulation | nothing | `io.Simulation`, the simulated backend, virtual clock and network |
-| §4.4 prerequisite | if the hole exists, the structural predicate that keeps waitable values out of an owner's state and jobs | — |
 
 Each rule lands in `docs/linea-semantics.md` with the phase that builds it,
 since the compiler may emit no rule name the document does not define.
@@ -1195,7 +1249,7 @@ since the compiler may emit no rule name the document does not define.
 ### 12. A simulated `Io` with a virtual clock
 
 **Decision: a simulated `Io` is designed now and shapes the tests of phases 1
-and 2** (the maintainer, 2026-11-07). A test of a deadline, a timeout or a
+and 2**. A test of a deadline, a timeout or a
 wait set should not sleep, and a race between readiness and expiry should be
 reproduced exactly, not hoped for.
 
@@ -1262,6 +1316,14 @@ test fn a_read_past_its_deadline_times_out() {
 - **What stays real.** Files, foreign calls and the standard streams are
   performed for real and take no virtual time; a test that needs them
   deterministic leaves them out.
+- **A real socket inside a simulation traps.** A socket opened before `run`
+  and used inside it would wait on the real kernel against a virtual clock: a
+  deadline would expire in virtual time while the kernel answered in real
+  time, and the trace would depend on the machine. An operation on a real
+  socket or listener inside `run` therefore traps with `linea: a real socket
+  was used inside a simulation`, the mirror of the trap for a simulated
+  descriptor outside. Files stay real, since a file operation does not wait on
+  the clock.
 - **Where it lives.** The simulated backend is the runtime's (`runtime/sim.c`,
   beside the in-place and poller backends), behind the operation interface of
   §1, so it exercises the same state machine (§2) the real backends do. It
@@ -1294,8 +1356,8 @@ in. Phase 1 does not wait for the questions later phases raise.
    `accept`, `connect`, `read` and `write`; the existing `std.net` and HTTP
    tests unchanged and green. It gives no multi-source waiting and keeps one
    thread per task.
-2. **The park protocol and wait sets** (§3 on threads, §4, §5). *Prerequisite:*
-   §4.4 settled and, if the hole exists, its fix landed.
+2. **The park protocol, wait sets and signals** (§3 on threads, §4, §4.5, §5).
+   *Prerequisite:* ADR 0262 (`Isolated`) landed.
    `refactor(runtime): stop a task through one park routine`, then
    `feat(task): wait on several sources through a wait set`. *Proves* the
    registration protocol, the keys and the extended deadlock argument.
@@ -1317,7 +1379,10 @@ in. Phase 1 does not wait for the questions later phases raise.
    the last registration leaves, so a second `SIGTERM` ends the process;
    registration under `SIG_IGN` answers `Ignored`; a host handler installed
    before registration is still called; `world.deliver` does the same with no
-   real signal.
+   real signal; a delivered message whose share is unsettled keeps the handler
+   installed, so a second signal is counted, and settling it restores the saved
+   action; `signal_with` moves a delivered share into a new registration with
+   no window in which a signal would take the saved action.
 3. **The HTTP dispatcher and keep-alive on threads** (§6).
    `feat(http): keep connections alive through a dispatcher`. *Proves* that a
    bounded number of serving tasks serves many more kept-alive clients safely.
@@ -1328,8 +1393,15 @@ in. Phase 1 does not wait for the questions later phases raise.
    leaves its body unread; pipelined requests answered in order; `Connection:
    close` and HTTP/1.0 closing; the idle timeout; at `open_connections`, the
    longest-idle connection evicted for a new one, and the listener withdrawn
-   when nothing is idle. `.Threads(128)` stays the default; the HTTP examples
-   and the networking chapter migrate.
+   when nothing is idle. Graceful shutdown (§6.1), in a child process: a
+   `SIGTERM` during an in-flight request completes it with `Connection:
+   close`, closes idle connections, refuses new ones and makes `serve` answer
+   `.Ok(())`; `SIGINT` does the same; a second `SIGTERM` during the drain ends
+   the process; `.Manual` leaves the signals' actions untouched; a program's
+   own registration wakes beside the server's; under `SIG_IGN` the server
+   serves on; under `.Sequential` the request being served finishes first.
+   `.Threads(128)` stays the default; the HTTP examples and the networking
+   chapter migrate.
 4. **Pinned fibers and the minimal `Io` contract** (§3 on fibers, §7 without
    migration, §8 and §8.1). `test(runtime): hold a context switch to the reference switch`,
    then `feat(runtime): run tasks as fibers pinned to carriers` and
@@ -1348,15 +1420,16 @@ in. Phase 1 does not wait for the questions later phases raise.
    switch on both architectures; ten thousand connections on a few carriers; the
    soundness matrix's task cells run on fibers; the thread sanitizer lane with
    fiber annotations; a fiber polling a peer on its own carrier with
-   `recv_until(0)` lets the peer run, and a hot buffered read does not switch.
+   `recv_until(time.Duration.from_milliseconds(0))` lets the peer run, and a hot buffered read does not switch.
    Foreign calls from fibers run on the carrier in this phase.
 5. **Foreign calls from fibers** (§9). `feat(ffi): offload blocking calls and keep thread-affine ones on one thread`.
    *Proves* that SQLite and files run from fibers without holding a carrier,
    through typed trampolines, and that a thread-affine library keeps its
    thread. *Tests:* the guest book on a loop with SQLite declared
-   `"blocking"`, each serving fiber owning its own connection (ADR 0259):
-   operations on one connection never run on two threads at once, and a
-   connection's calls keep whatever thread SQLite's threading mode requires;
+   `"blocking"`, each serving fiber owning its own connection (ADR 0259, on
+   another branch, PR #50): SQLite in multi-thread mode lets a connection's
+   calls run on any one thread at a time, and a connection owned by one fiber
+   never has two calls running at once;
    a FIFO read and write between two fibers; ten thousand fibers
    that each make one blocking call holding no pool thread afterwards; a C
    library that checks its thread identity across calls, declared
@@ -1364,7 +1437,9 @@ in. Phase 1 does not wait for the questions later phases raise.
    operation and starts and joins a task (callback mode); a trampoline per
    argument class (floats, a structure, a hidden result pointer, more than
    eight arguments); [M-Blocking]'s refusals; a refused pool thread answering
-   `ResourceExhausted` from `fs`.
+   `ResourceExhausted` from `fs`, and trapping with `linea: the blocking pool
+   could not start a thread` for a user module, while an ordinary error the
+   foreign function answers reaches the caller with no trap.
 6. **Migration and scheduling** (§7's invariant), only after phase 4's
    measurements. `feat(runtime): steal runnable fibers between carriers`.
    *Proves* the migration invariant: a fiber with `foreign_depth` above zero
@@ -1530,19 +1605,6 @@ with a measured benefit; carriers' stalls are counted instead.
 **Growable or segmented fiber stacks.** Excluded by *Builds on*.
 
 ## Open questions
-
-The maintainer answered the ten questions this record asked on 2026-11-07, and
-each answer is written into the section it decides: `Io` only where tasks start
-(§8), conditional progress with budgets and yield points before fibers become
-the default (§5), process-lifetime loops with stable identities (§8),
-eviction of the longest-idle connection when a newcomer waits (§6), agreeing
-`Content-Length` duplicates under strict conditions (§6), a trap in phase 5
-for a pool thread that cannot be made, with recoverable exhaustion as the
-future direction (§9), `carriers:` always written with
-`env.available_parallelism()` (§8), chunked request bodies as the next HTTP
-change (§6), signals as a wait-set source in phase 2 (§4.5), and a simulated
-`Io` shaping phases 1 and 2 (§12). §4.4 is a prerequisite of phase 2 with its
-verification pending.
 
 What this record still leaves open:
 
