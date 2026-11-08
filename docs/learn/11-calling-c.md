@@ -162,10 +162,12 @@ where C takes the address of one. It compares how each value is passed, not
 how C spells its type: `long` and `long long` are both `Int64`, and any
 pointer is the 64-bit address a `UInt64`, a handle or a `std.ffi` view holds.
 It also compares every C declaration of the function the manifest names, and
-refuses a function C declares `static`, one C reaches under another symbol
-than its name, and one with another calling convention than C's own. An
-`enum` must match the width and signedness the C compiler gives it: an
-`enum` whose values are all small and positive is usually a `UInt32`.
+refuses a function C declares `static` and one with another calling
+convention than C's own. Where C code calling a function reaches another
+symbol than its name, as glibc's `lseek` reaches `lseek64` when a C file asks
+for 64-bit file offsets, the `extern` calls that symbol too. An `enum` must
+match the width C passes it at: an `enum` whose values fit 32 bits is an
+`Int32` or a `UInt32`.
 `linea check`, `build`, `run` and `test` all run it, so no `extern` reaches a
 C function whose declaration disagrees with it. What C does with the values
 it is handed is still yours to get right, as the end of this chapter lists.

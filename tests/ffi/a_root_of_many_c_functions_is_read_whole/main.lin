@@ -1,0 +1,7 @@
+import std.io
+import many
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{many.total()}")?
+    .Ok(0)
+}

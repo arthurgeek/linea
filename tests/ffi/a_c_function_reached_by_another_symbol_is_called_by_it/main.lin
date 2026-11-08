@@ -1,0 +1,7 @@
+import std.io
+import files
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{files.resolves("/nowhere/linea-missing")} {files.seek_closed()} {files.offset_bits()}")?
+    .Ok(0)
+}

@@ -1,0 +1,1 @@
+{ "extern": ["many"], "native": ["many/many.c"], "headers": ["stdlib.h"] }

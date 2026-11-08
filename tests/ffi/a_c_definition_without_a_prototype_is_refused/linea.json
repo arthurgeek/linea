@@ -1,0 +1,1 @@
+{ "extern": ["scale"], "native": ["scale/scale.c"] }

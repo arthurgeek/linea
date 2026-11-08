@@ -1,0 +1,11 @@
+extern fn picks_big(wanted: UInt32) -> UInt32
+
+extern fn picks_inner(wanted: UInt32) -> UInt32
+
+pub fn big(wanted: UInt32) -> UInt32 {
+    picks_big(wanted)
+}
+
+pub fn inner(wanted: UInt32) -> UInt32 {
+    picks_inner(wanted)
+}

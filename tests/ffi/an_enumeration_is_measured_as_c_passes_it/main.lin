@@ -1,0 +1,7 @@
+import std.io
+import picks
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{picks.big(1)} {picks.inner(1)}")?
+    .Ok(0)
+}

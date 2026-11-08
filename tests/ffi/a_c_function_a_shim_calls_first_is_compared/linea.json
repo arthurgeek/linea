@@ -1,0 +1,1 @@
+{ "extern": ["numbers"], "native": ["numbers/numbers.c"], "headers": ["stdlib.h"] }

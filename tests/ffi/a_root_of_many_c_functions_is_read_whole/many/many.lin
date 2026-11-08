@@ -1,0 +1,64 @@
+// Thirty functions the header does not declare and the source does.
+extern fn many_1() -> Int32
+
+extern fn many_2() -> Int32
+
+extern fn many_3() -> Int32
+
+extern fn many_4() -> Int32
+
+extern fn many_5() -> Int32
+
+extern fn many_6() -> Int32
+
+extern fn many_7() -> Int32
+
+extern fn many_8() -> Int32
+
+extern fn many_9() -> Int32
+
+extern fn many_10() -> Int32
+
+extern fn many_11() -> Int32
+
+extern fn many_12() -> Int32
+
+extern fn many_13() -> Int32
+
+extern fn many_14() -> Int32
+
+extern fn many_15() -> Int32
+
+extern fn many_16() -> Int32
+
+extern fn many_17() -> Int32
+
+extern fn many_18() -> Int32
+
+extern fn many_19() -> Int32
+
+extern fn many_20() -> Int32
+
+extern fn many_21() -> Int32
+
+extern fn many_22() -> Int32
+
+extern fn many_23() -> Int32
+
+extern fn many_24() -> Int32
+
+extern fn many_25() -> Int32
+
+extern fn many_26() -> Int32
+
+extern fn many_27() -> Int32
+
+extern fn many_28() -> Int32
+
+extern fn many_29() -> Int32
+
+extern fn many_30() -> Int32
+
+pub fn total() -> Int32 {
+    many_1() + many_2() + many_3() + many_4() + many_5() + many_6() + many_7() + many_8() + many_9() + many_10() + many_11() + many_12() + many_13() + many_14() + many_15() + many_16() + many_17() + many_18() + many_19() + many_20() + many_21() + many_22() + many_23() + many_24() + many_25() + many_26() + many_27() + many_28() + many_29() + many_30()
+}

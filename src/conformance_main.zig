@@ -15815,6 +15815,22 @@ fn emitOrRecord(
     /// The sanitizer the program will run under, which instruments its code.
     sanitize: ?[]const u8,
 ) !bool {
+    return emitOrRecordWith(gpa, failures, ir, module, table, sink, display_path, sanitize, &.{});
+}
+
+/// `emitOrRecord`, calling each `extern` by the symbol its C declaration
+/// gives it, as the command line does.
+fn emitOrRecordWith(
+    gpa: std.mem.Allocator,
+    failures: *std.ArrayList(Failure),
+    ir: *std.Io.Writer.Allocating,
+    module: *const MirModule,
+    table: *FileTable,
+    sink: *Sink,
+    display_path: []const u8,
+    sanitize: ?[]const u8,
+    foreign_symbols: []const mlir_backend.ForeignSymbol,
+) !bool {
     // Whether the program was accepted is settled after the composed step,
     // not before it: discovery reports [L-Size] about concrete types the
     // checker never saw. A caller that emitted without checking the sink would
@@ -15835,7 +15851,7 @@ fn emitOrRecord(
         return false;
     }
 
-    if (try emitMlir(gpa, &ir.writer, module, table, sink, .{ .sanitize = mlir_backend.Sanitizer.named(sanitize) })) return true;
+    if (try emitMlir(gpa, &ir.writer, module, table, sink, .{ .sanitize = mlir_backend.Sanitizer.named(sanitize), .foreign_symbols = foreign_symbols })) return true;
 
     var why: std.Io.Writer.Allocating = .init(gpa);
     try render.renderAll(&why.writer, table, sink, .{ .color = .never });
@@ -21147,10 +21163,12 @@ fn freshCheck(
 /// [T-ExternPrototype] for a case loaded from memory: its C files are written
 /// beneath the scratch directory at their paths in the case, which is the
 /// directory its roots' manifests and sources are named relative to.
-fn checkPrototypes(gpa: std.mem.Allocator, io: std.Io, scratch_dir: []const u8, case: Case, settled: *const loader.Semantics, sink: *Sink) !void {
-    var declares = false;
-    for (settled.expanded.source.modules) |module| declares = declares or (module.externs and !module.library);
-    if (!declares) return;
+fn checkPrototypes(gpa: std.mem.Allocator, io: std.Io, scratch_dir: []const u8, case: Case, settled: *const loader.Semantics, sink: *Sink) ![]const mlir_backend.ForeignSymbol {
+    if (case.native.files.len == 0 and case.native.compile.len == 0) {
+        var declares = false;
+        for (settled.expanded.source.modules) |module| declares = declares or (module.externs and !module.library);
+        if (!declares) return &.{};
+    }
     const dir = try toolchain.uniqueTarget(gpa, io, scratch_dir, "case-c-files");
     defer gpa.free(dir);
     try std.Io.Dir.cwd().createDirPath(io, dir);
@@ -21166,7 +21184,7 @@ fn checkPrototypes(gpa: std.mem.Allocator, io: std.Io, scratch_dir: []const u8, 
         try w.interface.writeAll(file.text);
         try w.interface.flush();
     }
-    try prototypes.check(gpa, io, settled, sink, .{ .base = dir, .scratch = dir });
+    return prototypes.check(gpa, io, settled, sink, .{ .base = dir, .scratch = dir });
 }
 
 fn checkCase(
@@ -21408,8 +21426,9 @@ fn checkCase(
     // case's C files written where `cc` can read them.
     const before_prototypes = sink.items().len;
     var refused_by_prototypes = false;
+    var foreign_symbols: []const mlir_backend.ForeignSymbol = &.{};
     if (!rejected) {
-        try checkPrototypes(gpa, io, env.scratch_dir, case, &settled, &sink);
+        foreign_symbols = try checkPrototypes(gpa, io, env.scratch_dir, case, &settled, &sink);
         rejected = sink.hasErrors();
         refused_by_prototypes = rejected;
     }
@@ -21782,7 +21801,7 @@ fn checkCase(
             }
 
             var ir: std.Io.Writer.Allocating = .init(gpa);
-            if (try emitOrRecord(gpa, &w.failures, &ir, &mir, &table, &sink, display_path, env.sanitize)) {
+            if (try emitOrRecordWith(gpa, &w.failures, &ir, &mir, &table, &sink, display_path, env.sanitize, foreign_symbols)) {
                 const mlir_golden = try std.mem.concat(gpa, u8, &.{ stem, ".mlir" });
                 var matching_mlir = false;
                 var native_verified = false;
@@ -21792,7 +21811,7 @@ fn checkCase(
                     // sanitizer, so it emits the module again to compare.
                     var plain: std.Io.Writer.Allocating = .init(gpa);
                     const recorded_ir = if (env.sanitize == null) ir.written() else written: {
-                        if (!try emitMlir(gpa, &plain.writer, &mir, &table, &sink, .{})) @panic("a module the emitter wrote once was refused the second time");
+                        if (!try emitMlir(gpa, &plain.writer, &mir, &table, &sink, .{ .foreign_symbols = foreign_symbols })) @panic("a module the emitter wrote once was refused the second time");
                         break :written plain.written();
                     };
                     if (try compare(gpa, io, &w.failures, display_path, "mlir", mlir_golden, expected, recorded_ir, env.update, false)) {

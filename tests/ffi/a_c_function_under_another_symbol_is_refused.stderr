@@ -1,9 +1,0 @@
-error[T-ExternPrototype]: C code calling `twice_of` reaches another symbol than `twice_of`, which this declaration links against
- --> tests/ffi/a_c_function_under_another_symbol_is_refused/twice/twice.lin:1:11
-  |
-1 | extern fn twice_of(value: Int64) -> Int64
-  |           ^^^^^^^^ C's declaration gives this function another symbol
-  |
-  = note: `twice_of` is declared by `twice/impl.c`
-  = note: `cc` says: conflicting asm label
-  = help: call it through a C function with a plain symbol, built under "native"

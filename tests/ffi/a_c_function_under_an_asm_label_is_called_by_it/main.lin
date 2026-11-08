@@ -1,0 +1,7 @@
+import std.io
+import twice
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{twice.of(21)}")?
+    .Ok(0)
+}

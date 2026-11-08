@@ -3,30 +3,38 @@
 //! declarations give that function.
 //!
 //! The C declarations are the sources the root's manifest builds under
-//! `native` and the headers it names under `headers`. For each of them one C
-//! file is written that includes it and, for every function of the root,
-//! takes the function's address, names its symbol and refers to it from an
-//! inline function of external linkage:
+//! `native` and the headers it names under `headers`. For each of them two C
+//! files are written that include it. The first takes each function's
+//! address and refers to it from an inline function of external linkage:
 //!
 //! ```c
 //! #include <sqlite3.h>
-//! extern __typeof__(sqlite3_close_v2) sqlite3_close_v2 __asm__("_sqlite3_close_v2");
 //! static __typeof__(sqlite3_close_v2) *const linea_probe_0_3 = &sqlite3_close_v2;
 //! inline void linea_probe_0_3_linkage(void) { (void)&sqlite3_close_v2; }
 //! ```
 //!
-//! `cc` refuses the second line where C gives the function another symbol,
-//! and the fourth where the function is `static`. It prints each pointer's
-//! type tree with every typedef resolved, and the compiler compares that
-//! tree, position by position, with what lowering passes there
+//! `cc` refuses the second line where the function is `static`, and prints
+//! each pointer's type tree with every typedef resolved. The compiler compares
+//! that tree, position by position, with what lowering passes there
 //! (`foreign.externPrototype`), for every C declaration of the root that
 //! declares the function. The comparison is by representation, not by C's
 //! type identity: C's `long long` and `long` are both 64-bit signed integers,
-//! and a handle's address is any pointer. An enumeration's width and
-//! signedness are the compiler's choice, so a second file asks `cc` for them.
-//! Symbols in the runtime's namespace are held to the runtime's own table
-//! instead ([T-ExternRuntime]), and so are the storage primitives lowering
-//! replaces.
+//! and a handle's address is any pointer.
+//!
+//! The second file, compiled to LLVM IR, keeps each declared function's
+//! address in a used global:
+//!
+//! ```c
+//! void *const linea_symbol_0_3 __attribute__((used)) = (void *)&sqlite3_close_v2;
+//! ```
+//!
+//! Its IR names the symbol C code calling the function reaches, which an
+//! `__asm__` label or `overloadable` changes, and the `extern` links against
+//! that symbol. The IR declaration of the function also says how C passes an
+//! enumeration: its width, and for one narrower than 32 bits, whether it is
+//! sign- or zero-extended. Symbols in the runtime's namespace are held to the
+//! runtime's own table instead ([T-ExternRuntime]), and so are the storage
+//! primitives lowering replaces.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -34,9 +42,11 @@ const testing = std.testing;
 const loader = @import("loader.zig");
 const toolchain = @import("toolchain.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
+const symbol_names = @import("../support/symbol.zig");
 const foreign = @import("../sema/foreign.zig");
 const RawAccesses = @import("../sema/intrinsics.zig").RawAccesses;
 const ForeignScalar = @import("../sema/types.zig").ForeignScalar;
+const ForeignSymbol = @import("../backend/mlir.zig").ForeignSymbol;
 const Sink = @import("../diagnostics/sink.zig").Sink;
 const diagnostic = @import("../diagnostics/diagnostic.zig");
 const Label = diagnostic.Label;
@@ -57,15 +67,19 @@ pub const Options = struct {
 /// The prefix every probe declaration's name begins with, which is what
 /// `cc` is asked to describe.
 const probe_prefix = "linea_probe_";
+/// The prefix of the globals whose IR names each function's symbol.
+const symbol_prefix = "linea_symbol_";
 
 /// Holds every `extern` and `export` of a program's roots to its C
-/// prototype, reporting each that disagrees into `sink`. Reads the
-/// declarations the checker settled, so it runs once the semantic passes
-/// accepted the program.
-pub fn check(gpa: std.mem.Allocator, io: std.Io, semantics: *const loader.Semantics, sink: *Sink, opts: Options) !void {
+/// prototype, reporting each that disagrees into `sink`, and answers the
+/// symbol C gives each `extern` whose C declaration links it under another
+/// symbol than its name, allocated in `gpa`, for the backend to call it by.
+/// Reads the declarations the checker settled, so it runs once the semantic
+/// passes accepted the program.
+pub fn check(gpa: std.mem.Allocator, io: std.Io, semantics: *const loader.Semantics, sink: *Sink, opts: Options) ![]const ForeignSymbol {
     const expanded = &semantics.expanded;
     const program = expanded.source;
-    if (program.roots.len == 0) return;
+    if (program.roots.len == 0) return &.{};
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -88,11 +102,15 @@ pub fn check(gpa: std.mem.Allocator, io: std.Io, semantics: *const loader.Semant
             try by_root[module.root.index()].append(arena, .{ .decl = d, .name = name, .implied = implied, .exported = exported });
         }
     }
+    var symbols: std.ArrayList(ForeignSymbol) = .empty;
     for (by_root, program.roots) |subjects, facts| {
         if (subjects.items.len == 0) continue;
         var reporter: Reporter = .{ .arena = arena, .sink = sink, .ast = &expanded.ast };
-        try checkRoot(arena, io, facts, subjects.items, &reporter, opts);
+        try checkRoot(arena, io, facts, subjects.items, &reporter, opts, &symbols);
     }
+    const out = try gpa.alloc(ForeignSymbol, symbols.items.len);
+    for (symbols.items, out) |held, *copy| copy.* = .{ .name = try gpa.dupe(u8, held.name), .symbol = try gpa.dupe(u8, held.symbol) };
+    return out;
 }
 
 /// Whether `d` is one of the standard library's storage primitives, whose
@@ -137,16 +155,17 @@ const Found = struct {
     ctype: ?CType = null,
     /// Whether the name is a macro in the unit.
     macro: bool = false,
-    /// Why C gives the function another symbol than its name, where it does.
-    symbol: ?[]const u8 = null,
     /// Whether C declares the function `static`, which leaves it no symbol.
     internal: bool = false,
     /// Whether `cc` refused the probe taking the function's address, as it
     /// does where nothing declares the name.
     refused: bool = false,
+    /// What the IR says of the function: the symbol C calls it by, as LLVM
+    /// spells a symbol, and its signature.
+    linked: ?Linked = null,
 };
 
-fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: []const Subject, reporter: *Reporter, opts: Options) !void {
+fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: []const Subject, reporter: *Reporter, opts: Options, symbols: *std.ArrayList(ForeignSymbol)) !void {
     var units: std.ArrayList(Unit) = .empty;
     if (facts.headers.len > 0) {
         const lines = try arena.alloc([]const u8, facts.headers.len);
@@ -195,23 +214,32 @@ fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: [
             return reporter.unread(subjects[0], reason);
         }
         const dumps = try Dumps.parse(arena, described.dump);
-
-        // An enumeration's width is learnt from a second file, which names
-        // each enumeration the first one's type trees spell.
-        var widths: Widths = .{};
-        for (row, 0..) |_, i| _ = try dumps.function(arena, k, i, &widths);
-        if (widths.wanted.items.len > 0) {
-            const sizes = try std.fmt.allocPrint(arena, "{s}/unit{d}-widths.c", .{ dir, k });
-            try writeWidths(arena, io, sizes, unit, widths.wanted.items);
-            const measured = try toolchain.describeC(arena, io, include_dir, sizes, probe_prefix) orelse {
-                return reporter.unread(subjects[0], "`cc` is not installed");
-            };
-            try widths.read(arena, try Dumps.parse(arena, measured.dump));
-        }
         // A probe `cc` refused declares nothing, whatever recovery left in
         // its tree.
-        for (row, 0..) |*seen, i| seen.ctype = if (seen.refused) null else try dumps.function(arena, k, i, &widths);
-        for (row, 0..) |*seen, i| seen.macro = dumps.sections.contains(try probeName(arena, k, i, "_macro"));
+        for (row, 0..) |*seen, i| {
+            seen.macro = dumps.sections.contains(try probeName(arena, k, i, "_macro"));
+            if (!seen.refused) seen.ctype = try dumps.function(arena, k, i);
+        }
+
+        // The IR of every function the unit declares names its symbol and
+        // how C passes each of its values.
+        const ir_path = try std.fmt.allocPrint(arena, "{s}/unit{d}-symbols.c", .{ dir, k });
+        const ir_out = try std.fmt.allocPrint(arena, "{s}/unit{d}-symbols.ll", .{ dir, k });
+        if (!try writeSymbols(arena, io, ir_path, k, unit, subjects, row)) continue;
+        const lowered = try toolchain.lowerC(arena, io, include_dir, ir_path, ir_out) orelse {
+            return reporter.unread(subjects[0], "`cc` is not installed");
+        };
+        const ir = switch (lowered) {
+            .ir => |text| text,
+            .refused => |reports| return reporter.unread(subjects[0], firstError(reports) orelse "`cc` could not compile the declarations"),
+        };
+        for (row, 0..) |*seen, i| {
+            if (seen.ctype == null or seen.macro) continue;
+            seen.linked = linkedOf(arena, ir, k, i);
+            if (seen.linked) |linked| if (linked.signature) |signature| {
+                widenEnumerations(&seen.ctype.?, signature);
+            };
+        }
     }
 
     for (subjects, 0..) |subject, i| {
@@ -237,22 +265,53 @@ fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: [
             }
         }
         // Every C declaration of the function is held to the declaration,
-        // since any of them may be the one C code calling it was built with.
+        // since any of them may be the one C code calling it was built with,
+        // and all of them must give it one symbol.
+        var symbol: ?struct { name: []const u8, unit: Unit } = null;
+        var refused = false;
         for (units.items, 0..) |unit, k| {
             const seen = found[k * subjects.len + i];
             const ctype = seen.ctype orelse continue;
             if (!subject.exported) {
                 if (seen.internal) {
                     try reporter.internal(subject, unit.shown);
+                    refused = true;
                     break;
                 }
-                if (seen.symbol) |reason| {
-                    try reporter.symbol(subject, unit.shown, reason);
+                const linked = seen.linked orelse {
+                    try reporter.unread(subject, "`cc` names no symbol for it");
+                    refused = true;
+                    break;
+                };
+                if (linked.alias) {
+                    try reporter.alias(subject, unit.shown);
+                    refused = true;
                     break;
                 }
+                const name = callableSymbol(linked.symbol) orelse {
+                    try reporter.unnameable(subject, unit.shown, linked.symbol);
+                    refused = true;
+                    break;
+                };
+                if (symbol) |earlier| {
+                    if (!std.mem.eql(u8, earlier.name, name)) {
+                        try reporter.symbols(subject, earlier.unit.shown, earlier.name, unit.shown, name);
+                        refused = true;
+                        break;
+                    }
+                } else symbol = .{ .name = name, .unit = unit };
             }
-            if (try reporter.compare(subject, ctype, unit.shown)) break;
+            if (try reporter.compare(subject, ctype, unit.shown)) {
+                refused = true;
+                break;
+            }
         }
+        if (refused or subject.exported) continue;
+        const name = (symbol orelse continue).name;
+        if (std.mem.eql(u8, name, subject.name)) continue;
+        var recorded = false;
+        for (symbols.items) |held| recorded = recorded or std.mem.eql(u8, held.name, subject.name);
+        if (!recorded) try symbols.append(arena, .{ .name = subject.name, .symbol = name });
     }
 }
 
@@ -281,8 +340,6 @@ fn probeName(arena: std.mem.Allocator, unit: usize, index: usize, suffix: []cons
 const Role = union(enum) {
     /// A line including C declarations, or one that asks nothing.
     none,
-    /// The line naming the symbol the subject links against.
-    symbol: usize,
     /// The line referring to the subject from an inline function of external
     /// linkage.
     linkage: usize,
@@ -290,12 +347,6 @@ const Role = union(enum) {
     /// declares it.
     address: usize,
 };
-
-/// The symbol a C function named `name` has: the name, with an underscore
-/// before it on Darwin.
-fn symbolOf(arena: std.mem.Allocator, name: []const u8) ![]const u8 {
-    return std.fmt.allocPrint(arena, "{s}{s}", .{ if (builtin.target.os.tag.isDarwin()) "_" else "", name });
-}
 
 /// Writes the probe file and answers what each of its lines asks.
 fn writeProbe(arena: std.mem.Allocator, io: std.Io, path: []const u8, unit_index: usize, unit: Unit, subjects: []const Subject) ![]const Role {
@@ -310,10 +361,6 @@ fn writeProbe(arena: std.mem.Allocator, io: std.Io, path: []const u8, unit_index
         const name = subject.name;
         try w.print("#ifdef {s}\nstatic int {s};\n#endif\n", .{ name, try probeName(arena, unit_index, i, "_macro") });
         try roles.appendSlice(arena, &.{ .none, .none, .none });
-        if (!subject.exported) {
-            try w.print("extern __typeof__({s}) {s} __asm__(\"{s}\");\n", .{ name, name, try symbolOf(arena, name) });
-            try roles.append(arena, .{ .symbol = i });
-        }
         try w.print("static __typeof__({s}) *const {s} = &{s};\n", .{ name, try probeName(arena, unit_index, i, ""), name });
         try roles.append(arena, .{ .address = i });
         if (!subject.exported) {
@@ -325,6 +372,22 @@ fn writeProbe(arena: std.mem.Allocator, io: std.Io, path: []const u8, unit_index
     return roles.items;
 }
 
+/// Writes the file whose IR names the symbol of every function the unit
+/// declares, and answers whether it names any.
+fn writeSymbols(arena: std.mem.Allocator, io: std.Io, path: []const u8, unit_index: usize, unit: Unit, subjects: []const Subject, row: []const Found) !bool {
+    var text: std.Io.Writer.Allocating = .init(arena);
+    const w = &text.writer;
+    for (unit.includes) |line| try w.print("{s}\n", .{line});
+    var any = false;
+    for (subjects, row, 0..) |subject, seen, i| {
+        if (seen.ctype == null or seen.macro) continue;
+        try w.print("void *const {s}{d}_{d} __attribute__((used)) = (void *)&{s};\n", .{ symbol_prefix, unit_index, i, subject.name });
+        any = true;
+    }
+    if (any) try writeFile(io, path, text.written());
+    return any;
+}
+
 fn writeFile(io: std.Io, path: []const u8, text: []const u8) !void {
     const file = try std.Io.Dir.cwd().createFile(io, path, .{});
     defer file.close(io);
@@ -334,11 +397,20 @@ fn writeFile(io: std.Io, path: []const u8, text: []const u8) !void {
     try writer.interface.flush();
 }
 
+/// The first error `cc` reported, without its location.
+fn firstError(reports: []const u8) ?[]const u8 {
+    var lines = std.mem.splitScalar(u8, reports, '\n');
+    while (lines.next()) |line| {
+        const at = std.mem.indexOf(u8, line, "error: ") orelse continue;
+        return line[at + "error: ".len ..];
+    }
+    return null;
+}
+
 /// Records what `cc`'s errors at the probe lines say into `row`, and answers
 /// the first error outside the probes, without its location, or null where
-/// there is none. An error at a probe taking an address says nothing a
-/// missing type tree does not; one at a symbol or linkage probe is recorded
-/// for the subject it names.
+/// there is none. An error at a probe taking an address means nothing
+/// declares the name; one at a linkage probe that the function is `static`.
 fn readReports(reports: []const u8, path: []const u8, includes: usize, roles: []const Role, row: []Found) !?[]const u8 {
     var lines = std.mem.splitScalar(u8, reports, '\n');
     while (lines.next()) |line| {
@@ -351,9 +423,6 @@ fn readReports(reports: []const u8, path: []const u8, includes: usize, roles: []
             const number = std.fmt.parseInt(usize, rest[0..end], 10) catch 0;
             if (number > includes and number <= roles.len) {
                 switch (roles[number - 1]) {
-                    .symbol => |i| if (row[i].symbol == null and std.mem.indexOf(u8, message, "undeclared") == null) {
-                        row[i].symbol = message;
-                    },
                     .linkage => |i| if (std.mem.indexOf(u8, message, "static-in-inline") != null) {
                         row[i].internal = true;
                     },
@@ -370,18 +439,16 @@ fn readReports(reports: []const u8, path: []const u8, includes: usize, roles: []
 
 test "an error at a probe is not a failure to read the declarations" {
     var row = [_]Found{.{}};
-    const roles = [_]Role{ .none, .none, .none, .none, .{ .symbol = 0 }, .{ .address = 0 }, .{ .linkage = 0 } };
+    const roles = [_]Role{ .none, .none, .none, .none, .{ .address = 0 }, .{ .linkage = 0 } };
     const undeclared =
         \\/tmp/p/unit0.c:5:19: error: use of undeclared identifier 'labs'
         \\/tmp/p/unit0.c:6:19: error: use of undeclared identifier 'labs'
         \\1 error generated.
     ;
     try testing.expectEqual(@as(?[]const u8, null), try readReports(undeclared, "/tmp/p/unit0.c", 1, &roles, &row));
-    try testing.expectEqual(@as(?[]const u8, null), row[0].symbol);
     try testing.expect(row[0].refused);
-    const labelled = "/tmp/p/unit0.c:5:26: error: conflicting asm label\n/tmp/p/unit0.c:7:40: error: static function 'twice' is used in an inline function with external linkage [-Werror,-Wstatic-in-inline]\n";
-    try testing.expectEqual(@as(?[]const u8, null), try readReports(labelled, "/tmp/p/unit0.c", 1, &roles, &row));
-    try testing.expectEqualStrings("conflicting asm label", row[0].symbol.?);
+    const internal = "/tmp/p/unit0.c:6:40: error: static function 'twice' is used in an inline function with external linkage [-Werror,-Wstatic-in-inline]\n";
+    try testing.expectEqual(@as(?[]const u8, null), try readReports(internal, "/tmp/p/unit0.c", 1, &roles, &row));
     try testing.expect(row[0].internal);
     const missing = "/tmp/p/unit0.c:1:10: fatal error: 'nowhere.h' file not found\n";
     try testing.expectEqualStrings("'nowhere.h' file not found", (try readReports(missing, "/tmp/p/unit0.c", 1, &roles, &row)).?);
@@ -389,77 +456,195 @@ test "an error at a probe is not a failure to read the declarations" {
     try testing.expectEqualStrings("unknown type name 'in'", (try readReports(inside, "/tmp/p/unit0.c", 1, &roles, &row)).?);
 }
 
-/// The width and signedness of each enumeration a unit's type trees name,
-/// by the spelling that names it.
-const Widths = struct {
-    known: std.StringHashMapUnmanaged(?Integer) = .empty,
-    /// The spellings asked about and not yet answered, each one a type name
-    /// a C file can write.
-    wanted: std.ArrayList([]const u8) = .empty,
-
-    fn lookup(self: *Widths, arena: std.mem.Allocator, spelled: []const u8) !?Integer {
-        if (self.known.get(spelled)) |held| return held;
-        if (!nameable(spelled)) return null;
-        for (self.wanted.items) |asked| if (std.mem.eql(u8, asked, spelled)) return null;
-        try self.wanted.append(arena, spelled);
-        return null;
-    }
-
-    /// Reads the answers `writeWidths` asked for, as `char[size][signed + 1]`.
-    fn read(self: *Widths, arena: std.mem.Allocator, dumps: Dumps) !void {
-        for (self.wanted.items, 0..) |spelled, n| {
-            const name = try std.fmt.allocPrint(arena, "{s}width_{d}", .{ probe_prefix, n });
-            var answer: ?Integer = null;
-            if (dumps.sections.get(name)) |lines| {
-                for (lines) |line| {
-                    if (line.depth != 0 or !std.mem.eql(u8, line.kind, "VarDecl") or std.mem.indexOf(u8, line.flags, " invalid") != null) continue;
-                    answer = arrayWidth(line.spelled);
-                }
-            }
-            try self.known.put(arena, spelled, answer);
-        }
-        self.wanted.clearRetainingCapacity();
-    }
+/// What the IR says of one function: the symbol C calls it by, as the IR
+/// spells it, whether that symbol is an alias of another function, and the
+/// function's signature where the IR declares or defines it.
+const Linked = struct {
+    symbol: []const u8,
+    alias: bool,
+    signature: ?Signature,
 };
 
+/// An IR signature: how C passes each parameter and the result.
+const Signature = struct {
+    result: Passed,
+    params: []const Passed,
+};
+
+/// How the IR passes one value: an integer of `bits`, extended by sign or by
+/// zero where it is narrower than 32 bits, or something else.
+const Passed = struct {
+    bits: ?u8,
+    extension: ?bool = null,
+};
+
+/// The symbol global `linea_symbol_K_I` holds, its signature and whether it
+/// is an alias, read from the IR, or null where the IR holds no such global.
+fn linkedOf(arena: std.mem.Allocator, ir: []const u8, unit: usize, index: usize) ?Linked {
+    const global = std.fmt.allocPrint(arena, "@{s}{d}_{d} = ", .{ symbol_prefix, unit, index }) catch return null;
+    var lines = std.mem.splitScalar(u8, ir, '\n');
+    var symbol: ?[]const u8 = null;
+    while (lines.next()) |line| {
+        if (!std.mem.startsWith(u8, line, global)) continue;
+        const at = std.mem.indexOf(u8, line, " ptr @") orelse return null;
+        symbol = irName(line[at + " ptr ".len ..]);
+        break;
+    }
+    const named = symbol orelse return null;
+    var linked: Linked = .{ .symbol = named, .alias = false, .signature = null };
+    lines = std.mem.splitScalar(u8, ir, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.startsWith(u8, line, "@") and irName(line) != null and std.mem.eql(u8, irName(line).?, named)) {
+            if (std.mem.indexOf(u8, line, " alias ") != null) linked.alias = true;
+        }
+        if (!std.mem.startsWith(u8, line, "declare ") and !std.mem.startsWith(u8, line, "define ")) continue;
+        const at = std.mem.indexOf(u8, line, " @") orelse continue;
+        const name = irName(line[at + 1 ..]) orelse continue;
+        if (!std.mem.eql(u8, name, named)) continue;
+        linked.signature = signatureOf(arena, line, at) catch null;
+    }
+    return linked;
+}
+
+/// The IR name `text` begins with, `@name` or `@"name"`, as written between
+/// the quotes, or null where it begins with none.
+fn irName(text: []const u8) ?[]const u8 {
+    if (text.len < 2 or text[0] != '@') return null;
+    if (text[1] == '"') {
+        const end = std.mem.indexOfScalarPos(u8, text, 2, '"') orelse return null;
+        return text[2..end];
+    }
+    var end: usize = 1;
+    while (end < text.len and (std.ascii.isAlphanumeric(text[end]) or text[end] == '_' or text[end] == '.' or text[end] == '$' or text[end] == '-')) end += 1;
+    return text[1..end];
+}
+
+/// The signature on a `declare` or `define` line whose function's name
+/// begins at `at`.
+fn signatureOf(arena: std.mem.Allocator, line: []const u8, at: usize) !?Signature {
+    const open = std.mem.indexOfScalarPos(u8, line, at, '(') orelse return null;
+    var depth: usize = 0;
+    var close = open;
+    while (close < line.len) : (close += 1) {
+        switch (line[close]) {
+            '(', '[', '{', '<' => depth += 1,
+            ')', ']', '}', '>' => {
+                depth -= 1;
+                if (depth == 0) break;
+            },
+            else => {},
+        }
+    }
+    if (close >= line.len) return null;
+    var params: std.ArrayList(Passed) = .empty;
+    var start = open + 1;
+    depth = 0;
+    var i = open + 1;
+    while (i <= close) : (i += 1) {
+        const c = line[i];
+        if (c == '(' or c == '[' or c == '{' or c == '<') depth += 1;
+        if ((c == ')' or c == ']' or c == '}' or c == '>') and i != close) depth -= 1;
+        if ((c == ',' and depth == 0) or i == close) {
+            const piece = std.mem.trim(u8, line[start..i], " ");
+            if (piece.len > 0) try params.append(arena, passedOf(piece));
+            start = i + 1;
+        }
+    }
+    const head = line[std.mem.indexOfScalar(u8, line, ' ').? + 1 .. at];
+    return .{ .result = passedOf(head), .params = params.items };
+}
+
+/// How the IR passes a value whose type and attributes `text` holds.
+fn passedOf(text: []const u8) Passed {
+    var passed: Passed = .{ .bits = null };
+    var words = std.mem.tokenizeScalar(u8, text, ' ');
+    while (words.next()) |word| {
+        if (std.mem.eql(u8, word, "signext")) passed.extension = true;
+        if (std.mem.eql(u8, word, "zeroext")) passed.extension = false;
+        if (word.len > 1 and word[0] == 'i' and std.ascii.isDigit(word[1])) {
+            passed.bits = std.fmt.parseInt(u8, word[1..], 10) catch null;
+        }
+    }
+    return passed;
+}
+
+test "the IR names the symbol C reaches and how it passes each value" {
+    const ir =
+        \\@linea_symbol_0_0 = constant ptr @"\01_realpath$DARWIN_EXTSN", align 8
+        \\@linea_symbol_0_1 = constant ptr @raise_, align 8
+        \\declare ptr @"\01_realpath$DARWIN_EXTSN"(ptr noundef, ptr noundef) #2
+        \\declare zeroext i8 @raise_(i8 noundef zeroext, i64 noundef) #2
+    ;
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const realpath = linkedOf(arena, ir, 0, 0).?;
+    try testing.expectEqualStrings("\\01_realpath$DARWIN_EXTSN", realpath.symbol);
+    const raise = linkedOf(arena, ir, 0, 1).?;
+    try testing.expectEqualStrings("raise_", raise.symbol);
+    const signature = raise.signature.?;
+    try testing.expectEqual(Passed{ .bits = 8, .extension = false }, signature.result);
+    try testing.expectEqual(Passed{ .bits = 8, .extension = false }, signature.params[0]);
+    try testing.expectEqual(Passed{ .bits = 64 }, signature.params[1]);
+    try testing.expectEqual(@as(?Linked, null), linkedOf(arena, ir, 0, 2));
+}
+
+/// The symbol an `extern` is emitted under to reach the IR symbol `spelled`,
+/// as LLVM spells one, or null where no symbol a Linea declaration can name
+/// reaches it. `\01` marks a symbol written as the object file spells it,
+/// which on Darwin begins with the underscore LLVM adds to every other name.
+fn callableSymbol(spelled: []const u8) ?[]const u8 {
+    var name = spelled;
+    if (std.mem.startsWith(u8, spelled, "\\01")) {
+        name = spelled[3..];
+        if (builtin.target.os.tag.isDarwin()) {
+            if (!std.mem.startsWith(u8, name, "_")) return null;
+            name = name[1..];
+        }
+    }
+    if (name.len == 0 or !symbol_names.holds(name)) return null;
+    return name;
+}
+
+test "a symbol C names is the one an extern is emitted under" {
+    try testing.expectEqualStrings("lseek64", callableSymbol("lseek64").?);
+    if (builtin.target.os.tag.isDarwin()) {
+        try testing.expectEqualStrings("realpath$DARWIN_EXTSN", callableSymbol("\\01_realpath$DARWIN_EXTSN").?);
+        try testing.expectEqual(@as(?[]const u8, null), callableSymbol("\\01twice_impl"));
+    } else {
+        try testing.expectEqualStrings("twice_impl", callableSymbol("\\01twice_impl").?);
+    }
+}
+
+/// Gives each enumeration at the top of `ctype`'s parameters and result the
+/// width and extension the IR passes it with.
+fn widenEnumerations(ctype: *CType, signature: Signature) void {
+    const function = &ctype.shape.function;
+    const params = @constCast(function.params);
+    if (params.len == signature.params.len) {
+        for (params, signature.params) |*param, passed| widen(param, passed);
+    }
+    widen(@constCast(function.result), signature.result);
+}
+
+fn widen(c: *CType, passed: Passed) void {
+    if (c.shape != .enumeration) return;
+    const bits = passed.bits orelse return;
+    switch (bits) {
+        8, 16, 32, 64 => {},
+        else => return,
+    }
+    // Narrower than 32 bits, the extension says the signedness; a 32- or
+    // 64-bit value is passed alike whatever its signedness.
+    c.shape = .{ .enumeration = .{ .bits = bits, .signed = if (bits < 32) passed.extension else null } };
+}
+
+/// The width and signedness of an integer type.
 const Integer = struct { bits: u8, signed: bool };
 
-/// Whether `spelled` is a type name a C file can write: an identifier, or
-/// `enum` and one. An enumeration without a name is spelled by where it is.
-fn nameable(spelled: []const u8) bool {
-    if (spelled.len == 0) return false;
-    for (spelled) |c| if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == ' ')) return false;
-    return true;
-}
-
-/// The integer a width probe's `char[size][signed + 1]` describes.
-fn arrayWidth(spelled: []const u8) ?Integer {
-    if (!std.mem.startsWith(u8, spelled, "char[")) return null;
-    var parts = std.mem.tokenizeAny(u8, spelled["char".len..], "[]");
-    const size = std.fmt.parseInt(u8, parts.next() orelse return null, 10) catch return null;
-    const sign = std.fmt.parseInt(u8, parts.next() orelse return null, 10) catch return null;
-    if (size == 0 or size > 8 or (size & (size - 1)) != 0) return null;
-    return .{ .bits = size * 8, .signed = sign == 2 };
-}
-
-test "an enumeration's width is read from the array its probe declares" {
-    try testing.expectEqual(Integer{ .bits = 64, .signed = false }, arrayWidth("char[8][1]").?);
-    try testing.expectEqual(Integer{ .bits = 8, .signed = true }, arrayWidth("char[1][2]").?);
-    try testing.expectEqual(@as(?Integer, null), arrayWidth("int[4]"));
-    try testing.expect(nameable("enum big"));
-    try testing.expect(nameable("size_hint"));
-    try testing.expect(!nameable("enum (unnamed at /tmp/x.h:3:1)"));
-}
-
-fn writeWidths(arena: std.mem.Allocator, io: std.Io, path: []const u8, unit: Unit, wanted: []const []const u8) !void {
-    var text: std.Io.Writer.Allocating = .init(arena);
-    const w = &text.writer;
-    for (unit.includes) |line| try w.print("{s}\n", .{line});
-    for (wanted, 0..) |spelled, n| {
-        try w.print("static char {s}width_{d}[sizeof({s})][((({s})-1) < 0) + 1];\n", .{ probe_prefix, n, spelled, spelled });
-    }
-    try writeFile(io, path, text.written());
-}
+/// How C passes an enumeration: its width, and its signedness where that
+/// changes how it is passed.
+const Enumeration = struct { bits: u8, signed: ?bool };
 
 /// What `cc` says a C name is.
 pub const CType = struct {
@@ -470,9 +655,10 @@ pub const CType = struct {
     pub const Shape = union(enum) {
         integer: Integer,
         /// An enumeration, whose integer type the C compiler chooses from its
-        /// values, or from the type it is declared over; null where that
-        /// cannot be learnt, because nothing names the enumeration.
-        enumeration: ?Integer,
+        /// values, or from the type it is declared over. Null until the IR
+        /// says how C passes it, which it says only for a parameter or a
+        /// result, not behind a pointer or in a callback.
+        enumeration: ?Enumeration,
         float: u8,
         void,
         boolean,
@@ -488,7 +674,9 @@ pub const CType = struct {
         result: *const CType,
         params: []const CType,
         variadic: bool,
-        /// False for a declaration written `f()`, which states no parameters.
+        /// False for a declaration written `f()` or a definition written
+        /// `f(x) int x; {…}`, neither of which states parameter types a
+        /// caller passes by.
         prototyped: bool,
         /// The calling convention C declares beside the default one, such as
         /// `preserve_none`, or null for C's own.
@@ -521,7 +709,7 @@ const Dumps = struct {
     /// The function the probe of subject `index` in unit `unit` points at,
     /// or null where nothing declared the name, or names something that is
     /// not a function.
-    fn function(self: Dumps, arena: std.mem.Allocator, unit: usize, index: usize, widths: *Widths) !?CType {
+    fn function(self: Dumps, arena: std.mem.Allocator, unit: usize, index: usize) !?CType {
         const lines = self.sections.get(try probeName(arena, unit, index, "")) orelse return null;
         for (lines) |line| {
             if (line.depth == 0 and std.mem.eql(u8, line.kind, "VarDecl") and std.mem.indexOf(u8, line.flags, " invalid") != null) return null;
@@ -530,7 +718,7 @@ const Dumps = struct {
         // declaration and its initializer.
         for (lines, 0..) |line, i| {
             if (line.depth != 0 or !line.isType()) continue;
-            const pointer = try convert(arena, lines, i, widths);
+            const pointer = try convert(arena, lines, i);
             return switch (pointer.shape) {
                 .pointer => |pointee| switch (pointee.shape) {
                     .function => pointee.*,
@@ -613,22 +801,17 @@ fn conventionOf(line: Line) ?[]const u8 {
 
 /// The canonical type the line at `at` and its children describe: sugar is
 /// read through to the type it stands for, and qualifiers are dropped, since
-/// neither changes how a value crosses. Each enumeration's width is looked up
-/// in `widths` by every spelling naming it.
-fn convert(arena: std.mem.Allocator, lines: []const Line, at: usize, widths: *Widths) std.mem.Allocator.Error!CType {
+/// neither changes how a value crosses.
+fn convert(arena: std.mem.Allocator, lines: []const Line, at: usize) std.mem.Allocator.Error!CType {
     const line = lines[at];
     const children = try typeChildren(arena, lines, at);
     // A qualified type's one child is the type it qualifies, and a sugared
     // one's last child is the type it stands for.
     if (std.mem.eql(u8, line.kind, "QualType") or line.has("sugar")) {
         if (children.len == 0) return .{ .spelled = line.spelled, .shape = .other };
-        var inner = try convert(arena, lines, children[children.len - 1], widths);
+        var inner = try convert(arena, lines, children[children.len - 1]);
         // `typeof (f)` names the probe's expression, not a type C spells.
-        if (std.mem.startsWith(u8, line.kind, "TypeOf")) return inner;
-        if (inner.shape == .enumeration and inner.shape.enumeration == null and !std.mem.eql(u8, line.kind, "QualType")) {
-            inner.shape = .{ .enumeration = try widths.lookup(arena, line.spelled) };
-        }
-        inner.spelled = line.spelled;
+        if (!std.mem.startsWith(u8, line.kind, "TypeOf")) inner.spelled = line.spelled;
         return inner;
     }
     const shape: CType.Shape = if (std.mem.eql(u8, line.kind, "BuiltinType"))
@@ -636,14 +819,14 @@ fn convert(arena: std.mem.Allocator, lines: []const Line, at: usize, widths: *Wi
     else if (std.mem.eql(u8, line.kind, "PointerType")) blk: {
         if (children.len == 0) break :blk .other;
         const pointee = try arena.create(CType);
-        pointee.* = try convert(arena, lines, children[0], widths);
+        pointee.* = try convert(arena, lines, children[0]);
         break :blk .{ .pointer = pointee };
     } else if (std.mem.eql(u8, line.kind, "FunctionProtoType") or std.mem.eql(u8, line.kind, "FunctionNoProtoType")) blk: {
         if (children.len == 0) break :blk .other;
         const result = try arena.create(CType);
-        result.* = try convert(arena, lines, children[0], widths);
+        result.* = try convert(arena, lines, children[0]);
         const params = try arena.alloc(CType, children.len - 1);
-        for (children[1..], params) |child, *param| param.* = try convert(arena, lines, child, widths);
+        for (children[1..], params) |child, *param| param.* = try convert(arena, lines, child);
         break :blk .{ .function = .{
             .result = result,
             .params = params,
@@ -652,7 +835,7 @@ fn convert(arena: std.mem.Allocator, lines: []const Line, at: usize, widths: *Wi
             .convention = conventionOf(line),
         } };
     } else if (std.mem.eql(u8, line.kind, "EnumType"))
-        .{ .enumeration = try widths.lookup(arena, line.spelled) }
+        .{ .enumeration = null }
     else if (std.mem.eql(u8, line.kind, "RecordType") or std.mem.endsWith(u8, line.kind, "ArrayType"))
         .object
     else
@@ -737,8 +920,7 @@ test "a type tree is read through its sugar to the type C passes" {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     const dumps = try Dumps.parse(arena, dump);
-    var widths: Widths = .{};
-    const column = (try dumps.function(arena, 0, 0, &widths)).?;
+    const column = (try dumps.function(arena, 0, 0)).?;
     try testing.expectEqualStrings("sqlite3_int64 (sqlite3_stmt *, int)", column.spelled);
     const function = column.shape.function;
     try testing.expectEqualStrings("sqlite3_int64", function.result.spelled);
@@ -748,11 +930,12 @@ test "a type tree is read through its sugar to the type C passes" {
     try testing.expectEqual(CType.Shape{ .integer = .{ .bits = 32, .signed = true } }, function.params[1].shape);
     try testing.expect(!function.variadic);
     try testing.expectEqual(@as(?[]const u8, null), function.convention);
-    try testing.expectEqual(@as(?CType, null), try dumps.function(arena, 0, 1, &widths));
-    const other = (try dumps.function(arena, 0, 2, &widths)).?.shape.function;
-    try testing.expectEqualStrings("preserve_none", other.convention.?);
-    try testing.expectEqual(@as(?Integer, null), other.params[0].shape.enumeration);
-    try testing.expectEqualStrings("enum big", widths.wanted.items[0]);
+    try testing.expectEqual(@as(?CType, null), try dumps.function(arena, 0, 1));
+    var other = (try dumps.function(arena, 0, 2)).?;
+    try testing.expectEqualStrings("preserve_none", other.shape.function.convention.?);
+    try testing.expectEqual(@as(?Enumeration, null), other.shape.function.params[0].shape.enumeration);
+    widenEnumerations(&other, .{ .result = .{ .bits = 64 }, .params = &.{.{ .bits = 64 }} });
+    try testing.expectEqual(Enumeration{ .bits = 64, .signed = null }, other.shape.function.params[0].shape.enumeration.?);
 }
 
 /// Why a C position disagrees with what lowering passes there.
@@ -771,7 +954,7 @@ fn scalarAccepts(scalar: ForeignScalar, c: CType) bool {
         .float64 => c.shape == .float and c.shape.float == 64,
         .integer => |integer| switch (c.shape) {
             .integer => |held| held.bits == integer.bits and held.signed == integer.signed,
-            .enumeration => |width| if (width) |held| held.bits == integer.bits and held.signed == integer.signed else false,
+            .enumeration => |width| if (width) |held| held.bits == integer.bits and (held.signed == null or held.signed.? == integer.signed) else false,
             // A pointer is a 64-bit address, which a `UInt64` and every
             // newtype over one carries: a handle, or a `std.ffi` view.
             .pointer => integer.bits == 64 and !integer.signed,
@@ -899,19 +1082,39 @@ const Reporter = struct {
         });
     }
 
-    fn symbol(self: *Reporter, subject: Subject, shown: []const u8, reason: []const u8) !void {
+    fn alias(self: *Reporter, subject: Subject, shown: []const u8) !void {
         const a = self.sink.arena;
-        const remarks = try a.dupe([]const u8, &.{
-            (try self.declaredBy(subject, shown))[0],
-            try std.fmt.allocPrint(a, "`cc` says: {s}", .{reason}),
-        });
         try self.sink.add(.{
             .severity = .err,
             .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "C code calling `{s}` reaches another symbol than `{s}`, which this declaration links against", .{ subject.name, subject.name }),
-            .labels = try self.nameLabel(subject, "C's declaration gives this function another symbol"),
-            .remarks = remarks,
+            .message = try std.fmt.allocPrint(a, "C defines `{s}` as an alias of another function, whose prototype its declaration does not show", .{subject.name}),
+            .labels = try self.nameLabel(subject, "C's symbol for this is another function's"),
+            .remarks = try self.declaredBy(subject, shown),
+            .notes = try a.dupe([]const u8, &.{"declare the function the alias names, or call it through a C function, built under \"native\""}),
+        });
+    }
+
+    fn unnameable(self: *Reporter, subject: Subject, shown: []const u8, spelled: []const u8) !void {
+        const a = self.sink.arena;
+        const symbol = if (std.mem.startsWith(u8, spelled, "\\01")) spelled[3..] else spelled;
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_extern_prototype,
+            .message = try std.fmt.allocPrint(a, "C code calling `{s}` reaches the symbol `{s}`, which a Linea declaration cannot name", .{ subject.name, symbol }),
+            .labels = try self.nameLabel(subject, "C gives this function a symbol Linea cannot link against"),
+            .remarks = try self.declaredBy(subject, shown),
             .notes = try a.dupe([]const u8, &.{"call it through a C function with a plain symbol, built under \"native\""}),
+        });
+    }
+
+    fn symbols(self: *Reporter, subject: Subject, first_shown: []const u8, first: []const u8, then_shown: []const u8, then: []const u8) !void {
+        const a = self.sink.arena;
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_extern_prototype,
+            .message = try std.fmt.allocPrint(a, "C's declarations give `{s}` two symbols: `{s}` in {s} and `{s}` in {s}", .{ subject.name, first, first_shown, then, then_shown }),
+            .labels = try self.nameLabel(subject, "this links against one symbol, and C code calls two"),
+            .notes = try a.dupe([]const u8, &.{"declare the function alike in every C source and header linea.json names"}),
         });
     }
 
@@ -930,8 +1133,8 @@ const Reporter = struct {
         var help: []const u8 = "";
         switch (mismatch) {
             .unprototyped => {
-                label = "C's declaration lists no parameters";
-                help = "declare the function with its parameters in C, as a prototype";
+                label = "C declares this without a prototype, which states no parameter types";
+                help = "declare the function in C with a prototype, `long long f(long long value)` rather than `long long f()`";
             },
             .convention => |convention| {
                 label = try std.fmt.allocPrint(a, "C declares it with the `{s}` calling convention, which is not C's own", .{convention});
@@ -1003,7 +1206,7 @@ fn innerHelp(a: std.mem.Allocator, mismatch: Mismatch) ![]const u8 {
 fn lineaName(c: CType) ?[]const u8 {
     const integer: Integer = switch (c.shape) {
         .integer => |held| held,
-        .enumeration => |width| width orelse return null,
+        .enumeration => |width| if (width) |held| .{ .bits = held.bits, .signed = held.signed orelse true } else return null,
         .float => |bits| return if (bits == 64) "Float64" else null,
         .pointer => return "UInt64",
         else => return null,
@@ -1022,7 +1225,7 @@ fn untranslatable(a: std.mem.Allocator, c: CType) !?[]const u8 {
     return switch (c.shape) {
         .boolean => "C's `bool` has no Linea type that crosses: call it through a C function, built under \"native\", that takes an integer",
         .object => "C takes a structure by value, which no Linea type crosses as: call it through a C function, built under \"native\", that takes its address",
-        .enumeration => |width| if (width == null) try std.fmt.allocPrint(a, "C's `{s}` is an enumeration nothing names, so its width cannot be learnt: call it through a C function, built under \"native\", that takes an integer", .{c.spelled}) else null,
+        .enumeration => |width| if (width == null) try std.fmt.allocPrint(a, "C's `{s}` is an enumeration behind a pointer or in a callback, whose width only the C compiler knows: call it through a C function, built under \"native\", that takes an integer", .{c.spelled}) else null,
         .void, .function, .other => try std.fmt.allocPrint(a, "C's `{s}` has no Linea type that crosses", .{c.spelled}),
         .float => |bits| if (bits != 64) try std.fmt.allocPrint(a, "C's `{s}` has no Linea type that crosses", .{c.spelled}) else null,
         else => null,

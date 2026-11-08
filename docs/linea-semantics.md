@@ -4702,15 +4702,20 @@ compiler's own tables instead: a symbol in the runtime's `linea_` namespace
 calls lowering replaces. A function none of the C declarations declares is
 refused, and so is every `extern` of a root whose C declarations the C
 compiler cannot read, with the reason it gives. Every C declaration that
-declares the function is compared, and the function must have its name as
-its symbol: one C declares `static`, or reaches under another symbol through
-an `__asm__` label, `overloadable` or a macro of its name, is refused. An
+declares the function is compared. A function C declares `static`, a macro
+of its name and a symbol C defines as an alias of another function are
+refused. Where C reaches the function under another symbol than its name,
+through an `__asm__` label or `overloadable`, as glibc sends `lseek` to
+`lseek64` under `_FILE_OFFSET_BITS=64`, the `extern` calls that symbol; every
+C declaration must give it the same one, and a symbol no Linea declaration
+can be emitted under is refused. An
 `export` is held to the same rules wherever its root's C declarations declare
 it, and is not refused where they do not. Each position of C's prototype
 must be what lowering passes there, compared by representation rather than
 by C's type identity: for an `IntN` or `UIntN`, or an unrefined newtype over
-one, an integer of `N` bits and the same signedness, or an `enum` the C
-compiler gives that width and signedness; for a `UInt64` or a newtype over
+one, an integer of `N` bits and the same signedness, or an `enum` C passes
+at that width, sign-extended for a signed and zero-extended for an unsigned
+one narrower than 32 bits; for a `UInt64` or a newtype over
 one, which is how a handle, `ffi.CText`, `ffi.Bytes` and `ffi.CTextList`
 cross, also any pointer; for a `Float64`, `double`; for an `inout` parameter,
 a pointer to a type the parameter's type would match by value; for a
@@ -4720,9 +4725,12 @@ what `R` matches; and for no result, `void`. The widths of C's integer types
 and the signedness of plain `char` are the target's, so `long` and
 `long long` are both 64-bit integers on every supported target. The number of
 parameters must be C's, and the function must use C's own calling
-convention; a variadic function, one declared without a prototype, an `enum`
-no type name names, and C's `bool`, `float`, `long double` and a structure by
-value match nothing. A `read` parameter does not require a `const` pointee:
+convention. A function declared or defined without a prototype, `long f();`
+or `long f(x) short x; {…}`, a variadic function, an `enum` behind a pointer
+or in a callback, and C's `bool`, `float`, `long double` and a structure by
+value match nothing. What C defines without a declaration the
+compiler reads, a symbol a top-level `__asm__` defines included, is
+believed. A `read` parameter does not require a `const` pointee:
 what C does through the address remains the wrapper's promise
 ([T-ExternHandle]). The check runs for `linea check`, `build`, `run`, `test`
 and `emit-mlir` once the program is otherwise accepted, and reads each
