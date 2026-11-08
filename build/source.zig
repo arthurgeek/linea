@@ -336,40 +336,67 @@ fn visitContainer(
 /// `-Dslow-tests=false`.
 pub const slow_test_gate = "try slow_tests.skipUnlessRun()";
 
+/// The file, relative to `src/`, that declares `skipUnlessRun` and is the one
+/// reader of the `test_options` module.
+pub const slow_tests_file = "support/slow_tests.zig";
+
 /// Where a file's tests break the pairing between a `slow:` name and the
 /// statement that skips the test: a test named `slow:` whose first statement
-/// is not `slow_test_gate`, a test that opens with it under another name, and
-/// a use of it anywhere else.
+/// is not `slow_test_gate`, the identifier `skipUnlessRun` anywhere else, in
+/// whatever form it is called or aliased, and an `@import("test_options")`
+/// outside `slow_tests_file`, which would read the option without the call.
 ///
 /// The name is what `-Dtest-filter=slow:` selects and what a reader sees in a
 /// run's output; the statement is what `-Dslow-tests=false` skips. Each alone
 /// is a test that runs where its name says it does not, or the reverse.
-pub fn slowTestMismatches(gpa: std.mem.Allocator, text: []const u8) []const []const u8 {
-    const z = gpa.dupeZ(u8, text) catch @panic("OOM");
+pub fn slowTestMismatches(gpa: std.mem.Allocator, file: SourceFile) []const []const u8 {
+    const z = gpa.dupeZ(u8, file.text) catch @panic("OOM");
     var tree = std.zig.Ast.parse(gpa, z, .zig) catch @panic("OOM");
     defer tree.deinit(gpa);
 
     var mismatches: std.ArrayList([]const u8) = .empty;
-    var gated: usize = 0;
+    // The `skipUnlessRun` token of each test named `slow:` that opens with
+    // `slow_test_gate`: the one place the identifier may be written.
+    var gates: std.ArrayList(std.zig.Ast.TokenIndex) = .empty;
     for (tree.nodes.items(.tag), 0..) |tag, i| {
         if (tag != .test_decl) continue;
         const at: std.zig.Ast.Node.Index = @enumFromInt(i);
         const name_token, const body = tree.nodeData(at).opt_token_and_node;
         const name = if (name_token.unwrap()) |token| tree.tokenSlice(token) else "";
-        const slow = std.mem.startsWith(u8, name, "\"slow: ");
+        if (!std.mem.startsWith(u8, name, "\"slow: ")) continue;
         var buffer: [2]std.zig.Ast.Node.Index = undefined;
         const statements = tree.blockStatements(&buffer, body) orelse &.{};
-        const opens_with_gate = statements.len > 0 and std.mem.eql(u8, nodeText(&tree, statements[0]), slow_test_gate);
-        if (opens_with_gate) gated += 1;
-        const line = tree.tokenLocation(0, tree.nodeMainToken(at)).line + 1;
-        if (slow and !opens_with_gate) {
+        if (statements.len > 0 and std.mem.eql(u8, nodeText(&tree, statements[0]), slow_test_gate)) {
+            // `try`, `slow_tests`, `.`, then the identifier.
+            gates.append(gpa, tree.firstToken(statements[0]) + 3) catch @panic("OOM");
+        } else {
+            const line = tree.tokenLocation(0, tree.nodeMainToken(at)).line + 1;
             mismatches.append(gpa, std.fmt.allocPrint(gpa, "line {d}: a test named `slow:` does not open with `{s};`", .{ line, slow_test_gate }) catch @panic("OOM")) catch @panic("OOM");
-        } else if (!slow and opens_with_gate) {
-            mismatches.append(gpa, std.fmt.allocPrint(gpa, "line {d}: a test opens with `{s};` and is not named `slow:`", .{ line, slow_test_gate }) catch @panic("OOM")) catch @panic("OOM");
         }
     }
-    if (std.mem.count(u8, text, slow_test_gate) > gated) {
-        mismatches.append(gpa, "`" ++ slow_test_gate ++ ";` is written where it is not a test's first statement") catch @panic("OOM");
+    if (std.mem.eql(u8, file.path, slow_tests_file)) return mismatches.toOwnedSlice(gpa) catch @panic("OOM");
+
+    const tags = tree.tokens.items(.tag);
+    for (tags, 0..) |tag, i| {
+        const token: std.zig.Ast.TokenIndex = @intCast(i);
+        switch (tag) {
+            .identifier => {
+                const slice = tree.tokenSlice(token);
+                const name = if (std.mem.startsWith(u8, slice, "@\"")) slice[2 .. slice.len - 1] else slice;
+                if (!std.mem.eql(u8, name, "skipUnlessRun")) continue;
+                if (std.mem.indexOfScalar(std.zig.Ast.TokenIndex, gates.items, token) != null) continue;
+                const line = tree.tokenLocation(0, token).line + 1;
+                mismatches.append(gpa, std.fmt.allocPrint(gpa, "line {d}: `skipUnlessRun` is named where it is not the first statement, `{s};`, of a test named `slow:`", .{ line, slow_test_gate }) catch @panic("OOM")) catch @panic("OOM");
+            },
+            .builtin => {
+                if (!std.mem.eql(u8, tree.tokenSlice(token), "@import")) continue;
+                if (i + 2 >= tags.len or tags[i + 1] != .l_paren or tags[i + 2] != .string_literal) continue;
+                if (!std.mem.eql(u8, tree.tokenSlice(token + 2), "\"test_options\"")) continue;
+                const line = tree.tokenLocation(0, token).line + 1;
+                mismatches.append(gpa, std.fmt.allocPrint(gpa, "line {d}: `@import(\"test_options\")` is written outside `{s}`", .{ line, slow_tests_file }) catch @panic("OOM")) catch @panic("OOM");
+            },
+            else => {},
+        }
     }
     return mismatches.toOwnedSlice(gpa) catch @panic("OOM");
 }

@@ -11,6 +11,7 @@
 
 const std = @import("std");
 const slow_tests = @import("../support/slow_tests.zig");
+const compiler_stack = @import("../support/stack.zig");
 const testing = std.testing;
 
 const Span = @import("../support/span.zig").Span;
@@ -3149,6 +3150,11 @@ test "slow: a dominator tree as deep as the function has blocks is walked" {
     const exit = try b.addBlock();
     // Each block observes the slot and branches on to the next or out, so
     // every block's dominator is the one before it.
+    //
+    // The check runs on a 512 KiB stack. A Debug check of this function uses
+    // about 85 KiB of it, and a frame per block, at least 16 bytes for a
+    // return address and a saved frame pointer, needs 960 KB for sixty
+    // thousand, so recursion overflows the stack at every optimisation level.
     for (blocks, 0..) |block, i| {
         const a = try addrOf(&b, block, big);
         const view = try b.addCall(block, .value, .u64, Span.empty, Shapes.reads, &.{a});
@@ -3159,7 +3165,7 @@ test "slow: a dominator tree as deep as the function has blocks is walked" {
     }
     const k = try constant(&b, exit, 0);
     try ret(&b, exit, k);
-    try expectAccepted(try Shapes.callees(gpa, try b.finish(blocks[0], .from(0))));
+    try (try compiler_stack.runWithin(512 << 10, expectAccepted, .{try Shapes.callees(gpa, try b.finish(blocks[0], .from(0)))}));
 }
 
 test "an edge into a loop other than at its dominating block is reported" {

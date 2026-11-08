@@ -1120,13 +1120,16 @@ fn checkTreeIsTidy(b: *std.Build, tree: Tree, failed: *bool) void {
     }
 
     // A unit test named `slow:` that does not skip itself under
-    // `-Dslow-tests=false`, or one that skips itself under another name.
+    // `-Dslow-tests=false`, a test that skips itself, or reads the option,
+    // under another name.
     //
     // Only the tree the unit-test binary is built from: the build tree's own
     // cases quote the statement inside strings.
     if (tree.joined != null) for (files) |f| {
-        if (std.mem.indexOf(u8, f.text, "test \"slow: ") == null and std.mem.indexOf(u8, f.text, source.slow_test_gate) == null) continue;
-        for (source.slowTestMismatches(b.allocator, f.text)) |mismatch| {
+        if (std.mem.indexOf(u8, f.text, "test \"slow: ") == null and
+            std.mem.indexOf(u8, f.text, "skipUnlessRun") == null and
+            std.mem.indexOf(u8, f.text, "test_options") == null) continue;
+        for (source.slowTestMismatches(b.allocator, f)) |mismatch| {
             std.debug.print("slow test: {s}/{s}, {s}\n", .{ tree.dir, f.path, mismatch });
             failed.* = true;
         }
@@ -1407,7 +1410,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     // `zig build` stays a debug build for the edit-compile loop, and
     // `zig build -Drelease` is the distributed one. The unit tests run in the
-    // mode the build selects: Debug here, ReleaseFast in the optimised CI lane.
+    // mode the build selects: Debug here, ReleaseSafe in the optimised CI lane.
     const optimize = test_roots.optimizeMode(b.release_mode, b.option(bool, "release", "optimize for end users"));
 
     // Where recorded outcomes and build intermediates go.
@@ -1570,8 +1573,9 @@ pub fn build(b: *std.Build) void {
     // The unit tests named `slow:` take ten seconds or more each in a Debug
     // binary and together most of its run. A pull request's `check` run builds
     // its Debug unit tests with them skipped and passes `-Dslow-tests=false`,
-    // because the `optimised` lane runs every unit test under ReleaseFast
-    // before the pull request merges; everywhere else they run.
+    // because the `optimised` lane runs every unit test under ReleaseSafe,
+    // which keeps Debug's safety checks and assertions, before the pull
+    // request merges; everywhere else they run.
     const slow_tests = b.option(
         bool,
         "slow-tests",

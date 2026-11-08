@@ -65,7 +65,7 @@ until it is green.
   the joined Debug compiler/conformance root and the build-source binary. It
   skips every integration gate: corpus and example walks, sweeps, and
   tree-sitter checks. The unit tests run once, in the mode the build selects;
-  the `optimised` CI lane runs them again under ReleaseFast.
+  the `optimised` CI lane runs them again under ReleaseSafe.
 - `zig build sweep -Drelease -Dsweep-filter=<substring>` runs only the cost
   dimensions whose names contain the text. Use the narrowest match while
   iterating; run the unfiltered sweep before declaring a performance-sensitive
@@ -238,10 +238,13 @@ and twenty thousand runs would take hours.
 
 Name a unit test `slow:` when it takes ten seconds or more in a Debug unit
 binary, and make `try slow_tests.skipUnlessRun();` its first statement
-(`src/support/slow_tests.zig`); `build.zig` refuses either without the other.
-`-Dslow-tests=false` builds the unit tests with those skipped; the default runs
-them, so an unfiltered `zig build test` still runs every test, and
-`-Dtest-filter=slow:` selects them alone.
+(`src/support/slow_tests.zig`); `build.zig` refuses either without the other,
+`skipUnlessRun` named anywhere else, and `@import("test_options")` outside that
+file. `-Dslow-tests=false` builds the unit tests with those skipped; the
+default runs them, so an unfiltered `zig build test` still runs every test.
+A filter matches a test's qualified name (`loader.test.slow: …`), so
+`-Dtest-filter=test.slow:` selects them alone, where `slow:` would also select
+the `fuzz-slow:` tests.
 
 CI runs on GitHub's hosted runners, from `.github/workflows/ci.yml`. A pull
 request merges into `main` once `merge-ready`, the one required status, is
@@ -272,8 +275,9 @@ Outside a push to `main`, `check` passes `-Dguide=false` and leaves the guide,
 the library's own tests and the examples' own tests to `optimised`, which runs
 them with the Debug compiler; a push to `main` runs them in `check`. It also
 passes `-Dslow-tests=false` there and leaves the `slow:` unit tests to
-`optimised`, which runs every unit test under ReleaseFast; a push to `main`
-runs them in `check`.
+`optimised`, which runs every unit test under ReleaseSafe, so bounds, overflow
+and `std.debug.assert` checks and the testing allocator's checks still hold;
+a push to `main` runs them in `check`.
 `-Dsequential` runs a test suite's heavy steps (the compiles of the compiler,
 the conformance runner and the unit tests, the unit tests and the corpus walks)
 one after another, unit tests first, through copies only that suite reaches;

@@ -5186,8 +5186,13 @@ test "slow: a capability question reads through types held only as arguments, tw
     try slow_tests.skipUnlessRun();
     // `N0` holds `N1` only as the argument of `Marker[N1]`, which has no part
     // of that type, so `N1` is asked about after the walk through `N0` ends,
-    // and so on down the chain. Two hundred thousand is past what a frame per
-    // argument would fit on the compiler's stack in a Debug build.
+    // and so on down the chain.
+    //
+    // The check runs on a 3 MiB stack. A Debug check of this program uses
+    // about 1.5 MiB of it whatever the depth, and a frame per argument, at
+    // least 16 bytes for a return address and a saved frame pointer, needs
+    // 3.2 MB for two hundred thousand, so recursion overflows the stack at
+    // every optimisation level.
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
@@ -5205,7 +5210,7 @@ test "slow: a capability question reads through types held only as arguments, tw
     for (0..depth - 1) |i| try w.print("struct N{d} {{\n    x: Marker[N{d}],\n}}\n\n", .{ i, i + 1 });
     try w.print("struct N{d} {{\n    x: UInt8,\n}}\n\n", .{depth - 1});
     try w.writeAll("fn main() -> UInt8 {\n    let reading: M.Reading = 3\n    reading\n}\n");
-    try testing.expectEqualSlices(diagnostic.Code, &.{}, try refusalCodes(gpa, out.written()));
+    try testing.expectEqualSlices(diagnostic.Code, &.{}, try (try compiler_stack.runWithin(3 << 20, refusalCodesHere, .{ gpa, out.written() })));
 }
 
 /// A borrowed carrier with `n` field paths, moved through `n` bindings.

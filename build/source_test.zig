@@ -127,15 +127,39 @@ test "CI runs the unit tests named slow in a lane every pull request requires" {
     const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(workflow);
     // `check` skips them on every event but a push to main, which runs no
-    // `optimised` lane; `optimised` runs them under ReleaseFast, with the rest
-    // of the unit tests, on every other event.
-    const check = try workflowJob(workflow, "check");
-    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, check, " -Dslow-tests="));
-    try testing.expect(std.mem.indexOf(u8, check, "zig build test -j4 -Dsequential -Dsafe-runner -Dguide=${{ github.event_name == 'push' }} -Dslow-tests=${{ github.event_name == 'push' }} ") != null);
-    const optimised = try workflowJob(workflow, "optimised");
-    try testing.expect(std.mem.indexOf(u8, optimised, "zig build test-unit --release=fast ") != null);
-    try testing.expect(std.mem.indexOf(u8, optimised, "github.event_name != 'push'") != null);
+    // `optimised` lane; `optimised` runs every unit test, unfiltered and with
+    // safety checks, on every other event, and a pull request cannot merge
+    // without it.
     try testing.expectEqual(@as(usize, 1), std.mem.count(u8, workflow, " -Dslow-tests="));
+    try testing.expectEqualStrings(
+        "nice -n 10 nix develop --command zig build test -j4 -Dsequential -Dsafe-runner -Dguide=${{ github.event_name == 'push' }} -Dslow-tests=${{ github.event_name == 'push' }} -Dscratch=\"$LINEA_SCRATCH-$GITHUB_JOB\"",
+        try onlyLineWith(try workflowJob(workflow, "check"), "zig build test "),
+    );
+    const optimised = try workflowJob(workflow, "optimised");
+    try testing.expectEqualStrings(
+        "if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'push' && !github.event.pull_request.draft }}",
+        try onlyLineWith(optimised, "if: ${{ needs.changes"),
+    );
+    try testing.expectEqualStrings(
+        "nice -n 10 nix develop --command zig build test-unit --release=safe -j4 -Dsequential -Dscratch=\"$LINEA_SCRATCH-$GITHUB_JOB\"",
+        try onlyLineWith(optimised, "zig build test-unit"),
+    );
+    try testing.expectEqualStrings(
+        "pull_request) required=(check sanitize optimised) ;;",
+        try onlyLineWith(try workflowJob(workflow, "merge-ready"), "pull_request) "),
+    );
+}
+
+/// The one line of `text` holding `needle`, without its indentation.
+fn onlyLineWith(text: []const u8, needle: []const u8) ![]const u8 {
+    var found: ?[]const u8 = null;
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.indexOf(u8, line, needle) == null) continue;
+        if (found != null) return error.SeveralLines;
+        found = std.mem.trim(u8, line, " ");
+    }
+    return found orelse error.NoLine;
 }
 
 fn outcomeStep(job: []const u8, action: []const u8) ?[]const u8 {
@@ -409,7 +433,7 @@ test "a test is named slow exactly where it opens by skipping itself" {
         \\test {}
         \\
     ;
-    try testing.expectEqual(@as(usize, 0), source.slowTestMismatches(gpa, paired).len);
+    try testing.expectEqual(@as(usize, 0), source.slowTestMismatches(gpa, .{ .path = "conformance_main.zig", .text = paired }).len);
 
     const broken =
         \\test "slow: skips nothing" {
@@ -428,13 +452,69 @@ test "a test is named slow exactly where it opens by skipping itself" {
         \\test "slow: empty" {}
         \\
     ;
-    const mismatches = source.slowTestMismatches(gpa, broken);
+    const mismatches = source.slowTestMismatches(gpa, .{ .path = "conformance_main.zig", .text = broken });
     try testing.expectEqual(@as(usize, 5), mismatches.len);
     try testing.expectEqualStrings("line 1: a test named `slow:` does not open with `try slow_tests.skipUnlessRun();`", mismatches[0]);
     try testing.expectEqualStrings("line 5: a test named `slow:` does not open with `try slow_tests.skipUnlessRun();`", mismatches[1]);
-    try testing.expectEqualStrings("line 10: a test opens with `try slow_tests.skipUnlessRun();` and is not named `slow:`", mismatches[2]);
-    try testing.expectEqualStrings("line 14: a test named `slow:` does not open with `try slow_tests.skipUnlessRun();`", mismatches[3]);
-    try testing.expectEqualStrings("`try slow_tests.skipUnlessRun();` is written where it is not a test's first statement", mismatches[4]);
+    try testing.expectEqualStrings("line 14: a test named `slow:` does not open with `try slow_tests.skipUnlessRun();`", mismatches[2]);
+    try testing.expectEqualStrings("line 7: `skipUnlessRun` is named where it is not the first statement, `try slow_tests.skipUnlessRun();`, of a test named `slow:`", mismatches[3]);
+    try testing.expectEqualStrings("line 11: `skipUnlessRun` is named where it is not the first statement, `try slow_tests.skipUnlessRun();`, of a test named `slow:`", mismatches[4]);
+}
+
+test "a test that skips itself in another form is refused unless named slow" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const evasions =
+        \\const s = slow_tests;
+        \\
+        \\test "skips through an alias" {
+        \\    try s.skipUnlessRun();
+        \\}
+        \\
+        \\test "skips and returns" {
+        \\    slow_tests.skipUnlessRun() catch return;
+        \\}
+        \\
+        \\test "reads the option itself" {
+        \\    if (!@import("test_options").slow_tests) return error.SkipZigTest;
+        \\}
+        \\
+    ;
+    const mismatches = source.slowTestMismatches(gpa, .{ .path = "conformance_main.zig", .text = evasions });
+    try testing.expectEqual(@as(usize, 3), mismatches.len);
+    try testing.expectEqualStrings("line 4: `skipUnlessRun` is named where it is not the first statement, `try slow_tests.skipUnlessRun();`, of a test named `slow:`", mismatches[0]);
+    try testing.expectEqualStrings("line 8: `skipUnlessRun` is named where it is not the first statement, `try slow_tests.skipUnlessRun();`, of a test named `slow:`", mismatches[1]);
+    try testing.expectEqualStrings("line 12: `@import(\"test_options\")` is written outside `support/slow_tests.zig`", mismatches[2]);
+
+    // Named `slow:`, the same forms are refused for the opening they lack.
+    const named =
+        \\const run = @import("test_options").slow_tests;
+        \\const skip = slow_tests.skipUnlessRun;
+        \\
+        \\test "slow: skips through an alias" {
+        \\    const s = slow_tests;
+        \\    try s.skipUnlessRun();
+        \\}
+        \\
+    ;
+    const refused = source.slowTestMismatches(gpa, .{ .path = "conformance_main.zig", .text = named });
+    try testing.expectEqual(@as(usize, 4), refused.len);
+    try testing.expectEqualStrings("line 4: a test named `slow:` does not open with `try slow_tests.skipUnlessRun();`", refused[0]);
+    try testing.expectEqualStrings("line 1: `@import(\"test_options\")` is written outside `support/slow_tests.zig`", refused[1]);
+    try testing.expectEqualStrings("line 2: `skipUnlessRun` is named where it is not the first statement, `try slow_tests.skipUnlessRun();`, of a test named `slow:`", refused[2]);
+    try testing.expectEqualStrings("line 6: `skipUnlessRun` is named where it is not the first statement, `try slow_tests.skipUnlessRun();`, of a test named `slow:`", refused[3]);
+
+    // The file that declares the call reads the option and names the call.
+    const declaring =
+        \\const run_slow_tests = @import("test_options").slow_tests;
+        \\pub fn skipUnlessRun() error{SkipZigTest}!void {
+        \\    if (!run_slow_tests) return error.SkipZigTest;
+        \\}
+        \\
+    ;
+    try testing.expectEqual(@as(usize, 0), source.slowTestMismatches(gpa, .{ .path = "support/slow_tests.zig", .text = declaring }).len);
+    try testing.expectEqual(@as(usize, 2), source.slowTestMismatches(gpa, .{ .path = "conformance_main.zig", .text = declaring }).len);
 }
 
 test "an import is resolved against the file that writes it" {
