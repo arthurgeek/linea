@@ -91,8 +91,10 @@ integers, passed alike. The widths of C's integer types and the signedness of
 plain `char` are the target's. An enumeration's width is the C compiler's
 choice from its values or its fixed underlying type, so the compiler reads
 how C passes it: its width, and for one narrower than 32 bits whether it is
-sign- or zero-extended, which is its signedness; a 32- or 64-bit enumeration
-is passed alike either way, so either matches. An enumeration behind a
+sign- or zero-extended, which is its signedness, on a target whose convention
+extends it (both macOS targets and x86-64 Linux do, AArch64 Linux leaves it
+to the callee); a value C does not extend is passed alike whatever its
+signedness, so either matches. The help names both types of the width. An enumeration behind a
 pointer or in a callback, which nothing passes by itself, matches nothing. A
 function C declares with a calling convention other than its own, such as
 `preserve_none`, a variadic function, a function declared or defined without

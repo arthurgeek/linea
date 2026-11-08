@@ -5,7 +5,7 @@ error[T-ExternPrototype]: C declares `big_t picks_big(big_t)`, and this declarat
   |                             ^^^^^^ C takes `big_t` here
   |
   = note: `picks_big` is declared by `picks/picks.c`
-  = help: declare `wanted` as `Int64`, or a newtype over it, the Linea type of C's `big_t`
+  = help: declare `wanted` as `Int64` or `UInt64`, or a newtype over it, the Linea type of C's `big_t`
 error[T-ExternPrototype]: C declares `unsigned int picks_inner(enum inner)`, and this declaration calls it as `unsigned int picks_inner(uint32_t)`
  --> tests/ffi/an_enumeration_is_measured_as_c_passes_it/picks/picks.lin:3:31
   |
@@ -13,4 +13,4 @@ error[T-ExternPrototype]: C declares `unsigned int picks_inner(enum inner)`, and
   |                               ^^^^^^ C takes `enum inner` here
   |
   = note: `picks_inner` is declared by `picks/picks.c`
-  = help: declare `wanted` as `Int64`, or a newtype over it, the Linea type of C's `enum inner`
+  = help: declare `wanted` as `Int64` or `UInt64`, or a newtype over it, the Linea type of C's `enum inner`

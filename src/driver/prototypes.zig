@@ -1206,7 +1206,16 @@ fn innerHelp(a: std.mem.Allocator, mismatch: Mismatch) ![]const u8 {
 fn lineaName(c: CType) ?[]const u8 {
     const integer: Integer = switch (c.shape) {
         .integer => |held| held,
-        .enumeration => |width| if (width) |held| .{ .bits = held.bits, .signed = held.signed orelse true } else return null,
+        // How C passes an enumeration fixes its width, and its signedness
+        // only on some targets, so both types of the width are named, each
+        // quoted where the help quotes one.
+        .enumeration => |width| return if (width) |held| switch (held.bits) {
+            8 => "Int8` or `UInt8",
+            16 => "Int16` or `UInt16",
+            32 => "Int32` or `UInt32",
+            64 => "Int64` or `UInt64",
+            else => null,
+        } else null,
         .float => |bits| return if (bits == 64) "Float64" else null,
         .pointer => return "UInt64",
         else => return null,

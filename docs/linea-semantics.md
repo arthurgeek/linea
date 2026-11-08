@@ -4714,8 +4714,8 @@ it, and is not refused where they do not. Each position of C's prototype
 must be what lowering passes there, compared by representation rather than
 by C's type identity: for an `IntN` or `UIntN`, or an unrefined newtype over
 one, an integer of `N` bits and the same signedness, or an `enum` C passes
-at that width, sign-extended for a signed and zero-extended for an unsigned
-one narrower than 32 bits; for a `UInt64` or a newtype over
+at that width, and where the target's convention extends one narrower than
+32 bits, extended by the same signedness; for a `UInt64` or a newtype over
 one, which is how a handle, `ffi.CText`, `ffi.Bytes` and `ffi.CTextList`
 cross, also any pointer; for a `Float64`, `double`; for an `inout` parameter,
 a pointer to a type the parameter's type would match by value; for a

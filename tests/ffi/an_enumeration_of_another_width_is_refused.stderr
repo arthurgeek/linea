@@ -5,7 +5,7 @@ error[T-ExternPrototype]: C declares `enum big levels_pick(enum big)`, and this 
   |                               ^^^^^ C takes `enum big` here
   |
   = note: `levels_pick` is declared by `levels/levels.c`
-  = help: declare `wanted` as `Int64`, or a newtype over it, the Linea type of C's `enum big`
+  = help: declare `wanted` as `Int64` or `UInt64`, or a newtype over it, the Linea type of C's `enum big`
 error[T-ExternPrototype]: C declares `enum level levels_raise(enum level)`, and this declaration calls it as `int32_t levels_raise(int32_t)`
  --> tests/ffi/an_enumeration_of_another_width_is_refused/levels/levels.lin:5:31
   |
@@ -13,4 +13,4 @@ error[T-ExternPrototype]: C declares `enum level levels_raise(enum level)`, and 
   |                               ^^^^^ C takes `enum level` here
   |
   = note: `levels_raise` is declared by `levels/levels.c`
-  = help: declare `level` as `UInt8`, or a newtype over it, the Linea type of C's `enum level`
+  = help: declare `level` as `Int8` or `UInt8`, or a newtype over it, the Linea type of C's `enum level`
