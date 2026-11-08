@@ -123,7 +123,7 @@ fn open_alongside_the_others(sink path: String) -> Bool {
 
 // How many signatures each of `tasks_at_once` tasks writes when they all
 // sign at once.
-let signatures_per_task: UInt64 = 16
+let signatures_per_task: UInt64 = 32
 
 // One of `tasks_at_once` tasks: open a connection to the book at `path`, sign
 // it `signatures_per_task` times, and answer whether every signature was
@@ -181,14 +181,15 @@ impl Book {
     // to two seconds for it rather than fail with `SQLITE_BUSY`.
     //
     // A connection waits for the disk after every commit unless told
-    // otherwise, and holds the write lock while it waits, so 128 tasks
-    // signing at once queue behind one disk flush each and a signature can
-    // wait past the two seconds. `synchronous=NORMAL` leaves the flush to
-    // the write-ahead log's checkpoint, so a commit ends as soon as the log
-    // holds it. A signature survives the server crashing; one signed just
-    // before the machine loses power may be lost, but the file stays whole.
-    // The setting belongs to the connection, not the file, so every
-    // connection sets it.
+    // otherwise, and holds the write lock while it waits, so with every
+    // serving task signing at once the lock is almost never free, and a
+    // connection that keeps retrying can still find it taken after two
+    // seconds. `synchronous=NORMAL` leaves the flush to the write-ahead
+    // log's checkpoint, so a commit ends as soon as the log holds it. A
+    // signature survives the server crashing; one signed just before the
+    // machine loses power or its operating system crashes may be lost, but
+    // the file stays whole. The setting belongs to the connection, not the
+    // file, so every connection sets it.
     pub fn connect(path: Str) -> Result[Book, BookError] {
         defer var database = Database.open(path)?
         &database.wait_when_busy(2000)?
@@ -264,7 +265,9 @@ impl Book {
     }
 
     // `synchronous=NORMAL` is 1: a connection commits a signature without
-    // waiting for the disk.
+    // waiting for the disk. The test above fails only where the disk makes
+    // each commit slow; this one fails everywhere if `connect` leaves the
+    // setting out.
     test fn a_connection_commits_without_waiting_for_the_disk() {
         defer let path = scratch_path()
         defer {
