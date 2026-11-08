@@ -152,7 +152,7 @@ error[T-ExternPrototype]: C declares `int64_t counter_sum(int64_t, int64_t)`, an
   |                                           ^^^^^ C takes `int64_t` here
   |
   = note: `counter_sum` is declared by `counter/counter.c`
-  = help: declare `right` as `Int64`, the Linea type of C's `int64_t`
+  = help: declare `right` as `Int64`, or a newtype over it, the Linea type of C's `int64_t`
 ```
 
 C would have read the whole 64-bit register for `right`, half of which the
@@ -161,8 +161,14 @@ result of another type, `inout` where C takes a value, and a plain parameter
 where C takes the address of one. It compares how each value is passed, not
 how C spells its type: `long` and `long long` are both `Int64`, and any
 pointer is the 64-bit address a `UInt64`, a handle or a `std.ffi` view holds.
-`linea check`, `build`, `run` and `test` all run it, so no program reaches C
-through a declaration C disagrees with.
+It also compares every C declaration of the function the manifest names, and
+refuses a function C declares `static`, one C reaches under another symbol
+than its name, and one with another calling convention than C's own. An
+`enum` must match the width and signedness the C compiler gives it: an
+`enum` whose values are all small and positive is usually a `UInt32`.
+`linea check`, `build`, `run` and `test` all run it, so no `extern` reaches a
+C function whose declaration disagrees with it. What C does with the values
+it is handed is still yours to get right, as the end of this chapter lists.
 
 ### `headers` names the C library's declarations
 
