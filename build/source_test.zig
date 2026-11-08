@@ -137,7 +137,7 @@ test "CI runs the unit tests named slow in a lane every pull request requires" {
     );
     const optimised = try workflowJob(workflow, "optimised");
     try testing.expectEqualStrings(
-        "if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'push' && !github.event.pull_request.draft }}",
+        "if: ${{ needs.changes.outputs.optimised == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}",
         try onlyLineWith(optimised, "if: ${{ needs.changes"),
     );
     // The whole step, so a step-level `if:` or `continue-on-error:` cannot
@@ -159,9 +159,12 @@ test "CI runs the unit tests named slow in a lane every pull request requires" {
         \\          trap 'kill "$follower" 2>/dev/null || true' EXIT
         \\          nice -n 10 nix develop --command zig build test-unit --release=fast -j4 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
     , try stepText(optimised, "Unit tests, ReleaseFast"));
+    // `merge-ready` requires `optimised` wherever `changes` said to run it,
+    // and `changes` keeps it from running only where a commit passed it
+    // against the same base and nothing it reads changed since.
     try testing.expectEqualStrings(
-        "pull_request) required=(check sanitize optimised) ;;",
-        try onlyLineWith(try workflowJob(workflow, "merge-ready"), "pull_request) "),
+        "judge optimised \"$WANT_OPTIMISED\" \"$OPTIMISED\"",
+        try onlyLineWith(try workflowJob(workflow, "merge-ready"), "judge optimised "),
     );
 }
 
@@ -195,6 +198,124 @@ fn outcomeStep(job: []const u8, action: []const u8) ?[]const u8 {
     var steps = std.mem.splitSequence(u8, job, "\n      - ");
     while (steps.next()) |step| if (std.mem.indexOf(u8, step, action) != null) return step;
     return null;
+}
+
+test "CI lanes run on the decision changes makes for each of them" {
+    const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(workflow);
+    const script = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/scripts/changes.sh", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(script);
+
+    // `changes` reads the check runs of earlier commits, so it needs the
+    // whole history and the right to read checks, and decides through the
+    // script the cases below run.
+    const changes = try workflowJob(workflow, "changes");
+    try testing.expect(std.mem.indexOf(u8, changes, "fetch-depth: 0") != null);
+    try testing.expectEqualStrings("\n      contents: read\n      checks: read\n", source.between(changes, "    permissions:", "    outputs:").?);
+    try testing.expect(std.mem.indexOf(u8, changes, "run: .github/scripts/changes.sh ci\n") != null);
+    try testing.expect(std.mem.indexOf(u8, changes, "GH_TOKEN: ${{ github.token }}") != null);
+
+    // The base a run records is the one a later run reads back.
+    try testing.expect(std.mem.indexOf(u8, script, "echo \"::notice title=tested base::$EVENT $tested_base\"") != null);
+    try testing.expect(std.mem.indexOf(u8, script, "select(.title == \"tested base\")") != null);
+
+    // Each lane runs only where `changes` said `run`, and `merge-ready`
+    // judges it against the same output.
+    const merge_ready = try workflowJob(workflow, "merge-ready");
+    const lanes = [_]struct { job: []const u8, want: []const u8 }{
+        .{ .job = "check", .want = "WANT_CHECK" },
+        .{ .job = "sanitize", .want = "WANT_SANITIZE" },
+        .{ .job = "optimised", .want = "WANT_OPTIMISED" },
+        .{ .job = "sweep", .want = "" },
+        .{ .job = "fuzz-mir", .want = "WANT_FUZZ_MIR" },
+    };
+    for (lanes) |lane| {
+        var buffer: [256]u8 = undefined;
+        const output = try std.fmt.bufPrint(&buffer, "      {s}: ${{{{ steps.lanes.outputs.{s} }}}}\n", .{ lane.job, lane.job });
+        try testing.expect(std.mem.indexOf(u8, changes, output) != null);
+        const condition = try std.fmt.bufPrint(&buffer, "needs.changes.outputs.{s} == 'run'", .{lane.job});
+        const @"if" = source.between(try workflowJob(workflow, lane.job), "\n    if: ${{ ", " }}\n") orelse return error.MissingCondition;
+        try testing.expect(std.mem.indexOf(u8, @"if", condition) != null);
+        if (lane.want.len == 0) continue;
+        const want = try std.fmt.bufPrint(&buffer, "{s}: ${{{{ needs.changes.outputs.{s} }}}}\n", .{ lane.want, lane.job });
+        try testing.expect(std.mem.indexOf(u8, merge_ready, want) != null);
+        const judged = try std.fmt.bufPrint(&buffer, "judge {s} \"${s}\"", .{ lane.job, lane.want });
+        try testing.expect(std.mem.indexOf(u8, merge_ready, judged) != null);
+    }
+    // A sanitizer the script finds inherited is left out of the matrix.
+    try testing.expect(std.mem.indexOf(u8, try workflowJob(workflow, "sanitize"), "        exclude: ${{ fromJSON(needs.changes.outputs.sanitize-exclude) }}\n") != null);
+}
+
+/// What `changes.sh decide` prints for `lane`, given the paths changed since
+/// the lane last passed and since the pull request's base; null stands for
+/// no such list.
+fn laneDecision(lane: []const u8, since_green: ?[]const u8, since_base: ?[]const u8) ![]const u8 {
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var paths: [2][]const u8 = .{ "-", "-" };
+    var buffers: [2][128]u8 = undefined;
+    for ([_]?[]const u8{ since_green, since_base }, [_][]const u8{ "green", "base" }, 0..) |list, name, i| {
+        const text = list orelse continue;
+        try tmp.dir.writeFile(io, .{ .sub_path = name, .data = text });
+        paths[i] = try std.fmt.bufPrint(&buffers[i], ".zig-cache/tmp/{s}/{s}", .{ tmp.sub_path, name });
+    }
+    const result = try std.process.run(testing.allocator, io, .{
+        .argv = &.{ "bash", ".github/scripts/changes.sh", "decide", lane, paths[0], paths[1] },
+    });
+    defer testing.allocator.free(result.stderr);
+    errdefer testing.allocator.free(result.stdout);
+    try testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    return result.stdout;
+}
+
+fn expectDecision(want: []const u8, lane: []const u8, since_green: ?[]const u8, since_base: ?[]const u8) !void {
+    const got = try laneDecision(lane, since_green, since_base);
+    defer testing.allocator.free(got);
+    if (!std.mem.eql(u8, std.mem.trimEnd(u8, got, "\n"), want)) {
+        std.debug.print("{s}: wanted {s}, got {s}", .{ lane, want, got });
+        return error.TestExpectedEqual;
+    }
+}
+
+const ci_lanes = [_][]const u8{ "check", "sanitize-address", "sanitize-thread", "optimised", "sweep", "fuzz-mir" };
+
+test "a lane inherits a green commit across Markdown no gate reads" {
+    for (ci_lanes) |lane| {
+        try expectDecision("inherit", lane, "AGENTS.md\nstd/README.md\n", "src/main.zig\n");
+        try expectDecision("inherit", lane, "", "src/main.zig\n");
+    }
+}
+
+test "Markdown a gate reads reruns only the lanes that read it" {
+    for ([_][]const u8{ "docs/learn/03-errors.md\n", "docs/adr/README.md\n", "docs/linea-semantics.md\nAGENTS.md\n" }) |changed| {
+        for (ci_lanes) |lane| {
+            const reads = std.mem.eql(u8, lane, "check") or std.mem.eql(u8, lane, "optimised");
+            try expectDecision(if (reads) "run" else "inherit", lane, changed, null);
+        }
+    }
+}
+
+test "anything else reruns every lane, and fuzz-mir only what it guards" {
+    for ([_][]const u8{ "tests/cmd/README.md\n", "build.zig\n", "docs/learn/notes.txt\n", "AGENTS.md\nsrc/sema/types.zig\n" }) |changed| {
+        for (ci_lanes) |lane| {
+            const guarded = std.mem.indexOf(u8, changed, "src/sema/") != null;
+            const want = if (!std.mem.eql(u8, lane, "fuzz-mir") or guarded) "run" else "inherit";
+            try expectDecision(want, lane, changed, null);
+        }
+    }
+}
+
+test "a lane with no green commit is decided by the diff against the base" {
+    for (ci_lanes) |lane| {
+        const fuzz_mir = std.mem.eql(u8, lane, "fuzz-mir");
+        try expectDecision("skip", lane, null, "AGENTS.md\n");
+        try expectDecision(if (fuzz_mir) "skip" else "run", lane, null, "docs/learn/03-errors.md\n");
+        try expectDecision(if (fuzz_mir) "skip" else "run", lane, null, "tests/a.lin\n");
+        try expectDecision("run", lane, null, "src/mir/lower.zig\n");
+        // Without either diff every lane runs.
+        try expectDecision("run", lane, null, null);
+    }
 }
 
 test "explicit release modes preserve their requested safety and size policy" {
