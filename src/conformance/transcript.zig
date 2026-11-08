@@ -298,6 +298,67 @@ test "a transcript that builds or runs a program is told from one that does not"
     try std.testing.expect(!runsAProgram(checks));
 }
 
+/// Whether some step leaves a job running in the background, as a server
+/// started with `./server > log 2>&1 & server=$!` is: an `&` outside quotes
+/// that ends a command. The `&` of `&&`, and of a redirection such as `2>&1`
+/// or `&>`, ends none.
+pub fn startsABackgroundJob(transcript: Transcript) bool {
+    for (transcript.pieces) |piece| switch (piece) {
+        .prose => {},
+        .step => |step| if (backgrounds(step.command)) return true,
+    };
+    return false;
+}
+
+fn backgrounds(command: []const u8) bool {
+    var quote: ?u8 = null;
+    var at: usize = 0;
+    while (at < command.len) : (at += 1) {
+        const c = command[at];
+        if (quote) |open| {
+            if (c == open) {
+                quote = null;
+            } else if (open == '"' and c == '\\') {
+                at += 1;
+            }
+            continue;
+        }
+        switch (c) {
+            '\\' => at += 1,
+            '\'', '"' => quote = c,
+            '&' => {
+                const after: u8 = if (at + 1 < command.len) command[at + 1] else ' ';
+                if (after == '&') {
+                    at += 1;
+                    continue;
+                }
+                const before: u8 = if (at > 0) command[at - 1] else ' ';
+                if (before == '>' or before == '<' or after == '>') continue;
+                return true;
+            },
+            else => {},
+        }
+    }
+    return false;
+}
+
+test "a transcript that leaves a job running in the background is told from one that does not" {
+    var serves = try parse(std.testing.allocator, "  $ linea build a.lin -o a\n  $ ./a 0 > log 2>&1 & server=$!\n");
+    defer serves.deinit(std.testing.allocator);
+    try std.testing.expect(startsABackgroundJob(serves));
+    var trailing = try parse(std.testing.allocator, "  $ sleep 1 &\n");
+    defer trailing.deinit(std.testing.allocator);
+    try std.testing.expect(startsABackgroundJob(trailing));
+
+    var waits = try parse(std.testing.allocator,
+        \\  $ linea build a.lin -o a && ./a > log 2>&1 && cat log &> both
+        \\  $ curl --data 'name=Ada&message=hi' "http://x/?a=1&b=2" -d a\&b
+        \\
+    );
+    defer waits.deinit(std.testing.allocator);
+    try std.testing.expect(!startsABackgroundJob(waits));
+}
+
 /// Whether `help` is usage text this can read: one listing `check`, which
 /// every build offers. Anything else would read as a build hiding every
 /// debugging aid, and pass each transcript naming one over unchecked.
