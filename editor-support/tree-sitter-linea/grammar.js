@@ -82,7 +82,7 @@ module.exports = grammar({
 
     _attribute_item: $ => choice($.policy_attribute, $.derive_attribute),
 
-    policy_attribute: _ => choice('opaque', 'linear', 'copyable', 'carrier', 'unshareable'),
+    policy_attribute: _ => choice('opaque', 'linear', 'copyable', 'carrier', 'unshareable', 'shareable'),
 
     derive_attribute: $ => seq('derive', $.derive_traits),
 

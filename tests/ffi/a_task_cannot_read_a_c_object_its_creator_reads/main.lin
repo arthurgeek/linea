@@ -1,0 +1,27 @@
+import std.session
+import std.task
+import counter
+
+use counter.Counter
+use session.Chan
+use session.End
+
+// `total` reads the counter through C. Nothing says the C library lets two
+// threads read one counter at once, so a task cannot read `tally` while
+// `main` may read it too.
+fn main() -> UInt8 {
+    var tally = Counter.open() else |_| {
+        return 1
+    }
+    &tally.add(3)
+    let worker = task.prepare(
+        sink [read tally] |sink me: Chan[End]| {
+            let _seen = tally.total()
+            me.close()
+        },
+    ).unwrap().start()
+    let _mine = tally.total()
+    worker.close()
+    tally.close()
+    0
+}

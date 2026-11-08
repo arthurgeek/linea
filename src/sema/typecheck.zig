@@ -849,6 +849,8 @@ fn typecheckInternal(
         const gop = try c.decl_of_type.getOrPut(gpa, t);
         if (!gop.found_existing) gop.value_ptr.* = each.id;
         if (ast.declUnshareableToken(each.id) != .none) c.builder.markUnshareable(t);
+        if (intrinsics.sealsForeignObject(program, ast, each.id) and ast.declShareableToken(each.id) == .none)
+            c.builder.markForeignObject(t);
     }
 
     z_decltypes.end();
@@ -1372,7 +1374,12 @@ fn typecheckInternal(
             if (!m.externs) {
                 const unshareable = ast.declUnshareableToken(d);
                 if (unshareable != .none) try c.reportUngranted(unshareable, "an `@unshareable` type", "drop `@unshareable`");
+                // `@shareable` vouches for C, which only a module trusted
+                // with C can do.
+                const shareable = ast.declShareableToken(d);
+                if (shareable != .none) try c.reportUngranted(shareable, "a `@shareable` handle", "drop `@shareable`");
             }
+            if (m.externs) try c.checkSealedHandle(d);
             if (m.externs and foreign_module != .none and c.current != foreign_module)
                 try c.checkForeignPublished(d, foreign_module);
             if (c.program.publishesExport(d)) try c.checkExport(d);
@@ -11683,7 +11690,15 @@ const Checker = struct {
         const held_name = try self.typeName(held);
         const seed_name = try self.typeName(witness.seed);
         var help = self.unmetBoundHelp(bound);
-        help.another_value = if (which == .shareable) "pass a value that reading never changes" else "pass a value that holds no end of a session";
+        // A handle to a C object is unshareable because nothing says C lets
+        // two threads read the object at once; only its wrapper can say so.
+        const foreign = which == .shareable and self.builder.view().namesForeignObject(witness.seed);
+        help.another_value = if (foreign)
+            try std.fmt.allocPrint(self.sink.arena, "keep it in one task or in an owning task, or, if the C library guarantees concurrent access is safe for every operation its wrapper exposes through shared reads, mark `{s}` `@shareable` in that trusted wrapper", .{seed_name[0 .. std.mem.indexOfScalar(u8, seed_name, '[') orelse seed_name.len]})
+        else if (which == .shareable)
+            "pass a value that reading never changes"
+        else
+            "pass a value that holds no end of a session";
         const edit: Edit = if (self.builder.get(witness.seed) == .parameter)
             try self.boundsEdit(spelled, witness.seed)
         else
@@ -11691,9 +11706,12 @@ const Checker = struct {
         const label = try self.unmetLabel(help, edit);
         const file = self.ast.fileOf(at);
 
-        // What the seed itself is, for a declared type: unshareable, an end
-        // of a session, or an erased closure that may hold one.
-        const declared: []const u8 = if (which == .shareable)
+        // What the seed itself is, for a declared type: a handle to a C
+        // object, unshareable, an end of a session, or an erased closure that
+        // may hold one.
+        const declared: []const u8 = if (foreign)
+            "which names an object C holds"
+        else if (which == .shareable)
             "which is unshareable"
         else if (self.builder.declOfType(witness.seed) == self.raw_accesses.endpoint)
             "an end of a session, through which a call could wait on another task"
@@ -11709,7 +11727,9 @@ const Checker = struct {
         if (witness.steps.len == 0) return switch (self.builder.get(witness.seed)) {
             .parameter => self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `{s}`, and `{s}` may stand for a type that is not `{s}`", .{ subject, spelled, held_name, spelled }),
             .callable, .open_type => self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `{s}`, and `{s}` is a function value, which may hold a value that is not `{s}`", .{ subject, spelled, held_name, spelled }),
-            else => if (which == .shareable)
+            else => if (foreign)
+                self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Shareable`, and `{s}` names an object C holds, which C has not said two threads may read at once", .{ subject, held_name })
+            else if (which == .shareable)
                 self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Shareable`, and `{s}` is unshareable", .{ subject, held_name })
             else
                 self.sink.addErrorFmt(.t_bound, file, span, label, "`{s}` requires `Isolated`, and `{s}` {s}", .{
@@ -19788,6 +19808,42 @@ const Checker = struct {
         return false;
     }
 
+    /// [T-ExternHandle] on a newtype sealed in a module trusted with C. A
+    /// `copyable` one names its object from every copy, and a copy crosses to
+    /// any task whole, so it is declared only with `@shareable`, the wrapper's
+    /// promise that C lets threads use the object at once. And `@shareable`
+    /// lifts only the declaration's own reason, so on a newtype whose base is
+    /// not `Shareable` it changes nothing and is refused ([S-Entry]).
+    fn checkSealedHandle(self: *Checker, d: DeclId) std.mem.Allocator.Error!void {
+        if (intrinsics.copiesUnvouchedForeignObject(self.program, self.ast, d)) {
+            self.reportAtToken(
+                .t_extern_handle,
+                self.ast.declName(d),
+                "a copyable sealed newtype in a module trusted with C names its object from every copy, and a copy reaches any task",
+                "declare it `@shareable` if C lets two threads use the object at once, or drop `copyable` so the compiler keeps the object to one task at a time",
+                null,
+            );
+            return;
+        }
+        const shareable = self.ast.declShareableToken(d);
+        if (shareable == .none or !intrinsics.sealedUnderGrant(self.program, self.ast, d)) return;
+        const t = self.type_of_decl.get(d);
+        if (t == .poison) return;
+        const base = switch (self.builder.get(t)) {
+            .newtype => |nominal| nominal.base,
+            else => return,
+        };
+        if (base == .poison or try self.builder.isShareable(base)) return;
+        const base_name = try self.typeName(base);
+        self.reportAtToken(
+            .s_entry,
+            shareable,
+            try std.fmt.allocPrint(self.sink.arena, "`@shareable` vouches only for this declaration, and its base `{s}` is not `Shareable`, so the type stays unshareable", .{base_name}),
+            "vouch on the type that keeps the base unshareable, or drop `shareable`",
+            null,
+        );
+    }
+
     /// Refuses `what`, written at `at` in the current module, which only a
     /// module its root's manifest grants `extern` may declare. The manifest
     /// and the module are spelled as that manifest writes them: a library's
@@ -20632,25 +20688,74 @@ const Checker = struct {
             }
         }
 
-        // `read` says C leaves a handle's object as it was, which is a promise
-        // only about a handle ([T-ExternHandle]).
+        // `read` says C leaves a handle's object as it was, or that C neither
+        // keeps nor frees the object a copyable sealed newtype names, which
+        // are promises only about those ([T-ExternHandle]). Every copy of a
+        // copyable sealed newtype names its object, so C takes one only
+        // `read`, and no `extern` answers one: the object must outlive every
+        // copy, and nothing the compiler tracks keeps it alive.
         if (category == .t_extern) {
             const pool = self.builder.view();
+            const signature: ?types_mod.CallableSignature = switch (self.builder.get(self.decl_signatures.get(d))) {
+                .callable => |callable| callable,
+                else => null,
+            };
+            const signature_params: []const types_mod.CallableParam = if (signature) |held| self.builder.callableParams(held) else &.{};
             for (self.ast.declParams(d), 0..) |p, k| {
                 const t = try self.declaredParamType(d, k);
-                const marked = p.convention == .read and self.ast.paramConventionToken(p) != .none;
-                if (marked and t != .poison and !intrinsics.isForeignHandle(self.program, self.ast, &pool, t)) {
-                    const token = self.ast.paramConventionToken(p);
+                if (t == .poison) continue;
+                const written = self.ast.paramConventionToken(p);
+                const marked = p.convention == .read and written != .none;
+                const copied = intrinsics.namesCopiedForeignObject(self.program, self.ast, &pool, t);
+                if (marked and !copied and !intrinsics.isForeignHandle(self.program, self.ast, &pool, t)) {
                     try self.sink.addError(
                         .s_entry,
-                        self.ast.fileOf(token),
-                        self.ast.tokenSpan(token),
-                        "`read` on an `extern` parameter marks a handle, a newtype sealed in a module trusted with C that is not `copyable`, whose object C only reads",
+                        self.ast.fileOf(written),
+                        self.ast.tokenSpan(written),
+                        "`read` on an `extern` parameter marks a handle, or a copyable sealed newtype, whose object C neither keeps nor frees",
                         "omit `read`; parameters are read by default",
                     );
                 }
+                if (copied and !marked and !self.isCallbackContext(signature_params, t)) {
+                    const at = if (written != .none) written else p.name;
+                    try self.sink.addErrorFmt(
+                        .t_extern_handle,
+                        self.ast.fileOf(at),
+                        self.ast.tokenSpan(at),
+                        "write `read`, so C only reads the object; keep an object C frees or keeps in a handle that is not `copyable`",
+                        "every copy of a `{s}` names the same C object, so C may neither keep nor free it",
+                        .{try self.typeName(t)},
+                    );
+                }
             }
+            // An `extern` answering `ffi.Errno[R]` hands Linea the `R`.
+            if (signature) |held| if (intrinsics.namesCopiedForeignObject(self.program, self.ast, &pool, self.raw_accesses.errnoValue(&self.builder, held.result) orelse held.result)) {
+                const answered = self.raw_accesses.errnoValue(&self.builder, held.result) orelse held.result;
+                const at = self.ast.declName(d);
+                try self.sink.addErrorFmt(
+                    .t_extern_handle,
+                    self.ast.fileOf(at),
+                    self.ast.tokenSpan(at),
+                    "answer the address as an integer, and build the value where the wrapper knows the object outlives every copy",
+                    "an `extern` cannot answer a `{s}`: every copy would name an object nothing the compiler tracks keeps alive",
+                    .{try self.typeName(answered)},
+                );
+            };
             try self.checkForeignViewSources(d);
+        }
+        // C calls an exported function, so what it takes comes from C and
+        // what it answers goes to C, as for a callback.
+        if (category == .t_export) {
+            const pool = self.builder.view();
+            const span = self.ast.tokenSpan(self.ast.declName(d));
+            for (self.ast.declParams(d), 0..) |p, k| {
+                const t = try self.declaredParamType(d, k);
+                if (t != .poison and intrinsics.namesCopiedForeignObject(self.program, self.ast, &pool, t))
+                    try self.refuseCopiedAcross(self.ast.fileOf(self.ast.declName(d)), self.ast.tokenSpan(p.name), t, .from_c);
+            }
+            const answered = try self.declaredResultType(d);
+            if (answered != .poison and intrinsics.namesCopiedForeignObject(self.program, self.ast, &pool, answered))
+                try self.refuseCopiedAcross(self.ast.fileOf(self.ast.declName(d)), span, answered, .to_c);
         }
 
         // What may cross is decided by what both sides of a boundary agree a
@@ -20853,6 +20958,32 @@ const Checker = struct {
     /// which is a context: the `extern` takes exactly one `inout` parameter of
     /// the same type, and C hands its address back as a `void *`. Answers the
     /// context's type, or null where the callback takes none or was refused.
+    /// [T-ExternHandle] where a copyable sealed newtype would cross by value
+    /// in a callback's or an exported function's signature: one C hands
+    /// Linea names an object nothing the compiler tracks keeps alive, and one
+    /// Linea hands C may be kept or freed while a copy still names it.
+    fn refuseCopiedAcross(self: *Checker, file: FileId, span: Span, t: TypeId, direction: enum { from_c, to_c }) std.mem.Allocator.Error!void {
+        const name = try self.typeName(t);
+        switch (direction) {
+            .from_c => try self.sink.addErrorFmt(
+                .t_extern_handle,
+                file,
+                span,
+                "take the address as an integer, and build the value where the wrapper knows the object outlives every copy",
+                "C cannot hand Linea a `{s}`: every copy would name an object nothing the compiler tracks keeps alive",
+                .{name},
+            ),
+            .to_c => try self.sink.addErrorFmt(
+                .t_extern_handle,
+                file,
+                span,
+                "answer the address as an integer, and keep the object in a handle that is not `copyable` if C frees or keeps it",
+                "Linea cannot hand C a `{s}` by value: C may keep or free the object while a copy still names it",
+                .{name},
+            ),
+        }
+    }
+
     fn checkCallbackParam(self: *Checker, d: node.DeclId, k: usize, t: TypeId) std.mem.Allocator.Error!?TypeId {
         const p = self.ast.declParams(d)[k];
         const file = self.ast.fileOf(self.ast.declName(d));
@@ -20887,6 +21018,17 @@ const Checker = struct {
             try self.sink.addError(.t_extern_callback, file, span, "C reads what a callback answers, so it crosses the boundary", label);
             return null;
         }
+        // C hands a callback its parameters and keeps what it answers, as an
+        // `extern` hands back what it answers and takes its parameters, so a
+        // copyable sealed newtype crosses neither way here ([T-ExternHandle]).
+        const pool = self.builder.view();
+        for (self.builder.callableParams(signature), 0..) |param, j| {
+            if (j == 0 and param.convention == .inout) continue;
+            if (intrinsics.namesCopiedForeignObject(self.program, self.ast, &pool, param.ty))
+                try self.refuseCopiedAcross(file, span, param.ty, .from_c);
+        }
+        if (intrinsics.namesCopiedForeignObject(self.program, self.ast, &pool, signature.result))
+            try self.refuseCopiedAcross(file, span, signature.result, .to_c);
         const wanted = context orelse return null;
         var paired: usize = 0;
         for (self.ast.declParams(d), 0..) |other, i| {
@@ -40836,6 +40978,56 @@ test "borrow explicit observation methods borrow a temporary descriptor that is 
         try testing.expectEqual(case.temporary, typing.borrowed_temporaries.count() != 0);
         try testing.expectEqual(@as(u32, 0), sink.error_count);
     }
+}
+
+test "the builder and the finished typing agree on Shareable and each explains it" {
+    // `Shareable` is answered by the builder's table while checking and by
+    // the finished typing's copy of it afterwards, and each walks its own
+    // witness over the same edges. Over records, enums, newtypes, generic
+    // instances nested through representatives, observations, closures and
+    // type parameters, both must give one answer, and each witness must end
+    // at a reason the table seeds, through parts the table marks.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var sink = Sink.init(gpa);
+    const typing = try typingOf(gpa,
+        \\@unshareable
+        \\struct Cursor { at: UInt64 }
+        \\struct Box[T] { item: T }
+        \\enum Maybe[T] { Nothing, Just(T) }
+        \\type Wrapped = Cursor
+        \\fn hold[T](value: T) -> Box[T] { Box { item = value } }
+        \\fn peek(seen: borrow Cursor) -> UInt64 { seen.at }
+        \\fn main() -> UInt8 {
+        \\    let cursor = Cursor { at = 1 }
+        \\    let _nested = hold(hold(Cursor { at = 2 }))
+        \\    let _maybe: Maybe[Cursor] = .Just(Cursor { at = 3 })
+        \\    let _plain = hold(hold(UInt64(4)))
+        \\    let _wrapped = Wrapped(Cursor { at = 5 })
+        \\    let reader = [read cursor] || peek(borrow cursor)
+        \\    UInt8(reader())
+        \\}
+    , &sink);
+    var builder = try types_mod.Typing.Builder.reopen(gpa, &typing);
+    const count = typing.pool.len;
+    var unshareable: usize = 0;
+    for (0..count) |i| {
+        const t: TypeId = @enumFromInt(@as(u32, @intCast(i)));
+        if (t == .poison) continue;
+        const finished = typing.isShareable(t);
+        try testing.expectEqual(finished, try builder.isShareable(t));
+        if (finished) continue;
+        unshareable += 1;
+        const seen = (try typing.unshareableWitness(gpa, t)).?;
+        try testing.expect(typing.unshareableSeed(seen.seed));
+        for (seen.parts) |part| try testing.expect(!typing.isShareable(part));
+        const open = (try builder.unshareableWitness(gpa, t)).?;
+        try testing.expect(builder.view().unshareableSeed(open.seed));
+        for (open.parts) |part| try testing.expect(!try builder.isShareable(part));
+    }
+    // The cursor, its wrappers, its observation and the closure at least.
+    try testing.expect(unshareable >= 6);
 }
 
 test "integer constraints admit concrete and forwarded integer evidence" {

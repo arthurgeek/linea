@@ -1,0 +1,36 @@
+import std.io
+import std.session
+import std.task
+import counter
+
+use counter.Counter
+use session.Chan
+use session.End
+
+// An owning task keeps the counter on its own thread and runs one call at a
+// time against it, so C never sees two threads use the counter at once. A
+// client of the owning task may be given to another task.
+fn main() -> Result[UInt8, io.IoError] {
+    let opened = Counter.open() else |_| {
+        return .Ok(1)
+    }
+    let tally = task.own(opened).unwrap()
+    let calls = tally.client()
+    let worker = task.prepare(
+        sink [sink calls = copy(calls)] |sink me: Chan[End]| {
+            for _ in 0..10 {
+                calls.call(|inout c: Counter| &c.add(1))
+            }
+            me.close()
+        },
+    ).unwrap().start()
+    for _ in 0..10 {
+        calls.call(|inout c: Counter| &c.add(2))
+    }
+    worker.close()
+    let total = calls.call(|inout c: Counter| c.total())
+    let counted = tally.close()
+    counted.close()
+    io.println("{total}")?
+    .Ok(0)
+}

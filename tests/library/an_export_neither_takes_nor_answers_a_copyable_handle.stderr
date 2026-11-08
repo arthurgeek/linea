@@ -1,0 +1,10 @@
+error[T-ExternHandle]: C cannot hand Linea a `Handle`: every copy would name an object nothing the compiler tracks keeps alive
+ --> tests/library/an_export_neither_takes_nor_answers_a_copyable_handle/main.lin:8:24
+  |
+8 | export fn counter_peek(counter: Handle) -> Int32 {
+  |                        ^^^^^^^ take the address as an integer, and build the value where the wrapper knows the object outlives every copy
+error[T-ExternHandle]: Linea cannot hand C a `Handle` by value: C may keep or free the object while a copy still names it
+  --> tests/library/an_export_neither_takes_nor_answers_a_copyable_handle/main.lin:13:11
+   |
+13 | export fn counter_make() -> Handle {
+   |           ^^^^^^^^^^^^ answer the address as an integer, and keep the object in a handle that is not `copyable` if C frees or keeps it

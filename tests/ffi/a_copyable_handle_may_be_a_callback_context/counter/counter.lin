@@ -1,0 +1,20 @@
+// A copyable sealed newtype over a counter that lives for the whole program.
+@(opaque, copyable, shareable)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+extern fn counter_total(read counter: Handle) -> Int64
+
+// C receives the context as the address of the Linea place holding the
+// handle, never the handle itself, and hands it back only during the call.
+extern fn counter_visit(visit: fn(inout h: Handle, n: Int32) -> Int32, inout h: Handle) -> Int32
+
+fn seen(inout h: Handle, n: Int32) -> Int32 {
+    Int32(counter_total(h)) + n
+}
+
+pub fn go() -> Int32 {
+    var h = Handle(counter_open())
+    counter_visit(seen, &h)
+}

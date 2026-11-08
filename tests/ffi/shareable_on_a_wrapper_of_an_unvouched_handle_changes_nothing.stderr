@@ -1,0 +1,5 @@
+error[S-Entry]: `@shareable` vouches only for this declaration, and its base `Handle` is not `Shareable`, so the type stays unshareable
+  --> tests/ffi/shareable_on_a_wrapper_of_an_unvouched_handle_changes_nothing/counter/counter.lin:14:19
+   |
+14 | @(opaque, linear, shareable)
+   |                   ^^^^^^^^^ vouch on the type that keeps the base unshareable, or drop `shareable`

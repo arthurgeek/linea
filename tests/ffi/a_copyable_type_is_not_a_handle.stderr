@@ -1,10 +1,15 @@
-error[S-Entry]: `read` on an `extern` parameter marks a handle, a newtype sealed in a module trusted with C that is not `copyable`, whose object C only reads
-  --> tests/ffi/a_copyable_type_is_not_a_handle/named/named.lin:12:22
+error[T-ExternHandle]: an `extern` cannot answer a `Name`: every copy would name an object nothing the compiler tracks keeps alive
+  --> tests/ffi/a_copyable_type_is_not_a_handle/named/named.lin:11:11
    |
-12 | extern fn named_name(read handle: Name) -> ffi.CText where borrows(handle)
-   |                      ^^^^ omit `read`; parameters are read by default
+11 | extern fn named_open() -> Name
+   |           ^^^^^^^^^^ answer the address as an integer, and build the value where the wrapper knows the object outlives every copy
 error[T-Extern]: `named_name` answers memory `handle` lends, so `handle` must be a handle or a `std.ffi` view, and `Name` is neither
-  --> tests/ffi/a_copyable_type_is_not_a_handle/named/named.lin:12:27
+  --> tests/ffi/a_copyable_type_is_not_a_handle/named/named.lin:13:27
    |
-12 | extern fn named_name(read handle: Name) -> ffi.CText where borrows(handle)
+13 | extern fn named_name(read handle: Name) -> ffi.CText where borrows(handle)
    |                           ^^^^^^ take a handle: a type sealed with `@opaque` in a module trusted with C and not `copyable`; or write `where carries()` when C keeps the memory for the program's life
+error[T-ExternHandle]: every copy of a `Name` names the same C object, so C may neither keep nor free it
+  --> tests/ffi/a_copyable_type_is_not_a_handle/named/named.lin:15:23
+   |
+15 | extern fn named_reset(handle: Name)
+   |                       ^^^^^^ write `read`, so C only reads the object; keep an object C frees or keeps in a handle that is not `copyable`

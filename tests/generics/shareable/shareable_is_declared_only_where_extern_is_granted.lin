@@ -1,0 +1,9 @@
+// `@shareable` vouches that C lets two threads read one object at once, and
+// only a module trusted with C may vouch for C.
+@(opaque, linear, shareable)
+type Handle = UInt64
+
+fn main() -> UInt8 {
+    let Handle(address) = Handle(0)
+    UInt8(address)
+}

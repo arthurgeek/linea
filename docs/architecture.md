@@ -1066,17 +1066,25 @@ or a slice names, what a `mem.Carried` carries and the callable a
 `mem.ClosureEntry` stands for, and no other type argument. A value kept in
 bytes is held through a `mem.address.Address` of its own type, so no argument
 the walk passes over names something the value holds. Its seeds are a
-declared type whose record says it is marked `@unshareable`, a callable or open
-type, and a type parameter whose record says neither `Shareable` nor `Integer`.
+declared type whose record says it is marked `@unshareable`, a newtype whose
+record says it is the innermost handle to a C object not marked `@shareable`
+(its `foreign` flag, set while declarations are typed from
+`intrinsics.sealsForeignObject`, the routine [T-ExternHandle]'s predicate
+calls, so the type C is lent `read` is the type two tasks may not read), a
+callable or open type, and a type parameter whose record says neither
+`Shareable` nor `Integer`.
 A `Shareable` promise on a parameter or on a settled reference read through
 one is part of an alike instantiation's shape, as an `Owned` one is, and an
 `Integer` promise on a settled reference makes both. The checker refuses a
 `Shareable` argument by asking `isShareable`, and
 `unshareableWitness` finds the path the refusal names over those edges. The
 mark is copied from a template to each instance, so an instantiation of an
-`@unshareable` declaration is unshareable whatever its arguments. No pass after
-the checker reads the answer yet, so the table is not kept in the finished
-`Typing`.
+`@unshareable` declaration, or of a handle, is unshareable whatever its
+arguments. The finished `Typing` keeps the answer as `unshareable_containment`,
+which ownership reads for [O-Cross], and `Typing.unshareableWitness` walks the
+same edges over it: `BorrowContainment.eachChild` takes the open builder or
+the finished typing alike, so the handle [O-Cross] names is the one
+[T-Bound]'s `Builder.unshareableWitness` names.
 
 A fourth table, `connected_facts`, answers `Isolated` over the same edges in
 `connected` mode. Its seeds are the declarations `RawAccesses` names as

@@ -57,6 +57,7 @@
 "copyable" @keyword.storage.modifier
 "carrier" @keyword.storage.modifier
 "unshareable" @keyword.storage.modifier
+"shareable" @keyword.storage.modifier
 "test" @keyword.storage.modifier
 "trap" @keyword.storage.modifier
 "phantom" @keyword.storage.modifier

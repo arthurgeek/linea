@@ -1,0 +1,7 @@
+error[O-Cross]: a task cannot read `tally` while its creator may read it too: a `Counter` is not `Shareable`: it reaches a `counter.Handle[Int8]`, which names an object C holds
+  --> tests/ffi/a_generic_handle_is_named_by_its_declaration/main.lin:14:20
+   |
+14 |         sink [read tally] |sink me: Chan[End]| {
+   |                    ^^^^^ this capture is read by the task
+   |
+   = help: C has not said two threads may read this object at once; move it into one task, or keep it in an owning task (`task.own`) and give other tasks its client, or, if the C library guarantees concurrent access is safe for every operation its wrapper exposes through shared reads, mark `counter.Handle` `@shareable` in that trusted wrapper

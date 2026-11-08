@@ -23,7 +23,7 @@ for the code in brackets to reach the rule itself.
 | `O-Borrow` | error | Calling things: [Why captures are written out](02-calling-things.md#why-captures-are-written-out) | [§5.5 What is checked](../linea-semantics.md#55-what-is-checked), at `[O-Borrow]` |
 | `O-Capture` | error | Calling things: [Closures: functions that capture](02-calling-things.md#closures-functions-that-capture) | [§5.2 Matching](../linea-semantics.md#52-matching), at `[O-Capture]` |
 | `O-Copy` | error | Copying, settling and sealing: [`copyable`: values that are safe to duplicate](04-copying-settling-and-sealing.md#copyable-values-that-are-safe-to-duplicate) | [§5.3 Copying](../linea-semantics.md#53-copying), at `[O-Copy]` |
-| `O-Cross` | error | Tasks and sessions: [No data races and no locks](13-tasks-and-sessions.md#no-data-races-and-no-locks) | [§5.5 What is checked](../linea-semantics.md#55-what-is-checked), at `[O-Cross]` |
+| `O-Cross` | error | Calling C: [A C object stays with one task unless its wrapper says otherwise](11-calling-c.md#a-c-object-stays-with-one-task-unless-its-wrapper-says-otherwise) | [§5.5 What is checked](../linea-semantics.md#55-what-is-checked), at `[O-Cross]` |
 | `O-DeferDead` | error | Copying, settling and sealing: [A `defer` and a move](04-copying-settling-and-sealing.md#a-defer-and-a-move) | [§4 Types](../linea-semantics.md#4-types), at `[O-DeferDead]` |
 | `O-Escapes` | error | Borrowing: [What happens if you forget one](06-borrowing.md#what-happens-if-you-forget-one) | [§5.5 What is checked](../linea-semantics.md#55-what-is-checked), at `[O-Escapes]` |
 | `O-Leak` | error | Linea in an hour: [`Vec`: a list that grows](01-linea-in-an-hour.md#vec-a-list-that-grows) | [§5.5 What is checked](../linea-semantics.md#55-what-is-checked), at `[O-Leak]` |
@@ -52,7 +52,7 @@ for the code in brackets to reach the rule itself.
 | `T-Discard` | error | Linea in an hour: [Where a statement ends](01-linea-in-an-hour.md#where-a-statement-ends) | [§4 Types](../linea-semantics.md#4-types), at `[T-Discard]` |
 | `T-Dual` | error | Copying, settling and sealing: [Protocols: tags that name each other](04-copying-settling-and-sealing.md#protocols-tags-that-name-each-other) | [§4 Types](../linea-semantics.md#4-types), at `[T-Dual]` |
 | `T-ExternCallback` | error | Calling C: [Callbacks: C calling Linea](11-calling-c.md#callbacks-c-calling-linea) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternCallback]` |
-| `T-ExternHandle` | error | Calling C: [Text and bytes: `std.ffi`](11-calling-c.md#text-and-bytes-stdffi) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternHandle]` |
+| `T-ExternHandle` | error | Calling C: [A C object stays with one task unless its wrapper says otherwise](11-calling-c.md#a-c-object-stays-with-one-task-unless-its-wrapper-says-otherwise) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternHandle]` |
 | `T-For` | error | Iterating: [Four ways to walk](05-iterating.md#four-ways-to-walk) | [§4 Types](../linea-semantics.md#4-types), at `[T-For]` |
 | `T-Format` | error | Text: [Format specs: laying a value out](08-text.md#format-specs-laying-a-value-out) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[T-Format]` |
 | `T-Impl` | error | Copying, settling and sealing: [Protocols: tags that name each other](04-copying-settling-and-sealing.md#protocols-tags-that-name-each-other) | [§4 Types](../linea-semantics.md#4-types), at `[T-Impl]` |

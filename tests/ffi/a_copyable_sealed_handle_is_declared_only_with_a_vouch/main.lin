@@ -1,0 +1,28 @@
+import std.io
+import std.session
+import std.task
+import counter
+
+use session.Chan
+use session.End
+
+// Two tasks add to one counter through copies of its handle, and C's
+// `counter_add` is not safe for two threads at once.
+fn main() -> Result[UInt8, io.IoError] {
+    let tally = counter.open()
+    let other = copy(tally)
+    let worker = task.start(
+        sink [sink other] |sink me: Chan[End]| {
+            for _ in 0..1000 {
+                counter.add(other, 1)
+            }
+            me.close()
+        },
+    ).unwrap()
+    for _ in 0..1000 {
+        counter.add(tally, 1)
+    }
+    worker.close()
+    io.println("{counter.total(tally)}")?
+    .Ok(0)
+}

@@ -61,7 +61,58 @@ pub fn isForeignHandle(program: *const ExpandedProgram, ast: *const Ast, pool: a
         };
         const declared = pool.declOfType(at) orelse return false;
         if (ast.declOwnershipPolicy(declared) == .copyable) return false;
-        if (ast.declVisibility(declared) == .opaque_ and program.get(program.moduleOf(declared)).externs) return true;
+        if (sealsForeignObject(program, ast, declared)) return true;
+        at = newtype.base;
+    }
+}
+
+/// Whether the declaration `d` is a newtype sealed (`@opaque`) in a module
+/// its root's manifest grants `extern`: only such a module makes one from an
+/// address, so it is the shape a value naming a C object takes.
+pub fn sealedUnderGrant(program: *const ExpandedProgram, ast: *const Ast, d: DeclId) bool {
+    return ast.declTag(d) == .newtype and ast.declVisibility(d) == .opaque_ and
+        program.get(program.moduleOf(d)).externs;
+}
+
+/// Whether the declaration `d` is the innermost handle to an object C holds:
+/// a newtype sealed under a grant that is not `copyable`. A read of the
+/// handle may reach C, which has not said two threads may read the object at
+/// once, so the type is not `Shareable` unless its declaration is marked
+/// `shareable`; [T-ExternHandle] and the `unshareable` table both ask here.
+pub fn sealsForeignObject(program: *const ExpandedProgram, ast: *const Ast, d: DeclId) bool {
+    return sealedUnderGrant(program, ast, d) and ast.declOwnershipPolicy(d) != .copyable;
+}
+
+/// Whether the declaration `d` is a `copyable` newtype sealed under a grant
+/// that does not vouch `shareable`. Every copy names what the sealed number
+/// names, and a copy crosses to any task whole, so no rule about readers can
+/// keep two threads apart: the wrapper must vouch for concurrent use itself
+/// ([T-ExternHandle]).
+pub fn copiesUnvouchedForeignObject(program: *const ExpandedProgram, ast: *const Ast, d: DeclId) bool {
+    return sealedUnderGrant(program, ast, d) and ast.declOwnershipPolicy(d) == .copyable and
+        ast.declShareableToken(d) == .none;
+}
+
+/// Whether `t` names a C object through a `copyable` newtype sealed under a
+/// grant, at any layer: it is one, or a newtype wrapped around one, sealed or
+/// not, copyable or not. Every copy of the copyable layer names the same
+/// object, so the object must outlive every copy, and a wrapper around it,
+/// even a linear one, does not own it: C may take any of them only `read`,
+/// neither keeping nor freeing the object, and none crosses from C or back to
+/// it by value ([T-ExternHandle]).
+///
+/// **Bound:** each step enters a newtype's base, so the walk is as deep as
+/// `t`'s newtypes nest.
+pub fn namesCopiedForeignObject(program: *const ExpandedProgram, ast: *const Ast, pool: anytype, t: TypeId) bool {
+    var at = t;
+    while (true) {
+        if (at == .poison) return false;
+        const newtype = switch (pool.get(at)) {
+            .newtype => |newtype| newtype,
+            else => return false,
+        };
+        const declared = pool.declOfType(at) orelse return false;
+        if (sealedUnderGrant(program, ast, declared) and ast.declOwnershipPolicy(declared) == .copyable) return true;
         at = newtype.base;
     }
 }

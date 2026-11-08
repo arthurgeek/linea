@@ -1,0 +1,41 @@
+// A `struct counter *` is an address, which this module keeps in a sealed
+// newtype over `UInt64`, and does not vouch for.
+@(opaque, linear)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+extern fn counter_total(read counter: Handle) -> Int64
+
+extern fn counter_close(sink counter: Handle)
+
+// `@shareable` lifts only this declaration's own reason, and `Wrap`'s base is
+// a handle that stays unshareable, so the mark would change nothing.
+@(opaque, linear, shareable)
+type Wrap = Handle
+
+@(opaque, linear)
+struct Counter { handle: Wrap }
+
+pub enum OpenError { OutOfMemory }
+
+impl Counter {
+    pub fn open() -> Result[Counter, OpenError] {
+        let address = counter_open()
+        if address == 0 {
+            return .Err(.OutOfMemory)
+        }
+        .Ok(.{ handle = Wrap(Handle(address)) })
+    }
+
+    pub fn total(self: Self) -> Int64 {
+        match read self.handle {
+            Wrap(handle) => counter_total(handle),
+        }
+    }
+
+    pub fn close(sink self: Self) {
+        let Counter { handle: Wrap(handle) } = self
+        counter_close(handle)
+    }
+}

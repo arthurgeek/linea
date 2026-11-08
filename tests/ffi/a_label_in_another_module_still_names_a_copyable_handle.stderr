@@ -1,0 +1,5 @@
+error[T-ExternHandle]: every copy of a `Label` names the same C object, so C may neither keep nor free it
+ --> tests/ffi/a_label_in_another_module_still_names_a_copyable_handle/main.lin:9:25
+  |
+9 | extern fn counter_close(counter: Label)
+  |                         ^^^^^^^ write `read`, so C only reads the object; keep an object C frees or keeps in a handle that is not `copyable`
