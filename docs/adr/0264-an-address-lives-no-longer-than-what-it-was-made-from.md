@@ -242,27 +242,36 @@ accepted before.
 ## The trusted base
 
 The compiler proves that an address carries what its source carries, that a
-number is read or written only as an address, and that every declaration below
-is the only place its name, field or literal appears. It does not prove what
-each of these promises. `RawAccesses` in `src/sema/intrinsics.zig` and
-`runtime_symbols.zig` are the authoritative list; a declaration moves in or out
-of this base only by changing them.
+number is read or written only as an address, that a raw type's fields and
+literals appear only where its row says, and that each name confined below is
+named only by the declarations listed. It does not prove what each row
+promises. `RawAccesses` in `src/sema/intrinsics.zig` and `runtime_symbols.zig`
+are the authoritative list; a declaration moves in or out of this base only by
+changing them.
 
-| Declarations | Promise |
-| --- | --- |
-| Members of `Storage`, `Buffer`, `Slice`, `View`, `Closure`, `Vec`, `Kept`, `Chan`, `Owner`, `Arena` (`rawTypes`) | Their fields describe bytes they own, a live extent, or an endpoint or queue of the type asked. |
-| `Storage.from_buffer`; `owned_address_in`'s callers `Storage.from_buffer`, `keep_body`, `Arena.open` | The value taking the buffer owns the bytes the address names. |
-| `keep_body`, `take_kept_body`, `release_kept_bytes`, `task.Slot.start`, `task.run_body` | A kept body's addresses go only to the thread that was started with them. |
-| `Closure.erase`, with `closure_entry`, `closure_settle`, `closure_size` | A closure's address holds the callable erased with that entry and release. |
-| Members of `mem.Allocator` implementations; `backing_buffer_builders` | A `Buffer` is built only over bytes the allocator handed out. |
-| `slot_users`, and members of `Storage`, `Vec`, `Drain` | A slot is taken once, put when empty, and every value put is taken or handed on before the storage is given up. |
-| `release_from`, through `Vec` and `Drain` members | The two counts bound live slots. |
-| `byte_operations` | The extent passed to a marked runtime symbol is read from what owns the bytes. |
-| `send_payload`, `receive_payload`, `receive_payload_until`, `Chan.opened`; `call_owner`, `next_owner_request` | An endpoint or queue carries the type asked of it. |
-| `foreign_at`, `foreign_byte`, `foreign_word`, `copied_in`, members of `CText`, `CTextList`; `foreign_view_builders` | A number is one C handed over, within what C promised, or is built from an address its contract names. |
-| Members of `Arena`, `Handle.dispose`, `arena_table_of`, `arena_zero`, `arena_give_back`, `arena_reserve`, `arena_holds` | `chunks` addresses the table inside the first chunk, whose `slots` are the chunks `first` owns; a chunk leaves the table once, when the arena gives it back. |
-| `buffer_numbers` (the arena's, `AllocationLog.refuse_attempt`, `ReleaseLog.words`) | A number read from a buffer is read at while that buffer lives. |
-| `record_release`, from `ReleaseTag.release` and the HTTP test's `ProbeTag.release`; `ProbeTag` built only by `probe_tag` | The number is a live log's. An HTTP extractor sees only its request, so the test's log address crosses as header text; this is test-only code. |
+"Confined" means the compiler refuses the name anywhere else. "Open" means any
+library code may call it, which is safe because it takes only what owns the
+bytes or checks its own bounds.
+
+| Declarations | Held by | Promise |
+| --- | --- | --- |
+| Members of `Storage`, `Buffer`, `Slice`, `View`, `Closure`, `Vec`, `Kept`, `session.Chan`, `task.Owner`, `Arena` (`rawTypes`), and the free declarations each row lists, among them `session.detach`, `task.Client.call` and `task.own` | Fields and literals confined; the members themselves open unless listed below | Their fields describe bytes they own, a live extent, or an endpoint or queue of the type asked. |
+| `Storage.from_buffer` | Open: it takes the buffer it wraps | The storage it builds owns the buffer's bytes. |
+| `owned_address_in`, named by `Storage.from_buffer`, `keep_body`, `Arena.open` | Confined | The value taking the buffer owns the bytes the address names. |
+| `keep_body`, `take_kept_body`, `release_kept_bytes`, `task.run_body`, from `task.Slot.start` and `task.run_body` | Confined | A kept body's addresses go only to the thread started with them. |
+| `closure_entry`, `closure_settle`, `closure_size`, from `Closure.erase` | Confined | A closure's address holds the callable erased with that entry and release. |
+| Members of `mem.Allocator` implementations for their own `Buffer[Self]`; `backing_buffer_builders` | Confined for a `Buffer`'s fields and literals | A `Buffer` is built only over bytes the allocator handed out. |
+| `slot_take`, `slot_put`, `slot_place`, `slot_span`, `Storage.dispose`, `Storage.into_buffer`, from members of `Storage`, `Vec`, `Drain` and `slot_users` | Confined | A slot is taken once, put when empty, and every value put is taken or handed on before the storage is given up. |
+| `release_from`, from members of `Vec` and `Drain` | Confined | The two counts bound live slots. |
+| Runtime symbols and raw loads and stores with a marked address, from members of `Buffer`, `Storage`, `Chan` and `byte_operations` | Confined | The extent passed is read from what owns the bytes. |
+| The entries of `byte_operations` not confined below, such as `read_fd`, `write_slice_fd`, `parse_float64_bits` and `vec_test_log_store` | Open: each takes the buffer or slice and reads its extent from it, checking any offset against it | The extent is that of the value passed. |
+| `send_payload`, `receive_payload`, `receive_payload_until`, from `Chan`'s members; `Chan.opened`, also from `task.Slot.start` and `task.run_body`; `call_owner` from `task.Client.call`; `next_owner_request` from `task.run_owner` | Confined | An endpoint or queue carries the type asked of it. |
+| `number_address`, from `foreign_at` and `record_release` | Confined | The number names live memory: C's, or a log's. |
+| `foreign_at`, `foreign_byte`, `foreign_word`, from members of `CText` and `CTextList`, `copied_in` and their own tests | Confined | The number is one C handed over, read within what C promised. |
+| C view construction, in the view's members and `foreign_view_builders`, or from the literal `0` | Confined | The view is built from an address its contract names, or a number C handed over. |
+| `arena_zero` and `arena_give_back` from `Arena`'s members; `arena_reserve` and `arena_holds` from `Handle`'s; `arena_table_of` from those three readers of the table | Confined | `first` is the arena's first chunk, `chunks` addresses the table inside it, and a chunk leaves the table once. |
+| `buffer_numbers` (the arena's declarations, `AllocationLog.refuse_attempt`, `ReleaseLog.words`) | Buffer fields confined; `ReleaseLog.words` is open and answers only a number, which no unnamed declaration can read at | A number read from a buffer is read at while that buffer lives. |
+| `record_release`, from `ReleaseTag.release` and the HTTP test's `ProbeTag.release`; `ProbeTag` built only by `probe_tag` | Confined | The number is a live log's. An HTTP extractor sees only its request, so the test's log address crosses as header text; this is test-only code. |
 
 ## Alternatives considered
 

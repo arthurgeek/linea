@@ -6555,6 +6555,18 @@ test "an address lives no longer than the slice, buffer or storage it was made f
         \\    foreign_byte(at, 0)
         \\}
         \\
+        \\pub fn chunks_given_back_from_any_buffer() -> Int64 {
+        \\    let arena = Arena.open(system(), 1048576)
+        \\    let big = arena.handle().acquire(100000).unwrap()
+        \\    var fake = system().acquire(256).unwrap()
+        \\    &fake.store(arena_grown, 1)
+        \\    arena_give_back(arena, fake)
+        \\    let seen = big.load_byte(0)
+        \\    fake.release()
+        \\    arena.release()
+        \\    Int64(seen)
+        \\}
+        \\
         \\pub fn release_recorded_at_any_number() {
         \\    record_release(16, 16, 1)
         \\}
@@ -6613,6 +6625,7 @@ test "an address lives no longer than the slice, buffer or storage it was made f
         .{ .name = "raw_load_at_a_number", .code = .t_raw_address },
         .{ .name = "text_rebuilt_from_a_stale_number", .code = .t_raw_address },
         .{ .name = "address_made_from_any_number", .code = .t_raw_address },
+        .{ .name = "chunks_given_back_from_any_buffer", .code = .t_raw_address },
         .{ .name = "release_recorded_at_any_number", .code = .t_raw_address },
         .{ .name = "raw_store_past_its_buffer", .code = .t_raw_address },
         .{ .name = "foreign_byte_past_its_view", .code = .t_raw_address },

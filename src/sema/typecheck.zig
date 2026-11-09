@@ -20321,8 +20321,8 @@ const Checker = struct {
             _ = self.report(
                 .t_raw_address,
                 id,
-                "`mem.{s}` holds an address or an extent of bytes, so its fields are named only by its own members",
-                .{name},
+                "`{s}.{s}` holds an address or an extent of bytes, so its fields are named only by its own members",
+                .{ self.program.get(self.program.moduleOf(row.decl)).name, name },
                 "reach it through the type's own operations",
             );
         }
@@ -20438,6 +20438,8 @@ const Checker = struct {
         const queue_help = "call the owning task through a `task.Client`";
         const foreign = "C's memory has no extent to check a read against, so only a C view's own operations read it";
         const foreign_help = "read the view through its own operations";
+        const arena = "an arena's bookkeeping trusts the first chunk it is handed, so only the arena's and its handle's own operations call it";
+        const arena_help = "use the arena or its handle";
         const confinements = [_]Confinement{
             .{ .decl = raw.owned_address_in, .allowed = &raw.owned_address_callers, .message = "`owned_address_in` makes an address that outlives its buffer, so only a declaration that takes the buffer into what the address names calls it", .help = "call `address_in`, whose address borrows the buffer" },
             .{ .decl = raw.closure_entry, .allowed = &.{raw.closure_erase}, .message = "a closure's entry is made only where `Closure.erase` erases a callable", .help = "build the closure with `Closure.open` or `Closure.open_in`" },
@@ -20461,6 +20463,11 @@ const Checker = struct {
             .{ .decl = raw.chan_opened, .allowed = &.{ raw.task_run_body, raw.task_slot_start }, .types = &.{raw.endpoint}, .message = channel, .help = channel_help },
             .{ .decl = raw.call_owner, .allowed = &.{raw.client_call}, .message = queue, .help = queue_help },
             .{ .decl = raw.next_owner_request, .allowed = &.{raw.run_owner}, .message = queue, .help = queue_help },
+            .{ .decl = raw.arena_zero, .allowed = &.{}, .types = &.{raw.arena}, .message = arena, .help = arena_help },
+            .{ .decl = raw.arena_give_back, .allowed = &.{}, .types = &.{raw.arena}, .message = arena, .help = arena_help },
+            .{ .decl = raw.arena_reserve, .allowed = &.{}, .types = &.{raw.handle}, .message = arena, .help = arena_help },
+            .{ .decl = raw.arena_holds, .allowed = &.{}, .types = &.{raw.handle}, .message = arena, .help = arena_help },
+            .{ .decl = raw.arena_table_of, .allowed = &.{ raw.arena_give_back, raw.arena_reserve, raw.arena_holds }, .message = arena, .help = arena_help },
             .{ .decl = raw.record_release, .allowed = &raw.record_release_callers, .message = "`record_release` writes at the number it is given, so only the declarations the table names call it", .help = "release a `ReleaseTag`" },
             .{ .decl = raw.foreign_byte, .allowed = &raw.foreign_readers, .types = &.{ raw.foreign_views[1], raw.foreign_views[2] }, .message = foreign, .help = foreign_help },
             .{ .decl = raw.foreign_word, .allowed = &raw.foreign_readers, .types = &.{ raw.foreign_views[1], raw.foreign_views[2] }, .message = foreign, .help = foreign_help },

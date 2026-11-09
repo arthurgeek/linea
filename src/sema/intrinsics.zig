@@ -214,6 +214,15 @@ pub const RawAccesses = struct {
     arena: DeclId = .none,
     arena_users: [5]DeclId = @splat(.none),
     arena_table_of: DeclId = .none,
+    /// `mem.Handle` and the arena's free functions that trust the first chunk
+    /// they are handed: `arena_zero` and `arena_give_back` are named only by
+    /// `Arena`'s members, `arena_reserve` and `arena_holds` only by `Handle`'s,
+    /// and `arena_table_of` only by the three that read the table.
+    handle: DeclId = .none,
+    arena_zero: DeclId = .none,
+    arena_give_back: DeclId = .none,
+    arena_reserve: DeclId = .none,
+    arena_holds: DeclId = .none,
     /// `Storage.from_buffer`, which takes a buffer apart into slot storage.
     storage_from_buffer: DeclId = .none,
     /// `Storage.dispose` and `Storage.into_buffer`, which give up a storage's
@@ -415,6 +424,11 @@ pub const RawAccesses = struct {
                 memberOf(program, ast, "mem", "Handle", "dispose"),
             },
             .arena_table_of = moduleFunction(program, ast, "mem", "arena_table_of"),
+            .handle = structIn(program, ast, "mem", "Handle"),
+            .arena_zero = moduleFunction(program, ast, "mem", "arena_zero"),
+            .arena_give_back = moduleFunction(program, ast, "mem", "arena_give_back"),
+            .arena_reserve = moduleFunction(program, ast, "mem", "arena_reserve"),
+            .arena_holds = moduleFunction(program, ast, "mem", "arena_holds"),
             .chan_opened = memberOf(program, ast, "session", "Chan", "opened"),
             .send_payload = moduleFunction(program, ast, "mem", "send_payload"),
             .receive_payload = moduleFunction(program, ast, "mem", "receive_payload"),
