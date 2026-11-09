@@ -669,11 +669,13 @@ pub fn lowerC(gpa: std.mem.Allocator, io: std.Io, include_dir: []const u8, path:
         error.FileNotFound => return null,
         else => return err,
     };
+    gpa.free(result.stdout);
     const succeeded = switch (result.term) {
         .exited => |code| code == 0,
         else => false,
     };
     if (!succeeded) return .{ .refused = result.stderr };
+    gpa.free(result.stderr);
     return .{ .ir = try std.Io.Dir.cwd().readFileAlloc(io, out, gpa, .unlimited) };
 }
 

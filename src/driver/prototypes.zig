@@ -131,7 +131,20 @@ pub fn check(gpa: std.mem.Allocator, io: std.Io, semantics: *const loader.Semant
         if (!std.mem.eql(u8, held.symbol, held.subject.name)) try symbols.append(arena, .{ .name = held.subject.name, .symbol = held.symbol });
     }
     const out = try gpa.alloc(ForeignSymbol, symbols.items.len);
-    for (symbols.items, out) |held, *copy| copy.* = .{ .name = try gpa.dupe(u8, held.name), .symbol = try gpa.dupe(u8, held.symbol) };
+    var made: usize = 0;
+    errdefer {
+        for (out[0..made]) |held| {
+            gpa.free(held.name);
+            gpa.free(held.symbol);
+        }
+        gpa.free(out);
+    }
+    for (symbols.items, out) |held, *copy| {
+        const name = try gpa.dupe(u8, held.name);
+        errdefer gpa.free(name);
+        copy.* = .{ .name = name, .symbol = try gpa.dupe(u8, held.symbol) };
+        made += 1;
+    }
     return out;
 }
 

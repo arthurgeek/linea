@@ -591,11 +591,7 @@ fn loadInputs(
     }
     const roots = try l.rootFacts();
     errdefer {
-        for (roots) |r| {
-            gpa.free(r.name);
-            gpa.free(r.dir);
-            gpa.free(r.dependencies);
-        }
+        for (roots) |r| Loader.freeRootFacts(gpa, r);
         gpa.free(roots);
     }
 
