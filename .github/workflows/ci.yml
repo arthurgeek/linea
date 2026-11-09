@@ -909,6 +909,50 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # Every run and attempt of a lane saves its cache under a key of its own,
+  # and a cache stays until the repository's 10 GB are spent and the least
+  # recently used go: main's, the only ones a new pull request can restore.
+  # So once the lanes that save are done, this job deletes each lane's older
+  # caches on the run's ref, keeping the one this run saved; a lane that did
+  # not save in this attempt keeps what it has.
+  #
+  # A job of its own because the token that may delete caches must not reach
+  # the code under test: the Nix installer writes the job's token into
+  # `/etc/nix/nix.conf`, which every later step can read. This job installs
+  # nothing, builds nothing, and checks out only the script and the lock file
+  # whose hash the keys name. A pull request from a fork gets a token that
+  # cannot delete, so it is skipped there. Nothing waits for it, and
+  # `merge-ready` does not read it.
+  prune-caches:
+    needs: [check, sanitize, optimised-unit, optimised-corpus, optimised-soundness, fuzz]
+    if: ${{ !cancelled() && !github.event.pull_request.draft && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/scripts/
+            /flake.lock
+
+      # Each key is the one its lane's restore step names for this run; the
+      # sanitizers are the `sanitize` matrix's.
+      - name: Delete each lane's older caches on this ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOCK: ${{ hashFiles('flake.lock') }}
+        run: |
+          this_run="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          for lane in check sanitize-address sanitize-thread optimised-unit optimised-corpus optimised-soundness; do
+            .github/scripts/prune-caches.sh "outcomes-$lane-$RUNNER_OS-$LOCK-$GITHUB_SHA-$this_run" "$GITHUB_SHA-$this_run"
+          done
+          .github/scripts/prune-caches.sh "fuzz-inputs-$RUNNER_OS-$this_run" "$this_run"
+
   # The one status the ruleset on main requires, so it runs on every event and
   # always reports. It fails when any lane it reads failed or was cancelled,
   # and when a lane `changes` said to run did not pass:

@@ -55,10 +55,13 @@ pub struct Limits {
 // - The response takes the rest: 48 MiB holds both of those together and
 //   leaves about 8 MiB.
 //
-// The arena is carved from the parent once, and its memory is not touched
-// until a request uses it. Rewinding zeroes only what a request used, so a
-// small request does not pay for the arena's size. `serve` uses these limits
-// when its caller gives none.
+// The arena's size is a limit, not memory taken up front: it takes a 64 KiB
+// first chunk from the parent when it opens and further chunks, each at least
+// twice the last, only as a request needs them. Rewinding it once the response
+// is written zeroes only what the request used and gives every chunk but the
+// first back to the parent, so a serving task between requests holds 64 KiB
+// whatever the largest request it answered. `serve` uses these limits when its
+// caller gives none.
 let standard_limits: Limits = .{
     max_line_bytes = 8192,
     max_headers = 100,

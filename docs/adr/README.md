@@ -171,11 +171,12 @@ true of a different implementation.
 | [0223](0223-a-function-returning-nothing-writes-no-result.md) | A function returning nothing writes no result | Accepted |
 | [0178](0178-a-constant-is-a-static-place.md) | A constant is a static place | Accepted; supersedes the materialization clause of 0140; extends 0123 and 0147; extended by 0227 |
 | [0141](0141-json-documents-own-bounded-trees-and-number-tokens.md) | JSON documents own bounded trees and validated number tokens | Accepted |
-| [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180 and 0185; subtree clause superseded by 0222 |
+| [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180 and 0185; subtree clause superseded by 0222; arena-memory clause superseded by 0263 |
 | [0174](0174-logging-is-a-leveled-structured-logger-and-http-logs-through-middleware.md) | Logging is a leveled, structured logger, and HTTP logs through middleware | Accepted; extends 0154; extended by 0180 |
 | [0180](0180-state-is-lent-down-through-every-handler.md) | The application's state is lent down through every handler | Accepted; extends 0154, 0173 and 0174; extended by 0185 and 0214 |
 | [0185](0185-a-handler-reads-its-inputs-through-extractors.md) | A handler reads its inputs through extractors | Accepted; extends 0154 and 0180; refined by 0214 |
 | [0222](0222-a-route-pattern-matches-its-own-path.md) | A route pattern matches its own path | Accepted; supersedes the subtree clause of 0154 |
+| [0263](0263-an-arena-grows-in-chunks-up-to-its-size-and-a-rewind-returns-them.md) | An arena grows in chunks up to its size, and a rewind returns them | Accepted; supersedes the arena-memory clause of 0154 |
 | [0232](0232-a-cookie-value-is-percent-encoded-text.md) | A cookie value is percent-encoded text: `set_cookie` takes any text and `Request.cookie` decodes it, reading a value that does not decode as absent | Accepted |
 | [0142](0142-construction-derives-expand-to-ordinary-source.md) | Construction derives expand to ordinary source | Accepted; partially supersedes 0081 and 0113; extends 0047 and 0087; attached-derive predicate clause superseded by 0165 |
 | [0143](0143-checked-decimal-conversion-uses-integer-rounding.md) | Checked decimal conversion uses bounded integer rounding | Accepted; extended by 0249 |

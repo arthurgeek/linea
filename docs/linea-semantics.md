@@ -5699,7 +5699,8 @@ nothing the value holds, a phantom one such as a session's protocol, is not
 followed, so a `task.Client[S]` of an owning task is Shareable whatever `S` is:
 the state lives on the owning task's thread, and a client holds only a borrow
 of its queue. `mem.Arena` is `@unshareable`, since a handle's `acquire`
-takes the handle by `read` and advances the arena's cursor; `mem.Handle`
+takes the handle by `read`, advances the arena's cursor and may record a
+chunk it acquired from the arena's parent; `mem.Handle`
 borrows its arena, so it, `Vec[UInt8, mem.Handle]` and `borrow mem.Arena` are
 not Shareable;
 `mem.AllocationLog` is `@unshareable` too, since its allocator writes the log
