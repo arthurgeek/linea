@@ -287,6 +287,12 @@ test "CI deletes each lane's older caches on its own ref after the lanes save" {
         \\
         \\
     , try workflowJob(workflow, "prune-caches"));
+    // A job added to the ones that save is one the prune must wait for.
+    const needs = try std.mem.join(testing.allocator, ", ", &saving);
+    defer testing.allocator.free(needs);
+    const needs_line = try std.mem.concat(testing.allocator, u8, &.{ "needs: [", needs, "]" });
+    defer testing.allocator.free(needs_line);
+    try testing.expectEqualStrings(needs_line, try onlyLineWith(try workflowJob(workflow, "prune-caches"), "needs: ["));
     // The token is written out in two jobs alone: `changes`, which reads
     // check runs, and the prune.
     try testing.expectEqual(@as(usize, 2), std.mem.count(u8, workflow, "github.token"));
