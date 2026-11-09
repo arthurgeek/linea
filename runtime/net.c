@@ -187,7 +187,8 @@ static long wait_ready(const struct linea_op *op, unsigned long remaining_ns, in
         }
         timeout_ms = whole_ms > (unsigned long)INT_MAX ? INT_MAX : (int)whole_ms;
     }
-    if (poll(&entry, 1, timeout_ms) < 0 && errno != EINTR) return -(long)errno;
+    /* EAGAIN is POSIX's name for poll running briefly short of memory. */
+    if (poll(&entry, 1, timeout_ms) < 0 && errno != EINTR && errno != EAGAIN) return -(long)errno;
     return 0;
 }
 
@@ -198,7 +199,7 @@ static long wait_ready(const struct linea_op *op, unsigned long remaining_ns, in
  * The deadline is checked once on entry, so an operation whose deadline has
  * already passed answers -ETIMEDOUT before anything is consumed. After that
  * the check follows each attempt: an attempt made as the wait ended, whether
- * by readiness or by expiry, is the claimant's last, and it decides the result
+ * by readiness or by expiry, is the last, and it decides the result
  * by the operation's own rule. Progress wins, since dropping bytes or a
  * connection taken off the backlog would lose them, and an attempt that would
  * still wait answers -ETIMEDOUT. A connect's attempt reads SO_ERROR when the

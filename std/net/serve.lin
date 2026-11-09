@@ -588,7 +588,7 @@ test fn serve_workers_handles_connections_concurrently() {
 // that sends nothing holds the task serving it until its read times out.
 fn answer_a_line(sink connection: Connection, _peer: Address) {
     var waiting = connection
-    let _timed = &waiting.set_timeouts(read_ms: 3000, write_ms: 3000)
+    &waiting.set_timeouts(read_ms: 3000, write_ms: 3000)
     var reader = io.BufferedReader.open(capacity: 16, reader: waiting) else |_| {
         panic("the server's reader could not be made")
     }
@@ -607,7 +607,7 @@ fn answer_a_line(sink connection: Connection, _peer: Address) {
 // within a second.
 fn asked(sink connection: Connection) -> Bool {
     var asking = connection
-    let _timed = &asking.set_timeouts(read_ms: 1000, write_ms: 1000)
+    &asking.set_timeouts(read_ms: 1000, write_ms: 1000)
     if io.write_all(&asking, "x\n".as_bytes()).is_err() {
         let _closed = asking.close()
         return false

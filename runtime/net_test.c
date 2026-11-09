@@ -104,6 +104,9 @@ static void read_deadline_times_out(void) {
     char got[4];
     assert(linea_net_read((int)p.server, ADDRESS(got), sizeof got, in_ms(50)) == -ETIMEDOUT);
     assert(now_ns() - started >= 50 * 1000000UL);
+    /* A timed-out read leaves the connection usable. */
+    assert(linea_net_write((int)p.client, ADDRESS("k"), 1, 0) == 1);
+    assert(linea_net_read((int)p.server, ADDRESS(got), sizeof got, in_ms(1000)) == 1);
     close_pair(p);
 }
 

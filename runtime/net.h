@@ -6,7 +6,7 @@
  * boundary packed into one integer: host-order address in the high bits,
  * port in the low 16, so no socket extern takes a memory address. */
 long linea_net_listen(unsigned long address, unsigned long backlog);
-/* Every socket is nonblocking. A wait is `linea_io_perform`'s, and its deadline
+/* Every socket is nonblocking and an operation waits by polling. A deadline
  * is the monotonic clock's reading in nanoseconds, 0 for none. A deadline that
  * has passed answers -ETIMEDOUT without attempting the operation. */
 long linea_net_accept(int listener, unsigned long deadline_ns);

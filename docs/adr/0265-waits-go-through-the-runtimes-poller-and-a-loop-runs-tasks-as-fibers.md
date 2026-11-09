@@ -227,7 +227,7 @@ An operation moves through these states, each change a compare-and-swap on
 
 | From | To | By | Linearization point |
 | --- | --- | --- | --- |
-| idle | armed | the submitter, after its attempt answered `EAGAIN` | the swap, after the registration and the deadline are published |
+| idle | armed | the submitter, after its attempt answered `EAGAIN` | the swap, after the registration and the deadline are published; only the carrier that polls the registration arms it (§8.1), so no event can reach the slot before the swap |
 | armed | claimed | the first of: the carrier that saw readiness, the carrier whose heap expired the deadline, the backend's own completion | the swap; every other claimant's swap fails and it does nothing |
 | claimed | complete | the claimant, after its last access to the operation's bytes, after it has disarmed the registration and removed the deadline, and after writing `result` | the swap, with release order |
 | complete | runnable | the claimant, by unparking the submitter (§3) | the unpark |

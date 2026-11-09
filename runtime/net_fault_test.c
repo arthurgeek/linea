@@ -154,8 +154,8 @@ int linea_test_listen(int fd, int backlog) {
     return listen(fd, backlog);
 }
 
-/* net.c's only fcntl call is the close-on-exec step shared by every socket it
- * creates or accepts; matching the header's variadic prototype (rather than
+/* net.c configures every socket it creates or accepts through fcntl, for
+ * close-on-exec and for O_NONBLOCK; matching the header's variadic prototype (rather than
  * a fixed third parameter) keeps this definition compatible with however the
  * renamed declaration in <fcntl.h> is seen from net.c. */
 int linea_test_fcntl(int fd, int cmd, ...) {
@@ -200,7 +200,7 @@ int linea_test_accept(int fd, struct sockaddr *addr, socklen_t *len) {
  * decided one: switch the socket to non-blocking, issue the real connect
  * (which reports success, EINPROGRESS, or a real error such as
  * ECONNREFUSED once the kernel already knows the peer refused), restore
- * blocking mode, then report EINTR regardless of that outcome. Only the
+ * the socket's mode, then report EINTR regardless of that outcome. Only the
  * caller's poll+SO_ERROR completion discovers what actually happened. */
 int linea_test_connect(int fd, const struct sockaddr *addr, socklen_t len) {
     last_socket_fd = fd;
@@ -565,6 +565,21 @@ static void a_failed_poll_is_reported(void) {
     close_pair(p);
 }
 
+/* POSIX lets poll fail with EAGAIN when it is briefly short of memory. That is
+ * a wait to retry, not an answer for the caller. */
+static void a_poll_short_of_resources_is_retried(void) {
+    struct pair p = scripted_pair();
+    assert(write(p.client, "r", 1) == 1);
+    settle((int)p.server);
+    const struct poll_step busy[] = { { EAGAIN, 0, 0 } };
+    script_polls(busy, 1);
+    read_eagain = 1;
+    char got[8];
+    assert(linea_net_read((int)p.server, ADDRESS(got), sizeof got, 0) == 1);
+    assert_script_finished();
+    close_pair(p);
+}
+
 /* poll takes milliseconds: what remains is rounded down so the wait ends by
  * the deadline, never after it, and the last fraction is slept. */
 static void a_wait_never_outlasts_its_deadline(void) {
@@ -637,7 +652,7 @@ static void accept_at_its_deadline_answers_the_connection(void) {
     close(client); close((int)server); close((int)listener);
 }
 
-static void accept_at_its_deadline_with_nothing_queued_times_out(void) {
+static void accept_at_its_deadline_finding_nothing_times_out(void) {
     long listener = linea_net_listen(loopback(0), 4);
     assert(listener >= 0);
     long bound = linea_net_local_address((int)listener);
@@ -738,13 +753,14 @@ int main(void) {
     spurious_readiness_waits_again();
     interruptions_do_not_extend_a_deadline();
     a_failed_poll_is_reported();
+    a_poll_short_of_resources_is_retried();
     a_wait_never_outlasts_its_deadline();
     a_clock_failure_is_reported();
     write_at_its_deadline_answers_progress();
     write_at_its_deadline_without_progress_times_out();
     write_answers_a_short_count_and_retries_an_interruption();
     accept_at_its_deadline_answers_the_connection();
-    accept_at_its_deadline_with_nothing_queued_times_out();
+    accept_at_its_deadline_finding_nothing_times_out();
     connect_at_its_deadline_reads_so_error();
     connect_still_in_progress_at_its_deadline_times_out();
     a_failed_wait_closes_the_connecting_socket();

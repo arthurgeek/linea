@@ -89,11 +89,10 @@ test fn a_deadline_too_far_ahead_means_no_deadline() {
 impl Connection {
     // Bound each later read and write separately, in milliseconds, and end
     // any deadline. Zero waits forever.
-    pub fn set_timeouts(inout self: Self, read_ms: UInt64, write_ms: UInt64) -> Result[(), io.IoError] {
+    pub fn set_timeouts(inout self: Self, read_ms: UInt64, write_ms: UInt64) {
         self.read_ms = read_ms
         self.write_ms = write_ms
         self.deadline = .None
-        .Ok(())
     }
 
     test fn a_silent_peer_times_out_the_read() {
@@ -101,7 +100,7 @@ impl Connection {
         let client = connect(listener.local_address().unwrap()).unwrap()
         let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
         var server = accepted
-        let configured = &server.set_timeouts(read_ms: 50, write_ms: 50).is_ok()
+        &server.set_timeouts(read_ms: 50, write_ms: 50)
         defer var buffer = mem.system().acquire(8).unwrap()
         let expired = match &server.read_some(&buffer, offset: 0, count: 8) {
             Ok(_) => false,
@@ -110,7 +109,6 @@ impl Connection {
         let server_closed = server.close().is_ok()
         let client_closed = client.close().is_ok()
         let listener_closed = listener.close().is_ok()
-        testing.assert(configured, "setting the timeouts failed")?
         testing.assert(expired, "a read from a silent peer did not time out")?
         testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
         .Ok(())
@@ -138,7 +136,7 @@ impl Connection {
         var server = accepted
         // Each byte arrives inside the 150 ms a single read may wait, yet the
         // third read starts after the 200 ms deadline, which spans them all.
-        &server.set_timeouts(read_ms: 150, write_ms: 150).unwrap()
+        &server.set_timeouts(read_ms: 150, write_ms: 150)
         &server.set_deadline(time.Instant.now(), within_ms: 200)
         defer var buffer = mem.system().acquire(8).unwrap()
         var arrived: UInt64 = 0
@@ -315,7 +313,7 @@ impl Connection {
         let Accepted { connection: peer, address: _ } = &listener.accept().unwrap()
         var client = peer
         let unbounded = client.read_deadline()
-        &client.set_timeouts(read_ms: 1000, write_ms: 0).unwrap()
+        &client.set_timeouts(read_ms: 1000, write_ms: 0)
         let before = time.Instant.now().monotonic_nanoseconds()
         let bound = client.read_deadline()
         &client.set_deadline(time.Instant.now(), within_ms: 5)
@@ -330,7 +328,8 @@ impl Connection {
         .Ok(())
     }
 
-    // The monotonic moment a write must finish by, 0 for no bound.
+    // The monotonic moment one send attempt must finish by, 0 for no bound. A
+    // send that makes progress answers at once, so each attempt gets a fresh bound.
     fn write_deadline(self: Self) -> UInt64 {
         if self.write_ms == 0 {
             return 0
@@ -343,7 +342,7 @@ impl Connection {
         var client = connect(listener.local_address().unwrap()).unwrap()
         let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
         var server = accepted
-        &server.set_timeouts(read_ms: 0, write_ms: 50).unwrap()
+        &server.set_timeouts(read_ms: 0, write_ms: 50)
         defer var bytes = mem.system().acquire(65536).unwrap()
         // A peer that never reads fills the socket's buffers, so a later write
         // has nowhere to put bytes and ends at its deadline.
