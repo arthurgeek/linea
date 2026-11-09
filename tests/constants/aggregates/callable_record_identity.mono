@@ -5,7 +5,7 @@ fn ;main() -> UInt8 {
     if ;invoke[fn$28read$3aConfig$3avalue$3a0$3drecord[7$3aenabled$401,5$3awidth$402,];1$3dtrue;2$3di7;$29$2d$3eUInt8](width) != 7 {
         return 1
     }
-    if ;invoke[closure0[]](
+    if ;invoke[closure$400$3a453[]](
         |config = settings| if config.enabled {
             config.width
         } else {
@@ -29,11 +29,11 @@ fn ;invoke[fn$28read$3aConfig$3avalue$3a0$3drecord[7$3aenabled$401,5$3awidth$402
     callback()
 }
 
-fn ;invoke[closure0[]](callback: closure0[]) -> UInt8 {
-    closure.0()
+fn ;invoke[closure$400$3a453[]](callback: closure@0:453[]) -> UInt8 {
+    closure$400$3a453()
 }
 
-fn closure.0(read config: Config = .{ .enabled = true, .width = 7 }) -> UInt8 {
+fn closure$400$3a453(read config: Config = .{ .enabled = true, .width = 7 }) -> UInt8 {
     if config.enabled {
         config.width
     } else {

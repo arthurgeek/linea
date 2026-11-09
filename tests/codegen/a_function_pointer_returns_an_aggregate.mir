@@ -21,7 +21,7 @@ local $1 Pair value storage=bytes
   %16 = add UInt8 value computation=i64 %11, %15
   %17 = check UInt8 value computation=i64 %16 (overflow)
   ret %17
-function closure.0
+function closure$400$3a141
 local $0 UInt8 value storage=i8
 local $1 UInt8 value storage=i8
 local $2 Pair value storage=bytes

@@ -2652,7 +2652,27 @@ fn closureTypeHash(closure: ids.ClosureId, args: []const TypeId, impl_args: []co
 
 pub const ClosureRelease = struct { trait: DeclId, member: DeclId };
 
+/// Where an expression is written, which names what the compiler generates
+/// for it (a closure, a constructor's body) the same however the program was
+/// checked: closure and constructor IDs follow the order the passes reached
+/// them, and a program resumed from a checked library reaches the library's
+/// first.
+pub const SourceSite = struct {
+    /// The module the expression is written in, spelled by its route.
+    module: u32 = unplaced,
+    /// The file's place among the module's files, which the loader sorts by
+    /// name.
+    file: u32 = 0,
+    /// The expression's byte offset in that file.
+    offset: u32 = 0,
+
+    /// An expression written in no file of a module: one a derive generated.
+    pub const unplaced = std.math.maxInt(u32);
+};
+
 pub const ClosureDescriptor = struct {
+    /// Where the lambda is written.
+    site: SourceSite = .{},
     /// Environment fields initialized by consuming captures, in source order.
     owned_fields: []const FieldOrdinal = &.{},
     environment: TypeId = .unit,
@@ -6864,6 +6884,28 @@ pub const Typing = struct {
         return .{ .lo = n.lo, .hi = n.hi };
     }
 
+    /// Where the lambda of closure `closure` is written.
+    pub fn closureSite(self: *const Typing, closure: ids.ClosureId) SourceSite {
+        return if (closure.index() < self.closures.len) self.closures[closure.index()].site else .{};
+    }
+
+    /// Appends what names a generated body or closure in a symbol: `@`, the
+    /// route of the module `site` is in, and the file and byte offset it is
+    /// written at. An expression a derive generated is written in no
+    /// module's file, and is named by `id` after `#`.
+    pub fn appendSite(self: *const Typing, gpa: std.mem.Allocator, out: *std.ArrayList(u8), site: SourceSite, id: u32) std.mem.Allocator.Error!void {
+        if (site.module == SourceSite.unplaced) {
+            const spelled = try std.fmt.allocPrint(gpa, "#{d}", .{id});
+            defer gpa.free(spelled);
+            return out.appendSlice(gpa, spelled);
+        }
+        try out.append(gpa, '@');
+        try self.appendModule(gpa, out, site.module);
+        const spelled = try std.fmt.allocPrint(gpa, "{d}:{d}", .{ site.file, site.offset });
+        defer gpa.free(spelled);
+        try out.appendSlice(gpa, spelled);
+    }
+
     /// Appends the module a type belongs to, where that is not the root.
     ///
     /// A declared name is only unique within its module, so the module joins
@@ -7014,9 +7056,9 @@ pub const Typing = struct {
                 return;
             },
             .closure => |closure| {
-                const source = try std.fmt.allocPrint(gpa, "closure{d}[", .{@intFromEnum(closure.closure)});
-                defer gpa.free(source);
-                try out.appendSlice(gpa, source);
+                try out.appendSlice(gpa, "closure");
+                try self.appendSite(gpa, out, self.closureSite(closure.closure), closure.closure.index());
+                try out.append(gpa, '[');
                 for (self.closureArgs(closure), 0..) |arg, i| {
                     if (i > 0) try out.append(gpa, ',');
                     try self.appendMangled(gpa, out, arg);
@@ -15793,6 +15835,35 @@ test "callable invocation modes participate in identity and bound satisfaction" 
     try testing.expect(!view.callableSatisfies(sink, inout));
     try testing.expect(!view.callableSatisfies(read, sink));
     try testing.expect(view.callableSatisfies(sink, sink));
+}
+
+test "a closure type is spelled by where its lambda is written, whatever its ID" {
+    const gpa = testing.allocator;
+    const signature_of = struct {
+        fn mangle(sites: []const SourceSite, closure: u32) ![]const u8 {
+            var builder = try Typing.Builder.init(gpa);
+            defer builder.deinit();
+            builder.module_paths = &.{ "", "std.mem" };
+            const signature = try builder.internCallable(&.{}, .unit, &.{}, .read);
+            var descriptors: [2]ClosureDescriptor = undefined;
+            for (&descriptors, sites) |*descriptor, site| descriptor.* = .{ .site = site, .enclosing = .none, .expr = .none, .body = .none, .signature = signature };
+            builder.closure_descriptors = &descriptors;
+            const ty = try builder.internClosure(@enumFromInt(closure), &.{}, &.{}, .poison);
+            return builder.view().mangledName(gpa, ty);
+        }
+    };
+    const vec: SourceSite = .{ .module = 1, .file = 2, .offset = 1264 };
+    const root: SourceSite = .{ .module = 0, .file = 0, .offset = 40 };
+    // A fresh check numbers the library's lambda after the program's; one
+    // resumed from the checked library numbers it first.
+    const fresh = try signature_of.mangle(&.{ root, vec }, 1);
+    defer gpa.free(fresh);
+    const resumed = try signature_of.mangle(&.{ vec, root }, 0);
+    defer gpa.free(resumed);
+    try testing.expectEqualStrings(fresh, resumed);
+    const other = try signature_of.mangle(&.{ vec, root }, 1);
+    defer gpa.free(other);
+    try testing.expect(!std.mem.eql(u8, fresh, other));
 }
 
 test "conditional closure Release distinguishes consuming and read capture slots" {

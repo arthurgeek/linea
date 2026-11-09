@@ -1,8 +1,8 @@
 fn ;main() -> UInt8 {
     let settle = |_value: () = ()| UInt8(0)
-    closure.0()
+    closure$400$3a99()
 }
 
-fn closure.0(read _value: () = ()) -> UInt8 {
+fn closure$400$3a99(read _value: () = ()) -> UInt8 {
     UInt8(0)
 }

@@ -256,6 +256,17 @@ fn attachSeedRows(
     return result;
 }
 
+/// Where `expr`, written in `module`, sits: the module, the place of its file
+/// among the module's files, and its byte offset in that file. Unplaced where
+/// its file is none of the module's, as a derive's generated file is not.
+pub fn sourceSite(program: *const ExpandedProgram, module: ModuleId, expr: node.ExprId) types_mod.SourceSite {
+    const ast = &program.ast;
+    if (module == .none or module.index() >= program.modules.len) return .{};
+    const file = ast.fileOf(ast.exprTokens(expr).start);
+    const place = std.mem.indexOfScalar(FileId, program.get(module).files, file) orelse return .{};
+    return .{ .module = @intCast(module.index()), .file = @intCast(place), .offset = ast.exprSpan(expr).start };
+}
+
 /// Frees what a recorded demand owns: a trait demand's arguments.
 fn freeRefusedDemand(gpa: std.mem.Allocator, demand: types_mod.RefusedDemand) void {
     if (demand.lacks == .trait and demand.lacks.trait.args.len > 0) gpa.free(demand.lacks.trait.args);
@@ -380,6 +391,7 @@ fn typecheckInternal(
             };
             descriptor.owned_fields = owned;
             descriptor.lends = lends;
+            descriptor.site = if (lambda_expr == .none) .{} else sourceSite(program, resolution.moduleOfFile(ast.fileOf(ast.exprTokens(lambda_expr).start)), lambda_expr);
             if (lambda_expr != .none and ast.exprTag(lambda_expr) == .lambda) {
                 descriptor.invocation = ast.lambda(lambda_expr).invocation;
             }
@@ -22191,6 +22203,7 @@ const Checker = struct {
             environment = try self.builder.addStruct(name, if (lends) .affine else .copyable, environment_fields);
         }
         self.closure_descriptors[closure.index()] = .{
+            .site = self.closure_descriptors[closure.index()].site,
             .owned_fields = self.closure_descriptors[closure.index()].owned_fields,
             .environment = environment,
             .invocation = lambda.invocation,
