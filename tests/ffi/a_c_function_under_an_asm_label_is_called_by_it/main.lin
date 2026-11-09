@@ -2,6 +2,9 @@ import std.io
 import twice
 
 fn main() -> Result[UInt8, io.IoError] {
-    io.println("{twice.of(21)}")?
+    // Each call reaches the symbol `twice_impl`, the one C calls.
+    for value in [1, 20] {
+        io.println("{twice.of(value)}")?
+    }
     .Ok(0)
 }

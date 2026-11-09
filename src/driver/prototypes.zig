@@ -700,7 +700,9 @@ const Dumps = struct {
                 continue;
             }
             if (current == null or raw.len == 0) continue;
-            try lines.append(arena, Line.of(raw));
+            var line = Line.of(raw);
+            line.spelled = try withoutDirectories(arena, line.spelled);
+            try lines.append(arena, line);
         }
         if (current) |name| try out.sections.put(arena, name, try lines.toOwnedSlice(arena));
         return out;
@@ -730,6 +732,32 @@ const Dumps = struct {
         return null;
     }
 };
+
+/// `spelled` with the directories taken out of each path clang writes where
+/// it spells a type that has no name, `enum (unnamed at /tmp/x/c.c:1:1)`, so
+/// the spelling names the file as the manifest's directory does not change.
+fn withoutDirectories(arena: std.mem.Allocator, spelled: []const u8) ![]const u8 {
+    if (std.mem.indexOf(u8, spelled, " at /") == null) return spelled;
+    var out: std.ArrayList(u8) = .empty;
+    var rest = spelled;
+    while (std.mem.indexOf(u8, rest, " at /")) |at| {
+        try out.appendSlice(arena, rest[0 .. at + " at ".len]);
+        const path_start = at + " at ".len;
+        const path_end = std.mem.indexOfScalarPos(u8, rest, path_start, ':') orelse rest.len;
+        const path = rest[path_start..path_end];
+        try out.appendSlice(arena, std.fs.path.basename(path));
+        rest = rest[path_end..];
+    }
+    try out.appendSlice(arena, rest);
+    return out.items;
+}
+
+test "a type without a name is spelled with its file, not where the file sits" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    try testing.expectEqualStrings("enum (unnamed enum at c.c:1:1)", try withoutDirectories(arena_state.allocator(), "enum (unnamed enum at /tmp/probe/c/c.c:1:1)"));
+    try testing.expectEqualStrings("enum big", try withoutDirectories(arena_state.allocator(), "enum big"));
+}
 
 /// One line of a type tree: how deep it sits, the node's kind, the type it
 /// spells and the words after it.
@@ -810,8 +838,12 @@ fn convert(arena: std.mem.Allocator, lines: []const Line, at: usize) std.mem.All
     if (std.mem.eql(u8, line.kind, "QualType") or line.has("sugar")) {
         if (children.len == 0) return .{ .spelled = line.spelled, .shape = .other };
         var inner = try convert(arena, lines, children[children.len - 1]);
-        // `typeof (f)` names the probe's expression, not a type C spells.
-        if (!std.mem.startsWith(u8, line.kind, "TypeOf")) inner.spelled = line.spelled;
+        // `typeof (f)` names the probe's expression, not a type C spells, and
+        // a typedef naming a function type, `op_t`, shows none of its
+        // parameters, so the function keeps its own spelling.
+        if (std.mem.startsWith(u8, line.kind, "TypeOf")) return inner;
+        if (inner.shape == .function and parameterListStart(line.spelled) == null) return inner;
+        inner.spelled = line.spelled;
         return inner;
     }
     const shape: CType.Shape = if (std.mem.eql(u8, line.kind, "BuiltinType"))
@@ -1202,6 +1234,21 @@ fn innerHelp(a: std.mem.Allocator, mismatch: Mismatch) ![]const u8 {
     };
 }
 
+/// Whether `held`, a `lineaName`, names two types of one width.
+fn paired(held: []const u8) bool {
+    return std.mem.indexOf(u8, held, "` or `") != null;
+}
+
+/// What a newtype is over in a help naming `held`.
+fn overWhich(held: []const u8) []const u8 {
+    return if (paired(held)) "either" else "it";
+}
+
+/// How a help names what `held` is to C's type.
+fn theLineaTypes(held: []const u8) []const u8 {
+    return if (paired(held)) "the Linea types" else "the Linea type";
+}
+
 /// The Linea type a C scalar crosses as, or null for one none does.
 fn lineaName(c: CType) ?[]const u8 {
     const integer: Integer = switch (c.shape) {
@@ -1254,12 +1301,12 @@ fn positionHelp(a: std.mem.Allocator, implied: foreign.Value, c: CType, name: []
                     return try std.fmt.allocPrint(a, "C takes the object's own address, which a plain parameter passes: drop `inout` from {s}", .{name});
                 if (try untranslatable(a, pointee.*)) |why| return why;
                 const held = lineaName(pointee.*).?;
-                return try std.fmt.allocPrint(a, "C writes {s} `{s}` through the address: declare {s} as an `inout` `{s}`, or a newtype over it", .{ article(pointee.spelled), pointee.spelled, name, held });
+                return try std.fmt.allocPrint(a, "C writes {s} `{s}` through the address: declare {s} as an `inout` `{s}`, or a newtype over {s}", .{ article(pointee.spelled), pointee.spelled, name, held, overWhich(held) });
             },
             else => {
                 if (scalarAccepts(scalar, c)) return try std.fmt.allocPrint(a, "C takes the value itself: drop `inout` from {s}", .{name});
                 const held = lineaName(c).?;
-                return try std.fmt.allocPrint(a, "C takes the value itself: declare {s} as `{s}`, or a newtype over it, without `inout`", .{ name, held });
+                return try std.fmt.allocPrint(a, "C takes the value itself: declare {s} as `{s}`, or a newtype over {s}, without `inout`", .{ name, held, overWhich(held) });
             },
         },
         .scalar => |scalar| switch (c.shape) {
@@ -1272,7 +1319,7 @@ fn positionHelp(a: std.mem.Allocator, implied: foreign.Value, c: CType, name: []
             },
             else => {
                 const held = lineaName(c).?;
-                return try std.fmt.allocPrint(a, "declare {s} as `{s}`, or a newtype over it, the Linea type of C's `{s}`", .{ name, held, c.spelled });
+                return try std.fmt.allocPrint(a, "declare {s} as `{s}`, or a newtype over {s}, {s} of C's `{s}`", .{ name, held, overWhich(held), theLineaTypes(held), c.spelled });
             },
         },
     }
@@ -1282,14 +1329,25 @@ fn resultHelp(a: std.mem.Allocator, implied: ?foreign.Value, c: CType, errno: bo
     if (c.shape == .void) return "C answers nothing: drop the result";
     if (try untranslatable(a, c)) |why| return why;
     const held = lineaName(c).?;
-    if (errno) return try std.fmt.allocPrint(a, "declare the result `ffi.Errno[{s}]`, the Linea type of C's `{s}` beside `errno`", .{ held, c.spelled });
-    if (implied == null) return try std.fmt.allocPrint(a, "declare the result `-> {s}`, the Linea type of C's `{s}`", .{ held, c.spelled });
-    return try std.fmt.allocPrint(a, "declare the result `{s}`, or a newtype over it, the Linea type of C's `{s}`", .{ held, c.spelled });
+    if (errno) {
+        if (paired(held)) return try std.fmt.allocPrint(a, "declare the result `ffi.Errno[R]` with `R` one of `{s}`, {s} of C's `{s}` beside `errno`", .{ held, theLineaTypes(held), c.spelled });
+        return try std.fmt.allocPrint(a, "declare the result `ffi.Errno[{s}]`, {s} of C's `{s}` beside `errno`", .{ held, theLineaTypes(held), c.spelled });
+    }
+    if (implied == null) return try std.fmt.allocPrint(a, "declare the result `-> {s}`, {s} of C's `{s}`", .{ held, theLineaTypes(held), c.spelled });
+    return try std.fmt.allocPrint(a, "declare the result `{s}`, or a newtype over {s}, {s} of C's `{s}`", .{ held, overWhich(held), theLineaTypes(held), c.spelled });
 }
 
 /// C's function type spelled with `name` before its parameter list:
 /// `int (sqlite3 *)` becomes `int sqlite3_close_v2(sqlite3 *)`.
 fn rendered(a: std.mem.Allocator, spelled: []const u8, name: []const u8) ![]const u8 {
+    // A calling convention clang writes after the parameter list follows it.
+    if (std.mem.lastIndexOf(u8, spelled, " __attribute__((")) |at| {
+        if (std.mem.endsWith(u8, spelled, "))") and parameterListStart(spelled[0..at]) != null) {
+            const head = try rendered(a, spelled[0..at], name);
+            defer a.free(head);
+            return std.fmt.allocPrint(a, "{s}{s}", .{ head, spelled[at..] });
+        }
+    }
     const open = parameterListStart(spelled) orelse return std.fmt.allocPrint(a, "{s} {s}", .{ spelled, name });
     const head = std.mem.trimEnd(u8, spelled[0..open], " ");
     const separator: []const u8 = if (head.len > 0 and head[head.len - 1] == '*') "" else " ";
@@ -1326,6 +1384,9 @@ test "a C prototype is shown with its function's name" {
     const callback = try rendered(gpa, "int (int (*)(void *, int), void *)", "visit");
     defer gpa.free(callback);
     try testing.expectEqualStrings("int visit(int (*)(void *, int), void *)", callback);
+    const convention = try rendered(gpa, "long long (long long) __attribute__((preserve_none))", "twice");
+    defer gpa.free(convention);
+    try testing.expectEqualStrings("long long twice(long long) __attribute__((preserve_none))", convention);
 }
 
 /// The C type lowering passes as `implied`, as C would spell it.

@@ -18342,6 +18342,10 @@ const Env = struct {
     scratch: []const u8,
     runtime: []const u8,
     sanitize: ?[]const u8,
+    /// The symbols C gives the program's `extern` declarations where they are
+    /// not their names, which every build of the program and of each rewrite
+    /// of it calls them by.
+    foreign_symbols: []const mlir_backend.ForeignSymbol = &.{},
     diagnostics: ?*std.Io.Writer = null,
 
     fn buildRunOptions(self: Env, name: []const u8, ir: []const u8, foreign: Foreign) BuildRunOptions {
@@ -18931,7 +18935,7 @@ fn checkDamage(
         // call is how the verifier answers -- there is no second entry point
         // that skips it, and there must not be one.
         var ir: std.Io.Writer.Allocating = .init(scratch);
-        if (!try emitMlir(scratch, &ir.writer, &module, table, &sink, .{ .sanitize = mlir_backend.Sanitizer.named(env.sanitize) })) {
+        if (!try emitMlir(scratch, &ir.writer, &module, table, &sink, .{ .sanitize = mlir_backend.Sanitizer.named(env.sanitize), .foreign_symbols = env.foreign_symbols })) {
             if (saidDefect(&sink)) continue;
 
             var why: std.Io.Writer.Allocating = .init(scratch);
@@ -19076,7 +19080,7 @@ fn checkMaterializedDerives(
 
     const mir = (try lower(gpa, &settled.expanded, &settled.res, &settled.typing, &settled.disposals, &sink, .program)) orelse return error.SourceRejected;
     var ir: std.Io.Writer.Allocating = .init(gpa);
-    if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, display_path, env.sanitize)) return;
+    if (!try emitOrRecordWith(gpa, failures, &ir, &mir, &table, &sink, display_path, env.sanitize, env.foreign_symbols)) return;
     if (!try sameCodeIgnoringFunctionOrder(gpa, original_ir, ir.written())) {
         try failures.append(gpa, .{
             .path = display_path,
@@ -19212,7 +19216,7 @@ fn checkRewrites(
 
         const mir = (try lower(scratch, &settled.expanded, res, typing, disposals, &sink, .program)) orelse return error.SourceRejected;
         var ir: std.Io.Writer.Allocating = .init(scratch);
-        if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, program.display_path, env.sanitize)) continue;
+        if (!try emitOrRecordWith(gpa, failures, &ir, &mir, &table, &sink, program.display_path, env.sanitize, env.foreign_symbols)) continue;
 
         // Writing an operator out as what it is defined to be must reach the
         // same code, not merely the same answer: the semantics says `is`, and
@@ -19422,6 +19426,9 @@ const WalkSubject = struct {
     rules: []const u8,
     /// What the program answered, where it was built and run.
     ran: ?struct { env: Env, answered: RanAs } = null,
+    /// The symbols C gives the program's `extern` declarations where they
+    /// are not their names.
+    foreign_symbols: []const mlir_backend.ForeignSymbol = &.{},
 };
 
 /// Property: every walk answers as the loop it stands for.
@@ -19516,7 +19523,7 @@ fn compareWalkLoops(
     const module = mir orelse return true;
     if (sink.hasErrors()) return true;
     var ir: std.Io.Writer.Allocating = .init(scratch);
-    if (!try emitOrRecord(gpa, failures, &ir, &module, table, sink, subject.display_path, sanitize)) return true;
+    if (!try emitOrRecordWith(gpa, failures, &ir, &module, table, sink, subject.display_path, sanitize, subject.foreign_symbols)) return true;
     const suffix = try std.fmt.allocPrint(scratch, "walks{d}", .{k});
     _ = try compareRewrittenRun(gpa, scratch, io, cache, run.env, failures, run.answered, suffix, why, ir.written());
     return true;
@@ -21909,6 +21916,7 @@ fn checkCase(
                             answered_env = .{
                                 .scratch = env.scratch_dir,
                                 .runtime = rt,
+                                .foreign_symbols = foreign_symbols,
                                 .sanitize = env.sanitize,
                             };
                         }
@@ -21952,6 +21960,7 @@ fn checkCase(
                                 .{
                                     .scratch = env.scratch_dir,
                                     .runtime = rt,
+                                    .foreign_symbols = foreign_symbols,
                                     .sanitize = env.sanitize,
                                 },
                                 &w.failures,
@@ -21996,6 +22005,7 @@ fn checkCase(
                             rewritten = try checkRewrites(gpa, io, env.cache, .{
                                 .scratch = env.scratch_dir,
                                 .runtime = rt,
+                                .foreign_symbols = foreign_symbols,
                                 .sanitize = env.sanitize,
                             }, &w.failures, &w.rewrites, .{
                                 .display_path = display_path,
@@ -22047,6 +22057,7 @@ fn checkCase(
                             try checkDamage(gpa, io, env.cache, .{
                                 .scratch = env.scratch_dir,
                                 .runtime = rt,
+                                .foreign_symbols = foreign_symbols,
                                 .sanitize = env.sanitize,
                             }, &w.failures, &w.damages, &table, &settled.expanded, res, typing, disposals, .{
                                 .display_path = display_path,
@@ -22140,6 +22151,7 @@ fn checkCase(
             },
             .rules = rules_named,
             .ran = if (answered) |a| .{ .env = answered_env, .answered = a } else null,
+            .foreign_symbols = foreign_symbols,
         });
         walk_zone.end();
     }

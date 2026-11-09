@@ -210,6 +210,16 @@ the Linea declaration does not name, so no implied type could be written for
 it; and a `UInt64` passed where C takes a pointer, the way 0228 passes a null
 `vfs`, has no single spelling either.
 
+**Accepting a definition without a prototype at its promoted types.** A
+definition written `long f(x) short x; {…}` is called with its arguments
+promoted, so comparing at `int` for that `short` would be sound. It lost
+because the type tree `cc` prints for such a function is
+`FunctionNoProtoType 'long ()'`, without its parameters; the composite type
+with the promoted parameters appears only in the text of the expression that
+names the function, and reading it would mean parsing C's type spelling, the
+C frontend the check otherwise avoids. C23 removed these definitions, and a
+prototype in the source is the edit that makes one comparable.
+
 **Requiring `const` for `read`.** Sound, since it refuses more, but it would
 refuse every `read` against SQLite, whose read-only functions take
 `sqlite3 *`, while a `const` pointer C casts away would still be accepted. It
