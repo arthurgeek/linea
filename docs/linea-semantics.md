@@ -4715,7 +4715,8 @@ variable or anything but a function it declares or defines is refused. Every
 `extern` of one name must reach one symbol in every root that declares it,
 and every `extern` reaching one symbol must imply one prototype. An
 `export` is held to the same rules wherever its root's C declarations declare
-it, and is not refused where they do not. Each position of C's prototype
+it, under its name or through a label naming its symbol, and is not refused
+where they do not. Each position of C's prototype
 must be what lowering passes there, compared by representation rather than
 by C's type identity: for an `IntN` or `UIntN`, or an unrefined newtype over
 one, an integer of `N` bits and the same signedness, or an `enum` C passes

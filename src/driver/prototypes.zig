@@ -240,6 +240,9 @@ fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: [
         return;
     }
 
+    var exports = false;
+    for (subjects) |subject| exports = exports or subject.exported;
+
     // What each unit says about each subject, by unit then by subject.
     const found = try arena.alloc(Found, units.items.len * subjects.len);
     @memset(found, .{});
@@ -272,7 +275,7 @@ fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: [
         // how C passes each of its values.
         const ir_path = try std.fmt.allocPrint(arena, "{s}/unit{d}-symbols.c", .{ dir, k });
         const ir_out = try std.fmt.allocPrint(arena, "{s}/unit{d}-symbols.ll", .{ dir, k });
-        if (!try writeSymbols(arena, io, ir_path, k, unit, subjects, row)) continue;
+        if (!try writeSymbols(arena, io, ir_path, k, unit, subjects, row) and !exports) continue;
         const lowered = try toolchain.lowerC(arena, io, include_dir, ir_path, ir_out) orelse {
             return reporter.unread(subjects[0], "`cc` is not installed");
         };
@@ -280,6 +283,17 @@ fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: [
             .ir => |text| text,
             .refused => |reports| return reporter.unread(subjects[0], firstError(reports) orelse "`cc` could not compile the declarations"),
         };
+        // C may call an export under another name, through a label; every
+        // IR declaration of the export's symbol is held to the export. A
+        // unit that declares it by its name is compared by its prototype,
+        // which says more.
+        for (subjects, row) |subject, seen| {
+            if (!subject.exported or seen.ctype != null) continue;
+            for (try signaturesNamed(arena, ir, subject.name)) |signature| {
+                if (signatureAgrees(subject.implied, signature)) continue;
+                if (try reporter.called(subject, unit.shown, signature)) break;
+            }
+        }
         for (row, 0..) |*seen, i| {
             if (seen.ctype == null or seen.macro) continue;
             seen.linked = linkedOf(arena, ir, k, i);
@@ -435,7 +449,9 @@ fn writeSymbols(arena: std.mem.Allocator, io: std.Io, path: []const u8, unit_ind
         try w.print("void *const {s}{d}_{d} __attribute__((used)) = (void *)&{s};\n", .{ symbol_prefix, unit_index, i, subject.name });
         any = true;
     }
-    if (any) try writeFile(io, path, text.written());
+    // Written even with no probe, where the root exports: the IR of what
+    // the unit's own code calls is what an export is held to.
+    try writeFile(io, path, text.written());
     return any;
 }
 
@@ -540,6 +556,9 @@ const Signature = struct {
 const Passed = struct {
     bits: ?u8,
     extension: ?bool = null,
+    kind: Kind = .other,
+
+    const Kind = enum { integer, float, pointer, void, other };
 };
 
 /// The symbol global `linea_symbol_K_I` holds, its signature and whether it
@@ -636,9 +655,79 @@ fn passedOf(text: []const u8) Passed {
         if (std.mem.eql(u8, word, "zeroext")) passed.extension = false;
         if (word.len > 1 and word[0] == 'i' and std.ascii.isDigit(word[1])) {
             passed.bits = std.fmt.parseInt(u8, word[1..], 10) catch null;
+            passed.kind = .integer;
         }
+        if (std.mem.eql(u8, word, "double")) {
+            passed.kind = .float;
+            passed.bits = 64;
+        }
+        if (std.mem.eql(u8, word, "float")) {
+            passed.kind = .float;
+            passed.bits = 32;
+        }
+        if (std.mem.eql(u8, word, "ptr")) passed.kind = .pointer;
+        if (std.mem.eql(u8, word, "void")) passed.kind = .void;
     }
     return passed;
+}
+
+/// Whether the IR passes a value as `implied` crosses: an integer of its
+/// width, extended by its signedness where the IR extends it, a `double` for
+/// a `Float64`, and an address for an `inout` place, a context or a callback,
+/// or for a `UInt64`, which an address crosses as.
+fn passedAgrees(implied: foreign.Value, passed: Passed) bool {
+    return switch (implied) {
+        .scalar => |scalar| switch (scalar) {
+            .float64 => passed.kind == .float and passed.bits == 64,
+            .integer => |integer| switch (passed.kind) {
+                .integer => passed.bits == integer.bits and (passed.extension == null or passed.extension.? == integer.signed),
+                .pointer => integer.bits == 64 and !integer.signed,
+                else => false,
+            },
+        },
+        .address_of, .context, .callback => passed.kind == .pointer,
+    };
+}
+
+/// Whether the IR signature C calls a function by agrees with the prototype
+/// a Linea declaration of it implies.
+fn signatureAgrees(implied: foreign.Prototype, signature: Signature) bool {
+    if (implied.params.len != signature.params.len) return false;
+    for (implied.params, signature.params) |value, passed| if (!passedAgrees(value, passed)) return false;
+    if (implied.result) |value| return passedAgrees(value, signature.result);
+    return signature.result.kind == .void;
+}
+
+/// Every signature the IR declares or defines a function by whose symbol is
+/// `name` once emitted, whatever C calls the function.
+fn signaturesNamed(arena: std.mem.Allocator, ir: []const u8, name: []const u8) ![]const Signature {
+    var out: std.ArrayList(Signature) = .empty;
+    var lines = std.mem.splitScalar(u8, ir, '\n');
+    while (lines.next()) |line| {
+        if (!std.mem.startsWith(u8, line, "declare ") and !std.mem.startsWith(u8, line, "define ")) continue;
+        const at = std.mem.indexOf(u8, line, " @") orelse continue;
+        const spelled = irName(line[at + 1 ..]) orelse continue;
+        const symbol = callableSymbol(spelled) orelse continue;
+        if (!std.mem.eql(u8, symbol, name)) continue;
+        if (try signatureOf(arena, line, at)) |signature| try out.append(arena, signature);
+    }
+    return out.items;
+}
+
+test "a signature C calls an export by is compared whatever C names it" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const ir = if (builtin.target.os.tag.isDarwin())
+        "declare i64 @\"\\01_scale\"(i64 noundef) #1\n"
+    else
+        "declare i64 @scale(i64 noundef) #1\n";
+    const found = try signaturesNamed(arena, ir, "scale");
+    try testing.expectEqual(@as(usize, 1), found.len);
+    const narrow: foreign.Prototype = .{ .params = &.{.{ .scalar = .{ .integer = .{ .bits = 32, .signed = true } } }}, .result = .{ .scalar = .{ .integer = .{ .bits = 32, .signed = true } } } };
+    try testing.expect(!signatureAgrees(narrow, found[0]));
+    const wide: foreign.Prototype = .{ .params = &.{.{ .scalar = .{ .integer = .{ .bits = 64, .signed = true } } }}, .result = .{ .scalar = .{ .integer = .{ .bits = 64, .signed = true } } } };
+    try testing.expect(signatureAgrees(wide, found[0]));
 }
 
 test "the IR names the symbol C reaches and how it passes each value" {
@@ -657,9 +746,9 @@ test "the IR names the symbol C reaches and how it passes each value" {
     const raise = linkedOf(arena, ir, 0, 1).?;
     try testing.expectEqualStrings("raise_", raise.symbol);
     const signature = raise.signature.?;
-    try testing.expectEqual(Passed{ .bits = 8, .extension = false }, signature.result);
-    try testing.expectEqual(Passed{ .bits = 8, .extension = false }, signature.params[0]);
-    try testing.expectEqual(Passed{ .bits = 64 }, signature.params[1]);
+    try testing.expectEqual(Passed{ .bits = 8, .extension = false, .kind = .integer }, signature.result);
+    try testing.expectEqual(Passed{ .bits = 8, .extension = false, .kind = .integer }, signature.params[0]);
+    try testing.expectEqual(Passed{ .bits = 64, .kind = .integer }, signature.params[1]);
     try testing.expectEqual(@as(?Linked, null), linkedOf(arena, ir, 0, 2));
     const resolved =
         \\@linea_symbol_0_0 = constant ptr @twice, align 8
@@ -1050,7 +1139,7 @@ test "a type tree is read through its sugar to the type C passes" {
     var other = (try dumps.function(arena, 0, 2)).?;
     try testing.expectEqualStrings("preserve_none", other.shape.function.convention.?);
     try testing.expectEqual(@as(?Enumeration, null), other.shape.function.params[0].shape.enumeration);
-    widenEnumerations(&other, .{ .result = .{ .bits = 64 }, .params = &.{.{ .bits = 64 }} });
+    widenEnumerations(&other, .{ .result = .{ .bits = 64, .kind = .integer }, .params = &.{.{ .bits = 64, .kind = .integer }} });
     try testing.expectEqual(Enumeration{ .bits = 64, .signed = null }, other.shape.function.params[0].shape.enumeration.?);
 }
 
@@ -1137,6 +1226,8 @@ const Reporter = struct {
     arena: std.mem.Allocator,
     sink: *Sink,
     ast: *const Ast,
+    /// The exports already reported as called by another signature.
+    called_exports: std.ArrayList(DeclId) = .empty,
 
     fn nameLabel(self: *Reporter, subject: Subject, message: []const u8) ![]const Label {
         const labels = try self.sink.arena.alloc(Label, 1);
@@ -1225,6 +1316,29 @@ const Reporter = struct {
             .remarks = try self.declaredBy(subject, shown),
             .notes = try a.dupe([]const u8, &.{"declare the C function under its own symbol, or reach the runtime through the standard library"}),
         });
+    }
+
+    /// Reports C calling an export by an IR signature the export does not
+    /// have, once per export, and answers whether it reported.
+    fn called(self: *Reporter, subject: Subject, shown: []const u8, signature: Signature) !bool {
+        for (self.called_exports.items) |held| if (held == subject.decl) return false;
+        try self.called_exports.append(self.arena, subject.decl);
+        const a = self.sink.arena;
+        var text: std.Io.Writer.Allocating = .init(a);
+        if (signature.params.len == 0) try text.writer.writeAll("nothing");
+        for (signature.params, 0..) |param, i| {
+            if (i > 0) try text.writer.writeAll(", ");
+            try text.writer.writeAll(passedSpelling(param));
+        }
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_extern_prototype,
+            .message = try std.fmt.allocPrint(a, "C code calls the symbol `{s}` this export defines through a declaration that takes {s} and answers {s}, which this export does not", .{ subject.name, text.written(), passedSpelling(signature.result) }),
+            .labels = try self.nameLabel(subject, "C calls this export through a declaration of another prototype"),
+            .remarks = try a.dupe([]const u8, &.{try std.fmt.allocPrint(a, "the call is compiled from {s}", .{shown})}),
+            .notes = try a.dupe([]const u8, &.{"declare the export as C calls it, or the C declaration that reaches it as the export is"}),
+        });
+        return true;
     }
 
     fn sharedName(self: *Reporter, subject: Subject, first: []const u8, then: []const u8) !void {
@@ -1338,6 +1452,23 @@ const Reporter = struct {
 
 fn plural(n: usize) []const u8 {
     return if (n == 1) "" else "s";
+}
+
+/// How the IR passes a value, as its type reads in C.
+fn passedSpelling(passed: Passed) []const u8 {
+    return switch (passed.kind) {
+        .integer => switch (passed.bits orelse 0) {
+            8 => "an 8-bit integer",
+            16 => "a 16-bit integer",
+            32 => "a 32-bit integer",
+            64 => "a 64-bit integer",
+            else => "an integer of another width",
+        },
+        .float => if (passed.bits == 64) "a `double`" else "a `float`",
+        .pointer => "an address",
+        .void => "nothing",
+        .other => "a value no Linea type crosses as",
+    };
 }
 
 /// `a` or `an` before `word`, by its first letter.

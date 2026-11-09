@@ -77,7 +77,10 @@ prototype, and the backend declares that symbol once.
 C code of the root calling an exported function trusts its own declaration of
 it as the Linea program trusts an `extern`, so the promise is the same in the
 other direction. An export C does not declare is not refused: a library's
-caller declares it elsewhere.
+caller declares it elsewhere. C may also reach an export under another name,
+through a label naming its symbol, so every `declare` or `define` of the
+export's symbol in the IR of the root's C is held to how the export passes
+each value, whatever C calls it.
 
 **What lowering passes at each position is the implied C type.** The table is
 read from the compiler, not restated: `types.foreignScalar` answers what a
