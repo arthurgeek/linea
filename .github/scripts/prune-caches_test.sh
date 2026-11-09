@@ -6,9 +6,10 @@
 # The fake `gh` answers `cache list` with `$FAKE/caches`, lines of `id ref key`
 # as the real call's `--jq` prints them, whatever filters the call names, so
 # the script's own ref and prefix checks are what keep other entries. It
-# appends each `cache list` call to `$FAKE/lists` and the id of each
-# `cache delete` to `$FAKE/deleted`. Every call fails while `$FAKE/fail`
-# exists, and a delete of id N fails while `$FAKE/fail-N` exists.
+# appends each `cache list` call to `$FAKE/lists`, and each `cache delete`
+# call to `$FAKE/deletes` and its id to `$FAKE/deleted`. Every call fails
+# while `$FAKE/fail` exists, and a delete of id N fails while `$FAKE/fail-N`
+# exists.
 set -u -o pipefail
 
 script=$(cd "$(dirname "$0")" && pwd)/prune-caches.sh
@@ -28,7 +29,8 @@ case "$1 $2" in
   "cache delete")
     id=${*: -1}
     [ -e "$FAKE/fail-$id" ] && exit 1
-    echo "$id" >> "$FAKE/deleted" ;;
+    echo "$id" >> "$FAKE/deleted"
+    echo "$*" >> "$FAKE/deletes" ;;
   *) exit 1 ;;
 esac
 exit 0
@@ -43,7 +45,7 @@ corpus="outcomes-optimised-corpus-Linux-$lock-"
 a=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 b=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
-reset() { rm -f "$FAKE/caches" "$FAKE/lists" "$FAKE/deleted" "$FAKE"/fail*; }
+reset() { rm -f "$FAKE/caches" "$FAKE/lists" "$FAKE/deletes" "$FAKE/deleted" "$FAKE"/fail*; }
 cache() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$FAKE/caches"; }
 
 # Runs the script as case $1 on ref $2 with the arguments after it.
@@ -80,7 +82,9 @@ cache 10 "$pr" "${check}$a-100-1"
 run "older entries of the lane on the ref" "$pr" "${check}$b-200-1" "$b-200-1"
 expect_status 0
 expect_deleted "20 10"
-grep -q -- "--ref $pr --key $check " "$FAKE/lists" || fail "the listing was not scoped to the ref and the prefix"
+grep -q -- "^cache list --repo owner/repo --ref $pr --key $check --limit 1000 " "$FAKE/lists" ||
+  fail "the listing was not scoped to the repository, the ref and the prefix, or stopped short of every page"
+grep -qx -- "cache delete --repo owner/repo 20" "$FAKE/deletes" || fail "the delete named no repository"
 
 # Main's caches are never a pull request run's to delete, even where the
 # listing returns them, and another lane's caches on the same ref stay.

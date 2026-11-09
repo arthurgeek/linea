@@ -88,12 +88,6 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.check == 'run' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
-    # `actions: write` lets the step after the save delete this lane's older
-    # caches. Only that step is handed the token, and the checkout writes
-    # none into the git config, so the code under test does not hold it.
-    permissions:
-      actions: write
-      contents: read
     # Measured on the four-vCPU runner in November 2026, with recorded
     # outcomes restored: the test step took 92 minutes on a pull request when
     # it still ran the unit tests named `slow:`, about 64 of them the Debug
@@ -111,8 +105,6 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
 
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
 
@@ -240,7 +232,6 @@ jobs:
           dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache"
           if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
       - name: Save program outcomes
-        id: outcomes_save
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
@@ -250,17 +241,6 @@ jobs:
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/examples/outcomes
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/properties/outcomes
           key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
-
-      # Every run and attempt saves under a key of its own, so the lane's
-      # older caches on this ref are deleted, keeping the one just saved:
-      # left behind, they push main's out of the repository's 10 GB, and
-      # main's are the only ones a new pull request can restore.
-      - name: Delete the lane's older caches on this ref
-        if: ${{ !cancelled() && steps.outcomes_save.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          KEY: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
-        run: .github/scripts/prune-caches.sh "$KEY" "$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
       - name: Keep the resource log
         if: always()
@@ -297,12 +277,6 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.sanitize == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
-    # `actions: write` lets the step after the save delete this lane's older
-    # caches. Only that step is handed the token, and the checkout writes
-    # none into the git config, so the code under test does not hold it.
-    permissions:
-      actions: write
-      contents: read
     timeout-minutes: 75
     strategy:
       fail-fast: false
@@ -317,8 +291,6 @@ jobs:
         exclude: ${{ fromJSON(needs.changes.outputs.sanitize-exclude) }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
 
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
 
@@ -380,7 +352,6 @@ jobs:
         run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-clock test-native-runtime test-native-task -Dsanitize=${{ matrix.sanitizer }}
 
       - name: Save program outcomes
-        id: outcomes_save
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
@@ -389,17 +360,6 @@ jobs:
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/linea-cache
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/examples/outcomes
           key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
-
-      # Every run and attempt saves under a key of its own, so the lane's
-      # older caches on this ref are deleted, keeping the one just saved:
-      # left behind, they push main's out of the repository's 10 GB, and
-      # main's are the only ones a new pull request can restore.
-      - name: Delete the lane's older caches on this ref
-        if: ${{ !cancelled() && steps.outcomes_save.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          KEY: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
-        run: .github/scripts/prune-caches.sh "$KEY" "$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   # The optimised lanes: the unit tests built ReleaseSafe, and on a weekly or
   # manual run built ReleaseFast as well; the corpus against a ReleaseFast
@@ -430,12 +390,6 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.optimised-unit == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
-    # `actions: write` lets the step after the save delete this lane's older
-    # caches. Only that step is handed the token, and the checkout writes
-    # none into the git config, so the code under test does not hold it.
-    permissions:
-      actions: write
-      contents: read
     # On the four-vCPU runner in November 2026 the ReleaseSafe unit tests took
     # 17 minutes, their compile included, and the guide, the library's tests
     # and the examples' tests 8.5 more, the Debug compiler's compile included:
@@ -446,8 +400,6 @@ jobs:
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
 
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
 
@@ -551,24 +503,12 @@ jobs:
           dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache"
           if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
       - name: Save program outcomes
-        id: outcomes_save
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: |
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache
           key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
-
-      # Every run and attempt saves under a key of its own, so the lane's
-      # older caches on this ref are deleted, keeping the one just saved:
-      # left behind, they push main's out of the repository's 10 GB, and
-      # main's are the only ones a new pull request can restore.
-      - name: Delete the lane's older caches on this ref
-        if: ${{ !cancelled() && steps.outcomes_save.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          KEY: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
-        run: .github/scripts/prune-caches.sh "$KEY" "$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
       - name: Keep the resource log
         if: always()
@@ -586,12 +526,6 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.optimised-corpus == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
-    # `actions: write` lets the step after the save delete this lane's older
-    # caches. Only that step is handed the token, and the checkout writes
-    # none into the git config, so the code under test does not hold it.
-    permissions:
-      actions: write
-      contents: read
     # On the four-vCPU runner in November 2026 the step took 35 minutes, the
     # compiles of the compiler and the runner included. The outcome cache is
     # keyed on the emitted IR and a stamp of every tool, so a change to the
@@ -601,8 +535,6 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
 
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
 
@@ -654,7 +586,6 @@ jobs:
           dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache"
           if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
       - name: Save program outcomes
-        id: outcomes_save
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
@@ -663,17 +594,6 @@ jobs:
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/examples/outcomes
           key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
-
-      # Every run and attempt saves under a key of its own, so the lane's
-      # older caches on this ref are deleted, keeping the one just saved:
-      # left behind, they push main's out of the repository's 10 GB, and
-      # main's are the only ones a new pull request can restore.
-      - name: Delete the lane's older caches on this ref
-        if: ${{ !cancelled() && steps.outcomes_save.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          KEY: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
-        run: .github/scripts/prune-caches.sh "$KEY" "$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
       - name: Keep the resource log
         if: always()
@@ -694,12 +614,6 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.optimised-soundness == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
-    # `actions: write` lets the step after the save delete this lane's older
-    # caches. Only that step is handed the token, and the checkout writes
-    # none into the git config, so the code under test does not hold it.
-    permissions:
-      actions: write
-      contents: read
     # On the four-vCPU runner in November 2026 the two steps took 11 minutes
     # with the runner already built, and building the ReleaseFast runner took
     # 8 more: about 20 minutes. A cold run checks every matrix program and
@@ -708,8 +622,6 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
 
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
 
@@ -768,7 +680,6 @@ jobs:
           dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache"
           if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
       - name: Save program outcomes
-        id: outcomes_save
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
@@ -776,17 +687,6 @@ jobs:
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/linea-cache
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/soundness/outcomes
           key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
-
-      # Every run and attempt saves under a key of its own, so the lane's
-      # older caches on this ref are deleted, keeping the one just saved:
-      # left behind, they push main's out of the repository's 10 GB, and
-      # main's are the only ones a new pull request can restore.
-      - name: Delete the lane's older caches on this ref
-        if: ${{ !cancelled() && steps.outcomes_save.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          KEY: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
-        run: .github/scripts/prune-caches.sh "$KEY" "$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
       - name: Keep the resource log
         if: always()
@@ -896,19 +796,11 @@ jobs:
     # each week's search starts where the last one stopped.
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
-    # `actions: write` lets the step after the save delete this lane's older
-    # caches. Only that step is handed the token, and the checkout writes
-    # none into the git config, so the code under test does not hold it.
-    permissions:
-      actions: write
-      contents: read
     # A release build of the fuzz root and twenty thousand runs of each
     # target. A quiet run takes about half an hour.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
 
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
 
@@ -954,21 +846,11 @@ jobs:
 
       # Only after a clean search, so a crash is never saved for the next one.
       - name: Keep the inputs this search reached
-        id: fuzz_save
         if: ${{ success() && steps.fuzz_restore.outcome == 'success' }}
         uses: actions/cache/save@v4
         with:
           path: ${{ env.ZIG_LOCAL_CACHE_DIR }}/f
           key: fuzz-inputs-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
-
-      # Each run saves its inputs under a key of its own, so the older ones
-      # on this ref are deleted, keeping the one just saved.
-      - name: Delete the older fuzz inputs on this ref
-        if: ${{ !cancelled() && steps.fuzz_save.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          KEY: fuzz-inputs-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
-        run: .github/scripts/prune-caches.sh "$KEY" "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
       # A crash is only useful with the input that caused it. Without this the
       # runner is destroyed and the reproduction goes with it, leaving a red
@@ -1026,6 +908,50 @@ jobs:
           path: ${{ env.ZIG_LOCAL_CACHE_DIR }}/f/
           if-no-files-found: ignore
           retention-days: 30
+
+  # Every run and attempt of a lane saves its cache under a key of its own,
+  # and a cache stays until the repository's 10 GB are spent and the least
+  # recently used go: main's, the only ones a new pull request can restore.
+  # So once the lanes that save are done, this job deletes each lane's older
+  # caches on the run's ref, keeping the one this run saved; a lane that did
+  # not save in this attempt keeps what it has.
+  #
+  # A job of its own because the token that may delete caches must not reach
+  # the code under test: the Nix installer writes the job's token into
+  # `/etc/nix/nix.conf`, which every later step can read. This job installs
+  # nothing, builds nothing, and checks out only the script and the lock file
+  # whose hash the keys name. A pull request from a fork gets a token that
+  # cannot delete, so it is skipped there. Nothing waits for it, and
+  # `merge-ready` does not read it.
+  prune-caches:
+    needs: [check, sanitize, optimised-unit, optimised-corpus, optimised-soundness, fuzz]
+    if: ${{ !cancelled() && !github.event.pull_request.draft && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/scripts/
+            /flake.lock
+
+      # Each key is the one its lane's restore step names for this run; the
+      # sanitizers are the `sanitize` matrix's.
+      - name: Delete each lane's older caches on this ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOCK: ${{ hashFiles('flake.lock') }}
+        run: |
+          this_run="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          for lane in check sanitize-address sanitize-thread optimised-unit optimised-corpus optimised-soundness; do
+            .github/scripts/prune-caches.sh "outcomes-$lane-$RUNNER_OS-$LOCK-$GITHUB_SHA-$this_run" "$GITHUB_SHA-$this_run"
+          done
+          .github/scripts/prune-caches.sh "fuzz-inputs-$RUNNER_OS-$this_run" "$this_run"
 
   # The one status the ruleset on main requires, so it runs on every event and
   # always reports. It fails when any lane it reads failed or was cancelled,

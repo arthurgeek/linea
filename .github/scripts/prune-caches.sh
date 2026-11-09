@@ -26,8 +26,8 @@
 #
 # When KEY is not listed under the ref (its save was refused or failed), the
 # script deletes nothing. A failure to list or to delete is printed as a
-# warning and leaves the lane green: a cache left behind is evicted later
-# anyway, and a pull request from a fork gets a token that cannot delete.
+# warning and leaves the run green: a cache left behind is evicted later
+# anyway.
 # Wrong arguments exit 2 without calling `gh`.
 set -u -o pipefail
 

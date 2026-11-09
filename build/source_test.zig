@@ -75,11 +75,8 @@ test "CI outcome snapshots preserve restore and save contracts" {
         const restore = outcomeStep(job, "actions/cache/restore@v4") orelse return error.MissingRestoreStep;
         const save = outcomeStep(job, "actions/cache/save@v4") orelse return error.MissingSaveStep;
         try testing.expectEqualStrings("outcomes_restore", source.between(restore, "id: ", "\n").?);
-        // Every step that runs something sits between the restore and the
-        // save, save the one after the save that deletes older caches.
         const first_run = std.mem.indexOf(u8, job, "\n        run:") orelse return error.MissingRunStep;
-        const prune = std.mem.indexOf(u8, job, "\n      - name: Delete the lane's older caches on this ref\n") orelse return error.MissingPruneStep;
-        const last_run = std.mem.lastIndexOf(u8, job[0..prune], "\n        run:").?;
+        const last_run = std.mem.lastIndexOf(u8, job, "\n        run:").?;
         try testing.expect(@intFromPtr(restore.ptr) < @intFromPtr(job.ptr) + first_run);
         try testing.expect(@intFromPtr(job.ptr) + last_run < @intFromPtr(save.ptr));
         try testing.expectEqualStrings(
@@ -231,78 +228,73 @@ fn expectPrunesCheckedLibraries(job: []const u8) !void {
     , try stepText(job, "Keep the newest checked libraries"));
 }
 
-test "CI deletes each lane's older caches on its own ref after it saves" {
+test "CI deletes each lane's older caches on its own ref after the lanes save" {
     const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(workflow);
-    // Every save is followed by a prune, so a save added without one fails
-    // here.
-    try testing.expectEqual(@as(usize, 6), std.mem.count(u8, workflow, "uses: actions/cache/save@v4"));
-    try testing.expectEqual(@as(usize, 6), std.mem.count(u8, workflow, "run: .github/scripts/prune-caches.sh "));
-    const lanes = [_]struct { job: []const u8, save: []const u8, prune: []const u8 }{
-        .{ .job = "check", .save = "Save program outcomes", .prune = outcome_prune },
-        .{ .job = "sanitize", .save = "Save program outcomes", .prune = outcome_prune },
-        .{ .job = "optimised-unit", .save = "Save program outcomes", .prune = outcome_prune },
-        .{ .job = "optimised-corpus", .save = "Save program outcomes", .prune = outcome_prune },
-        .{ .job = "optimised-soundness", .save = "Save program outcomes", .prune = outcome_prune },
-        .{ .job = "fuzz", .save = "Keep the inputs this search reached", .prune = fuzz_prune },
-    };
-    for (lanes) |lane| {
-        const job = try workflowJob(workflow, lane.job);
-        // The job's token may delete caches and read the repository, nothing
-        // more.
-        const permissions = "\n    permissions:\n      actions: write\n      contents: read\n    ";
-        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, job, "\n    permissions:"));
-        const granted = std.mem.indexOf(u8, job, permissions) orelse return error.MissingPermissions;
-        try testing.expect(job[granted + permissions.len] != ' ');
-        // The token reaches the prune step alone: the checkout writes none
-        // into the git config the code under test can read, and no other
-        // step is handed it.
-        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, job, "actions/checkout@"));
-        try testing.expect(std.mem.indexOf(u8, job, "      - uses: actions/checkout@v7\n        with:\n          persist-credentials: false\n") != null);
-        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, job, "github.token"));
-        // The prune is the step after the save, run whenever the save ran,
-        // whole so that its condition, its key and its ref cannot drift.
-        const save = try stepText(job, lane.save);
-        try testing.expect(std.mem.indexOf(u8, save, "uses: actions/cache/save@v4\n") != null);
-        const save_end = @intFromPtr(save.ptr) + save.len - @intFromPtr(job.ptr);
-        const prune_start = std.mem.indexOf(u8, job, lane.prune) orelse {
-            std.debug.print("{s} does not prune after its save as pinned\n", .{lane.job});
-            return error.MissingPruneStep;
-        };
-        try testing.expect(save_end < prune_start);
-        try testing.expect(std.mem.indexOf(u8, job[save_end..prune_start], "\n      - ") == null);
-        // The key the prune keeps is the key the save wrote.
-        const saved_key = source.between(job[save_end - save.len ..], "          key: ", "\n").?;
-        try testing.expectEqualStrings(saved_key, source.between(lane.prune, "          KEY: ", "\n").?);
+    // The jobs that save a cache, each once and through `actions/cache/save`
+    // alone: a combined `actions/cache` saves in a post step no prune follows.
+    const saving = [_][]const u8{ "check", "sanitize", "optimised-unit", "optimised-corpus", "optimised-soundness", "fuzz" };
+    try testing.expectEqual(@as(usize, saving.len), std.mem.count(u8, workflow, "uses: actions/cache/save@"));
+    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, workflow, "uses: actions/cache@"));
+    for (saving) |name| {
+        const job = try workflowJob(workflow, name);
+        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, job, "uses: actions/cache/save@v4"));
+        // A job that installs Nix exposes its token to every later step, so
+        // no such job may hold more than the repository's read-only default.
+        try testing.expect(std.mem.indexOf(u8, job, "\n    permissions:") == null);
     }
-    // The fuzz inputs' key ends in the suffix its prune strips, as each
-    // outcome key ends in the commit and the run, so what is left is the
-    // prefix the restore falls back on.
+    // The prune key of each outcome lane is what its restore step names, with
+    // the job and the sanitizer written out; the pinned step below spells
+    // `outcomes-$lane-$RUNNER_OS-$LOCK-$GITHUB_SHA-$this_run` for each.
+    try testing.expectEqualStrings("sanitizer: [address, thread]", try onlyLineWith(try workflowJob(workflow, "sanitize"), "sanitizer: ["));
     try testing.expectEqualStrings(
-        "fuzz-inputs-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}",
-        source.between(try stepText(try workflowJob(workflow, "fuzz"), "Restore the inputs earlier searches reached"), "          key: ", "\n").?,
+        "key: fuzz-inputs-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}",
+        try onlyLineWith(try stepText(try workflowJob(workflow, "fuzz"), "Restore the inputs earlier searches reached"), "key: "),
     );
+    // The one job that may delete caches waits for every job that saves, and
+    // runs nothing else: no Nix, no build, and a checkout of the script and
+    // the lock file alone, keeping no credentials.
+    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, workflow, "actions: write"));
+    try testing.expectEqualStrings(
+        \\    needs: [check, sanitize, optimised-unit, optimised-corpus, optimised-soundness, fuzz]
+        \\    if: ${{ !cancelled() && !github.event.pull_request.draft && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        \\    runs-on: ubuntu-24.04
+        \\    timeout-minutes: 10
+        \\    permissions:
+        \\      actions: write
+        \\      contents: read
+        \\    steps:
+        \\      - uses: actions/checkout@v7
+        \\        with:
+        \\          persist-credentials: false
+        \\          sparse-checkout-cone-mode: false
+        \\          sparse-checkout: |
+        \\            /.github/scripts/
+        \\            /flake.lock
+        \\
+        \\      # Each key is the one its lane's restore step names for this run; the
+        \\      # sanitizers are the `sanitize` matrix's.
+        \\      - name: Delete each lane's older caches on this ref
+        \\        env:
+        \\          GH_TOKEN: ${{ github.token }}
+        \\          LOCK: ${{ hashFiles('flake.lock') }}
+        \\        run: |
+        \\          this_run="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        \\          for lane in check sanitize-address sanitize-thread optimised-unit optimised-corpus optimised-soundness; do
+        \\            .github/scripts/prune-caches.sh "outcomes-$lane-$RUNNER_OS-$LOCK-$GITHUB_SHA-$this_run" "$GITHUB_SHA-$this_run"
+        \\          done
+        \\          .github/scripts/prune-caches.sh "fuzz-inputs-$RUNNER_OS-$this_run" "$this_run"
+        \\
+        \\
+    , try workflowJob(workflow, "prune-caches"));
+    // The token is written out in two jobs alone: `changes`, which reads
+    // check runs, and the prune.
+    try testing.expectEqual(@as(usize, 2), std.mem.count(u8, workflow, "github.token"));
+    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, workflow, "secrets.GITHUB_TOKEN"));
+    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, workflow, "github["));
+    // `merge-ready` does not wait for it.
+    try testing.expect(std.mem.indexOf(u8, try workflowJob(workflow, "merge-ready"), "prune-caches") == null);
 }
-
-const outcome_prune =
-    \\      - name: Delete the lane's older caches on this ref
-    \\        if: ${{ !cancelled() && steps.outcomes_save.outcome == 'success' }}
-    \\        env:
-    \\          GH_TOKEN: ${{ github.token }}
-    \\          KEY: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
-    \\        run: .github/scripts/prune-caches.sh "$KEY" "$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-    \\
-;
-
-const fuzz_prune =
-    \\      - name: Delete the older fuzz inputs on this ref
-    \\        if: ${{ !cancelled() && steps.fuzz_save.outcome == 'success' }}
-    \\        env:
-    \\          GH_TOKEN: ${{ github.token }}
-    \\          KEY: fuzz-inputs-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
-    \\        run: .github/scripts/prune-caches.sh "$KEY" "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-    \\
-;
 
 test "prune-caches deletes only a lane's older caches on the run's own ref" {
     // A `gh` answering from files, covering older attempts and commits,
