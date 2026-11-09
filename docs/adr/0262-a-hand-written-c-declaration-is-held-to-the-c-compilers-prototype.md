@@ -64,10 +64,14 @@ reservations a written name is: a symbol in the runtime's `linea_`
 namespace, one the runtime owns such as `main`, one Linea emits its own
 definitions or callback entries under (`lin.`, `lcb.`) and one LLVM spells
 (`llvm.`) are refused, so a label cannot reach around [T-ExternRuntime].
-[T-ExternAgreement] is then held by symbol: every `extern` of one name is one
-function, so the C of every root declaring it must give it one symbol, and
-every `extern` reaching one symbol, under whatever name, must imply one
-prototype, which the backend declares once.
+[T-ExternAgreement] is then held by symbol. Every `extern` of one name is
+one function, which lowering makes one MIR function
+([0156](0156-every-declaration-of-an-extern-symbol-is-one-function.md)), so
+the C of every root declaring the name must give it one symbol: a root and a
+dependency whose C give one `extern` name two symbols are refused, not linked
+each to its own, since one function cannot be emitted under two symbols.
+Every `extern` reaching one symbol, under whatever name, must imply one
+prototype, and the backend declares that symbol once.
 
 **An `export` is held to the same table wherever its root's C declares it.**
 C code of the root calling an exported function trusts its own declaration of
