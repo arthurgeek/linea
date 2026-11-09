@@ -121,6 +121,31 @@ fn open_alongside_the_others(sink path: String) -> Bool {
     listed
 }
 
+// How many signatures each of `tasks_at_once` tasks writes when they all
+// sign at once.
+let signatures_per_task: UInt64 = 32
+
+// One of `tasks_at_once` tasks: open a connection to the book at `path`, sign
+// it `signatures_per_task` times, and answer whether every signature was
+// written.
+fn sign_alongside_the_others(sink path: String) -> Bool {
+    defer let owned = path
+    var book = Book.connect(owned.view()) else |error| {
+        error.release()
+        return false
+    }
+    var written = true
+    for _ in 0..signatures_per_task {
+        let _ = &book.sign("Ada", "Signed alongside the others") else |error| {
+            error.release()
+            written = false
+            break
+        }
+    }
+    book.close()
+    written
+}
+
 impl Book {
     // Prepare the guest book at `path` for every connection a server will
     // open: create its file and `entries` table if neither exists yet, and
@@ -154,9 +179,21 @@ impl Book {
     // prepared. SQLite lets one connection write at a time, so
     // `wait_when_busy` makes a connection that finds another writing wait up
     // to two seconds for it rather than fail with `SQLITE_BUSY`.
+    //
+    // A connection waits for the disk after every commit unless told
+    // otherwise, and holds the write lock while it waits, so with every
+    // serving task signing at once the lock is almost never free, and a
+    // connection that keeps retrying can still find it taken after two
+    // seconds. `synchronous=NORMAL` leaves the flush to the write-ahead
+    // log's checkpoint, so a commit ends as soon as the log holds it. A
+    // signature survives the server crashing; one signed just before the
+    // machine loses power or its operating system crashes may be lost, but
+    // the file stays whole. The setting belongs to the connection, not the
+    // file, so every connection sets it.
     pub fn connect(path: Str) -> Result[Book, BookError] {
         defer var database = Database.open(path)?
         &database.wait_when_busy(2000)?
+        &database.execute("PRAGMA synchronous=NORMAL")?
         .Ok(Book { database })
     }
 
@@ -195,6 +232,52 @@ impl Book {
             }
         }
         testing.assert_eq(succeeded, tasks_at_once, "a connection opened at the same time as the others failed")?
+        .Ok(())
+    }
+
+    // As many connections as a server's serving tasks, each on a thread of
+    // its own, all signing the book at once. SQLite writes one signature at a
+    // time, and a connection waits at most two seconds for the others, so
+    // each commit must be short for every signature to be written.
+    test fn every_serving_task_signs_at_once() {
+        defer let path = scratch_path()
+        defer {
+            remove_database(path.view())
+        }
+        Book.initialize(path.view()).unwrap()
+        var paths: Vec[String] = Vec.new()
+        for _ in 0..tasks_at_once {
+            &paths.push(path.view().to_owned().unwrap()).unwrap()
+        }
+        defer let answered = task.map(.Threads(tasks_at_once), paths, sign_alongside_the_others)
+        var succeeded: UInt64 = 0
+        for read ok in answered.as_slice() {
+            if ok {
+                succeeded += 1
+            }
+        }
+        testing.assert_eq(succeeded, tasks_at_once, "a signature written at the same time as the others failed")?
+        defer var reading = Book.connect(path.view()).unwrap()
+        defer var count = reading.database.prepare("SELECT COUNT(*) FROM entries").unwrap()
+        testing.assert(&count.step().unwrap(), "COUNT answered no row")?
+        testing.assert_eq(count.integer(0).unwrap(), Int64(tasks_at_once * signatures_per_task), "a signature is missing")?
+        .Ok(())
+    }
+
+    // `synchronous=NORMAL` is 1: a connection commits a signature without
+    // waiting for the disk. The test above fails only where the disk makes
+    // each commit slow; this one fails everywhere if `connect` leaves the
+    // setting out.
+    test fn a_connection_commits_without_waiting_for_the_disk() {
+        defer let path = scratch_path()
+        defer {
+            remove_database(path.view())
+        }
+        Book.initialize(path.view()).unwrap()
+        defer var book = Book.connect(path.view()).unwrap()
+        defer var synchronous = book.database.prepare("PRAGMA synchronous").unwrap()
+        testing.assert(&synchronous.step().unwrap(), "PRAGMA synchronous answered no row")?
+        testing.assert_eq(synchronous.integer(0).unwrap(), Int64(1), "the connection waits for the disk on every commit")?
         .Ok(())
     }
 

@@ -63,16 +63,16 @@ fn usage_error(cmd: cli.Command) -> UInt8 {
     64
 }
 
-// Print `error` and the help of the command the arguments reached to
-// standard error, and return the exit status: 1 when memory ran out,
-// otherwise 64, the conventional status for a usage mistake.
+// Print `error` to standard error, with the help of the command the error
+// is about, and return the exit status: 1 when memory ran out, otherwise 64,
+// the conventional status for a usage mistake.
 fn report(cmd: cli.Command, args: env.Args, error: cli.CliError) -> UInt8 {
     io.eprintln("error: {error}")
     if match read error { Allocation(_) => true, _ => false } {
         return 1
     }
     var cursor = cli.ArgCursor.new(args)
-    let help = cmd.help_for_arguments(&cursor) else |reason| {
+    let help = cmd.help_for_arguments(&cursor, error) else |reason| {
         let refused: cli.CliError = .Allocation(reason)
         io.eprintln("error: {refused}")
         return 1

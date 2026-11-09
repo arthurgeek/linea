@@ -1,7 +1,7 @@
 The echo example, built once and run as a server and as a client.
 
 A command that is not a mode and a port names what is missing, prints the
-help of the command it reached and exits with 64.
+help of the command the error is about and exits with 64.
 
   $ linea build "$LINEA_ROOT"/examples/tcp_echo.lin -o echo
   $ ./echo serve

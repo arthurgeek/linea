@@ -485,9 +485,21 @@ and each serving task then opens its connection with `Book.connect`:
     // prepared. SQLite lets one connection write at a time, so
     // `wait_when_busy` makes a connection that finds another writing wait up
     // to two seconds for it rather than fail with `SQLITE_BUSY`.
+    //
+    // A connection waits for the disk after every commit unless told
+    // otherwise, and holds the write lock while it waits, so with every
+    // serving task signing at once the lock is almost never free, and a
+    // connection that keeps retrying can still find it taken after two
+    // seconds. `synchronous=NORMAL` leaves the flush to the write-ahead
+    // log's checkpoint, so a commit ends as soon as the log holds it. A
+    // signature survives the server crashing; one signed just before the
+    // machine loses power or its operating system crashes may be lost, but
+    // the file stays whole. The setting belongs to the connection, not the
+    // file, so every connection sets it.
     pub fn connect(path: Str) -> Result[Book, BookError] {
         defer var database = Database.open(path)?
         &database.wait_when_busy(2000)?
+        &database.execute("PRAGMA synchronous=NORMAL")?
         .Ok(Book { database })
     }
 ```
@@ -502,7 +514,31 @@ one at a time: `wait_when_busy(2000)` sets SQLite's busy timeout
 retries for up to two seconds instead of failing at once with `SQLITE_BUSY`.
 Two tests in `book.lin` hold a query open on one connection while another
 signs, one on the same thread and one with the signing connection on a task
-of its own, and both fail without the `PRAGMA` line.
+of its own, and both fail without the `PRAGMA journal_mode=WAL` line.
+
+How long each signature holds the write lock decides how long the others
+wait. By default SQLite asks the disk to store every commit before the commit
+ends. On the Linux machine this was measured on that took most of a
+millisecond, so 128 tasks signing at once kept the lock almost always taken,
+some waited past their two seconds, and those visitors got the 500 page.
+macOS's `fsync` does not wait for the drive's own cache and finishes far
+sooner, which is why the failure shows on Linux. SQLite's busy timeout is not
+a queue: a waiting connection sleeps and tries again, and a newer one can
+take the lock first. `PRAGMA synchronous=NORMAL` ends a commit once the
+write-ahead log holds it and asks the disk only when the log is copied into
+the file, so a signature holds the lock for microseconds rather than a
+millisecond. It is a setting of each connection, not of the file, so
+`connect` runs it every time. The cost is in what a power cut or a system
+crash can undo: a signature always survives the server crashing, but one made
+just before the machine loses power or its operating system crashes may be
+gone after a restart, while the file itself stays intact. A guest book can
+lose its last few signatures that way; a ledger would keep the default.
+Signatures still take turns, so a load that keeps the lock taken for two
+seconds even at this speed still answers some visitors with 500; a server
+with far more writers than this would send every write through one task that
+holds the only writing connection. The test
+`every_serving_task_signs_at_once` signs 32 times from each of 128
+connections at once, and fails on that Linux machine without the line.
 
 A connection is safe on one thread at a time, as long as the SQLite library
 was built to allow threads at all. The wrapper checks that once per
@@ -997,6 +1033,7 @@ needs:
 - `process.raise_open_file_limit` makes room for a connection on each of the
   128 serving tasks.
 - Each serving task opens its own SQLite connection in WAL mode with a busy
-  timeout, so reads run at once and signatures wait only on each other, and
+  timeout and `synchronous=NORMAL`, so reads run at once, signatures wait
+  only on each other, and each holds the write lock for microseconds, and
   the closure that builds a task's handler returns a `Result`, so a database
   that cannot be opened stops serving before anything is accepted.
