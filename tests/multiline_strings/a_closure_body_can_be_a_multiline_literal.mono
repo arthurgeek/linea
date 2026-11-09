@@ -12,10 +12,10 @@ struct Slice[UInt8] {
 fn ;main() -> UInt8 {
     let title = |_n: UInt8|
         \\Chapter
-    UInt8(std.text;Str.length(closure.0(1))) - 7
+    UInt8(std.text;Str.length(lambda$40;main$230(1))) - 7
 }
 
-fn closure.0(read _n: UInt8) -> Str {
+fn lambda$40;main$230(read _n: UInt8) -> Str {
     \\Chapter
 }
 pub fn std.text;Str.length(self: std.text.Str) -> UInt64 {

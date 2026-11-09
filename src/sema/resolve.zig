@@ -164,11 +164,16 @@ fn loadsEveryLibraryModule(gpa: std.mem.Allocator, program: *const Program, libr
 /// read: the library's modules a program imports are the checked library's
 /// own.
 ///
-/// A closure's symbol and its capture environment's names encode allocation
-/// identities, so a closure needs the ordinary load order. A `_linea_trait_`
-/// identifier and a file named as a generated one (`linea-derive-N.lin`)
-/// would collide with the names a resumed expansion gives what it
-/// generates, which a fresh expansion numbers around them.
+/// A `_linea_trait_` identifier and a file named as a generated one
+/// (`linea-derive-N.lin`) would collide with the names a resumed expansion
+/// gives what it generates, which a fresh expansion numbers around them. An
+/// application holding a lambda of its own is checked with the library too.
+/// Its closures' symbols and capture environments are named by the
+/// declaration each lambda is written in and its place there, which a
+/// resumed check computes as a fresh one does. The rule stays because
+/// resuming such programs holds a checked library for each further set of
+/// imports: in a walk of `examples/` that set of libraries takes the
+/// conformance runner past the memory it allows itself.
 ///
 /// **Bound:** the program's modules, a scan of the file parts for each of
 /// the application's own files, and the tokens and expressions those files

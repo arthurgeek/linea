@@ -1,0 +1,14 @@
+import built_in.std.cmp
+
+fn apply[F: fn(left: UInt8, right: UInt8) -> Bool](f: F) -> Bool {
+    f(1, 1)
+}
+
+fn main() -> UInt8 {
+    let mine = cmp.Equatable.equals(UInt8(0))
+    if apply(Equatable.equals) {
+        mine
+    } else {
+        1
+    }
+}

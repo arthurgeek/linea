@@ -26,11 +26,11 @@ module {
     %v0 = arith.constant 0 : i64 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":2:20)
     llvm.store %v0, %s0 : i64, !llvm.ptr loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":2:5)
     %v2 = arith.constant 0 : i64 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":3:24)
-    %v3 = func.call @lin.closure.0() : () -> i64 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":3:24)
+    %v3 = func.call @"lin.lambda$40;main$230"() : () -> i64 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":3:24)
     %sw4 = arith.trunci %v3 : i64 to i8 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":3:5)
     llvm.store %sw4, %s1 : i8, !llvm.ptr loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":3:5)
     %v5 = arith.constant 0 : i64 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":4:18)
-    %v6 = func.call @lin.closure.0() : () -> i64 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":4:18)
+    %v6 = func.call @"lin.lambda$40;main$230"() : () -> i64 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":4:18)
     %sw7 = arith.trunci %v6 : i64 to i8 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":4:5)
     llvm.store %sw7, %s2 : i8, !llvm.ptr loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":4:5)
     %lw8 = llvm.load %s1 : !llvm.ptr -> i8 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":5:5)
@@ -53,7 +53,7 @@ module {
     %v11 = arith.addi %v10, %p11 : i64 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":5:11)
     func.return %v11 : i64 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":5:5)
   }
-  func.func private @lin.closure.0() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
+  func.func private @"lin.lambda$40;main$230"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     cf.br ^b0
   ^b0:
     %v0 = arith.constant 7 : i64 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":2:23)

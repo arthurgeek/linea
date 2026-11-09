@@ -178,6 +178,32 @@ test "a symbol's route is the prefix its alphabet allows, and the separator foll
     }
 }
 
+test "no generated body's symbol reads as a declaration's" {
+    for (std.enums.values(Kind)) |kind| {
+        const name = @tagName(kind);
+        // The kind is spelled in the route alphabet, so the first byte of the
+        // symbol outside it is the `@` after the kind; a declaration's route
+        // is ended by `;` there instead.
+        try testing.expect(std.mem.indexOfNone(u8, name, route_alphabet) == null);
+        // The one type spelling that puts `@` after a name, a closure type,
+        // which may head a declaration's symbol, is named by no kind.
+        try testing.expect(!std.mem.eql(u8, name, types_mod.closure_type_mark[0 .. types_mod.closure_type_mark.len - 1]));
+    }
+
+    var builder = try Typing.Builder.init(testing.allocator);
+    defer builder.deinit();
+    for (std.enums.values(Kind)) |kind| {
+        const identity: Identity = if (kind == .closure_release or kind == .closure_entry or kind == .closure_settle) .{ .type = .u8 } else .{ .closure = .at(0) };
+        var spelled: std.ArrayList(u8) = .empty;
+        defer spelled.deinit(testing.allocator);
+        try spellGenerated(testing.allocator, &spelled, kind, identity, &.{}, .poison, &.{}, &builder);
+        const name = spelled.items;
+        const at = std.mem.indexOfNone(u8, name, route_alphabet).?;
+        try testing.expectEqualStrings(@tagName(kind), name[0..at]);
+        try testing.expectEqual(@as(u8, '@'), name[at]);
+    }
+}
+
 test "a default's text in a type spelling does not end the list it sits in" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -239,21 +265,32 @@ test "a default's text in a type spelling does not end the list it sits in" {
     }
 }
 
-fn symbolForClosure(
-    gpa: std.mem.Allocator,
+/// The bodies the compiler generates rather than a declaration, each spelled
+/// by its name and `@`. No declaration symbol starts that way: a declaration's
+/// route or a named type's spelling is followed by `;`, `[` or `.`, and the one
+/// type spelling with `@` after a name is a closure type's
+/// (`types.closure_type_mark`), which no kind here is named.
+const Kind = enum { lambda, closure_release, constructor, closure_entry, closure_settle, built_in, viewed };
+
+/// What a generated body's symbol is named after: a type by its spelling, a
+/// closure or constructor by its name (`Typing.closure_names`), a trait member
+/// by its name.
+/// Never by a type, closure, constructor or declaration ID: those follow the
+/// order the program was checked in, and a program resumed from a checked
+/// library numbers them after the library's.
+const Identity = union(enum) {
+    type: TypeId,
     closure: ClosureId,
-    args: []const TypeId,
-    self_ty: TypeId,
-    impl_args: []const TypeId,
-    pool: *Typing.Builder,
-) ![]const u8 {
-    return symbolForGenerated(gpa, "closure", @intFromEnum(closure), args, self_ty, impl_args, pool);
-}
+    constructor: types_mod.ConstructorId,
+    /// A trait member, named by its trait's module route, the trait and the
+    /// member.
+    member: struct { program: *const ExpandedProgram, trait: DeclId, member: DeclId },
+};
 
 fn symbolForGenerated(
     gpa: std.mem.Allocator,
-    kind: []const u8,
-    identity: u32,
+    kind: Kind,
+    identity: Identity,
     args: []const TypeId,
     self_ty: TypeId,
     impl_args: []const TypeId,
@@ -261,19 +298,45 @@ fn symbolForGenerated(
 ) ![]const u8 {
     var spelled: std.ArrayList(u8) = .empty;
     defer spelled.deinit(gpa);
-    const base = try std.fmt.allocPrint(gpa, "{s}.{d}", .{ kind, identity });
-    defer gpa.free(base);
-    try spelled.appendSlice(gpa, base);
-    try pool.view().appendArguments(gpa, &spelled, args);
-    if (self_ty != .poison) try pool.view().appendArguments(gpa, &spelled, &.{self_ty});
-    if (impl_args.len > 0) {
-        try spelled.appendSlice(gpa, ".impl");
-        try pool.view().appendArguments(gpa, &spelled, impl_args);
-    }
+    try spellGenerated(gpa, &spelled, kind, identity, args, self_ty, impl_args, pool);
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(gpa);
     try symbol_names.appendBounded(gpa, &out, spelled.items);
     return out.toOwnedSlice(gpa);
+}
+
+/// Appends a generated body's spelling, before a symbol escapes it.
+fn spellGenerated(
+    gpa: std.mem.Allocator,
+    spelled: *std.ArrayList(u8),
+    kind: Kind,
+    identity: Identity,
+    args: []const TypeId,
+    self_ty: TypeId,
+    impl_args: []const TypeId,
+    pool: *Typing.Builder,
+) !void {
+    try spelled.appendSlice(gpa, @tagName(kind));
+    try spelled.append(gpa, '@');
+    const view = pool.view();
+    switch (identity) {
+        .type => |ty| try view.appendArguments(gpa, spelled, &.{ty}),
+        .closure => |closure| try view.appendClosureName(gpa, spelled, closure),
+        .constructor => |constructor| try view.appendConstructorName(gpa, spelled, constructor),
+        .member => |at| {
+            const ast = &at.program.ast;
+            try appendRoute(&view, gpa, spelled, @intCast(at.program.moduleOf(at.trait).index()));
+            try spelled.appendSlice(gpa, ast.tokenText(ast.declName(at.trait)));
+            try spelled.append(gpa, '.');
+            try spelled.appendSlice(gpa, ast.tokenText(ast.declName(at.member)));
+        },
+    }
+    try view.appendArguments(gpa, spelled, args);
+    if (self_ty != .poison) try view.appendArguments(gpa, spelled, &.{self_ty});
+    if (impl_args.len > 0) {
+        try spelled.appendSlice(gpa, ".impl");
+        try view.appendArguments(gpa, spelled, impl_args);
+    }
 }
 
 /// The identity of one instance, and the whole of it.
@@ -696,13 +759,13 @@ pub const TableBuilder = struct {
         errdefer self.gpa.free(owned_impl);
         const name = switch (key.body) {
             .declaration => |decl| try symbolFor(self.gpa, &program.ast, program, decl, owned, pool, key.self_ty, owned_impl),
-            .closure => |closure| try symbolForClosure(self.gpa, closure, owned, key.self_ty, owned_impl, pool),
-            .closure_release => |closure| try symbolForGenerated(self.gpa, "closure_release", @intFromEnum(closure), owned, key.self_ty, owned_impl, pool),
-            .constructor => |constructor| try symbolForGenerated(self.gpa, "constructor", @intFromEnum(constructor.id), owned, key.self_ty, owned_impl, pool),
-            .erased_entry => |entry| try symbolForGenerated(self.gpa, "closure_entry", @intFromEnum(entry.callable), &.{entry.signature}, key.self_ty, owned_impl, pool),
-            .erased_settle => |callable| try symbolForGenerated(self.gpa, "closure_settle", @intFromEnum(callable), owned, key.self_ty, owned_impl, pool),
-            .built_in => |built_in| try symbolForGenerated(self.gpa, "built_in", @intCast(built_in.member.index()), &.{built_in.receiver}, key.self_ty, owned_impl, pool),
-            .viewed => |viewed| try symbolForGenerated(self.gpa, "viewed", @intCast(viewed.member.index()), &.{viewed.receiver}, key.self_ty, owned_impl, pool),
+            .closure => |closure| try symbolForGenerated(self.gpa, .lambda, .{ .closure = closure }, owned, key.self_ty, owned_impl, pool),
+            .closure_release => |closure| try symbolForGenerated(self.gpa, .closure_release, .{ .type = closure }, owned, key.self_ty, owned_impl, pool),
+            .constructor => |constructor| try symbolForGenerated(self.gpa, .constructor, .{ .constructor = constructor.id }, owned, key.self_ty, owned_impl, pool),
+            .erased_entry => |entry| try symbolForGenerated(self.gpa, .closure_entry, .{ .type = entry.callable }, &.{entry.signature}, key.self_ty, owned_impl, pool),
+            .erased_settle => |callable| try symbolForGenerated(self.gpa, .closure_settle, .{ .type = callable }, owned, key.self_ty, owned_impl, pool),
+            .built_in => |built_in| try symbolForGenerated(self.gpa, .built_in, .{ .member = .{ .program = program, .trait = built_in.trait, .member = built_in.member } }, &.{built_in.receiver}, key.self_ty, owned_impl, pool),
+            .viewed => |viewed| try symbolForGenerated(self.gpa, .viewed, .{ .member = .{ .program = program, .trait = viewed.trait, .member = viewed.member } }, &.{viewed.receiver}, key.self_ty, owned_impl, pool),
         };
         errdefer self.gpa.free(name);
         const claimed: u32 = @intCast(self.instances.items.len);

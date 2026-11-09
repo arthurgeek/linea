@@ -12,22 +12,22 @@ fn Crate;;Weighed.total[Bool](self: Crate, _tag: Bool, n: UInt8) -> UInt8 {
         let step = [self] |k: UInt8| self.weight() + k
         twice(step, m) + step(m)
     }
-    ;twice[closure0[Bool]$3aimpl[]$3aCrate](scaled, n) + closure.0[Bool][Crate](n)
+    ;twice[closure$40;Weighed.total$230[Bool]$3aimpl[]$3aCrate](scaled, n) + lambda$40;Weighed.total$230[Bool][Crate](n)
 }
 
-fn ;twice[closure0[Bool]$3aimpl[]$3aCrate](f: closure0[Bool]:impl[]:Crate, n: UInt8) -> UInt8 {
-    closure.0[Bool][Crate](n) + closure.0[Bool][Crate](n)
+fn ;twice[closure$40;Weighed.total$230[Bool]$3aimpl[]$3aCrate](f: closure@;Weighed.total#0[Bool]:impl[]:Crate, n: UInt8) -> UInt8 {
+    lambda$40;Weighed.total$230[Bool][Crate](n) + lambda$40;Weighed.total$230[Bool][Crate](n)
 }
 
-fn closure.0[Bool][Crate](read m: UInt8) -> UInt8 {
+fn lambda$40;Weighed.total$230[Bool][Crate](read m: UInt8) -> UInt8 {
     let step = [self] |k: UInt8| self.weight() + k
-    ;twice[closure1[Bool]$3aimpl[]$3aCrate](step, m) + closure.1[Bool][Crate](m)
+    ;twice[closure$40;Weighed.total$231[Bool]$3aimpl[]$3aCrate](step, m) + lambda$40;Weighed.total$231[Bool][Crate](m)
 }
-fn ;twice[closure1[Bool]$3aimpl[]$3aCrate](f: closure1[Bool]:impl[]:Crate, n: UInt8) -> UInt8 {
-    closure.1[Bool][Crate](n) + closure.1[Bool][Crate](n)
+fn ;twice[closure$40;Weighed.total$231[Bool]$3aimpl[]$3aCrate](f: closure@;Weighed.total#1[Bool]:impl[]:Crate, n: UInt8) -> UInt8 {
+    lambda$40;Weighed.total$231[Bool][Crate](n) + lambda$40;Weighed.total$231[Bool][Crate](n)
 }
 
-fn closure.1[Bool][Crate](read k: UInt8) -> UInt8 {
+fn lambda$40;Weighed.total$231[Bool][Crate](read k: UInt8) -> UInt8 {
     Crate;;Weighed.weight(self) + k
 }
 fn Crate;;Weighed.weight(self: Crate) -> UInt8 {

@@ -19,7 +19,7 @@ module {
     %s0 = llvm.alloca %z0 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     cf.br ^b0
   ^b0:
-    %fa0 = func.constant @lin.closure.0 : (i64) -> i64 loc("tests/codegen/a_lambda_converts_to_one_function_pointer.lin":2:53)
+    %fa0 = func.constant @"lin.lambda$40;main$230" : (i64) -> i64 loc("tests/codegen/a_lambda_converts_to_one_function_pointer.lin":2:53)
     %v0 = builtin.unrealized_conversion_cast %fa0 : (i64) -> i64 to !llvm.ptr loc("tests/codegen/a_lambda_converts_to_one_function_pointer.lin":2:53)
     llvm.store %v0, %s0 : !llvm.ptr, !llvm.ptr loc("tests/codegen/a_lambda_converts_to_one_function_pointer.lin":2:5)
     %v2 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("tests/codegen/a_lambda_converts_to_one_function_pointer.lin":3:5)
@@ -27,7 +27,7 @@ module {
     %v4 = llvm.call %v2(%v3) : !llvm.ptr, (i64) -> i64 loc("tests/codegen/a_lambda_converts_to_one_function_pointer.lin":3:5)
     func.return %v4 : i64 loc("tests/codegen/a_lambda_converts_to_one_function_pointer.lin":3:5)
   }
-  func.func private @lin.closure.0(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
+  func.func private @"lin.lambda$40;main$230"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %pw0 = arith.trunci %a0 : i64 to i8
