@@ -10,21 +10,23 @@ name: Pull request caches
 # start the whole CI workflow, its `changes` job and `merge-ready` included,
 # on every close, and share the concurrency group of the pull request's runs.
 # Nothing here is a required status.
+#
+# `pull_request_target` runs this file as the base branch holds it, with a
+# token that may delete a fork's caches too, so a pull request can neither
+# edit the workflow that deletes its caches nor keep them by coming from a
+# fork. That is safe because nothing of the pull request runs: there is no
+# checkout, and the one input taken from the event is its number, which
+# names the ref to delete.
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
 
 permissions: {}
 
 jobs:
   delete-caches:
-    # A pull request from a fork gets a token that cannot delete; its caches
-    # are left to eviction.
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # No checkout: the step runs `gh` alone, so no code of the pull request
-    # runs with this token.
     permissions:
       actions: write
     steps:

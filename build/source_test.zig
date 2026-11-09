@@ -321,25 +321,27 @@ test "prune-caches deletes only a lane's older caches on the run's own ref" {
 test "CI deletes a closed pull request's caches without running its code" {
     const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/pull-request-caches.yml", testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(workflow);
+    // `pull_request_target` runs the base branch's copy of this file with a
+    // token that may delete, so nothing of the pull request may run in it: no
+    // checkout of any ref, and nothing read from the head it came from.
+    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, workflow, "actions/checkout"));
+    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, workflow, "github.event.pull_request.head"));
+    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, workflow, "head_ref"));
+    try testing.expectEqualStrings("  pull_request_target:\n    types: [closed]", source.between(workflow, "\non:\n", "\n\n") orelse return error.MissingTrigger);
     // Everything from the trigger on, whole: the `closed` trigger alone, a
-    // token that may delete caches and nothing else, no checkout, and a
-    // delete scoped to the pull request's own ref.
+    // token that may delete caches and nothing else, and a delete scoped to
+    // the ref the event's number names.
     try testing.expectEqualStrings(
         \\on:
-        \\  pull_request:
+        \\  pull_request_target:
         \\    types: [closed]
         \\
         \\permissions: {}
         \\
         \\jobs:
         \\  delete-caches:
-        \\    # A pull request from a fork gets a token that cannot delete; its caches
-        \\    # are left to eviction.
-        \\    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         \\    runs-on: ubuntu-24.04
         \\    timeout-minutes: 10
-        \\    # No checkout: the step runs `gh` alone, so no code of the pull request
-        \\    # runs with this token.
         \\    permissions:
         \\      actions: write
         \\    steps:
