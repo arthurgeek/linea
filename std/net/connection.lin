@@ -87,7 +87,7 @@ test fn a_deadline_too_far_ahead_means_no_deadline() {
 }
 
 impl Connection {
-    // Bound each later read and write separately, in milliseconds, and end
+    // Bound each later read and send attempt separately, in milliseconds, and end
     // any deadline. Zero waits forever.
     pub fn set_timeouts(inout self: Self, read_ms: UInt64, write_ms: UInt64) {
         self.read_ms = read_ms

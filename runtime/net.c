@@ -187,8 +187,14 @@ static long wait_ready(const struct linea_op *op, unsigned long remaining_ns, in
         }
         timeout_ms = whole_ms > (unsigned long)INT_MAX ? INT_MAX : (int)whole_ms;
     }
-    /* EAGAIN is POSIX's name for poll running briefly short of memory. */
-    if (poll(&entry, 1, timeout_ms) < 0 && errno != EINTR && errno != EAGAIN) return -(long)errno;
+    if (poll(&entry, 1, timeout_ms) >= 0 || errno == EINTR) return 0;
+    if (errno != EAGAIN) return -(long)errno;
+    /* EAGAIN is POSIX's name for poll running briefly short of memory. The
+     * caller retries, so pause for a millisecond at most rather than spin. */
+    struct timespec pause;
+    pause.tv_sec = 0;
+    pause.tv_nsec = (!unbounded && remaining_ns < 1000000UL) ? (long)remaining_ns : 1000000L;
+    (void)nanosleep(&pause, NULL);
     return 0;
 }
 

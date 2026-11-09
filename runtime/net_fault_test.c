@@ -574,9 +574,20 @@ static void a_poll_short_of_resources_is_retried(void) {
     const struct poll_step busy[] = { { EAGAIN, 0, 0 } };
     script_polls(busy, 1);
     read_eagain = 1;
+    int sleeps = nanosleep_calls;
     char got[8];
     assert(linea_net_read((int)p.server, ADDRESS(got), sizeof got, 0) == 1);
     assert_script_finished();
+    /* The retry pauses instead of spinning. */
+    assert(nanosleep_calls == sleeps + 1);
+
+    const struct poll_step expiring[] = { { EAGAIN, 0, 5000000 } };
+    script_polls(expiring, 1);
+    read_eagain = 2;
+    sleeps = nanosleep_calls;
+    assert(linea_net_read((int)p.server, ADDRESS(got), sizeof got, fake_now_ns + 5000000) == -ETIMEDOUT);
+    assert_script_finished();
+    assert(nanosleep_calls == sleeps + 1);
     close_pair(p);
 }
 

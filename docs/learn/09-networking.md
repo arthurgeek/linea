@@ -354,7 +354,7 @@ error[O-Leak]: `visitor` (a linear `net.Connection`) is still owned when this pa
   connection before the next is accepted, so a slow client holds up the
   clients queued behind it. A server that must not wait needs a different
   design, and one that waits bounds each connection: `set_timeouts` limits
-  every read and write, and `set_deadline` limits all the reads together, so a
+  every read and send attempt, and `set_deadline` limits all the reads together, so a
   client that sends a byte at a time cannot hold the server either.
 - When accepting fails because the peer reset the connection or the process ran
   out of descriptors, `serve` waits and tries again, starting at 5
