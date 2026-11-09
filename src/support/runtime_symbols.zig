@@ -221,11 +221,6 @@ const written: Parameter = .{ .scalar = .u64, .passing = .inout };
 /// writes. Passed as `address.raw` of an `Address[UInt8]` the standard
 /// library made from the buffer or slice.
 const bytes_at: Parameter = .{ .scalar = .u64, .held = .bytes, .address = true };
-/// The address of bytes a storage primitive reads or writes. Lowering replaces
-/// the call with an access it checks against the extent beside it, so no
-/// runtime is handed it; the number may be one C handed over, which no
-/// `Address` names.
-const checked_at: Parameter = .{ .scalar = .u64, .held = .bytes };
 /// A descriptor a linear value owns.
 const descriptor: Parameter = .{ .scalar = .i32, .held = .descriptor };
 /// The address of an allocation a buffer owns, which the runtime frees.
@@ -414,10 +409,10 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_float32_parse", .parameters = &.{ bytes_at, p(.u64), written, written }, .result = .u64, .declared_by = mem_parse },
     .{ .symbol = "linea_float32_debug", .parameters = &.{ p(.u64), written, written, written, written }, .result = .u64, .declared_by = .granted },
     .{ .symbol = "linea_float32_shortest", .parameters = &.{ p(.u64), .{ .scalar = .i64, .passing = .inout } }, .result = .u64, .declared_by = .granted },
-    .{ .symbol = "linea_raw_load", .parameters = &.{ checked_at, p(.u64), p(.u64) }, .result = .u64, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
-    .{ .symbol = "linea_raw_load8", .parameters = &.{ checked_at, p(.u64), p(.u64) }, .result = .u8, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
-    .{ .symbol = "linea_raw_store", .parameters = &.{ checked_at, p(.u64), p(.u64), p(.u64) }, .result = .unit, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
-    .{ .symbol = "linea_raw_store8", .parameters = &.{ checked_at, p(.u64), p(.u64), p(.u8) }, .result = .unit, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
+    .{ .symbol = "linea_raw_load", .parameters = &.{ bytes_at, p(.u64), p(.u64) }, .result = .u64, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
+    .{ .symbol = "linea_raw_load8", .parameters = &.{ bytes_at, p(.u64), p(.u64) }, .result = .u8, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
+    .{ .symbol = "linea_raw_store", .parameters = &.{ bytes_at, p(.u64), p(.u64), p(.u64) }, .result = .unit, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
+    .{ .symbol = "linea_raw_store8", .parameters = &.{ bytes_at, p(.u64), p(.u64), p(.u8) }, .result = .unit, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
     // A float's IEEE 754 bits as the unsigned integer of its width, and back.
     // Lowering replaces each with a bit-for-bit reinterpretation.
     .{ .symbol = "linea_float64_to_bits", .parameters = &.{p(.f64)}, .result = .u64, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`Float64.to_bits`" } } },

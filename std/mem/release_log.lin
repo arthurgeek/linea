@@ -1,3 +1,4 @@
+import std.mem.address
 import std.testing
 
 // A ReleaseLog records the code of each ReleaseTag released while it is open,
@@ -118,7 +119,8 @@ impl Release for ReleaseTag {
 // without the log being observed, and only a test that starts no task may
 // keep one.
 internal fn record_release(at: UInt64, extent: UInt64, code: UInt64) {
-    let count = linea_raw_load(at, extent, 0)
-    linea_raw_store(at, extent, (count + 1) * release_word_bytes, code)
-    linea_raw_store(at, extent, 0, count + 1)
+    let words: address.Address[UInt64] = number_address(at)
+    let count = linea_raw_load(address.raw(words), extent, 0)
+    linea_raw_store(address.raw(words), extent, (count + 1) * release_word_bytes, code)
+    linea_raw_store(address.raw(words), extent, 0, count + 1)
 }

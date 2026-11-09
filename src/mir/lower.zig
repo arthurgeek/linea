@@ -5273,7 +5273,7 @@ const Lowerer = struct {
             return self.emit(.constant, .u64, span, .{ .constant = self.types().layoutOf(settled[0]).size });
         // The address of slots `offset` bytes into a buffer: the buffer's
         // own address plus the offset, which may reach its end and no further.
-        if (d == self.library.raw.address_in) {
+        if (d == self.library.raw.address_in or d == self.library.raw.owned_address_in) {
             const buffer = args.items[0];
             const buffer_ty = self.b.insts.items(.ty)[buffer.index()];
             const start = try self.fieldValue(buffer, buffer_ty, "at", span);
@@ -5286,6 +5286,8 @@ const Lowerer = struct {
         }
         // The address of a slice's first element: the slice's own address,
         // which names values of its element type.
+        // An address at a number is the number itself.
+        if (d == self.library.raw.number_address) return args.items[0];
         if (d == self.library.raw.slice_address) {
             const view = args.items[0];
             return self.fieldValue(view, self.b.insts.items(.ty)[view.index()], "at", span);

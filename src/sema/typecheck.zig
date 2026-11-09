@@ -1634,6 +1634,7 @@ fn typecheckInternal(
     try c.checkTestAnswers();
     try c.checkForeignCallbacks();
     try c.checkRawAddresses();
+    try c.checkStorageAddresses();
     try c.checkHandleChanges();
     try c.checkForeignUses(foreign_module);
 
@@ -20066,7 +20067,8 @@ const Checker = struct {
 
     /// [T-RawAddress] at a declaration: an `extern` or `export` whose
     /// signature reaches a `mem.address.Address`, itself, through a newtype's
-    /// base or through a callback, would hand C a
+    /// base, through the `R` of an answered `ffi.Errno[R]` or through a
+    /// callback, would hand C a
     /// number that names a type, or take one from it, and C may keep it where
     /// no type names what the address holds. A runtime callback's function may
     /// take one, because the entry C calls is the compiler's; the `extern`
@@ -20079,7 +20081,7 @@ const Checker = struct {
         };
         var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
         defer seen.deinit(self.gpa);
-        var names = try self.reachesAddress(&seen, signature.result);
+        var names = try self.answerReachesAddress(signature.result);
         const params = self.builder.callableParams(signature);
         for (params) |param| {
             // A callback's context reaches C as an address C hands back
@@ -20097,6 +20099,19 @@ const Checker = struct {
             "`{s}` would pass an address between C and Linea, and C may keep one where no type names what the address holds",
             .{self.ast.tokenText(self.ast.declName(d))},
         );
+    }
+
+    /// Whether an `extern`'s or `export`'s answer reaches a
+    /// `mem.address.Address`, which [T-RawAddress] refuses at the
+    /// declaration. An `ffi.Errno[R]` crosses as its `R`, so it is read as
+    /// that; every other answer that crosses is a scalar, a newtype over one
+    /// or a callback, which `reachesAddress` follows.
+    fn answerReachesAddress(self: *Checker, answer: TypeId) std.mem.Allocator.Error!bool {
+        if (self.raw_accesses.address == .none) return false;
+        var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer seen.deinit(self.gpa);
+        const crossing = self.raw_accesses.errnoValue(&self.builder, answer) orelse answer;
+        return self.reachesAddress(&seen, crossing);
     }
 
     /// Whether `ty` is the context a callback among `params` takes first,
@@ -20179,6 +20194,11 @@ const Checker = struct {
         for (0..self.ast.exprCount()) |i| {
             const id = ExprId.at(@intCast(i));
             switch (self.ast.exprTag(id)) {
+                // The number a C view is built from; where the view may be
+                // built is [T-RawAddress]'s rule at the construction.
+                .call => if (self.foreignViewBuilt(id) != null) {
+                    for (self.ast.call(id).args) |arg| try allowed.put(self.gpa, self.ast.withoutGroups(arg), {});
+                },
                 .struct_literal => {
                     const closure = self.raw_accesses.closure;
                     const built = self.builder.construction_types.items;
@@ -20220,6 +20240,280 @@ const Checker = struct {
                 "call `raw` where the number is passed to the runtime",
             );
         }
+    }
+
+    /// [T-RawAddress] at the library's raw layer: where an address or an
+    /// extent of bytes can be chosen, read or trusted, each permitted place is
+    /// a declaration the compiler's table names or finds, so a declaration
+    /// added later is covered without anyone listing it.
+    ///
+    /// Every field of a raw type (`RawAccesses.rawTypes`) is named, in any
+    /// expression or pattern and in a literal, only in a member of an
+    /// implementation for that type, in an allocator's member where the type
+    /// says so, and in the declarations its row lists. The check sits at the
+    /// node that names the field, so a read, a write, a lend, a method
+    /// receiver and an argument are one case. A `Storage` literal with no
+    /// buffer, `address.nowhere()` and a length of zero names no bytes and is
+    /// written anywhere.
+    ///
+    /// This is what lets the dependency table skip a storage's buffer and
+    /// address: what they hold is chosen only in the storage's own members
+    /// and the places that keep a task body or erase a closure.
+    ///
+    /// One walk over the expressions, each asked a type lookup or a
+    /// resolution and a comparison with the few declarations named.
+    fn checkStorageAddresses(self: *Checker) std.mem.Allocator.Error!void {
+        const raw = self.raw_accesses;
+        if (raw.storage == .none) return;
+        const rows = raw.rawTypes();
+        // A callee the checker resolved to a declaration names a method, not
+        // a field; a call through a field's value reads the field, so its
+        // callee is checked as the field node it is. Methods a raw layer
+        // confines are held to their places here too.
+        var callees: std.AutoHashMapUnmanaged(ExprId, void) = .empty;
+        defer callees.deinit(self.gpa);
+        for (self.calls.items) |call| {
+            const d = switch (call.target) {
+                .declared => |d| d,
+                else => continue,
+            };
+            if (self.ast.exprTag(call.at) != .call) continue;
+            const callee = self.ast.withoutGroups(self.ast.call(call.at).callee);
+            if (self.ast.exprTag(callee) != .field) continue;
+            try callees.put(self.gpa, callee, {});
+            const owner = self.expression_owners[call.at.index()];
+            if (owner == .none or !self.program.get(self.program.moduleOf(owner)).library) continue;
+            try self.checkConfined(d, callee, owner);
+        }
+        for (0..self.ast.exprCount()) |i| {
+            const id = ExprId.at(@intCast(i));
+            const owner = self.expression_owners[i];
+            // Outside the library these types are opaque and these
+            // declarations private, which [M-Opaque] and resolution already
+            // refuse.
+            if (owner == .none or !self.program.get(self.program.moduleOf(owner)).library) continue;
+            try self.checkConfinedName(id, owner);
+            if (self.ast.exprTag(id) == .call) try self.checkForeignViewBuilt(id, owner);
+            const of = switch (self.ast.exprTag(id)) {
+                .field => blk: {
+                    if (callees.contains(id)) continue;
+                    // `Buffer.alignment` names a constant of the type, not a
+                    // field of a value.
+                    const operand = self.ast.withoutGroups(self.ast.unaryOperand(id));
+                    const named = self.res.targetOf(operand);
+                    if (named != .none) switch (self.res.kindOf(named)) {
+                        .declared_type, .builtin_type, .trait => continue,
+                        else => {},
+                    };
+                    break :blk self.builder.exprType(operand);
+                },
+                .struct_pattern => self.builder.exprType(id),
+                .struct_literal => blk: {
+                    const built = self.builder.construction_types.items;
+                    break :blk if (id.index() < built.len and built[id.index()] != .poison) built[id.index()] else self.builder.exprType(id);
+                },
+                else => continue,
+            };
+            const row = self.rawRow(&rows, of) orelse continue;
+            if (self.mayNameFields(row, owner, of)) continue;
+            if (self.ast.exprTag(id) == .struct_literal and row.decl == raw.storage and self.addressesNothing(id)) continue;
+            const name = self.ast.tokenText(self.ast.declName(row.decl));
+            _ = self.report(
+                .t_raw_address,
+                id,
+                "`mem.{s}` holds an address or an extent of bytes, so its fields are named only by its own members",
+                .{name},
+                "reach it through the type's own operations",
+            );
+        }
+    }
+
+    /// [T-RawAddress] at the construction of a C view (`std.ffi`'s `Bytes`,
+    /// `CText`, `CTextList`) from a number: its operations read at that
+    /// number, so a view is built only in its own members and in the
+    /// declarations `RawAccesses.foreign_view_builders` names, each from an
+    /// address whose source its contract names or from a number C handed
+    /// over. A null view, built from the literal `0`, names no bytes and is
+    /// built anywhere.
+    fn checkForeignViewBuilt(self: *Checker, id: ExprId, owner: node.DeclId) std.mem.Allocator.Error!void {
+        const built = self.foreignViewBuilt(id) orelse return;
+        if (self.memberOfType(owner, built)) return;
+        if (std.mem.indexOfScalar(node.DeclId, &self.raw_accesses.foreign_view_builders, owner) != null) return;
+        const args = self.ast.call(id).args;
+        if (args.len == 1) {
+            const arg = self.ast.withoutGroups(args[0]);
+            if (self.ast.exprTag(arg) == .int_literal and std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(arg)), "0")) return;
+        }
+        _ = self.report(
+            .t_raw_address,
+            id,
+            "`ffi.{s}` reads at the number it is built from, so it is built only by its own operations and the declarations the table names",
+            .{self.ast.tokenText(self.ast.declName(built))},
+            "build it from what owns the bytes, through the operation that lends them",
+        );
+    }
+
+    /// The C view a call constructs, where it is one.
+    fn foreignViewBuilt(self: *const Checker, id: ExprId) ?node.DeclId {
+        const d = resolve_mod.constructionOf(self.ast, self.res, id) orelse return null;
+        for (self.raw_accesses.foreign_views) |candidate| if (candidate != .none and candidate == d) return candidate;
+        return null;
+    }
+
+    /// The raw type `t` is, seen through an observation of one.
+    fn rawRow(self: *Checker, rows: []const RawAccesses.RawType, t: TypeId) ?RawAccesses.RawType {
+        if (t == .poison) return null;
+        const seen = switch (self.builder.get(t)) {
+            .borrow => |observation| observation.referent,
+            else => t,
+        };
+        const declaration = self.builder.view().declOfType(seen) orelse return null;
+        if (declaration == .none) return null;
+        for (rows) |row| if (row.decl == declaration) return row;
+        return null;
+    }
+
+    /// Whether `owner` may name the fields of `row`'s type: a member of an
+    /// implementation for the type, an allocator's member where the row
+    /// says so, or a declaration the row lists.
+    fn mayNameFields(self: *Checker, row: RawAccesses.RawType, owner: node.DeclId, t: TypeId) bool {
+        if (std.mem.indexOfScalar(node.DeclId, &row.also, owner) != null) return true;
+        if (self.memberOfType(owner, row.decl)) return true;
+        // An allocator's members build and take apart its own buffers, a
+        // `Buffer[Self]`; a buffer of another allocator is built only where
+        // the table names a backing allocator's buffer.
+        if (!row.allocators) return false;
+        if (std.mem.indexOfScalar(node.DeclId, &self.raw_accesses.backing_buffer_builders, owner) != null) return true;
+        const allocator = self.allocator_decl orelse return false;
+        const implementation = self.enclosingRow(owner) orelse return false;
+        if (implementation.trait != allocator.index()) return false;
+        const seen = switch (self.builder.get(t)) {
+            .borrow => |observation| observation.referent,
+            else => t,
+        };
+        const args = self.builder.appliedTo(seen);
+        return args.len == 1 and args[0] == implementation.ty;
+    }
+
+    /// Whether `owner` is a member of an implementation for the type `decl`
+    /// declares, or a test written inside one. A test is a member of nothing,
+    /// so it is judged by the implementation it is written in.
+    fn memberOfType(self: *Checker, owner: node.DeclId, decl: node.DeclId) bool {
+        if (decl == .none or owner == .none) return false;
+        if (self.ast.declIsTest(owner)) {
+            const written = self.ast.declOwner(owner);
+            return written != .none and self.program.moduleOf(owner) == self.program.moduleOf(decl) and
+                std.mem.eql(u8, self.ast.tokenText(written), self.ast.tokenText(self.ast.declName(decl)));
+        }
+        const implementation = self.enclosingRow(owner) orelse return false;
+        return switch (implementation.head) {
+            .applied => |declaration| declaration == decl,
+            .whole => |t| self.builder.view().declOfType(t) == decl,
+            else => false,
+        };
+    }
+
+    /// The raw declarations only named declarations may name, as a callee or
+    /// as a value: `owned_address_in`, the closure erasure primitives, and the
+    /// three that keep, take and release a task body.
+    fn checkConfinedName(self: *Checker, id: ExprId, owner: node.DeclId) std.mem.Allocator.Error!void {
+        const b = self.res.targetOf(id);
+        if (b == .none or self.res.kindOf(b) != .function) return;
+        const d = self.res.declaredBy(b);
+        if (d == .none) return;
+        try self.checkConfined(d, id, owner);
+    }
+
+    /// Holds a name of the confined declaration `d`, at `id` in `owner`, to
+    /// the places the table names for it.
+    fn checkConfined(self: *Checker, d: node.DeclId, id: ExprId, owner: node.DeclId) std.mem.Allocator.Error!void {
+        const raw = self.raw_accesses;
+        const Confinement = struct { decl: node.DeclId, allowed: []const node.DeclId, types: []const node.DeclId = &.{}, message: []const u8, help: []const u8 };
+        const slot_types = [_]node.DeclId{ raw.storage, raw.vec, raw.drain };
+        const slots = "a slot is taken, put, placed or given up only by `Storage` and `Vec` and the declarations the table names, each of which settles or hands on every value it puts";
+        const slots_help = "use the vector's or the storage's own operations";
+        const channel = "an endpoint is trusted to carry the value asked of it, so only a `Chan`'s own members move a value through one, and only `task.Slot.start` opens one";
+        const channel_help = "send or receive through a `Chan`";
+        const queue = "a queue is trusted to hold jobs for the state asked of it, so only `task.Client.call` and the owning task reach one";
+        const queue_help = "call the owning task through a `task.Client`";
+        const foreign = "C's memory has no extent to check a read against, so only a C view's own operations read it";
+        const foreign_help = "read the view through its own operations";
+        const confinements = [_]Confinement{
+            .{ .decl = raw.owned_address_in, .allowed = &raw.owned_address_callers, .message = "`owned_address_in` makes an address that outlives its buffer, so only a declaration that takes the buffer into what the address names calls it", .help = "call `address_in`, whose address borrows the buffer" },
+            .{ .decl = raw.closure_entry, .allowed = &.{raw.closure_erase}, .message = "a closure's entry is made only where `Closure.erase` erases a callable", .help = "build the closure with `Closure.open` or `Closure.open_in`" },
+            .{ .decl = raw.closure_settle, .allowed = &.{raw.closure_erase}, .message = "a closure's release is made only where `Closure.erase` erases a callable", .help = "build the closure with `Closure.open` or `Closure.open_in`" },
+            .{ .decl = raw.closure_size, .allowed = &.{raw.closure_erase}, .message = "a closure's size is read only where `Closure.erase` erases a callable", .help = "build the closure with `Closure.open` or `Closure.open_in`" },
+            .{ .decl = raw.keep_body, .allowed = &.{raw.task_slot_start}, .message = "a task's body is kept in bytes only by `task.Slot.start`, which hands the addresses to the thread it starts", .help = "start the task with `task.prepare(body)` and `start()`" },
+            .{ .decl = raw.release_kept_bytes, .allowed = &.{raw.task_slot_start}, .message = "a kept task body's bytes are released only by the thread `task.Slot.start` starts", .help = "start the task with `task.prepare(body)` and `start()`" },
+            .{ .decl = raw.take_kept_body, .allowed = &.{raw.task_run_body}, .message = "a kept task body is taken only by the thread `task.Slot.start` starts", .help = "start the task with `task.prepare(body)` and `start()`" },
+            .{ .decl = raw.task_run_body, .allowed = &.{raw.task_slot_start}, .message = "a task's entry is handed only to the thread `task.Slot.start` starts, with the addresses `keep_body` answered", .help = "start the task with `task.prepare(body)` and `start()`" },
+            .{ .decl = raw.take, .allowed = &raw.slot_users, .types = &slot_types, .message = slots, .help = slots_help },
+            .{ .decl = raw.put, .allowed = &raw.slot_users, .types = &slot_types, .message = slots, .help = slots_help },
+            .{ .decl = raw.place, .allowed = &raw.slot_users, .types = &slot_types, .message = slots, .help = slots_help },
+            .{ .decl = raw.span, .allowed = &raw.slot_users, .types = &slot_types, .message = slots, .help = slots_help },
+            .{ .decl = raw.storage_dispose, .allowed = &raw.slot_users, .types = &slot_types, .message = slots, .help = slots_help },
+            .{ .decl = raw.storage_into_buffer, .allowed = &raw.slot_users, .types = &slot_types, .message = slots, .help = slots_help },
+            .{ .decl = raw.number_address, .allowed = &raw.number_address_callers, .message = "`number_address` makes an address of any number, so only the declarations the table names, each reading memory C or a test log handed over, call it", .help = "reach bytes through an address made from what owns them" },
+            .{ .decl = raw.foreign_at, .allowed = &.{raw.foreign_at_test}, .types = &.{ raw.foreign_views[1], raw.foreign_views[2] }, .message = "`foreign_at` makes an address of the number a C view holds, so only that view's own members call it, under a contract tying the address to the view", .help = "read the view through its own operations" },
+            .{ .decl = raw.send_payload, .allowed = &.{}, .types = &.{raw.endpoint}, .message = channel, .help = channel_help },
+            .{ .decl = raw.receive_payload, .allowed = &.{}, .types = &.{raw.endpoint}, .message = channel, .help = channel_help },
+            .{ .decl = raw.receive_payload_until, .allowed = &.{}, .types = &.{raw.endpoint}, .message = channel, .help = channel_help },
+            .{ .decl = raw.chan_opened, .allowed = &.{ raw.task_run_body, raw.task_slot_start }, .types = &.{raw.endpoint}, .message = channel, .help = channel_help },
+            .{ .decl = raw.call_owner, .allowed = &.{raw.client_call}, .message = queue, .help = queue_help },
+            .{ .decl = raw.next_owner_request, .allowed = &.{raw.run_owner}, .message = queue, .help = queue_help },
+            .{ .decl = raw.record_release, .allowed = &raw.record_release_callers, .message = "`record_release` writes at the number it is given, so only the declarations the table names call it", .help = "release a `ReleaseTag`" },
+            .{ .decl = raw.foreign_byte, .allowed = &raw.foreign_readers, .types = &.{ raw.foreign_views[1], raw.foreign_views[2] }, .message = foreign, .help = foreign_help },
+            .{ .decl = raw.foreign_word, .allowed = &raw.foreign_readers, .types = &.{ raw.foreign_views[1], raw.foreign_views[2] }, .message = foreign, .help = foreign_help },
+            .{ .decl = raw.release_from, .allowed = &.{}, .types = &.{ raw.vec, raw.drain }, .message = "`release_from` trusts the counts it is given, so only a vector's and a drain's own members, which know how many slots are live, call it", .help = "release the vector or the drain itself" },
+        };
+        // A runtime symbol or lowered primitive that reads or writes bytes at
+        // an address trusts the extent passed beside it, whichever symbol
+        // the table adds later.
+        if (self.ast.declIsExtern(d)) if (runtime_symbols.signatureOf(self.ast.tokenText(self.ast.declName(d)))) |signature| {
+            for (signature.parameters) |parameter| if (parameter.address) {
+                const owners = [_]node.DeclId{ raw.buffer, raw.storage, raw.endpoint };
+                if (std.mem.indexOfScalar(node.DeclId, &raw.byte_operations, owner) != null) return;
+                for (owners) |t| if (self.memberOfType(owner, t)) return;
+                _ = self.report(.t_raw_address, id, "`{s}` trusts the extent beside its address, so only the declarations the table names pass one", .{self.ast.tokenText(self.ast.declName(d))}, "use the operation of what owns the bytes");
+                return;
+            };
+        };
+        for (confinements) |confinement| {
+            if (confinement.decl == .none or d != confinement.decl) continue;
+            if (std.mem.indexOfScalar(node.DeclId, confinement.allowed, owner) != null) return;
+            for (confinement.types) |t| if (self.memberOfType(owner, t)) return;
+            _ = self.report(.t_raw_address, id, "{s}", .{confinement.message}, confinement.help);
+            return;
+        }
+    }
+
+    /// Whether a `Storage` literal holds no bytes: its `buffer` is `.None`, its
+    /// `at` a call of `address.nowhere()` and its `len` zero, so no slot can
+    /// be reached through it and nothing a later release could free.
+    fn addressesNothing(self: *Checker, literal: ExprId) bool {
+        const nowhere = self.raw_accesses.address_nowhere;
+        if (nowhere == .none) return false;
+        const c = self.ast.call(literal);
+        if (c.callee != ExprId.none) return false;
+        var empty_buffer = false;
+        var no_bytes = false;
+        var no_length = false;
+        var at: usize = 0;
+        while (at + 1 < c.args.len) : (at += 2) {
+            if (self.ast.exprTag(c.args[at]) == .err) continue;
+            const name = self.ast.tokenText(self.ast.exprMain(c.args[at]));
+            const value = self.ast.withoutGroups(c.args[at + 1]);
+            if (value == ExprId.none) continue;
+            if (std.mem.eql(u8, name, "at")) {
+                no_bytes = self.ast.exprTag(value) == .call and self.ast.call(value).args.len == 0 and
+                    self.namesFunction(self.ast.withoutGroups(self.ast.call(value).callee), nowhere);
+            } else if (std.mem.eql(u8, name, "buffer")) {
+                empty_buffer = self.ast.exprTag(value) == .variant_ref and std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(value)), "None");
+            } else if (std.mem.eql(u8, name, "len")) {
+                no_length = self.ast.exprTag(value) == .int_literal and std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(value)), "0");
+            }
+        }
+        return empty_buffer and no_bytes and no_length;
     }
 
     /// [T-RawAddress] at a runtime call: each argument for a parameter
@@ -20660,14 +20954,18 @@ const Checker = struct {
         if (signature != .callable) return false;
         const raw = self.raw_accesses;
         const contracts = signature.callable.contracts;
-        if (d == raw.stride or d == raw.address_in or d == raw.slice_address or raw.processText(d) != null) return contracts.len == 0;
+        if (d == raw.stride or d == raw.number_address or raw.processText(d) != null) return contracts.len == 0;
         if (contracts.len != 1) return false;
         const effect = contracts[0];
         if (effect.target.len != 0 or effect.source.fields.len != 0 or effect.borrows_source) return false;
         if (d == raw.put) return effect.kind == .retains and effect.source.root == .parameter and effect.source.root.parameter == 2 and
             effect.destination != null and effect.destination.?.root == .parameter and effect.destination.?.root.parameter == 0 and effect.destination.?.fields.len == 0;
+        // A span and the address of a buffer's bytes borrow their owner, so
+        // neither outlives it; every other primitive, the address of a slice
+        // and the address a buffer's new owner keeps included, carries what
+        // its first argument carries.
         return effect.destination == null and effect.source.root == .parameter and effect.source.root.parameter == 0 and
-            effect.kind == (if (d == raw.span or d == raw.buffer_span) @as(@FieldType(types_mod.CallableContract, "kind"), .borrows) else .carries);
+            effect.kind == (if (d == raw.span or d == raw.buffer_span or d == raw.address_in) @as(@FieldType(types_mod.CallableContract, "kind"), .borrows) else .carries);
     }
 
     fn validStorageSignature(self: *Checker, d: DeclId) !bool {
@@ -20675,11 +20973,15 @@ const Checker = struct {
         if (!self.validStorageEffects(d)) return false;
         const raw = self.raw_accesses;
         if (d == raw.span or d == raw.buffer_span or d == raw.subspan or d == raw.slice_place or d == raw.view_place or raw.processText(d) != null) return self.validSpanSignature(d);
-        const count: usize = if (d == raw.stride or d == raw.slice_address) 1 else 2;
+        const count: usize = if (d == raw.stride or d == raw.slice_address or d == raw.number_address) 1 else 2;
         const tps = self.ast.declTypeParams(d);
         if (tps.len != count or self.ast.declVisibility(d) != .private) return false;
         const result = try self.declaredResultType(d);
         const ps = self.ast.declParams(d);
+        if (d == raw.number_address) {
+            return ps.len == 1 and self.addressOf(result) == self.param_types[d.index()][0] and ps[0].convention == .read and
+                try self.declaredParamType(d, 0) == .u64;
+        }
         if (d == raw.slice_address) {
             const slice = try self.declaredParamType(d, 0);
             const slice_args = self.builder.appliedTo(slice);
@@ -20687,7 +20989,7 @@ const Checker = struct {
                 raw.slice != .none and self.builder.view().declOfType(slice) == raw.slice and
                 slice_args.len == 1 and slice_args[0] == self.param_types[d.index()][0];
         }
-        if (d == raw.address_in) {
+        if (d == raw.address_in or d == raw.owned_address_in) {
             const buffer = try self.declaredParamType(d, 0);
             const buffer_args = self.builder.appliedTo(buffer);
             return self.addressOf(result) == self.param_types[d.index()][0] and ps[0].convention == .read and
@@ -20944,9 +21246,12 @@ const Checker = struct {
         // An answer that can point somewhere, such as a `CText`, gets its
         // dependencies from the contract alone: C's body is not read, and no
         // parameter of a handle type carries one by default. So the
-        // declaration states where it points.
+        // declaration states where it points. An answer that reaches a
+        // `mem.address.Address` is already [T-RawAddress], which no contract
+        // answers.
         if (category == .t_extern and answers != .poison and self.ast.declContracts(d).len == 0 and
-            self.crossesForeign(answers) and try self.builder.mayCarryDependencies(answers))
+            self.crossesForeign(answers) and try self.builder.mayCarryDependencies(answers) and
+            !try self.answerReachesAddress(answers))
         {
             try self.sink.addErrorFmt(
                 .t_extern,
