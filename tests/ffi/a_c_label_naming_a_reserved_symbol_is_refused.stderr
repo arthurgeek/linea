@@ -1,0 +1,16 @@
+error[T-ExternPrototype]: C code calling `labels_close` reaches the symbol `linea_close`, which belongs to the Linea runtime or the program's own code
+ --> tests/ffi/a_c_label_naming_a_reserved_symbol_is_refused/labels/labels.lin:1:11
+  |
+1 | extern fn labels_close(descriptor: Int64) -> Int64
+  |           ^^^^^^^^^^^^ C gives this function a symbol no `extern` may link against
+  |
+  = note: `labels_close` is declared by `labels/labels.c`
+  = help: declare the C function under its own symbol, or reach the runtime through the standard library
+error[T-ExternPrototype]: C code calling `labels_main` reaches the symbol `lin.main`, which belongs to the Linea runtime or the program's own code
+ --> tests/ffi/a_c_label_naming_a_reserved_symbol_is_refused/labels/labels.lin:3:11
+  |
+3 | extern fn labels_main(value: Int64) -> Int64
+  |           ^^^^^^^^^^^ C gives this function a symbol no `extern` may link against
+  |
+  = note: `labels_main` is declared by `labels/labels.c`
+  = help: declare the C function under its own symbol, or reach the runtime through the standard library

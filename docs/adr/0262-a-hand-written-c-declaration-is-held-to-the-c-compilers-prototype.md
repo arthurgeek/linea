@@ -59,7 +59,15 @@ declaration's, so the `extern` links against the labelled symbol, which is
 what C itself calls. Every C declaration of the root must give the function
 one symbol; two that give it two are refused, and so is a symbol a Linea
 declaration cannot be emitted under, such as a Darwin label without the
-leading underscore every C symbol there carries.
+leading underscore every C symbol there carries. A label is held to the
+reservations a written name is: a symbol in the runtime's `linea_`
+namespace, one the runtime owns such as `main`, one Linea emits its own
+definitions or callback entries under (`lin.`, `lcb.`) and one LLVM spells
+(`llvm.`) are refused, so a label cannot reach around [T-ExternRuntime].
+[T-ExternAgreement] is then held by symbol: every `extern` of one name is one
+function, so the C of every root declaring it must give it one symbol, and
+every `extern` reaching one symbol, under whatever name, must imply one
+prototype, which the backend declares once.
 
 **An `export` is held to the same table wherever its root's C declares it.**
 C code of the root calling an exported function trusts its own declaration of
@@ -144,7 +152,9 @@ enumeration's width, and its extension. Reading these from the code `cc`
 generates, rather than asking `cc` about a type by its spelling, cannot be
 misled by a macro that renames the spelling after the declaration or by an
 enumeration declared inside a parameter list. An `alias` definition of the
-symbol is refused.
+symbol is refused, and so is every symbol the IR makes anything other than a
+function it declares or defines: an `ifunc`, which the loader resolves to a
+function no declaration describes, a variable, or a global of another kind.
 
 **When.** `linea check`, `build`, `run`, `test` and `emit-mlir` hold the declarations once
 the semantic passes accept the program, before lowering, and so does the
@@ -191,8 +201,10 @@ error[T-ExternPrototype]: C declares `void counter_add(struct counter *, int8_t)
   test reads a recorded dump.
 - What stays believed: ownership conventions, `read`, `borrows`, lengths,
   which object a pointer points at, and C the compiler reads no declaration
-  of: a symbol defined by top-level `__asm__`, or a library whose header
-  does not describe it, is believed as a lying header is. A handle crosses as any pointer, so a
+  of: a symbol defined by top-level `__asm__`, a weak definition another
+  object replaces at link time, a version a `.symver` directive binds, and a
+  library whose header does not describe it are believed as a lying header
+  is. A handle crosses as any pointer, so a
   plain handle where C takes `sqlite3 **` is accepted; `inout` of a handle
   against C's `sqlite3 *` is refused, because the pointee is fixed there.
 - Diagnostics carry no machine fix: the corpus property that applies fixes

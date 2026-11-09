@@ -1,0 +1,5 @@
+import labels
+
+fn main() -> UInt8 {
+    UInt8(labels.close(99) + labels.into(1))
+}

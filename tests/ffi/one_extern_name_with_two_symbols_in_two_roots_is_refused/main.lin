@@ -1,0 +1,6 @@
+import twice
+import scaled
+
+fn main() -> UInt8 {
+    UInt8(twice.of(21) + scaled.plus(1) - 1000)
+}

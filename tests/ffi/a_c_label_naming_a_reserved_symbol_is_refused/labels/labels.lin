@@ -1,0 +1,11 @@
+extern fn labels_close(descriptor: Int64) -> Int64
+
+extern fn labels_main(value: Int64) -> Int64
+
+pub fn close(descriptor: Int64) -> Int64 {
+    labels_close(descriptor)
+}
+
+pub fn into(value: Int64) -> Int64 {
+    labels_main(value)
+}

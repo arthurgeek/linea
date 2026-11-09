@@ -1,0 +1,1 @@
+{ "extern": ["pairs"], "native": ["pairs/pairs.c"] }

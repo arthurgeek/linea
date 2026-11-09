@@ -286,9 +286,14 @@ pub fn emit(
     // module does not hold. The body is the linker's to find; writing one here
     // would put this compiler's invention under a name the runtime already
     // answers to.
+    // Two externals C gives one symbol, which the prototype check holds to
+    // one signature, are declared once.
+    var declared: std.StringHashMapUnmanaged(void) = .empty;
+    defer declared.deinit(gpa);
     for (module.functions, 0..) |*f, i| {
         const id = FunctionId.at(@intCast(i));
         if (!module.isExternal(id)) continue;
+        if ((try declared.getOrPut(gpa, externalSymbol(module, options.foreign_symbols, id))).found_existing) continue;
         try w.writeAll("  func.func private @");
         try writeSymbol(w, module, options.foreign_symbols, id);
         try w.writeAll("(");
@@ -2698,6 +2703,14 @@ fn resultTypeOf(module: *const Module, id: FunctionId, ret: TypeId) ?[]const u8 
 /// The name a function is emitted under. Read from the module rather than
 /// rebuilt, because a name computed twice is a name that can differ, and every
 /// reference to a declaration must spell it the way its definition does.
+/// The symbol an external function is emitted under: the one its C
+/// declaration gives it, where that is not its name.
+fn externalSymbol(module: *const Module, foreign_symbols: []const ForeignSymbol, id: FunctionId) []const u8 {
+    const name = module.nameOf(id);
+    for (foreign_symbols) |held| if (std.mem.eql(u8, held.name, name)) return held.symbol;
+    return name;
+}
+
 fn writeSymbol(w: *std.Io.Writer, module: *const Module, foreign_symbols: []const ForeignSymbol, id: FunctionId) std.Io.Writer.Error!void {
     const name = module.nameOf(id);
     std.debug.assert(symbol_names.holds(name));
@@ -2705,11 +2718,9 @@ fn writeSymbol(w: *std.Io.Writer, module: *const Module, foreign_symbols: []cons
         // Somebody else's symbol, spelled as they spelled it: the prefix is
         // this language's claim on a name it defined, and this is not one.
         // C's declaration may give it another symbol than its name.
-        for (foreign_symbols) |held| if (std.mem.eql(u8, held.name, name)) {
-            std.debug.assert(symbol_names.holds(held.symbol));
-            return writeSymbolName(w, held.symbol, "");
-        };
-        try writeSymbolName(w, name, "");
+        const symbol = externalSymbol(module, foreign_symbols, id);
+        std.debug.assert(symbol_names.holds(symbol));
+        try writeSymbolName(w, symbol, "");
     } else {
         std.debug.assert(name.len <= symbol_names.max_len);
         try writeSymbolName(w, name, symbol_names.defined_prefix);

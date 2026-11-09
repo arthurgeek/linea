@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C defines `twice_of` as an `ifunc`, which the program's loader resolves to some function, whose prototype its declaration does not show
+ --> tests/ffi/a_c_ifunc_is_refused/twice/twice.lin:1:11
+  |
+1 | extern fn twice_of(value: Int64) -> Int64
+  |           ^^^^^^^^ C's symbol for this is not a function its declaration describes
+  |
+  = note: `twice_of` is declared by `twice/twice.c`
+  = help: declare the function itself, or call it through a C function, built under "native"

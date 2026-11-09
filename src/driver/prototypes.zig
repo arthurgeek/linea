@@ -102,15 +102,62 @@ pub fn check(gpa: std.mem.Allocator, io: std.Io, semantics: *const loader.Semant
             try by_root[module.root.index()].append(arena, .{ .decl = d, .name = name, .implied = implied, .exported = exported });
         }
     }
-    var symbols: std.ArrayList(ForeignSymbol) = .empty;
+    var resolved: std.ArrayList(Resolved) = .empty;
+    var reporter: Reporter = .{ .arena = arena, .sink = sink, .ast = &expanded.ast };
     for (by_root, program.roots) |subjects, facts| {
         if (subjects.items.len == 0) continue;
-        var reporter: Reporter = .{ .arena = arena, .sink = sink, .ast = &expanded.ast };
-        try checkRoot(arena, io, facts, subjects.items, &reporter, opts, &symbols);
+        try checkRoot(arena, io, facts, subjects.items, &reporter, opts, &resolved);
+    }
+
+    // Every `extern` of one name is one function ([T-ExternAgreement]), so
+    // its roots' C must give it one symbol; and one symbol is one function,
+    // so every `extern` reaching it must be declared alike.
+    var symbols: std.ArrayList(ForeignSymbol) = .empty;
+    var by_name: std.StringHashMapUnmanaged(Resolved) = .empty;
+    var by_symbol: std.StringHashMapUnmanaged(Resolved) = .empty;
+    for (resolved.items) |held| {
+        const named = try by_name.getOrPut(arena, held.subject.name);
+        if (named.found_existing) {
+            if (!std.mem.eql(u8, named.value_ptr.symbol, held.symbol)) try reporter.sharedName(held.subject, named.value_ptr.symbol, held.symbol);
+            continue;
+        }
+        named.value_ptr.* = held;
+        const reached = try by_symbol.getOrPut(arena, held.symbol);
+        if (reached.found_existing) {
+            if (!samePrototype(reached.value_ptr.subject.implied, held.subject.implied)) {
+                try reporter.sharedSymbol(held.subject, held.symbol, reached.value_ptr.subject.name);
+            }
+        } else reached.value_ptr.* = held;
+        if (!std.mem.eql(u8, held.symbol, held.subject.name)) try symbols.append(arena, .{ .name = held.subject.name, .symbol = held.symbol });
     }
     const out = try gpa.alloc(ForeignSymbol, symbols.items.len);
     for (symbols.items, out) |held, *copy| copy.* = .{ .name = try gpa.dupe(u8, held.name), .symbol = try gpa.dupe(u8, held.symbol) };
     return out;
+}
+
+/// An `extern` the check accepted, and the symbol it links against.
+const Resolved = struct {
+    subject: Subject,
+    symbol: []const u8,
+};
+
+/// Whether two declarations imply one prototype.
+fn samePrototype(a: foreign.Prototype, b: foreign.Prototype) bool {
+    if (a.params.len != b.params.len) return false;
+    for (a.params, b.params) |x, y| if (!sameValue(x, y)) return false;
+    if ((a.result == null) != (b.result == null)) return false;
+    if (a.result) |r| if (!sameValue(r, b.result.?)) return false;
+    return true;
+}
+
+fn sameValue(a: foreign.Value, b: foreign.Value) bool {
+    if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
+    return switch (a) {
+        .scalar => |x| std.meta.eql(x, b.scalar),
+        .address_of => |x| std.meta.eql(x, b.address_of),
+        .context => true,
+        .callback => |x| samePrototype(x.*, b.callback.*),
+    };
 }
 
 /// Whether `d` is one of the standard library's storage primitives, whose
@@ -165,7 +212,7 @@ const Found = struct {
     linked: ?Linked = null,
 };
 
-fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: []const Subject, reporter: *Reporter, opts: Options, symbols: *std.ArrayList(ForeignSymbol)) !void {
+fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: []const Subject, reporter: *Reporter, opts: Options, resolved: *std.ArrayList(Resolved)) !void {
     var units: std.ArrayList(Unit) = .empty;
     if (facts.headers.len > 0) {
         const lines = try arena.alloc([]const u8, facts.headers.len);
@@ -283,8 +330,8 @@ fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: [
                     refused = true;
                     break;
                 };
-                if (linked.alias) {
-                    try reporter.alias(subject, unit.shown);
+                if (linked.kind != .function) {
+                    try reporter.notFunction(subject, unit.shown, linked.kind);
                     refused = true;
                     break;
                 }
@@ -293,6 +340,14 @@ fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: [
                     refused = true;
                     break;
                 };
+                // A symbol C names is held to the reservations a written
+                // name is: it may not be one the runtime, this compiler's
+                // own definitions or LLVM spell.
+                if (!std.mem.eql(u8, name, subject.name) and symbol_names.reservedForeign(name)) {
+                    try reporter.reserved(subject, unit.shown, name);
+                    refused = true;
+                    break;
+                }
                 if (symbol) |earlier| {
                     if (!std.mem.eql(u8, earlier.name, name)) {
                         try reporter.symbols(subject, earlier.unit.shown, earlier.name, unit.shown, name);
@@ -307,11 +362,7 @@ fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: [
             }
         }
         if (refused or subject.exported) continue;
-        const name = (symbol orelse continue).name;
-        if (std.mem.eql(u8, name, subject.name)) continue;
-        var recorded = false;
-        for (symbols.items) |held| recorded = recorded or std.mem.eql(u8, held.name, subject.name);
-        if (!recorded) try symbols.append(arena, .{ .name = subject.name, .symbol = name });
+        try resolved.append(arena, .{ .subject = subject, .symbol = (symbol orelse continue).name });
     }
 }
 
@@ -457,12 +508,25 @@ test "an error at a probe is not a failure to read the declarations" {
 }
 
 /// What the IR says of one function: the symbol C calls it by, as the IR
-/// spells it, whether that symbol is an alias of another function, and the
-/// function's signature where the IR declares or defines it.
+/// spells it, what the IR makes of that symbol, and the function's signature
+/// where the IR declares or defines it.
 const Linked = struct {
     symbol: []const u8,
-    alias: bool,
+    kind: Kind,
     signature: ?Signature,
+
+    /// A symbol is held to a prototype only where the IR declares or
+    /// defines it as a function. Every other kind of global, whatever the C
+    /// declaration says, names code or data no prototype describes.
+    const Kind = enum {
+        function,
+        /// An `alias` of another symbol.
+        alias,
+        /// An `ifunc`, resolved to some function when the program loads.
+        ifunc,
+        /// A variable, or anything else that is not a function.
+        other,
+    };
 };
 
 /// An IR signature: how C passes each parameter and the result.
@@ -491,11 +555,17 @@ fn linkedOf(arena: std.mem.Allocator, ir: []const u8, unit: usize, index: usize)
         break;
     }
     const named = symbol orelse return null;
-    var linked: Linked = .{ .symbol = named, .alias = false, .signature = null };
+    var linked: Linked = .{ .symbol = named, .kind = .other, .signature = null };
+    var global_kind: ?Linked.Kind = null;
     lines = std.mem.splitScalar(u8, ir, '\n');
     while (lines.next()) |line| {
         if (std.mem.startsWith(u8, line, "@") and irName(line) != null and std.mem.eql(u8, irName(line).?, named)) {
-            if (std.mem.indexOf(u8, line, " alias ") != null) linked.alias = true;
+            global_kind = if (std.mem.indexOf(u8, line, " alias ") != null)
+                .alias
+            else if (std.mem.indexOf(u8, line, " ifunc ") != null)
+                .ifunc
+            else
+                .other;
         }
         if (!std.mem.startsWith(u8, line, "declare ") and !std.mem.startsWith(u8, line, "define ")) continue;
         const at = std.mem.indexOf(u8, line, " @") orelse continue;
@@ -503,6 +573,9 @@ fn linkedOf(arena: std.mem.Allocator, ir: []const u8, unit: usize, index: usize)
         if (!std.mem.eql(u8, name, named)) continue;
         linked.signature = signatureOf(arena, line, at) catch null;
     }
+    // A global of the symbol's name is never a function, so it decides; a
+    // function is one only where a `declare` or `define` gives a signature.
+    linked.kind = global_kind orelse if (linked.signature != null) .function else .other;
     return linked;
 }
 
@@ -580,6 +653,7 @@ test "the IR names the symbol C reaches and how it passes each value" {
     const arena = arena_state.allocator();
     const realpath = linkedOf(arena, ir, 0, 0).?;
     try testing.expectEqualStrings("\\01_realpath$DARWIN_EXTSN", realpath.symbol);
+    try testing.expectEqual(Linked.Kind.function, realpath.kind);
     const raise = linkedOf(arena, ir, 0, 1).?;
     try testing.expectEqualStrings("raise_", raise.symbol);
     const signature = raise.signature.?;
@@ -587,6 +661,16 @@ test "the IR names the symbol C reaches and how it passes each value" {
     try testing.expectEqual(Passed{ .bits = 8, .extension = false }, signature.params[0]);
     try testing.expectEqual(Passed{ .bits = 64 }, signature.params[1]);
     try testing.expectEqual(@as(?Linked, null), linkedOf(arena, ir, 0, 2));
+    const resolved =
+        \\@linea_symbol_0_0 = constant ptr @twice, align 8
+        \\@twice = ifunc i64 (i64), ptr @resolve
+    ;
+    try testing.expectEqual(Linked.Kind.ifunc, linkedOf(arena, resolved, 0, 0).?.kind);
+    const variable =
+        \\@linea_symbol_0_0 = constant ptr @count, align 8
+        \\@count = global i32 0, align 4
+    ;
+    try testing.expectEqual(Linked.Kind.other, linkedOf(arena, variable, 0, 0).?.kind);
 }
 
 /// The symbol an `extern` is emitted under to reach the IR symbol `spelled`,
@@ -1114,15 +1198,54 @@ const Reporter = struct {
         });
     }
 
-    fn alias(self: *Reporter, subject: Subject, shown: []const u8) !void {
+    fn notFunction(self: *Reporter, subject: Subject, shown: []const u8, kind: Linked.Kind) !void {
+        const a = self.sink.arena;
+        const what = switch (kind) {
+            .alias => "an alias of another function",
+            .ifunc => "an `ifunc`, which the program's loader resolves to some function",
+            .other, .function => "something that is not a function",
+        };
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_extern_prototype,
+            .message = try std.fmt.allocPrint(a, "C defines `{s}` as {s}, whose prototype its declaration does not show", .{ subject.name, what }),
+            .labels = try self.nameLabel(subject, "C's symbol for this is not a function its declaration describes"),
+            .remarks = try self.declaredBy(subject, shown),
+            .notes = try a.dupe([]const u8, &.{"declare the function itself, or call it through a C function, built under \"native\""}),
+        });
+    }
+
+    fn reserved(self: *Reporter, subject: Subject, shown: []const u8, symbol: []const u8) !void {
         const a = self.sink.arena;
         try self.sink.add(.{
             .severity = .err,
             .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "C defines `{s}` as an alias of another function, whose prototype its declaration does not show", .{subject.name}),
-            .labels = try self.nameLabel(subject, "C's symbol for this is another function's"),
+            .message = try std.fmt.allocPrint(a, "C code calling `{s}` reaches the symbol `{s}`, which belongs to the Linea runtime or the program's own code", .{ subject.name, symbol }),
+            .labels = try self.nameLabel(subject, "C gives this function a symbol no `extern` may link against"),
             .remarks = try self.declaredBy(subject, shown),
-            .notes = try a.dupe([]const u8, &.{"declare the function the alias names, or call it through a C function, built under \"native\""}),
+            .notes = try a.dupe([]const u8, &.{"declare the C function under its own symbol, or reach the runtime through the standard library"}),
+        });
+    }
+
+    fn sharedName(self: *Reporter, subject: Subject, first: []const u8, then: []const u8) !void {
+        const a = self.sink.arena;
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_extern_prototype,
+            .message = try std.fmt.allocPrint(a, "C gives `{s}` the symbol `{s}` in one root and `{s}` in another, and every `extern` of one name is one function", .{ subject.name, first, then }),
+            .labels = try self.nameLabel(subject, "this root's C calls it by another symbol"),
+            .notes = try a.dupe([]const u8, &.{"give the function one symbol in every root's C, or declare one of them under another name"}),
+        });
+    }
+
+    fn sharedSymbol(self: *Reporter, subject: Subject, symbol: []const u8, other: []const u8) !void {
+        const a = self.sink.arena;
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_extern_prototype,
+            .message = try std.fmt.allocPrint(a, "C gives `{s}` the symbol `{s}`, which `{s}` also links against with another signature", .{ subject.name, symbol, other }),
+            .labels = try self.nameLabel(subject, "one symbol is one function, with one signature"),
+            .notes = try a.dupe([]const u8, &.{"declare both alike, since C calls one function through both"}),
         });
     }
 

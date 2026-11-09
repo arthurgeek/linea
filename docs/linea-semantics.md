@@ -4708,7 +4708,12 @@ refused. Where C reaches the function under another symbol than its name,
 through an `__asm__` label or `overloadable`, as glibc sends `lseek` to
 `lseek64` under `_FILE_OFFSET_BITS=64`, the `extern` calls that symbol; every
 C declaration must give it the same one, and a symbol no Linea declaration
-can be emitted under is refused. An
+can be emitted under is refused, as is one in the runtime's `linea_`
+namespace, one the runtime owns, and one Linea or LLVM emits its own code
+under (`lin.`, `lcb.`, `llvm.`). A symbol C makes an `ifunc`, an alias, a
+variable or anything but a function it declares or defines is refused. Every
+`extern` of one name must reach one symbol in every root that declares it,
+and every `extern` reaching one symbol must imply one prototype. An
 `export` is held to the same rules wherever its root's C declarations declare
 it, and is not refused where they do not. Each position of C's prototype
 must be what lowering passes there, compared by representation rather than
