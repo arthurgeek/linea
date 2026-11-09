@@ -7553,12 +7553,24 @@ test "storage byte access lowers to a checked load only for its exact library de
         const program: program_mod.Program = .{ .modules = &modules, .ast = ast };
         var resolved = try resolve_mod.resolve(gpa, &program, &interner, &sink, .program);
         var typing = try @import("../sema/typecheck.zig").typecheck(gpa, &resolved.expanded, &resolved.resolution, &sink);
+        // The fixture passes a plain number where the library passes
+        // `address.raw` of an address, and has no `address` module to make
+        // one, so [T-RawAddress] refuses every call of the runtime's symbol;
+        // the rest is lowering's question, asked of the other diagnostics.
+        var others: std.ArrayList(@import("../diagnostics/diagnostic.zig").Diagnostic) = .empty;
+        var refused_address = false;
+        for (sink.list.items) |diagnostic| {
+            if (diagnostic.code == .t_raw_address) refused_address = true else try others.append(gpa, diagnostic);
+        }
+        try testing.expectEqual(std.mem.startsWith(u8, case.declaration, "extern"), refused_address);
         if (case.expected_error) |expected| {
-            try testing.expectEqual(@as(u32, 1) + @intFromBool(case.runtime_refused), sink.error_count);
-            try testing.expectEqual(expected, sink.list.items[0].code);
-            if (case.runtime_refused) try testing.expectEqual(@import("../diagnostics/diagnostic.zig").Code.t_extern_runtime, sink.list.items[1].code);
+            try testing.expectEqual(@as(usize, 1) + @intFromBool(case.runtime_refused), others.items.len);
+            try testing.expectEqual(expected, others.items[0].code);
+            if (case.runtime_refused) try testing.expectEqual(@import("../diagnostics/diagnostic.zig").Code.t_extern_runtime, others.items[1].code);
             continue;
         }
+        try testing.expectEqual(@as(usize, 0), others.items.len);
+        sink = Sink.init(gpa);
         var disposals = try @import("../ownership/check.zig").check(gpa, gpa, &resolved.expanded, &resolved.resolution, &typing, &sink);
         if (sink.hasErrors()) {
             std.debug.print("\nraw-access fixture: {s}\n", .{case.declaration});

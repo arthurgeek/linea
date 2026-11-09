@@ -20542,11 +20542,13 @@ const Checker = struct {
                 const given = if (arg == ExprId.none) call.at else self.ast.withoutGroups(arg);
                 if (arg != ExprId.none and raw_fn != .none and self.ast.exprTag(given) == .call and
                     self.namesFunction(self.ast.withoutGroups(self.ast.call(given).callee), raw_fn)) continue;
-                _ = self.report(
+                // The argument keeps its type: a number where an address
+                // belongs is refused, and is still the number it is.
+                try self.sink.addError(
                     .t_raw_address,
-                    given,
+                    self.ast.fileOfExpr(given),
+                    self.ast.exprSpan(given),
                     "the runtime reads or writes values at this address, so it takes only the number in a `mem.address.Address`",
-                    .{},
                     if (arg == ExprId.none)
                         try std.fmt.allocPrint(self.sink.arena, "pass `address.raw(at)` for `{s}`, in place of the declaration's default", .{self.ast.tokenText(self.ast.declParams(callee)[i].name)})
                     else
