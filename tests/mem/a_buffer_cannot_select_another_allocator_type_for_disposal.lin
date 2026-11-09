@@ -19,6 +19,10 @@ impl Allocator for Elsewhere {
         let _length = b.length()
         panic("this allocator never hands out buffers")
     }
+
+    fn reclaims(_self: Elsewhere) -> Bool {
+        true
+    }
 }
 
 fn dispose_elsewhere(sink buffer: Buffer[Elsewhere]) {

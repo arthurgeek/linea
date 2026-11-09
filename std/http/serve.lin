@@ -122,10 +122,14 @@ test fn a_serve_error_displays_its_cause() {
 // which keeps that state in an owning task. Each task keeps one arena of
 // `limits.request_arena_bytes` carved from the system allocator, or from the
 // `parent` `serve_in` takes: each request is read into it, the handler builds
-// its response in it, and once the response is written the arena is rewound,
-// which zeroes only the bytes that exchange used, so a small request costs
-// little however large the arena is. When `parent` refuses the arena, the
-// request is answered 503 and the arena is opened again for the next. The 503
+// its response in it, and once the response is written the arena is rewound.
+// The arena takes a 64 KiB first chunk from the parent when it opens and
+// further chunks only as a request needs them, and rewinding zeroes only the
+// bytes that exchange used and gives every chunk but the first back to the
+// parent, so a task between requests holds 64 KiB however large the arena
+// is. When `parent` refuses the arena's first chunk, the request is answered
+// 503 and the arena is opened again for the next; a parent that refuses a
+// later chunk refuses the reservation that needed it, which answers 500. The 503
 // discards the unread request into a 4 KiB buffer each task takes from
 // `parent` once, before it serves anything, so a parent that refuses every
 // arena still has each client read its 503 rather than a reset. Once each
@@ -792,11 +796,13 @@ test fn a_handler_error_before_headers_answers_its_status() {
     .Ok(())
 }
 
-// Serving acquires one arena from the parent for every kind of exchange and
-// disposes it once: an answer, a streamed answer, a stream that fails, an
-// error, a path value, a HEAD request, a refused request, a silent client and
-// a handler that fills the arena. Each exchange starts from a rewound arena,
-// so the one after a full arena is answered too.
+// Serving opens one arena over the parent for every kind of exchange and gives
+// back everything it took: an answer, a streamed answer, a stream that fails,
+// an error, a path value, a HEAD request, a refused request, a silent client
+// and a handler that fills the arena. The arena's first chunk and the discard
+// buffer are acquired once each, and the chunks the filling handler grows the
+// arena by are given back when it is rewound. Each exchange starts from a
+// rewound arena.
 test fn every_exchange_returns_its_arena_to_the_parent() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
@@ -845,16 +851,57 @@ test fn every_exchange_returns_its_arena_to_the_parent() {
     answers.release()
     testing.assert_ok_eq(served, (), "serving failed")?
     testing.assert(settled, "an exchange kept an allocation from the parent")?
-    // Serving takes one arena and one buffer for discarding refused input.
-    testing.assert_eq(acquired, UInt64(2), "serving acquired more than its arena and discard buffer from the parent")?
+    // Beside the arena's first chunk and the discard buffer, the handler that
+    // fills the arena grows it by at least one chunk.
+    testing.assert(acquired > 2, "a handler filling the arena did not grow it past its first chunk")?
     testing.assert(tables_settled, "the router kept an allocation after its release")?
     testing.assert_eq(first_lines.view(), "200 OK|200 OK|reset|404 Not Found|200 OK|200 OK|400 Bad Request||408 Request Timeout|500 Internal Server Error|", "an exchange was answered wrongly")?
     .Ok(())
 }
 
-// A parent that refuses every request arena has serving take the 4096-byte
-// buffer a 503 discards input into, be refused the arena, answer 503 and open
-// the arena again. The walk then refuses each of those acquisitions in turn: a
+// An exchange whose handler fills a 1 MiB arena grows it chunk by chunk from
+// the parent, and rewinding the arena once the answer is written gives the
+// parent back every chunk but the first.
+test fn a_rewound_request_arena_keeps_only_its_first_chunk() {
+    var listener = net.listen(net.loopback(0)).unwrap()
+    let client = send(listener.local_address().unwrap(), "GET /fill HTTP/1.1\r\nHost: loopback\r\n\r\n")
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    defer let log = testing.AllocationLog.open(mem.system(), 0).unwrap()
+    var router = exchanges_router(log.allocator())
+    var refusal = log.allocator().acquire(request_buffer_bytes).unwrap()
+    let before = log.live_bytes()
+    var arena = mem.Arena.open(log.allocator(), 1048576)
+    let opened = log.live_bytes() - before
+    let _answered = serve_connection(connection, &router, arena.handle(), &refusal, Limits { read_timeout_ms = 2000, ..serving(1) }, time.Instant.now())
+    let peak = log.peak_bytes()
+    &arena.rewind()
+    let rewound = log.live_bytes() - before
+    let grown = log.acquired()
+    // A small request is answered in the first chunk alone.
+    let small = send(listener.local_address().unwrap(), health_request)
+    let Accepted { connection: next, address: _ } = &listener.accept().unwrap()
+    let _small = serve_connection(next, &router, arena.handle(), &refusal, Limits { read_timeout_ms = 2000, ..serving(1) }, time.Instant.now())
+    &arena.rewind()
+    let unchanged = log.acquired() == grown
+    refusal.release()
+    arena.release()
+    router.release()
+    listener.close().unwrap()
+    defer let received = read_to_end(client)
+    defer let answered = read_to_end(small)
+    testing.assert(received.starts_with("HTTP/1.1 500 Internal Server Error\r\n"), "a handler that filled the arena was not answered 500")?
+    testing.assert_eq(opened, mem.arena_first_chunk_bytes, "opening the arena took more than its first chunk")?
+    testing.assert(peak > 524288, "filling the arena did not grow it past half its size")?
+    testing.assert_eq(rewound, opened, "rewinding the arena kept chunks past its first")?
+    testing.assert_eq(answered.view(), health_answer, "a request after a rewound full arena was not answered")?
+    testing.assert(unchanged, "a small request grew the arena past its first chunk")?
+    testing.assert(log.all_disposed(), "releasing the arena kept a chunk")?
+    .Ok(())
+}
+
+// A parent that refuses the first chunk of every request arena has serving
+// take the 4096-byte buffer a 503 discards input into, be refused the arena,
+// answer 503 and open the arena again. The walk then refuses each of those acquisitions in turn: a
 // refused discard buffer ends serving before it accepts, and every other run
 // answers 503. Every run gives back everything it took.
 test fn each_allocation_failure_covers_every_acquisition_from_the_parent() {
@@ -883,7 +930,7 @@ fn served_refusing_arenas(refuse_at: UInt64) -> Result[UInt64, testing.Failure] 
         request_arena_bytes = 98304,
         ..serving(1),
     }
-    parent.refuse_size_from(limits.request_arena_bytes, 1)
+    parent.refuse_size_from(mem.arena_first_chunk_bytes, 1)
     let routes = tables.allocator()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
     let served = serve_in(parent.allocator(), listener, made, limits, policy: .Sequential)
@@ -940,7 +987,7 @@ test fn a_refused_arena_is_answered_503() {
     let valid = send(bound, health_request)
     let parent = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
     let limits = serving(2)
-    parent.refuse_size_attempt(limits.request_arena_bytes, 1)
+    parent.refuse_size_attempt(mem.arena_first_chunk_bytes, 1)
     let routes = parent.allocator()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
     let served = serve_in(parent.allocator(), listener, made, limits, policy: .Sequential)
@@ -972,7 +1019,7 @@ test fn every_connection_is_answered_503_while_the_parent_refuses_the_arena() {
         request_arena_bytes = 98304,
         ..serving(2),
     }
-    parent.refuse_size_from(limits.request_arena_bytes, 1)
+    parent.refuse_size_from(mem.arena_first_chunk_bytes, 1)
     let routes = parent.allocator()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
     let served = serve_in(parent.allocator(), listener, made, limits, policy: .Threads(2))

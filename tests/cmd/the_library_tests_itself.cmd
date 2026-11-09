@@ -484,6 +484,7 @@ The library tests itself.
   ok    http.a_response_reads_its_status
   ok    http.a_response_takes_another_status
   ok    http.a_retried_accept_is_logged_as_a_warning
+  ok    http.a_rewound_request_arena_keeps_only_its_first_chunk
   ok    http.a_route_closure_reads_what_it_captured
   ok    http.a_route_error_displays_its_reason
   ok    http.a_route_is_registered_once_per_shape_and_method
@@ -1036,9 +1037,11 @@ The library tests itself.
   ok    mem.a_buffer_arrives_zeroed_and_holds_what_it_is_given
   ok    mem.a_buffer_byte_view_covers_the_requested_extent
   ok    mem.a_buffer_disposes_through_its_stored_allocator
+  ok    mem.a_buffer_from_a_later_chunk_is_disposed_into_its_arena
   ok    mem.a_byte_store_reaches_one_byte
   ok    mem.a_carried_field_keeps_a_lend_until_its_holders_last_use
   ok    mem.a_carried_type_that_can_carry_nothing_is_owned
+  ok    mem.a_chunked_arena_hands_out_exactly_its_size_less_the_cursor
   ok    mem.a_closure_calls_what_it_captured
   ok    mem.a_closure_keeps_its_captures_in_an_arena
   ok    mem.a_closure_opened_in_the_system_allocator_calls_what_it_captured
@@ -1049,14 +1052,17 @@ The library tests itself.
   ok    mem.a_handle_written_without_a_parent_is_a_handle_over_the_system
   ok    mem.a_lambda_that_captures_nothing_allocates_nothing
   ok    mem.a_new_release_log_holds_no_releases
+  ok    mem.a_parent_refusing_a_chunk_refuses_the_reservation_that_needed_it
   ok    mem.a_read_walk_lends_each_viewed_element
   ok    mem.a_refused_allocation_releases_the_callback
   ok    mem.a_refused_overflowing_reservation_keeps_the_cursor
   ok    mem.a_release_log_holds_its_codes_in_release_order
+  ok    mem.a_reservation_larger_than_the_first_chunk_is_handed_out_whole
   ok    mem.a_rewound_arena_hands_out_its_slab_again_zeroed
   ok    mem.a_shared_log_allocator_is_shared_by_tasks_that_allocate_at_once
   ok    mem.a_shared_log_counts_only_successful_acquisitions
   ok    mem.a_shared_log_counts_refused_attempts_too
+  ok    mem.a_shared_log_counts_what_is_acquired_and_not_disposed
   ok    mem.a_shared_log_is_not_all_disposed_while_an_allocation_is_live
   ok    mem.a_shared_log_refuses_a_later_attempt_through_live_handles
   ok    mem.a_shared_log_refuses_every_acquisition_of_the_named_size_from_one_on
@@ -1078,6 +1084,8 @@ The library tests itself.
   ok    mem.allocator_hands_out_buffers_the_log_records
   ok    mem.an_arena_backs_another_arena
   ok    mem.an_arena_hands_out_storage_and_gives_the_slab_back
+  ok    mem.an_arena_over_an_arena_is_rewound_in_place
+  ok    mem.an_arena_over_an_arena_takes_its_whole_size_from_it
   ok    mem.an_arena_refuses_what_it_cannot_hold
   ok    mem.an_arena_the_backing_refused_refuses_everything
   ok    mem.an_empty_buffer_is_allocated_rather_than_refused
@@ -1106,6 +1114,7 @@ The library tests itself.
   ok    mem.from_fn_takes_an_initializer_that_changes_a_lent_count
   ok    mem.get_borrows_an_element_or_answers_none_past_the_end
   ok    mem.length_counts_the_viewed_elements
+  ok    mem.live_bytes_counts_what_is_acquired_and_not_disposed
   ok    mem.load_byte_traps_past_the_end
   ok    mem.load_traps_at_a_misaligned_offset
   ok    mem.load_traps_past_the_end
@@ -1119,6 +1128,7 @@ The library tests itself.
   ok    mem.releasing_a_closure_returns_its_bytes
   ok    mem.releasing_a_drain_stopped_early_releases_only_what_remains
   ok    mem.releasing_a_slice_leaves_its_storage_owned
+  ok    mem.rewinding_gives_back_every_chunk_but_the_first
   ok    mem.settling_a_refused_push_releases_the_value_and_keeps_the_reason
   ok    mem.slice_iteration_collects_observations_and_transformed_values
   ok    mem.slice_iteration_early_exit_leaves_the_source_mutable
@@ -1528,4 +1538,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1525 passed, 0 failed
+  1535 passed, 0 failed

@@ -566,6 +566,61 @@ error[O-Borrow]: this operation invalidates a place that a later observation sti
 
 `first` lives in the arena, and the rewind would erase it before its last use.
 
+### A large arena takes memory as it is used
+
+An arena's size is a limit on what it hands out, not memory it takes all at
+once. An arena of up to 64 KiB takes its whole size when it opens. A larger
+one takes a first chunk of 64 KiB, and more from its allocator only when a
+piece no longer fits: a new chunk at least as large as the piece and at least
+twice the chunk before it, or all the arena can still hand out when that is
+less. A piece never spans two chunks. An arena opened over another arena's
+handle takes its whole size at once, since memory given back to an arena is
+not used again until that arena is rewound. `rewind` gives every
+chunk but the first back, so an arena that once held a large piece holds 64
+KiB again afterwards. `mem.AllocationLog` counts what the arena takes from the
+system allocator, and `live_bytes` answers how much of it the arena holds:
+
+`arena_growth.lin`:
+
+```linea
+import std.io
+import std.mem
+
+use mem.Lender
+
+fn main() -> Result[UInt8, io.IoError] {
+    // The log hands the arena the system allocator and counts what it takes.
+    defer let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    defer var arena = mem.Arena.open(log.allocator(), size: 4194304)
+    let opened = log.live_bytes()
+    io.println("opened: {opened} bytes held")?
+    // A million bytes do not fit in the first chunk, so the arena takes a
+    // chunk of a million bytes more.
+    let samples = Vec.filled_in(arena.handle(), count: 131072, value: UInt64(0)) else |_| {
+        return .Ok(1)
+    }
+    let count = samples.length()
+    let grown = log.live_bytes()
+    io.println("{count} samples: {grown} bytes held")?
+    &arena.rewind()
+    let rewound = log.live_bytes()
+    io.println("rewound: {rewound} bytes held")?
+    .Ok(0)
+}
+```
+
+```
+opened: 65536 bytes held
+131072 samples: 1114112 bytes held
+rewound: 65536 bytes held
+```
+
+The arena may hand out four mebibytes, and it held 64 KiB until something
+needed more. Rust's `bumpalo` grows the same way, but keeps every chunk until
+it is reset or dropped, and a reset keeps the largest; here a rewind returns
+to the first chunk, so a loop that sometimes builds something large does not
+keep that memory for its other passes.
+
 ## Keeping a closure: `mem.Closure`
 
 [Calling things](02-calling-things.md#closures-functions-that-capture) showed
@@ -870,8 +925,10 @@ text, its headers, the response built for it — lives exactly as long as the
 request, and a server answers requests forever. `std.http` serves every request
 from one arena:
 
-1. `http.serve` carves one arena of `limits.request_arena_bytes` (48 MiB by
-   default) from the allocator you give it.
+1. `http.serve` opens one arena of `limits.request_arena_bytes` (48 MiB by
+   default) over the allocator you give it. That size bounds what one request
+   may use; the arena takes a 64 KiB first chunk and more only as a request
+   needs it.
 2. It reads each request into that arena and hands the handler a
    `Request`.
 3. The handler builds its response with `request.allocator()`, a handle to
@@ -886,8 +943,10 @@ the arena and releases nothing. And the `[O-Borrow]` that refused to keep
 `first` across a rewind is what stops a handler keeping a request's text, or a
 response, past the request it belongs to.
 
-So a handler releases nothing, and a server that runs for a year uses the same
-six megabytes throughout. [Networking](09-networking.md#every-request-lives-in-an-arena)
+So a handler releases nothing, and a server that runs for a year holds the same
+memory between requests throughout: each serving task's arena is 64 KiB once
+it is rewound, however large the requests it answered, since the arena takes
+more than its first chunk only while a request needs it. [Networking](09-networking.md#every-request-lives-in-an-arena)
 drives these steps with a real handler once handlers have been introduced.
 
 ## Choosing an allocator

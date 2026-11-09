@@ -132,6 +132,25 @@ impl[H: Allocator] AllocationLog[H] {
         testing.assert(log.peak_bytes() >= 24, "the peak lost the two live allocations")?
     }
 
+    // Return how many bytes the log's allocations hold now: what was acquired
+    // and not yet disposed.
+    pub fn live_bytes(self: Self) -> UInt64 {
+        self.buffer.load(log_live_bytes)
+    }
+
+    test fn live_bytes_counts_what_is_acquired_and_not_disposed() {
+        defer let log = AllocationLog.open(system(), 0).unwrap()
+        let first = log.allocator().acquire(16).unwrap()
+        let second = log.allocator().acquire(8).unwrap()
+        let both = log.live_bytes()
+        first.release()
+        let one = log.live_bytes()
+        second.release()
+        testing.assert_eq(both, UInt64(24), "two live allocations were not counted")?
+        testing.assert_eq(one, UInt64(8), "a disposed allocation was still counted")?
+        testing.assert_eq(log.live_bytes(), UInt64(0), "bytes stayed live after every release")?
+    }
+
     // Refuse a later acquisition, counting from the log's first attempt. It
     // writes the shared log words, as its handles do, so handles may be live.
     pub fn refuse_attempt(self: Self, attempt: UInt64) {
@@ -202,6 +221,11 @@ struct RefusingAllocation[H: Allocator] {
 
 impl[H: Allocator] Allocator for RefusingAllocator[H] {
     type Obligation = RefusingAllocation[H]
+
+    // A logged buffer is disposed into the backing, which decides.
+    fn reclaims(self: Self) -> Bool {
+        self.log.backing.reclaims()
+    }
 
     fn acquire(self: Self, size: UInt64) -> Result[Buffer[Self], Oom] {
         let attempt = linea_raw_load(self.log.buffer.at, self.log.buffer.len, log_attempts) + 1
