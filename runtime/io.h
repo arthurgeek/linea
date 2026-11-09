@@ -31,6 +31,9 @@ uint8_t linea_io_category(int code);
  * code in between that could change it. */
 int linea_errno(void);
 
+/* Zero when the bytes at `at` are ones a system call may be handed, after
+ * giving them to the allocator's checks; otherwise an errno. */
+int linea_io_byte_range(unsigned long at, unsigned long len);
 long linea_read_some(int fd, unsigned long at, unsigned long len);
 long linea_write_some(int fd, unsigned long at, unsigned long len);
 long linea_read_at(int fd, unsigned long at, unsigned long len, unsigned long offset);

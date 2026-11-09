@@ -1137,6 +1137,7 @@ The library tests itself.
   ok    mem.slice_iteration_retains_order_and_independent_observations
   ok    mem.slices_equal_by_their_elements
   ok    mem.slices_order_by_their_first_different_element
+  ok    mem.socket_reads_reject_a_range_past_the_buffer
   ok    mem.sort_by_keeps_equal_keys_in_order_at_every_length_up_to_seventy
   ok    mem.sort_by_makes_n_log_n_comparisons
   ok    mem.sort_by_reorders_linear_elements
@@ -1203,6 +1204,7 @@ The library tests itself.
   ok    net.a_connection_to_a_closed_port_is_refused
   ok    net.a_deadline_ends_reads_that_each_arrive_in_time
   ok    net.a_deadline_of_zero_leaves_reads_unbounded
+  ok    net.a_deadline_too_far_ahead_means_no_deadline
   ok    net.a_failed_listener_close_ends_serving_with_close
   ok    net.a_fatal_accept_failure_ends_serving_and_closes_the_listener
   ok    net.a_limit_is_reached_at_its_count_and_none_is_never_reached
@@ -1211,6 +1213,7 @@ The library tests itself.
   ok    net.a_listener_close_reports_success
   ok    net.a_listener_reports_the_port_it_was_given
   ok    net.a_net_error_displays_its_reason
+  ok    net.a_read_deadline_is_the_nearer_of_the_read_bound_and_the_session
   ok    net.a_reset_connection_is_reset_at_its_peer
   ok    net.a_reset_or_exhausted_accept_is_retried
   ok    net.a_scripted_listener_fails_as_scripted_then_accepts_and_reports_its_close_failure
@@ -1218,6 +1221,7 @@ The library tests itself.
   ok    net.a_serve_error_displays_its_cause
   ok    net.a_shut_down_writer_ends_the_peer_input
   ok    net.a_silent_peer_times_out_the_read
+  ok    net.a_write_times_out_when_the_peer_reads_nothing
   ok    net.an_accept_attempt_retries_failures_with_a_growing_pause_that_a_connection_resets
   ok    net.an_acceptor_waits_for_every_expected_task_and_stops_when_one_fails
   ok    net.an_address_debugs_its_parts
@@ -1499,6 +1503,7 @@ The library tests itself.
   ok    time.an_http_date_displays_in_the_form_header_fields_use
   ok    time.an_instant_measures_the_time_since_another
   ok    time.an_instant_measures_the_time_since_it_was_read
+  ok    time.an_instant_reads_nanoseconds_of_the_monotonic_clock
   ok    time.from_nanoseconds_makes_a_duration_that_long
   ok    time.nanoseconds_returns_the_part_of_a_second
   ok    time.now_reads_the_present
@@ -1538,4 +1543,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1535 passed, 0 failed
+  1540 passed, 0 failed

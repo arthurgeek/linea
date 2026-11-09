@@ -68,7 +68,7 @@ void linea_storage_extent(unsigned long at, unsigned long len);
 
 /* Validates the bytes a program hands a system call, and hands them to the
  * allocator first, so the call never meets storage the program does not own. */
-static int byte_range(unsigned long at, unsigned long len) {
+int linea_io_byte_range(unsigned long at, unsigned long len) {
     if (len == 0) return 0;
     if (at == 0) return EFAULT;
     if (len > (unsigned long)LONG_MAX || len > ULONG_MAX - at) return EOVERFLOW;
@@ -77,7 +77,7 @@ static int byte_range(unsigned long at, unsigned long len) {
 }
 
 long linea_read_some(int fd, unsigned long at, unsigned long len) {
-    const int invalid = byte_range(at, len);
+    const int invalid = linea_io_byte_range(at, len);
     if (invalid != 0) return -(long)invalid;
     if (len == 0) return 0;
     ssize_t count;
@@ -88,7 +88,7 @@ long linea_read_some(int fd, unsigned long at, unsigned long len) {
 }
 
 long linea_write_some(int fd, unsigned long at, unsigned long len) {
-    const int invalid = byte_range(at, len);
+    const int invalid = linea_io_byte_range(at, len);
     if (invalid != 0) return -(long)invalid;
     if (len == 0) return 0;
     const void *bytes = (const void *)(uintptr_t)at;
@@ -147,7 +147,7 @@ long linea_write_some(int fd, unsigned long at, unsigned long len) {
 }
 
 long linea_read_at(int fd, unsigned long at, unsigned long len, unsigned long offset) {
-    const int invalid = byte_range(at, len);
+    const int invalid = linea_io_byte_range(at, len);
     if (invalid != 0) return -(long)invalid;
     if (len == 0) return 0;
     if (offset > (unsigned long)INT64_MAX) return -(long)EOVERFLOW;
@@ -159,7 +159,7 @@ long linea_read_at(int fd, unsigned long at, unsigned long len, unsigned long of
 }
 
 long linea_write_at(int fd, unsigned long at, unsigned long len, unsigned long offset) {
-    const int invalid = byte_range(at, len);
+    const int invalid = linea_io_byte_range(at, len);
     if (invalid != 0) return -(long)invalid;
     if (len == 0) return 0;
     if (offset > (unsigned long)INT64_MAX) return -(long)EOVERFLOW;
@@ -179,7 +179,7 @@ long linea_close(int fd) {
 }
 
 long linea_random_bytes(unsigned long at, unsigned long len) {
-    const int invalid = byte_range(at, len);
+    const int invalid = linea_io_byte_range(at, len);
     if (invalid != 0) return -(long)invalid;
     if (len == 0) return 0;
     /* Both supported platforms provide getentropy with a 256-byte limit. */
@@ -207,7 +207,7 @@ long linea_random_words(unsigned long *high, unsigned long *low) {
 /* `(memchr)` names the function rather than the macro newer glibc headers
  * define with C11's `_Generic`, which this C99 source may not use. */
 static int path_bytes(unsigned long at, unsigned long extent, int component) {
-    const int invalid = byte_range(at, extent);
+    const int invalid = linea_io_byte_range(at, extent);
     if (invalid != 0) return invalid;
     if (extent < 2) return EINVAL;
     const char *path = (const char *)(uintptr_t)at;

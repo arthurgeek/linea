@@ -1694,12 +1694,19 @@ pub fn build(b: *std.Build) void {
         "-Dconnect=linea_test_connect",
         "-Dgetpeername=linea_test_getpeername",
         "-Dgetsockname=linea_test_getsockname",
+        "-Dgetsockopt=linea_test_getsockopt",
+        "-Dread=linea_test_read",
+        "-Dsend=linea_test_send",
+        "-Dpoll=linea_test_poll",
+        "-Dnanosleep=linea_test_nanosleep",
+        "-Dlinea_clock_read=linea_test_clock_read",
     }) catch @panic("OOM");
     inline for (.{ false, true }) |faults| {
         native.add(native_net_step, if (faults) "native-net-fault-tests" else "native-net-tests", &.{
             .{ .file = "runtime/net.c", .flags = if (faults) socket_flags.items else runtime_flags.items },
             .{ .file = "runtime/io.c", .flags = runtime_flags.items },
             .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+            .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
             .{ .file = if (faults) "runtime/net_fault_test.c" else "runtime/net_test.c", .flags = runtime_flags.items },
         });
     }

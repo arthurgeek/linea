@@ -735,9 +735,12 @@ behind it. The [bounded echo](../../examples/bounded_echo.lin) is the same
 server and client with three limits added, and `net.serve` in place of the
 accept loop:
 
-- `set_timeouts` bounds each read and each write on a connection.
+- `set_timeouts` bounds each read and each write on a connection. An operation
+  that passes its bound answers `TimedOut` and leaves the connection usable,
+  and a byte that arrives just as the bound passes is delivered rather than lost.
 - `set_deadline` bounds all the reads of a session together, so a byte at a
-  time cannot stretch it.
+  time cannot stretch it. Once the deadline has passed a read answers `TimedOut`
+  without taking any waiting bytes.
 - A cap on the text a connection may send, past which nothing is echoed.
 
 It also logs what happens, and reads lines through an `io.BufferedReader`
