@@ -8,13 +8,13 @@ fn ;main() -> UInt8 {
 }
 
 pub fn ;Holder[UInt8].apply(self: Holder[UInt8], sink value: UInt8) -> UInt8 where carries(value) {
-    ;Holder[UInt8].invoke[closure$40;impl$20[$20T$20]$20Holder$20[$20T$20].apply$230[]$3aimpl[UInt8]$3aHolder[UInt8]](self, value, |sink value| value)
+    ;Holder[UInt8].invoke[closure$40;[Holder[T]].apply$230[]$3aimpl[UInt8]$3aHolder[UInt8]](self, value, |sink value| value)
 }
 
-fn ;Holder[UInt8].invoke[closure$40;impl$20[$20T$20]$20Holder$20[$20T$20].apply$230[]$3aimpl[UInt8]$3aHolder[UInt8]](_self: Holder[UInt8], sink value: UInt8, f: closure@;impl [ T ] Holder [ T ].apply#0[]:impl[UInt8]:Holder[UInt8]) -> UInt8 where carries(value, f) {
-    lambda$40;impl$20[$20T$20]$20Holder$20[$20T$20].apply$230[Holder[UInt8]].impl[UInt8](value)
+fn ;Holder[UInt8].invoke[closure$40;[Holder[T]].apply$230[]$3aimpl[UInt8]$3aHolder[UInt8]](_self: Holder[UInt8], sink value: UInt8, f: closure@;[Holder[T]].apply#0[]:impl[UInt8]:Holder[UInt8]) -> UInt8 where carries(value, f) {
+    lambda$40;[Holder[T]].apply$230[Holder[UInt8]].impl[UInt8](value)
 }
 
-fn lambda$40;impl$20[$20T$20]$20Holder$20[$20T$20].apply$230[Holder[UInt8]].impl[UInt8](sink value: UInt8) -> UInt8 {
+fn lambda$40;[Holder[T]].apply$230[Holder[UInt8]].impl[UInt8](sink value: UInt8) -> UInt8 {
     value
 }

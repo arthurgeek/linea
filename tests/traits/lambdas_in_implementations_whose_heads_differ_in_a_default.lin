@@ -1,0 +1,32 @@
+@copyable
+struct Config { width: UInt8 }
+
+@copyable
+struct Holder {}
+
+trait Get[phantom F] {
+    fn get(_self: Self) -> UInt8
+}
+
+impl Get[fn(config: Config = .{ width = 7 }) -> UInt8] for Holder {
+    fn get(_self: Self) -> UInt8 {
+        let f = |n: UInt8| n + 1
+        f(1)
+    }
+}
+
+impl Get[fn(config: Config = .{ width = 8 }) -> UInt8] for Holder {
+    fn get(_self: Self) -> UInt8 {
+        let f = |n: UInt8| n + 2
+        f(1)
+    }
+}
+
+fn pick[F, T: Get[F]](value: T) -> UInt8 {
+    value.get()
+}
+
+fn main() -> UInt8 {
+    let h = Holder {}
+    pick[fn(config: Config = .{ width = 7 }) -> UInt8, Holder](h) + pick[fn(config: Config = .{ width = 8 }) -> UInt8, Holder](h) - 5
+}

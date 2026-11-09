@@ -258,26 +258,102 @@ fn attachSeedRows(
 
 /// What a symbol calls each of `exprs`, closures' lambdas or qualified
 /// constructor references: the declaration it is written in
-/// (`appendDeclarationName`), `#` and its place, in source order, among the
-/// members of `exprs` that declaration holds. Neither a resumed check, which numbers
-/// the library's closures and constructors first, nor a rewrite that moves
-/// declarations or respells what is around the expression changes the name.
-/// An entry of `.none` is named by its index after `#`. Allocated in `gpa`.
+/// (`appendDeclarationName`), `#` and its place among the members of `exprs`
+/// that declaration holds. Places follow source order, except that a call's
+/// arguments are taken in the order of the parameters they fill (`calls`
+/// holds each accepted call's arguments in that order), so writing named
+/// arguments in another order renames nothing. Neither a resumed check, which
+/// numbers the library's closures and constructors first, nor a rewrite that
+/// moves declarations or respells what is around an expression changes a
+/// name. An entry of `.none` is named by its index after `#`. Allocated in
+/// `gpa`.
 ///
-/// **Bound:** one sort of `exprs` and one of the program's declarations by
-/// first token, then one sweep over both; the stack the sweep keeps holds
-/// the declarations nested around one point.
-pub fn bodyNames(gpa: std.mem.Allocator, program: *const ExpandedProgram, resolution: *const Resolution, exprs: []const node.ExprId) ![][]const u8 {
+/// **Bound:** a sort of `exprs` and one of the program's declarations by first
+/// token, and one sweep over both, whose stack holds the declarations nested
+/// around one point. Each call naming two or more arguments adds a step to the
+/// place of each member of `exprs` inside one of its arguments, found by binary
+/// search, so the work is the members of `exprs` times the calls nested around
+/// each.
+pub fn bodyNames(
+    gpa: std.mem.Allocator,
+    program: *const ExpandedProgram,
+    resolution: *const Resolution,
+    typing: *const Typing,
+    calls: []const types_mod.NormalizedCall,
+    exprs: []const node.ExprId,
+) ![][]const u8 {
     const ast = &program.ast;
     var scratch = std.heap.ArenaAllocator.init(gpa);
     defer scratch.deinit();
     const temp = scratch.allocator();
 
-    const ByToken = struct {
-        fn exprLess(tree: *const Ast, a: u32, b: u32) bool {
-            return @intFromEnum(tree.exprTokens(node.ExprId.at(a)).start) < @intFromEnum(tree.exprTokens(node.ExprId.at(b)).start);
+    const startOf = struct {
+        fn expr(tree: *const Ast, e: node.ExprId) u32 {
+            return @intFromEnum(tree.exprTokens(e).start);
         }
-        fn declLess(tree: *const Ast, a: u32, b: u32) bool {
+    };
+
+    // The members of `exprs`, by the token each starts at.
+    var placed: std.ArrayList(u32) = .empty;
+    for (exprs, 0..) |expr, i| if (expr != .none) try placed.append(temp, @intCast(i));
+    const ByStart = struct {
+        tree: *const Ast,
+        exprs: []const node.ExprId,
+        fn less(self: @This(), a: u32, b: u32) bool {
+            return startOf.expr(self.tree, self.exprs[a]) < startOf.expr(self.tree, self.exprs[b]);
+        }
+    };
+    std.mem.sort(u32, placed.items, ByStart{ .tree = ast, .exprs = exprs }, ByStart.less);
+
+    // Where each member sits: a step for each call around it whose arguments
+    // are written by name, outermost first, holding the call's first token and
+    // the parameter the argument fills; then the member's own first token.
+    const steps = try temp.alloc(std.ArrayList(u32), exprs.len);
+    @memset(steps, .empty);
+    const Named = struct { start: u32, call: u32 };
+    var named: std.ArrayList(Named) = .empty;
+    for (calls, 0..) |call, i| {
+        if (call.at == .none or !ast.exprTag(call.at).namesArguments()) continue;
+        var names: usize = 0;
+        for (ast.callNames(call.at)) |name| {
+            if (name != TokenId.none) names += 1;
+        }
+        if (names < 2) continue;
+        try named.append(temp, .{ .start = startOf.expr(ast, call.at), .call = @intCast(i) });
+    }
+    std.mem.sort(Named, named.items, {}, struct {
+        fn less(_: void, a: Named, b: Named) bool {
+            return a.start < b.start;
+        }
+    }.less);
+    for (named.items) |entry| {
+        const call = calls[entry.call];
+        for (call.args, 0..) |arg, parameter| {
+            if (arg == .none) continue;
+            const span = ast.exprTokens(arg);
+            // The first member starting inside the argument, and every one
+            // after it that still does.
+            var lo: usize = 0;
+            var hi: usize = placed.items.len;
+            while (lo < hi) {
+                const mid = lo + (hi - lo) / 2;
+                if (startOf.expr(ast, exprs[placed.items[mid]]) < @intFromEnum(span.start)) lo = mid + 1 else hi = mid;
+            }
+            for (placed.items[lo..]) |position| {
+                if (startOf.expr(ast, exprs[position]) >= @intFromEnum(span.end)) break;
+                try steps[position].append(temp, entry.start);
+                try steps[position].append(temp, @intCast(parameter));
+            }
+        }
+    }
+    for (placed.items) |position| try steps[position].append(temp, startOf.expr(ast, exprs[position]));
+
+    // The declaration each member is written in: the innermost one whose
+    // tokens hold its first token.
+    const decls = try temp.alloc(u32, ast.declCount());
+    for (decls, 0..) |*d, i| d.* = @intCast(i);
+    std.mem.sort(u32, decls, ast, struct {
+        fn less(tree: *const Ast, a: u32, b: u32) bool {
             const x = tree.declTokens(DeclId.at(a));
             const y = tree.declTokens(DeclId.at(b));
             if (x.start != y.start) return @intFromEnum(x.start) < @intFromEnum(y.start);
@@ -285,30 +361,13 @@ pub fn bodyNames(gpa: std.mem.Allocator, program: *const ExpandedProgram, resolu
             // outer, which ends later, opens first.
             return @intFromEnum(x.end) > @intFromEnum(y.end);
         }
-    };
-
-    var placed: std.ArrayList(u32) = .empty;
-    for (exprs, 0..) |expr, i| if (expr != .none) try placed.append(temp, @intCast(i));
-    // Sort the positions in `exprs` by the token each expression starts at.
-    const Positions = struct {
-        tree: *const Ast,
-        exprs: []const node.ExprId,
-        fn less(self: @This(), a: u32, b: u32) bool {
-            return ByToken.exprLess(self.tree, @intCast(self.exprs[a].index()), @intCast(self.exprs[b].index()));
-        }
-    };
-    std.mem.sort(u32, placed.items, Positions{ .tree = ast, .exprs = exprs }, Positions.less);
-
-    const decls = try temp.alloc(u32, ast.declCount());
-    for (decls, 0..) |*d, i| d.* = @intCast(i);
-    std.mem.sort(u32, decls, ast, ByToken.declLess);
-
+    }.less);
     const enclosing = try temp.alloc(DeclId, exprs.len);
     @memset(enclosing, .none);
     var open: std.ArrayList(DeclId) = .empty;
     var next_decl: usize = 0;
     for (placed.items) |position| {
-        const at = @intFromEnum(ast.exprTokens(exprs[position]).start);
+        const at = startOf.expr(ast, exprs[position]);
         while (next_decl < decls.len and @intFromEnum(ast.declTokens(DeclId.at(decls[next_decl])).start) <= at) : (next_decl += 1) {
             const d = DeclId.at(decls[next_decl]);
             while (open.items.len > 0 and @intFromEnum(ast.declTokens(open.items[open.items.len - 1]).end) <= @intFromEnum(ast.declTokens(d).start)) _ = open.pop();
@@ -318,19 +377,33 @@ pub fn bodyNames(gpa: std.mem.Allocator, program: *const ExpandedProgram, resolu
         if (open.items.len > 0) enclosing[position] = open.items[open.items.len - 1];
     }
 
-    var counts: std.AutoHashMapUnmanaged(DeclId, u32) = .empty;
+    // Each member's place among its declaration's, by its steps.
+    const ByPlace = struct {
+        steps: []const std.ArrayList(u32),
+        enclosing: []const DeclId,
+        fn less(self: @This(), a: u32, b: u32) bool {
+            const x = @intFromEnum(self.enclosing[a]);
+            const y = @intFromEnum(self.enclosing[b]);
+            if (x != y) return x < y;
+            return std.mem.order(u32, self.steps[a].items, self.steps[b].items) == .lt;
+        }
+    };
+    std.mem.sort(u32, placed.items, ByPlace{ .steps = steps, .enclosing = enclosing }, ByPlace.less);
+    const ordinals = try temp.alloc(u32, exprs.len);
+    var previous: DeclId = .none;
+    var ordinal: u32 = 0;
+    for (placed.items, 0..) |position, i| {
+        if (i == 0 or enclosing[position] != previous) ordinal = 0;
+        previous = enclosing[position];
+        ordinals[position] = ordinal;
+        ordinal += 1;
+    }
+
     const names = try gpa.alloc([]const u8, exprs.len);
     var filled: usize = 0;
     errdefer {
         for (names[0..filled]) |n| gpa.free(n);
         gpa.free(names);
-    }
-    const ordinals = try temp.alloc(u32, exprs.len);
-    for (placed.items) |position| {
-        const entry = try counts.getOrPut(temp, enclosing[position]);
-        if (!entry.found_existing) entry.value_ptr.* = 0;
-        ordinals[position] = entry.value_ptr.*;
-        entry.value_ptr.* += 1;
     }
     for (exprs, 0..) |expr, i| {
         var spelled: std.ArrayList(u8) = .empty;
@@ -338,7 +411,7 @@ pub fn bodyNames(gpa: std.mem.Allocator, program: *const ExpandedProgram, resolu
         if (expr == .none or enclosing[i] == .none) {
             try spelled.print(gpa, "#{d}", .{i});
         } else {
-            try appendDeclarationName(gpa, &spelled, program, resolution, enclosing[i]);
+            try appendDeclarationName(gpa, &spelled, program, resolution, typing, enclosing[i]);
             try spelled.print(gpa, "#{d}", .{ordinals[i]});
         }
         names[i] = try spelled.toOwnedSlice(gpa);
@@ -350,28 +423,30 @@ pub fn bodyNames(gpa: std.mem.Allocator, program: *const ExpandedProgram, resolu
 /// Appends what names declaration `d` whatever order the program was
 /// checked or written in: its module's route and `;`, the implementation or
 /// trait it is a member of, and its own name. An implementation is named by
-/// its head as written, token by token, so two implementations for one type
-/// are told apart.
-fn appendDeclarationName(gpa: std.mem.Allocator, out: *std.ArrayList(u8), program: *const ExpandedProgram, resolution: *const Resolution, d: DeclId) !void {
+/// its resolved head: the type it is for and, for a trait's, the trait's route
+/// and name and the arguments it supplies, each spelled as a symbol spells a
+/// type, so a head's spelling, an alias or a default inside it names nothing
+/// differently.
+fn appendDeclarationName(gpa: std.mem.Allocator, out: *std.ArrayList(u8), program: *const ExpandedProgram, resolution: *const Resolution, typing: *const Typing, d: DeclId) !void {
     const ast = &program.ast;
     const module = program.moduleOf(d);
     if (module != .none) try out.appendSlice(gpa, program.modulePath(module));
     try out.append(gpa, ';');
-    const implementation = resolution.implEnclosing(d);
-    if (implementation != .none) {
-        const head = ast.declTokens(implementation);
-        var first = true;
-        var at = @intFromEnum(head.start);
-        while (at < @intFromEnum(head.end)) : (at += 1) {
-            const tok = TokenId.at(at);
-            switch (ast.tokenTag(tok)) {
-                .l_brace => break,
-                .comment => continue,
-                else => {},
+    const enclosing = resolution.implEnclosing(d);
+    if (enclosing != .none) {
+        // `implementationOf` answers for the declarations an implementation
+        // holds, which is what `impl_of_decl` is kept for.
+        if (typing.implementationOf(d)) |implementation| {
+            try typing.appendArguments(gpa, out, &.{implementation.ty});
+            if (implementation.trait != types_mod.Implementation.no_trait) {
+                const trait = DeclId.at(implementation.trait);
+                try out.append(gpa, ':');
+                const trait_module = program.moduleOf(trait);
+                if (trait_module != .none) try out.appendSlice(gpa, program.modulePath(trait_module));
+                try out.append(gpa, ';');
+                try out.appendSlice(gpa, ast.tokenText(ast.declName(trait)));
+                try typing.appendArguments(gpa, out, implementation.args);
             }
-            if (!first) try out.append(gpa, ' ');
-            first = false;
-            try out.appendSlice(gpa, ast.tokenText(tok));
         }
         try out.append(gpa, '.');
     } else if (ast.memberOwner(d) != .none) {
@@ -510,12 +585,6 @@ fn typecheckInternal(
             }
         }
 
-        const closure_names = try bodyNames(gpa, program, resolution, resolution.closures.exprs);
-        errdefer {
-            for (closure_names) |n| gpa.free(n);
-            gpa.free(closure_names);
-        }
-
         const binder_places = try gpa.alloc(?Checker.BinderPlace, resolution.bindingCount());
         errdefer gpa.free(binder_places);
 
@@ -573,7 +642,6 @@ fn typecheckInternal(
             .signature_built = signature_built,
             .declared_results = declared_results,
             .closure_descriptors = closure_descriptors,
-            .closure_names = closure_names,
             .binder_places = binder_places,
             .written_types = written_types,
             .binding_value_locs = try gpa.alloc(Loc, resolution.bindingCount()),
@@ -605,7 +673,6 @@ fn typecheckInternal(
     };
     c.builder.constant_pool = &c.folded.pool;
     c.builder.closure_descriptors = c.closure_descriptors;
-    c.builder.closure_names = c.closure_names;
     c.builder.certified_storage = c.raw_accesses.storage;
     c.builder.certified_buffer = c.raw_accesses.buffer;
     c.builder.certified_slice = c.raw_accesses.slice;
@@ -718,8 +785,7 @@ fn typecheckInternal(
     defer {
         for (c.closure_descriptors) |descriptor| gpa.free(descriptor.owned_fields);
         gpa.free(c.closure_descriptors);
-        for (c.closure_names) |n| gpa.free(n);
-        gpa.free(c.closure_names);
+        c.capture_environments.deinit(gpa);
     }
     defer {
         for (c.projected.items) |row| gpa.free(row.impl_args);
@@ -1690,19 +1756,6 @@ fn typecheckInternal(
     // Before the pool is finished, so that nothing here can fail after there is
     // a pool to release: a `finish` that succeeded and an allocation that did
     // not is a whole type pool nobody owns.
-    const constructor_names = names: {
-        const exprs = try gpa.alloc(ExprId, c.constructor_count);
-        defer gpa.free(exprs);
-        @memset(exprs, .none);
-        for (function_values) |value| if (value.target == .constructor) {
-            exprs[@intFromEnum(value.target.constructor.id)] = value.target.constructor.expr;
-        };
-        break :names try bodyNames(gpa, c.program, c.res, exprs);
-    };
-    errdefer {
-        for (constructor_names) |n| gpa.free(n);
-        gpa.free(constructor_names);
-    }
 
     const module_paths = try gpa.alloc([]const u8, c.program.modules.len);
     var filled: usize = 0;
@@ -1715,6 +1768,30 @@ fn typecheckInternal(
         module_paths[i] = dotted;
         filled = i + 1;
     }
+
+    // Named through a view spelling every module's route, which a builder
+    // reopened from a checked library holds and a fresh one does not yet.
+    var pool_view = c.builder.view();
+    pool_view.module_paths = module_paths;
+    const closure_names = try bodyNames(gpa, c.program, c.res, &pool_view, calls, c.res.closures.exprs);
+    errdefer {
+        for (closure_names) |n| gpa.free(n);
+        gpa.free(closure_names);
+    }
+    const constructor_names = names: {
+        const exprs = try gpa.alloc(ExprId, c.constructor_count);
+        defer gpa.free(exprs);
+        @memset(exprs, .none);
+        for (function_values) |value| if (value.target == .constructor) {
+            exprs[@intFromEnum(value.target.constructor.id)] = value.target.constructor.expr;
+        };
+        break :names try bodyNames(gpa, c.program, c.res, &pool_view, calls, exprs);
+    };
+    errdefer {
+        for (constructor_names) |n| gpa.free(n);
+        gpa.free(constructor_names);
+    }
+    try c.nameCaptureEnvironments(closure_names);
 
     const suppressed_generated_bodies = try c.suppressed_generated_bodies.toOwnedSlice(gpa);
     errdefer gpa.free(suppressed_generated_bodies);
@@ -1817,8 +1894,7 @@ fn typecheckInternal(
     typing.module_paths = module_paths;
     typing.closures = c.closure_descriptors;
     c.closure_descriptors = &.{};
-    typing.closure_names = c.closure_names;
-    c.closure_names = &.{};
+    typing.closure_names = closure_names;
     typing.constructor_names = constructor_names;
     typing.call_index = call_index;
     typing.calls = calls;
@@ -5919,9 +5995,10 @@ const Checker = struct {
     /// own scope by the first reader and null until then.
     declared_results: []?TypeId = &.{},
     closure_descriptors: []types_mod.ClosureDescriptor = &.{},
-    /// `Typing.closure_names`, which a closure's capture environment is
-    /// named by while the checker runs.
-    closure_names: [][]const u8 = &.{},
+    /// Each capture environment the check made and the closure it is for.
+    /// Named by the closure's ID while the check runs, and by the closure's
+    /// name once the names are known, when the check finishes.
+    capture_environments: std.ArrayList(struct { ty: TypeId, closure: resolve_mod.ClosureId }) = .empty,
     /// Which parameter a written name fills, keyed by the declaration and the
     /// interned name together.
     ///
@@ -6464,6 +6541,20 @@ const Checker = struct {
         for (saved.closures, self.closure_descriptors[0..saved.closures.len]) |descriptor, *target| {
             gpa.free(target.owned_fields);
             target.* = try copyRetained(gpa, descriptor);
+        }
+    }
+
+    /// Names each capture environment the check made after its closure, now
+    /// that `names` holds the closures' names, so an environment's name, like
+    /// its closure's, does not depend on the order closures were reached in.
+    fn nameCaptureEnvironments(self: *Checker, names: []const []const u8) !void {
+        for (self.capture_environments.items) |made| {
+            const name = try std.fmt.allocPrint(self.gpa, "captures@{s}", .{names[made.closure.index()]});
+            self.builder.owned_names.append(self.gpa, name) catch |err| {
+                self.gpa.free(name);
+                return err;
+            };
+            self.builder.pool.items[@intFromEnum(made.ty)].struct_.name = name;
         }
     }
 
@@ -22338,18 +22429,15 @@ const Checker = struct {
             if (capture.convention == .inout) break true;
         } else false;
         if (resolved_captures.len != 0 and environment == .unit) {
-            // Named by the closure's name rather than its ID, which a check
-            // resumed from the checked library numbers after the library's.
-            var spelled: std.ArrayList(u8) = .empty;
-            defer spelled.deinit(self.gpa);
-            try spelled.appendSlice(self.gpa, "captures@");
-            try spelled.appendSlice(self.gpa, self.closure_names[closure.index()]);
-            const name = try spelled.toOwnedSlice(self.gpa);
+            // Renamed after the closure when the check finishes
+            // (`nameCaptureEnvironments`).
+            const name = try std.fmt.allocPrint(self.gpa, "captures.{d}", .{closure.index()});
             self.builder.owned_names.append(self.gpa, name) catch |err| {
                 self.gpa.free(name);
                 return err;
             };
             environment = try self.builder.addStruct(name, if (lends) .affine else .copyable, environment_fields);
+            try self.capture_environments.append(self.gpa, .{ .ty = environment, .closure = closure });
         }
         self.closure_descriptors[closure.index()] = .{
             .owned_fields = self.closure_descriptors[closure.index()].owned_fields,

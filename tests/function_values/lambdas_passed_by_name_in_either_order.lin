@@ -1,0 +1,7 @@
+fn combine[F: fn(n: UInt8) -> UInt8, G: fn(n: UInt8) -> UInt8](first: F, second: G) -> UInt8 {
+    first(1) + second(2)
+}
+
+fn main() -> UInt8 {
+    combine(first: |x: UInt8| x + 1, second: |y: UInt8| y * 3) - 8
+}
