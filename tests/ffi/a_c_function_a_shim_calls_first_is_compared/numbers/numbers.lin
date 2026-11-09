@@ -1,0 +1,22 @@
+import std.ffi
+
+extern fn labs(value: Int64) -> Int64
+
+extern fn numbers_distance(from: Int64, to: Int64) -> Int64
+
+// `stdlib.h` declares `long strtol(const char *, char **, int)`, which C
+// library functions in the header call too.
+extern fn strtol(text: ffi.CText, end: UInt64, base: Int32) -> Int64
+
+pub fn spread(from: Int64, to: Int64) -> Int64 {
+    labs(from) + numbers_distance(from, to)
+}
+
+pub fn parsed(text: Str) -> Int64 {
+    let held = ffi.CString.open(text) else |_| {
+        return 0
+    }
+    let value = strtol(held.text(), 0, 10)
+    held.release()
+    value
+}

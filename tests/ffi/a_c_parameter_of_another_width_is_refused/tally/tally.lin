@@ -1,0 +1,7 @@
+// C takes `amount` as an `int64_t`, so an `Int32` here leaves the upper half
+// of the register to whatever it held.
+extern fn tally_add(total: Int64, amount: Int32) -> Int64
+
+pub fn add(total: Int64, amount: Int32) -> Int64 {
+    tally_add(total, amount)
+}

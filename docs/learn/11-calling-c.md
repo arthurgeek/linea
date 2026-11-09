@@ -4,9 +4,12 @@ A great deal of useful code is written in C: SQLite, compression, image
 formats, the operating system's own libraries. This chapter shows how a Linea
 program calls it, and what Linea keeps checking when it does.
 
-The compiler cannot read C. When you declare a C function, it believes what you
-wrote about its parameters, its result and who owns what, the way Rust believes
-an `extern "C"` block inside `unsafe`. Linea's answer is to keep that belief in
+You declare a C function by hand, and the compiler holds the declaration to
+the C prototype: it asks the C compiler what the function takes and answers,
+and refuses a declaration that disagrees. What C does with what it is given,
+who owns what and how long a pointer stays valid, no prototype says, so the
+compiler believes what you wrote about those, the way Rust believes an
+`extern "C"` block inside `unsafe`. Linea's answer is to keep that belief in
 one place: a **wrapper module** that your project's manifest trusts with C. The
 wrapper declares the C functions and checks what they return. It hands the rest
 of the program ordinary Linea values, which every rule from the earlier
@@ -38,8 +41,9 @@ error[M-Extern]: an `extern` is declared only in a module its root's manifest gr
 The manifest, `linea.json`, lists the modules it trusts under `"extern"`, each
 spelled the way an import names it. `"."` is the root module itself. Listing a
 small module rather than the whole program keeps the trusted code small enough
-to read: a reviewer checks the wrapper's declarations against the C header, and
-no other module can declare C at all.
+to read: a reviewer checks what the wrapper's declarations promise about
+ownership against the C library's documentation, and no other module can
+declare C at all.
 
 ## Calling your own C
 
@@ -122,6 +126,119 @@ which is C's `double`, as `average` shows. On every platform Linea runs on, C's
 `int` is `Int32`, `long` and `int64_t` are `Int64`, and `size_t` is `UInt64`.
 `Bool` does not cross, because C has no single answer for which bytes mean
 true: pass an integer and compare it.
+
+### The compiler holds each `extern` to C's prototype
+
+Before it builds the program, the compiler asks the C compiler for the
+prototype of every function an `extern` names, and compares the two position
+by position. Here `counter_sum`, and the `sum` that calls it, take an `Int32`
+where C takes an `int64_t`:
+
+<!-- guide: edit tally/counter/counter.lin 6 extern fn counter_sum(left: Int64, right: Int64) -> Int64 -->
+```linea
+extern fn counter_sum(left: Int64, right: Int32) -> Int64
+```
+
+<!-- guide: edit tally/counter/counter.lin 15 pub fn sum(left: Int64, right: Int64) -> Int64 { -->
+```linea
+pub fn sum(left: Int64, right: Int32) -> Int64 {
+```
+
+```
+error[T-ExternPrototype]: C declares `int64_t counter_sum(int64_t, int64_t)`, and this declaration calls it as `int64_t counter_sum(int64_t, int32_t)`
+ --> tally/counter/counter.lin:6:43
+  |
+6 | extern fn counter_sum(left: Int64, right: Int32) -> Int64
+  |                                           ^^^^^ C takes `int64_t` here
+  |
+  = note: `counter_sum` is declared by `counter/counter.c`
+  = help: declare `right` as `Int64`, or a newtype over it, the Linea type of C's `int64_t`
+```
+
+C would have read the whole 64-bit register for `right`, half of which the
+call never wrote. The same check refuses a missing or extra parameter, a
+result of another type, `inout` where C takes a value, and a plain parameter
+where C takes the address of one. It compares how each value is passed, not
+how C spells its type: `long` and `long long` are both `Int64`, and any
+pointer is the 64-bit address a `UInt64`, a handle or a `std.ffi` view holds.
+It also compares every C declaration of the function the manifest names, and
+refuses a function C declares `static` and one with another calling
+convention than C's own. Where C code calling a function reaches another
+symbol than its name, as glibc's `lseek` reaches `lseek64` when a C file asks
+for 64-bit file offsets, the `extern` calls that symbol too. An `enum` must
+match the width C passes it at: an `enum` whose values fit 32 bits is an
+`Int32` or a `UInt32`.
+`linea check`, `build`, `run` and `test` all run it, so no `extern` reaches a
+C function whose declaration disagrees with it. What C does with the values
+it is handed is still yours to get right, as the end of this chapter lists.
+
+### `headers` names the C library's declarations
+
+A project's own C under `"native"` declares the functions it defines. A
+function from a C library is declared by the library's header, which the
+manifest names under `"headers"`, spelled as `#include <...>` takes it. Here
+`labs`, C's absolute value of a `long`, comes from `stdlib.h`:
+
+`distance/linea.json`:
+
+```json
+{ "extern": ["."], "headers": ["stdlib.h"] }
+```
+
+`distance/main.lin`:
+
+```linea
+import std.io
+
+// `stdlib.h` declares `long labs(long)`, and C's `long` is `Int64`.
+extern fn labs(value: Int64) -> Int64
+
+fn main() -> Result[UInt8, io.IoError] {
+    let gap = labs(3 - 10)
+    io.println("{gap}")?
+    .Ok(0)
+}
+```
+
+```
+7
+```
+
+Without the header, nothing the manifest names declares `labs`, and the
+declaration is refused rather than believed:
+
+`undeclared/linea.json`:
+
+```json
+{ "extern": ["."] }
+```
+
+`undeclared/main.lin`:
+
+```linea
+import std.io
+
+extern fn labs(value: Int64) -> Int64
+
+fn main() -> Result[UInt8, io.IoError] {
+    let gap = labs(3 - 10)
+    io.println("{gap}")?
+    .Ok(0)
+}
+```
+
+```
+error[T-ExternPrototype]: no C declaration of `labs` is in reach: linea.json names no C declarations for this root
+ --> undeclared/main.lin:3:11
+  |
+3 | extern fn labs(value: Int64) -> Int64
+  |           ^^^^ held to the prototype C gives it, and C gives it none
+  |
+  = help: name the header that declares it under "headers" in linea.json, such as "stdlib.h", or build the C that defines it under "native"
+```
+
+A header is looked for beside `linea.json` first, so `"store/store.h"` names
+a header of your own, and then where the C compiler looks for the system's.
 
 ### An `extern` stays private
 
@@ -1195,6 +1312,8 @@ it, and a call that succeeds may leave it holding anything at all. So an
 `extern` asks for it in its result instead. Declared to answer
 `ffi.Errno[Int32]`, POSIX's `unlink` still returns C's `int`, and the compiler
 reads `errno` immediately after the call returns, before anything else runs.
+`unistd.h` declares `unlink`, so the manifest names it under `"headers"`, and
+the prototype the compiler holds the declaration to is `int unlink(const char *)`.
 
 What an `Errno` holds is reached only by saying what failure looks like.
 `failed_at(-1)` answers `.Err(code)` when C returned -1 and `.Ok(value)`
@@ -1207,7 +1326,7 @@ reports:
 `cleanup/linea.json`:
 
 ```json
-{ "extern": ["posix"] }
+{ "extern": ["posix"], "headers": ["unistd.h"] }
 ```
 
 `cleanup/posix/posix.lin`:
@@ -1284,6 +1403,10 @@ C libraries report failure with result codes, and the wrapper turns them into
 `Result`s. SQLite answers `0` for success, `100` when a row is ready and `101`
 when a statement has finished; anything else is an error code, which
 `sqlite3_errmsg` explains in words.
+
+The shim below includes `sqlite3.h`, so the shim is where the compiler finds
+the prototype of every SQLite function the wrapper declares, and the manifest
+needs no `"headers"` of its own.
 
 Some C interfaces need a value a Linea declaration cannot spell.
 `sqlite3_bind_text` takes `SQLITE_TRANSIENT`, a function pointer cast from
@@ -1822,12 +1945,14 @@ row's values and column names as two C arrays of strings, `char **`, with
 their length. A callback takes each as an `ffi.CTextList` and reads entry `i`
 with `get(i, count:)`, an `ffi.CText`. Reading past the count C gave stops the
 program rather than reading past the array. The values live only during the
-call, so the callback copies them out:
+call, so the callback copies them out. This project builds no C of its own,
+so its manifest names `sqlite3.h` for the prototypes of the functions it
+declares:
 
 `rows/linea.json`:
 
 ```json
-{ "extern": ["sqlite"], "link": ["sqlite3"] }
+{ "extern": ["sqlite"], "link": ["sqlite3"], "headers": ["sqlite3.h"] }
 ```
 
 `rows/sqlite/sqlite.lin`:
@@ -2007,42 +2132,38 @@ the runtime's handler, not its own.
 ## What the compiler believes
 
 A wrapper module is the one place a mistake becomes undefined behaviour,
-because the compiler cannot check C. When you write one, check each of these
-against the C library's documentation:
+because the compiler cannot see what C does with what it is handed. When you
+write one, check each of these against the C library's documentation:
 
-1. Each `extern` matches its C prototype: the same number of parameters, the
-   same width and signedness, a value or a pointer (`inout`) in the same
-   places, and the same result. A handle C takes by value is a plain
-   parameter, never `inout`.
-2. Conventions tell the truth about ownership. `sink` means C frees or keeps
+1. Conventions tell the truth about ownership. `sink` means C frees or keeps
    the object on every return; a plain parameter means C only uses it during
    the call.
-3. C keeps no pointer into Linea memory after the call returns: not a
+2. C keeps no pointer into Linea memory after the call returns: not a
    `Bytes`, not a `CText` from a `CString`, not a context.
-4. A `CText` answer whose text lives inside a C object says so with
+3. A `CText` answer whose text lives inside a C object says so with
    `borrows`, and an `extern` marks its handle `read` only where C truly only
    reads the object. The compiler believes the marker: a `read` written on a
    function that changes or frees the object lets text read from it before
    the call be read after, which is a read of freed memory. Without `read`,
    the compiler treats the call as changing the handle's place, as it treats
    an `inout` argument.
-5. Each handle is the only one naming its C object. An `extern` that answers a
+4. Each handle is the only one naming its C object. An `extern` that answers a
    handle answers a new object, or one it hands over, never a second handle
    to an object another handle already names; and the wrapper never builds a
    handle from an address it took out of another. The compiler tracks what is
    read from an object through the handle it was read from, so two handles to
    one object let a change through one free what was read through the other.
-6. C calls a callback only during the call that passed it.
-7. Every length you pass to C, or to `copy_bytes`, is the length of the
+5. C calls a callback only during the call that passed it.
+6. Every length you pass to C, or to `copy_bytes`, is the length of the
    memory it describes.
-8. Every C object reachable from more than one task, by a read or through a
+7. Every C object reachable from more than one task, by a read or through a
    copy, is kept in a non-copyable handle, or the wrapper is sure its read
    paths are safe for concurrent use. The compiler keeps a handle to one task
    at a time, but a C pointer kept in a plain integer field of a record is not
    followed at all. And a handle moved whole into a task is accepted, so a C
    object that must be created, used and destroyed on one thread is created
    inside an owning task, which then runs every call on that thread.
-9. A handle marked `@shareable` names an object the C library lets two
+8. A handle marked `@shareable` names an object the C library lets two
    threads read at once, through every `extern` that takes it. A copyable
    sealed newtype must be marked `@shareable` in a trusted module, and the
    mark then promises that any number of threads may use the object through
@@ -2050,7 +2171,9 @@ against the C library's documentation:
    lives: C takes the newtype only `read`, and the wrapper never frees the
    object through an address it took out of one.
 
-The compiler holds the rest: an `extern` is private to its module, an
+The compiler holds the rest: each `extern` matches its C prototype in the
+number, width, signedness and passing of its parameters and in its result, an
+`extern` is private to its module, an
 `extern` answering a `CText` states what it points into, a module that is not
 trusted can neither declare C nor read a `std.ffi` value, and every borrow a
 declaration states is checked like any other. Keep the wrapper small and keep

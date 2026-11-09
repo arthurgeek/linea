@@ -1,0 +1,12 @@
+import counter
+
+use counter.Counter
+
+fn main() -> UInt8 {
+    var tally = Counter.open() else |_| {
+        return 1
+    }
+    &tally.add(3)
+    tally.close()
+    0
+}

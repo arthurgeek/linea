@@ -286,11 +286,16 @@ pub fn emit(
     // module does not hold. The body is the linker's to find; writing one here
     // would put this compiler's invention under a name the runtime already
     // answers to.
+    // Two externals C gives one symbol, which the prototype check holds to
+    // one signature, are declared once.
+    var declared: std.StringHashMapUnmanaged(void) = .empty;
+    defer declared.deinit(gpa);
     for (module.functions, 0..) |*f, i| {
         const id = FunctionId.at(@intCast(i));
         if (!module.isExternal(id)) continue;
+        if ((try declared.getOrPut(gpa, externalSymbol(module, options.foreign_symbols, id))).found_existing) continue;
         try w.writeAll("  func.func private @");
-        try writeSymbol(w, module, id);
+        try writeSymbol(w, module, options.foreign_symbols, id);
         try w.writeAll("(");
         const indirect = module.returnsIndirectly(id);
         if (indirect) try w.writeAll("!llvm.ptr");
@@ -317,7 +322,7 @@ pub fn emit(
     for (module.functions, 0..) |*f, i| {
         const id = FunctionId.at(@intCast(i));
         if (module.isExternal(id)) continue;
-        try emitFunction(gpa, w, module, f, try table.buildMap(gpa, f.file), table.get(f.file).path, id, file_symbols[f.file.index()].?, options.sanitize);
+        try emitFunction(gpa, w, module, f, try table.buildMap(gpa, f.file), table.get(f.file).path, id, file_symbols[f.file.index()].?, options);
     }
 
     // Only where something is to be entered. A library holds no entry point, so
@@ -386,6 +391,17 @@ pub const Sanitizer = enum {
 /// What emission is asked to add to the module beyond what the MIR says.
 pub const Options = struct {
     sanitize: ?Sanitizer = null,
+    /// The symbol C gives each `extern` whose C declaration links it under
+    /// another one than its name, such as `lseek64` for `lseek` where C reads
+    /// files with 64-bit offsets ([T-ExternPrototype]).
+    foreign_symbols: []const ForeignSymbol = &.{},
+};
+
+/// An `extern`'s name and the symbol its C declaration gives it, as LLVM
+/// spells a symbol: without the underscore Darwin puts before every C name.
+pub const ForeignSymbol = struct {
+    name: []const u8,
+    symbol: []const u8,
 };
 
 /// Writes `options`' sanitizer attribute as one more entry of a `passthrough`
@@ -497,7 +513,7 @@ fn emitEntryWrapper(w: *std.Io.Writer, module: *const Module, sanitize: ?Sanitiz
     try writeOwnedCallType(w, runtime_symbols.set_args_signature);
     try w.writeAll("\n");
     try w.writeAll("    %status = func.call @");
-    try writeSymbol(w, module, module.entry);
+    try writeSymbol(w, module, &.{}, module.entry);
     try w.print("() : () -> {s}\n", .{int_type});
     // The status narrows to the runtime's width here and nowhere else -- the
     // one place a 64-bit computation meets a 32-bit interface.
@@ -508,20 +524,22 @@ fn emitEntryWrapper(w: *std.Io.Writer, module: *const Module, sanitize: ?Sanitiz
 
 /// The width one exported parameter or answer crosses the boundary in.
 ///
-/// The type a value crosses the C boundary as: its storage representation,
+/// The type a value crosses the C boundary as: `types.foreignScalar`'s answer,
 /// which for an integer is the declared width rather than the width the body
 /// computes in. That width is an implementation choice about where overflow is
 /// caught, and publishing it would make this module's calling convention
-/// something every caller has to match forever.
+/// something every caller has to match forever. The same answer is what
+/// [T-ExternPrototype] holds a C prototype to.
 ///
 /// Only an integer, a `Float64` or a newtype over one reaches here: the
 /// checker refused every other type ([T-Extern], [T-Export]), so another
 /// representation is a compiler defect rather than a signature to print.
 fn foreignTypeOf(module: *const Module, ty: TypeId) []const u8 {
-    const representation = module.representationOf(ty).storage;
-    if (representation != .code_pointer and !types_mod.crossesForeign(&module.types, ty))
+    // A callback crosses as the address of its C-callable entry.
+    if (module.representationOf(ty).storage == .code_pointer) return "!llvm.ptr";
+    const scalar = types_mod.foreignScalar(&module.types, ty) orelse
         std.debug.panic("compiler defect: a type the checker refused crosses the foreign boundary", .{});
-    return switch (representation) {
+    return switch (scalar) {
         .integer => |integer| switch (integer.bits) {
             8 => "i8",
             16 => "i16",
@@ -529,10 +547,7 @@ fn foreignTypeOf(module: *const Module, ty: TypeId) []const u8 {
             64 => "i64",
             else => std.debug.panic("compiler defect: a {d}-bit integer crosses the foreign boundary", .{integer.bits}),
         },
-        .float => |bits| if (bits == 64) "f64" else std.debug.panic("compiler defect: a {d}-bit float crosses the foreign boundary", .{bits}),
-        // A callback crosses as the address of its C-callable entry.
-        .code_pointer => "!llvm.ptr",
-        else => std.debug.panic("compiler defect: this type does not cross the foreign boundary", .{}),
+        .float64 => "f64",
     };
 }
 
@@ -714,7 +729,7 @@ fn emitForeignEntry(
     } else {
         try w.writeAll("    func.call @");
     }
-    try writeSymbol(w, module, id);
+    try writeSymbol(w, module, &.{}, id);
     try w.writeAll("(");
     for (0..mir.param_count) |i| {
         if (i > 0) try w.writeAll(", ");
@@ -760,8 +775,9 @@ fn emitFunction(
     path: []const u8,
     id: FunctionId,
     file_symbol: u32,
-    sanitize: ?Sanitizer,
+    options: Options,
 ) (std.mem.Allocator.Error || std.Io.Writer.Error)!void {
+    const sanitize = options.sanitize;
     // An answer too wide for a register is written into storage the caller
     // owns, handed in as a leading pointer. Asked of the module because the
     // call sites ask the same routine, so the two sides cannot disagree.
@@ -774,10 +790,11 @@ fn emitFunction(
         .file_symbol = file_symbol,
         .module = module,
         .indirect = indirect,
+        .foreign_symbols = options.foreign_symbols,
     };
 
     try w.writeAll("  func.func private @");
-    try writeSymbol(w, module, id);
+    try writeSymbol(w, module, &.{}, id);
     try w.writeAll("(");
     if (indirect) try w.writeAll("%sret: !llvm.ptr");
     for (0..mir.param_count) |i| {
@@ -984,6 +1001,9 @@ const FunctionEmitter = struct {
     /// Whether this function writes its answer through a caller-owned pointer
     /// rather than returning it.
     indirect: bool,
+    /// The symbols C gives the `extern` declarations it calls, where they are
+    /// not their names.
+    foreign_symbols: []const ForeignSymbol = &.{},
     /// The terminal call writes directly to this function's caller-owned result.
     return_call: InstId = .none,
     /// Names the temporaries a check expands into, and the trap blocks it
@@ -1338,7 +1358,7 @@ const FunctionEmitter = struct {
                 const n = id.index();
                 const target = mir.functionOf(id);
                 try self.w.print("    %fa{d} = func.constant @", .{n});
-                try writeSymbol(self.w, self.module, target);
+                try writeSymbol(self.w, self.module, self.foreign_symbols, target);
                 try self.w.writeAll(" : ");
                 try self.writeFunctionType(target);
                 try self.here(span);
@@ -1498,7 +1518,7 @@ const FunctionEmitter = struct {
         } else {
             try w.print("    %v{d} = func.call @", .{n});
         }
-        try writeSymbol(w, module, c.func);
+        try writeSymbol(w, module, self.foreign_symbols, c.func);
         try w.writeAll("(");
         if (indirect) {
             if (id == self.return_call) try w.writeAll("%sret") else try w.print("%rs{d}", .{n});
@@ -2683,13 +2703,24 @@ fn resultTypeOf(module: *const Module, id: FunctionId, ret: TypeId) ?[]const u8 
 /// The name a function is emitted under. Read from the module rather than
 /// rebuilt, because a name computed twice is a name that can differ, and every
 /// reference to a declaration must spell it the way its definition does.
-fn writeSymbol(w: *std.Io.Writer, module: *const Module, id: FunctionId) std.Io.Writer.Error!void {
+/// The symbol an external function is emitted under: the one its C
+/// declaration gives it, where that is not its name.
+fn externalSymbol(module: *const Module, foreign_symbols: []const ForeignSymbol, id: FunctionId) []const u8 {
+    const name = module.nameOf(id);
+    for (foreign_symbols) |held| if (std.mem.eql(u8, held.name, name)) return held.symbol;
+    return name;
+}
+
+fn writeSymbol(w: *std.Io.Writer, module: *const Module, foreign_symbols: []const ForeignSymbol, id: FunctionId) std.Io.Writer.Error!void {
     const name = module.nameOf(id);
     std.debug.assert(symbol_names.holds(name));
     if (module.isExternal(id)) {
         // Somebody else's symbol, spelled as they spelled it: the prefix is
         // this language's claim on a name it defined, and this is not one.
-        try writeSymbolName(w, name, "");
+        // C's declaration may give it another symbol than its name.
+        const symbol = externalSymbol(module, foreign_symbols, id);
+        std.debug.assert(symbol_names.holds(symbol));
+        try writeSymbolName(w, symbol, "");
     } else {
         std.debug.assert(name.len <= symbol_names.max_len);
         try writeSymbolName(w, name, symbol_names.defined_prefix);
@@ -3074,7 +3105,7 @@ test "aggregate tail calls use the final return destination only across an empty
         defer map.deinit();
         var output: std.Io.Writer.Allocating = .init(gpa);
         defer output.deinit();
-        try emitFunction(gpa, &output.writer, &module, &mir, &map, source.path, .at(0), 0, null);
+        try emitFunction(gpa, &output.writer, &module, &mir, &map, source.path, .at(0), 0, .{});
         const forwards = shape == .direct or shape == .copied_join;
         try testing.expectEqual(forwards, std.mem.indexOf(u8, output.written(), "func.call @lin.tail(%sret,") != null);
         try testing.expectEqual(!forwards, std.mem.indexOf(u8, output.written(), "%rs") != null);

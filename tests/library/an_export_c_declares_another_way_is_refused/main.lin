@@ -1,0 +1,10 @@
+extern fn scale_twice(value: Int64) -> Int64
+
+// This export takes and answers 32 bits, which C's declaration of it does not.
+export fn scale(value: Int32) -> Int32 {
+    value * 2
+}
+
+export fn quadruple(value: Int64) -> Int64 {
+    scale_twice(value)
+}

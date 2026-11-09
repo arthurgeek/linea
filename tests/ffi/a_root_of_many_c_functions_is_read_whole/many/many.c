@@ -1,0 +1,32 @@
+#include <stdint.h>
+
+int32_t many_1(void) { return 1; }
+int32_t many_2(void) { return 2; }
+int32_t many_3(void) { return 3; }
+int32_t many_4(void) { return 4; }
+int32_t many_5(void) { return 5; }
+int32_t many_6(void) { return 6; }
+int32_t many_7(void) { return 7; }
+int32_t many_8(void) { return 8; }
+int32_t many_9(void) { return 9; }
+int32_t many_10(void) { return 10; }
+int32_t many_11(void) { return 11; }
+int32_t many_12(void) { return 12; }
+int32_t many_13(void) { return 13; }
+int32_t many_14(void) { return 14; }
+int32_t many_15(void) { return 15; }
+int32_t many_16(void) { return 16; }
+int32_t many_17(void) { return 17; }
+int32_t many_18(void) { return 18; }
+int32_t many_19(void) { return 19; }
+int32_t many_20(void) { return 20; }
+int32_t many_21(void) { return 21; }
+int32_t many_22(void) { return 22; }
+int32_t many_23(void) { return 23; }
+int32_t many_24(void) { return 24; }
+int32_t many_25(void) { return 25; }
+int32_t many_26(void) { return 26; }
+int32_t many_27(void) { return 27; }
+int32_t many_28(void) { return 28; }
+int32_t many_29(void) { return 29; }
+int32_t many_30(void) { return 30; }

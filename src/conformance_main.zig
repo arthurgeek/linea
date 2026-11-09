@@ -50,6 +50,7 @@ const lowerTree = @import("mir/lower.zig").lowerTree;
 const mlir_backend = @import("backend/mlir.zig");
 const emitMlir = mlir_backend.emit;
 const toolchain = @import("driver/toolchain.zig");
+const prototypes = @import("driver/prototypes.zig");
 const edges = @import("mir/edges.zig");
 const storage_mod = @import("mir/storage.zig");
 const Inst = @import("mir/mir.zig").Inst;
@@ -15814,6 +15815,22 @@ fn emitOrRecord(
     /// The sanitizer the program will run under, which instruments its code.
     sanitize: ?[]const u8,
 ) !bool {
+    return emitOrRecordWith(gpa, failures, ir, module, table, sink, display_path, sanitize, &.{});
+}
+
+/// `emitOrRecord`, calling each `extern` by the symbol its C declaration
+/// gives it, as the command line does.
+fn emitOrRecordWith(
+    gpa: std.mem.Allocator,
+    failures: *std.ArrayList(Failure),
+    ir: *std.Io.Writer.Allocating,
+    module: *const MirModule,
+    table: *FileTable,
+    sink: *Sink,
+    display_path: []const u8,
+    sanitize: ?[]const u8,
+    foreign_symbols: []const mlir_backend.ForeignSymbol,
+) !bool {
     // Whether the program was accepted is settled after the composed step,
     // not before it: discovery reports [L-Size] about concrete types the
     // checker never saw. A caller that emitted without checking the sink would
@@ -15834,7 +15851,7 @@ fn emitOrRecord(
         return false;
     }
 
-    if (try emitMlir(gpa, &ir.writer, module, table, sink, .{ .sanitize = mlir_backend.Sanitizer.named(sanitize) })) return true;
+    if (try emitMlir(gpa, &ir.writer, module, table, sink, .{ .sanitize = mlir_backend.Sanitizer.named(sanitize), .foreign_symbols = foreign_symbols })) return true;
 
     var why: std.Io.Writer.Allocating = .init(gpa);
     try render.renderAll(&why.writer, table, sink, .{ .color = .never });
@@ -18325,6 +18342,10 @@ const Env = struct {
     scratch: []const u8,
     runtime: []const u8,
     sanitize: ?[]const u8,
+    /// The symbols C gives the program's `extern` declarations where they are
+    /// not their names, which every build of the program and of each rewrite
+    /// of it calls them by.
+    foreign_symbols: []const mlir_backend.ForeignSymbol = &.{},
     diagnostics: ?*std.Io.Writer = null,
 
     fn buildRunOptions(self: Env, name: []const u8, ir: []const u8, foreign: Foreign) BuildRunOptions {
@@ -18914,7 +18935,7 @@ fn checkDamage(
         // call is how the verifier answers -- there is no second entry point
         // that skips it, and there must not be one.
         var ir: std.Io.Writer.Allocating = .init(scratch);
-        if (!try emitMlir(scratch, &ir.writer, &module, table, &sink, .{ .sanitize = mlir_backend.Sanitizer.named(env.sanitize) })) {
+        if (!try emitMlir(scratch, &ir.writer, &module, table, &sink, .{ .sanitize = mlir_backend.Sanitizer.named(env.sanitize), .foreign_symbols = env.foreign_symbols })) {
             if (saidDefect(&sink)) continue;
 
             var why: std.Io.Writer.Allocating = .init(scratch);
@@ -19059,7 +19080,7 @@ fn checkMaterializedDerives(
 
     const mir = (try lower(gpa, &settled.expanded, &settled.res, &settled.typing, &settled.disposals, &sink, .program)) orelse return error.SourceRejected;
     var ir: std.Io.Writer.Allocating = .init(gpa);
-    if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, display_path, env.sanitize)) return;
+    if (!try emitOrRecordWith(gpa, failures, &ir, &mir, &table, &sink, display_path, env.sanitize, env.foreign_symbols)) return;
     if (!try sameCodeIgnoringFunctionOrder(gpa, original_ir, ir.written())) {
         try failures.append(gpa, .{
             .path = display_path,
@@ -19195,7 +19216,7 @@ fn checkRewrites(
 
         const mir = (try lower(scratch, &settled.expanded, res, typing, disposals, &sink, .program)) orelse return error.SourceRejected;
         var ir: std.Io.Writer.Allocating = .init(scratch);
-        if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, program.display_path, env.sanitize)) continue;
+        if (!try emitOrRecordWith(gpa, failures, &ir, &mir, &table, &sink, program.display_path, env.sanitize, env.foreign_symbols)) continue;
 
         // Writing an operator out as what it is defined to be must reach the
         // same code, not merely the same answer: the semantics says `is`, and
@@ -19354,9 +19375,13 @@ fn compareRewrittenRun(
 /// the rules and not where they point, because a rewrite moves the text a span
 /// indexes, and not the message, which quotes what the rewrite spelled.
 fn rulesNamedBy(gpa: std.mem.Allocator, sink: *const Sink) ![]const u8 {
+    return rulesNamedIn(gpa, sink.items());
+}
+
+fn rulesNamedIn(gpa: std.mem.Allocator, diagnostics: []const Diagnostic) ![]const u8 {
     var names: std.ArrayList([]const u8) = .empty;
     defer names.deinit(gpa);
-    for (sink.items()) |d| {
+    for (diagnostics) |d| {
         if (d.severity == .note) continue;
         try names.append(gpa, if (d.code) |c| c.ruleName() else "(no rule)");
     }
@@ -19401,6 +19426,9 @@ const WalkSubject = struct {
     rules: []const u8,
     /// What the program answered, where it was built and run.
     ran: ?struct { env: Env, answered: RanAs } = null,
+    /// The symbols C gives the program's `extern` declarations where they
+    /// are not their names.
+    foreign_symbols: []const mlir_backend.ForeignSymbol = &.{},
 };
 
 /// Property: every walk answers as the loop it stands for.
@@ -19495,7 +19523,7 @@ fn compareWalkLoops(
     const module = mir orelse return true;
     if (sink.hasErrors()) return true;
     var ir: std.Io.Writer.Allocating = .init(scratch);
-    if (!try emitOrRecord(gpa, failures, &ir, &module, table, sink, subject.display_path, sanitize)) return true;
+    if (!try emitOrRecordWith(gpa, failures, &ir, &module, table, sink, subject.display_path, sanitize, subject.foreign_symbols)) return true;
     const suffix = try std.fmt.allocPrint(scratch, "walks{d}", .{k});
     _ = try compareRewrittenRun(gpa, scratch, io, cache, run.env, failures, run.answered, suffix, why, ir.written());
     return true;
@@ -21139,6 +21167,33 @@ fn freshCheck(
     return .{ .program = program, .semantics = semantics, .lowered = lowered };
 }
 
+/// [T-ExternPrototype] for a case loaded from memory: its C files are written
+/// beneath the scratch directory at their paths in the case, which is the
+/// directory its roots' manifests and sources are named relative to.
+fn checkPrototypes(gpa: std.mem.Allocator, io: std.Io, scratch_dir: []const u8, case: Case, settled: *const loader.Semantics, sink: *Sink) ![]const mlir_backend.ForeignSymbol {
+    if (case.native.files.len == 0 and case.native.compile.len == 0) {
+        var declares = false;
+        for (settled.expanded.source.modules) |module| declares = declares or (module.externs and !module.library);
+        if (!declares) return &.{};
+    }
+    const dir = try toolchain.uniqueTarget(gpa, io, scratch_dir, "case-c-files");
+    defer gpa.free(dir);
+    try std.Io.Dir.cwd().createDirPath(io, dir);
+    defer std.Io.Dir.cwd().deleteTree(io, dir) catch {};
+    for (case.native.files) |file| {
+        const path = try std.fs.path.join(gpa, &.{ dir, file.path });
+        defer gpa.free(path);
+        if (std.fs.path.dirname(path)) |parent| try std.Io.Dir.cwd().createDirPath(io, parent);
+        const written = try std.Io.Dir.cwd().createFile(io, path, .{});
+        defer written.close(io);
+        var buf: [4096]u8 = undefined;
+        var w = written.writer(io, &buf);
+        try w.interface.writeAll(file.text);
+        try w.interface.flush();
+    }
+    return prototypes.check(gpa, io, settled, sink, .{ .base = dir, .scratch = dir });
+}
+
 fn checkCase(
     gpa: std.mem.Allocator,
     scratch_parent: std.mem.Allocator,
@@ -21373,6 +21428,18 @@ fn checkCase(
     // closure loads exactly what a fresh load does.
     if (rejected and chosen.imported) _ = try freshCheck(gpa, scratch_parent, case, &table, &sink, display_path, &w.failures);
 
+    // The command line holds every `extern` to its C prototype once the
+    // semantic passes accept the program, and so does the corpus, over the
+    // case's C files written where `cc` can read them.
+    const before_prototypes = sink.items().len;
+    var refused_by_prototypes = false;
+    var foreign_symbols: []const mlir_backend.ForeignSymbol = &.{};
+    if (!rejected) {
+        foreign_symbols = try checkPrototypes(gpa, io, env.scratch_dir, case, &settled, &sink);
+        rejected = sink.hasErrors();
+        refused_by_prototypes = rejected;
+    }
+
     // The inferred dump reads the checker's answers back into the
     // source, so it is only meaningful where the checker had answers.
     if (!rejected) {
@@ -21404,7 +21471,9 @@ fn checkCase(
     };
     // Taken before the backend runs, which reports nothing about the source:
     // what a rewrite of the walks is compared against is what the passes said.
-    const rules_named = try rulesNamedBy(gpa, &sink);
+    // A rewrite is checked by the semantic passes alone, so a case only
+    // [T-ExternPrototype] refused is compared as the passes accepted it.
+    const rules_named = try rulesNamedIn(gpa, if (refused_by_prototypes) sink.items()[0..before_prototypes] else sink.items());
     semantic_check_zone.end();
 
     // Property: a use lies inside the region of source its binding belongs
@@ -21739,7 +21808,7 @@ fn checkCase(
             }
 
             var ir: std.Io.Writer.Allocating = .init(gpa);
-            if (try emitOrRecord(gpa, &w.failures, &ir, &mir, &table, &sink, display_path, env.sanitize)) {
+            if (try emitOrRecordWith(gpa, &w.failures, &ir, &mir, &table, &sink, display_path, env.sanitize, foreign_symbols)) {
                 const mlir_golden = try std.mem.concat(gpa, u8, &.{ stem, ".mlir" });
                 var matching_mlir = false;
                 var native_verified = false;
@@ -21749,7 +21818,7 @@ fn checkCase(
                     // sanitizer, so it emits the module again to compare.
                     var plain: std.Io.Writer.Allocating = .init(gpa);
                     const recorded_ir = if (env.sanitize == null) ir.written() else written: {
-                        if (!try emitMlir(gpa, &plain.writer, &mir, &table, &sink, .{})) @panic("a module the emitter wrote once was refused the second time");
+                        if (!try emitMlir(gpa, &plain.writer, &mir, &table, &sink, .{ .foreign_symbols = foreign_symbols })) @panic("a module the emitter wrote once was refused the second time");
                         break :written plain.written();
                     };
                     if (try compare(gpa, io, &w.failures, display_path, "mlir", mlir_golden, expected, recorded_ir, env.update, false)) {
@@ -21847,6 +21916,7 @@ fn checkCase(
                             answered_env = .{
                                 .scratch = env.scratch_dir,
                                 .runtime = rt,
+                                .foreign_symbols = foreign_symbols,
                                 .sanitize = env.sanitize,
                             };
                         }
@@ -21890,6 +21960,7 @@ fn checkCase(
                                 .{
                                     .scratch = env.scratch_dir,
                                     .runtime = rt,
+                                    .foreign_symbols = foreign_symbols,
                                     .sanitize = env.sanitize,
                                 },
                                 &w.failures,
@@ -21934,6 +22005,7 @@ fn checkCase(
                             rewritten = try checkRewrites(gpa, io, env.cache, .{
                                 .scratch = env.scratch_dir,
                                 .runtime = rt,
+                                .foreign_symbols = foreign_symbols,
                                 .sanitize = env.sanitize,
                             }, &w.failures, &w.rewrites, .{
                                 .display_path = display_path,
@@ -21985,6 +22057,7 @@ fn checkCase(
                             try checkDamage(gpa, io, env.cache, .{
                                 .scratch = env.scratch_dir,
                                 .runtime = rt,
+                                .foreign_symbols = foreign_symbols,
                                 .sanitize = env.sanitize,
                             }, &w.failures, &w.damages, &table, &settled.expanded, res, typing, disposals, .{
                                 .display_path = display_path,
@@ -22078,6 +22151,7 @@ fn checkCase(
             },
             .rules = rules_named,
             .ran = if (answered) |a| .{ .env = answered_env, .answered = a } else null,
+            .foreign_symbols = foreign_symbols,
         });
         walk_zone.end();
     }

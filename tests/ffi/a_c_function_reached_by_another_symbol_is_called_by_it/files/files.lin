@@ -1,0 +1,27 @@
+import std.ffi
+
+// `stdlib.h` may give `realpath` another symbol, as macOS does.
+extern fn realpath(path: ffi.CText, resolved: UInt64) -> UInt64
+
+extern fn lseek(descriptor: Int32, offset: Int64, whence: Int32) -> Int64
+
+extern fn files_offset_bits() -> Int64
+
+// Resolve a path that does not exist, which C answers with no path.
+pub fn resolves(path: Str) -> Bool {
+    let held = ffi.CString.open(path) else |_| {
+        return false
+    }
+    let resolved = realpath(held.text(), 0)
+    held.release()
+    resolved != 0
+}
+
+// Seek on a descriptor that is not open, which C refuses with -1.
+pub fn seek_closed() -> Int64 {
+    lseek(-1, 0, 0)
+}
+
+pub fn offset_bits() -> Int64 {
+    files_offset_bits()
+}

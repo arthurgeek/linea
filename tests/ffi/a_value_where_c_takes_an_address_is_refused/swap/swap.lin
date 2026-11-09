@@ -1,0 +1,6 @@
+// C writes through the address it is handed, which only `inout` passes.
+extern fn swap_increment(value: Int32)
+
+pub fn bump(value: Int32) {
+    swap_increment(value)
+}

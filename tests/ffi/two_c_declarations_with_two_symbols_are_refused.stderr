@@ -1,0 +1,7 @@
+error[T-ExternPrototype]: C's declarations give `twice_of` two symbols: `twice_first` in `twice/first.c` and `twice_second` in `twice/second.c`
+ --> tests/ffi/two_c_declarations_with_two_symbols_are_refused/twice/twice.lin:1:11
+  |
+1 | extern fn twice_of(value: Int64) -> Int64
+  |           ^^^^^^^^ this links against one symbol, and C code calls two
+  |
+  = help: declare the function alike in every C source and header linea.json names

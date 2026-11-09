@@ -1,0 +1,1 @@
+{ "extern": ["picks"], "native": ["picks/picks.c"] }

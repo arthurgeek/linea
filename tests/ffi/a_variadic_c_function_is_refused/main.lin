@@ -1,0 +1,5 @@
+import sums
+
+fn main() -> UInt8 {
+    UInt8(sums.pair(40, 2))
+}

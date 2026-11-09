@@ -1,1 +1,1 @@
-{ "extern": ["sqlite"], "link": ["sqlite3"] }
+{ "extern": ["sqlite"], "link": ["sqlite3"], "headers": ["sqlite3.h"] }

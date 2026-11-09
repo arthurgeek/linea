@@ -1,0 +1,7 @@
+// C reads the arguments after `count` as a variable list, which an `extern`
+// does not pass.
+extern fn sums_add(count: Int32, first: Int32, second: Int32) -> Int32
+
+pub fn pair(first: Int32, second: Int32) -> Int32 {
+    sums_add(2, first, second)
+}

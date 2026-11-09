@@ -1,0 +1,5 @@
+import geometry
+
+fn main() -> UInt8 {
+    UInt8(geometry.area(6, 7))
+}

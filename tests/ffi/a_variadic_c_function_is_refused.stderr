@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `int32_t sums_add(int32_t, ...)`, and this declaration calls it as `int32_t sums_add(int32_t, int32_t, int32_t)`
+ --> tests/ffi/a_variadic_c_function_is_refused/sums/sums.lin:3:11
+  |
+3 | extern fn sums_add(count: Int32, first: Int32, second: Int32) -> Int32
+  |           ^^^^^^^^ C reads a variable list of arguments, which an `extern` cannot pass
+  |
+  = note: `sums_add` is declared by `sums/sums.c`
+  = help: call it through a C function with fixed parameters, built under "native"

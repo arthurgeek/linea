@@ -1,0 +1,7 @@
+import std.io
+import pairs
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{pairs.total()}")?
+    .Ok(0)
+}

@@ -1,0 +1,1 @@
+{ "extern": ["score"], "native": ["score/score.c"], "headers": ["stdlib.h", "score/score.h"] }

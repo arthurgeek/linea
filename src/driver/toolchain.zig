@@ -587,6 +587,98 @@ pub fn checkC(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !?Failure {
     return runTool(gpa, io, .cc, &.{ Tool.cc.command(), "-fsyntax-only", path });
 }
 
+/// What `cc` printed while reading one C file for the type of every probe
+/// declaration in it.
+pub const Described = struct {
+    /// The type trees of the declarations whose names begin `prefix`.
+    dump: []const u8,
+    /// What `cc` reported, one diagnostic per line.
+    reports: []const u8,
+};
+
+/// Reads the C file at `path` with `cc` and answers the type tree of every
+/// declaration whose name begins with `prefix`, or null where `cc` could not
+/// be started. Nothing is produced. `include_dir` is searched first for an
+/// `#include`. A refusal is not a failure here: a probe naming a function no
+/// header declares is refused while the others are described, and the caller
+/// reads both streams.
+pub fn describeC(gpa: std.mem.Allocator, io: std.Io, include_dir: []const u8, path: []const u8, prefix: []const u8) !?Described {
+    const filter = try std.fmt.allocPrint(gpa, "-ast-dump-filter={s}", .{prefix});
+    defer gpa.free(filter);
+    const result = std.process.run(gpa, io, .{
+        .argv = &.{
+            Tool.cc.command(),
+            "-fsyntax-only",
+            // No warning is read, apart from the one that says a function the
+            // probe refers to from an inline function of external linkage is
+            // `static`.
+            "-Wno-everything",
+            "-Werror=static-in-inline",
+            "-fno-color-diagnostics",
+            "-fno-caret-diagnostics",
+            // A name nothing declares is not read as a similar one that is.
+            "-fno-spell-checking",
+            // Every probe naming something no included file declares is an
+            // error, and a root may hold any number of them.
+            "-ferror-limit=0",
+            "-I",
+            include_dir,
+            "-Xclang",
+            "-ast-dump",
+            "-Xclang",
+            "-ast-dump-decl-types",
+            "-Xclang",
+            filter,
+            path,
+        },
+    }) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    return .{ .dump = result.stdout, .reports = result.stderr };
+}
+
+/// What compiling a C file to LLVM IR gave.
+pub const Lowered = union(enum) {
+    /// The IR.
+    ir: []const u8,
+    /// What `cc` reported where it refused the file.
+    refused: []const u8,
+};
+
+/// Compiles the C file at `path` to LLVM IR at `out`, unoptimised, and
+/// answers the IR, or null where `cc` could not be started. `include_dir`
+/// is searched first for an `#include`.
+pub fn lowerC(gpa: std.mem.Allocator, io: std.Io, include_dir: []const u8, path: []const u8, out: []const u8) !?Lowered {
+    const result = std.process.run(gpa, io, .{
+        .argv = &.{
+            Tool.cc.command(),
+            "-S",
+            "-emit-llvm",
+            "-O0",
+            "-Wno-everything",
+            "-fno-color-diagnostics",
+            "-fno-caret-diagnostics",
+            "-I",
+            include_dir,
+            "-o",
+            out,
+            path,
+        },
+    }) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    gpa.free(result.stdout);
+    const succeeded = switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+    if (!succeeded) return .{ .refused = result.stderr };
+    gpa.free(result.stderr);
+    return .{ .ir = try std.Io.Dir.cwd().readFileAlloc(io, out, gpa, .unlimited) };
+}
+
 fn runTool(
     gpa: std.mem.Allocator,
     io: std.Io,

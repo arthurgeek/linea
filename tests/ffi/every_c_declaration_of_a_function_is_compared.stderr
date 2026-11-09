@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `int twice_of(int, int)`, and this declaration calls it as `int64_t twice_of(int64_t)`
+ --> tests/ffi/every_c_declaration_of_a_function_is_compared/twice/twice.lin:3:11
+  |
+3 | extern fn twice_of(value: Int64) -> Int64
+  |           ^^^^^^^^ C takes 2 parameters, and this declares 1
+  |
+  = note: `twice_of` is declared by `twice/twice.c`
+  = help: declare one parameter for each of the 2 C takes, in its order

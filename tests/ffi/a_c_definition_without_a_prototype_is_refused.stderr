@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `long long scale_by()`, and this declaration calls it as `long long scale_by(int32_t, int64_t)`
+ --> tests/ffi/a_c_definition_without_a_prototype_is_refused/scale/scale.lin:1:11
+  |
+1 | extern fn scale_by(value: Int32, factor: Int64) -> Int64
+  |           ^^^^^^^^ C declares this without a prototype, which states no parameter types
+  |
+  = note: `scale_by` is declared by `scale/scale.c`
+  = help: declare the function in C with a prototype, `long long f(long long value)` rather than `long long f()`

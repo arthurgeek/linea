@@ -1,0 +1,13 @@
+// C passes `enum big` as a 64-bit integer.
+extern fn levels_pick(wanted: Int32) -> Int32
+
+// C passes `enum level` as one unsigned byte.
+extern fn levels_raise(level: Int32) -> Int32
+
+pub fn pick(wanted: Int32) -> Int32 {
+    levels_pick(wanted)
+}
+
+pub fn raise(level: Int32) -> Int32 {
+    levels_raise(level)
+}

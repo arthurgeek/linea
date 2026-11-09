@@ -1,0 +1,1 @@
+{ "extern": ["geometry"], "native": ["geometry/geometry.c"] }

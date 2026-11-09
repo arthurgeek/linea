@@ -167,6 +167,15 @@ pub const RootFacts = struct {
     /// The roots an import written in this root may name, besides its own and
     /// the standard library.
     dependencies: []const RootId = &.{},
+    /// The directory holding the root's manifest, which its `native` and
+    /// `headers` entries are named relative to.
+    manifest_dir: []const u8 = "",
+    /// The C declarations the root's `extern` declarations are held to
+    /// ([T-ExternPrototype]): the C sources its manifest names under
+    /// `native`, joined to `manifest_dir`, and the headers it names under
+    /// `headers`, as an include spells each.
+    native: []const []const u8 = &.{},
+    headers: []const []const u8 = &.{},
 };
 
 /// Ordered declaration runs chosen by the caller, without allocating ID lists.
@@ -505,6 +514,11 @@ pub const Program = struct {
             gpa.free(r.name);
             gpa.free(r.dir);
             gpa.free(r.dependencies);
+            gpa.free(r.manifest_dir);
+            for (r.native) |path| gpa.free(path);
+            gpa.free(r.native);
+            for (r.headers) |header| gpa.free(header);
+            gpa.free(r.headers);
         }
         gpa.free(self.roots);
         for (self.native) |path| gpa.free(path);

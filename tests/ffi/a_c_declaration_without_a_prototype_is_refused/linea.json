@@ -1,0 +1,1 @@
+{ "extern": ["twice"], "native": ["twice/caller.c", "twice/twice.c"] }

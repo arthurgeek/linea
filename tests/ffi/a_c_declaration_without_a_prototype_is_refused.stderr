@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `long long twice_of()`, and this declaration calls it as `long long twice_of(int64_t)`
+ --> tests/ffi/a_c_declaration_without_a_prototype_is_refused/twice/twice.lin:1:11
+  |
+1 | extern fn twice_of(value: Int64) -> Int64
+  |           ^^^^^^^^ C declares this without a prototype, which states no parameter types
+  |
+  = note: `twice_of` is declared by `twice/caller.c`
+  = help: declare the function in C with a prototype, `long long f(long long value)` rather than `long long f()`

@@ -1,1 +1,1 @@
-{ "extern": ["files"] }
+{ "extern": ["files"], "headers": ["unistd.h"] }

@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C code calls the symbol `scale` this export defines through a declaration that takes a 64-bit integer and answers a 64-bit integer, which this export does not
+ --> tests/library/an_export_c_reaches_under_another_name_is_compared/main.lin:4:11
+  |
+4 | export fn scale(value: Int32) -> Int32 {
+  |           ^^^^^ C calls this export through a declaration of another prototype
+  |
+  = note: the call is compiled from `scale.c`
+  = help: declare the export as C calls it, or the C declaration that reaches it as the export is

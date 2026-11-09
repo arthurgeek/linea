@@ -28,6 +28,29 @@ const hex_digits = "0123456789abcdef";
 /// that stops holding the day the prefix grows.
 pub const defined_prefix = "lin.";
 
+/// Whether a symbol C gives a function is one no `extern` may link against:
+/// one the runtime owns or its `linea_` namespace holds ([T-ExternRuntime]),
+/// one a Linea definition or callback entry is emitted under, or one LLVM
+/// spells for itself. A written name cannot reach these, since an identifier
+/// holds no `.`, but an `__asm__` label can.
+pub fn reservedForeign(name: []const u8) bool {
+    const runtime_symbols = @import("runtime_symbols.zig");
+    if (std.mem.startsWith(u8, name, runtime_symbols.namespace) or runtime_symbols.holds(name)) return true;
+    for ([_][]const u8{ defined_prefix, callback_prefix, "llvm." }) |prefix| {
+        if (std.mem.startsWith(u8, name, prefix)) return true;
+    }
+    return false;
+}
+
+test "a symbol the runtime, a definition or LLVM spells is reserved" {
+    try std.testing.expect(reservedForeign("linea_close"));
+    try std.testing.expect(reservedForeign("main"));
+    try std.testing.expect(reservedForeign("lin.main"));
+    try std.testing.expect(reservedForeign("lcb.visit"));
+    try std.testing.expect(reservedForeign("llvm.trap"));
+    try std.testing.expect(!reservedForeign("lseek64"));
+}
+
 /// What a C-callable entry to a function passed to C as a callback is called:
 /// the function's own name after this prefix. As long as `defined_prefix`, so
 /// `max_len` bounds both, and spelled with a byte no C identifier holds and no

@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `double geometry_area(int64_t, int64_t)`, and this declaration calls it as `int64_t geometry_area(int64_t, int64_t)`
+ --> tests/ffi/a_c_result_of_another_type_is_refused/geometry/geometry.lin:3:57
+  |
+3 | extern fn geometry_area(width: Int64, height: Int64) -> Int64
+  |                                                         ^^^^^ C answers `double`
+  |
+  = note: `geometry_area` is declared by `geometry/geometry.c`
+  = help: declare the result `Float64`, or a newtype over it, the Linea type of C's `double`

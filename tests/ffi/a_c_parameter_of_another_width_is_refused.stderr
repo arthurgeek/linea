@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `int64_t tally_add(int64_t, int64_t)`, and this declaration calls it as `int64_t tally_add(int64_t, int32_t)`
+ --> tests/ffi/a_c_parameter_of_another_width_is_refused/tally/tally.lin:3:43
+  |
+3 | extern fn tally_add(total: Int64, amount: Int32) -> Int64
+  |                                           ^^^^^ C takes `int64_t` here
+  |
+  = note: `tally_add` is declared by `tally/tally.c`
+  = help: declare `amount` as `Int64`, or a newtype over it, the Linea type of C's `int64_t`

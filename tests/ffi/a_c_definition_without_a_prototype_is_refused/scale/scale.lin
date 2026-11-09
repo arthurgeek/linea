@@ -1,0 +1,5 @@
+extern fn scale_by(value: Int32, factor: Int64) -> Int64
+
+pub fn by(value: Int32, factor: Int64) -> Int64 {
+    scale_by(value, factor)
+}

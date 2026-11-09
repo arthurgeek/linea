@@ -1,0 +1,6 @@
+// C reads a third argument, `high`, that this declaration never passes.
+extern fn limits_clamp(value: Int32, low: Int32) -> Int32
+
+pub fn at_least(value: Int32, low: Int32) -> Int32 {
+    limits_clamp(value, low)
+}

@@ -1,0 +1,5 @@
+import limits
+
+fn main() -> UInt8 {
+    UInt8(limits.at_least(7, 3))
+}

@@ -1,0 +1,5 @@
+import scale
+
+fn main() -> UInt8 {
+    UInt8(scale.by(6, 7))
+}

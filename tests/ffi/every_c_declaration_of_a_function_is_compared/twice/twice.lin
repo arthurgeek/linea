@@ -1,0 +1,7 @@
+// The header agrees with this declaration, and the source the build links
+// does not.
+extern fn twice_of(value: Int64) -> Int64
+
+pub fn of(value: Int64) -> Int64 {
+    twice_of(value)
+}

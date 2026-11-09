@@ -1,0 +1,1 @@
+{ "extern": ["twice"], "native": ["twice/impl.c"] }

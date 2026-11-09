@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `int32_t squares_visit(int32_t, int32_t (*)(void *, int64_t), void *)`, and this declaration calls it as `int32_t squares_visit(int32_t, int32_t (*)(void *, int32_t), void *)`
+ --> tests/ffi/a_callback_c_calls_another_way_is_refused/squares/squares.lin:5:46
+  |
+5 | extern fn squares_visit(count: Int32, visit: fn(inout tally: Tally, square: Int32) -> Int32, inout tally: Tally) -> Int3 ...
+  |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ C calls this back as `int32_t (*)(void *, int64_t)`
+  |
+  = note: `squares_visit` is declared by `squares/squares.c`
+  = help: in the callback, C passes `int64_t` as parameter 2: declare that parameter as `Int64`, or a newtype over it, the Linea type of C's `int64_t`

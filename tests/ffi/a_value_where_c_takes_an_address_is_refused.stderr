@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `void swap_increment(int32_t *)`, and this declaration calls it as `void swap_increment(int32_t)`
+ --> tests/ffi/a_value_where_c_takes_an_address_is_refused/swap/swap.lin:2:33
+  |
+2 | extern fn swap_increment(value: Int32)
+  |                                 ^^^^^ C takes `int32_t *` here
+  |
+  = note: `swap_increment` is declared by `swap/swap.c`
+  = help: C takes `int32_t *`, the address of a place it reads or writes: make `value` `inout`, which passes its place's address

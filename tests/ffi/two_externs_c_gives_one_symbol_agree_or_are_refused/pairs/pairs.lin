@@ -1,0 +1,11 @@
+extern fn pairs_add(left: Int32, right: Int32) -> Int32
+
+// The same function as `pairs_add`, declared alike.
+extern fn pairs_sum(left: Int32, right: Int32) -> Int32
+
+// The same function again, declared another way.
+extern fn pairs_twice(value: Int64) -> Int64
+
+pub fn total() -> Int64 {
+    Int64(pairs_add(1, 2) + pairs_sum(3, 4)) + pairs_twice(5)
+}

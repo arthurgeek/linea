@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `twice_of` `static`, so it has no symbol this declaration could link against
+ --> tests/ffi/a_c_function_without_a_symbol_is_refused/twice/twice.lin:1:11
+  |
+1 | extern fn twice_of(value: Int64) -> Int64
+  |           ^^^^^^^^ C gives this function no symbol
+  |
+  = note: `twice_of` is declared by `twice/twice.h`
+  = help: call it through a C function that is not `static`, built under "native"

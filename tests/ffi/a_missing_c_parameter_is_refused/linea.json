@@ -1,0 +1,1 @@
+{ "extern": ["limits"], "native": ["limits/limits.c"] }

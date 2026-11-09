@@ -1,0 +1,7 @@
+error[T-ExternPrototype]: C gives `pairs_twice` the symbol `pairs_add`, which `pairs_add` also links against with another signature
+ --> tests/ffi/two_externs_c_gives_one_symbol_agree_or_are_refused/pairs/pairs.lin:7:11
+  |
+7 | extern fn pairs_twice(value: Int64) -> Int64
+  |           ^^^^^^^^^^^ one symbol is one function, with one signature
+  |
+  = help: declare both alike, since C calls one function through both

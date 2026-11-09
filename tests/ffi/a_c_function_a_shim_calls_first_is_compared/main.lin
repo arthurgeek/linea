@@ -1,0 +1,7 @@
+import std.io
+import numbers
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{numbers.spread(-2, 3)} {numbers.parsed("42")}")?
+    .Ok(0)
+}

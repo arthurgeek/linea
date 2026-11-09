@@ -1,0 +1,13 @@
+// `enum colour` holds no negative value, so C passes it as a 32-bit unsigned
+// integer; `size_hint` holds `-1`, so C passes it as a signed one.
+extern fn colours_next(colour: UInt32) -> UInt32
+
+extern fn colours_flip(hint: Int32) -> Int32
+
+pub fn next(colour: UInt32) -> UInt32 {
+    colours_next(colour)
+}
+
+pub fn flip(hint: Int32) -> Int32 {
+    colours_flip(hint)
+}

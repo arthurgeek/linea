@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `__attribute__((preserve_none)) long long twice_of(long long)`, and this declaration calls it as `long long twice_of(long long)`
+ --> tests/ffi/a_c_function_of_another_calling_convention_is_refused/twice/twice.lin:1:11
+  |
+1 | extern fn twice_of(value: Int64) -> Int64
+  |           ^^^^^^^^ C declares it with the `preserve_none` calling convention, which is not C's own
+  |
+  = note: `twice_of` is declared by `twice/twice.c`
+  = help: call it through a C function with C's own calling convention, built under "native"

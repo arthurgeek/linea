@@ -1,0 +1,7 @@
+// C answers a `double` in a floating-point register, which an `Int64` result
+// never reads.
+extern fn geometry_area(width: Int64, height: Int64) -> Int64
+
+pub fn area(width: Int64, height: Int64) -> Int64 {
+    geometry_area(width, height)
+}

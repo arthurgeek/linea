@@ -47,6 +47,7 @@ const emitMlir = mlir_backend.emit;
 const toolchain = @import("toolchain.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
 const loader = @import("loader.zig");
+const prototypes = @import("prototypes.zig");
 const library = @import("library.zig");
 
 const Program = @import("../syntax/program.zig").Program;
@@ -352,6 +353,9 @@ const BuildRequest = struct {
     /// The C sources and libraries the program's manifest names.
     native: []const []const u8 = &.{},
     link: []const []const u8 = &.{},
+    /// The symbols C gives the program's `extern` declarations where they
+    /// are not their names.
+    foreign_symbols: []const mlir_backend.ForeignSymbol = &.{},
 };
 
 /// Writes IR, assembles it and links it against the runtime.
@@ -410,6 +414,7 @@ fn compileToExecutable(
         // sink for the renderer at the end of the run.
         if (!try emitMlir(gpa, out.open(io, file), req.mir, req.table, req.sink, .{
             .sanitize = mlir_backend.Sanitizer.named(sanitize),
+            .foreign_symbols = req.foreign_symbols,
         })) return exit_defect;
         try out.flush();
     }
@@ -694,6 +699,10 @@ pub fn run(process: std.process.Init) !u8 {
                 "  the {s} names under `link` something other than a library name, such as \"sqlite3\" for -lsqlite3\n",
                 .{loader.manifest_name},
             ),
+            error.ManifestHeaderNotHeader => try stderr_w.print(
+                "  the {s} names under `headers` something other than a C header as an include names it, such as \"sqlite3.h\" or \"store/shim.h\"\n",
+                .{loader.manifest_name},
+            ),
             error.ManifestLinksWithoutExtern => try stderr_w.print(
                 "  the {s} names C to build or link but grants no module `extern`, so nothing could call it\n",
                 .{loader.manifest_name},
@@ -765,6 +774,12 @@ pub fn run(process: std.process.Init) !u8 {
                 else
                     try checkProgram(gpa, process.gpa, &program, &interner, &sink, purpose);
                 defer settled.deinit(gpa);
+                // Every command that would build the program holds its C
+                // declarations to the C compiler's prototypes first.
+                const foreign_symbols = if ((is_check or is_run or is_build or is_test or is_emit_mlir) and !sink.hasErrors())
+                    try prototypes.check(gpa, io, &settled, &sink, .{ .scratch = scratchDir(process.minimal.environ) })
+                else
+                    &.{};
                 const res = &settled.res;
                 const typing = &settled.typing;
                 const disposals = &settled.disposals;
@@ -836,7 +851,7 @@ pub fn run(process: std.process.Init) !u8 {
                             };
                             defer file.close(io);
                             var out: Out = .{};
-                            if (!try emitMlir(gpa, out.open(io, file), &lowered, &table, &sink, .{})) return exit_defect;
+                            if (!try emitMlir(gpa, out.open(io, file), &lowered, &table, &sink, .{ .foreign_symbols = foreign_symbols })) return exit_defect;
                             try out.flush();
                         }
 
@@ -891,6 +906,7 @@ pub fn run(process: std.process.Init) !u8 {
                                 .storage = storage,
                                 .native = program.native,
                                 .link = program.link,
+                                .foreign_symbols = foreign_symbols,
                             });
 
                             // Removed whatever happened, including where the
@@ -990,6 +1006,7 @@ pub fn run(process: std.process.Init) !u8 {
                                 .storage = storage,
                                 .native = program.native,
                                 .link = program.link,
+                                .foreign_symbols = foreign_symbols,
                             });
 
                             // A refusal to emit falls through to the renderer
@@ -1032,7 +1049,7 @@ pub fn run(process: std.process.Init) !u8 {
                             const stdout_w = stdout.open(io, stdout_file);
                             defer stdout.flush() catch {};
 
-                            if (!try emitMlir(gpa, stdout_w, &lowered, &table, &sink, .{})) {
+                            if (!try emitMlir(gpa, stdout_w, &lowered, &table, &sink, .{ .foreign_symbols = foreign_symbols })) {
                                 defect = true;
                             }
                         }

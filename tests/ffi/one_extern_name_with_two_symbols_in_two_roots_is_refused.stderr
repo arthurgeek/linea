@@ -1,0 +1,7 @@
+error[T-ExternPrototype]: C gives `twice_of` the symbol `twice_impl` in one root and `twice_of` in another, and every `extern` of one name is one function
+ --> tests/ffi/one_extern_name_with_two_symbols_in_two_roots_is_refused/scaled/scaled.lin:1:11
+  |
+1 | extern fn twice_of(value: Int64) -> Int64
+  |           ^^^^^^^^ this root's C calls it by another symbol
+  |
+  = help: give the function one symbol in every root's C, or declare one of them under another name

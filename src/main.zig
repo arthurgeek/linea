@@ -42,6 +42,7 @@ comptime {
     _ = @import("sema/constants.zig");
     _ = @import("sema/types.zig");
     _ = @import("sema/intrinsics.zig");
+    _ = @import("sema/foreign.zig");
     _ = @import("sema/observations.zig");
     _ = @import("sema/open_types.zig");
     _ = @import("sema/usefulness.zig");
@@ -55,6 +56,7 @@ comptime {
     _ = @import("mir/notes.zig");
     _ = @import("backend/mlir.zig");
     _ = @import("driver/toolchain.zig");
+    _ = @import("driver/prototypes.zig");
     _ = @import("support/generated_calls.zig");
     _ = @import("support/module_route.zig");
     _ = @import("support/runtime_symbols.zig");

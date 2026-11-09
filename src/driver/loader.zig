@@ -476,6 +476,8 @@ fn loadInputs(
     // reaches before the first import is followed: an import's first element
     // may name one of them.
     try l.readGraph();
+    l.graph.items[RootId.primary.index()].native = declared.native;
+    l.graph.items[RootId.primary.index()].headers = declared.headers;
 
     var primary = if (module) |named| try l.load(named, null, .primary) else try l.load(dir, if (entry_is_file) entry else null, .primary);
 
@@ -589,11 +591,7 @@ fn loadInputs(
     }
     const roots = try l.rootFacts();
     errdefer {
-        for (roots) |r| {
-            gpa.free(r.name);
-            gpa.free(r.dir);
-            gpa.free(r.dependencies);
-        }
+        for (roots) |r| Loader.freeRootFacts(gpa, r);
         gpa.free(roots);
     }
 
@@ -1491,9 +1489,13 @@ pub const Declared = struct {
     /// The C libraries a build links, each a name `cc` takes after `-l`.
     /// Owned.
     link: []const []const u8 = &.{},
+    /// The C headers that declare what the root's `extern` declarations name
+    /// beyond its own `native` sources, each as `#include <...>` takes it,
+    /// found first beside the manifest. Owned.
+    headers: []const []const u8 = &.{},
 
     pub fn deinit(self: Declared, gpa: std.mem.Allocator) void {
-        inline for (.{ self.externs, self.native, self.link }) |list| {
+        inline for (.{ self.externs, self.native, self.link, self.headers }) |list| {
             for (list) |item| gpa.free(item);
             gpa.free(list);
         }
@@ -1542,9 +1544,11 @@ fn namesLibrary(text: []const u8) bool {
 }
 
 /// Whether `text` names a C source below the manifest's directory: a relative
-/// path ending in `.c` with no `..` and no empty part.
+/// path ending in `.c` with no `..` and no empty part, spelled with letters,
+/// digits and `_.+-/`, so a C file including it holds nothing else.
 fn namesSource(text: []const u8) bool {
     if (!std.mem.endsWith(u8, text, ".c") or text.len <= 2) return false;
+    for (text) |c| if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '.' or c == '+' or c == '-' or c == '/')) return false;
     var parts = std.mem.splitScalar(u8, text, '/');
     while (parts.next()) |part| {
         if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return false;
@@ -1552,10 +1556,34 @@ fn namesSource(text: []const u8) bool {
     return true;
 }
 
+/// Whether `text` names a C header as `#include <...>` takes it: a relative
+/// path ending in `.h` with no `..` and no empty part, spelled with letters,
+/// digits and `_.+-/`, so the probe's `#include` line holds nothing else.
+fn namesHeader(text: []const u8) bool {
+    if (!std.mem.endsWith(u8, text, ".h") or text.len <= 2) return false;
+    for (text) |c| if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '.' or c == '+' or c == '-' or c == '/')) return false;
+    var parts = std.mem.splitScalar(u8, text, '/');
+    while (parts.next()) |part| {
+        if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return false;
+    }
+    return true;
+}
+
+test "a header is named as an include takes it, below the manifest or on the compiler's path" {
+    try testing.expect(namesHeader("sqlite3.h"));
+    try testing.expect(namesHeader("score/score.h"));
+    try testing.expect(namesHeader("sys/stat.h"));
+    try testing.expect(!namesHeader("../outside.h"));
+    try testing.expect(!namesHeader("/usr/include/stdio.h"));
+    try testing.expect(!namesHeader("bind.c"));
+    try testing.expect(!namesHeader("a.h>\n#include <b.h"));
+    try testing.expect(!namesHeader(".h"));
+}
+
 /// Copies a manifest list whose every entry is a string `accepts` takes, or
 /// refuses it with `refusal`. An absent key is an empty list.
 /// Why a manifest's list of strings was refused.
-const ListRefusal = error{ ManifestExternNotModules, ManifestNativeNotSource, ManifestLinkNotLibrary };
+const ListRefusal = error{ ManifestExternNotModules, ManifestNativeNotSource, ManifestLinkNotLibrary, ManifestHeaderNotHeader };
 
 fn stringsOf(
     gpa: std.mem.Allocator,
@@ -1599,9 +1627,10 @@ fn declaredFrom(gpa: std.mem.Allocator, written: Written) !Declared {
     declared.externs = try stringsOf(gpa, written.@"extern", spellsModule, error.ManifestExternNotModules);
     declared.native = try stringsOf(gpa, written.native, namesSource, error.ManifestNativeNotSource);
     declared.link = try stringsOf(gpa, written.link, namesLibrary, error.ManifestLinkNotLibrary);
-    // Only a granted module can call what these build, so C named without a
-    // grant is C nothing reaches.
-    if (declared.native.len + declared.link.len > 0 and declared.externs.len == 0) return error.ManifestLinksWithoutExtern;
+    declared.headers = try stringsOf(gpa, written.headers, namesHeader, error.ManifestHeaderNotHeader);
+    // Only a granted module can call what these build or declare, so C named
+    // without a grant is C nothing reaches.
+    if (declared.native.len + declared.link.len + declared.headers.len > 0 and declared.externs.len == 0) return error.ManifestLinksWithoutExtern;
     return declared;
 }
 
@@ -1652,7 +1681,16 @@ test "a manifest names the C a program builds and links" {
     try testing.expectError(error.ManifestNativeNotSource, declaredFromText(gpa, "{ \"extern\": [\".\"], \"native\": [\"../outside.c\"] }"));
     try testing.expectError(error.ManifestNativeNotSource, declaredFromText(gpa, "{ \"extern\": [\".\"], \"native\": [\"/abs.c\"] }"));
     try testing.expectError(error.ManifestNativeNotSource, declaredFromText(gpa, "{ \"extern\": [\".\"], \"native\": [\"shim.h\"] }"));
+    try testing.expectError(error.ManifestNativeNotSource, declaredFromText(gpa, "{ \"extern\": [\".\"], \"native\": [\"a.c\\\"\\nint f(void);\\n/* .c\"] }"));
     try testing.expectError(error.ManifestLinksWithoutExtern, declaredFromText(gpa, "{ \"link\": [\"sqlite3\"] }"));
+
+    const declaring = try declaredFromText(gpa, "{ \"extern\": [\"store\"], \"headers\": [\"sqlite3.h\", \"store/shim.h\"] }");
+    defer declaring.deinit(gpa);
+    try testing.expectEqualStrings("sqlite3.h", declaring.headers[0]);
+    try testing.expectEqualStrings("store/shim.h", declaring.headers[1]);
+    try testing.expectError(error.ManifestHeaderNotHeader, declaredFromText(gpa, "{ \"extern\": [\".\"], \"headers\": [\"../shim.h\"] }"));
+    try testing.expectError(error.ManifestHeaderNotHeader, declaredFromText(gpa, "{ \"extern\": [\".\"], \"headers\": \"sqlite3.h\" }"));
+    try testing.expectError(error.ManifestLinksWithoutExtern, declaredFromText(gpa, "{ \"headers\": [\"sqlite3.h\"] }"));
 }
 
 fn readManifest(gpa: std.mem.Allocator, io: std.Io, dir: []const u8) !?Manifest {
@@ -1741,6 +1779,8 @@ const Written = struct {
     native: ?std.json.Value = null,
     /// C libraries to link, by the name `cc` takes after `-l`.
     link: ?std.json.Value = null,
+    /// C headers declaring what the root's `extern` declarations name.
+    headers: ?std.json.Value = null,
 };
 
 /// The directory a manifest in `base` names with `path`, spelled without `.`
@@ -2190,6 +2230,8 @@ const Loader = struct {
         externs: []const []const u8 = &.{},
         native: []const []const u8 = &.{},
         link: []const []const u8 = &.{},
+        /// The headers its manifest names, as an include spells each.
+        headers: []const []const u8 = &.{},
         dependencies: std.ArrayList(RootId) = .empty,
         /// The names its manifest wrote under `dependencies` and that were
         /// refused, so an import of one reports nothing beyond the refusal.
@@ -3311,7 +3353,7 @@ const Loader = struct {
                 try self.reportManifest(manifest_path, text, entry.path_at, "correct the library's manifest", "the {s} in `{s}` grants `extern` to something that is not a list of its modules", .{ manifest_name, entry.path.? }, &.{});
                 return true;
             },
-            error.ManifestNativeNotSource, error.ManifestLinkNotLibrary, error.ManifestLinksWithoutExtern => {
+            error.ManifestNativeNotSource, error.ManifestLinkNotLibrary, error.ManifestHeaderNotHeader, error.ManifestLinksWithoutExtern => {
                 try self.reportManifest(manifest_path, text, entry.path_at, "correct the library's manifest", "the {s} in `{s}` names C it cannot build or link", .{ manifest_name, entry.path.? }, &.{});
                 return true;
             },
@@ -3372,6 +3414,7 @@ const Loader = struct {
             .externs = parsed.declared.externs,
             .native = native,
             .link = parsed.declared.link,
+            .headers = parsed.declared.headers,
             .identity = identity,
             .source_identity = source_identity,
             .primary_key = if (consumer == .primary) entry.key else null,
@@ -3537,25 +3580,46 @@ const Loader = struct {
         const out = try self.gpa.alloc(RootFacts, self.graph.items.len);
         var made: usize = 0;
         errdefer {
-            for (out[0..made]) |r| {
-                self.gpa.free(r.name);
-                self.gpa.free(r.dir);
-                self.gpa.free(r.dependencies);
-            }
+            for (out[0..made]) |r| freeRootFacts(self.gpa, r);
             self.gpa.free(out);
         }
         for (self.graph.items, 0..) |held, i| {
-            const name = try self.gpa.dupe(u8, held.name);
-            errdefer self.gpa.free(name);
-            const dir = try self.gpa.dupe(u8, held.source_dir);
-            errdefer self.gpa.free(dir);
-            const edges = try self.gpa.dupe(RootId, held.dependencies.items);
-            out[i] = .{
-                .name = name,
-                .dir = dir,
+            var facts: RootFacts = .{
                 .module = if (RootId.from(i).isDependency()) self.by_dir.get(held.source_dir) orelse .none else .none,
-                .dependencies = edges,
             };
+            errdefer freeRootFacts(self.gpa, facts);
+            facts.name = try self.gpa.dupe(u8, held.name);
+            facts.dir = try self.gpa.dupe(u8, held.source_dir);
+            facts.dependencies = try self.gpa.dupe(RootId, held.dependencies.items);
+            facts.manifest_dir = try self.gpa.dupe(u8, held.manifest_dir);
+            facts.native = try dupeStrings(self.gpa, held.native);
+            facts.headers = try dupeStrings(self.gpa, held.headers);
+            out[i] = facts;
+            made += 1;
+        }
+        return out;
+    }
+
+    fn freeRootFacts(gpa: std.mem.Allocator, r: RootFacts) void {
+        gpa.free(r.name);
+        gpa.free(r.dir);
+        gpa.free(r.dependencies);
+        gpa.free(r.manifest_dir);
+        for (r.native) |path| gpa.free(path);
+        gpa.free(r.native);
+        for (r.headers) |header| gpa.free(header);
+        gpa.free(r.headers);
+    }
+
+    fn dupeStrings(gpa: std.mem.Allocator, list: []const []const u8) std.mem.Allocator.Error![]const []const u8 {
+        const out = try gpa.alloc([]const u8, list.len);
+        var made: usize = 0;
+        errdefer {
+            for (out[0..made]) |text| gpa.free(text);
+            gpa.free(out);
+        }
+        for (list, out) |text, *copy| {
+            copy.* = try gpa.dupe(u8, text);
             made += 1;
         }
         return out;

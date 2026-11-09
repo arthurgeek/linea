@@ -364,6 +364,10 @@ pub const Code = enum {
     /// An `extern` in the runtime's `linea_` namespace whose symbol the
     /// runtime does not declare, or whose signature is not the runtime's.
     t_extern_runtime,
+    /// An `extern` naming a C function whose prototype, as the root's C
+    /// declarations give it, is not the one the declaration implies, or that
+    /// no C declaration of the root declares.
+    t_extern_prototype,
     /// A call to a runtime function that runs Linea code on a thread of its
     /// own, anywhere but the one start whose handle keeps the body's
     /// dependencies until the thread is joined.
@@ -545,6 +549,7 @@ pub const Code = enum {
             .t_extern_callback => "T-ExternCallback",
             .t_extern_handle => "T-ExternHandle",
             .t_extern_runtime => "T-ExternRuntime",
+            .t_extern_prototype => "T-ExternPrototype",
             .t_thread_start => "T-ThreadStart",
             .t_raw_address => "T-RawAddress",
             .t_export => "T-Export",

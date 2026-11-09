@@ -1,0 +1,7 @@
+error[T-ExternPrototype]: no C declaration of `lab` is in reach: neither the `headers` nor the `native` sources its linea.json names declare it
+ --> tests/ffi/a_misspelt_c_function_is_undeclared/main.lin:2:11
+  |
+2 | extern fn lab(value: Int64) -> Int64
+  |           ^^^ held to the prototype C gives it, and C gives it none
+  |
+  = help: name the header that declares it under "headers" in linea.json, such as "stdlib.h", or build the C that defines it under "native"

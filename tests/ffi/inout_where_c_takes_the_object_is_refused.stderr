@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `void counter_add(struct counter *, int8_t)`, and this declaration calls it as `void counter_add(uint64_t *, int8_t)`
+ --> tests/ffi/inout_where_c_takes_the_object_is_refused/counter/counter.lin:8:38
+  |
+8 | extern fn counter_add(inout counter: Handle, amount: Int8)
+  |                                      ^^^^^^ C takes `struct counter *` here
+  |
+  = note: `counter_add` is declared by `counter/counter.c`
+  = help: C takes the object's own address, which a plain parameter passes: drop `inout` from `counter`

@@ -1,0 +1,34 @@
+@(opaque, linear)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+// `inout` passes the address of the handle, a `struct counter **`, where C
+// takes the counter's own address.
+extern fn counter_add(inout counter: Handle, amount: Int8)
+
+extern fn counter_close(sink counter: Handle)
+
+@(opaque, linear)
+struct Counter { handle: Handle }
+
+pub enum OpenError { OutOfMemory }
+
+impl Counter {
+    pub fn open() -> Result[Counter, OpenError] {
+        let address = counter_open()
+        if address == 0 {
+            return .Err(.OutOfMemory)
+        }
+        .Ok(.{ handle = Handle(address) })
+    }
+
+    pub fn add(inout self: Self, amount: Int8) {
+        counter_add(&self.handle, amount)
+    }
+
+    pub fn close(sink self: Self) {
+        let Counter { handle: handle } = self
+        counter_close(handle)
+    }
+}
