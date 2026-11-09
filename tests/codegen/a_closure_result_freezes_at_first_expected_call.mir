@@ -16,7 +16,7 @@ local $2 UInt8 value storage=i8
   %10 = add UInt8 value computation=i64 %8, %9
   %11 = check UInt8 value computation=i64 %10 (overflow)
   ret %11
-function closure$400$3a40
+function lambda$40;main$230
 @0:
   %0 = constant UInt8 value computation=i64 7
   ret %0

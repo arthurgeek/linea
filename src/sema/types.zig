@@ -2652,27 +2652,12 @@ fn closureTypeHash(closure: ids.ClosureId, args: []const TypeId, impl_args: []co
 
 pub const ClosureRelease = struct { trait: DeclId, member: DeclId };
 
-/// Where an expression is written, which names what the compiler generates
-/// for it (a closure, a constructor's body) the same however the program was
-/// checked: closure and constructor IDs follow the order the passes reached
-/// them, and a program resumed from a checked library reaches the library's
-/// first.
-pub const SourceSite = struct {
-    /// The module the expression is written in, spelled by its route.
-    module: u32 = unplaced,
-    /// The file's place among the module's files, which the loader sorts by
-    /// name.
-    file: u32 = 0,
-    /// The expression's byte offset in that file.
-    offset: u32 = 0,
-
-    /// An expression written in no file of a module: one a derive generated.
-    pub const unplaced = std.math.maxInt(u32);
-};
+/// What a closure type's spelling begins with: the one type spelling in which
+/// `@` follows a name, so a generated body's symbol, a kind and `@`, is
+/// spelled with any kind but this one.
+pub const closure_type_mark = "closure@";
 
 pub const ClosureDescriptor = struct {
-    /// Where the lambda is written.
-    site: SourceSite = .{},
     /// Environment fields initialized by consuming captures, in source order.
     owned_fields: []const FieldOrdinal = &.{},
     environment: TypeId = .unit,
@@ -6402,6 +6387,17 @@ pub const Typing = struct {
     /// every symbol below it, which is a name nobody can predict and an
     /// emitted module the outcome cache had never seen.
     module_paths: []const []const u8 = &.{},
+    /// What a symbol calls each closure, by `ClosureId`: the declaration its
+    /// lambda is written in and the lambda's place among that declaration's
+    /// lambdas in source order. Closure IDs follow the order resolution
+    /// reached the lambdas, which a program resumed from a checked library,
+    /// or one whose declarations are written in another order, reaches
+    /// differently.
+    closure_names: []const []const u8 = &.{},
+    /// What a symbol calls each qualified constructor's body, by
+    /// `ConstructorId`: the declaration naming the constructor and the
+    /// reference's place among that declaration's constructor references.
+    constructor_names: []const []const u8 = &.{},
     instances: []const Instance = &.{},
     instance_args: []const TypeId = &.{},
     /// Where each type's entry in `instances` sits, by `TypeId`, or `not_an
@@ -6762,6 +6758,10 @@ pub const Typing = struct {
         // so the pool this was filled for is the one owner there is.
         for (self.module_paths) |m| gpa.free(m);
         gpa.free(self.module_paths);
+        for (self.closure_names) |n| gpa.free(n);
+        gpa.free(self.closure_names);
+        for (self.constructor_names) |n| gpa.free(n);
+        gpa.free(self.constructor_names);
         for (self.owned_bounds) |b| freeBoundTraits(gpa, b);
         gpa.free(self.owned_bounds);
         for (self.owned_callable_bounds) |b| gpa.free(b);
@@ -6884,24 +6884,22 @@ pub const Typing = struct {
         return .{ .lo = n.lo, .hi = n.hi };
     }
 
-    /// Where the lambda of closure `closure` is written.
-    pub fn closureSite(self: *const Typing, closure: ids.ClosureId) SourceSite {
-        return if (closure.index() < self.closures.len) self.closures[closure.index()].site else .{};
+    /// Appends what names closure `closure` in a symbol: its name in
+    /// `closure_names`. A pool built without a checked program holds no
+    /// names, and names a closure by its ID after `#`.
+    pub fn appendClosureName(self: *const Typing, gpa: std.mem.Allocator, out: *std.ArrayList(u8), closure: ids.ClosureId) std.mem.Allocator.Error!void {
+        if (closure.index() < self.closure_names.len) return out.appendSlice(gpa, self.closure_names[closure.index()]);
+        const spelled = try std.fmt.allocPrint(gpa, "#{d}", .{closure.index()});
+        defer gpa.free(spelled);
+        try out.appendSlice(gpa, spelled);
     }
 
-    /// Appends what names a generated body or closure in a symbol: `@`, the
-    /// route of the module `site` is in, and the file and byte offset it is
-    /// written at. An expression a derive generated is written in no
-    /// module's file, and is named by `id` after `#`.
-    pub fn appendSite(self: *const Typing, gpa: std.mem.Allocator, out: *std.ArrayList(u8), site: SourceSite, id: u32) std.mem.Allocator.Error!void {
-        if (site.module == SourceSite.unplaced) {
-            const spelled = try std.fmt.allocPrint(gpa, "#{d}", .{id});
-            defer gpa.free(spelled);
-            return out.appendSlice(gpa, spelled);
-        }
-        try out.append(gpa, '@');
-        try self.appendModule(gpa, out, site.module);
-        const spelled = try std.fmt.allocPrint(gpa, "{d}:{d}", .{ site.file, site.offset });
+    /// Appends what names a qualified constructor's body in a symbol, as
+    /// `appendClosureName` names a closure.
+    pub fn appendConstructorName(self: *const Typing, gpa: std.mem.Allocator, out: *std.ArrayList(u8), constructor: ConstructorId) std.mem.Allocator.Error!void {
+        const index = @intFromEnum(constructor);
+        if (index < self.constructor_names.len) return out.appendSlice(gpa, self.constructor_names[index]);
+        const spelled = try std.fmt.allocPrint(gpa, "#{d}", .{index});
         defer gpa.free(spelled);
         try out.appendSlice(gpa, spelled);
     }
@@ -7056,8 +7054,8 @@ pub const Typing = struct {
                 return;
             },
             .closure => |closure| {
-                try out.appendSlice(gpa, "closure");
-                try self.appendSite(gpa, out, self.closureSite(closure.closure), closure.closure.index());
+                try out.appendSlice(gpa, closure_type_mark);
+                try self.appendClosureName(gpa, out, closure.closure);
                 try out.append(gpa, '[');
                 for (self.closureArgs(closure), 0..) |arg, i| {
                     if (i > 0) try out.append(gpa, ',');
@@ -8733,6 +8731,10 @@ pub const Typing = struct {
         /// reopened. Lowering spells symbols from a view of this builder, so a
         /// table the view did not carry left every symbol unqualified.
         module_paths: []const []const u8 = &.{},
+        /// `Typing.closure_names` and `constructor_names`, borrowed as
+        /// `module_paths` is.
+        closure_names: []const []const u8 = &.{},
+        constructor_names: []const []const u8 = &.{},
         expr_types: std.ArrayList(TypeId) = .empty,
         construction_types: std.ArrayList(TypeId) = .empty,
         /// Which declaration each declared type came from, so substitution can
@@ -12059,6 +12061,8 @@ pub const Typing = struct {
                 .templates = self.templates.items,
                 .template_of = self.template_of.items,
                 .module_paths = self.module_paths,
+                .closure_names = self.closure_names,
+                .constructor_names = self.constructor_names,
                 .instances = self.instances.items,
                 .instance_args = self.instance_args.items,
                 .instance_of = self.instance_of.items,
@@ -13824,6 +13828,8 @@ pub const Typing = struct {
             self.closure_descriptors = t.closures;
             self.closure_release = t.closure_release;
             self.module_paths = t.module_paths;
+            self.closure_names = t.closure_names;
+            self.constructor_names = t.constructor_names;
         }
 
         /// A builder holding everything a finished pool holds, so a later pass
@@ -15837,23 +15843,23 @@ test "callable invocation modes participate in identity and bound satisfaction" 
     try testing.expect(view.callableSatisfies(sink, sink));
 }
 
-test "a closure type is spelled by where its lambda is written, whatever its ID" {
+test "a closure type is spelled by its name, whatever its ID" {
     const gpa = testing.allocator;
     const signature_of = struct {
-        fn mangle(sites: []const SourceSite, closure: u32) ![]const u8 {
+        fn mangle(names: []const []const u8, closure: u32) ![]const u8 {
             var builder = try Typing.Builder.init(gpa);
             defer builder.deinit();
-            builder.module_paths = &.{ "", "std.mem" };
+            builder.closure_names = names;
             const signature = try builder.internCallable(&.{}, .unit, &.{}, .read);
             var descriptors: [2]ClosureDescriptor = undefined;
-            for (&descriptors, sites) |*descriptor, site| descriptor.* = .{ .site = site, .enclosing = .none, .expr = .none, .body = .none, .signature = signature };
+            for (&descriptors) |*descriptor| descriptor.* = .{ .enclosing = .none, .expr = .none, .body = .none, .signature = signature };
             builder.closure_descriptors = &descriptors;
             const ty = try builder.internClosure(@enumFromInt(closure), &.{}, &.{}, .poison);
             return builder.view().mangledName(gpa, ty);
         }
     };
-    const vec: SourceSite = .{ .module = 1, .file = 2, .offset = 1264 };
-    const root: SourceSite = .{ .module = 0, .file = 0, .offset = 40 };
+    const vec = "std.mem;Vec.map#0";
+    const root = ";main#0";
     // A fresh check numbers the library's lambda after the program's; one
     // resumed from the checked library numbers it first.
     const fresh = try signature_of.mangle(&.{ root, vec }, 1);

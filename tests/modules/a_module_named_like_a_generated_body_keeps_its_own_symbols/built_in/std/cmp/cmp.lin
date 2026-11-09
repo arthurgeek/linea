@@ -1,0 +1,7 @@
+pub struct Equatable {}
+
+impl Equatable {
+    pub fn equals[T](_value: T) -> UInt8 {
+        0
+    }
+}

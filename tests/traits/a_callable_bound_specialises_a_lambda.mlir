@@ -20,10 +20,10 @@ module {
     %v0 = arith.constant 2 : i64 loc("tests/traits/a_callable_bound_specialises_a_lambda.lin":6:13)
     %v1 = arith.constant 3 : i64 loc("tests/traits/a_callable_bound_specialises_a_lambda.lin":6:16)
     %v2 = arith.constant 0 : i64 loc("tests/traits/a_callable_bound_specialises_a_lambda.lin":6:19)
-    %v3 = func.call @"lin.;reduce2[UInt8,closure$400$3a208[]]"(%v0, %v1, %v2) : (i64, i64, i64) -> i64 loc("tests/traits/a_callable_bound_specialises_a_lambda.lin":6:5)
+    %v3 = func.call @"lin.;reduce2[UInt8,closure$40;main$230[]]"(%v0, %v1, %v2) : (i64, i64, i64) -> i64 loc("tests/traits/a_callable_bound_specialises_a_lambda.lin":6:5)
     func.return %v3 : i64 loc("tests/traits/a_callable_bound_specialises_a_lambda.lin":6:5)
   }
-  func.func private @"lin.;reduce2[UInt8,closure$400$3a208[]]"(%a0: i64, %a1: i64, %a2: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
+  func.func private @"lin.;reduce2[UInt8,closure$40;main$230[]]"(%a0: i64, %a1: i64, %a2: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64
@@ -42,10 +42,10 @@ module {
     %v1 = arith.extui %lw1 : i8 to i64 loc("tests/traits/a_callable_bound_specialises_a_lambda.lin":2:13)
     %lw2 = llvm.load %s1 : !llvm.ptr -> i8 loc("tests/traits/a_callable_bound_specialises_a_lambda.lin":2:18)
     %v2 = arith.extui %lw2 : i8 to i64 loc("tests/traits/a_callable_bound_specialises_a_lambda.lin":2:18)
-    %v3 = func.call @lin.closure$400$3a208(%v1, %v2) : (i64, i64) -> i64 loc("tests/traits/a_callable_bound_specialises_a_lambda.lin":2:5)
+    %v3 = func.call @"lin.lambda$40;main$230"(%v1, %v2) : (i64, i64) -> i64 loc("tests/traits/a_callable_bound_specialises_a_lambda.lin":2:5)
     func.return %v3 : i64 loc("tests/traits/a_callable_bound_specialises_a_lambda.lin":2:5)
   }
-  func.func private @lin.closure$400$3a208(%a0: i64, %a1: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
+  func.func private @"lin.lambda$40;main$230"(%a0: i64, %a1: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64

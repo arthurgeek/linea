@@ -23,7 +23,7 @@ module {
     %rs6 = llvm.alloca %rz6 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     cf.br ^b0
   ^b0:
-    %fa0 = func.constant @lin.closure$400$3a141 : (!llvm.ptr, i64, i64) -> () loc("tests/codegen/a_function_pointer_returns_an_aggregate.lin":7:67)
+    %fa0 = func.constant @"lin.lambda$40;main$230" : (!llvm.ptr, i64, i64) -> () loc("tests/codegen/a_function_pointer_returns_an_aggregate.lin":7:67)
     %v0 = builtin.unrealized_conversion_cast %fa0 : (!llvm.ptr, i64, i64) -> () to !llvm.ptr loc("tests/codegen/a_function_pointer_returns_an_aggregate.lin":7:67)
     llvm.store %v0, %s0 : !llvm.ptr, !llvm.ptr loc("tests/codegen/a_function_pointer_returns_an_aggregate.lin":7:5)
     %v3 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("tests/codegen/a_function_pointer_returns_an_aggregate.lin":8:16)
@@ -55,7 +55,7 @@ module {
     %v17 = arith.addi %v16, %p17 : i64 loc("tests/codegen/a_function_pointer_returns_an_aggregate.lin":9:16)
     func.return %v17 : i64 loc("tests/codegen/a_function_pointer_returns_an_aggregate.lin":9:5)
   }
-  func.func private @lin.closure$400$3a141(%sret: !llvm.ptr, %a0: i64, %a1: i64) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
+  func.func private @"lin.lambda$40;main$230"(%sret: !llvm.ptr, %a0: i64, %a1: i64) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z1 = arith.constant 1 : i64

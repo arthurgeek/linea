@@ -1,11 +1,11 @@
 fn ;main() -> UInt8 {
-    ;reduce2[UInt8,closure$400$3a208[]](2, 3, |lhs, rhs| lhs + rhs)
+    ;reduce2[UInt8,closure$40;main$230[]](2, 3, |lhs, rhs| lhs + rhs)
 }
 
-fn ;reduce2[UInt8,closure$400$3a208[]](lhs: UInt8, rhs: UInt8, combine: closure@0:208[]) -> UInt8 where carries(lhs, rhs, combine) {
-    closure$400$3a208(lhs, rhs)
+fn ;reduce2[UInt8,closure$40;main$230[]](lhs: UInt8, rhs: UInt8, combine: closure@;main#0[]) -> UInt8 where carries(lhs, rhs, combine) {
+    lambda$40;main$230(lhs, rhs)
 }
 
-fn closure$400$3a208(read lhs: UInt8, read rhs: UInt8) -> UInt8 {
+fn lambda$40;main$230(read lhs: UInt8, read rhs: UInt8) -> UInt8 {
     lhs + rhs
 }

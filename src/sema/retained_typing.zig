@@ -19,10 +19,13 @@ const Allocator = std.mem.Allocator;
 /// symbol a later module repeats is grouped with the library's declaration of
 /// it. The capability watch is lent only while declared answers are settled,
 /// and the open types only while a check runs. The call and implementation
-/// indexes are rebuilt from the relocated calls and implementations.
+/// indexes are rebuilt from the relocated calls and implementations. The
+/// closure and constructor names are computed again for the whole attached
+/// program, library included.
 pub const unread_fields = [_][]const u8{
     "scoped_capabilities", "prepared_implementations", "implementation_selections", "contextual_constraints", "extern_symbols",
-    "capability_watch",    "open_types",               "call_index",                "impl_index",
+    "capability_watch",    "open_types",               "call_index",                "impl_index",             "closure_names",
+    "constructor_names",
 };
 
 /// The layout memos of a typing: each entry is an answer only where its stamp
