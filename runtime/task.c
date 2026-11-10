@@ -52,6 +52,12 @@ void linea_storage_extent(unsigned long at, unsigned long len);
  * stops C code compiled without probes that keeps its frames under that. */
 static const unsigned long guard_bytes = 65536;
 
+/* glibc places a thread's static thread-local storage at the top of a stack
+ * its caller supplies, so each task's stack holds this much beside the bytes
+ * it asked for. Sixty-four kibibytes covers the runtime's own and a
+ * sanitizer's; pages the storage does not reach are never touched. */
+static const unsigned long thread_storage_bytes = 65536;
+
 /* The alternate signal stack each task's thread runs its fault handler on. */
 static const unsigned long signal_stack_bytes = 65536;
 
@@ -176,6 +182,7 @@ long linea_task_prepare(unsigned long stack_bytes) {
     if (page <= 0) return -EINVAL;
     unsigned long usable = round_up(stack_bytes, (unsigned long)page);
     if (usable < (unsigned long)PTHREAD_STACK_MIN) usable = round_up((unsigned long)PTHREAD_STACK_MIN, (unsigned long)page);
+    usable += round_up(thread_storage_bytes, (unsigned long)page);
 
     struct task *t = calloc(1, sizeof *t);
     if (t == 0) return -ENOMEM;
