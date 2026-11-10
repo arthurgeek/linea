@@ -14,13 +14,14 @@
  * the join, or by `linea_task_cancel`; the task's own end never frees it,
  * since the creator's close waits for the thread to end.
  *
- * Every wait is on the record's condition variable, and every change to the
- * record's state is made with its mutex held and followed by a broadcast, so
- * a mutex release by one thread and its acquire by the other order everything
- * either did before. `pthread_create` orders what the creator did before the
- * start, since the thread reads the body only after it observes the start
- * under the mutex, and `pthread_join` orders everything the body did before
- * the handle's close returns. */
+ * Every wait is a park on the record's park (`park.h`), and every change to
+ * the record's state is made with the park's lock held and followed by an
+ * unpark, so a lock release by one thread and its acquire by the other order
+ * everything either did before. The thread reads the body only after it
+ * observes the start under the lock, which orders what the creator did
+ * before the start, and the handle's close parks until the thread has
+ * marked the body finished under the lock, which orders everything the body
+ * did before the close returns; `pthread_join` then reclaims the thread. */
 
 #define _GNU_SOURCE
 #define _DARWIN_C_SOURCE
@@ -31,10 +32,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "loop.h"
+#include "park.h"
 #include "pipe_signal.h"
 #include "task.h"
 
@@ -77,12 +78,12 @@ static const unsigned long largest_stack = 1UL << 40;
 
 /* A thread is `beginning` until it has installed its signal stack, then
  * `parked` until the task is started or cancelled, or `failed` where it could
- * not begin and has ended. */
-enum { beginning, failed, parked, started, cancelled };
+ * not begin and has ended. A started or cancelled thread is `finished` once
+ * it has run its body, or nothing, and will run no more Linea code. */
+enum { beginning, failed, parked, started, cancelled, finished };
 
 struct task {
-    pthread_mutex_t lock;
-    pthread_cond_t changed;
+    struct linea_park park;
     pthread_t thread;
     int state;
     int begin_error;
@@ -125,29 +126,6 @@ static void alone(void) {
     if (linea_io_current() != 0) fail("linea: a simulation runs one task until fibers\n");
 }
 
-/* A pthread call on a mutex or condition variable this file initialised can
- * fail only when the record is corrupt, which is no state to continue in. */
-static void must(int status) {
-    if (status != 0) fail("linea: a task's lock failed\n");
-}
-
-/* Initialises a record's condition variable. On Linux its timed waits read
- * the monotonic clock, which a change to the system's time does not move;
- * Darwin has no such setting, and `wait_until` measures there instead. */
-static int condition_init(pthread_cond_t *cond) {
-#if defined(__APPLE__)
-    return pthread_cond_init(cond, 0);
-#else
-    pthread_condattr_t attributes;
-    int status = pthread_condattr_init(&attributes);
-    if (status != 0) return status;
-    status = pthread_condattr_setclock(&attributes, CLOCK_MONOTONIC);
-    if (status == 0) status = pthread_cond_init(cond, &attributes);
-    if (pthread_condattr_destroy(&attributes) != 0) fail("linea: a condition variable's attributes could not be released\n");
-    return status;
-#endif
-}
-
 static struct task *task_of(unsigned long endpoint) {
     return (struct task *)(endpoint & ~1UL);
 }
@@ -161,8 +139,7 @@ static void destroy(struct task *t) {
     if (munmap(t->stack, t->stack_mapping) != 0 || munmap(t->signal_stack, signal_stack_bytes) != 0) {
         fail("linea: a task's stack could not be unmapped\n");
     }
-    must(pthread_cond_destroy(&t->changed));
-    must(pthread_mutex_destroy(&t->lock));
+    linea_park_destroy(&t->park);
     free(t);
 }
 
@@ -170,20 +147,32 @@ static void *run(void *arg) {
     struct task *t = arg;
     const unsigned long base = (unsigned long)t->stack;
     const int begun = linea_thread_begin((unsigned long)t->signal_stack, signal_stack_bytes, base, base + guard_bytes);
-    must(pthread_mutex_lock(&t->lock));
+    linea_park_lock(&t->park);
     t->begin_error = begun;
     t->state = begun == 0 ? parked : failed;
-    must(pthread_cond_broadcast(&t->changed));
+    linea_unpark(&t->park);
     if (begun != 0) {
-        must(pthread_mutex_unlock(&t->lock));
+        linea_park_unlock(&t->park);
         return 0;
     }
-    while (t->state == parked) must(pthread_cond_wait(&t->changed, &t->lock));
+    while (t->state == parked) (void)linea_park(&t->park, 0);
     const int state = t->state;
-    must(pthread_mutex_unlock(&t->lock));
+    linea_park_unlock(&t->park);
     if (state == started) t->entry((unsigned long)t | 1UL, t->at, t->len);
+    linea_park_lock(&t->park);
+    t->state = finished;
+    linea_unpark(&t->park);
+    linea_park_unlock(&t->park);
     linea_thread_end();
     return 0;
+}
+
+/* Park until the thread has finished, then reclaim it. */
+static void join(struct task *t) {
+    linea_park_lock(&t->park);
+    while (t->state != finished) (void)linea_park(&t->park, 0);
+    linea_park_unlock(&t->park);
+    if (pthread_join(t->thread, 0) != 0) fail("linea: a task's thread could not be joined\n");
 }
 
 long linea_task_prepare(unsigned long stack_bytes) {
@@ -213,35 +202,31 @@ long linea_task_prepare(unsigned long stack_bytes) {
         status = errno;
         goto unmap_signal_stack;
     }
-    status = pthread_mutex_init(&t->lock, 0);
+    status = linea_park_init(&t->park);
     if (status != 0) goto unmap_signal_stack;
-    status = condition_init(&t->changed);
-    if (status != 0) goto destroy_lock;
     t->state = beginning;
 
     pthread_attr_t attributes;
     status = pthread_attr_init(&attributes);
-    if (status != 0) goto destroy_condition;
+    if (status != 0) goto destroy_park;
     status = pthread_attr_setstack(&attributes, (char *)t->stack + guard_bytes, usable);
     if (status == 0) status = pthread_create(&t->thread, &attributes, run, t);
     if (pthread_attr_destroy(&attributes) != 0) fail("linea: a thread's attributes could not be released\n");
-    if (status != 0) goto destroy_condition;
+    if (status != 0) goto destroy_park;
 
     /* The thread installs its signal stack before it parks, and a failure
      * there is this call's to report, so it waits until the thread has
      * parked or ended. */
-    must(pthread_mutex_lock(&t->lock));
-    while (t->state == beginning) must(pthread_cond_wait(&t->changed, &t->lock));
+    linea_park_lock(&t->park);
+    while (t->state == beginning) (void)linea_park(&t->park, 0);
     const int parked_now = t->state == parked;
     status = t->begin_error;
-    must(pthread_mutex_unlock(&t->lock));
+    linea_park_unlock(&t->park);
     if (parked_now) return (long)t;
     if (pthread_join(t->thread, 0) != 0) fail("linea: a task's thread could not be joined\n");
 
-destroy_condition:
-    must(pthread_cond_destroy(&t->changed));
-destroy_lock:
-    must(pthread_mutex_destroy(&t->lock));
+destroy_park:
+    linea_park_destroy(&t->park);
 unmap_signal_stack:
     (void)munmap(t->signal_stack, signal_stack_bytes);
 unmap_stack:
@@ -254,25 +239,25 @@ unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea
                                unsigned long len, unsigned long release_at) {
     alone();
     struct task *t = task_of(task);
-    must(pthread_mutex_lock(&t->lock));
+    linea_park_lock(&t->park);
     t->entry = entry;
     t->release = release;
     t->at = at;
     t->len = len;
     t->release_at = release_at;
     t->state = started;
-    must(pthread_cond_broadcast(&t->changed));
-    must(pthread_mutex_unlock(&t->lock));
+    linea_unpark(&t->park);
+    linea_park_unlock(&t->park);
     return task;
 }
 
 void linea_task_cancel(unsigned long task) {
     struct task *t = task_of(task);
-    must(pthread_mutex_lock(&t->lock));
+    linea_park_lock(&t->park);
     t->state = cancelled;
-    must(pthread_cond_broadcast(&t->changed));
-    must(pthread_mutex_unlock(&t->lock));
-    if (pthread_join(t->thread, 0) != 0) fail("linea: a task's thread could not be joined\n");
+    linea_unpark(&t->park);
+    linea_park_unlock(&t->park);
+    join(t);
     destroy(t);
 }
 
@@ -280,31 +265,38 @@ void linea_chan_send(unsigned long endpoint, unsigned long at, unsigned long len
     alone();
     struct task *t = task_of(endpoint);
     linea_storage_extent(at, len);
-    must(pthread_mutex_lock(&t->lock));
-    while (t->full) must(pthread_cond_wait(&t->changed, &t->lock));
+    linea_park_lock(&t->park);
+    while (t->full) (void)linea_park(&t->park, 0);
     t->full = 1;
     t->from = endpoint;
     t->slot_at = at;
     t->slot_len = len;
     t->filled += 1;
     const unsigned long mine = t->filled;
-    must(pthread_cond_broadcast(&t->changed));
-    while (t->emptied != mine) must(pthread_cond_wait(&t->changed, &t->lock));
-    must(pthread_mutex_unlock(&t->lock));
+    linea_unpark(&t->park);
+    while (t->emptied != mine) (void)linea_park(&t->park, 0);
+    linea_park_unlock(&t->park);
+}
+
+/* Copy the value waiting in the slot to the `len` bytes at `at` and empty
+ * the slot, waking its sender. Called with the lock held and the slot full
+ * from the other end. */
+static void take_slot(struct task *t, unsigned long at, unsigned long len) {
+    if (t->slot_len != len) fail("linea: the two ends of a session disagree about a payload's size\n");
+    if (len != 0) memcpy((void *)at, (const void *)t->slot_at, len);
+    t->full = 0;
+    t->emptied += 1;
+    linea_unpark(&t->park);
 }
 
 void linea_chan_recv(unsigned long endpoint, unsigned long at, unsigned long len) {
     alone();
     struct task *t = task_of(endpoint);
     linea_storage_extent(at, len);
-    must(pthread_mutex_lock(&t->lock));
-    while (!t->full || t->from == endpoint) must(pthread_cond_wait(&t->changed, &t->lock));
-    if (t->slot_len != len) fail("linea: the two ends of a session disagree about a payload's size\n");
-    if (len != 0) memcpy((void *)at, (const void *)t->slot_at, len);
-    t->full = 0;
-    t->emptied += 1;
-    must(pthread_cond_broadcast(&t->changed));
-    must(pthread_mutex_unlock(&t->lock));
+    linea_park_lock(&t->park);
+    while (!t->full || t->from == endpoint) (void)linea_park(&t->park, 0);
+    take_slot(t, at, len);
+    linea_park_unlock(&t->park);
 }
 
 void linea_chan_choose(unsigned long endpoint, uint8_t branch) {
@@ -327,7 +319,7 @@ void linea_chan_close(unsigned long endpoint) {
      * for the thread itself. */
     if ((endpoint & 1UL) != 0) return;
     struct task *t = task_of(endpoint);
-    if (pthread_join(t->thread, 0) != 0) fail("linea: a task's thread could not be joined\n");
+    join(t);
     t->release(t->release_at, t->len);
     destroy(t);
 }
@@ -339,8 +331,7 @@ void linea_chan_close(unsigned long endpoint) {
  * request to finish however many requests other callers make before it next
  * runs, and a later caller cannot take a slot that is still being served. */
 struct owner_queue {
-    pthread_mutex_t lock;
-    pthread_cond_t changed;
+    struct linea_park park;
     int closed;
     int full;
     unsigned long at;
@@ -354,12 +345,7 @@ struct owner_queue {
 unsigned long linea_owner_open(void) {
     struct owner_queue *q = calloc(1, sizeof *q);
     if (q == 0) return 0;
-    if (pthread_mutex_init(&q->lock, 0) != 0) {
-        free(q);
-        return 0;
-    }
-    if (pthread_cond_init(&q->changed, 0) != 0) {
-        must(pthread_mutex_destroy(&q->lock));
+    if (linea_park_init(&q->park) != 0) {
         free(q);
         return 0;
     }
@@ -372,9 +358,9 @@ void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len, 
     struct owner_queue *q = (struct owner_queue *)queue;
     linea_storage_extent(at, len);
     linea_storage_extent(answer_at, answer_len);
-    must(pthread_mutex_lock(&q->lock));
+    linea_park_lock(&q->park);
     if (q->closed) fail("linea: a call reached an owning task that was closed\n");
-    while (q->full) must(pthread_cond_wait(&q->changed, &q->lock));
+    while (q->full) (void)linea_park(&q->park, 0);
     q->full = 1;
     q->at = at;
     q->len = len;
@@ -382,139 +368,79 @@ void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len, 
     q->answer_len = answer_len;
     int finished = 0;
     q->finished = &finished;
-    must(pthread_cond_broadcast(&q->changed));
-    while (!finished) must(pthread_cond_wait(&q->changed, &q->lock));
-    must(pthread_mutex_unlock(&q->lock));
+    linea_unpark(&q->park);
+    while (!finished) (void)linea_park(&q->park, 0);
+    linea_park_unlock(&q->park);
 }
 
 uint8_t linea_owner_next(unsigned long queue, unsigned long at, unsigned long len) {
     struct owner_queue *q = (struct owner_queue *)queue;
     linea_storage_extent(at, len);
-    must(pthread_mutex_lock(&q->lock));
-    while (!q->full && !q->closed) must(pthread_cond_wait(&q->changed, &q->lock));
+    linea_park_lock(&q->park);
+    while (!q->full && !q->closed) (void)linea_park(&q->park, 0);
     if (!q->full) {
-        must(pthread_mutex_unlock(&q->lock));
+        linea_park_unlock(&q->park);
         return 0;
     }
     if (q->len != len) fail("linea: a call and its owning task disagree about a request's size\n");
     if (len != 0) memcpy((void *)at, (const void *)q->at, len);
-    must(pthread_mutex_unlock(&q->lock));
+    linea_park_unlock(&q->park);
     return 1;
 }
 
 void linea_owner_answer(unsigned long queue, unsigned long at, unsigned long len) {
     struct owner_queue *q = (struct owner_queue *)queue;
     linea_storage_extent(at, len);
-    must(pthread_mutex_lock(&q->lock));
+    linea_park_lock(&q->park);
     if (!q->full || q->answered) fail("linea: an owning task answered a call it was not serving\n");
     if (q->answer_len != len) fail("linea: a call and its owning task disagree about an answer's size\n");
     if (len != 0) memcpy((void *)q->answer_at, (const void *)at, len);
     q->answered = 1;
-    must(pthread_mutex_unlock(&q->lock));
+    linea_park_unlock(&q->park);
 }
 
 void linea_owner_done(unsigned long queue) {
     struct owner_queue *q = (struct owner_queue *)queue;
-    must(pthread_mutex_lock(&q->lock));
+    linea_park_lock(&q->park);
     if (!q->answered) fail("linea: an owning task finished a call it did not answer\n");
     q->answered = 0;
     q->full = 0;
     *q->finished = 1;
     q->finished = 0;
-    must(pthread_cond_broadcast(&q->changed));
-    must(pthread_mutex_unlock(&q->lock));
+    linea_unpark(&q->park);
+    linea_park_unlock(&q->park);
 }
 
 void linea_owner_close(unsigned long queue) {
     alone();
     struct owner_queue *q = (struct owner_queue *)queue;
-    must(pthread_mutex_lock(&q->lock));
+    linea_park_lock(&q->park);
     q->closed = 1;
-    must(pthread_cond_broadcast(&q->changed));
-    must(pthread_mutex_unlock(&q->lock));
+    linea_unpark(&q->park);
+    linea_park_unlock(&q->park);
 }
 
 void linea_owner_free(unsigned long queue) {
     struct owner_queue *q = (struct owner_queue *)queue;
-    must(pthread_cond_destroy(&q->changed));
-    must(pthread_mutex_destroy(&q->lock));
+    linea_park_destroy(&q->park);
     free(q);
-}
-
-/* Waits on the record's condition variable until `deadline` on the monotonic
- * clock, answering 0 when woken and ETIMEDOUT once the deadline has passed.
- * Darwin's condition variable cannot read the monotonic clock, so there the
- * wait is relative and recomputed from that clock on every call; a wait is
- * at most `longest_relative_wait_sec` long, since Darwin refuses a relative
- * time it cannot add to its own, and a capped wait that ends answers 0 so the
- * caller waits again. */
-static int wait_until(struct task *t, const struct timespec *deadline) {
-#if defined(__APPLE__)
-    enum { longest_relative_wait_sec = 86400 };
-    struct timespec now;
-    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) fail("linea: clock_gettime failed\n");
-    if (now.tv_sec > deadline->tv_sec || (now.tv_sec == deadline->tv_sec && now.tv_nsec >= deadline->tv_nsec))
-        return ETIMEDOUT;
-    struct timespec remaining = {.tv_sec = deadline->tv_sec - now.tv_sec, .tv_nsec = deadline->tv_nsec - now.tv_nsec};
-    if (remaining.tv_nsec < 0) {
-        remaining.tv_sec -= 1;
-        remaining.tv_nsec += 1000000000L;
-    }
-    if (remaining.tv_sec >= longest_relative_wait_sec) {
-        remaining.tv_sec = longest_relative_wait_sec;
-        remaining.tv_nsec = 0;
-    }
-    const int rc = pthread_cond_timedwait_relative_np(&t->changed, &t->lock, &remaining);
-    return rc == ETIMEDOUT ? 0 : rc;
-#else
-    return pthread_cond_timedwait(&t->changed, &t->lock, deadline);
-#endif
-}
-
-/* Sets `*deadline` to `now` plus `step_sec` seconds and `step_nsec`
- * nanoseconds and answers 1, or answers 0 when that time is past the largest
- * `time_t`. No clock reaches a time `time_t` cannot hold, so a wait whose
- * deadline would be past it waits without one. `step_nsec` is below one
- * second. */
-static int deadline_after(struct timespec now, uint64_t step_sec, long step_nsec, struct timespec *deadline) {
-    long nsec = now.tv_nsec + step_nsec;
-    int carry = 0;
-    if (nsec >= 1000000000L) {
-        carry = 1;
-        nsec -= 1000000000L;
-    }
-    time_t sec;
-    if (__builtin_add_overflow(now.tv_sec, step_sec, &sec) || __builtin_add_overflow(sec, carry, &sec)) return 0;
-    deadline->tv_sec = sec;
-    deadline->tv_nsec = nsec;
-    return 1;
 }
 
 uint8_t linea_chan_recv_until(unsigned long endpoint, unsigned long at, unsigned long len, unsigned long timeout_ns) {
     alone();
     struct task *t = task_of(endpoint);
     linea_storage_extent(at, len);
-    struct timespec now;
-    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) fail("linea: clock_gettime failed\n");
-    struct timespec deadline;
-    const int timed = deadline_after(now, timeout_ns / 1000000000UL, (long)(timeout_ns % 1000000000UL), &deadline);
-    must(pthread_mutex_lock(&t->lock));
+    /* A deadline past what the clock can count is none: no clock reaches
+     * it, so the receive waits until the peer sends. */
+    const unsigned long deadline = linea_park_deadline_after(timeout_ns);
+    linea_park_lock(&t->park);
     while (!t->full || t->from == endpoint) {
-        int rc = timed ? wait_until(t, &deadline) : pthread_cond_wait(&t->changed, &t->lock);
-        if (rc == ETIMEDOUT && (!t->full || t->from == endpoint)) {
-            must(pthread_mutex_unlock(&t->lock));
+        if (linea_park(&t->park, deadline) && (!t->full || t->from == endpoint)) {
+            linea_park_unlock(&t->park);
             return 0;
         }
-        if (rc != 0 && rc != ETIMEDOUT) {
-            must(pthread_mutex_unlock(&t->lock));
-            fail("linea: channel timed wait failed\n");
-        }
     }
-    if (t->slot_len != len) fail("linea: the two ends of a session disagree about a payload's size\n");
-    if (len != 0) memcpy((void *)at, (const void *)t->slot_at, len);
-    t->full = 0;
-    t->emptied += 1;
-    must(pthread_cond_broadcast(&t->changed));
-    must(pthread_mutex_unlock(&t->lock));
+    take_slot(t, at, len);
+    linea_park_unlock(&t->park);
     return 1;
 }

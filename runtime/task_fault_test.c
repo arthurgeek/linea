@@ -17,11 +17,11 @@
 
 #include "task.h"
 
-/* `task.c` is compiled with its thread creation, joins, mappings, record
- * allocation, monotonic clock reads and untimed condition waits renamed to
- * these, and `linea_rt.c` with its `sigaltstack`, so each can be made to fail
- * or answer where the system would. Each counts what it made and otherwise
- * does what the system call does. */
+/* `task.c` is compiled with its thread creation, joins, mappings and record
+ * allocation renamed to these, `park.c` with its monotonic clock reads and
+ * untimed condition waits, and `linea_rt.c` with its `sigaltstack`, so each
+ * can be made to fail or answer where the system would. Each counts what it
+ * made and otherwise does what the system call does. */
 static int refuse_create = 0;
 static int refuse_record = 0;
 static int refuse_signal_stack = 0;
@@ -156,12 +156,12 @@ static void nothing_is_left_and_the_body_still_runs(long refused, long expected)
     released = 0;
 }
 
-/* The largest value of `time_t`, which is signed on every target the runtime
- * builds for; `main` checks that it is. */
-static const time_t latest_time = (time_t)((((uintmax_t)1 << (sizeof(time_t) * CHAR_BIT - 1)) - 1));
+/* The last whole second a deadline can name: a deadline is a count of
+ * nanoseconds in 64 bits. */
+static const time_t latest_time = (time_t)(ULONG_MAX / 1000000000UL);
 
-/* A timeout of three days in nanoseconds. Read an hour before the largest
- * `time_t`, it ends past the last time a deadline can name. */
+/* A timeout of three days in nanoseconds. Read an hour before the last
+ * second, it ends past the last time a deadline can name. */
 static const unsigned long three_days_ns = 3UL * 86400UL * 1000000000UL;
 
 /* The body of a task that sends one payload once its creator waits for it. */
@@ -179,8 +179,8 @@ static void release_nothing(unsigned long at, unsigned long len) {
     (void)len;
 }
 
-/* A timed receive whose timeout ends after the last time `time_t` holds waits
- * without a deadline, and still takes what the peer sends. */
+/* A timed receive whose timeout ends after the last time a deadline can name
+ * waits without a deadline, and still takes what the peer sends. */
 static void a_receive_timeout_past_the_last_time_waits_without_a_deadline(void) {
     const long task = linea_task_prepare(1UL << 16);
     assert(task > 0);

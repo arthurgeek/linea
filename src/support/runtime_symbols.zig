@@ -311,12 +311,20 @@ pub const math_functions = math: {
     break :math table;
 };
 
-/// What the runtime's own files call between themselves to run a
-/// simulation: the loop table (`runtime/loop.h`) and the simulated backend
-/// that the socket and clock entries hand an operation to
-/// (`runtime/sim.h`). No Linea declaration names them; they are owned so
-/// that no `export` takes their names.
+/// What the runtime's own files call between themselves: the park routine
+/// every wait goes through (`runtime/park.h`), and, to run a simulation, the
+/// loop table (`runtime/loop.h`) and the simulated backend that the socket
+/// and clock entries hand an operation to (`runtime/sim.h`). No Linea
+/// declaration names them; they are owned so that no `export` takes their
+/// names.
 pub const internal_functions = [_]Signature{
+    .{ .symbol = "linea_park_init", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .i32 },
+    .{ .symbol = "linea_park_destroy", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_park_lock", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_park_unlock", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_park", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.u64) }, .result = .i32 },
+    .{ .symbol = "linea_unpark", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_park_deadline_after", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .u64 },
     .{ .symbol = "linea_loop_claim", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .u64 },
     .{ .symbol = "linea_loop_find", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .ptr },
     .{ .symbol = "linea_loop_retire", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .unit },

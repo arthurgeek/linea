@@ -13,7 +13,7 @@ const runtime_symbols = @import("runtime_symbols");
 test "runtime archive members have stable names and separate linkage" {
     const archive = @embedFile("runtime_archive");
     try testing.expect(std.mem.startsWith(u8, archive, "!<arch>\n"));
-    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "clock.o", "task.o", "loop.o", "sim.o", "linea_float.o", "math.o" };
+    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "clock.o", "task.o", "park.o", "loop.o", "sim.o", "linea_float.o", "math.o" };
     var member: usize = 0;
     var offset: usize = 8;
     var long_names: []const u8 = "";
@@ -2141,7 +2141,6 @@ fn scalarOf(written: []const u8, typedefs: *const Typedefs) ?runtime_symbols.Par
         .{ "const char *", .{ .scalar = .ptr } },
         .{ "char **", .{ .scalar = .ptr } },
         .{ "void *", .{ .scalar = .ptr } },
-        .{ "struct linea_op *", .{ .scalar = .ptr } },
         .{ "void", .{ .scalar = .unit } },
         .{ "u8", .{ .scalar = .u8 } },
         .{ "i32", .{ .scalar = .i32 } },
@@ -2154,7 +2153,22 @@ fn scalarOf(written: []const u8, typedefs: *const Typedefs) ?runtime_symbols.Par
         .{ "long *", .{ .scalar = .i64, .passing = .inout } },
     };
     for (spellings) |s| if (std.mem.eql(u8, s[0], t)) return s[1];
+    // A pointer to a record of the runtime's own, such as `struct linea_op *`.
+    if (std.mem.startsWith(u8, t, "struct linea_") and std.mem.endsWith(u8, t, " *")) {
+        const name = t["struct ".len .. t.len - " *".len];
+        for (name) |c| if (!std.ascii.isAlphanumeric(c) and c != '_') return null;
+        return .{ .scalar = .ptr };
+    }
     return null;
+}
+
+test "a pointer to a runtime record is a pointer, and to any other record is unread" {
+    const no_typedefs: Typedefs = .empty;
+    try testing.expectEqual(runtime_symbols.Scalar.ptr, scalarOf("struct linea_park *", &no_typedefs).?.scalar);
+    try testing.expect(scalarOf("struct timespec *", &no_typedefs) == null);
+    try testing.expect(scalarOf("struct linea_park **", &no_typedefs) == null);
+    try testing.expect(scalarOf("struct linea_park * *", &no_typedefs) == null);
+    try testing.expect(scalarOf("struct linea_park", &no_typedefs) == null);
 }
 
 /// Why a declaration naming a callback typedef declared inside a conditional

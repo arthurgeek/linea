@@ -1726,6 +1726,7 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
         .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
         .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
         .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
         .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
         .{ .file = "runtime/sim_test.c", .flags = runtime_flags.items },
@@ -1796,6 +1797,7 @@ pub fn build(b: *std.Build) void {
     inline for (.{ false, true }) |checked| {
         native.add(native_task_step, if (checked) "native-checked-task-tests" else "native-task-tests", &.{
             .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+            .{ .file = "runtime/park.c", .flags = runtime_flags.items },
             .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
             .{ .file = "runtime/linea_rt.c", .flags = if (checked) checked_flags.items else runtime_flags.items },
             .{ .file = "runtime/task_test.c", .flags = runtime_flags.items },
@@ -1803,6 +1805,7 @@ pub fn build(b: *std.Build) void {
     }
     native.add(native_task_step, "native-task-fault-tests", &.{
         .{ .file = "runtime/task.c", .flags = refused_task_flags.items },
+        .{ .file = "runtime/park.c", .flags = refused_task_flags.items },
         .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
         .{ .file = "runtime/linea_rt.c", .flags = refused_signal_flags.items },
         .{ .file = "runtime/task_fault_test.c", .flags = runtime_flags.items },
@@ -1830,6 +1833,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "net", .file = "runtime/net.c", .flags = runtime_flags.items },
             .{ .name = "clock", .file = "runtime/clock.c", .flags = runtime_flags.items },
             .{ .name = "task", .file = "runtime/task.c", .flags = runtime_flags.items },
+            .{ .name = "park", .file = "runtime/park.c", .flags = runtime_flags.items },
             .{ .name = "loop", .file = "runtime/loop.c", .flags = runtime_flags.items },
             .{ .name = "sim", .file = "runtime/sim.c", .flags = runtime_flags.items },
         }) |input| {
@@ -1923,6 +1927,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "net", .file = b.path("runtime/net.c"), .flags = runtime_flags.items },
         .{ .name = "clock", .file = b.path("runtime/clock.c"), .flags = runtime_flags.items },
         .{ .name = "task", .file = b.path("runtime/task.c"), .flags = runtime_flags.items },
+        .{ .name = "park", .file = b.path("runtime/park.c"), .flags = runtime_flags.items },
         .{ .name = "loop", .file = b.path("runtime/loop.c"), .flags = runtime_flags.items },
         .{ .name = "sim", .file = b.path("runtime/sim.c"), .flags = runtime_flags.items },
         .{ .name = "linea_float", .file = float_c, .flags = float_flags.items },

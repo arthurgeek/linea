@@ -12,7 +12,7 @@
  * visible to the body; everything a task did before a send is visible to its
  * peer once the matching receive returns; everything the body did is visible
  * once `linea_chan_close` on the handle returns. Each edge is a release and
- * an acquire of the session's mutex, or `pthread_create` and `pthread_join`. */
+ * an acquire of the lock of the session's park (`park.h`). */
 
 /* What a started task's thread calls: the task's own endpoint, then the
  * address and length of the bytes its body is kept in. */
