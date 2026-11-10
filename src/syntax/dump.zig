@@ -267,6 +267,8 @@ fn dumpDecl(
         });
         try dumpWrittenType(w, ast, p.written);
         try w.writeAll("\n");
+        // A pattern prints only where one was written, as a default does.
+        if (p.pattern != ExprId.none) try dumpExpr(w, ast, offsets, p.pattern, depth + 2);
         // A default prints only where one was written, so the existing
         // goldens with no defaulted parameter stand unchanged.
         if (p.default != ExprId.none) {
@@ -721,7 +723,9 @@ fn dumpExpr(
             }
             for (lambda.params) |p| {
                 try indent(w, depth + 1);
-                if (p.pattern != ExprId.none)
+                if (p.pattern != ExprId.none and ast.paramLabel(p) != .none)
+                    try w.print("param {s} \"{s}\" pattern", .{ @tagName(p.convention), ast.tokenText(p.name) })
+                else if (p.pattern != ExprId.none)
                     try w.print("param {s} pattern", .{@tagName(p.convention)})
                 else
                     try w.print("param {s} \"{s}\"", .{ @tagName(p.convention), ast.tokenText(p.name) });

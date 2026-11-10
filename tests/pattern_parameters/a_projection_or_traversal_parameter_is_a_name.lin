@@ -1,0 +1,24 @@
+// A projection names a place and a traversal names the order a walk runs
+// through; neither has a body that binds names, so each reads a parameter
+// written as a pattern whole under its label.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[(UInt64, UInt64)] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Self, i (row, column): (UInt64, UInt64)) -> UInt8 where carries(self) {
+        self.cells[i._0 * 2 + i._1]
+    }
+}
+
+impl Grid {
+    trav corners(grid Grid { cells }: Self) = 0..grid.cells.length()
+}
+
+fn main() -> UInt8 {
+    var grid: Grid = .{ cells = [1, 2, 3, 4] }
+    let cell: (UInt64, UInt64) = (1, 0)
+    grid[cell]
+}

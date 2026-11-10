@@ -1,0 +1,14 @@
+// An `inout` pattern parameter lends each part writably: assigning `low` and
+// `high` changes the pair the caller lent.
+fn widen(inout range (low, high): (UInt8, UInt8)) {
+    low = low - 1
+    high = high + 1
+}
+
+fn main() -> UInt8 {
+    var range = (5, 9)
+    widen(&range)
+    widen(range: &range)
+    let (low, high) = range
+    high - low
+}

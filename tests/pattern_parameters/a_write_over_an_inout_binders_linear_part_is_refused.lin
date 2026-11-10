@@ -1,0 +1,46 @@
+// An `inout` pattern parameter lends each part writably, so assigning a binder
+// replaces that part of the caller's value. A part that owes settlement still
+// holds its old value there, and the write would lose it: `ticket`'s old
+// ticket, and the vector `items` held, in a function and in a lambda alike.
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+struct Desk {
+    ticket: Ticket,
+    count: UInt8,
+}
+
+fn swap_in(inout desk { ticket, count }: Desk) {
+    ticket = .{ number = 9 }
+    count = count + 1
+}
+
+fn reset(inout pair (items, _size): (Vec[UInt8], UInt8)) {
+    items = Vec.new()
+}
+
+fn apply[F: fn(inout pair: (Vec[UInt8], UInt8))](inout pair: (Vec[UInt8], UInt8), with: F) {
+    with(&pair)
+}
+
+fn main() -> UInt8 {
+    var desk: Desk = .{ ticket = .{ number = 1 }, count = 0 }
+    swap_in(&desk)
+    let Desk { ticket, count } = desk
+    let Ticket { number } = ticket
+    var pair: (Vec[UInt8], UInt8) = (Vec.new(), 2)
+    reset(&pair)
+    apply(
+        &pair,
+        |inout (items, size)| {
+            items = Vec.new()
+            size = 9
+        },
+    )
+    let (items, size) = pair
+    let total = UInt8(items.length()) + size + number + count
+    items.release()
+    total
+}

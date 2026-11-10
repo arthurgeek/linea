@@ -1,0 +1,10 @@
+// `entry (position, score)` names the parameter `entry` for callers and takes
+// the pair apart where the body begins. A call writes the label or fills the
+// parameter by position.
+fn weighted(entry (position, score): (UInt8, UInt8)) -> UInt8 {
+    (position + 1) * score
+}
+
+fn main() -> UInt8 {
+    weighted(entry: (0, 10)) + weighted((2, 5))
+}

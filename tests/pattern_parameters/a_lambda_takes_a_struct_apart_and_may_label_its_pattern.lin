@@ -1,0 +1,20 @@
+// A lambda's parameter reads like a declaration's: a struct or newtype pattern
+// takes its argument apart, and a label names the parameter for a direct call
+// of the closure.
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+type Meters = UInt8
+
+fn apply[F: fn(sink at: Point) -> UInt8](sink at: Point, measure: F) -> UInt8 {
+    measure(at)
+}
+
+fn main() -> UInt8 {
+    let sum = apply(.{ x = 1, y = 2 }, |sink { x, y }| x + y)
+    let width = |length Meters(m): Meters| m * 2
+    let flat = |Point { x, y: _ }: Point| x
+    sum + width(length: Meters(3)) + flat(.{ x = 4, y = 5 })
+}

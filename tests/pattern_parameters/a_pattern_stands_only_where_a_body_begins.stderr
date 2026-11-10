@@ -1,0 +1,20 @@
+error[S-Params]: a parameter of a declaration without a body is a name
+ --> tests/pattern_parameters/a_pattern_stands_only_where_a_body_begins.lin:5:32
+  |
+5 |     fn score(self: Self, entry (a, b): (UInt8, UInt8)) -> UInt8
+  |                                ^ a pattern takes an argument apart where a body begins
+error[S-Params]: a parameter of a declaration without a body is a name
+ --> tests/pattern_parameters/a_pattern_stands_only_where_a_body_begins.lin:6:26
+  |
+6 |     fn bonus(self: Self, (a, b): (UInt8, UInt8)) -> UInt8
+  |                          ^ a pattern takes an argument apart where a body begins
+error[S-Params]: the receiver `self` takes no pattern
+  --> tests/pattern_parameters/a_pattern_stands_only_where_a_body_begins.lin:15:17
+   |
+15 |     fn sum(self Pair { left, right }: Self) -> UInt8 {
+   |                 ^^^^ take `self` apart in the body with `let`
+error[S-Params]: a callable type's parameter is a name
+  --> tests/pattern_parameters/a_pattern_stands_only_where_a_body_begins.lin:30:22
+   |
+30 | fn apply[F: fn(entry (a, b): (UInt8, UInt8)) -> UInt8](pair: (UInt8, UInt8), with: F) -> UInt8 {
+   |                      ^ a type has no body for a pattern to bind in

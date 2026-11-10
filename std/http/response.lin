@@ -786,8 +786,7 @@ enum WriteError[P: Allocator] {
 // Write a handler's `response` to `body`: the status line, `Connection:
 // close`, the headers in order, a plain-text `Content-Type` when they name
 // none, and the body. For a HEAD request the head is written alone.
-fn write_response[P: Allocator](inout body: BodyWriter[P], sink response: Response[P], head_only: Bool) -> Result[(), WriteError[P]] where carries(.Err: body, response), retains(body: response) {
-    let Response { answer, headers, content } = response
+fn write_response[P: Allocator](inout body: BodyWriter[P], sink response { answer, headers, content }: Response[P], head_only: Bool) -> Result[(), WriteError[P]] where carries(.Err: body, response), retains(body: response) {
     let framing = body.framing
     let _written = write_head(&body, answer, headers, framing) else |failure| {
         return .Err(.Io(failure.into()))
@@ -814,8 +813,7 @@ fn write_response[P: Allocator](inout body: BodyWriter[P], sink response: Respon
 // Run a streamed body's closure into `body`, then release what it captured.
 // The closure reads the request its handler answered, which holds the path
 // values a router matched.
-fn produce_into[P: Allocator](inout body: BodyWriter[P], sink stream: Stream[P]) -> Result[(), Error[P]] where carries(.Err: body, stream), retains(body: stream) {
-    let Stream { request, produce } = stream
+fn produce_into[P: Allocator](inout body: BodyWriter[P], sink stream { request, produce }: Stream[P]) -> Result[(), Error[P]] where carries(.Err: body, stream), retains(body: stream) {
     body.answering = request
     var write = produce
     let produced = &write(&body)
@@ -1006,8 +1004,7 @@ fn put[W: io.ByteWriter](inout writer: W, inout written: UInt64, piece: Str) -> 
 
 // Add `before` to the bytes a write failure reports as written, so it counts
 // what the earlier pieces of the head wrote.
-fn progressed[E](sink failure: WriteFailure[E], before: UInt64) -> WriteFailure[E] where carries(failure) {
-    let WriteFailure { kind, reason, written } = failure
+fn progressed[E](sink failure { kind, reason, written }: WriteFailure[E], before: UInt64) -> WriteFailure[E] where carries(failure) {
     .{ kind, reason, written = before + written }
 }
 

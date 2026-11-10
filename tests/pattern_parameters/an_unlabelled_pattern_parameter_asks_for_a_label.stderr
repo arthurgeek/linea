@@ -1,0 +1,12 @@
+error[S-Params]: a function's pattern parameter needs a label
+ --> tests/pattern_parameters/an_unlabelled_pattern_parameter_asks_for_a_label.lin:4:10
+  |
+4 | fn total((first, second): (UInt8, UInt8)) -> UInt8 {
+  |          ^ a call names this parameter by its label
+  |
+  = help: write the label a call uses before the pattern: `entry (first, second)`
+error[N-Case]: parameters start with a lowercase letter
+  --> tests/pattern_parameters/an_unlabelled_pattern_parameter_asks_for_a_label.lin:10:11
+   |
+10 | fn larger(Entry (first, second): (UInt8, UInt8)) -> UInt8 {
+   |           ^^^^^ rename it `entry`

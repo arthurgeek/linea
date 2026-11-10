@@ -1,0 +1,7 @@
+error[S-Params]: a function's pattern parameter needs a label
+  --> tests/pattern_parameters/an_implementation_member_without_a_label_is_refused_once.lin:13:26
+   |
+13 |     fn score(self: Self, (first, second): (UInt8, UInt8)) -> UInt8 {
+   |                          ^ a call names this parameter by its label
+   |
+   = help: write the label a call uses before the pattern: `entry (first, second)`

@@ -572,6 +572,8 @@ const Builder = struct {
             }
         }
 
+        try self.takeApartPatternParameters(params, self.res.parametersOf(d));
+
         // A function's value leaves through its return type, which takes it.
         self.owner = d;
         self.statements.clearRetainingCapacity();
@@ -599,6 +601,24 @@ const Builder = struct {
         });
     }
 
+    /// A parameter written as a pattern, a declaration's or a lambda's, is
+    /// taken apart where the body begins, as `let pattern = argument` takes
+    /// a value and `let read pattern = argument` lends from a place.
+    fn takeApartPatternParameters(self: *Builder, params: []const node.Param, bindings: []const BindingId) !void {
+        for (bindings) |b| {
+            const param = params[self.res.paramIndexOf(b)];
+            if (param.pattern == ExprId.none) continue;
+            const owning = param.convention == .sink;
+            try self.received(param.argument, if (owning) .consuming else .reading);
+            const holding: Holding = switch (param.convention) {
+                .sink => .owned,
+                .read => .lent_until_last_use,
+                .inout => .lent_writably,
+            };
+            try self.bindPatternHolders(param.pattern, param.argument, param.argument, holding);
+        }
+    }
+
     fn closure(self: *Builder, id: resolve_mod.ClosureId, descriptor: types_mod.ClosureDescriptor) !void {
         const first = self.blocks.items.len;
         const first_scope = self.scopes.items.len;
@@ -619,21 +639,7 @@ const Builder = struct {
             }
         }
 
-        // A parameter written as a tuple pattern is taken apart where the
-        // body begins, as `let (a, b) = argument` takes a value and
-        // `let read (a, b) = argument` lends from a place.
-        for (self.res.closureParameters(id)) |b| {
-            const param = params[self.res.paramIndexOf(b)];
-            if (param.pattern == ExprId.none) continue;
-            const owning = param.convention == .sink;
-            try self.received(param.argument, if (owning) .consuming else .reading);
-            const holding: Holding = switch (param.convention) {
-                .sink => .owned,
-                .read => .lent_until_last_use,
-                .inout => .lent,
-            };
-            try self.bindPatternHolders(param.pattern, param.argument, param.argument, holding);
-        }
+        try self.takeApartPatternParameters(params, self.res.closureParameters(id));
 
         for (self.res.closureCaptures(id)) |capture| {
             try self.emit(.init, .{ .root = capture.binding }, descriptor.expr);
@@ -696,7 +702,11 @@ const Builder = struct {
     /// How a pattern's binders hold what they name: owned by the binder, lent
     /// for the extent of the construct that bound them, or lent until their
     /// last use.
-    const Holding = enum { owned, lent, lent_until_last_use };
+    /// How a binder holds the part it names. `lent_writably` is an `inout`
+    /// pattern parameter's binder: lent, and holding the caller's part, so
+    /// a write over it replaces a value the checker asks about as it asks
+    /// about a write over an `inout` parameter's part.
+    const Holding = enum { owned, lent, lent_writably, lent_until_last_use };
 
     /// Binds what each binder of `pattern` names, at every depth: the part
     /// of `source` its path selects, held as `holding` says.
@@ -777,6 +787,9 @@ const Builder = struct {
             self.ops.items(.projection)[self.ops.len - 1] = projection;
         }
         if (!lending) try self.beginScope(binder);
+        // The binder now holds the caller's part, which a later write would
+        // replace.
+        if (holding == .lent_writably) try self.emit(.init, .{ .root = binder }, at);
     }
 
     /// Puts a binding on the live stack, and records the node it holds.

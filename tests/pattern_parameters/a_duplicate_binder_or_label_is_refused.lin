@@ -1,0 +1,23 @@
+// A pattern's binders and the named parameters are locals of one body, so a
+// binder spelled like a named parameter is declared twice, as is a binder
+// repeated in one pattern. Two labels of one spelling are two parameters of one
+// name. A binder may share a label, which the body does not see.
+fn mixed(count: UInt8, entry (count, other): (UInt8, UInt8)) -> UInt8 {
+    count + other
+}
+
+fn twice(entry (same, same): (UInt8, UInt8)) -> UInt8 {
+    same
+}
+
+fn labels(entry (a, b): (UInt8, UInt8), entry (c, d): (UInt8, UInt8)) -> UInt8 {
+    a + b + c + d
+}
+
+fn own(entry (entry, other): (UInt8, UInt8), pair: (UInt8, UInt8)) -> UInt8 {
+    entry + other + pair._0
+}
+
+fn main() -> UInt8 {
+    mixed(1, (2, 3)) + twice((1, 2)) + labels((1, 2), (3, 4)) + own((1, 2), (3, 4))
+}

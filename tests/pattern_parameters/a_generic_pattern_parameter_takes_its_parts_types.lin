@@ -1,0 +1,20 @@
+// A pattern takes apart a type whose shape is known, whatever its arguments:
+// `(K, V)` and `Pair[T]` are a tuple and a struct over type parameters.
+struct Pair[T] {
+    left: T,
+    right: T,
+}
+
+fn swap[K, V](sink entry (key, value): (K, V)) -> (V, K) {
+    (value, key)
+}
+
+fn flipped[T](sink pair { left, right }: Pair[T]) -> Pair[T] {
+    .{ left = right, right = left }
+}
+
+fn main() -> UInt8 {
+    let (count, _) = swap((true, UInt8(7)))
+    let pair: Pair[UInt8] = .{ left = 1, right = 2 }
+    count + flipped(pair: pair).left
+}

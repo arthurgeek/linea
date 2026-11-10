@@ -1,0 +1,22 @@
+// A parameter's pattern nests like any other: the ticket inside the entry is
+// taken apart in the same step.
+struct Ticket {
+    id: UInt8,
+}
+
+struct Entry {
+    key: UInt8,
+    value: Ticket,
+}
+
+fn settle(sink entry { key, value: Ticket { id } }: Entry) -> UInt8 {
+    key + id
+}
+
+fn sum(pairs ((a, b), c): ((UInt8, UInt8), UInt8)) -> UInt8 {
+    a + b + c
+}
+
+fn main() -> UInt8 {
+    settle(.{ key = 3, value = .{ id = 4 } }) + sum(pairs: ((1, 2), 3))
+}

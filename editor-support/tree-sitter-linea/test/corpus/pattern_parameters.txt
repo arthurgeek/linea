@@ -1,0 +1,103 @@
+==================
+A parameter's label precedes the pattern that takes its argument apart
+==================
+
+fn show(sink entry (position, name): (UInt64, Str), at { x }: Point, d Meters(m): Meters) -> UInt64 {
+    position
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (convention)
+        (identifier)
+        (tuple_pattern
+          (identifier)
+          (identifier))
+        (tuple_type
+          (type_identifier)
+          (type_identifier)))
+      (parameter
+        (identifier)
+        (struct_pattern
+          (field_pattern
+            (identifier)))
+        (type_identifier))
+      (parameter
+        (identifier)
+        (variant_pattern
+          (type_identifier)
+          (identifier))
+        (type_identifier)))
+    (type_identifier)
+    (block
+      (expression_statement
+        (identifier)))))
+
+==================
+A lambda's pattern parameter may carry a label, and a name before braces reads as one
+==================
+
+fn main() -> UInt8 {
+    let f = |entry (a, b), Point { x, y }| a
+    0
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (parameter
+            (identifier)
+            (tuple_pattern
+              (identifier)
+              (identifier)))
+          (parameter
+            (identifier)
+            (struct_pattern
+              (field_pattern
+                (identifier))
+              (field_pattern
+                (identifier))))
+          (identifier)))
+      (expression_statement
+        (integer_literal)))))
+
+==================
+A lambda's unlabelled pattern may name the type it takes apart
+==================
+
+fn main() -> UInt8 {
+    let f = |Meters(m)| m
+    0
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (parameter
+            (variant_pattern
+              (type_identifier)
+              (identifier)))
+          (identifier)))
+      (expression_statement
+        (integer_literal)))))

@@ -1,0 +1,24 @@
+// `sink transaction { recipient, amount }` moves each field of the linear
+// transaction into its own name, so the body settles the transaction by using
+// its parts. `Ticket { number }` names the type the pattern takes apart.
+@linear
+struct Transaction {
+    recipient: UInt8,
+    amount: UInt8,
+}
+
+struct Ticket {
+    number: UInt8,
+}
+
+fn commit(sink transaction { recipient, amount }: Transaction) -> UInt8 {
+    recipient + amount
+}
+
+fn number_of(ticket Ticket { number }: Ticket) -> UInt8 {
+    number
+}
+
+fn main() -> UInt8 {
+    commit(transaction: .{ recipient = 1, amount = 2 }) + number_of(.{ number = 4 })
+}

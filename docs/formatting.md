@@ -241,7 +241,8 @@ and `{ e }` are the same program and there is nothing to write back.
 ## Fixed, and not configurable
 
 Four spaces per level. LF endings. Exactly one newline at the end of a file. No
-trailing whitespace on any line. Indentation is spaces, never tabs.
+trailing whitespace on any line. Indentation is spaces, never tabs. One space
+separates a parameter's label from its pattern: `entry (position, name)`.
 
 ## The escape hatch
 

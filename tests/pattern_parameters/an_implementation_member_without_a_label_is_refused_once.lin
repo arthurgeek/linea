@@ -1,0 +1,20 @@
+// An implementation's member written with an unlabelled pattern is refused
+// for the missing label alone: it names no parameter for the trait's to be
+// compared with.
+trait Score {
+    fn score(self: Self, entry: (UInt8, UInt8)) -> UInt8
+}
+
+struct Base {
+    points: UInt8,
+}
+
+impl Score for Base {
+    fn score(self: Self, (first, second): (UInt8, UInt8)) -> UInt8 {
+        self.points + first + second
+    }
+}
+
+fn main() -> UInt8 {
+    Base { points = 1 }.score((2, 3))
+}

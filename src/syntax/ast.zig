@@ -560,10 +560,21 @@ pub const Ast = struct {
         try std.testing.expectEqual(@as(u32, 2), range.end);
     }
 
-    /// How a parameter is written: its name, or for a lambda parameter taken
-    /// apart by a tuple pattern, the pattern.
+    /// The name a call writes for a parameter: its name, or the label
+    /// written before its pattern. `.none` for a lambda's pattern written
+    /// with no label, which a call fills by position.
+    pub fn paramLabel(self: *const Ast, p: Param) TokenId {
+        if (p.pattern == ExprId.none) return p.name;
+        if (self.tokenTag(p.name) != .identifier) return .none;
+        if (p.name.index() >= self.exprTokens(p.pattern).start.index()) return .none;
+        return p.name;
+    }
+
+    /// How a parameter is named outside its body: its label, or for a
+    /// lambda's pattern written with none, the pattern.
     pub fn paramSpelling(self: *const Ast, p: Param) []const u8 {
-        return if (p.pattern != ExprId.none) self.exprText(p.pattern) else self.tokenText(p.name);
+        const label = self.paramLabel(p);
+        return if (label != .none) self.tokenText(label) else self.exprText(p.pattern);
     }
 
     test paramSpelling {
@@ -598,6 +609,10 @@ pub const Ast = struct {
         const patterned: Param = .{ .name = TokenId.at(1), .pattern = pattern, .written = .{ .name = .none }, .convention = .read, .default = .none };
         try testing.expectEqualStrings("x", ast.paramSpelling(named));
         try testing.expectEqualStrings("(a, b)", ast.paramSpelling(patterned));
+        try testing.expectEqual(TokenId.none, ast.paramLabel(patterned));
+        const labelled: Param = .{ .name = TokenId.at(0), .pattern = pattern, .written = .{ .name = .none }, .convention = .read, .default = .none };
+        try testing.expectEqualStrings("x", ast.paramSpelling(labelled));
+        try testing.expectEqual(TokenId.at(0), ast.paramLabel(labelled));
     }
 
     /// Whether the author wrote this parameter's convention.
@@ -2106,6 +2121,11 @@ pub const Ast = struct {
         /// combining nodes can span from it without reading the storage.
         pub fn exprStart(self: *const Builder, id: ExprId) TokenId {
             return self.exprs.items(.token_range)[id.index()].start;
+        }
+
+        /// The token after an already-built expression's last.
+        pub fn exprEnd(self: *const Builder, id: ExprId) TokenId {
+            return self.exprs.items(.token_range)[id.index()].end;
         }
 
         /// The tag of an already-built expression, so a caller can tell whether

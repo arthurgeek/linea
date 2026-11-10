@@ -434,8 +434,7 @@ impl[H: Allocator] Allocator for SharedRefusingAllocator[H] {
         }
     }
 
-    fn dispose(sink b: Buffer[Self]) {
-        let Buffer { at, len, allocated, allocator, obligation: SharedRefusingAllocation { backing, index } } = b
+    fn dispose(sink b { at, len, allocated, allocator, obligation: SharedRefusingAllocation { backing, index } }: Buffer[Self]) {
         if !allocator.log.call([sink index, sink allocated] |inout state: SharedLogState| &state.dispose(index, allocated)) {
             panic("an allocation was disposed more than once")
         }

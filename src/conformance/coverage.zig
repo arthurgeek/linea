@@ -154,10 +154,9 @@ pub fn reachOfExpr(tag: Expr.Tag) Reach {
         // the library and checked as the command line checks one.
         .tuple_literal, .tuple_pattern => .generated,
 
-        // The argument a lambda's tuple-pattern parameter stands for. It is
-        // written nowhere, and the generator writes no lambda with a pattern
-        // parameter.
-        .param_argument => .{ .impossible = "the generator writes every lambda parameter as a name, so none stands for a pattern" },
+        // The argument a pattern parameter stands for. The generator takes
+        // each tuple group's pair apart with a labelled pattern parameter.
+        .param_argument => .generated,
 
         // All three walks, over an array. What a walk yields there is settled
         // by the type -- the places are the language's own, and so are the

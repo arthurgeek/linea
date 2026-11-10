@@ -1,0 +1,9 @@
+// A generic body is checked once, over its type parameters, so a pattern needs
+// a type whose shape is known there; `T` could be anything.
+fn first_of[T](sink entry (first, _second): T) -> T {
+    first
+}
+
+fn main() -> UInt8 {
+    first_of(7)
+}

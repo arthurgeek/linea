@@ -45,6 +45,9 @@ module.exports = grammar({
     // `f[()]` holds a type argument or an index, as the compiler reads it both
     // ways until resolution says what `f` names.
     [$.unit_type, $.unit_expression],
+    // A label's tuple pattern ends at a comma or its `)`, which the list it
+    // sits in also reads; the compiler's own parser reads the pattern first.
+    [$.tuple_pattern],
   ],
 
   rules: {
@@ -173,15 +176,38 @@ module.exports = grammar({
 
     parameter_list: $ => seq('(', commaSep($.parameter), ')'),
 
+    // A parameter is a name, or a label followed by a pattern that takes the
+    // argument apart where the body begins: `entry (position, name)`. The
+    // compiler refuses a pattern with no label in a declaration and a pattern
+    // in a callable type; this grammar keeps either in the tree.
+    //
+    // The compiler tells `entry { x }` from `Point { x }` by the name's case,
+    // which one identifier token cannot see, so a name followed by a pattern
+    // is read as a label wherever both readings parse. `Meters(m)` is a
+    // newtype pattern either way: a tuple pattern has two parts or more.
     parameter: $ => seq(
       optional($.convention),
-      field('name', $.identifier),
+      $._parameter_head,
       ':',
       field('type', $._type),
       optional(seq('=', field('default', $._expression))),
     ),
 
     convention: _ => choice('read', 'inout', 'sink'),
+
+    _parameter_head: $ => choice(
+      field('name', $.identifier),
+      prec.dynamic(1, seq(field('name', $.identifier), field('pattern', $._parameter_pattern))),
+      field('pattern', $._parameter_pattern),
+    ),
+
+    // The heads a destructuring `let` takes, one rule for every parameter.
+    _parameter_pattern: $ => choice(
+      $.tuple_pattern,
+      $.struct_pattern,
+      prec(2, alias($._inferred_struct_pattern, $.struct_pattern)),
+      $.variant_pattern,
+    ),
 
     enum_declaration: $ => seq(
       repeat($.attribute),
@@ -896,8 +922,7 @@ module.exports = grammar({
     _lambda_parameter: $ => seq(
       optional(choice('read', 'inout', 'sink')),
       choice(
-        seq(field('name', $.identifier), optional(seq(':', field('type', $._type)))),
-        seq(field('pattern', $.tuple_pattern), optional(seq(':', field('type', $._type)))),
+        seq($._parameter_head, optional(seq(':', field('type', $._type)))),
         seq(':', field('type', $._type)),
       ),
       optional(seq('=', field('default', $._expression))),

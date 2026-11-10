@@ -1409,6 +1409,18 @@ const Gen = struct {
             try w.print("fn _tuple{d}() -> ({s}, {s}) {{\n    ", .{ k, returns[0].spelling(), returns[1].spelling() });
             try self.tupleLiteral(w, returns, 0);
             try w.writeAll("\n}\n\n");
+
+            // The pair taken apart by a labelled pattern parameter and built
+            // again, `sink` for an even group and `read` for an odd one. It
+            // draws no choice, so no other axis changes phase.
+            try w.print("fn _opened{d}({s}pair (first, second): ({s}, {s})) -> ({s}, {s}) {{\n    (first, second)\n}}\n\n", .{
+                k,
+                if (k % 2 == 0) "sink " else "",
+                returns[0].spelling(),
+                returns[1].spelling(),
+                returns[0].spelling(),
+                returns[1].spelling(),
+            });
         }
     }
 
@@ -1464,7 +1476,8 @@ const Gen = struct {
         try indent(w, at);
         try w.print("let ({s}, {s}) = ", .{ binders[0], binders[1] });
         if (call) |k| {
-            try w.print("_tuple{d}()", .{k});
+            // By label for an even group and by position for an odd one.
+            try w.print("_opened{d}({s}_tuple{d}())", .{ k, if (k % 2 == 0) "pair: " else "", k });
         } else {
             try self.tupleLiteral(w, types, visible);
         }
@@ -4057,7 +4070,7 @@ test "some generated program declares a projection" {
     try testing.expect(try seedsContaining(gpa, 200, "proj at(") < 200);
 }
 
-test "a generated program takes tuples apart by position" {
+test "a generated program takes tuples apart by position and by a parameter's pattern" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
@@ -4066,6 +4079,9 @@ test "a generated program takes tuples apart by position" {
     const text = try generate(gpa, bytes, .{ .max_tuples = 2 });
     try testing.expect(std.mem.indexOf(u8, text, "let (") != null);
     try testing.expect(std.mem.indexOf(u8, text, "-> (") != null);
+    try testing.expect(std.mem.indexOf(u8, text, "fn _opened0(sink pair (first, second): (") != null);
+    try testing.expect(std.mem.indexOf(u8, text, "_opened0(pair: _tuple0())") != null);
+    try testing.expect(std.mem.indexOf(u8, text, "_opened1(_tuple1())") != null);
 
     // None where the options ask for none.
     const none = try generate(gpa, bytes, .{ .max_tuples = 0 });

@@ -102,8 +102,7 @@ impl IoError {
 // with the bytes written before the failure as its progress, so `?` passes it
 // on as an `IoError`.
 impl From[WriteFailure[IoError]] for IoError {
-    fn from(sink source: WriteFailure[IoError]) -> IoError {
-        let WriteFailure { kind: kind, reason: reason, written: written } = source
+    fn from(sink source { kind: kind, reason: reason, written: written }: WriteFailure[IoError]) -> IoError {
         var error: IoError = match reason {
             Some(error) => error,
             None => .{ operation = .Write, category = .Other, code = .None, progress = 0 },

@@ -3908,6 +3908,7 @@ fn resolveInternal(
     defer r.type_in_module.deinit(gpa);
     defer r.local_of.deinit(gpa);
     defer r.pattern_names.deinit(gpa);
+    defer r.body_labels.deinit(gpa);
     defer r.shadowed.deinit(gpa);
     defer r.import_at.deinit(gpa);
     defer r.top_named.deinit(gpa);
@@ -6155,6 +6156,10 @@ const Resolver = struct {
     capture_bindings: std.AutoHashMapUnmanaged(BindingId, CaptureLocation) = .empty,
     current_closure: ClosureId = .none,
     closure_binding_start: usize = 0,
+    /// The labelled pattern parameters of the bodies being resolved, the
+    /// innermost last. A label names its parameter for callers only, so a
+    /// body naming one is told which pattern holds the parts.
+    body_labels: std.ArrayList(node.Param) = .empty,
     /// Every module's top-level bindings, concatenated, with `module_runs`
     /// giving each module's run. Kept apart from the working chain so a body
     /// can be resolved against its own module's declarations and a qualified
@@ -11727,7 +11732,7 @@ const Resolver = struct {
         try names.ensureTotalCapacity(self.gpa, params.len);
         // A name the parser read only to recover from a malformed parameter
         // declares nothing, so it is not a second of anything.
-        for (params) |p| if (!p.recovered) names.appendAssumeCapacity(p.name);
+        for (params) |p| if (!p.recovered and self.ast.paramLabel(p) != .none) names.appendAssumeCapacity(self.ast.paramLabel(p));
         try self.refuseNamesDeclaredTwice(names.items, "a declaration declares each parameter once");
     }
 
@@ -11854,7 +11859,7 @@ const Resolver = struct {
         }
         // A body's names may shadow what encloses them, so a respelling is
         // compared against nothing there.
-        for (source.params) |p| if (!p.recovered and p.pattern == ExprId.none) try checks.name(p.name, .parameter, .none);
+        for (source.params) |p| if (!p.recovered and source.paramLabel(p) != .none) try checks.name(source.paramLabel(p), .parameter, .none);
         for (source.captures) |c| if (c.equals != TokenId.none) try checks.name(c.name, .capture, .none);
 
         for (self.bindings.items[own_bindings..]) |b| {
@@ -13213,10 +13218,27 @@ const Resolver = struct {
         // nor reported unused.
         var names: std.AutoHashMapUnmanaged(StringId, void) = .empty;
         defer names.deinit(self.gpa);
+        // A pattern's binders and the named parameters are locals of one
+        // body, so they share one spelling space; a label is in neither.
+        self.pattern_names.restart();
         for (self.ast.declParams(d), 0..) |p, i| {
+            if (p.pattern != ExprId.none) {
+                if (self.ast.tokenTag(p.name) == .identifier) _ = try names.getOrPut(self.gpa, self.ast.tokenName(p.name));
+                try self.bindPatternParameter(p, @intCast(i), .{ .declaration = d });
+                continue;
+            }
             if (self.ast.tokenTag(p.name) != .identifier) continue;
             const text = self.ast.tokenText(p.name);
-            const repeated = (try names.getOrPut(self.gpa, self.ast.tokenName(p.name))).found_existing;
+            var repeated = (try names.getOrPut(self.gpa, self.ast.tokenName(p.name))).found_existing;
+            // A parameter named after an earlier pattern's binder is a second
+            // declaration of it, which the list check cannot see, since a
+            // pattern's binders are not in the list.
+            if (!repeated and !std.mem.eql(u8, text, "_")) {
+                if (self.pattern_names.get(self.ast.tokenName(p.name))) |first| {
+                    try self.reportNameDeclaredTwice(first, p.name, "declaration", "a function's parameters and its patterns' binders are declared once");
+                    repeated = true;
+                } else try self.pattern_names.put(self.gpa, self.ast.tokenName(p.name), p.name);
+            }
             if (!repeated) try self.pushLocal(
                 BindingId.at(@intCast(self.bindings.items.len)),
                 self.ast.tokenName(p.name),
@@ -13281,6 +13303,7 @@ const Resolver = struct {
         self.trait_scope = if (self.ast.declIsProvided(d)) self.signatures.?.traitOf(self.ast, d) orelse DeclId.none else DeclId.none;
         defer self.trait_scope = DeclId.none;
 
+        self.body_labels.clearRetainingCapacity();
         try self.declareParameters(d);
 
         // A default is an expression like any other the declaration writes,
@@ -13968,6 +13991,23 @@ const Resolver = struct {
         };
 
         if (try self.refuseImplNameInTest(self.ast.exprMain(id), .expression)) return;
+        var labels = std.mem.reverseIterator(self.body_labels.items);
+        while (labels.next()) |p| {
+            const label = self.ast.paramLabel(p);
+            if (self.ast.tokenName(label) != name) continue;
+            const marks = try self.sink.arena.alloc(Label, 2);
+            marks[0] = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id), .message = "no binding with this name is in scope" };
+            marks[1] = .{ .file = self.ast.fileOf(label), .span = self.ast.tokenSpan(label), .message = "a label names the parameter for callers", .style = .secondary };
+            return self.sink.add(.{
+                .severity = .err,
+                .code = .n_undefined,
+                .message = try std.fmt.allocPrint(self.sink.arena, "undefined name `{s}`", .{self.ast.tokenText(label)}),
+                .labels = marks,
+                .notes = try self.sink.arena.dupe([]const u8, &.{
+                    try std.fmt.allocPrint(self.sink.arena, "the body holds the parts its pattern binds, `{s}`", .{self.ast.exprText(p.pattern)}),
+                }),
+            });
+        }
         try self.sink.addErrorFmt(
             .n_undefined,
             self.ast.fileOfExpr(id),
@@ -14633,6 +14673,36 @@ const Resolver = struct {
         return .{ .reached = b };
     }
 
+    /// A parameter written as a pattern: its argument is still a parameter,
+    /// so its owner's parameter bindings stay one per parameter, and the
+    /// pattern's binders are locals of the body, bound as a pattern's are.
+    ///
+    /// The one routine a declaration's and a lambda's parameter list bind a
+    /// pattern parameter with. No name reaches the argument: a label is the
+    /// parameter's name for callers and contracts, which find it in the
+    /// list, and the body sees only the parts. The caller has opened the
+    /// list's spelling space, so a binder spelled like a named parameter or
+    /// another binder is a second declaration of it.
+    fn bindPatternParameter(self: *Resolver, p: node.Param, index: u32, owner: ParameterOwner) !void {
+        const argument = BindingId.at(@intCast(self.bindings.items.len));
+        try self.bindings.append(self.gpa, .{
+            .name = self.ast.tokenName(p.name),
+            .kind = .parameter,
+            .stmt = .none,
+            .decl = if (owner == .declaration) owner.declaration else .none,
+            .param_index = index,
+            .parameter_owner = owner,
+            .at = p.name,
+            .used = true,
+            .mutable = p.convention == .inout,
+            .exempt = true,
+        });
+        // Settled at no token: nothing written names it.
+        self.settle(p.argument, argument, .none);
+        if (self.ast.paramLabel(p) != .none) try self.body_labels.append(self.gpa, p);
+        try self.bindParts(p.pattern, p.convention == .inout);
+    }
+
     /// Declares the names a pattern binds, at every depth.
     ///
     /// One spelling space covers the whole pattern, so a name bound twice is
@@ -14885,9 +14955,11 @@ const Resolver = struct {
                 const previous_start = self.closure_binding_start;
                 self.current_closure = closure;
                 self.closure_binding_start = self.bindings.items.len;
+                const labels_mark = self.body_labels.items.len;
                 defer {
                     self.current_closure = previous_closure;
                     self.closure_binding_start = previous_start;
+                    self.body_labels.shrinkRetainingCapacity(labels_mark);
                 }
 
                 const mark = self.visible.items.len;
@@ -14902,7 +14974,7 @@ const Resolver = struct {
                     var listed: std.ArrayList(TokenId) = .empty;
                     defer listed.deinit(self.gpa);
                     for (lambda.captures) |capture| try listed.append(self.gpa, capture.name);
-                    for (lambda.params) |p| try listed.append(self.gpa, p.name);
+                    for (lambda.params) |p| if (self.ast.paramLabel(p) != .none) try listed.append(self.gpa, self.ast.paramLabel(p));
                     try self.refuseNamesDeclaredTwice(listed.items, "a closure's captures and parameters are declared once");
                 }
                 var names: std.AutoHashMapUnmanaged(StringId, void) = .empty;
@@ -14937,24 +15009,7 @@ const Resolver = struct {
                     // name reaches it; the pattern's binders are locals of
                     // the lambda, bound as a pattern's are.
                     if (p.pattern != ExprId.none) {
-                        const argument = BindingId.at(@intCast(self.bindings.items.len));
-                        try self.bindings.append(self.gpa, .{
-                            .name = self.ast.tokenName(p.name),
-                            .kind = .parameter,
-                            .stmt = .none,
-                            .decl = .none,
-                            .param_index = @intCast(i),
-                            .parameter_owner = .{ .closure = closure },
-                            .at = p.name,
-                            .used = true,
-                            .mutable = p.convention == .inout,
-                            .exempt = true,
-                        });
-                        // Settled at no token: nothing written names it.
-                        self.settle(p.argument, argument, .none);
-                        // One spelling space with the captures and the other
-                        // parameters, which the restart above opened.
-                        try self.bindParts(p.pattern, p.convention == .inout);
+                        try self.bindPatternParameter(p, @intCast(i), .{ .closure = closure });
                         continue;
                     }
                     if (self.ast.tokenTag(p.name) != .identifier) continue;

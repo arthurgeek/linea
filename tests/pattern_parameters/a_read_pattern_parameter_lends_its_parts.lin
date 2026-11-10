@@ -1,0 +1,16 @@
+// A `read` pattern parameter lends each part from the caller's argument, which
+// stays whole: `pair` is used again after the call.
+fn longer(pair (first, second): (Str, Str)) -> UInt64 {
+    if first.length() > second.length() {
+        first.length()
+    } else {
+        second.length()
+    }
+}
+
+fn main() -> UInt8 {
+    let pair = ("Ada", "Grace")
+    let length = longer(pair)
+    let (first, _) = pair
+    UInt8(length + first.length())
+}

@@ -1,0 +1,10 @@
+// A default is a constant the call supplies when it leaves the argument out,
+// so it cannot read another parameter, and a pattern's binders are no
+// exception: `a` is a part of `entry`, which the call has not taken apart yet.
+fn sum(entry (a, b): (UInt8, UInt8), extra: UInt8 = a) -> UInt8 {
+    a + b + extra
+}
+
+fn main() -> UInt8 {
+    sum((1, 2))
+}

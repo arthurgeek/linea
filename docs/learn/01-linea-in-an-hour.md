@@ -1305,8 +1305,8 @@ The dearest price is 1200 cents.
 each component. A tuple that stays whole is one value, and `range._0`,
 `range._1` name its components by position, counting from zero.
 [Iterating](05-iterating.md#pairs-from-enumerate-and-zip) takes pairs apart in
-a `for`, [Calling things](02-calling-things.md#a-closure-that-takes-a-pair-apart)
-in a lambda's parameters, and [Patterns inside patterns](#patterns-inside-patterns)
+a `for`, [Calling things](02-calling-things.md#a-parameter-that-takes-a-pair-apart)
+in a function's or a lambda's parameters, and [Patterns inside patterns](#patterns-inside-patterns)
 inside another pattern.
 
 Use a tuple for a positional relationship that is obvious from where it
