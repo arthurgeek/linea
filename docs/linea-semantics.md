@@ -6349,6 +6349,33 @@ task's stack has guard pages below it, and every generated function probes a
 frame larger than a page as it grows, so an overflow on any thread, `main`
 included, stops the program with `linea: a stack overflowed`.
 
+A task's waits run on an `io.Io`: the system, where an operation waits on the
+kernel, or a simulation, inside `io.Simulation.run`, where the clocks are
+virtual and sockets are entries of the simulation's own table
+([ADR 0265](adr/0265-waits-go-through-the-runtimes-poller-and-a-loop-runs-tasks-as-fibers.md)
+§8, §12). A simulation's virtual time moves only when its body advances it
+or waits, and every choice its network makes is drawn from its seed, so a run
+is repeated exactly by the same seed. `run` lends the simulation to its body,
+so no two tasks run one simulation at once. The uses that would make a run
+depend on the machine each stop the program: an operation on a simulated
+descriptor outside a run of its simulation (`linea: a simulated descriptor
+was used outside its simulation`), an operation other than closing on a real
+socket inside one (`linea: a real socket was used inside a simulation`),
+starting a task inside one, or waiting there on another task's session or
+owner, whose thread the kernel schedules (`linea: a simulation runs one task
+until fibers`), advancing a simulation's world while another simulation runs
+(`linea: a simulation's world was used outside its run`), and a wait with no
+deadline that nothing in the simulation can end (`linea: a simulation's one
+task waits forever`). An `Io` that names a simulation which has been closed
+stops the program where it is used (`linea: an Io names a loop that has
+ended`). A simulated descriptor closed outside a run is closed at its
+simulation's next operation, in the order the program closed it; one closed
+on another thread while its simulation runs stops the program as a use
+outside it, and one closed after its simulation was closed is only
+forgotten. An
+instant read inside a run is on the virtual clock, so it is not compared with
+one read outside.
+
 **[O-Temporary]** A value that is borrowed where it is written without being a
 place, such as `log.field("count", 3)`'s `3`, an argument `base + 2` to a
 parameter the result borrows, or an interpolated call whose result must be

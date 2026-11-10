@@ -1,0 +1,52 @@
+import std.io
+import std.mem
+import std.net
+
+use io.Reader
+use net.Accepted
+use net.Acceptor
+
+import std.time
+
+// Bytes cross the simulated network in chunks whose sizes and latencies the
+// seed chooses, so two simulations opened with one seed deliver the same
+// chunks at the same virtual instants, and report the same fingerprint.
+fn exchange(seed: UInt64) -> (UInt64, UInt64) {
+    let network = io.Network { latency_ms = 5, jitter_ms = 20, chunk_bytes = 3, ..io.Network.default() }
+    var sim = io.Simulation.open(seed, network).unwrap()
+    let elapsed = &sim.run(
+        |inout _world| {
+            let started = time.Instant.now()
+            var listener = net.listen(net.loopback(80)).unwrap()
+            var client = net.connect(net.loopback(80)).unwrap()
+            let Accepted { connection, address: _ } = &listener.accept().unwrap()
+            var server = connection
+            let _sent = io.write_all(&client, "a dozen bytes".as_bytes()).unwrap()
+            var buffer = mem.system().acquire(16).unwrap()
+            var received: UInt64 = 0
+            while received < 13 {
+                received += &server.read_some(&buffer, offset: received, count: 16 - received).unwrap()
+            }
+            buffer.release()
+            server.close().unwrap()
+            client.close().unwrap()
+            listener.close().unwrap()
+            started.elapsed().nanoseconds()
+        },
+    )
+    let fingerprint = sim.fingerprint()
+    sim.close()
+    (elapsed, fingerprint)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let (first_elapsed, first) = exchange(7)
+    let (second_elapsed, second) = exchange(7)
+    let (_, other) = exchange(8)
+    io.println("same seed, same trace: {first == second}")?
+    io.println("same seed, same virtual time: {first_elapsed == second_elapsed}")?
+    io.println("another seed, another trace: {first != other}")?
+    // Every chunk takes at least the 5 ms latency, on the virtual clock.
+    io.println("virtual time passed: {first_elapsed >= 5000000}")?
+    .Ok(0)
+}

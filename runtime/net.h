@@ -6,7 +6,8 @@
  * boundary packed into one integer: host-order address in the high bits,
  * port in the low 16, so no socket extern takes a memory address. */
 long linea_net_listen(unsigned long address, unsigned long backlog);
-/* Every socket is nonblocking and an operation waits by polling. A deadline
+/* Inside a simulation (`sim.h`) every operation is answered by the
+ * simulation; otherwise every socket is nonblocking and an operation waits by polling. A deadline
  * is the monotonic clock's reading in nanoseconds, 0 for none. A deadline that
  * has passed answers -ETIMEDOUT without attempting the operation. */
 long linea_net_accept(int listener, unsigned long deadline_ns);
@@ -23,5 +24,7 @@ long linea_net_shutdown_write(int fd);
  * orderly end of input. The descriptor is closed even when lingering cannot
  * be configured, and that failure is the one reported. */
 long linea_net_reset(int fd);
+/* Close a socket, or a simulated descriptor (`sim.h`). */
+long linea_net_close(int fd);
 
 #endif

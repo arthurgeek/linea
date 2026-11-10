@@ -72,6 +72,9 @@ pub fn holds(name: []const u8) bool {
     for (std.enums.values(@import("float_math.zig").Operation)) |operation| {
         if (std.mem.eql(u8, operation.symbol(), name)) return true;
     }
+    for (internal_functions) |signature| {
+        if (std.mem.eql(u8, signature.symbol, name)) return true;
+    }
     return false;
 }
 
@@ -308,6 +311,29 @@ pub const math_functions = math: {
     break :math table;
 };
 
+/// What the runtime's own files call between themselves to run a
+/// simulation: the loop table (`runtime/loop.h`) and the simulated backend
+/// that the socket and clock entries hand an operation to
+/// (`runtime/sim.h`). No Linea declaration names them; they are owned so
+/// that no `export` takes their names.
+pub const internal_functions = [_]Signature{
+    .{ .symbol = "linea_loop_claim", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .u64 },
+    .{ .symbol = "linea_loop_find", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .ptr },
+    .{ .symbol = "linea_loop_retire", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .unit },
+    .{ .symbol = "linea_loop_running", .declared_by = .compiler, .parameters = &.{}, .result = .ptr },
+    .{ .symbol = "linea_loop_runs", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .u64 },
+    .{ .symbol = "linea_sim_takes", .declared_by = .compiler, .parameters = &.{p(.i32)}, .result = .i32 },
+    .{ .symbol = "linea_sim_perform", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .i64 },
+    .{ .symbol = "linea_sim_listen", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64) }, .result = .i64 },
+    .{ .symbol = "linea_sim_local_address", .declared_by = .compiler, .parameters = &.{p(.i32)}, .result = .i64 },
+    .{ .symbol = "linea_sim_peer_address", .declared_by = .compiler, .parameters = &.{p(.i32)}, .result = .i64 },
+    .{ .symbol = "linea_sim_shutdown_write", .declared_by = .compiler, .parameters = &.{p(.i32)}, .result = .i64 },
+    .{ .symbol = "linea_sim_reset", .declared_by = .compiler, .parameters = &.{p(.i32)}, .result = .i64 },
+    .{ .symbol = "linea_sim_release", .declared_by = .compiler, .parameters = &.{p(.i32)}, .result = .i64 },
+    .{ .symbol = "linea_sim_clock_read", .declared_by = .compiler, .parameters = &.{ p(.u8), .{ .scalar = .i64, .passing = .inout }, .{ .scalar = .u64, .passing = .inout } }, .result = .i64 },
+    .{ .symbol = "linea_sim_sleep", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .i64 },
+};
+
 /// Every function the compiler owns, with the signature its emitted calls and
 /// declarations are written from and that the runtime's C is held to. The
 /// emitter prints from these rows rather than restating widths, so a width
@@ -322,7 +348,7 @@ pub const owned_functions = [_]Signature{
     byte_range_signature,
     thread_begin_signature,
     thread_end_signature,
-} ++ math_functions;
+} ++ math_functions ++ internal_functions;
 
 test "every function the compiler owns is a name the runtime refuses" {
     for (owned_functions) |signature| try testing.expect(holds(signature.symbol));
@@ -341,7 +367,7 @@ const mem_release = heldBy("mem", "`release` on a `mem.Buffer`");
 // `net.Listener` keeps, and each of these also takes the address of bytes a
 // `mem.Buffer` or `mem.Slice` holds.
 const mem_transfer = heldBy("mem", "the reads and writes of `io`, `fs.File` and `net.Connection`");
-const mem_close = heldBy("mem", "`close` on an `fs.File`, a `net.Connection` or a `net.Listener`");
+const mem_close = heldBy("mem", "`close` on an `fs.File`");
 const mem_files = heldBy("mem", "the standard library's `fs` operations");
 const mem_arguments = heldBy("mem", "`env.args`");
 const mem_environment = heldBy("mem", "`env.variable` and `env.variables`");
@@ -349,6 +375,12 @@ const mem_parse = heldBy("mem", "parsing a `Float64` or a `Float32` from text");
 const fs_mode = heldBy("fs", "the standard library's `fs` operations");
 const net_listener = heldBy("net", "`net.listen` and the `net.Listener` it answers");
 const net_connection = heldBy("net", "`net.connect` and the `net.Connection` it answers");
+const net_close = heldBy("net", "`close` on a `net.Connection` or a `net.Listener`");
+// A loop's identity is a number an `io.Io` keeps, and a simulation's one a
+// linear `io.Simulation` keeps; switching the thread's loop is what
+// `Simulation.run` does around its body.
+const io_loop = heldBy("io", "`io.current`, `io.Io` and `Simulation.run`");
+const io_simulation = heldBy("io", "`io.Simulation` and the `io.World` its run lends");
 
 /// Every `linea_` function an `extern` may name, with its signature. The
 /// namespace is the runtime's: a declaration of one of these is held to the
@@ -398,6 +430,15 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_net_peer_address", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection },
     .{ .symbol = "linea_net_shutdown_write", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection },
     .{ .symbol = "linea_net_reset", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection },
+    .{ .symbol = "linea_net_close", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_close },
+    // The loop table and the simulations in it.
+    .{ .symbol = "linea_io_current", .parameters = &.{}, .result = .u64, .declared_by = io_loop },
+    .{ .symbol = "linea_io_switch", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_loop },
+    .{ .symbol = "linea_io_is_simulated", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = io_loop },
+    .{ .symbol = "linea_sim_open", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64), p(.u64), p(.u8), p(.u64) }, .result = .u64, .declared_by = io_simulation },
+    .{ .symbol = "linea_sim_advance", .parameters = &.{ p(.u64), p(.u64) }, .result = .unit, .declared_by = io_simulation },
+    .{ .symbol = "linea_sim_fingerprint", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_simulation },
+    .{ .symbol = "linea_sim_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = io_simulation },
     .{ .symbol = "linea_clock_read", .parameters = &.{ p(.u8), .{ .scalar = .i64, .passing = .inout }, written }, .result = .i64, .declared_by = .granted },
     .{ .symbol = "linea_clock_sleep", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = .granted },
     // A task's thread and the rendezvous channel of its session.

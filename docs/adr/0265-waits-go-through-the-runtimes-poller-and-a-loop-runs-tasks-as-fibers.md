@@ -2,10 +2,13 @@
 
 Status: Proposed — 2026-11-07. It builds on
 [0261](0261-an-owning-task-holds-nothing-that-waits.md). Phases 1 to 7 of §13
-state what is built when; phase 1, nonblocking sockets with deadlines, is being
-built, and in it §1's in-place backend has one party, the calling thread, so §2's
-guarantees hold because the thread that attempts an operation is the one that
-answers it, without a state word. Nothing else is built.
+state what is built when. Phase 1 is being built: nonblocking sockets with
+deadlines, `io.Io`, `io.system()`, `io.current()`, the loop table of §8 and
+the simulation of §12 for one task. In it §1's in-place and simulated backends
+each have one party, the calling thread, so §2's guarantees hold because the
+thread that attempts an operation is the one that answers it, without a state
+word. Of §12, printing a failing test's seed is not built yet: a test reads
+`sim.fingerprint()` and names its own seed. Nothing else is built.
 Once built, it would change these sentences of existing records:
 
 - [0154](0154-sockets-and-http-follow-go.md),
@@ -1265,6 +1268,28 @@ timed-out wait hands back what it was given: `TimedRecv.TimedOut` hands back
 the endpoint, a timed-out read answers `TimedOut` with the connection still
 owned, and a timer in a set leaves the other sources registered.
 
+**Decision: a deadline on connecting and accepting is stated per call.**
+`net.connect(address, within_ms: N)` takes a defaulted `within_ms`, and its
+default is no deadline: it waits until the kernel answers, as `connect` does
+in C, in Zig's standard library and in Rust's `TcpStream::connect`.
+`Listener.accept_within(ms)` sits beside `accept()`, which keeps no deadline,
+so the `Acceptor` trait and `http.serve` are unchanged. Zero means no bound in
+both, as it does for `set_timeouts` and `set_deadline`. Both answer
+`TimedOut` once their milliseconds pass, and a connection ready as the time
+runs out is answered under §1's tie rules. Two alternatives were weighed:
+
+- *A setter stored on the listener*, `listener.set_accept_timeout(ms)` read by
+  every later `accept`, as `set_timeouts` is read by every later read. It
+  hides the bound from the call that waits, and a listener lent to a serving
+  loop would carry a bound its borrower cannot see. A connection keeps its
+  setters because a protocol bounds a session of many reads; an accept is one
+  wait, so its bound belongs to the call.
+- *A fixed default deadline* on `connect` and `accept`. Every fixed number is
+  wrong for some caller, a slow link or a server idle for hours, and a
+  default that times out turns a correct program into one that fails under
+  load. No deadline is the honest default, as every comparable standard
+  library chooses, and a caller that needs one writes it.
+
 ### 11. What the checker adds, and what is library and runtime only
 
 | Section | Checker | Library and runtime |
@@ -1292,8 +1317,8 @@ reproduced exactly, not hoped for.
 
 ```linea
 test fn a_read_past_its_deadline_times_out() {
-    var sim = io.Simulation.open(seed: 7)
-    let outcome = sim.run(|inout world| {
+    var sim = io.Simulation.open(seed: 7).unwrap()
+    let outcome = &sim.run(|inout world| {
         var listener = net.listen(net.loopback(80)).unwrap()
         var client = net.connect(net.loopback(80)).unwrap()
         let Accepted { connection: server, address: _ } = &listener.accept().unwrap()
@@ -1310,7 +1335,7 @@ test fn a_read_past_its_deadline_times_out() {
 - **What it is.** `io.Simulation.open(seed:)` answers a linear simulation:
   a virtual monotonic and wall clock that start at a fixed instant, an
   in-memory network, and a deterministic source of choices seeded by `seed`.
-  `sim.run(body)` runs `body` with the simulation as the `Io` it runs on
+  `&sim.run(body)` runs `body` with the simulation as the `Io` it runs on
   (`io.current()`, §8), and every operation the body makes goes to the
   simulated backend of §1 instead of the system. The body takes the
   simulation's controls as an `inout` parameter (`world`), through which it
@@ -1339,8 +1364,10 @@ test fn a_read_past_its_deadline_times_out() {
 - **Simulated descriptors stay inside.** A simulated descriptor that leaves
   `run` (returned from the body) names nothing outside it: an operation on it
   from any other `Io` traps with `linea: a simulated descriptor was used
-  outside its simulation`, and releasing it outside does nothing but forget
-  its table entry.
+  outside its simulation`. Releasing it outside a run takes no effect until
+  the simulation's next operation, which closes it in the order the program
+  released it; once the simulation is closed, releasing it only forgets its
+  table entry.
 - **Tasks.** In phases 1 to 3 every task is a thread, and threads scheduled by
   the kernel cannot be made deterministic, so `run` admits one task: a `start`
   inside it traps with `linea: a simulation runs one task until fibers`. A

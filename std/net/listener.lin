@@ -1,6 +1,7 @@
 import std.io
 import std.mem
 import std.testing
+import std.time
 
 // The runtime listens on a packed address, accepts a connection by a deadline
 // on the monotonic clock (0 waits forever), and reports a socket's packed local
@@ -92,18 +93,24 @@ pub trait Acceptor: io.Close {
 impl Acceptor for Listener {
     // Wait for the next connection, with no bound on how long.
     fn accept(inout self: Self) -> Result[Accepted, NetError] {
-        let answer = linea_net_accept(self.fd, deadline_ns: 0)
-        if answer < 0 {
-            return .Err(failure(.Accept, answer))
-        }
-        let connection = adopt(Int32(answer))
-        match connection.peer_address() {
-            Ok(address) => .Ok(Accepted { connection = connection, address = address }),
-            Err(reason) => {
-                let _closed = connection.close()
-                return .Err(reason)
-            },
-        }
+        accept_by(&self, deadline_ns: 0)
+    }
+}
+
+// Accept the next connection by the monotonic moment `deadline_ns`, 0 for
+// none, and read its peer's address.
+fn accept_by(inout listener: Listener, deadline_ns: UInt64) -> Result[Accepted, NetError] {
+    let answer = linea_net_accept(listener.fd, deadline_ns)
+    if answer < 0 {
+        return .Err(failure(.Accept, answer))
+    }
+    let connection = adopt(Int32(answer))
+    match connection.peer_address() {
+        Ok(address) => .Ok(Accepted { connection = connection, address = address }),
+        Err(reason) => {
+            let _closed = connection.close()
+            return .Err(reason)
+        },
     }
 }
 
@@ -208,6 +215,73 @@ impl Listener {
         testing.assert(closed, "closing the listener failed")?
         .Ok(())
     }
+
+    // Wait for the next connection for at most `ms` milliseconds. Once they
+    // have passed, the accept fails as timed out and a connection that
+    // arrives later waits for the next accept. A connection ready as the time
+    // runs out is accepted. Zero sets no bound, as `accept` has none.
+    pub fn accept_within(inout self: Self, ms: UInt64) -> Result[Accepted, NetError] {
+        var deadline: UInt64 = 0
+        if ms != 0 {
+            deadline = deadline_after(time.Instant.now().monotonic_nanoseconds(), ms)
+        }
+        accept_by(&self, deadline)
+    }
+
+    test fn an_accept_whose_connection_is_ready_at_its_deadline_takes_it() {
+        // Every delivery takes 10 ms of virtual time. The client is connected
+        // once its SYN and the SYN-ACK have crossed, after 20 ms, and the
+        // server's end is ready to accept once the client's ACK arrives, 10 ms
+        // later.
+        let network = io.Network { latency_ms = 10, ..io.Network.default() }
+        var sim = io.Simulation.open(seed: 1, network: network).unwrap()
+        let (early, on_time, waited) = &sim.run(
+            |inout _world| {
+                var listener = listen(loopback(80)).unwrap()
+                let client = connect(loopback(80)).unwrap()
+                let connected = time.Instant.now()
+                let early = timed_out(&listener.accept_within(ms: 9))
+                let on_time = !timed_out(&listener.accept_within(ms: 1))
+                let waited = connected.elapsed()
+                client.close().unwrap()
+                listener.close().unwrap()
+                (early, on_time, waited)
+            },
+        )
+        sim.close()
+        testing.assert(early, "an accept ended a millisecond before the connection was ready")?
+        testing.assert(on_time, "an accept whose deadline met the connection did not take it")?
+        testing.assert_eq(waited, time.Duration.from_milliseconds(10), "the accepts waited other than the ACK's 10 ms")?
+    }
+
+    test fn an_accept_with_no_bound_waits_as_accept_does() {
+        var listener = listen(loopback(0)).unwrap()
+        let client = connect(listener.local_address().unwrap()).unwrap()
+        let accepted = !timed_out(&listener.accept_within(ms: 0))
+        client.close().unwrap()
+        listener.close().unwrap()
+        testing.assert(accepted, "an accept with no bound did not take the waiting connection")?
+    }
+}
+
+// Whether an accept timed out. A connection it took is closed.
+fn timed_out(sink outcome: Result[Accepted, NetError]) -> Bool {
+    match outcome {
+        Ok(Accepted { connection, address: _ }) => {
+            let _closed = connection.close()
+            false
+        },
+        Err(Io(reason)) => match read reason.category { TimedOut => true, _ => false },
+        Err(_) => false,
+    }
+}
+
+test fn only_a_timed_out_accept_is_timed_out() {
+    let timeout = io.IoError { operation = .Accept, category = .TimedOut, code = .None, progress = 0 }
+    let refusal = io.IoError { operation = .Accept, category = .ConnectionRefused, code = .None, progress = 0 }
+    testing.assert(timed_out(.Err(.Io(timeout))), "a timed-out accept was not timed out")?
+    testing.assert(!timed_out(.Err(.Io(refusal))), "a refused accept was timed out")?
+    testing.assert(!timed_out(.Err(.AddressInUse)), "an address in use was timed out")?
 }
 
 // Generic code, such as `http.serve`, closes a listener through `io.Close`;

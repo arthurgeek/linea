@@ -34,6 +34,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "loop.h"
 #include "pipe_signal.h"
 #include "task.h"
 
@@ -50,6 +51,22 @@ void linea_storage_extent(unsigned long at, unsigned long len);
  * so any guard of a page or more stops an overflow; sixty-four kibibytes also
  * stops C code compiled without probes that keeps its frames under that. */
 static const unsigned long guard_bytes = 65536;
+
+/* glibc places a thread's static thread-local storage at the top of a stack
+ * its caller supplies, so each task's stack holds this much beside the bytes
+ * it asked for. Sixty-four kibibytes covers the runtime's own and a
+ * sanitizer's; pages the storage does not reach are never touched. */
+static const unsigned long thread_storage_bytes = 65536;
+
+/* The fewest bytes a task's stack holds for its own frames. A sanitizer's
+ * `pthread_create` wants 128 KiB beside the thread-local storage whatever
+ * the system's own minimum is, and reports a smaller stack on standard
+ * error. */
+#if defined(LINEA_SANITIZED)
+#define LEAST_STACK_BYTES ((unsigned long)PTHREAD_STACK_MIN > 131072UL ? (unsigned long)PTHREAD_STACK_MIN : 131072UL)
+#else
+#define LEAST_STACK_BYTES ((unsigned long)PTHREAD_STACK_MIN)
+#endif
 
 /* The alternate signal stack each task's thread runs its fault handler on. */
 static const unsigned long signal_stack_bytes = 65536;
@@ -98,6 +115,14 @@ struct task {
 static void fail(const char *message) {
     report_bytes(message, strlen(message));
     abort();
+}
+
+/* Threads the kernel schedules cannot be ordered by a seed, so a
+ * simulation admits only the task running it: starting another task, or
+ * waiting on one through a session or an owner's queue, traps while a
+ * simulation is the thread's loop. */
+static void alone(void) {
+    if (linea_io_current() != 0) fail("linea: a simulation runs one task until fibers\n");
 }
 
 /* A pthread call on a mutex or condition variable this file initialised can
@@ -166,7 +191,8 @@ long linea_task_prepare(unsigned long stack_bytes) {
     const long page = sysconf(_SC_PAGESIZE);
     if (page <= 0) return -EINVAL;
     unsigned long usable = round_up(stack_bytes, (unsigned long)page);
-    if (usable < (unsigned long)PTHREAD_STACK_MIN) usable = round_up((unsigned long)PTHREAD_STACK_MIN, (unsigned long)page);
+    if (usable < LEAST_STACK_BYTES) usable = round_up(LEAST_STACK_BYTES, (unsigned long)page);
+    usable += round_up(thread_storage_bytes, (unsigned long)page);
 
     struct task *t = calloc(1, sizeof *t);
     if (t == 0) return -ENOMEM;
@@ -226,6 +252,7 @@ unmap_stack:
 
 unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
                                unsigned long len, unsigned long release_at) {
+    alone();
     struct task *t = task_of(task);
     must(pthread_mutex_lock(&t->lock));
     t->entry = entry;
@@ -250,6 +277,7 @@ void linea_task_cancel(unsigned long task) {
 }
 
 void linea_chan_send(unsigned long endpoint, unsigned long at, unsigned long len) {
+    alone();
     struct task *t = task_of(endpoint);
     linea_storage_extent(at, len);
     must(pthread_mutex_lock(&t->lock));
@@ -266,6 +294,7 @@ void linea_chan_send(unsigned long endpoint, unsigned long at, unsigned long len
 }
 
 void linea_chan_recv(unsigned long endpoint, unsigned long at, unsigned long len) {
+    alone();
     struct task *t = task_of(endpoint);
     linea_storage_extent(at, len);
     must(pthread_mutex_lock(&t->lock));
@@ -279,11 +308,13 @@ void linea_chan_recv(unsigned long endpoint, unsigned long at, unsigned long len
 }
 
 void linea_chan_choose(unsigned long endpoint, uint8_t branch) {
+    alone();
     uint8_t sent = branch;
     linea_chan_send(endpoint, (unsigned long)&sent, 1);
 }
 
 uint8_t linea_chan_offer(unsigned long endpoint) {
+    alone();
     uint8_t chosen = 0;
     linea_chan_recv(endpoint, (unsigned long)&chosen, 1);
     if (chosen > 1) fail("linea: a session's peer chose a branch that does not exist\n");
@@ -291,6 +322,7 @@ uint8_t linea_chan_offer(unsigned long endpoint) {
 }
 
 void linea_chan_close(unsigned long endpoint) {
+    alone();
     /* The task's own end has nothing to wait for: the creator's close waits
      * for the thread itself. */
     if ((endpoint & 1UL) != 0) return;
@@ -336,6 +368,7 @@ unsigned long linea_owner_open(void) {
 
 void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len, unsigned long answer_at,
                       unsigned long answer_len) {
+    alone();
     struct owner_queue *q = (struct owner_queue *)queue;
     linea_storage_extent(at, len);
     linea_storage_extent(answer_at, answer_len);
@@ -393,6 +426,7 @@ void linea_owner_done(unsigned long queue) {
 }
 
 void linea_owner_close(unsigned long queue) {
+    alone();
     struct owner_queue *q = (struct owner_queue *)queue;
     must(pthread_mutex_lock(&q->lock));
     q->closed = 1;
@@ -457,6 +491,7 @@ static int deadline_after(struct timespec now, uint64_t step_sec, long step_nsec
 }
 
 uint8_t linea_chan_recv_until(unsigned long endpoint, unsigned long at, unsigned long len, unsigned long timeout_ns) {
+    alone();
     struct task *t = task_of(endpoint);
     linea_storage_extent(at, len);
     struct timespec now;
