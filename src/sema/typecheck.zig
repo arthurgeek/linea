@@ -1628,10 +1628,11 @@ fn typecheckInternal(
             c.answer_unknown = false;
             const want: ?Expected = if (written_return.wasWritten()) blk: {
                 const ty = try c.declaredResultType(d);
-                if (ty == .poison) {
-                    c.answer_unknown = true;
-                    break :blk null;
-                }
+                // A refused result type was reported where it is written. The
+                // body is still checked against it, as poison, so what stands
+                // in the result position -- a bare `.None` among them -- is
+                // not reported a second time for having nothing to answer.
+                if (ty == .poison) c.answer_unknown = true;
                 break :blk .{
                     .ty = ty,
                     .at = c.locOfWritten(written_return),
