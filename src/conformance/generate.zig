@@ -1195,6 +1195,11 @@ const Gen = struct {
         try w.print("    fn item({s}x: Self) -> Self.Item\n", .{conv});
         try w.writeAll("}\n\n");
 
+        // A subtrait declaring nothing, so a bound on it reaches `Item`
+        // through its supertrait and names the type a bound on `_Measure`
+        // names.
+        try w.writeAll("trait _Ranked: _Measure {}\n\n");
+
         for (0..shape.impls) |i| {
             try w.print("struct _M{d} {{", .{i});
             for (0..shape.fields[i]) |f| {
@@ -1230,12 +1235,19 @@ const Gen = struct {
                 });
             }
             try w.writeAll("}\n\n");
+            try w.print("impl _Ranked for _M{d} {{}}\n\n", .{i});
         }
 
         // Written against the bound and answering what the bound declares, so
         // the return type is settled by the argument at each instantiation
-        // rather than by anything written here.
-        try w.print("fn _itemOf[T: _Measure]({s}v: T) -> T.Item {{\n", .{conv});
+        // rather than by anything written here. `_itemOf` reads `T.Item`
+        // through `_Ranked`, which inherits it, and passes `T` on to a bound
+        // on `_Measure`, which declares it: the call checks only where the
+        // two readings name one type.
+        try w.print("fn _itemOf[T: _Ranked]({s}v: T) -> T.Item {{\n", .{conv});
+        try w.writeAll("    _itemDeclared(v)\n");
+        try w.writeAll("}\n\n");
+        try w.print("fn _itemDeclared[T: _Measure]({s}v: T) -> T.Item {{\n", .{conv});
         try w.writeAll("    _Measure.item(v)\n");
         try w.writeAll("}\n\n");
 
@@ -3412,6 +3424,8 @@ test "the trait a generated program declares is not one fixed program" {
         try testing.expect(std.mem.indexOf(u8, block, "type Item = UInt8") != null);
         try testing.expect(std.mem.indexOf(u8, block, "type Item = Bool") != null);
         try testing.expect(std.mem.indexOf(u8, block, "-> T.Item") != null);
+        // Read through a subtrait that inherits it, too.
+        try testing.expect(std.mem.indexOf(u8, block, "fn _itemOf[T: _Ranked]") != null);
 
         if (seed < 32) {
             if (std.mem.indexOf(u8, text, ": UInt8 = _itemOf(") != null) through_the_bound.insert(.u8_);

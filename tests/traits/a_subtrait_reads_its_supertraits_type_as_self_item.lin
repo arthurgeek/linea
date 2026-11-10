@@ -1,0 +1,43 @@
+// Inside `Countdown`, `Self.Item` is the `Item` its supertrait `Iterator`
+// declares: in a required signature, in a provided body, and in an
+// implementation of `Countdown`, which settles no `Item` of its own.
+trait Countdown: Iterator {
+    fn peek_last(self: Self) -> Option[Self.Item]
+
+    fn skip_one(inout self: Self) -> Option[Self.Item] where carries(.Some: self), Self: Discardable {
+        &self.next()
+    }
+}
+
+struct Up {
+    lo: UInt64,
+    hi: UInt64,
+}
+
+impl Iterator for Up {
+    type Item = UInt64
+
+    fn next(inout self: Self) -> Option[UInt64] where carries() {
+        if self.lo >= self.hi {
+            return .None
+        }
+        self.lo += 1
+        .Some(self.lo - 1)
+    }
+}
+
+impl Countdown for Up {
+    fn peek_last(self: Self) -> Option[Self.Item] {
+        if self.lo >= self.hi {
+            return .None
+        }
+        .Some(self.hi - 1)
+    }
+}
+
+fn main() -> UInt8 {
+    var up = Up { lo = 3, hi = 6 }
+    let skipped: Option[UInt64] = &up.skip_one()
+    let last: UInt64 = up.peek_last().unwrap()
+    UInt8(skipped.unwrap() * 10 + last)
+}

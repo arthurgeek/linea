@@ -187,7 +187,8 @@ true of a different implementation.
 | [0157](0157-a-newtype-built-from-a-constant-is-a-constant-expression.md) | A newtype built from a constant is a constant expression | Accepted; extends 0020, 0127 and 0140 |
 | [0160](0160-a-postfix-call-reaches-the-types-own-operation-first.md) | A postfix call reaches the type's own operation before a trait's | Accepted; extended by 0186 and 0187 |
 | [0186](0186-a-type-reaches-the-operations-of-the-traits-it-implements.md) | A type reaches the operations of the traits it implements | Accepted; extends 0160; extended by 0187 |
-| [0187](0187-a-bound-brings-its-traits-operations-into-reach.md) | A bound brings its trait's operations into reach | Accepted; extends 0160 and 0186 |
+| [0187](0187-a-bound-brings-its-traits-operations-into-reach.md) | A bound brings its trait's operations into reach | Accepted; extends 0160 and 0186; extended by 0243 |
+| [0243](0243-a-bound-reaches-its-supertraits-associated-types.md) | A bound reaches the associated types its supertraits declare | Accepted; extends 0187 |
 | [0161](0161-a-postfix-call-reaches-an-operation-never-a-field.md) | A postfix call reaches an operation, never a field | Accepted; replaces the field-precedence sentence of the semantics; extended by 0181 |
 | [0181](0181-a-call-may-name-its-type-arguments.md) | A call may name its type arguments | Accepted; replaces the unimplemented bracket clause of 0062; extends 0161; refines 0176 |
 | [0162](0162-question-mark-converts-an-error-through-from.md) | `?` converts a different error through `From` | Accepted; extended by 0184 and 0218 |

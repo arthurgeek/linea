@@ -1,0 +1,5 @@
+error[T-Impl]: `Source` declares no `Missing`
+ --> tests/typecheck/a_refused_result_type_is_reported_once.lin:8:45
+  |
+8 | fn _peek[T: Source](_source: T) -> Option[T.Missing] {
+  |                                             ^^^^^^^ declare it on the trait, or name one it declares

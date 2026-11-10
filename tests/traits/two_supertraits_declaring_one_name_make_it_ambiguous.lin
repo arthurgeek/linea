@@ -1,0 +1,30 @@
+// `Left` and `Right` each declare an `Item`, and `Both` requires both: a
+// name reaching two declarations names neither, through a bound or through
+// `Self`. A function bounded by one of them reads that one's `Item`.
+trait Left {
+    type Item
+
+    fn left(self: Self) -> Self.Item
+}
+
+trait Right {
+    type Item
+
+    fn right(self: Self) -> Self.Item
+}
+
+trait Both: Left + Right {
+    fn pick(self: Self) -> Self.Item
+}
+
+fn from_left[T: Left](t: T) -> T.Item {
+    t.left()
+}
+
+fn _both[T: Both](t: T) -> T.Item {
+    from_left(t)
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,36 @@
+// `impl[T] Countdown for Repeat[T]` writes `Self.Item`, which is the `T` that
+// `impl[T] Iterator for Repeat[T]` settled.
+trait Countdown: Iterator {
+    fn peek(self: Self) -> Option[Self.Item]
+}
+
+struct Repeat[T] {
+    value: T,
+    left: UInt64,
+}
+
+impl[T: Copyable + Owned] Iterator for Repeat[T] {
+    type Item = T
+
+    fn next(inout self: Self) -> Option[T] where carries() {
+        if self.left == 0 {
+            return .None
+        }
+        self.left -= 1
+        .Some(copy(self.value))
+    }
+}
+
+impl[T: Copyable + Owned] Countdown for Repeat[T] {
+    fn peek(self: Self) -> Option[Self.Item] {
+        if self.left == 0 {
+            return .None
+        }
+        .Some(copy(self.value))
+    }
+}
+
+fn main() -> UInt8 {
+    let r = Repeat[UInt8] { value = 9, left = 2 }
+    r.peek().unwrap()
+}

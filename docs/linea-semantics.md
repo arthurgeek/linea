@@ -3408,9 +3408,22 @@ parameter; both forms contribute to one per-declaration set of subject type
 expressions and requirements. All constraints are collected before projected
 subjects resolve, so predicate order is irrelevant: `where I.Item: Copyable,
 I: Iterator` and its reverse define the same set. Resolving an associated name
-requires a declaring bound in that set. No such bound gives the ordinary
-unresolved-name error at the projection; two possible bounds give
-[N-Ambiguous].
+requires a declaring bound in that set. A bound declares the name when its
+trait does or, where its trait does not, when a supertrait does: the search
+follows the trait's supertraits transitively and stops at the nearest
+declaration on each path. So `I.Item` under `I: DoubleEnded`, where `trait
+DoubleEnded: Iterator`, is `Iterator`'s `Item` read at the key (`Iterator`,
+`Item`, `I`), the same type `I: Iterator` names, and the supertrait is read at
+the arguments the requirement chain gives it. `Self.Item` inside a trait, and
+inside an implementation of it, resolves the same way through the trait's own
+supertraits; in an implementation it is what the supertrait's implementation
+for the same type settled. One trait reached along two paths is one
+declaration. No such bound gives the ordinary unresolved-name error at the
+projection, naming the trait the bound wrote; two declaring traits, whether
+named by two bounds or reached through supertraits, and one supertrait
+required at two argument lists give [N-Ambiguous]. No qualification selects
+between them; a parameter bounded by one of the traits alone reads its
+declaration.
 
 Instantiation substitutes a concrete type for each constraint subject, and
 [T-Bound] checks every requirement. When a generic declaration passes an open

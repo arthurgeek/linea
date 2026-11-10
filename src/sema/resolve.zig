@@ -2854,12 +2854,86 @@ pub const Declaring = struct {
     /// one trait once per argument list, so the trait alone names no
     /// implementation.
     args: node.TypeRefRange = node.TypeRefRange.empty,
-    /// Its trait.
+    /// The trait declaring the name: the bound's own trait, or a supertrait
+    /// of it where the bound's trait declares no member of that name.
     trait: DeclId = DeclId.none,
+    /// Whether `trait` is a supertrait of the bound's trait rather than the
+    /// trait the bound names. A supertrait is reached at the arguments the
+    /// requirement chain gives it, not at the bound's written arguments.
+    inherited: bool = false,
     /// The second bound declaring the name, which is the other half of what an
-    /// ambiguity is between.
+    /// ambiguity is between. The same token as `bound` where one bound's
+    /// supertraits hold both declarations.
     also: TokenId = .none,
+    /// The trait the second declaration belongs to.
+    also_trait: DeclId = DeclId.none,
 };
+
+/// Which traits declare a name read through one trait.
+pub const Inherited = struct {
+    /// How many distinct traits declare it.
+    declaring: u32 = 0,
+    /// The first trait found declaring it.
+    trait: DeclId = DeclId.none,
+    /// The second, where there are two.
+    also: DeclId = DeclId.none,
+};
+
+/// The trait that declares `name` for a reading through `trait`: `trait`
+/// itself where it declares a member of that name, and otherwise the nearest
+/// declaring trait along each of its supertrait paths, transitively.
+///
+/// Nearest on each path, because a supertrait that declares the name answers
+/// for everything above it: under `trait Mid: Iterator { type Item }` a
+/// reading through `Mid` reaches `Mid`'s `Item`, and `Iterator`'s is not a
+/// second candidate. Two paths reaching one trait reach one declaration, so a
+/// diamond whose two sides both require `Iterator` names one `Item`. Two
+/// distinct traits declaring it is the ambiguity the caller reports.
+///
+/// **Bound:** the supertrait closure of `trait`, each trait visited once
+/// through a set sized by that closure, so a cycle (refused elsewhere) ends
+/// the walk rather than repeating it.
+pub fn traitDeclaringMember(
+    ast: *const Ast,
+    trait: DeclId,
+    name: StringId,
+    lookup: anytype,
+) @TypeOf(lookup).Error!Inherited {
+    var found: Inherited = .{};
+    if (lookup.declaresMember(trait, name)) {
+        found.declaring = 1;
+        found.trait = trait;
+        return found;
+    }
+
+    const gpa = lookup.allocator();
+    var walk: std.ArrayList(DeclId) = .empty;
+    defer walk.deinit(gpa);
+    var seen: std.AutoHashMapUnmanaged(DeclId, void) = .empty;
+    defer seen.deinit(gpa);
+    try seen.put(gpa, trait, {});
+    try walk.append(gpa, trait);
+
+    var at: usize = 0;
+    while (at < walk.items.len) : (at += 1) {
+        for (ast.declBounds(walk.items[at])) |b| {
+            if (b.kind == .callable) continue;
+            const super = lookup.traitBoundAt(b.named.name) orelse continue;
+            if ((try seen.getOrPut(gpa, super)).found_existing) continue;
+            if (!lookup.declaresMember(super, name)) {
+                try walk.append(gpa, super);
+                continue;
+            }
+            found.declaring += 1;
+            switch (found.declaring) {
+                1 => found.trait = super,
+                2 => found.also = super,
+                else => {},
+            }
+        }
+    }
+    return found;
+}
 
 /// Which of a type parameter's bounds declares the name a settled reference
 /// writes after the dot.
@@ -2905,6 +2979,14 @@ pub fn boundDeclaring(
     var repeats: Repeats(Lookup) = .{ .bounds = bounds, .lookup = lookup };
     defer repeats.deinit();
 
+    // The traits an inherited declaration was found in, so a second bound
+    // reaching the same trait -- `I: Countdown + Iterator`, both reaching
+    // `Iterator`'s `Item` -- reaches the declaration already counted. Two
+    // bounds naming one trait directly at different arguments still count
+    // twice: those are two implementations a type may hold.
+    var inherited_from: std.ArrayList(DeclId) = .empty;
+    defer inherited_from.deinit(lookup.allocator());
+
     for (bounds, 0..) |b, at| {
         if (b.kind == .callable) continue;
         const trait = lookup.traitBoundAt(b.named.name) orelse continue;
@@ -2914,16 +2996,29 @@ pub fn boundDeclaring(
             sole = b;
             sole_trait = trait;
         }
-        if (!lookup.declaresMember(trait, name)) continue;
-        found.declaring += 1;
-        switch (found.declaring) {
-            1 => {
-                found.bound = b.named.name;
-                found.args = b.named.args;
-                found.trait = trait;
-            },
-            2 => found.also = b.named.name,
-            else => {},
+        const reached = try traitDeclaringMember(lookup.syntax(), trait, name, lookup);
+        for ([_]DeclId{ reached.trait, reached.also }) |declaring| {
+            if (declaring == DeclId.none) continue;
+            const inherited = declaring != trait;
+            const counted = for (inherited_from.items) |earlier| {
+                if (earlier == declaring) break true;
+            } else inherited and (declaring == found.trait or declaring == found.also_trait);
+            if (counted) continue;
+            if (inherited) try inherited_from.append(lookup.allocator(), declaring);
+            found.declaring += 1;
+            switch (found.declaring) {
+                1 => {
+                    found.bound = b.named.name;
+                    found.args = b.named.args;
+                    found.trait = declaring;
+                    found.inherited = inherited;
+                },
+                2 => {
+                    found.also = b.named.name;
+                    found.also_trait = declaring;
+                },
+                else => {},
+            }
         }
     }
 
@@ -12349,7 +12444,12 @@ const Resolver = struct {
             if (declared == .none) return;
             break :blk (try self.traitBounding(self.ast.declBounds(declared), wanted)) orelse return;
         };
-        const declared = self.memberOf(self.moduleOf(trait), self.ast.tokenName(self.ast.declName(trait)), .none, wanted) orelse return;
+        // A bound already answered with the declaring trait; `Self` answers
+        // with its own trait, whose supertraits may be what declares the name.
+        const inherited = try traitDeclaringMember(self.ast, trait, wanted, BoundsHere{ .res = self });
+        if (inherited.declaring != 1) return;
+        const declaring = inherited.trait;
+        const declared = self.memberOf(self.moduleOf(declaring), self.ast.tokenName(self.ast.declName(declaring)), .none, wanted) orelse return;
         self.bindings.items[declared.index()].used = true;
         self.reached(ref.name, declared);
     }
@@ -12523,6 +12623,10 @@ const Resolver = struct {
 
         pub fn allocator(self: BoundsHere) std.mem.Allocator {
             return self.res.gpa;
+        }
+
+        pub fn syntax(self: BoundsHere) *const Ast {
+            return self.res.ast;
         }
 
         /// The declaration a written name reached, as far as resolution has

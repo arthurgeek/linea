@@ -1,0 +1,14 @@
+// `Source` declares no `Missing`, so the result type is refused where it is
+// written. The body's `.None` answers that result and is not reported again
+// for having no type to take.
+trait Source {
+    type Item
+}
+
+fn _peek[T: Source](_source: T) -> Option[T.Missing] {
+    .None
+}
+
+fn main() -> UInt8 {
+    0
+}
