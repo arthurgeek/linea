@@ -759,6 +759,7 @@ The library tests itself.
   ok    io.whole_input_limit_failure_retains_the_extra_byte
   ok    io.whole_input_rejects_unreported_destination_overflow
   ok    io.whole_input_zero_limit_distinguishes_eof_from_one_byte
+  ok    iter.a_double_ended_map_yields_from_both_ends_until_they_meet
   ok    iter.a_failed_collection_can_be_released_whole
   ok    iter.a_filter_map_releases_its_inner_iterator
   ok    iter.a_filter_map_sequence_preserves_transformed_order
@@ -780,6 +781,8 @@ The library tests itself.
   ok    iter.collect_first_push_refusal_returns_the_item_and_advanced_linear_captures
   ok    iter.collect_preserves_result_items_and_returns_exhausted_state
   ok    iter.collect_returns_linear_elements_and_captures_after_success_or_refusal
+  ok    iter.copied_into_inner_returns_the_advanced_iterator
+  ok    iter.copied_yields_the_values_a_slice_views
   ok    iter.count_answers_how_many_items_a_sequence_yields
   ok    iter.count_keeps_no_borrowed_items_external_owner
   ok    iter.count_observes_linear_elements_without_settling_them
@@ -816,23 +819,42 @@ The library tests itself.
   ok    iter.folding_text_can_return_a_borrowed_item
   ok    iter.for_each_consumes_linear_items
   ok    iter.for_each_visits_every_linear_item_in_order
+  ok    iter.into_parts_hands_back_a_held_linear_item
   ok    iter.map_and_filter_map_compose
   ok    iter.map_changes_the_item_type
+  ok    iter.map_filter_and_filter_map_walk_backwards_over_a_double_ended_source
   ok    iter.map_into_inner_returns_the_advanced_iterator
   ok    iter.map_recovers_the_advanced_source_and_mutated_callback
   ok    iter.map_transforms_lazily_and_stays_exhausted
+  ok    iter.min_and_max_pick_the_first_least_and_the_last_greatest
   ok    iter.mutable_terminals_borrow_read_callbacks_and_preserve_protocol_captures
+  ok    iter.next_if_takes_only_an_accepted_item
+  ok    iter.peek_shows_the_next_item_without_taking_it
+  ok    iter.peekable_yields_every_item_once_in_order
+  ok    iter.position_counts_from_zero
+  ok    iter.position_hands_linear_items_to_its_predicate
+  ok    iter.reduce_combines_from_the_first_item
+  ok    iter.releasing_a_copied_releases_its_iterator_once
   ok    iter.releasing_a_filter_map_releases_its_iterator_once
   ok    iter.releasing_a_filter_releases_its_iterator_once
   ok    iter.releasing_a_map_releases_its_iterator_once
+  ok    iter.releasing_a_rev_releases_its_iterator_once
+  ok    iter.releasing_a_scan_releases_its_iterator_once
   ok    iter.releasing_a_skip_releases_its_iterator_once
   ok    iter.releasing_a_take_releases_its_iterator_once
   ok    iter.releasing_a_zip_releases_both_iterators_once
   ok    iter.releasing_an_enumerate_releases_its_iterator_once
+  ok    iter.rev_into_inner_returns_the_source_advanced_from_its_end
+  ok    iter.rev_walks_a_range_and_a_slice_from_the_end
+  ok    iter.reversing_twice_restores_the_order
+  ok    iter.scan_recovers_its_source_and_running_state
+  ok    iter.scan_runs_its_step_only_for_items_asked_for
+  ok    iter.scan_yields_each_running_total
   ok    iter.settling_a_failed_collection_keeps_the_allocation_reason
   ok    iter.skip_disposes_of_what_it_passes
   ok    iter.skip_ends_with_its_source_while_passing
   ok    iter.skip_into_inner_returns_the_advanced_iterator
+  ok    iter.sum_and_product_start_from_zero_and_one
   ok    iter.take_asks_for_no_more_than_it_yields
   ok    iter.take_ends_with_its_source
   ok    iter.take_into_inner_returns_the_advanced_iterator
@@ -1133,6 +1155,7 @@ The library tests itself.
   ok    mem.settling_a_refused_push_releases_the_value_and_keeps_the_reason
   ok    mem.slice_iteration_collects_observations_and_transformed_values
   ok    mem.slice_iteration_early_exit_leaves_the_source_mutable
+  ok    mem.slice_iteration_from_both_ends_yields_each_element_once
   ok    mem.slice_iteration_handles_empty_and_single_element_subspans
   ok    mem.slice_iteration_observes_affine_and_linear_elements_without_copying_or_settling
   ok    mem.slice_iteration_retains_order_and_independent_observations
@@ -1196,6 +1219,7 @@ The library tests itself.
   ok    mem.vec_split_inout_lends_disjoint_halves
   ok    mem.vec_truncate_releases_the_tail_last_first_and_keeps_capacity
   ok    mem.vec_unallocated_byte_storage_has_no_buffer
+  ok    mem.windows_yield_each_run_of_consecutive_elements
   ok    net.a_backlog_holds_one_to_4096_connections
   ok    net.a_client_reports_the_listener_as_its_peer
   ok    net.a_client_that_holds_its_task_holds_up_no_other
@@ -1246,6 +1270,8 @@ The library tests itself.
   ok    net.the_handler_reads_from_each_connection_and_names_its_peer
   ok    net.transient_accept_failures_are_retried_until_a_connection_is_served
   ok    net.zero_workers_closes_the_listener_and_returns
+  ok    num.both_float_types_add_from_zero_and_multiply_from_one
+  ok    num.every_integer_type_adds_from_zero_and_multiplies_from_one
   ok    option.a_mutable_and_then_calls_its_transform_only_for_some
   ok    option.a_mutable_fallback_runs_only_for_none
   ok    option.a_mutable_map_calls_its_transform_only_for_some
@@ -1271,9 +1297,12 @@ The library tests itself.
   ok    process.raising_the_open_file_limit_twice_answers_the_same_limit
   ok    range.a_descending_inclusive_range_yields_the_end_it_stops_at
   ok    range.a_descending_range_yields_its_values_downwards
+  ok    range.a_range_at_the_ends_of_its_type_walks_back_without_stepping_past_them
   ok    range.a_range_displays_its_source_notation
   ok    range.a_range_ending_at_the_largest_value_finishes_without_stepping_past_it
   ok    range.a_range_ending_at_the_smallest_value_finishes_without_stepping_past_it
+  ok    range.a_range_walked_from_both_ends_yields_each_value_once
+  ok    range.a_range_walked_from_the_back_yields_its_values_in_reverse
   ok    range.a_range_walks_as_the_sequence_it_is
   ok    range.a_range_yields_its_values_in_order_and_then_nothing
   ok    range.an_empty_range_yields_nothing
@@ -1544,4 +1573,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1541 passed, 0 failed
+  1570 passed, 0 failed

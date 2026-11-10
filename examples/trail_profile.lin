@@ -3,8 +3,8 @@
 // marker, and the markers passed on the way back down.
 //
 // `windows` pairs each marker with the next, `scan` keeps a running total,
-// `peekable` looks at a step before taking it, and `rev` walks the markers
-// from the last to the first.
+// `peekable` looks at a step before taking it, `position` finds where the
+// summit stands, and `rev` walks the markers from the last to the first.
 import std.io
 import std.mem
 import std.testing
@@ -46,7 +46,7 @@ fn longest_ascent(elevations: mem.Slice[Int64]) -> Int64 {
         }
         // Take the flat or falling step that ended the ascent, if the trail
         // has one left.
-        let _ended_by = &changes.next_if(|change| change <= 0)
+        let _ended_by = &changes.next()
     }
     longest
 }

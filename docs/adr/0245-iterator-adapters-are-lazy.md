@@ -138,6 +138,11 @@ stable sort would put first and last, so the two agree with `sort`.
   follow, so a module that declares a trait with one of their names and
   implements it for a sequence makes the dot call `[N-Ambiguous]` (ADR 0192's
   consequence, now wider).
+- `min` and `max` are also the names of an integer type's bounds
+  (`UInt8.max`). Those still resolve first. Written on a type that has no
+  such bound, `Bool.min` or `Count.max` on a newtype, the name is now looked
+  for in `Sequence` as any operation's name is, and the [N-Undefined] report
+  says the type implements no trait that declares it.
 
 ## Alternatives considered
 

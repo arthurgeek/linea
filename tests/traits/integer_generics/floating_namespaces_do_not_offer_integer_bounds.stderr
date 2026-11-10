@@ -1,5 +1,5 @@
-error[N-Undefined]: `Float64` declares no `max`
- --> tests/traits/integer_generics/floating_namespaces_do_not_offer_integer_bounds.lin:2:13
+error[N-Undefined]: `Float64` declares no `max`, and implements no trait in scope that does
+ --> tests/traits/integer_generics/floating_namespaces_do_not_offer_integer_bounds.lin:2:5
   |
 2 |     Float64.max
-  |             ^^^ a primitive holds what the standard library writes for it
+  |     ^^^^^^^^^^^ `Sequence` declares `max`, and another implementation of `Sequence` for `Float64` would overlap the one that matches it
