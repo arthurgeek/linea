@@ -321,8 +321,8 @@ fn spellGenerated(
     const view = pool.view();
     switch (identity) {
         .type => |ty| try view.appendArguments(gpa, spelled, &.{ty}),
-        .closure => |closure| try view.appendClosureName(gpa, spelled, closure),
-        .constructor => |constructor| try view.appendConstructorName(gpa, spelled, constructor),
+        .closure => |closure| try Typing.appendBodyName(gpa, spelled, view.closure_names, closure.index()),
+        .constructor => |constructor| try Typing.appendBodyName(gpa, spelled, view.constructor_names, @intFromEnum(constructor)),
         .member => |at| {
             const ast = &at.program.ast;
             try appendRoute(&view, gpa, spelled, @intCast(at.program.moduleOf(at.trait).index()));
@@ -1669,7 +1669,7 @@ const Discovery = struct {
             _ = try self.table.intern(.{ .body = body, .args = &.{}, .self_ty = .poison }, self.program, self.pool);
             return;
         }
-        if (self.raw_accesses.contains(decl) or self.typing.float_math.operationOf(decl) != null) return;
+        if (self.typing.lowers(decl)) return;
         if (self.ast.declBody(decl) == ExprId.none and !self.ast.declIsExtern(decl)) return;
         const recorded = normal.selection.own_args;
         const args = try self.gpa.alloc(TypeId, recorded.len);

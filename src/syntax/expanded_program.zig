@@ -11,6 +11,7 @@ const Source = @import("../support/source.zig").Source;
 const FileId = @import("../support/source.zig").FileId;
 const Span = @import("../support/span.zig").Span;
 const Table = @import("../support/table.zig").Table;
+const strings = @import("../support/strings.zig");
 const parser = @import("../parser/parser.zig");
 const TokenId = @import("../lexer/token.zig").TokenId;
 const Ast = @import("ast.zig").Ast;
@@ -154,11 +155,6 @@ pub const GeneratedSources = struct {
 
     pub const empty: GeneratedSources = .{};
 
-    fn freeStrings(gpa: std.mem.Allocator, strings: []const []const u8) void {
-        for (strings) |string| gpa.free(string);
-        gpa.free(strings);
-    }
-
     pub fn path(self: *const GeneratedSources, index: usize) []const u8 {
         return self.paths[index];
     }
@@ -168,8 +164,8 @@ pub const GeneratedSources = struct {
     }
 
     pub fn deinit(self: *GeneratedSources, gpa: std.mem.Allocator) void {
-        freeStrings(gpa, self.paths);
-        freeStrings(gpa, self.buffers);
+        strings.free(gpa, self.paths);
+        strings.free(gpa, self.buffers);
         self.* = .empty;
     }
 };
@@ -1096,8 +1092,8 @@ pub const ExpandedProgram = struct {
         const text = "fn generated() -> UInt8 { let x: UInt8 = 2; x }\n";
         var generated_sources: GeneratedSources = .empty;
         defer generated_sources.deinit(gpa);
-        generated_sources.paths = try dupeStrings(gpa, &.{"generated.lin"});
-        generated_sources.buffers = try dupeStrings(gpa, &.{text});
+        generated_sources.paths = try strings.dupe(gpa, &.{"generated.lin"});
+        generated_sources.buffers = try strings.dupe(gpa, &.{text});
 
         var expanded_interner = try Interner.initPrefix(gpa, &source_interner);
         defer expanded_interner.deinit(gpa);
@@ -1178,8 +1174,8 @@ pub const ExpandedProgram = struct {
         const text = "fn generated() -> UInt8 { let x: UInt8 = 2; x }\n";
         var generated_sources: GeneratedSources = .empty;
         defer generated_sources.deinit(gpa);
-        generated_sources.paths = try dupeStrings(gpa, &.{"generated.lin"});
-        generated_sources.buffers = try dupeStrings(gpa, &.{text});
+        generated_sources.paths = try strings.dupe(gpa, &.{"generated.lin"});
+        generated_sources.buffers = try strings.dupe(gpa, &.{text});
 
         var expanded_interner = try Interner.initPrefix(gpa, &source_interner);
         defer expanded_interner.deinit(gpa);
@@ -1548,8 +1544,8 @@ pub const ExpandedProgram = struct {
         const text = "fn generated() -> UInt8 { let x: UInt8 = 2; x }\n";
         var generated_sources: GeneratedSources = .empty;
         defer generated_sources.deinit(gpa);
-        generated_sources.paths = try dupeStrings(gpa, &.{"generated.lin"});
-        generated_sources.buffers = try dupeStrings(gpa, &.{text});
+        generated_sources.paths = try strings.dupe(gpa, &.{"generated.lin"});
+        generated_sources.buffers = try strings.dupe(gpa, &.{text});
 
         var expanded_interner = try Interner.initPrefix(gpa, &source_interner);
         defer expanded_interner.deinit(gpa);
@@ -1626,18 +1622,6 @@ pub const ExpandedProgram = struct {
 // a build filtered to one of them, which would otherwise never look inside it.
 comptime {
     _ = ExpandedProgram;
-}
-
-fn dupeStrings(gpa: std.mem.Allocator, strings: []const []const u8) ![]const []const u8 {
-    const out = try gpa.alloc([]const u8, strings.len);
-    errdefer gpa.free(out);
-    var initialized: usize = 0;
-    errdefer for (out[0..initialized]) |string| gpa.free(string);
-    for (strings, out) |string, *owned| {
-        owned.* = try gpa.dupe(u8, string);
-        initialized += 1;
-    }
-    return out;
 }
 
 test "expanded module roots" {
@@ -1720,8 +1704,8 @@ test "expanded module roots" {
     };
     var generated_sources: GeneratedSources = .empty;
     defer generated_sources.deinit(gpa);
-    generated_sources.paths = try dupeStrings(gpa, &generated_paths);
-    generated_sources.buffers = try dupeStrings(gpa, &generated_texts);
+    generated_sources.paths = try strings.dupe(gpa, &generated_paths);
+    generated_sources.buffers = try strings.dupe(gpa, &generated_texts);
     const owned_paths = generated_sources.paths;
     const owned_texts = generated_sources.buffers;
 

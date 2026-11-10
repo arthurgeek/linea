@@ -2,6 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 
 const FileId = @import("../support/source.zig").FileId;
+const strings = @import("../support/strings.zig");
 const Ast = @import("ast.zig").Ast;
 const node = @import("node.zig");
 const DeclId = node.DeclId;
@@ -176,6 +177,17 @@ pub const RootFacts = struct {
     /// `headers`, as an include spells each.
     native: []const []const u8 = &.{},
     headers: []const []const u8 = &.{},
+
+    /// Frees what a row the loader made holds, every list and string of it
+    /// allocated in `gpa`.
+    pub fn deinit(self: RootFacts, gpa: std.mem.Allocator) void {
+        gpa.free(self.name);
+        gpa.free(self.dir);
+        gpa.free(self.dependencies);
+        gpa.free(self.manifest_dir);
+        strings.free(gpa, self.native);
+        strings.free(gpa, self.headers);
+    }
 };
 
 /// Ordered declaration runs chosen by the caller, without allocating ID lists.
@@ -510,21 +522,10 @@ pub const Program = struct {
         gpa.free(self.import_routes);
         for (self.unloaded_routes) |route| gpa.free(route);
         gpa.free(self.unloaded_routes);
-        for (self.roots) |r| {
-            gpa.free(r.name);
-            gpa.free(r.dir);
-            gpa.free(r.dependencies);
-            gpa.free(r.manifest_dir);
-            for (r.native) |path| gpa.free(path);
-            gpa.free(r.native);
-            for (r.headers) |header| gpa.free(header);
-            gpa.free(r.headers);
-        }
+        for (self.roots) |r| r.deinit(gpa);
         gpa.free(self.roots);
-        for (self.native) |path| gpa.free(path);
-        gpa.free(self.native);
-        for (self.link) |name| gpa.free(name);
-        gpa.free(self.link);
+        strings.free(gpa, self.native);
+        strings.free(gpa, self.link);
         gpa.free(self.modules);
         // The paths and bytes have the sources' lifetime, as the file table's
         // entries do; the two lists are the program's.

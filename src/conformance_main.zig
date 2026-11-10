@@ -8605,7 +8605,7 @@ fn checkGeneratedProgram(
 
         const mir = (try lower(scratch, &semantics.expanded, &semantics.res, &semantics.typing, &semantics.disposals, sink, .program)) orelse return error.GeneratedProgramRejected;
         var ir: std.Io.Writer.Allocating = .init(scratch);
-        if (!try emitOrRecord(scratch, &failures, &ir, &mir, table, sink, display_path, settings.env.sanitize)) {
+        if (!try emitOrRecord(scratch, &failures, &ir, &mir, table, sink, display_path, settings.env.sanitize, &.{})) {
             break :generated;
         }
 
@@ -8873,10 +8873,10 @@ fn compileWithLibrary(
     const module = lowered orelse {
         var report: std.Io.Writer.Allocating = .init(scratch);
         try render.renderAll(&report.writer, &table, &sink, .{ .color = .never });
-        return .{ .refused = .{ .report = report.written(), .rules = try rulesNamedBy(scratch, &sink) } };
+        return .{ .refused = .{ .report = report.written(), .rules = try rulesNamedIn(scratch, sink.items()) } };
     };
     var ir: std.Io.Writer.Allocating = .init(scratch);
-    if (!try emitOrRecord(scratch, failures, &ir, &module, &table, &sink, display_path, sanitize)) return .broken;
+    if (!try emitOrRecord(scratch, failures, &ir, &module, &table, &sink, display_path, sanitize, &.{})) return .broken;
     return .{ .accepted = ir.written() };
 }
 
@@ -15824,21 +15824,8 @@ fn emitOrRecord(
     display_path: []const u8,
     /// The sanitizer the program will run under, which instruments its code.
     sanitize: ?[]const u8,
-) !bool {
-    return emitOrRecordWith(gpa, failures, ir, module, table, sink, display_path, sanitize, &.{});
-}
-
-/// `emitOrRecord`, calling each `extern` by the symbol its C declaration
-/// gives it, as the command line does.
-fn emitOrRecordWith(
-    gpa: std.mem.Allocator,
-    failures: *std.ArrayList(Failure),
-    ir: *std.Io.Writer.Allocating,
-    module: *const MirModule,
-    table: *FileTable,
-    sink: *Sink,
-    display_path: []const u8,
-    sanitize: ?[]const u8,
+    /// The symbol C gives each `extern` whose C declaration links it under
+    /// another one, which the module calls it by, as the command line does.
     foreign_symbols: []const mlir_backend.ForeignSymbol,
 ) !bool {
     // Whether the program was accepted is settled after the composed step,
@@ -19090,7 +19077,7 @@ fn checkMaterializedDerives(
 
     const mir = (try lower(gpa, &settled.expanded, &settled.res, &settled.typing, &settled.disposals, &sink, .program)) orelse return error.SourceRejected;
     var ir: std.Io.Writer.Allocating = .init(gpa);
-    if (!try emitOrRecordWith(gpa, failures, &ir, &mir, &table, &sink, display_path, env.sanitize, env.foreign_symbols)) return;
+    if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, display_path, env.sanitize, env.foreign_symbols)) return;
     if (!try sameCodeIgnoringFunctionOrder(gpa, original_ir, ir.written())) {
         try failures.append(gpa, .{
             .path = display_path,
@@ -19226,7 +19213,7 @@ fn checkRewrites(
 
         const mir = (try lower(scratch, &settled.expanded, res, typing, disposals, &sink, .program)) orelse return error.SourceRejected;
         var ir: std.Io.Writer.Allocating = .init(scratch);
-        if (!try emitOrRecordWith(gpa, failures, &ir, &mir, &table, &sink, program.display_path, env.sanitize, env.foreign_symbols)) continue;
+        if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, program.display_path, env.sanitize, env.foreign_symbols)) continue;
 
         // Writing an operator out as what it is defined to be must reach the
         // same code, not merely the same answer: the semantics says `is`, and
@@ -19384,10 +19371,6 @@ fn compareRewrittenRun(
 /// What two compilations of one program are compared by where each refused it:
 /// the rules and not where they point, because a rewrite moves the text a span
 /// indexes, and not the message, which quotes what the rewrite spelled.
-fn rulesNamedBy(gpa: std.mem.Allocator, sink: *const Sink) ![]const u8 {
-    return rulesNamedIn(gpa, sink.items());
-}
-
 fn rulesNamedIn(gpa: std.mem.Allocator, diagnostics: []const Diagnostic) ![]const u8 {
     var names: std.ArrayList([]const u8) = .empty;
     defer names.deinit(gpa);
@@ -19411,11 +19394,11 @@ test "the rules a compilation names are listed apart from where they point" {
     const gpa = arena.allocator();
 
     var sink = Sink.init(gpa);
-    try testing.expectEqualStrings("", try rulesNamedBy(gpa, &sink));
+    try testing.expectEqualStrings("", try rulesNamedIn(gpa, sink.items()));
     try sink.addError(.o_move, .from(0), .{ .start = 9, .end = 10 }, "moved", "here");
     try sink.addNote(.o_move, .from(0), .{ .start = 1, .end = 2 }, "noted", "here");
     try sink.addError(.o_borrow, .from(0), .{ .start = 1, .end = 2 }, "borrowed", "here");
-    try testing.expectEqualStrings("O-Borrow\nO-Move\n", try rulesNamedBy(gpa, &sink));
+    try testing.expectEqualStrings("O-Borrow\nO-Move\n", try rulesNamedIn(gpa, sink.items()));
 }
 
 /// A program as its own compilation answered it, for the walks in it written
@@ -19432,7 +19415,7 @@ const WalkSubject = struct {
     beside: []const loader.InMemoryFile = &.{},
     /// What the original compilation settled; its `file` is set per rewrite.
     semantics: TransformSemantics,
-    /// `rulesNamedBy` of the original compilation, through lowering.
+    /// `rulesNamedIn` of the original compilation, through lowering.
     rules: []const u8,
     /// What the program answered, where it was built and run.
     ran: ?struct { env: Env, answered: RanAs } = null,
@@ -19511,7 +19494,7 @@ fn compareWalkLoops(
     else
         try lower(scratch, &settled.expanded, &settled.res, &settled.typing, &settled.disposals, sink, .program);
 
-    const rules = try rulesNamedBy(scratch, sink);
+    const rules = try rulesNamedIn(scratch, sink.items());
     if (!std.mem.eql(u8, subject.rules, rules)) {
         var said: std.Io.Writer.Allocating = .init(scratch);
         try render.renderAll(&said.writer, table, sink, .{ .color = .never });
@@ -19533,7 +19516,7 @@ fn compareWalkLoops(
     const module = mir orelse return true;
     if (sink.hasErrors()) return true;
     var ir: std.Io.Writer.Allocating = .init(scratch);
-    if (!try emitOrRecordWith(gpa, failures, &ir, &module, table, sink, subject.display_path, sanitize, subject.foreign_symbols)) return true;
+    if (!try emitOrRecord(gpa, failures, &ir, &module, table, sink, subject.display_path, sanitize, subject.foreign_symbols)) return true;
     const suffix = try std.fmt.allocPrint(scratch, "walks{d}", .{k});
     _ = try compareRewrittenRun(gpa, scratch, io, cache, run.env, failures, run.answered, suffix, why, ir.written());
     return true;
@@ -19957,16 +19940,7 @@ fn buildAndRun(gpa: std.mem.Allocator, io: std.Io, opts: BuildRunOptions) !Build
     // header beside it and the manifest's paths name them.
     const native_dir = try std.fmt.allocPrint(gpa, "{s}.c-files", .{exe_path});
     defer std.Io.Dir.cwd().deleteTree(io, native_dir) catch {};
-    for (opts.foreign.native.files) |file| {
-        const path = try std.fs.path.join(gpa, &.{ native_dir, file.path });
-        if (std.fs.path.dirname(path)) |parent| try std.Io.Dir.cwd().createDirPath(io, parent);
-        const written = try std.Io.Dir.cwd().createFile(io, path, .{});
-        defer written.close(io);
-        var buf: [4096]u8 = undefined;
-        var w = written.writer(io, &buf);
-        try w.interface.writeAll(file.text);
-        try w.interface.flush();
-    }
+    try writeCaseFiles(gpa, io, native_dir, opts.foreign.native.files);
     const native_sources = try gpa.alloc([]const u8, opts.foreign.native.compile.len);
     for (opts.foreign.native.compile, 0..) |path, i| native_sources[i] = try std.fs.path.join(gpa, &.{ native_dir, path });
 
@@ -21196,6 +21170,9 @@ fn checkResumedEmission(
     resumed_table: *const FileTable,
     resumed: *const Sink,
     resumed_ir: []const u8,
+    /// The symbols the resumed check emitted each `extern` under, which the
+    /// fresh one is emitted with too.
+    foreign_symbols: []const mlir_backend.ForeignSymbol,
     display_path: []const u8,
     failures: *std.ArrayList(Failure),
 ) !void {
@@ -21204,7 +21181,7 @@ fn checkResumedEmission(
     // refused it, in its passes or in instance discovery, or whose module the
     // backend refused, disagrees with it.
     var ir: std.Io.Writer.Allocating = .init(gpa);
-    const emitted = if (check.lowered) |*module| try emitMlir(gpa, &ir.writer, module, &check.table, &check.sink, .{}) else false;
+    const emitted = if (check.lowered) |*module| try emitMlir(gpa, &ir.writer, module, &check.table, &check.sink, .{ .foreign_symbols = foreign_symbols }) else false;
     if (!emitted) {
         var why: std.Io.Writer.Allocating = .init(gpa);
         try render.renderAll(&why.writer, &check.table, &check.sink, .{ .color = .never });
@@ -21279,18 +21256,19 @@ fn checkPrototypes(gpa: std.mem.Allocator, io: std.Io, scratch_dir: []const u8, 
     defer gpa.free(dir);
     try std.Io.Dir.cwd().createDirPath(io, dir);
     defer std.Io.Dir.cwd().deleteTree(io, dir) catch {};
-    for (case.native.files) |file| {
+    try writeCaseFiles(gpa, io, dir, case.native.files);
+    return prototypes.check(gpa, io, settled, sink, .{ .base = dir, .scratch = dir });
+}
+
+/// Writes a case's C files beneath `dir` at their paths in the case, making
+/// the directories they sit in.
+fn writeCaseFiles(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, files: []const InMemoryFile) !void {
+    for (files) |file| {
         const path = try std.fs.path.join(gpa, &.{ dir, file.path });
         defer gpa.free(path);
         if (std.fs.path.dirname(path)) |parent| try std.Io.Dir.cwd().createDirPath(io, parent);
-        const written = try std.Io.Dir.cwd().createFile(io, path, .{});
-        defer written.close(io);
-        var buf: [4096]u8 = undefined;
-        var w = written.writer(io, &buf);
-        try w.interface.writeAll(file.text);
-        try w.interface.flush();
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = file.text });
     }
-    return prototypes.check(gpa, io, settled, sink, .{ .base = dir, .scratch = dir });
 }
 
 fn checkCase(
@@ -21908,7 +21886,7 @@ fn checkCase(
             }
 
             var ir: std.Io.Writer.Allocating = .init(gpa);
-            if (try emitOrRecordWith(gpa, &w.failures, &ir, &mir, &table, &sink, display_path, env.sanitize, foreign_symbols)) {
+            if (try emitOrRecord(gpa, &w.failures, &ir, &mir, &table, &sink, display_path, env.sanitize, foreign_symbols)) {
                 const mlir_golden = try std.mem.concat(gpa, u8, &.{ stem, ".mlir" });
                 var matching_mlir = false;
                 var native_verified = false;
@@ -21945,7 +21923,7 @@ fn checkCase(
                 // where the comparison costs one emission.
                 const sampled = fresh != null or env.narrowed or comparesResumedEmission(display_path);
                 if (chosen.imported and settled.reused_library and env.sanitize == null and sampled) {
-                    try checkResumedEmission(gpa, scratch_parent, case, fresh, &table, &sink, ir.written(), display_path, &w.failures);
+                    try checkResumedEmission(gpa, scratch_parent, case, fresh, &table, &sink, ir.written(), foreign_symbols, display_path, &w.failures);
                     resumed_emission_compared = true;
                 }
 

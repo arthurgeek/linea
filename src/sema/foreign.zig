@@ -72,12 +72,13 @@ pub fn externPrototype(arena: std.mem.Allocator, typing: *const Typing, decl: De
     return .{ .params = values, .result = result, .errno = errno != null };
 }
 
-/// Whether the `inout` parameter of type `ty` is the context one of the
-/// `extern`'s callbacks takes first ([T-ExternCallback]).
-fn isContext(typing: *const Typing, params: []const types_mod.CallableParam, ty: TypeId) bool {
-    for (params) |param| switch (typing.get(param.ty)) {
+/// Whether `ty` is the context a callback among `params` takes first,
+/// `inout`, which the `extern` lends C to hand back on every call
+/// ([T-ExternCallback]). Asked of a pool being built or of a finished typing.
+pub fn isContext(pool: anytype, params: []const types_mod.CallableParam, ty: TypeId) bool {
+    for (params) |param| switch (pool.get(param.ty)) {
         .callable => |callback| {
-            const taken = typing.callableParams(callback);
+            const taken = pool.callableParams(callback);
             if (taken.len > 0 and taken[0].convention == .inout and taken[0].ty == ty) return true;
         },
         else => {},

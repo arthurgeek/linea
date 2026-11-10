@@ -355,25 +355,32 @@ impl[H: Allocator] Arena[H] {
         match read self.first {
             None => {},
             Some(first) => {
+                // The used bytes of the first chunk: from its words up to the
+                // cursor, or, in an arena that grows, from its table up to
+                // where its reservations ended.
+                let start = self.start
+                let end = if self.slots == 0 {
+                    arena_header + first.load(arena_used)
+                } else if first.load(arena_grown) == 0 {
+                    first.load(arena_cursor)
+                } else {
+                    first.load(arena_first_end)
+                }
+                var offset = start
+                while offset < end {
+                    arena_write(first, offset, 0)
+                    offset += arena_header
+                }
                 if self.slots == 0 {
-                    let used = linea_raw_load(address.raw(bytes_in(first, 0)), first.len, arena_used)
-                    arena_zero(first, arena_header, arena_header + used)
-                    linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_used, 0)
+                    arena_write(first, arena_used, 0)
                     return
                 }
-                let start = self.start
-                let end = if linea_raw_load(address.raw(bytes_in(first, 0)), first.len, arena_grown) == 0 {
-                    linea_raw_load(address.raw(bytes_in(first, 0)), first.len, arena_cursor)
-                } else {
-                    linea_raw_load(address.raw(bytes_in(first, 0)), first.len, arena_first_end)
-                }
-                arena_zero(first, start, end)
                 arena_give_back(self, first)
-                linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_used, 0)
-                linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_cursor, start)
-                linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_chunk_at, first.at)
-                linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_chunk_len, first.len)
-                linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_first_end, 0)
+                arena_write(first, arena_used, 0)
+                arena_write(first, arena_cursor, start)
+                arena_write(first, arena_chunk_at, first.at)
+                arena_write(first, arena_chunk_len, first.len)
+                arena_write(first, arena_first_end, 0)
             },
         }
     }
@@ -495,13 +502,11 @@ fn arena_table_of[H: Allocator](owner: Arena[H], first: Buffer[H]) -> Storage[Bu
     .{ buffer = .None, allocator = copy(first.allocator), at = copy(owner.chunks), len = owner.slots * slot_stride(shape) }
 }
 
-// Zero the words of `buffer` from offset `from` up to `to`.
-fn arena_zero[H: Allocator](buffer: Buffer[H], from: UInt64, to: UInt64) {
-    var offset = from
-    while offset < to {
-        linea_raw_store(address.raw(bytes_in(buffer, 0)), buffer.len, offset, 0)
-        offset += arena_header
-    }
+// Write `value` into the word at `offset` of `buffer`, the arena's first
+// chunk, which the arena's bookkeeping reaches through a `read` of the arena:
+// its words, and the bytes it zeroes when it is rewound.
+fn arena_write[H: Allocator](buffer: Buffer[H], offset: UInt64, value: UInt64) {
+    linea_raw_store(address.raw(bytes_in(buffer, 0)), buffer.len, offset, value)
 }
 
 // Give the chunks a growing arena acquired after `first` back to its parent,
@@ -513,14 +518,14 @@ fn arena_give_back[H: Allocator](owner: Arena[H], first: Buffer[H]) {
     let shape: SlotType[Buffer[H]] = .Type
     let stride = slot_stride(shape)
     var table = arena_table_of(owner, first)
-    var index = linea_raw_load(address.raw(bytes_in(first, 0)), first.len, arena_grown)
+    var index = first.load(arena_grown)
     while index > 0 {
         index -= 1
         let chunk: Buffer[H] = slot_take(&table, index * stride)
         chunk.release()
     }
     table.dispose()
-    linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_grown, 0)
+    arena_write(first, arena_grown, 0)
 }
 
 impl[H: Allocator] Lender for Arena[H] {
@@ -559,22 +564,22 @@ fn arena_reserve[H: Allocator](owner: Arena[H], size: UInt64) -> Option[ArenaRes
             } else {
                 (size + arena_header - 1) / arena_header * arena_header
             }
-            let used = linea_raw_load(address.raw(bytes_in(first, 0)), first.len, arena_used)
+            let used = first.load(arena_used)
             let available = owner.limit - arena_header
             if used > available || want > available - used {
                 return .None
             }
             if owner.slots == 0 {
                 let at = first.at + arena_header + used
-                linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_used, used + want)
+                arena_write(first, arena_used, used + want)
                 return .Some(.{ at = at, allocated = want })
             }
-            let cursor = linea_raw_load(address.raw(bytes_in(first, 0)), first.len, arena_cursor)
-            let chunk_len = linea_raw_load(address.raw(bytes_in(first, 0)), first.len, arena_chunk_len)
+            let cursor = first.load(arena_cursor)
+            let chunk_len = first.load(arena_chunk_len)
             if cursor <= chunk_len && want <= chunk_len - cursor {
-                let at = linea_raw_load(address.raw(bytes_in(first, 0)), first.len, arena_chunk_at) + cursor
-                linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_cursor, cursor + want)
-                linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_used, used + want)
+                let at = first.load(arena_chunk_at) + cursor
+                arena_write(first, arena_cursor, cursor + want)
+                arena_write(first, arena_used, used + want)
                 return .Some(.{ at = at, allocated = want })
             }
             let remaining = available - used
@@ -591,16 +596,16 @@ fn arena_reserve[H: Allocator](owner: Arena[H], size: UInt64) -> Option[ArenaRes
             let chunk = first.allocator.acquire(next) else |_| {
                 return .None
             }
-            let grown = linea_raw_load(address.raw(bytes_in(first, 0)), first.len, arena_grown)
+            let grown = first.load(arena_grown)
             if grown == 0 {
-                linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_first_end, cursor)
+                arena_write(first, arena_first_end, cursor)
             }
             let at = chunk.at
-            linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_chunk_at, at)
-            linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_chunk_len, chunk.len)
-            linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_cursor, want)
-            linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_used, used + want)
-            linea_raw_store(address.raw(bytes_in(first, 0)), first.len, arena_grown, grown + 1)
+            arena_write(first, arena_chunk_at, at)
+            arena_write(first, arena_chunk_len, chunk.len)
+            arena_write(first, arena_cursor, want)
+            arena_write(first, arena_used, used + want)
+            arena_write(first, arena_grown, grown + 1)
             let shape: SlotType[Buffer[H]] = .Type
             var table = arena_table_of(owner, first)
             slot_put(&table, grown * slot_stride(shape), chunk)
@@ -621,18 +626,24 @@ fn arena_within(base: UInt64, length: UInt64, lowest: UInt64, at: UInt64, alloca
 }
 
 // Answer whether a reservation of `allocated` bytes at `at` lies within one of
-// the arena's chunks, outside its words and its table. It looks through at
-// most `owner.slots` chunks after the first, a number bounded by the log of
-// the arena's size.
+// the arena's chunks, outside its words and its table. It tries the first
+// chunk and then the current one, where the latest reservations lie, and only
+// then looks through at most `owner.slots` chunks after the first, a number
+// bounded by the log of the arena's size.
 fn arena_holds[H: Allocator](owner: Arena[H], first: Buffer[H], at: UInt64, allocated: UInt64) -> Bool {
     if arena_within(first.at, first.len, owner.start, at, allocated) {
+        return true
+    }
+    // An arena that has grown keeps its current chunk, the latest one it
+    // acquired, in its words.
+    let grown = first.load(arena_grown)
+    if owner.slots > 0 && grown > 0 && arena_within(first.load(arena_chunk_at), first.load(arena_chunk_len), 0, at, allocated) {
         return true
     }
     // Each chunk's buffer is taken out of its slot to read where it lies and
     // put back unchanged.
     let shape: SlotType[Buffer[H]] = .Type
     let stride = slot_stride(shape)
-    let grown = linea_raw_load(address.raw(bytes_in(first, 0)), first.len, arena_grown)
     var table = arena_table_of(owner, first)
     var found = false
     var index: UInt64 = 0

@@ -6901,24 +6901,13 @@ pub const Typing = struct {
         return .{ .lo = n.lo, .hi = n.hi };
     }
 
-    /// Appends what names closure `closure` in a symbol: its name in
-    /// `closure_names`. A pool built without a checked program holds no
-    /// names, and names a closure by its ID after `#`.
-    pub fn appendClosureName(self: *const Typing, gpa: std.mem.Allocator, out: *std.ArrayList(u8), closure: ids.ClosureId) std.mem.Allocator.Error!void {
-        if (closure.index() < self.closure_names.len) return out.appendSlice(gpa, self.closure_names[closure.index()]);
-        const spelled = try std.fmt.allocPrint(gpa, "#{d}", .{closure.index()});
-        defer gpa.free(spelled);
-        try out.appendSlice(gpa, spelled);
-    }
-
-    /// Appends what names a qualified constructor's body in a symbol, as
-    /// `appendClosureName` names a closure.
-    pub fn appendConstructorName(self: *const Typing, gpa: std.mem.Allocator, out: *std.ArrayList(u8), constructor: ConstructorId) std.mem.Allocator.Error!void {
-        const index = @intFromEnum(constructor);
-        if (index < self.constructor_names.len) return out.appendSlice(gpa, self.constructor_names[index]);
-        const spelled = try std.fmt.allocPrint(gpa, "#{d}", .{index});
-        defer gpa.free(spelled);
-        try out.appendSlice(gpa, spelled);
+    /// Appends what names a closure's or a qualified constructor's body in a
+    /// symbol: entry `index` of `names`, which is `closure_names` or
+    /// `constructor_names`. A pool built without a checked program holds no
+    /// names, and names the body by its ID after `#`.
+    pub fn appendBodyName(gpa: std.mem.Allocator, out: *std.ArrayList(u8), names: []const []const u8, index: usize) std.mem.Allocator.Error!void {
+        if (index < names.len) return out.appendSlice(gpa, names[index]);
+        try out.print(gpa, "#{d}", .{index});
     }
 
     /// Appends the module a type belongs to, where that is not the root.
@@ -7072,7 +7061,7 @@ pub const Typing = struct {
             },
             .closure => |closure| {
                 try out.appendSlice(gpa, closure_type_mark);
-                try self.appendClosureName(gpa, out, closure.closure);
+                try appendBodyName(gpa, out, self.closure_names, closure.closure.index());
                 try out.append(gpa, '[');
                 for (self.closureArgs(closure), 0..) |arg, i| {
                     if (i > 0) try out.append(gpa, ',');
@@ -7181,6 +7170,14 @@ pub const Typing = struct {
         while (at < count) : (at += 2) held.appendAssumeCapacity(self.fieldType(t, at));
 
         return self.appendArguments(gpa, out, held.items);
+    }
+
+    /// Whether lowering replaces every call of `d` with what it generates, so
+    /// no body and no C symbol stands behind it: a raw access, a float bit
+    /// cast or a checked scalar-math operation. Discovery finds no instance
+    /// for one, and the prototype check holds none to C.
+    pub fn lowers(self: *const Typing, d: DeclId) bool {
+        return self.raw_accesses.contains(d) or self.float_math.operationOf(d) != null;
     }
 
     /// What a declaration written inside an implementation is a member of, or
@@ -7737,7 +7734,7 @@ pub const Typing = struct {
         }
         const declaration = self.declOfType(t) orelse return false;
         if (self.raw_accesses.slice != .none and declaration == self.raw_accesses.slice) return true;
-        for (self.raw_accesses.foreign_views) |view| {
+        for (self.raw_accesses.foreignViews()) |view| {
             if (view != .none and declaration == view) return true;
         }
         if (self.raw_accesses.buffer != .none and declaration == self.raw_accesses.buffer) return true;
@@ -8723,7 +8720,10 @@ pub const Typing = struct {
         /// `P.Dual.Step` with `P.Step.Dual`.
         certified_protocol_dual: DeclId = .none,
         certified_protocol_step: DeclId = .none,
-        certified_foreign_views: [3]DeclId = .{ .none, .none, .none },
+        /// `ffi.Bytes`, `ffi.CText` and `ffi.CTextList`, the C views.
+        certified_foreign_bytes: DeclId = .none,
+        certified_c_text: DeclId = .none,
+        certified_c_text_list: DeclId = .none,
         /// `mem.ClosureEntry`: its instance at a callable type is the entry
         /// signature an erased closure is called through.
         certified_closure_entry: DeclId = .none,
@@ -12051,7 +12051,7 @@ pub const Typing = struct {
         pub fn view(self: *const Builder) Typing {
             return .{
                 .constant_pool = self.constant_pool.*,
-                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .address = self.certified_address, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .protocol_step = self.certified_protocol_step, .closure_entry_type = self.certified_closure_entry, .closure = self.certified_closure, .endpoint = self.certified_endpoint, .foreign_views = self.certified_foreign_views },
+                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .address = self.certified_address, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .protocol_step = self.certified_protocol_step, .closure_entry_type = self.certified_closure_entry, .closure = self.certified_closure, .endpoint = self.certified_endpoint, .foreign_bytes = self.certified_foreign_bytes, .c_text = self.certified_c_text, .c_text_list = self.certified_c_text_list },
                 .tuple_decls = self.tuple_decls,
                 .implementation_selections = self.implementation_selections,
                 .closure_release = self.closure_release,
@@ -13774,7 +13774,7 @@ pub const Typing = struct {
                 .constant_pool = constant_pool,
                 // The certified declarations, as `view` answers them, so a pass
                 // reading the finished pool asks what the builder answered.
-                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .address = self.certified_address, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .protocol_step = self.certified_protocol_step, .closure_entry_type = self.certified_closure_entry, .closure = self.certified_closure, .endpoint = self.certified_endpoint, .foreign_views = self.certified_foreign_views },
+                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .address = self.certified_address, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .protocol_step = self.certified_protocol_step, .closure_entry_type = self.certified_closure_entry, .closure = self.certified_closure, .endpoint = self.certified_endpoint, .foreign_bytes = self.certified_foreign_bytes, .c_text = self.certified_c_text, .c_text_list = self.certified_c_text_list },
                 .implementation_selections = implementation_selections,
                 .closure_release = self.closure_release,
                 .tuple_decls = self.tuple_decls,
@@ -13883,7 +13883,9 @@ pub const Typing = struct {
             b.certified_carried = t.raw_accesses.carried;
             b.certified_protocol_dual = t.raw_accesses.protocol_dual;
             b.certified_protocol_step = t.raw_accesses.protocol_step;
-            b.certified_foreign_views = t.raw_accesses.foreign_views;
+            b.certified_foreign_bytes = t.raw_accesses.foreign_bytes;
+            b.certified_c_text = t.raw_accesses.c_text;
+            b.certified_c_text_list = t.raw_accesses.c_text_list;
             b.certified_closure_entry = t.raw_accesses.closure_entry_type;
             b.certified_closure = t.raw_accesses.closure;
             b.certified_endpoint = t.raw_accesses.endpoint;
