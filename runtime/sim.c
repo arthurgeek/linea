@@ -758,6 +758,12 @@ long linea_sim_release(int fd) {
     struct entry *e = entry_of(fd);
     if (e == NULL) { unlock(); return -(long)EBADF; }
     const long index = index_of(fd);
+    /* A release from another thread while the simulation runs would land
+     * at a moment the kernel picks; between runs, the program orders it. */
+    if (e->sim != NULL && e->sim != running && linea_loop_runs(e->sim->identity) > 0) {
+        unlock();
+        outside();
+    }
     if (e->sim != NULL && e->sim == running) {
         settle(running);
         if (e->listening) close_listener(running, index); else close_end(running, index, 0);

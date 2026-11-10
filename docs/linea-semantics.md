@@ -6283,8 +6283,10 @@ deadline that nothing in the simulation can end (`linea: a simulation's one
 task waits forever`). An `Io` that names a simulation which has been closed
 stops the program where it is used (`linea: an Io names a loop that has
 ended`). A simulated descriptor closed outside a run is closed at its
-simulation's next operation, in the order the program closed it, and one
-closed after its simulation was closed is only forgotten. An
+simulation's next operation, in the order the program closed it; one closed
+on another thread while its simulation runs stops the program as a use
+outside it, and one closed after its simulation was closed is only
+forgotten. An
 instant read inside a run is on the virtual clock, so it is not compared with
 one read outside.
 

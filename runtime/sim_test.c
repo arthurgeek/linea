@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -486,6 +487,26 @@ static void a_listener_closed_between_runs_frees_its_port(void) {
     linea_sim_close(sim);
 }
 
+static long held_elsewhere;
+
+static void *release_held(void *unused) {
+    (void)unused;
+    (void)linea_net_close((int)held_elsewhere);
+    return NULL;
+}
+
+/* Another thread releasing a descriptor while its simulation runs would
+ * close it at a moment the kernel picks, so it traps. */
+static void release_on_another_thread_during_a_run(void) {
+    const unsigned long sim = plain(ms);
+    (void)linea_io_switch(sim);
+    struct pair p = connected_pair();
+    held_elsewhere = p.client;
+    pthread_t other;
+    assert(pthread_create(&other, NULL, release_held, NULL) == 0);
+    assert(pthread_join(other, NULL) == 0);
+}
+
 static unsigned long other_world;
 
 static void receive_from_a_task_inside(void) {
@@ -506,6 +527,7 @@ static void advance_another_simulation_inside(void) {
 static void a_session_wait_and_a_foreign_world_trap_inside(void) {
     traps_with(receive_from_a_task_inside, "linea: a simulation runs one task until fibers\n");
     traps_with(advance_another_simulation_inside, "linea: a simulation's world was used outside its run\n");
+    traps_with(release_on_another_thread_during_a_run, "linea: a simulated descriptor was used outside its simulation\n");
 }
 
 /* A real socket may be closed inside a simulation, since closing waits on

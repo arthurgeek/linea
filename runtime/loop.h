@@ -24,6 +24,10 @@ void *linea_loop_find(unsigned long identity);
  * identity can ever match a later loop of its slot. */
 void linea_loop_retire(unsigned long identity);
 
+/* How many threads have the loop `identity` names as their own; 0 for a
+ * loop that has ended. */
+unsigned long linea_loop_runs(unsigned long identity);
+
 /* The state of the loop the calling thread runs on, or null on the system. */
 void *linea_loop_running(void);
 

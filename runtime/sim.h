@@ -25,7 +25,8 @@
  * descriptor shares it. An entry knows its simulation until that simulation
  * ends, so an operation on it from any other loop traps. Releasing it outside
  * a run marks it, and the simulation's next operation closes it; releasing it
- * after the simulation ended forgets the entry. A real socket used while a simulation runs traps too,
+ * on another thread while a run is in progress traps; releasing it after the
+ * simulation ended forgets the entry. A real socket used while a simulation runs traps too,
  * since it would wait on the kernel against a virtual clock.
  *
  * Every entry and every simulation is guarded by one lock, held across each

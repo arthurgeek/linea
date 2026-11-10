@@ -326,6 +326,7 @@ pub const internal_functions = [_]Signature{
     .{ .symbol = "linea_loop_find", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .ptr },
     .{ .symbol = "linea_loop_retire", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .unit },
     .{ .symbol = "linea_loop_running", .declared_by = .compiler, .parameters = &.{}, .result = .ptr },
+    .{ .symbol = "linea_loop_runs", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .u64 },
     .{ .symbol = "linea_sim_takes", .declared_by = .compiler, .parameters = &.{p(.i32)}, .result = .i32 },
     .{ .symbol = "linea_sim_perform", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .i64 },
     .{ .symbol = "linea_sim_listen", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64) }, .result = .i64 },

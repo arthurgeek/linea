@@ -13,6 +13,8 @@ enum { slots_per_page = 64, page_count = 1024 };
 struct slot {
     uint32_t generation;
     int in_use;
+    /* How many threads have this loop as their own. */
+    unsigned long runs;
     void *state;
     /* The next free slot's index plus one, 0 for none. */
     unsigned long next_free;
@@ -78,6 +80,7 @@ unsigned long linea_loop_claim(void *state) {
     }
     struct slot *s = slot_at(index);
     s->in_use = 1;
+    s->runs = 0;
     s->state = state;
     s->next_free = 0;
     const unsigned long identity = ((index + 1) << 32) | s->generation;
@@ -128,9 +131,29 @@ unsigned long linea_io_current(void) {
     return (unsigned long)(uintptr_t)pthread_getspecific(identity_key);
 }
 
+/* Count `identity`'s threads up or down by one. Called with the table
+ * unlocked. */
+static void count_run(unsigned long identity, int entering) {
+    if (identity == 0) return;
+    lock();
+    struct slot *s = live_slot(identity);
+    if (s != NULL) s->runs = entering ? s->runs + 1 : s->runs - 1;
+    unlock();
+}
+
+unsigned long linea_loop_runs(unsigned long identity) {
+    lock();
+    const struct slot *s = live_slot(identity);
+    const unsigned long runs = s == NULL ? 0 : s->runs;
+    unlock();
+    return runs;
+}
+
 unsigned long linea_io_switch(unsigned long identity) {
     void *state = identity == 0 ? NULL : linea_loop_find(identity);
     const unsigned long previous = linea_io_current();
+    count_run(previous, 0);
+    count_run(identity, 1);
     if (pthread_setspecific(identity_key, (void *)(uintptr_t)identity) != 0 || pthread_setspecific(state_key, state) != 0) {
         fail("linea: a thread's loop could not be recorded\n");
     }
