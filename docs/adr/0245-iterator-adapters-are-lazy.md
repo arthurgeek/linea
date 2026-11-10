@@ -39,19 +39,25 @@ with it: `copied`, `sum`, `product`, `min`, `max`, `reduce`, `position`,
 
 ## Decision
 
+The rules below bind every operation of the list above. The first group is in
+the library; an operation named here that is not in that group is held to
+these rules when it lands, and until then the library does not offer it.
+
 **Every adapter is lazy.** Building an adapter calls no `next` and no
 callback. Each `next` pulls only what one output needs, and an adapter whose
-source has answered `None` answers `None`, as every `Iterator` promises. The
-only eager step in the library is `iter.successors`, which computes an item's
+source has answered `None` answers `None`, as every `Iterator` promises;
+`Peekable` records that its source ended and does not ask it again. The one
+eager step allowed is in `iter.successors`, which will compute an item's
 successor when it hands the item out, because the item is moved to the caller
-and its successor is computed from it; the function says so.
+and its successor is computed from it; the function will say so.
 
 **An operation is an adapter or a terminal, and only a terminal allocates.**
 An operation whose memory grows with its input (`partition`, `unzip`,
 `frequencies`, `group_by`, `distinct`, and `collect` as today) is a terminal
 returning `Result`, with an `_in` form, whose failure hands back what it
 gathered and the iterator. An adapter holds at most one item inline
-(`peekable`, `dedup`, `intersperse`, `take_while`) and never a buffer. A
+(`peekable` now; `dedup`, `intersperse` and `take_while` when they land) and
+never a buffer. A
 new terminal takes its callback `sink` and has no `_inout` form: whether
 `inout` should accept a temporary, so that one form serves a callback the
 caller keeps and one written in the call, is being decided separately, and
@@ -66,10 +72,11 @@ ends meet without yielding an item twice. `Sequence.rev` requires
 source. `DoubleEnded` is not in the prelude: a program implementing it or
 calling `next_back` names `iter.DoubleEnded`, while `rev` needs no import.
 
-**Groups without allocation are slice views.** `windows`, `chunks`, `chunk_by`
-and `span` are operations of `mem.Slice[T]` whose items are sub-views of the
-storage the slice observes, so each carries what the slice carries and the
-storage cannot move while one is in use ([O-Borrow]). A general iterator
+**Groups without allocation are slice views.** `windows` is an operation of
+`mem.Slice[T]` whose items are sub-views of the storage the slice observes,
+so each carries what the slice carries and the storage cannot move while one
+is in use ([O-Borrow]). `chunks`, `chunk_by` and `span` will be operations of
+`mem.Slice[T]` of the same kind. A general iterator
 offers no grouping adapter that yields borrowed groups, because its items
 cannot borrow it. `windows(0)` traps: a window of no elements says nothing
 about its neighbours, and an `Option` would burden every caller for a size
@@ -90,7 +97,9 @@ returns may carry the callback itself, so an adapter that stored such a value
 in its own field would retain itself, which `next` may not. `scan` therefore
 keeps a state its callback updates in place, `scan(initial, |inout state,
 sink item| …)`, and yields what the callback returns; the state is never
-replaced by a returned value.
+replaced by a returned value. What the callback returns may carry the item
+and what the state carries, so a state that is itself a walk over a slice may
+hand out that slice's views, but it may not view the state.
 
 **Sums are typed by `Additive` and `Multiplicative`** in `std.num`,
 implemented for every integer type and both float types. `Additive` offers
@@ -120,13 +129,15 @@ stable sort would put first and last, so the two agree with `sort`.
   program writes `copied()`.
 - `chunk_by` over a general iterator is not offered. Grouping a stream means
   collecting it or grouping into a map, both fallible and both visible.
-- Linear items work through `peekable`, `take_while`, `dedup` and
-  `intersperse` at the cost of a lent walk and an explicit recovery.
+- Linear items work through `peekable` at the cost of a lent walk and an
+  explicit recovery, and `take_while`, `dedup` and `intersperse` will work
+  the same way.
 - `scan` reads `|inout total, sink x| { total += x; total }` rather than
   `|total, x| total + x`.
-- About forty operations join `Sequence`, so a module that declares a trait
-  with one of their names and implements it for a sequence makes the dot call
-  `[N-Ambiguous]` (ADR 0192's consequence, now wider).
+- Ten operations join `Sequence` with this record and about thirty more will
+  follow, so a module that declares a trait with one of their names and
+  implements it for a sequence makes the dot call `[N-Ambiguous]` (ADR 0192's
+  consequence, now wider).
 
 ## Alternatives considered
 

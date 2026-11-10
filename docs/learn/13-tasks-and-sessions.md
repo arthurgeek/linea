@@ -756,7 +756,7 @@ borrowed value always is:
     var prices = [UInt64(300), 450, 125]
 ```
 
-<!-- guide: edit 28 let (total, done) = handle.recv() -->
+<!-- guide: edit 20 let (total, done) = handle.recv() -->
 ```linea
     prices[0] = 275
     let (total, done) = handle.recv()
@@ -764,11 +764,11 @@ borrowed value always is:
 
 ```
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> shared_prices.lin:28:5
+  --> shared_prices.lin:20:5
    |
-28 |     prices[0] = 275
+20 |     prices[0] = 275
    |     ^^^^^^^^^ keep this place available until the last use of its observation
-29 |     let (total, done) = handle.recv()
+21 |     let (total, done) = handle.recv()
    |                         ------ the observation is still used here
 ```
 

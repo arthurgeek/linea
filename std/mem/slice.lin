@@ -163,12 +163,7 @@ impl[T] Slice[T] {
         if size == 0 {
             panic("a window holds at least one element")
         }
-        let end = if self.len < size {
-            0
-        } else {
-            self.len - size + 1
-        }
-        .{ view = copy(self), size, at = 0, end }
+        .{ view = copy(self), size, at = 0 }
     }
 
     test fn windows_yield_each_run_of_consecutive_elements() {
@@ -350,22 +345,20 @@ test fn a_slice_debugs_as_its_elements_in_brackets() {
 // Discarding or releasing it leaves the elements and their storage with the
 // caller and requires neither Copyable nor Release of the element type. Arrays
 // and Slice subspans use this iterator, and a Vec is walked through
-// `values.as_slice().iterate()`. The elements not yet yielded are those from
-// `at` up to but not including `end`: `next` yields from the front and
-// `next_back` from the back.
+// `values.as_slice().iterate()`. The elements not yet yielded are those of
+// `view` from `at` on: `next` yields the one at `at` and moves `at` forward,
+// and `next_back` yields the last and shortens `view` by it.
 @(opaque, derive(Release))
 struct SliceIter[T] {
     view: Slice[T],
     at: UInt64,
-    end: UInt64,
 }
 
 impl[T] Sequence for Slice[T] {
     type Iter = SliceIter[T]
 
     fn iterate(sink self: Self) -> SliceIter[T] {
-        let end = self.length()
-        .{ view = self, at = 0, end }
+        .{ view = self, at = 0 }
     }
 }
 
@@ -373,7 +366,7 @@ impl[T] Iterator for SliceIter[T] {
     type Item = borrow T
 
     fn next(inout self: Self) -> Option[borrow T] {
-        if self.at == self.end {
+        if self.at == self.view.length() {
             return .None
         }
         let index = self.at
@@ -384,11 +377,13 @@ impl[T] Iterator for SliceIter[T] {
 
 impl[T] iter.DoubleEnded for SliceIter[T] {
     fn next_back(inout self: Self) -> Option[borrow T] {
-        if self.at == self.end {
+        if self.at == self.view.length() {
             return .None
         }
-        self.end -= 1
-        self.view.get(self.end)
+        let whole = copy(self.view)
+        let last = whole.length() - 1
+        self.view = whole.subspan(start: 0, count: last).unwrap()
+        whole.get(last)
     }
 }
 
@@ -430,20 +425,21 @@ test fn slice_iteration_handles_empty_and_single_element_subspans() {
 }
 
 // Windows yields views of `size` consecutive elements of `view`. The windows
-// not yet yielded start at `at` up to but not including `end`.
+// not yet yielded are those that start at `at` or later and fit in `view`:
+// `next` yields the one at `at` and moves `at` forward, and `next_back` yields
+// the one that ends where `view` ends and shortens `view` by one element.
 @(opaque, derive(Release))
 struct Windows[T] {
     view: Slice[T],
     size: UInt64,
     at: UInt64,
-    end: UInt64,
 }
 
 impl[T] Iterator for Windows[T] {
     type Item = Slice[T]
 
     fn next(inout self: Self) -> Option[Slice[T]] {
-        if self.at == self.end {
+        if self.view.length() - self.at < self.size {
             return .None
         }
         let start = self.at
@@ -454,11 +450,13 @@ impl[T] Iterator for Windows[T] {
 
 impl[T] iter.DoubleEnded for Windows[T] {
     fn next_back(inout self: Self) -> Option[Slice[T]] {
-        if self.at == self.end {
+        if self.view.length() - self.at < self.size {
             return .None
         }
-        self.end -= 1
-        self.view.subspan(start: self.end, count: self.size)
+        let whole = copy(self.view)
+        let last = whole.length() - 1
+        self.view = whole.subspan(start: 0, count: last).unwrap()
+        whole.subspan(start: whole.length() - self.size, count: self.size)
     }
 }
 

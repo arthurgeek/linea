@@ -449,12 +449,7 @@ import std.io
 fn main() -> Result[UInt8, io.IoError] {
     let items = ["coffee", "croissant", "jam"]
     // The longest name sets the column's width, so it is known only at run time.
-    var width = 0
-    for read item in items {
-        if item.length() > width {
-            width = item.length()
-        }
-    }
+    let width = items.as_slice().map(|sink item| item.length()).max().unwrap_or(0)
     // `spec` is `{…:<width}`, with the width chosen while the program runs.
     let spec = fmt.Spec { align = .Some(.Left), ..fmt.Spec.padded(width) }
     for read item in items {

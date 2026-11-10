@@ -665,7 +665,7 @@ error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Payment` does not 
 22  |     for (payment, till) in payments.zip(tills.as_slice()) {
     |                                     ^^^ `zip` may dispose of a `Payment`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before. `zip` draws an item from the first sequence before asking the second, and if the second sequence ends first it disposes of that first item, so the first sequence's items must be Discardable; zip in the other order, with the sequence whose items are Discardable first, or walk both sequences by hand
    ::: std/iter/iter.lin
-100 |         Self.Iter.Item: Discardable
+130 |         Self.Iter.Item: Discardable
     |         -------------- required by this `where` clause
 ```
 
@@ -980,7 +980,7 @@ error[T-Bound]: `Self.Iter.Item` requires `Additive`, and `borrow UInt64` does n
 5   |     let total = prices.as_slice().sum()
     |                                   ^^^ only the library, which declares `Additive`, may implement it for `borrow UInt64`; pass a value whose type implements it
    ::: std/iter/iter.lin
-196 |         Self.Iter.Item: num.Additive
+198 |         Self.Iter.Item: num.Additive
     |         -------------- required by this `where` clause
 ```
 
@@ -1109,7 +1109,7 @@ error[T-Bound]: `Self.Iter` requires `DoubleEnded`, and `Countdown` does not imp
 18  |     for n in (Countdown { left = 3 }).rev() {
     |                                       ^^^ implement it for that type
    ::: std/iter/iter.lin
-163 |         Self.Iter: DoubleEnded
+165 |         Self.Iter: DoubleEnded
     |         --------- required by this `where` clause
 ```
 
@@ -1305,13 +1305,13 @@ fn main() -> Result[UInt8, io.IoError] {
 
 ```
 error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Payment` does not have that capability
-  --> payments_filter.lin:24:10
-   |
-24 |         .filter([limit] |payment| payment.cents <= limit)
-   |          ^^^^^^ `filter` may dispose of a `Payment`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
-  ::: std/iter/iter.lin
-82 |         Self.Iter.Item: Discardable
-   |         -------------- required by this `where` clause
+   --> payments_filter.lin:24:10
+    |
+24  |         .filter([limit] |payment| payment.cents <= limit)
+    |          ^^^^^^ `filter` may dispose of a `Payment`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
+   ::: std/iter/iter.lin
+112 |         Self.Iter.Item: Discardable
+    |         -------------- required by this `where` clause
 ```
 
 `Self.Iter.Item` is the type of the items the chain hands out, `Payment`. The
@@ -2118,8 +2118,10 @@ The [payment batch](../../examples/payment_batch.lin) commits or declines a
 queue of payments with a lent walk, the [savings
 planner](../../examples/savings_planner.lin) sums a range, the [parcel
 manifest](../../examples/parcel_manifest.lin) filters and collects a shipment,
-and the [upcoming leap years](../../examples/upcoming_leap_years.lin) are taken
-from a walk of years that never ends.
+the [upcoming leap years](../../examples/upcoming_leap_years.lin) are taken
+from a walk of years that never ends, and the [trail
+profile](../../examples/trail_profile.lin) reports a hike with `windows`,
+`scan`, `peekable` and `rev`.
 
 Next: [Borrowing](06-borrowing.md) — the views that chains hand out, and the
 `borrows`, `carries` and `retains` clauses that say where a view points.

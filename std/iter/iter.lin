@@ -172,7 +172,7 @@ pub trait Sequence {
     // item. When items are linear, the adapter is too: walk it lent and
     // recover a held item with `into_parts`.
     fn peekable(sink self: Self) -> Peekable[Self.Iter] where carries(self) {
-        .{ iterator = self.iterate(), held = .None }
+        .{ iterator = self.iterate(), held = .None, ended = false }
     }
 
     // Yield one value per item, lazily, computed by `step` from the item and
@@ -183,7 +183,7 @@ pub trait Sequence {
     fn scan[
         S,
         U,
-        F: inout fn(inout state: S, sink item: Self.Iter.Item) -> U where carries(item),
+        F: inout fn(inout state: S, sink item: Self.Iter.Item) -> U where carries(state, item),
     ](sink self: Self, sink initial: S, sink step: F) -> Scan[Self.Iter, S, U, F] where carries(self, initial, step) {
         .{ iterator = self.iterate(), state = initial, step = step }
     }
@@ -1832,6 +1832,15 @@ impl[I: Iterator + Release] Release for Copied[I] {
     }
 }
 
+test fn releasing_a_copied_releases_its_iterator_once() {
+    let log = mem.ReleaseLog.open(1)
+    let copies = Copied[LoggedCursor] { iterator = LoggedCursor { tag = log.tag(37), visited = false } }
+    copies.release()
+    let released = log.holds([UInt64(37)].as_slice())
+    log.release()
+    testing.assert(released, "releasing a copied did not release its iterator exactly once")?
+}
+
 // Rev yields the items of `iterator` from its far end.
 @opaque
 struct Rev[I] {
@@ -1904,7 +1913,8 @@ test fn releasing_a_rev_releases_its_iterator_once() {
 }
 
 // Peekable yields the items of `iterator`, holding back at most one, `held`,
-// that `peek` took early. When the items are linear the held item makes
+// that `peek` took early. `ended` records that `iterator` has answered None,
+// so it is not asked again. When the items are linear the held item makes
 // Peekable linear too, so a program settles it through `into_parts`. Peekable
 // has no Release implementation: releasing it would instantiate the release
 // of `I.Item` from the release of `Peekable[I]`, which [T-PolyRec] refuses,
@@ -1913,6 +1923,7 @@ test fn releasing_a_rev_releases_its_iterator_once() {
 struct Peekable[I: Iterator] {
     iterator: I,
     held: Option[I.Item],
+    ended: Bool,
 }
 
 impl[I: Iterator] Iterator for Peekable[I] {
@@ -1921,8 +1932,22 @@ impl[I: Iterator] Iterator for Peekable[I] {
     fn next(inout self: Self) -> Option[I.Item] where carries(.Some: self) {
         match mem.exchange(&self.held, .None) {
             Some(item) => .Some(item),
-            None => &self.iterator.next(),
+            None => &self.pull(),
         }
+    }
+}
+
+impl[I: Iterator] Peekable[I] {
+    // Take the next item from the source, unless the source has ended.
+    fn pull(inout self: Self) -> Option[I.Item] where carries(.Some: self) {
+        if self.ended {
+            return .None
+        }
+        let item = &self.iterator.next()
+        if item.is_none() {
+            self.ended = true
+        }
+        item
     }
 }
 
@@ -1941,7 +1966,8 @@ impl[I: Iterator] Peekable[I] {
     // holds it; later peeks and the following `next` answer that same item.
     pub fn peek(inout self: Self) -> Option[borrow I.Item] where borrows(.Some: self), retains(self: self) {
         if self.held.is_none() {
-            fill_empty(&self.held, &self.iterator.next())
+            let pulled = &self.pull()
+            fill_empty(&self.held, pulled)
         }
         match read self.held {
             Some(item) => .Some(borrow item),
@@ -1959,7 +1985,7 @@ impl[I: Iterator] Peekable[I] {
         testing.assert(&source.next().is_none(), "next yielded past the end after a peek")?
         let (inner, held) = source.into_parts()
         testing.assert(held.is_none(), "an exhausted peekable held an item")?
-        testing.assert_eq(inner.asked, UInt8(4), "peek asked its source again for an item it held")?
+        testing.assert_eq(inner.asked, UInt8(3), "peek asked its source again for an item it held, or after it ended")?
     }
 
     // Take the next item only when `accept` approves of it; otherwise leave
@@ -1971,7 +1997,7 @@ impl[I: Iterator] Peekable[I] {
     {
         let candidate = match mem.exchange(&self.held, .None) {
             Some(item) => Option.Some(item),
-            None => &self.iterator.next(),
+            None => &self.pull(),
         }
         var accepting = accept
         match candidate {
@@ -2008,7 +2034,7 @@ impl[I: Iterator] Peekable[I] {
     // `peek` took from it but nothing has taken yet. Neither is discarded or
     // settled, so this is how a peekable over linear items ends.
     pub fn into_parts(sink self: Self) -> (I, Option[I.Item]) where carries(._0: self.iterator), carries(._1: self.held) {
-        let Peekable { iterator, held } = self
+        let Peekable { iterator, held, ended: _ } = self
         (iterator, held)
     }
 
@@ -2046,7 +2072,7 @@ impl[
     I: Iterator,
     S,
     U,
-    F: inout fn(inout state: S, sink item: I.Item) -> U where carries(item),
+    F: inout fn(inout state: S, sink item: I.Item) -> U where carries(state, item),
 ] Iterator for Scan[I, S, U, F] {
     type Item = U
 

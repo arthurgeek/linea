@@ -19,7 +19,7 @@ Values, functions, control flow, and ordinary errors.
 - [growth_forecast.lin](growth_forecast.lin): compares annual and continuous growth; loops and a stopping condition.
 - [savings_planner.lin](savings_planner.lin): plans growing monthly deposits; default arguments.
 - [character_counts.lin](character_counts.lin): counts letters, digits, and whitespace; `match` and bytes.
-- [temperature_extremes.lin](temperature_extremes.lin): finds a week's coldest and warmest readings; one pass with `Option`.
+- [temperature_extremes.lin](temperature_extremes.lin): finds a week's coldest and warmest readings; `copied`, `min` and `max`.
 - [temperature_readings.lin](temperature_readings.lin): calibrates and averages readings; `for read` and `for inout`.
 - [loyalty_points.lin](loyalty_points.lin): awards points under two reward plans; structs holding functions.
 - [print_orders.lin](print_orders.lin): prices print jobs; structs, defaults, and `..base` updates.
@@ -38,6 +38,7 @@ Strings, collections, parsing, and files.
 - [parcel_inspection.lin](parcel_inspection.lin): stops at the first overweight parcel; iterator chains.
 - [parcel_manifest.lin](parcel_manifest.lin): builds a shipping manifest; `filter`, `collect`, and lent counters.
 - [upcoming_leap_years.lin](upcoming_leap_years.lin): lists the next five leap years from a walk of years that never ends; lazy `filter` and `take`.
+- [trail_profile.lin](trail_profile.lin): reports a hike's climb, longest ascent and summit from its marker elevations; `windows`, `scan`, `peekable`, `position` and `rev`.
 - [pricing_rules.lin](pricing_rules.lin): prices a cart through a list of rules; closures in a `Vec`.
 - [frequency_report.lin](frequency_report.lin): counts how often each line appears in a file and lists them most frequent first; reading `lines()`, counting with a `Map`, and sorting with `Vec.sort_by`.
 - [server_settings.lin](server_settings.lin): reads a listen address from `key = value` lines; `lines()`, `split_once`, and `let ... else`.
