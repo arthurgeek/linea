@@ -199,11 +199,7 @@ struct Line {
 }
 
 fn total(lines: [Line; 3]) -> UInt64 {
-    var sum = 0
-    for read line in lines {
-        sum += line.cents * line.quantity
-    }
-    sum
+    lines.as_slice().map(|sink line| line.cents * line.quantity).sum()
 }
 
 // The tests share one order, so it is built in one place. Only tests call

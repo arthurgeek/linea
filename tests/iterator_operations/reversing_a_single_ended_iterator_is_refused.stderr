@@ -1,0 +1,8 @@
+error[T-Bound]: `Self.Iter` requires `DoubleEnded`, and `Countdown` does not implement it
+  --> tests/iterator_operations/reversing_a_single_ended_iterator_is_refused.lin:19:39
+   |
+19 |     for n in (Countdown { left = 3 }).rev() {
+   |                                       ^^^ implement it for that type
+  ::: std/iter/iter.lin
+L  |         Self.Iter: DoubleEnded
+   |         --------- required by this `where` clause

@@ -1,0 +1,261 @@
+import std.testing
+
+// Additive is a number type with a zero and an addition, which is what
+// `Sequence.sum` needs: the sum of no items is `zero()`, and each item is
+// added to the running total with `add`. Integer addition is checked, so a sum
+// past the type's greatest value traps as `+` does. Floating-point addition
+// rounds as `+` does, so the order of the items can change a float sum.
+pub trait Additive {
+    fn zero() -> Self
+
+    fn add(sink self: Self, sink other: Self) -> Self where carries(self, other)
+}
+
+// Multiplicative is a number type with a one and a multiplication, which is
+// what `Sequence.product` needs: the product of no items is `one()`, and each
+// item multiplies the running product with `multiply`. Integer multiplication
+// is checked, so a product past the type's greatest value traps as `*` does.
+pub trait Multiplicative {
+    fn one() -> Self
+
+    fn multiply(sink self: Self, sink other: Self) -> Self where carries(self, other)
+}
+
+impl Additive for UInt8 {
+    fn zero() -> UInt8 {
+        0
+    }
+
+    fn add(sink self: Self, sink other: Self) -> UInt8 {
+        self + other
+    }
+}
+
+impl Multiplicative for UInt8 {
+    fn one() -> UInt8 {
+        1
+    }
+
+    fn multiply(sink self: Self, sink other: Self) -> UInt8 {
+        self * other
+    }
+}
+
+impl Additive for UInt16 {
+    fn zero() -> UInt16 {
+        0
+    }
+
+    fn add(sink self: Self, sink other: Self) -> UInt16 {
+        self + other
+    }
+}
+
+impl Multiplicative for UInt16 {
+    fn one() -> UInt16 {
+        1
+    }
+
+    fn multiply(sink self: Self, sink other: Self) -> UInt16 {
+        self * other
+    }
+}
+
+impl Additive for UInt32 {
+    fn zero() -> UInt32 {
+        0
+    }
+
+    fn add(sink self: Self, sink other: Self) -> UInt32 {
+        self + other
+    }
+}
+
+impl Multiplicative for UInt32 {
+    fn one() -> UInt32 {
+        1
+    }
+
+    fn multiply(sink self: Self, sink other: Self) -> UInt32 {
+        self * other
+    }
+}
+
+impl Additive for UInt64 {
+    fn zero() -> UInt64 {
+        0
+    }
+
+    fn add(sink self: Self, sink other: Self) -> UInt64 {
+        self + other
+    }
+}
+
+impl Multiplicative for UInt64 {
+    fn one() -> UInt64 {
+        1
+    }
+
+    fn multiply(sink self: Self, sink other: Self) -> UInt64 {
+        self * other
+    }
+}
+
+impl Additive for Int8 {
+    fn zero() -> Int8 {
+        0
+    }
+
+    fn add(sink self: Self, sink other: Self) -> Int8 {
+        self + other
+    }
+}
+
+impl Multiplicative for Int8 {
+    fn one() -> Int8 {
+        1
+    }
+
+    fn multiply(sink self: Self, sink other: Self) -> Int8 {
+        self * other
+    }
+}
+
+impl Additive for Int16 {
+    fn zero() -> Int16 {
+        0
+    }
+
+    fn add(sink self: Self, sink other: Self) -> Int16 {
+        self + other
+    }
+}
+
+impl Multiplicative for Int16 {
+    fn one() -> Int16 {
+        1
+    }
+
+    fn multiply(sink self: Self, sink other: Self) -> Int16 {
+        self * other
+    }
+}
+
+impl Additive for Int32 {
+    fn zero() -> Int32 {
+        0
+    }
+
+    fn add(sink self: Self, sink other: Self) -> Int32 {
+        self + other
+    }
+}
+
+impl Multiplicative for Int32 {
+    fn one() -> Int32 {
+        1
+    }
+
+    fn multiply(sink self: Self, sink other: Self) -> Int32 {
+        self * other
+    }
+}
+
+impl Additive for Int64 {
+    fn zero() -> Int64 {
+        0
+    }
+
+    fn add(sink self: Self, sink other: Self) -> Int64 {
+        self + other
+    }
+}
+
+impl Multiplicative for Int64 {
+    fn one() -> Int64 {
+        1
+    }
+
+    fn multiply(sink self: Self, sink other: Self) -> Int64 {
+        self * other
+    }
+}
+
+impl Additive for Float32 {
+    fn zero() -> Float32 {
+        0.0
+    }
+
+    fn add(sink self: Self, sink other: Self) -> Float32 {
+        self + other
+    }
+}
+
+impl Multiplicative for Float32 {
+    fn one() -> Float32 {
+        1.0
+    }
+
+    fn multiply(sink self: Self, sink other: Self) -> Float32 {
+        self * other
+    }
+}
+
+impl Additive for Float64 {
+    fn zero() -> Float64 {
+        0.0
+    }
+
+    fn add(sink self: Self, sink other: Self) -> Float64 {
+        self + other
+    }
+}
+
+impl Multiplicative for Float64 {
+    fn one() -> Float64 {
+        1.0
+    }
+
+    fn multiply(sink self: Self, sink other: Self) -> Float64 {
+        self * other
+    }
+}
+
+// Add up `values` from zero through the trait alone, as a generic sum does.
+fn total_of[T: Additive](sink values: (T, T, T)) -> T {
+    let (a, b, c) = values
+    T.zero().add(a).add(b).add(c)
+}
+
+// Multiply `values` from one through the trait alone, as a generic product
+// does.
+fn product_of[T: Multiplicative](sink values: (T, T, T)) -> T {
+    let (a, b, c) = values
+    T.one().multiply(a).multiply(b).multiply(c)
+}
+
+test fn every_integer_type_adds_from_zero_and_multiplies_from_one() {
+    testing.assert_eq(total_of((UInt8(1), 2, 3)), UInt8(6), "UInt8 addition")?
+    testing.assert_eq(total_of((UInt16(1), 2, 3)), UInt16(6), "UInt16 addition")?
+    testing.assert_eq(total_of((UInt32(1), 2, 3)), UInt32(6), "UInt32 addition")?
+    testing.assert_eq(total_of((UInt64(1), 2, 3)), UInt64(6), "UInt64 addition")?
+    testing.assert_eq(total_of((Int8(1), -2, 3)), Int8(2), "Int8 addition")?
+    testing.assert_eq(total_of((Int16(1), -2, 3)), Int16(2), "Int16 addition")?
+    testing.assert_eq(total_of((Int32(1), -2, 3)), Int32(2), "Int32 addition")?
+    testing.assert_eq(total_of((Int64(1), -2, 3)), Int64(2), "Int64 addition")?
+    testing.assert_eq(product_of((UInt8(2), 3, 4)), UInt8(24), "UInt8 multiplication")?
+    testing.assert_eq(product_of((UInt16(2), 3, 4)), UInt16(24), "UInt16 multiplication")?
+    testing.assert_eq(product_of((UInt32(2), 3, 4)), UInt32(24), "UInt32 multiplication")?
+    testing.assert_eq(product_of((UInt64(2), 3, 4)), UInt64(24), "UInt64 multiplication")?
+    testing.assert_eq(product_of((Int8(2), -3, 4)), Int8(-24), "Int8 multiplication")?
+    testing.assert_eq(product_of((Int16(2), -3, 4)), Int16(-24), "Int16 multiplication")?
+    testing.assert_eq(product_of((Int32(2), -3, 4)), Int32(-24), "Int32 multiplication")?
+    testing.assert_eq(product_of((Int64(2), -3, 4)), Int64(-24), "Int64 multiplication")?
+}
+
+test fn both_float_types_add_from_zero_and_multiply_from_one() {
+    testing.assert_eq(total_of((Float32(0.5), 0.25, 2.0)), Float32(2.75), "Float32 addition")?
+    testing.assert_eq(total_of((Float64(0.5), 0.25, 2.0)), Float64(2.75), "Float64 addition")?
+    testing.assert_eq(product_of((Float32(0.5), 0.25, 2.0)), Float32(0.25), "Float32 multiplication")?
+    testing.assert_eq(product_of((Float64(0.5), 0.25, 2.0)), Float64(0.25), "Float64 multiplication")?
+}

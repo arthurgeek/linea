@@ -1,0 +1,28 @@
+// A peekable holds back the item `peek` took, so over linear items it is
+// linear itself. A consuming `for` would abandon it, and the held item with
+// it, when the walk ends.
+@linear
+struct Ticket { seat: UInt8 }
+
+struct Tickets { next_seat: UInt8 }
+
+impl Iterator for Tickets {
+    type Item = Ticket
+
+    fn next(inout self: Self) -> Option[Ticket] {
+        if self.next_seat == 3 {
+            return .None
+        }
+        self.next_seat += 1
+        .Some(Ticket { seat = self.next_seat })
+    }
+}
+
+fn main() -> UInt8 {
+    var seats: UInt8 = 0
+    for ticket in (Tickets { next_seat = 0 }).peekable() {
+        let Ticket { seat } = ticket
+        seats += seat
+    }
+    seats
+}

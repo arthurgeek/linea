@@ -8,13 +8,13 @@ fn savings_after(months: UInt8, monthly_increment: UInt64 = 1000) -> UInt64 {
         return 0
     }
     let schedule = UInt8(1)..=months
-    // `map` turns each month into its deposit and `fold` adds the deposits,
+    // `map` turns each month into its deposit and `sum` adds the deposits,
     // starting from zero. `[monthly_increment]` lets the closure read the
-    // increment. A line opening with `.map` or `.fold` continues the chain on
+    // increment. A line opening with `.map` or `.sum` continues the chain on
     // the line above.
     schedule
         .map([monthly_increment] |sink month| UInt64(month) * monthly_increment)
-        .fold(0, |sink saved, sink deposit| saved + deposit)
+        .sum()
 }
 
 test fn savings_accumulate_the_monthly_deposits() {

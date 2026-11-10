@@ -1,0 +1,5 @@
+error[O-Move]: this read-only observation cannot give away the value it observes
+  --> tests/iterator_operations/a_window_lends_linear_elements_without_moving_them.lin:10:31
+   |
+10 |         let Ticket { seat } = pair[0]
+   |                               ^^^^^^^ read the observation, or copy a copyable referent

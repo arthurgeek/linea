@@ -1,0 +1,49 @@
+trait Unwrap {
+    type Inner
+
+    fn inner(self: Self) -> Self.Inner
+}
+
+struct Boxed[T] { value: T }
+
+impl[T: Copyable] Unwrap for Boxed[T] {
+    type Inner = T
+
+    fn inner(self: Self) -> T {
+        copy(self.value)
+    }
+}
+
+struct Repeat[T] { value: T, left: UInt8 }
+
+impl[T: Copyable] Iterator for Repeat[T] {
+    type Item = Boxed[T]
+
+    fn next(inout self: Self) -> Option[Boxed[T]] {
+        if self.left == 0 {
+            .None
+        } else {
+            self.left -= 1
+            .Some(Boxed[T] { value = copy(self.value) })
+        }
+    }
+}
+
+struct Unwrapped[I] { source: I }
+
+impl[I: Iterator] Iterator for Unwrapped[I]
+where I.Item: Unwrap + Discardable {
+    type Item = I.Item.Inner
+
+    fn next(inout self: Self) -> Option[I.Item.Inner] {
+        match &self.source.next() {
+            Some(boxed) => .Some(boxed.inner()),
+            None => .None,
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    var mapped = (Unwrapped[Repeat[UInt8]] { source = Repeat[UInt8] { value = 2, left = 2 } }).map(|sink value| value + 10)
+    &mapped.next().unwrap()
+}

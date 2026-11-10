@@ -1,7 +1,9 @@
 import std.mem.address
 import std.hash
+import std.iter
 import std.testing
 
+use iter.DoubleEnded
 use hash.Hash
 
 // A Slice observes an initialized contiguous extent without owning its
@@ -148,6 +150,35 @@ impl[T] Slice[T] {
         testing.assert_eq(view.subspan(start: 0, count: 0).unwrap().length(), UInt64(0), "empty subspan failed")?
         testing.assert(view.get(0).is_none(), "empty slice yielded an element")?
         testing.assert(view.subspan(start: UInt64.max, count: 1).is_none(), "extreme subspan wrapped its extent")?
+        .Ok(())
+    }
+
+    // Yield every run of `size` consecutive elements, front first, each a
+    // view of this slice's storage: the windows of size 2 over [1, 2, 3] are
+    // [1, 2] and [2, 3]. A slice shorter than `size` has no windows. Each
+    // window observes what this slice observes, so the storage cannot change
+    // while a window is in use. A window of no elements says nothing about
+    // its neighbours, so a `size` of 0 traps.
+    pub fn windows(self: Self, size: UInt64) -> Windows[T] where carries(self) {
+        if size == 0 {
+            panic("a window holds at least one element")
+        }
+        .{ view = copy(self), size, at = 0 }
+    }
+
+    test fn windows_yield_each_run_of_consecutive_elements() {
+        let readings = [UInt64(3), 5, 8, 13]
+        var rises: UInt64 = 0
+        for pair in readings.as_slice().windows(2) {
+            rises += pair[1] - pair[0]
+        }
+        testing.assert_eq(rises, UInt64(10), "the windows of size 2 missed or repeated a pair")?
+        testing.assert_eq(readings.as_slice().windows(4).count(), UInt64(1), "a slice as long as its window has one")?
+        testing.assert_eq(readings.as_slice().windows(5).count(), UInt64(0), "a slice shorter than its window has none")?
+        var both = readings.as_slice().windows(3)
+        testing.assert_eq(&both.next_back().unwrap()[0], UInt64(5), "the last window starts at the second element")?
+        testing.assert_eq(&both.next().unwrap()[0], UInt64(3), "the first window starts at the first element")?
+        testing.assert(&both.next().is_none(), "the windows from both ends overlapped")?
         .Ok(())
     }
 
@@ -314,7 +345,9 @@ test fn a_slice_debugs_as_its_elements_in_brackets() {
 // Discarding or releasing it leaves the elements and their storage with the
 // caller and requires neither Copyable nor Release of the element type. Arrays
 // and Slice subspans use this iterator, and a Vec is walked through
-// `values.as_slice().iterate()`.
+// `values.as_slice().iterate()`. The elements not yet yielded are those of
+// `view` from `at` on: `next` yields the one at `at` and moves `at` forward,
+// and `next_back` yields the last and shortens `view` by it.
 @(opaque, derive(Release))
 struct SliceIter[T] {
     view: Slice[T],
@@ -342,6 +375,28 @@ impl[T] Iterator for SliceIter[T] {
     }
 }
 
+impl[T] iter.DoubleEnded for SliceIter[T] {
+    fn next_back(inout self: Self) -> Option[borrow T] {
+        if self.at == self.view.length() {
+            return .None
+        }
+        let whole = copy(self.view)
+        let last = whole.length() - 1
+        self.view = whole.subspan(start: 0, count: last).unwrap()
+        whole.get(last)
+    }
+}
+
+test fn slice_iteration_from_both_ends_yields_each_element_once() {
+    let values = [UInt64(1), 2, 3]
+    var walking = values.as_slice().iterate()
+    testing.assert_eq(*&walking.next_back().unwrap(), UInt64(3), "the back of a slice is its last element")?
+    testing.assert_eq(*&walking.next().unwrap(), UInt64(1), "the front of a slice is its first element")?
+    testing.assert_eq(*&walking.next_back().unwrap(), UInt64(2), "the back did not reach the middle element")?
+    testing.assert(&walking.next().is_none(), "the front passed the back")?
+    testing.assert(&walking.next_back().is_none(), "the back passed the front")?
+}
+
 test fn slice_iteration_retains_order_and_independent_observations() {
     defer let values = Vec.from_fn(count: 3, initializer: |index| index + 11).unwrap()
     var iterator = values.as_slice().iterate()
@@ -367,6 +422,42 @@ test fn slice_iteration_handles_empty_and_single_element_subspans() {
     testing.assert_eq(*selected, UInt64(22), "subspan iteration selected the wrong element")?
     testing.assert(&middle.next().is_none(), "subspan iteration escaped its boundary")?
     testing.assert(&middle.next().is_none(), "subspan iteration restarted")?
+}
+
+// Windows yields views of `size` consecutive elements of `view`. The windows
+// not yet yielded are those that start at `at` or later and fit in `view`:
+// `next` yields the one at `at` and moves `at` forward, and `next_back` yields
+// the one that ends where `view` ends and shortens `view` by one element.
+@(opaque, derive(Release))
+struct Windows[T] {
+    view: Slice[T],
+    size: UInt64,
+    at: UInt64,
+}
+
+impl[T] Iterator for Windows[T] {
+    type Item = Slice[T]
+
+    fn next(inout self: Self) -> Option[Slice[T]] {
+        if self.view.length() - self.at < self.size {
+            return .None
+        }
+        let start = self.at
+        self.at += 1
+        self.view.subspan(start: start, count: self.size)
+    }
+}
+
+impl[T] iter.DoubleEnded for Windows[T] {
+    fn next_back(inout self: Self) -> Option[Slice[T]] {
+        if self.view.length() - self.at < self.size {
+            return .None
+        }
+        let whole = copy(self.view)
+        let last = whole.length() - 1
+        self.view = whole.subspan(start: 0, count: last).unwrap()
+        whole.subspan(start: whole.length() - self.size, count: self.size)
+    }
 }
 
 // SliceRecord is an affine element and SliceTicket a linear one, so iteration

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/iterator_operations/a_window_does_not_outlive_a_write_to_its_element.lin:7:5
+  |
+7 |     readings[1] = 9
+  |     ^^^^^^^^^^^ keep this place available until the last use of its observation
+8 |     first[1] - first[0]
+  |     -------- the observation is still used here

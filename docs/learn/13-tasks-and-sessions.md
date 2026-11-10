@@ -362,11 +362,7 @@ use session.Send
 
 // Add up the whole numbers from `low` to `high`, one by one.
 fn sum_between(low: UInt64, high: UInt64) -> UInt64 {
-    var total = UInt64(0)
-    for number in low..=high {
-        total += number
-    }
-    total
+    (low..=high).sum()
 }
 
 // Add up 1 to 3000000 in three parts at once, or answer why a task could not
@@ -736,19 +732,11 @@ fn main() -> Result[UInt8, io.IoError] {
     // an array of numbers cannot race, and neither may write it until
     // `close` has joined the task.
     let body = sink [read prices] |sink me: Chan[Send[UInt64, End]]| {
-        var total = UInt64(0)
-        for read price in prices {
-            total += price
-        }
+        let total = prices.as_slice().copied().sum()
         me.send(total).close()
     }
     let handle = task.start(body).unwrap()
-    var cheapest = prices[0]
-    for read price in prices {
-        if price < cheapest {
-            cheapest = price
-        }
-    }
+    let cheapest = prices.as_slice().copied().min().unwrap()
     let (total, done) = handle.recv()
     done.close()
     io.println("total {total}, cheapest {cheapest}")?
@@ -768,7 +756,7 @@ borrowed value always is:
     var prices = [UInt64(300), 450, 125]
 ```
 
-<!-- guide: edit 28 let (total, done) = handle.recv() -->
+<!-- guide: edit 20 let (total, done) = handle.recv() -->
 ```linea
     prices[0] = 275
     let (total, done) = handle.recv()
@@ -776,11 +764,11 @@ borrowed value always is:
 
 ```
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> shared_prices.lin:28:5
+  --> shared_prices.lin:20:5
    |
-28 |     prices[0] = 275
+20 |     prices[0] = 275
    |     ^^^^^^^^^ keep this place available until the last use of its observation
-29 |     let (total, done) = handle.recv()
+21 |     let (total, done) = handle.recv()
    |                         ------ the observation is still used here
 ```
 

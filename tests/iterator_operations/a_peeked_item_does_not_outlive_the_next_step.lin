@@ -1,0 +1,8 @@
+// `peek` lends the item the peekable holds. `next` moves that item out, so the
+// view `peek` gave cannot be used after it.
+fn main() -> UInt8 {
+    var numbers = (UInt8(1)..4).peekable()
+    let upcoming = &numbers.peek().unwrap()
+    let taken = &numbers.next().unwrap()
+    *upcoming + taken
+}

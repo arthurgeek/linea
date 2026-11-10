@@ -1,0 +1,7 @@
+error[O-LinearWalk]: walking an `iter.Peekable[Tickets]` abandons it where the walk ends, and it is linear
+  --> tests/iterator_operations/a_for_over_a_peekable_of_linear_items_is_refused.lin:23:19
+   |
+23 |     for ticket in (Tickets { next_seat = 0 }).peekable() {
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `iter.Peekable[Tickets]` is linear, and nothing settles it here
+   |
+   = help: bind it, `var pending = (Tickets { next_seat = 0 }).peekable()`, walk it lent with `for ticket in &pending`, then settle `pending` after the loop

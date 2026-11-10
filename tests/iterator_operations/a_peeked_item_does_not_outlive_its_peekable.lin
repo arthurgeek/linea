@@ -1,0 +1,8 @@
+// `into_parts` takes the peekable apart and moves the held item, so the view
+// `peek` gave cannot be used after it.
+fn main() -> UInt8 {
+    var numbers = (UInt8(1)..4).peekable()
+    let upcoming = &numbers.peek().unwrap()
+    let (_rest, _held) = numbers.into_parts()
+    *upcoming
+}

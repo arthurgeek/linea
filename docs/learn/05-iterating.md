@@ -6,8 +6,11 @@ This chapter covers the ways to do that. It starts with the plain `for` loop,
 which is all most walks need, then the other ways a `for` can hold what it
 walks, and how a type of your own becomes something a `for` can walk. Next come
 **chains** such as `prices.map(…).filter(…).fold(…)`, which say in one line
-what a loop would do, and the pairs `enumerate` and `zip` hand out. The later
-sections cover the less common tools: collecting into a `Vec`, callbacks that
+what a loop would do, the pairs `enumerate` and `zip` hand out, and the
+operations that answer the common questions in one call: `sum`, `min`,
+`position`, walking backwards with `rev`, neighbours with `windows`, running
+totals with `scan` and looking ahead with `peekable`. The later sections
+cover the less common tools: collecting into a `Vec`, callbacks that
 keep their state, and collections of values that must be consumed, such as
 payments, and how to empty them one by one.
 
@@ -662,7 +665,7 @@ error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Payment` does not 
 22  |     for (payment, till) in payments.zip(tills.as_slice()) {
     |                                     ^^^ `zip` may dispose of a `Payment`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before. `zip` draws an item from the first sequence before asking the second, and if the second sequence ends first it disposes of that first item, so the first sequence's items must be Discardable; zip in the other order, with the sequence whose items are Discardable first, or walk both sequences by hand
    ::: std/iter/iter.lin
-100 |         Self.Iter.Item: Discardable
+130 |         Self.Iter.Item: Discardable
     |         -------------- required by this `where` clause
 ```
 
@@ -839,6 +842,12 @@ bulk item: jam
 | `find_map(f)` | terminal | the first `.Some` that `f` returns | yes |
 | `for_each(f)` | terminal | nothing: it hands every item to `f`, as a `for` loop would | yes |
 | `count()` | terminal | how many items there are, as a `UInt64` | no lambda |
+| `sum()`, `product()` | terminal | the items added up from 0, or multiplied from 1 | no lambda |
+| `min()`, `max()` | terminal | the least or greatest item, as an `Option` | no lambda |
+| `reduce(f)` | terminal | the items combined by `f`, starting from the first, as an `Option` | yes |
+| `position(p)` | terminal | where the first item `p` accepts stands, counting from 0, as an `Option` | yes |
+| `copied()`, `rev()`, `peekable()` | adapter | the values the views view; the items last to first; the items, with one held back to look at | no lambda |
+| `scan(start, f)` | adapter | what `f` answers for each item, with a state it changes in place | yes |
 
 An adapter answers a new chain and runs nothing until that chain is walked; a
 terminal walks the chain as soon as it is called.
@@ -900,6 +909,357 @@ walked, so it needs both to be Discardable, as `fold` does. To count the items
 of an iterator that must be settled, lend it to a `for x in &it` loop, which
 the last sections of this chapter cover, and count in the body.
 
+## Numbers from a chain: `sum`, `min`, `max` and `product`
+
+Adding up a chain is common enough to have its own operation. `sum()` walks
+the chain and adds its items, starting from 0, and `product()` multiplies
+them, starting from 1. `min()` and `max()` answer the least and the greatest
+item:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let temperatures = [Int64(18), 24, 31, 27, 16, 33]
+    // A slice hands out views of its elements; `copied` turns each view into
+    // the number it views, and `sum` adds the numbers up.
+    let total = temperatures.as_slice().copied().sum()
+    io.println("The week's temperatures add up to {total} degrees.")?
+    // `min` and `max` answer an `Option`, because an empty chain has neither.
+    match temperatures.as_slice().copied().min() {
+        Some(coldest) => io.println("The coldest day reached {coldest} degrees.")?,
+        None => io.println("There were no days.")?,
+    }
+    let hottest = temperatures.as_slice().copied().max().unwrap()
+    io.println("The hottest day reached {hottest} degrees.")?
+    // `product` multiplies, starting from 1.
+    let arrangements = (UInt64(1)..=6).product()
+    io.println("Six days can be ordered {arrangements} ways.")?
+    .Ok(0)
+}
+```
+
+```
+The week's temperatures add up to 149 degrees.
+The coldest day reached 16 degrees.
+The hottest day reached 33 degrees.
+Six days can be ordered 720 ways.
+```
+
+- A slice hands out each element as a view, `borrow Int64`, and a view is not
+  a number to add. `copied()` turns each view into a copy of the number it
+  views, so the chain that reaches `sum` carries `Int64`s. Rust programmers
+  know it as `.iter().copied()`.
+- `min` and `max` answer an `Option`, because a chain with no items has no
+  least item. `unwrap` is fine for a week that always has days; `match` when
+  the chain may be empty.
+- `min` keeps the first of several equal least items, and `max` the last of
+  several equal greatest items, which is where a stable sort would put them.
+  `min` and `max` compare views as well, so `temperatures.as_slice().min()`
+  answers a view of the coldest day without `copied`.
+- Integer sums and products are checked: going past the type's greatest value
+  stops the program, as `+` does.
+
+Leave `copied` out, and `sum` says what it is missing:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let prices = [UInt64(250), 175, 40]
+    let total = prices.as_slice().sum()
+    io.println("{total} cents")?
+    .Ok(0)
+}
+```
+
+```
+error[T-Bound]: `Self.Iter.Item` requires `Additive`, and `borrow UInt64` does not implement it
+   --> sum_refused.lin:5:35
+    |
+5   |     let total = prices.as_slice().sum()
+    |                                   ^^^ only the library, which declares `Additive`, may implement it for `borrow UInt64`; pass a value whose type implements it
+   ::: std/iter/iter.lin
+198 |         Self.Iter.Item: num.Additive
+    |         -------------- required by this `where` clause
+```
+
+### One item from all of them: `reduce`, and where one stands: `position`
+
+`reduce(f)` is a `fold` that starts from the first item instead of a value
+you give it, so it answers `.None` for an empty chain. `position(p)` counts
+from 0 to the first item `p` accepts:
+
+```linea
+import std.io
+
+struct Line {
+    item: Str,
+    cents: UInt64,
+    quantity: UInt64,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let order = [
+        Line { item = "coffee", cents = 250, quantity = 2 },
+        Line { item = "croissant", cents = 175, quantity = 1 },
+        Line { item = "jam", cents = 40, quantity = 12 },
+    ]
+    // `reduce` starts from the first line and keeps whichever costs more.
+    let dearest = order.as_slice().reduce(
+        |sink kept, sink line| {
+            if line.cents * line.quantity > kept.cents * kept.quantity {
+                line
+            } else {
+                kept
+            }
+        },
+    )
+    match dearest {
+        Some(line) => io.println("The {line.item} costs the most.")?,
+        None => io.println("The order is empty.")?,
+    }
+    // `position` counts from 0 to the first line the lambda accepts.
+    match order.as_slice().position(|sink line| line.quantity > 10) {
+        Some(at) => io.println("Line {at + 1} is a bulk purchase.")?,
+        None => io.println("Nothing was bought in bulk.")?,
+    }
+    .Ok(0)
+}
+```
+
+```
+The coffee costs the most.
+Line 3 is a bulk purchase.
+```
+
+`reduce`'s lambda takes the line kept so far and the next line, and answers
+the one to keep. `position` stops at the jam and never looks past it, as
+`find` would.
+
+## Walking backwards with `rev`
+
+`rev()` walks a chain from its last item to its first, lazily: each time the
+walk wants an item, it asks its source for the one at the far end, and it
+gathers nothing:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    // `rev` walks a range from its far end.
+    for second in (UInt8(1)..=3).rev() {
+        io.println("{second}...")?
+    }
+    io.println("Lift off!")?
+    // A slice reverses too, and so does a chain of `map` and `filter` over it.
+    let stops = ["Depot", "Market", "Harbour", "Airport"]
+    for stop in stops.as_slice().filter(|stop| *stop != "Market").rev() {
+        io.println("Return trip calls at {*stop}")?
+    }
+    .Ok(0)
+}
+```
+
+```
+3...
+2...
+1...
+Lift off!
+Return trip calls at Airport
+Return trip calls at Harbour
+Return trip calls at Depot
+```
+
+A source can go backwards when it implements `DoubleEnded`, which adds
+`next_back` to `next`: ranges, slices, and `map`, `filter`, `filter_map`,
+`copied` and `rev` over one of those. An iterator you write offers only
+`next` until you implement `iter.DoubleEnded` for it as well, so `rev`
+refuses it:
+
+```linea
+// Countdown can only go forward: its `next` is all it offers.
+struct Countdown { left: UInt8 }
+
+impl Iterator for Countdown {
+    type Item = UInt8
+
+    fn next(inout self: Self) -> Option[UInt8] {
+        if self.left == 0 {
+            return .None
+        }
+        self.left -= 1
+        .Some(self.left)
+    }
+}
+
+fn main() -> UInt8 {
+    var last: UInt8 = 0
+    for n in (Countdown { left = 3 }).rev() {
+        last = n
+    }
+    last
+}
+```
+
+```
+error[T-Bound]: `Self.Iter` requires `DoubleEnded`, and `Countdown` does not implement it
+   --> rev_refused.lin:18:39
+    |
+18  |     for n in (Countdown { left = 3 }).rev() {
+    |                                       ^^^ implement it for that type
+   ::: std/iter/iter.lin
+165 |         Self.Iter: DoubleEnded
+    |         --------- required by this `where` clause
+```
+
+To walk such a source backwards, collect it into a `Vec` and reverse the
+vector's slice, where the allocation is visible.
+
+## Neighbours with `windows`
+
+`windows(n)` is an operation of a slice. It hands out every run of `n`
+neighbouring elements, each as a slice of the same storage, so nothing is
+copied:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let readings = [Int64(12), 15, 11, 19, 20]
+    // `windows(2)` hands out each pair of neighbours as a slice of the
+    // readings: 12 and 15, then 15 and 11, and so on.
+    for pair in readings.as_slice().windows(2) {
+        io.println("{pair[0]} to {pair[1]}: a change of {pair[1] - pair[0]}")?
+    }
+    // Each window is a slice, so the chain operations work on it too.
+    let best_three = readings.as_slice().windows(3).map(|sink days| days.copied().sum()).max().unwrap()
+    io.println("The best three days in a row add up to {best_three}.")?
+    .Ok(0)
+}
+```
+
+```
+12 to 15: a change of 3
+15 to 11: a change of -4
+11 to 19: a change of 8
+19 to 20: a change of 1
+The best three days in a row add up to 50.
+```
+
+A slice of five readings has four windows of two and three windows of three;
+a slice shorter than `n` has none. Each window views the array's storage, so
+the array cannot change while a window is in use, as with any view
+([Borrowing](06-borrowing.md)). `windows(0)` stops the program: a window of
+no elements says nothing about its neighbours.
+
+## Running totals with `scan`
+
+`scan(start, f)` yields one value per item, computed from the item and a
+running state that begins as `start`. The lambda changes the state in place
+and answers what to yield:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let deposits = [Int64(100), -40, 250, -75]
+    // `scan` keeps a running balance, starting at 0. Its lambda changes the
+    // balance in place and answers what the walk yields: the new balance.
+    let balances = deposits.as_slice().copied().scan(
+        Int64(0),
+        |inout balance, sink amount| {
+            balance += amount
+            balance
+        },
+    )
+    for balance in balances {
+        io.println("balance: {balance}")?
+    }
+    .Ok(0)
+}
+```
+
+```
+balance: 100
+balance: 60
+balance: 310
+balance: 235
+```
+
+`scan` is an adapter, so it runs its lambda only as the walk asks: a
+`take(2)` after it would add up two deposits and no more. The lambda takes
+the state `inout`, as a function takes a variable it may change ([Calling
+things](02-calling-things.md)), which is why `balance += amount` changes it.
+
+## Looking ahead with `peekable`
+
+Some walks must see the next item before deciding whether to take it: a
+reader of `12+30+400` takes digits while they are digits and leaves the `+`
+alone. `peekable()` wraps a chain so it can hold back one item:
+
+```linea
+import std.io
+
+// Answer the digit a byte holds, or None for any other byte. The byte for
+// `0` is 48 and the byte for `9` is 57.
+fn digit(byte: UInt8) -> Option[UInt64] {
+    if byte >= 48 && byte <= 57 {
+        .Some(UInt64(byte - 48))
+    } else {
+        .None
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let sum = "12+30+400"
+    var bytes = sum.as_bytes().copied().peekable()
+    var total: UInt64 = 0
+    loop {
+        // `peek` looks at the next byte and leaves it for `next_if`.
+        let starts_number = match &bytes.peek() {
+            Some(byte) => digit(*byte).is_some(),
+            None => false,
+        }
+        if !starts_number {
+            break
+        }
+        // `next_if` takes a byte only while it is a digit, so the `+` stays.
+        var number: UInt64 = 0
+        loop {
+            match &bytes.next_if(|byte| digit(byte).is_some()) {
+                Some(byte) => number = number * 10 + digit(byte).unwrap(),
+                None => {
+                    break
+                },
+            }
+        }
+        io.println("number: {number}")?
+        total += number
+        // `next` takes the `+` between two numbers.
+        let _plus = &bytes.next()
+    }
+    io.println("{sum} = {total}")?
+    .Ok(0)
+}
+```
+
+```
+number: 12
+number: 30
+number: 400
+12+30+400 = 442
+```
+
+- `peek()` answers a view of the next item, or `.None` at the end. It takes
+  the item from the source and holds it, so the next `peek` or `next`
+  answers the same item.
+- `next_if(p)` takes the next item only when `p` accepts it, and otherwise
+  goes on holding it.
+- The view `peek` answers points into the peekable, so it must be used before
+  the next `next`: taking the item would leave the view pointing at nothing,
+  and the compiler refuses that with `[O-Borrow]`.
+
 ## `filter` drops what it rejects; `filter_map` hands it to you
 
 `filter` drops every item its predicate rejects. That is fine for numbers and
@@ -945,13 +1305,13 @@ fn main() -> Result[UInt8, io.IoError] {
 
 ```
 error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Payment` does not have that capability
-  --> payments_filter.lin:24:10
-   |
-24 |         .filter([limit] |payment| payment.cents <= limit)
-   |          ^^^^^^ `filter` may dispose of a `Payment`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
-  ::: std/iter/iter.lin
-82 |         Self.Iter.Item: Discardable
-   |         -------------- required by this `where` clause
+   --> payments_filter.lin:24:10
+    |
+24  |         .filter([limit] |payment| payment.cents <= limit)
+    |          ^^^^^^ `filter` may dispose of a `Payment`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
+   ::: std/iter/iter.lin
+112 |         Self.Iter.Item: Discardable
+    |         -------------- required by this `where` clause
 ```
 
 `Self.Iter.Item` is the type of the items the chain hands out, `Payment`. The
@@ -1627,6 +1987,95 @@ linear value. A `Vec` has the same `finish`. It belongs to these containers,
 as `release()` belongs to the types that implement `Release`; it is an
 operation they offer, and not a protocol the language asks of every type.
 
+### Looking ahead at values that must be consumed
+
+A peekable over payments may be holding one, so it owes what that payment
+owes. Like the drain, it cannot be walked by a plain `for`, which would drop
+it at the end; walk it with `next`, or lend it with `&`, and take it apart
+afterwards with `into_parts`, which hands back what it walked and the item it
+was holding. This till looks at each payment before taking it, and leaves the
+first one that does not fit in the line:
+
+```linea
+import std.io
+
+// A payment must be consumed exactly once: committed or refunded.
+@linear
+struct Payment {
+    cents: UInt64,
+}
+
+impl Payment {
+    // Committing puts the money in the till.
+    fn commit(sink self: Self, inout takings: UInt64) {
+        let Payment { cents } = self
+        takings += cents
+    }
+
+    // Refunding hands the money back, and answers how much it was.
+    fn refund(sink self: Self) -> UInt64 {
+        let Payment { cents } = self
+        cents
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let amounts = [UInt64(250), 400, 480, 180, 90]
+    let queue = Vec.from_fn(
+        count: 5,
+        initializer: [amounts] |index| Payment { cents = amounts[index] },
+    ) else |_| {
+        return .Ok(1)
+    }
+    let till_limit = 1000
+    var takings = 0
+    var refunded = 0
+    var line = queue.drain().peekable()
+    loop {
+        // Look at the next payment before taking it: one that would take the
+        // till past its limit stays in the line.
+        let fits = match &line.peek() {
+            Some(payment) => takings + payment.cents <= till_limit,
+            None => false,
+        }
+        if !fits {
+            break
+        }
+        match &line.next() {
+            Some(payment) => payment.commit(&takings),
+            None => {},
+        }
+    }
+    // `into_parts` hands back the drain and the payment `peek` was holding.
+    let (rest, held) = line.into_parts()
+    match held {
+        Some(payment) => refunded += payment.refund(),
+        None => {},
+    }
+    var pending = rest
+    for payment in &pending {
+        refunded += payment.refund()
+    }
+    match pending.finish() {
+        Ok(_) => {},
+        Err(_) => panic("a payment was left in the queue"),
+    }
+    io.println("took {takings} cents, refunded {refunded} cents")?
+    .Ok(0)
+}
+```
+
+```
+took 650 cents, refunded 750 cents
+```
+
+The loop commits 250 and 400 cents. `peek` then takes the 480-cent payment
+from the drain to look at it, and the loop stops without taking it, so the
+peekable is still holding it. `into_parts` answers the drain, with the last
+two payments, and that held payment, as an `Option`; the program refunds all
+three and finishes the drain. Rust's `Peekable` would drop a held value
+without a word; here the held payment has to go somewhere.
+
 ## What you have seen
 
 | You want | Write |
@@ -1643,6 +2092,14 @@ operation they offer, and not a protocol the language asks of every type.
 | one value from all the items | `xs.fold(start, \|sink value, sink x\| …)` |
 | to ask about the items | `any`, `all`, `find`, `find_map` |
 | how many items there are | `xs.count()`, or `xs.filter(\|x\| …).count()` for some of them |
+| the numbers of a slice, added up | `xs.as_slice().copied().sum()`; `product()` multiplies |
+| the least or greatest item | `xs.min()`, `xs.max()`, answering an `Option` |
+| one item combined from all of them | `xs.reduce(\|sink kept, sink x\| …)` |
+| where the first match stands | `xs.position(\|sink x\| …)` |
+| the items last to first | `xs.rev()`, over a range, a slice or a chain of them |
+| each run of `n` neighbouring elements | `xs.as_slice().windows(n)` |
+| a running total | `xs.scan(start, \|inout state, sink x\| …)` |
+| to look at the next item before taking it | `var it = xs.peekable()`, then `&it.peek()` and `&it.next_if(\|x\| …)` |
 | the items in a new `Vec` | `xs.collect().settled()`, or `xs.collect_in(allocator).settled()` |
 | a vector in ascending order | `&v.sort()`, for `Ordered` elements |
 | a vector in an order you choose | `&v.sort_by(\|left, right\| …)`, true when `left` comes first |
@@ -1659,10 +2116,12 @@ operation they offer, and not a protocol the language asks of every type.
 
 The [payment batch](../../examples/payment_batch.lin) commits or declines a
 queue of payments with a lent walk, the [savings
-planner](../../examples/savings_planner.lin) folds a range, the [parcel
+planner](../../examples/savings_planner.lin) sums a range, the [parcel
 manifest](../../examples/parcel_manifest.lin) filters and collects a shipment,
-and the [upcoming leap years](../../examples/upcoming_leap_years.lin) are taken
-from a walk of years that never ends.
+the [upcoming leap years](../../examples/upcoming_leap_years.lin) are taken
+from a walk of years that never ends, and the [trail
+profile](../../examples/trail_profile.lin) reports a hike with `windows`,
+`scan`, `peekable` and `rev`.
 
 Next: [Borrowing](06-borrowing.md) — the views that chains hand out, and the
 `borrows`, `carries` and `retains` clauses that say where a view points.

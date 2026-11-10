@@ -1383,7 +1383,7 @@ fn main() -> Result[UInt8, io.IoError] {
             inspected += 1
             *parcel <= limit
         })
-    let shipped = accepted.fold(0, |sink grams, sink parcel| grams + *parcel)
+    let shipped = accepted.copied().sum()
     io.println("{shipped} grams shipped; {inspected} parcels inspected")?
     .Ok(0)
 }
@@ -1393,15 +1393,15 @@ fn main() -> Result[UInt8, io.IoError] {
 10600 grams shipped; 5 parcels inspected
 ```
 
-`fold` walks the chain and is its last use, so `inspected` is `main`'s again
+`sum` walks the chain and is its last use, so `inspected` is `main`'s again
 on the next line. Before that, it belongs to the closure: reading it, changing
 it or lending it again is `[O-Borrow]`. Ask for the count before the chain is
 walked:
 
-<!-- guide: edit 15 let shipped = accepted.fold(0, |sink grams,… -->
+<!-- guide: edit 15 let shipped = accepted.copied().sum() -->
 ```linea
     io.println("{inspected} parcels inspected so far")?
-    let shipped = accepted.fold(0, |sink grams, sink parcel| grams + *parcel)
+    let shipped = accepted.copied().sum()
 ```
 
 ```
@@ -1412,7 +1412,7 @@ error[O-Borrow]: this operation uses a place lent `inout` to a value that is sti
    |                                     --------- lent `inout` here
 15 |     io.println("{inspected} parcels inspected so far")?
    |                  ^^^^^^^^^ this uses the place while it is lent
-16 |     let shipped = accepted.fold(0, |sink grams, sink parcel| grams + *parcel)
+16 |     let shipped = accepted.copied().sum()
    |                   -------- a value holding the lend is still used here
    |
    = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure

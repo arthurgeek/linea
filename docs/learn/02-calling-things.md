@@ -1601,7 +1601,7 @@ fn main() -> Result[UInt8, io.IoError] {
         .enumerate()
         .filter(|(i, _)| i % 2 == 0)
         .map(|sink (i, x)| (i + 1) * *x)
-        .fold(0, |sink total, sink w| total + w)
+        .sum()
     io.println("The weighted total is {weighted}.")?
     .Ok(0)
 }

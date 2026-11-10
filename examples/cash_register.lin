@@ -41,11 +41,8 @@ impl Cash for Notes {
 // `[T; 3]` holds exactly three values of the same type. `T: Cash` requires
 // that type to implement Cash, so this function can total either array.
 fn total[T: Cash](registers: [T; 3]) -> UInt64 {
-    var cents: UInt64 = 0
-    for read register in registers {
-        cents += register.cents()
-    }
-    cents
+    // `map` asks each register for its cents and `sum` adds them up.
+    registers.as_slice().map(|sink register| register.cents()).sum()
 }
 
 test fn coins_are_counted_by_denomination() {

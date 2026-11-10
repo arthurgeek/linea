@@ -1,0 +1,29 @@
+// `copied` yields the values a slice views, and every adapter and terminal
+// takes those values as it takes any others.
+fn main() -> UInt8 {
+    let readings = [UInt8(4), 9, 2, 7]
+    let doubled = readings.as_slice().copied().map(|sink r| r * 2).sum()
+    let large = readings.as_slice().copied().filter(|r| r > 3).count()
+    let last_running = readings
+        .as_slice()
+        .copied()
+        .scan(
+            UInt8(0),
+            |inout total, sink r| {
+                total += r
+                total
+            },
+        )
+        .max()
+        .unwrap()
+    let backwards = readings.as_slice().copied().rev().fold(
+        UInt8(0),
+        |sink first, sink r| if first == 0 {
+            r
+        } else {
+            first
+        },
+    )
+    // 44 + 3 + 22 + 7
+    doubled + UInt8(large) + last_running + backwards
+}

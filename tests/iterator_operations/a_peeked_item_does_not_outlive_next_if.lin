@@ -1,0 +1,8 @@
+// `next_if` may move the held item out to its caller, so the view `peek` gave
+// cannot be used after it.
+fn main() -> UInt8 {
+    var numbers = (UInt8(1)..4).peekable()
+    let upcoming = &numbers.peek().unwrap()
+    let taken = &numbers.next_if(|n| n < 3).unwrap()
+    *upcoming + taken
+}

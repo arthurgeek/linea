@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/iterator_operations/a_peeked_item_does_not_outlive_the_next_step.lin:6:17
+  |
+6 |     let taken = &numbers.next().unwrap()
+  |                 ^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+7 |     *upcoming + taken
+  |     --------- the observation is still used here

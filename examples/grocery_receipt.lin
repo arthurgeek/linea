@@ -24,12 +24,7 @@ fn write_receipt[W: Writer](inout w: W, purchases: mem.Slice[Purchase]) -> Resul
     // run time, so `fmt.write_display` takes a `fmt.Spec` built for it. The
     // default spec pads with spaces and puts text on the left, and struct
     // update changes only what differs from it.
-    var widest: UInt64 = 0
-    for purchase in copy(purchases) {
-        if purchase.name.length() > widest {
-            widest = purchase.name.length()
-        }
-    }
+    let widest = copy(purchases).map(|sink purchase| purchase.name.length()).max().unwrap_or(0)
     // A line is the name, a space, nine columns of amount, a space, three of
     // unit, a space and nine of price.
     let line_width = widest + 24

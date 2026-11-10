@@ -1,0 +1,92 @@
+// Report a hiking trail from the elevation at each of its markers: the metres
+// climbed by each marker, the longest ascent without a break, the highest
+// marker, and the markers passed on the way back down.
+//
+// `windows` pairs each marker with the next, `scan` keeps a running total,
+// `peekable` looks at a step before taking it, `position` finds where the
+// summit stands, and `rev` walks the markers from the last to the first.
+import std.io
+import std.mem
+import std.testing
+
+use io.IoError
+use io.println
+
+// Add up the metres gained between neighbouring markers. A descent adds
+// nothing. `windows(2)` hands out each pair of neighbours as a slice of two.
+fn total_climb(elevations: mem.Slice[Int64]) -> Int64 {
+    elevations.windows(2).map(|sink pair| pair[1] - pair[0]).filter(|change| change > 0).sum()
+}
+
+test fn only_the_ascents_count_as_climb() {
+    testing.assert_eq(total_climb([Int64(400), 520, 480, 610].as_slice()), 250, "a descent was counted as climb")?
+    testing.assert_eq(total_climb([Int64(400)].as_slice()), 0, "a trail of one marker has no climb")?
+}
+
+// Return the most metres gained in one run of rising steps.
+fn longest_ascent(elevations: mem.Slice[Int64]) -> Int64 {
+    // `peekable` lets the loop look at the next change before taking it.
+    var changes = elevations.windows(2).map(|sink pair| pair[1] - pair[0]).peekable()
+    var longest: Int64 = 0
+    // `peek` answers None once every change has been taken.
+    while &changes.peek().is_some() {
+        var ascent: Int64 = 0
+        // `next_if` takes a change only while the trail keeps rising, so the
+        // step that ends the ascent stays in `changes`.
+        loop {
+            match &changes.next_if(|change| change > 0) {
+                Some(change) => ascent += change,
+                None => {
+                    break
+                },
+            }
+        }
+        if ascent > longest {
+            longest = ascent
+        }
+        // Take the flat or falling step that ended the ascent, if the trail
+        // has one left.
+        let _ended_by = &changes.next()
+    }
+    longest
+}
+
+test fn the_longest_ascent_spans_neighbouring_rises() {
+    testing.assert_eq(longest_ascent([Int64(400), 520, 480, 610, 690, 650].as_slice()), 210, "two rises in a row are one ascent")?
+    testing.assert_eq(longest_ascent([Int64(500), 450, 400].as_slice()), 0, "a trail that only falls has no ascent")?
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let elevations = [Int64(400), 520, 480, 610, 690, 650]
+
+    // `scan` keeps the metres climbed so far and yields the new total at each
+    // step. `enumerate` numbers the steps from 0, and step 0 ends at marker 2.
+    let climbed_so_far = elevations.as_slice().windows(2).scan(
+        Int64(0),
+        |inout climbed, sink pair| {
+            if pair[1] > pair[0] {
+                climbed += pair[1] - pair[0]
+            }
+            climbed
+        },
+    )
+    for (step, climbed) in climbed_so_far.enumerate() {
+        println("marker {step + 2}: {climbed} m climbed")?
+    }
+
+    println("total climb: {total_climb(elevations.as_slice())} m")?
+    println("longest ascent: {longest_ascent(elevations.as_slice())} m")?
+
+    // `max` answers None for no markers; this trail has six. `position`
+    // counts from 0 to the first marker at that height.
+    let summit = elevations.as_slice().copied().max().unwrap()
+    let summit_marker = elevations.as_slice().position([summit] |sink elevation| *elevation == summit).unwrap() + 1
+    println("summit: {summit} m at marker {summit_marker}")?
+
+    // `rev` walks the same markers from the last to the first.
+    println("way back:")?
+    for elevation in elevations.as_slice().rev() {
+        println("  {*elevation} m")?
+    }
+    .Ok(0)
+}

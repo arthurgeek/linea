@@ -71,8 +71,8 @@ true of a different implementation.
 | [0242](0242-a-parameter-may-carry-a-label-and-a-pattern.md) | A parameter may carry a label and a pattern | Accepted; supersedes the declaration-parameter clause of 0201; extends 0177 and 0224 |
 | [0207](0207-linea-converts-nothing-implicitly.md) | Linea converts nothing implicitly | Accepted; extends 0018 and 0061 |
 | [0208](0208-defer-let-binds-and-schedules-its-release.md) | `defer let` binds a value and schedules its release | Accepted; extends 0063 and narrows 0104's no-scheduling sentence to "never without a written `defer`" |
-| [0203](0203-zip-and-skip-require-discardable-items-and-zip-is-left-biased.md) | `zip` and `skip` require the items they dispose of to be Discardable, and `zip` is left-biased | Accepted; extends 0192 |
-| [0245](0245-iterator-adapters-are-lazy.md) | Iterator adapters are lazy, reversal needs a double-ended source, and only a terminal allocates | Proposed; would extend 0192 and 0203 |
+| [0203](0203-zip-and-skip-require-discardable-items-and-zip-is-left-biased.md) | `zip` and `skip` require the items they dispose of to be Discardable, and `zip` is left-biased | Accepted; extends 0192; extended by 0245 |
+| [0245](0245-iterator-adapters-are-lazy.md) | Iterator adapters are lazy, reversal needs a double-ended source, and only a terminal allocates | Accepted; extends 0192 and 0203 |
 | [0017](0017-failure-is-a-trap-or-a-value.md) | Failure is either a trap or a value, never both | Accepted; refined by 0106 |
 | [0018](0018-the-integer-model.md) | Fixed-width integers, literals typed by context, conversions explicit | Accepted; extended by 0092, 0152, 0207 and 0226 |
 | [0019](0019-entry-point-is-main-returning-u8.md) | A program is `fn main() -> u8` | Superseded by 0024 |
@@ -321,7 +321,7 @@ ones most likely to be superseded as the compiler grows.
 | [0198](0198-array-literal-bindings-infer-written-lengths.md) | Array literal bindings infer written lengths | Accepted; extends 0061, 0083 and 0149 |
 | [0166](0166-an-array-compares-through-its-slice-view.md) | An array compares, hashes and prints through its slice view | Accepted; extends 0061 and 0137 |
 | [0172](0172-an-array-reports-its-length.md) | An array reports its length | Accepted; extends 0061, 0083 and 0137 |
-| [0192](0192-iterator-operations-belong-to-every-sequence.md) | Iterator operations belong to every sequence, and every iterator is a sequence | Accepted; builds on 0186 and 0187; refines 0148 and 0152; extended by 0203 |
+| [0192](0192-iterator-operations-belong-to-every-sequence.md) | Iterator operations belong to every sequence, and every iterator is a sequence | Accepted; builds on 0186 and 0187; refines 0148 and 0152; extended by 0203 and 0245 |
 | [0204](0204-mir-verification-re-derives-storage-safety.md) | MIR verification re-derives the storage safety ownership promised | Accepted; extends 0049 and 0050; extended by 0246 |
 | [0257](0257-the-driver-keeps-the-checked-standard-library-on-disk.md) | The driver keeps the checked standard library on disk | Accepted |
 

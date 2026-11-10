@@ -1,0 +1,7 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/iterator_operations/a_peekable_does_not_escape_what_it_walks.lin:9:5
+  |
+9 |     readings.as_slice().peekable()
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `readings` belongs to `upcoming` and ends when it returns, so nothing returned may observe it

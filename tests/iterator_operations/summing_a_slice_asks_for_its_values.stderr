@@ -1,0 +1,8 @@
+error[T-Bound]: `Self.Iter.Item` requires `Additive`, and `borrow UInt64` does not implement it
+ --> tests/iterator_operations/summing_a_slice_asks_for_its_values.lin:7:35
+  |
+7 |     let total = prices.as_slice().sum()
+  |                                   ^^^ only the library, which declares `Additive`, may implement it for `borrow UInt64`; pass a value whose type implements it
+ ::: std/iter/iter.lin
+L |         Self.Iter.Item: num.Additive
+  |         -------------- required by this `where` clause

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/iterator_operations/a_peeked_item_does_not_outlive_its_peekable.lin:6:26
+  |
+6 |     let (_rest, _held) = numbers.into_parts()
+  |                          ^^^^^^^ keep this place available until the last use of its observation
+7 |     *upcoming
+  |     --------- the observation is still used here

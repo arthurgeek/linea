@@ -1,0 +1,51 @@
+// A peekable over linear tickets is walked lent, `for ticket in &line`, so the
+// loop leaves it with the program. `into_parts` then hands back the source and
+// any ticket `peek` held, and the program settles both.
+@linear
+struct Ticket { seat: UInt8 }
+
+struct Tickets { next_seat: UInt8 }
+
+impl Iterator for Tickets {
+    type Item = Ticket
+
+    fn next(inout self: Self) -> Option[Ticket] {
+        if self.next_seat == 4 {
+            return .None
+        }
+        self.next_seat += 1
+        .Some(Ticket { seat = self.next_seat })
+    }
+}
+
+// Settle a ticket and answer its seat.
+fn seat_of(sink ticket: Ticket) -> UInt8 {
+    let Ticket { seat } = ticket
+    seat
+}
+
+fn main() -> UInt8 {
+    var line = (Tickets { next_seat = 0 }).peekable()
+    var seats: UInt8 = 0
+    for ticket in &line {
+        let seat = seat_of(ticket)
+        seats += seat
+        if seat == 2 {
+            break
+        }
+    }
+    // `peek` takes the third ticket from the source and holds it.
+    let upcoming = match &line.peek() {
+        Some(next) => next.seat,
+        None => 0,
+    }
+    let (rest, held) = line.into_parts()
+    match held {
+        Some(ticket) => seats += 10 * seat_of(ticket),
+        None => {},
+    }
+    for ticket in rest {
+        seats += 50 * seat_of(ticket)
+    }
+    seats + upcoming
+}

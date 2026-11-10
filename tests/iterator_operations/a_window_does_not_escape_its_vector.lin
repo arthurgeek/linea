@@ -1,0 +1,16 @@
+import std.mem
+
+// A window views the storage of a vector the function owns, and that storage
+// is released when the function returns.
+fn first_pair() -> mem.Slice[UInt8] {
+    defer var readings: Vec[UInt8] = Vec.new()
+    &readings.push(3).unwrap()
+    &readings.push(5).unwrap()
+    var pairs = readings.as_slice().windows(2)
+    &pairs.next().unwrap()
+}
+
+fn main() -> UInt8 {
+    let pair = first_pair()
+    pair[0]
+}

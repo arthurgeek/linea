@@ -1,0 +1,14 @@
+// The state of a `scan` may be a walk of its own, here the windows of a
+// second array. What the step yields from it views that array, not the state,
+// so it may be used while the scan goes on.
+fn main() -> UInt8 {
+    let offsets = [UInt8(10), 20, 30]
+    var shifted = (UInt8(1)..3).scan(
+        offsets.as_slice().windows(2),
+        |inout pairs, sink _step| &pairs.next().unwrap(),
+    )
+    let first = &shifted.next().unwrap()
+    let second = &shifted.next().unwrap()
+    // 10 + 20 + 20 + 30
+    first[0] + first[1] + second[0] + second[1]
+}

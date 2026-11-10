@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/iterator_operations/the_windows_do_not_outlive_their_vector.lin:8:5
+  |
+8 |     readings.release()
+  |     ^^^^^^^^ keep this place available until the last use of its observation
+9 |     let first = &pairs.next().unwrap()
+  |                  ----- the observation is still used here

@@ -1,5 +1,8 @@
+import std.iter
 import std.mem
 import std.testing
+
+use iter.DoubleEnded
 
 // A Range holds the endpoints of lo..hi or lo..=hi and whether hi is
 // included. Empty and descending ranges are valid values.
@@ -114,6 +117,95 @@ impl[T: Ordered + Steppable + Copyable] Iterator for Range[T] {
 
         .None
     }
+}
+
+// Iterate from hi back toward lo, the same values `next` yields in the
+// opposite order. hi records the bound of what is left: an excluded hi steps
+// toward lo before it is yielded, and an included hi is yielded before it
+// steps, so neither end steps beyond the type's minimum or maximum. Ranges
+// walked from both ends meet without yielding a value twice.
+impl[T: Ordered + Steppable + Copyable] iter.DoubleEnded for Range[T] {
+    fn next_back(inout self: Self) -> Option[T] {
+        if self.lo.less(self.hi) {
+            if self.inclusive {
+                let out = copy(self.hi)
+                self.hi = self.hi.backward()
+                return .Some(out)
+            }
+            self.hi = self.hi.backward()
+            return .Some(copy(self.hi))
+        }
+
+        if self.hi.less(self.lo) {
+            if self.inclusive {
+                let out = copy(self.hi)
+                self.hi = self.hi.forward()
+                return .Some(out)
+            }
+            self.hi = self.hi.forward()
+            return .Some(copy(self.hi))
+        }
+
+        if self.inclusive && self.lo.equals(self.hi) {
+            self.inclusive = false
+            return .Some(copy(self.hi))
+        }
+
+        .None
+    }
+}
+
+// Read every value `next_back` yields as decimal digits, last first.
+fn digits_from_the_back(sink range: Range[UInt8]) -> UInt32 {
+    var walking = range
+    var seen: UInt32 = 0
+    loop {
+        match &walking.next_back() {
+            Some(v) => seen = seen * 10 + UInt32(v),
+            None => {
+                break
+            },
+        }
+    }
+    seen
+}
+
+test fn a_range_walked_from_the_back_yields_its_values_in_reverse() {
+    testing.assert_eq(digits_from_the_back(1..4), UInt32(321), "an ascending range")?
+    testing.assert_eq(digits_from_the_back(1..=4), UInt32(4321), "an ascending inclusive range")?
+    testing.assert_eq(digits_from_the_back(4..0), UInt32(1234), "a descending range")?
+    testing.assert_eq(digits_from_the_back(4..=0), UInt32(1234), "a descending inclusive range")?
+    testing.assert_eq(digits_from_the_back(3..3), UInt32(0), "an empty range")?
+    testing.assert_eq(digits_from_the_back(3..=3), UInt32(3), "a one-value inclusive range")?
+    .Ok(())
+}
+
+test fn a_range_at_the_ends_of_its_type_walks_back_without_stepping_past_them() {
+    var top: Range[UInt8] = 254..=255
+    testing.assert_eq(&top.next_back(), Option.Some(UInt8(255)), "the back of 254..=255 is 255")?
+    testing.assert_eq(&top.next_back(), Option.Some(UInt8(254)), "the back of 254..=255 then is 254")?
+    testing.assert(&top.next_back().is_none(), "254..=255 yielded a third value")?
+    var bottom: Range[UInt8] = 1..=0
+    testing.assert_eq(&bottom.next_back(), Option.Some(UInt8(0)), "the back of 1..=0 is 0")?
+    testing.assert_eq(&bottom.next_back(), Option.Some(UInt8(1)), "the back of 1..=0 then is 1")?
+    testing.assert(&bottom.next_back().is_none(), "1..=0 yielded a third value")?
+    .Ok(())
+}
+
+test fn a_range_walked_from_both_ends_yields_each_value_once() {
+    var both: Range[UInt8] = 1..=4
+    testing.assert_eq(&both.next(), Option.Some(UInt8(1)), "the front of 1..=4 is 1")?
+    testing.assert_eq(&both.next_back(), Option.Some(UInt8(4)), "the back of 1..=4 is 4")?
+    testing.assert_eq(&both.next_back(), Option.Some(UInt8(3)), "the back then is 3")?
+    testing.assert_eq(&both.next(), Option.Some(UInt8(2)), "the front then is 2")?
+    testing.assert(&both.next().is_none(), "the front passed the back")?
+    testing.assert(&both.next_back().is_none(), "the back passed the front")?
+    var down: Range[UInt8] = 3..0
+    testing.assert_eq(&down.next_back(), Option.Some(UInt8(1)), "the back of 3..0 is 1")?
+    testing.assert_eq(&down.next(), Option.Some(UInt8(3)), "the front of 3..0 is 3")?
+    testing.assert_eq(&down.next(), Option.Some(UInt8(2)), "the front then is 2")?
+    testing.assert(&down.next_back().is_none(), "3..0 yielded a fourth value")?
+    .Ok(())
 }
 
 // Folding the digits into one number checks their order as well as membership.
