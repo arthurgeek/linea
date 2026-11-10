@@ -1,5 +1,5 @@
-error[N-Undefined]: `Bool` declares no `max`
- --> tests/types/a_bool_has_no_bounds.lin:5:10
+error[N-Undefined]: `Bool` declares no `max`, and implements no trait in scope that does
+ --> tests/types/a_bool_has_no_bounds.lin:5:5
   |
 5 |     Bool.max
-  |          ^^^ a primitive holds what the standard library writes for it
+  |     ^^^^^^^^ `Sequence` declares `max`, and another implementation of `Sequence` for `Bool` would overlap the one that matches it
