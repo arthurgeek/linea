@@ -26,8 +26,7 @@ struct ThermostatSetting {
 
 // `From` takes its source with `sink`, so converting a reading uses it up.
 impl From[Fahrenheit] for Celsius {
-    fn from(sink source: Fahrenheit) -> Celsius {
-        let Fahrenheit { value } = source
+    fn from(sink source { value }: Fahrenheit) -> Celsius {
         .{ value = (value - 32.0) / 1.8 }
     }
 }

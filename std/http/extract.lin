@@ -117,8 +117,7 @@ impl[P: Allocator, T: FromPath] Extract[P] for Path[T] {
 }
 
 // Answer a path value that could not be read.
-fn refused_path[P: Allocator](request: Request[P], sink refusal: ParamError) -> Error[P] {
-    let ParamError { name, value, problem } = refusal
+fn refused_path[P: Allocator](request: Request[P], sink refusal { name, value, problem }: ParamError) -> Error[P] {
     match problem {
         Missing => error(request, .InternalServerError, "the route has no path value {name:?}"),
         Repeated => error(request, .InternalServerError, "the route names the path value {name:?} twice"),
@@ -222,8 +221,7 @@ impl[P: Allocator, T: Params] Extract[P] for Query[T] {
 }
 
 // Answer a query value that could not be read.
-fn refused_query[P: Allocator](request: Request[P], sink refusal: ParamError) -> Error[P] {
-    let ParamError { name, value, problem } = refusal
+fn refused_query[P: Allocator](request: Request[P], sink refusal { name, value, problem }: ParamError) -> Error[P] {
     match problem {
         Missing => error(request, .BadRequest, "missing query value {name:?}"),
         Repeated => error(request, .BadRequest, "the query names {name:?} more than once"),
@@ -332,8 +330,7 @@ impl[P: Allocator, T: Params] Extract[P] for Form[T] {
 }
 
 // Answer a form value that could not be read.
-fn refused_form[P: Allocator](request: Request[P], sink refusal: ParamError) -> Error[P] {
-    let ParamError { name, value, problem } = refusal
+fn refused_form[P: Allocator](request: Request[P], sink refusal { name, value, problem }: ParamError) -> Error[P] {
     match problem {
         Missing => error(request, .BadRequest, "missing form value {name:?}"),
         Repeated => error(request, .BadRequest, "the form names {name:?} more than once"),

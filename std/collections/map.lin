@@ -341,8 +341,7 @@ impl Hash for DirectKey {
 @linear
 struct MapTicket { id: UInt64 }
 
-fn settle_ticket(sink entry: Entry[UInt64, MapTicket]) -> UInt64 {
-    let Entry { key, value: MapTicket { id } } = entry
+fn settle_ticket(sink entry { key, value: MapTicket { id } }: Entry[UInt64, MapTicket]) -> UInt64 {
     key + id
 }
 

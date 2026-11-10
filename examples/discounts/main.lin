@@ -12,9 +12,10 @@ use mail.Email
 @derive(Equatable, Debug)
 type Percent = UInt8 where it in 0..=100
 
-fn discounted_price(price: UInt64, sink discount: Percent) -> UInt64 {
-    // Destructuring extracts the validated number for arithmetic.
-    let Percent(percent) = discount
+// `discount Percent(percent)` takes the validated number out of the discount
+// where the body begins, so the arithmetic reads a plain `UInt8`. Callers still
+// name the parameter `discount`.
+fn discounted_price(price: UInt64, sink discount Percent(percent): Percent) -> UInt64 {
     let rate = UInt64(percent)
     // Split whole hundreds from the remainder to avoid multiplying the full
     // price by the rate. Fractional cents in the discount are rounded down.

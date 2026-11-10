@@ -41,15 +41,13 @@ struct Receipt {
 }
 
 impl From[Ticket] for Receipt {
-    fn from(sink source: Ticket) -> Receipt {
-        let Ticket { number } = source
+    fn from(sink source { number }: Ticket) -> Receipt {
         .{ number }
     }
 }
 
 impl From[Ticket] for UInt64 {
-    fn from(sink source: Ticket) -> UInt64 {
-        let Ticket { number } = source
+    fn from(sink source { number }: Ticket) -> UInt64 {
         number
     }
 }
@@ -80,8 +78,7 @@ struct Label {
 }
 
 impl From[Label] for Str {
-    fn from(sink source: Label) -> Str {
-        let Label { text } = source
+    fn from(sink source { text }: Label) -> Str {
         text
     }
 }
