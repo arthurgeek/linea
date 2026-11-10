@@ -1669,6 +1669,10 @@ fn typecheckInternal(
             defer answer_fixes.deinit(gpa);
             c.returns_seen = &returns;
             c.answer_fixes = &answer_fixes;
+            for (resolution.parametersOf(d)) |b| {
+                const param = ast.declParams(d)[resolution.paramIndexOf(b)];
+                if (param.pattern != ExprId.none) try c.checkParameterPattern(param, c.binding_types.get(b));
+            }
             const actual = try c.checkBody(body, want);
             c.returns_seen = null;
             c.answer_fixes = null;
@@ -8194,7 +8198,8 @@ const Checker = struct {
             try names.put(self.gpa, self.ast.tokenName(name), .{ .capture = .{ .closure = owner, .field = @enumFromInt(index) } });
         };
         for (params, 0..) |param, index| {
-            if (param.name != .none) try names.put(self.gpa, self.ast.tokenName(param.name), .{ .parameter = @intCast(index) });
+            const label = self.ast.paramLabel(param);
+            if (label != .none) try names.put(self.gpa, self.ast.tokenName(label), .{ .parameter = @intCast(index) });
         }
         return names;
     }
@@ -8731,7 +8736,7 @@ const Checker = struct {
             }
             if (ty == .poison) valid = false;
             callable_params[i] = .{
-                .spelling = self.ast.tokenText(param.name),
+                .spelling = self.ast.paramSpelling(param),
                 .convention = param.convention,
                 .ty = ty,
                 .default = default,
@@ -16003,20 +16008,27 @@ const Checker = struct {
                     _ = self.report(.t_lend, d.init, "a borrowed pattern requires a place", .{}, "bind the value before reading it apart");
                 }
             }
-            // A call-shaped head names a newtype, or one variant of the
-            // value's own enum -- a pattern that may not match, which
-            // [T-Refutable] says once it is checked. Any other spelling is
-            // the newtype check's to refuse.
-            const saved_site = self.pattern_site;
-            self.pattern_site = .binding;
-            const checked = if (self.ast.exprTag(d.pattern) == .call and
-                (try self.variantNamed(of, self.ast.tokenText(self.ast.exprMain(d.pattern)))) == null)
-                try self.checkNewtypePattern(d.pattern, of, taken)
-            else
-                try self.checkPattern(d.pattern, of, taken);
-            self.pattern_site = saved_site;
-            if (checked == .matches) try self.refuseRefutable(d.pattern, of);
+            try self.checkBindingPattern(d.pattern, of, taken);
         }
+    }
+
+    /// A pattern that takes a whole value apart with no other arm: a
+    /// destructuring `let`'s, or a parameter's. It must match every value of
+    /// its type ([T-Refutable]).
+    fn checkBindingPattern(self: *Checker, pattern: ExprId, of: TypeId, taken: ExprId) std.mem.Allocator.Error!void {
+        // A call-shaped head names a newtype, or one variant of the value's
+        // own enum -- a pattern that may not match, which [T-Refutable] says
+        // once it is checked. Any other spelling is the newtype check's to
+        // refuse.
+        const saved_site = self.pattern_site;
+        self.pattern_site = .binding;
+        const checked = if (self.ast.exprTag(pattern) == .call and
+            (try self.variantNamed(of, self.ast.tokenText(self.ast.exprMain(pattern)))) == null)
+            try self.checkNewtypePattern(pattern, of, taken)
+        else
+            try self.checkPattern(pattern, of, taken);
+        self.pattern_site = saved_site;
+        if (checked == .matches) try self.refuseRefutable(pattern, of);
     }
 
     /// A scheduled expression may not itself leave the scope.
@@ -18449,20 +18461,17 @@ const Checker = struct {
         return false;
     }
 
-    /// A lambda parameter written as a tuple pattern takes its argument apart
-    /// where the body begins, as `let (a, b) = argument` does for a `sink`
-    /// parameter and `let read (a, b) = argument` does for a `read` or `inout`
-    /// one: the components are owned under `sink`, and lent from the
-    /// argument's place otherwise. The body cannot name the argument, so the
-    /// checker records no place for a lent component: two components are
-    /// bindings of their own, which is all its overlap rules ask of them.
+    /// A parameter written as a pattern, a declaration's or a lambda's,
+    /// takes its argument apart where the body begins, as
+    /// `let pattern = argument` does for a `sink` parameter and
+    /// `let read pattern = argument` does for a `read` or `inout` one: the
+    /// parts are owned under `sink`, and lent from the argument's place
+    /// otherwise. The body cannot name the argument, so the checker records
+    /// no place for a lent part: two parts are bindings of their own, which
+    /// is all its overlap rules ask of them.
     fn checkParameterPattern(self: *Checker, param: node.Param, ty: TypeId) std.mem.Allocator.Error!void {
         _ = self.record(param.argument, ty);
-        const saved_site = self.pattern_site;
-        self.pattern_site = .binding;
-        const checked = try self.checkTuplePattern(param.pattern, ty, ExprId.none);
-        self.pattern_site = saved_site;
-        if (checked == .matches) try self.refuseRefutable(param.pattern, ty);
+        try self.checkBindingPattern(param.pattern, ty, ExprId.none);
     }
 
     test checkParameterPattern {
@@ -23218,7 +23227,10 @@ const Checker = struct {
         }
 
         fn paramName(owner: CallParameters, self: *const Checker, at: usize) StringId {
-            if (owner.labels(self)) |params| return self.ast.tokenName(params[at].name);
+            if (owner.labels(self)) |params| {
+                const label = self.ast.paramLabel(params[at]);
+                return if (label == .none) .none else self.ast.tokenName(label);
+            }
             return .none;
         }
 
@@ -23315,7 +23327,8 @@ const Checker = struct {
     ) std.mem.Allocator.Error!?u32 {
         if (owner == .labelled) {
             for (owner.labelled.params, 0..) |param, j| {
-                if (self.ast.tokenName(param.name) == name) return @intCast(j);
+                const label = self.ast.paramLabel(param);
+                if (label != .none and self.ast.tokenName(label) == name) return @intCast(j);
             }
             return null;
         }
@@ -24475,7 +24488,7 @@ const Checker = struct {
             }
             if (parameter_ty == .poison) signature_valid = false;
             callable_params[j] = .{
-                .spelling = self.ast.tokenText(p.name),
+                .spelling = self.ast.paramSpelling(p),
                 .convention = p.convention,
                 .ty = parameter_ty,
                 .default = default,

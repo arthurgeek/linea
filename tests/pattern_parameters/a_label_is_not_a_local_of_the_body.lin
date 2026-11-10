@@ -1,0 +1,10 @@
+// The label names the parameter for callers. The body holds the pattern's
+// parts, so naming the label there names nothing.
+fn total(entry (first, second): (UInt8, UInt8)) -> UInt8 {
+    let (a, b) = entry
+    first + second + a + b
+}
+
+fn main() -> UInt8 {
+    total((1, 2))
+}

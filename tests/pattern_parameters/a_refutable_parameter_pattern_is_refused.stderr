@@ -1,0 +1,7 @@
+error[T-Refutable]: this pattern does not match every `(Option[UInt8], UInt8)`
+ --> tests/pattern_parameters/a_refutable_parameter_pattern_is_refused.lin:3:17
+  |
+3 | fn total(entry (Some(first), second): (Option[UInt8], UInt8)) -> UInt8 {
+  |                 ^^^^^^^^^^^ `(None, _)` is not matched
+  |
+  = help: take it apart with `match`, which has an arm for every case

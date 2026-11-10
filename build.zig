@@ -2429,7 +2429,7 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/defer_let/a_defer_let_binds_one_name.lin",
     "tests/defer_let/a_defer_let_read_binds_nothing_to_release.lin",
     "tests/tuples/var_does_not_take_a_tuple_apart.lin",
-    "tests/tuples/a_declaration_parameter_is_a_name_not_a_pattern.lin",
+    "tests/pattern_parameters/a_label_and_a_second_name_are_refused.lin",
     "tests/traits/a_grouped_type_is_not_an_implementation_head.lin",
     "tests/decl/borrowed_lets/a_borrowed_pattern_is_not_a_var_declaration.lin",
     "tests/decl/borrowed_lets/read_requires_an_irrefutable_pattern.lin",

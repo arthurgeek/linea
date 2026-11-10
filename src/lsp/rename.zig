@@ -491,6 +491,58 @@ test "a lambda pattern's binder is renamed and its parenthesis is not a name" {
     try testing.expectEqual(@as(?lsp.types.WorkspaceEdit, null), try forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(text, paren), .@"utf-16", "", "near"));
 }
 
+test "a parameter's label and its pattern's binder are renamed apart" {
+    const gpa = testing.allocator;
+    const text =
+        \\fn total(entry (entry, other): (UInt8, UInt8)) -> UInt8 {
+        \\    entry + other
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    total(entry: (3, 4)) + total((1, 2))
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    try testing.expect(!checked.sink.hasErrors());
+    const file = checked.fileNamed("main.lin").?;
+
+    // From the named argument: the label and every call that writes it.
+    const argument = std.mem.indexOf(u8, text, "entry: (3").?;
+    const by_label = (try forPosition(gpa, testing.io, &checked, file, at(text, argument + 1), .@"utf-16", "", "pair")).?;
+    defer free(gpa, by_label);
+    const relabelled = try applyTo(gpa, text, editsFor(by_label, "main.lin"), .@"utf-16");
+    defer gpa.free(relabelled);
+    try testing.expectEqualStrings(
+        \\fn total(pair (entry, other): (UInt8, UInt8)) -> UInt8 {
+        \\    entry + other
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    total(pair: (3, 4)) + total((1, 2))
+        \\}
+        \\
+    , relabelled);
+
+    // From the binder of the same spelling: the binder and its uses only.
+    const binder = std.mem.indexOf(u8, text, "(entry,").? + 1;
+    const by_binder = (try forPosition(gpa, testing.io, &checked, file, at(text, binder + 1), .@"utf-16", "", "first")).?;
+    defer free(gpa, by_binder);
+    const rebound = try applyTo(gpa, text, editsFor(by_binder, "main.lin"), .@"utf-16");
+    defer gpa.free(rebound);
+    try testing.expectEqualStrings(
+        \\fn total(entry (first, other): (UInt8, UInt8)) -> UInt8 {
+        \\    first + other
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    total(entry: (3, 4)) + total((1, 2))
+        \\}
+        \\
+    , rebound);
+}
+
 test "a qualified trait is renamed at every final component" {
     const gpa = testing.allocator;
     const main_text =

@@ -1,0 +1,9 @@
+// A default is the argument a call leaves out, and the pattern takes it apart
+// like any other.
+fn area(size (width, height): (UInt8, UInt8) = (2, 3)) -> UInt8 {
+    width * height
+}
+
+fn main() -> UInt8 {
+    area() + area(size: (4, 5))
+}

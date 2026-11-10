@@ -437,6 +437,24 @@ test "a function value is described with the labels its calls use" {
     try testing.expectEqualStrings("fn(read UInt8) -> UInt8", positional);
 }
 
+test "a function taking a pattern parameter is described with its label" {
+    const gpa = testing.allocator;
+    const text =
+        \\fn total(entry (first, second): (UInt8, UInt8)) -> UInt8 { first + second }
+        \\fn main() -> UInt8 {
+        \\    let step = total
+        \\    step(entry: (1, 2))
+        \\}
+        \\
+    ;
+    const described_value = try said(gpa, text, std.mem.indexOf(u8, text, "let step").? + 4);
+    defer gpa.free(described_value);
+    try testing.expectEqualStrings("fn(read entry: (UInt8, UInt8)) -> UInt8", described_value);
+    const binder = try said(gpa, text, std.mem.indexOf(u8, text, "first + ").?);
+    defer gpa.free(binder);
+    try testing.expectEqualStrings("UInt8", binder);
+}
+
 const written_program =
     \\struct Point {
     \\    x: UInt8,

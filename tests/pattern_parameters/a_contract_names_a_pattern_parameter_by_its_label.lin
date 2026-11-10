@@ -1,0 +1,10 @@
+// A borrow contract names a pattern parameter by its label, the name callers
+// see: the result carries what `entry`'s `name` part holds.
+fn name_of(sink entry (name, _count): (Str, UInt8)) -> Str where carries(entry) {
+    name
+}
+
+fn main() -> UInt8 {
+    let name = name_of(entry: ("Ada", 1))
+    UInt8(name.length())
+}

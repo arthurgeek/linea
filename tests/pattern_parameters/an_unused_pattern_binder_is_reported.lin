@@ -1,0 +1,13 @@
+// Each binder of a parameter's pattern is a local, so one the body never uses
+// is reported; `_` and a name beginning with `_` say a part is unused.
+fn first_of(entry (first, second): (UInt8, UInt8)) -> UInt8 {
+    first
+}
+
+fn kept(entry (first, _second, _): (UInt8, UInt8, UInt8)) -> UInt8 {
+    first
+}
+
+fn main() -> UInt8 {
+    first_of((1, 2)) + kept((1, 2, 3))
+}

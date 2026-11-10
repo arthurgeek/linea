@@ -1,0 +1,10 @@
+// A declaration parameter's pattern follows a label, the name a call writes.
+// Without one the parameter is refused once; its binders are still declared,
+// so the body's uses of them are not reported.
+fn total((first, second): (UInt8, UInt8)) -> UInt8 {
+    first + second
+}
+
+fn main() -> UInt8 {
+    total((1, 2))
+}

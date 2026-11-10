@@ -2197,7 +2197,12 @@ const Printer = struct {
             .inout => try self.write("inout "),
             .sink => try self.write("sink "),
         }
-        if (p.pattern != ExprId.none) try self.writeExpr(p.pattern) else try self.write(self.ast.tokenText(p.name));
+        const label = self.ast.paramLabel(p);
+        if (label != .none or p.pattern == ExprId.none) try self.write(self.ast.tokenText(p.name));
+        if (p.pattern != ExprId.none) {
+            if (label != .none) try self.write(" ");
+            try self.writeExpr(p.pattern);
+        }
         if (require_annotation or p.written.wasWritten()) {
             try self.write(": ");
             try self.writeWrittenType(p.written);
@@ -5824,6 +5829,33 @@ test "a lambda parameter's tuple pattern is printed where its name goes, by the 
         \\
     ;
     try check(gpa, broken, broken);
+}
+
+test "a parameter's label is printed before its pattern with one space" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const flat =
+        \\fn show(sink entry (position, name): (UInt64, Str), at { x, y }: Point = .{ x = 0, y = 0 }) -> UInt64 {
+        \\    position + x + y
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let a = |pair Meters(m), Point { x, y }| m
+        \\}
+        \\
+    ;
+    try check(gpa,
+        \\fn show(sink entry(position,name):(UInt64,Str),at  {x,y}:Point=.{x=0,y=0})->UInt64{
+        \\position+x+y
+        \\}
+        \\fn main()->UInt8{
+        \\let a=|pair   Meters(m),Point{x,y}|m
+        \\}
+        \\
+    , flat);
+    try check(gpa, flat, flat);
 }
 
 test "a comment inside a tuple breaks it one component per line" {

@@ -572,6 +572,8 @@ const Builder = struct {
             }
         }
 
+        try self.takeApartPatternParameters(params, self.res.parametersOf(d));
+
         // A function's value leaves through its return type, which takes it.
         self.owner = d;
         self.statements.clearRetainingCapacity();
@@ -599,6 +601,24 @@ const Builder = struct {
         });
     }
 
+    /// A parameter written as a pattern, a declaration's or a lambda's, is
+    /// taken apart where the body begins, as `let pattern = argument` takes
+    /// a value and `let read pattern = argument` lends from a place.
+    fn takeApartPatternParameters(self: *Builder, params: []const node.Param, bindings: []const BindingId) !void {
+        for (bindings) |b| {
+            const param = params[self.res.paramIndexOf(b)];
+            if (param.pattern == ExprId.none) continue;
+            const owning = param.convention == .sink;
+            try self.received(param.argument, if (owning) .consuming else .reading);
+            const holding: Holding = switch (param.convention) {
+                .sink => .owned,
+                .read => .lent_until_last_use,
+                .inout => .lent,
+            };
+            try self.bindPatternHolders(param.pattern, param.argument, param.argument, holding);
+        }
+    }
+
     fn closure(self: *Builder, id: resolve_mod.ClosureId, descriptor: types_mod.ClosureDescriptor) !void {
         const first = self.blocks.items.len;
         const first_scope = self.scopes.items.len;
@@ -619,21 +639,7 @@ const Builder = struct {
             }
         }
 
-        // A parameter written as a tuple pattern is taken apart where the
-        // body begins, as `let (a, b) = argument` takes a value and
-        // `let read (a, b) = argument` lends from a place.
-        for (self.res.closureParameters(id)) |b| {
-            const param = params[self.res.paramIndexOf(b)];
-            if (param.pattern == ExprId.none) continue;
-            const owning = param.convention == .sink;
-            try self.received(param.argument, if (owning) .consuming else .reading);
-            const holding: Holding = switch (param.convention) {
-                .sink => .owned,
-                .read => .lent_until_last_use,
-                .inout => .lent,
-            };
-            try self.bindPatternHolders(param.pattern, param.argument, param.argument, holding);
-        }
+        try self.takeApartPatternParameters(params, self.res.closureParameters(id));
 
         for (self.res.closureCaptures(id)) |capture| {
             try self.emit(.init, .{ .root = capture.binding }, descriptor.expr);

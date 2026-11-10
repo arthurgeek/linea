@@ -90,7 +90,7 @@ fn appendStops(
     for (params[@min(taken, params.len)..]) |p| {
         if (inside > 0 or stops > 0) try written.appendSlice(gpa, ", ");
         stops += 1;
-        try written.print(gpa, "${{{d}:{s}}}", .{ stops, ast.tokenText(p.name) });
+        try written.print(gpa, "${{{d}:{s}}}", .{ stops, ast.paramSpelling(p) });
     }
     return stops;
 }

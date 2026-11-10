@@ -2533,7 +2533,8 @@ const Parser = struct {
         // take: a lone `trav` is a name written where no member can begin, and
         // the braces this sits in report it as that.
         const name = self.cursor.advance();
-        const params = if (self.cursor.at(.l_paren)) try self.parseParams() else node.ParamRange{ .start = 0, .end = 0 };
+        const params = if (self.cursor.at(.l_paren)) try self.parseParams(.declaration) else node.ParamRange{ .start = 0, .end = 0 };
+        try self.refuseParameterPatterns(params, "a traversal's parameter is a name", "a traversal's receiver is the value it walks");
 
         if (self.atDelegation()) {
             const via = self.cursor.advance();
@@ -2746,7 +2747,7 @@ const Parser = struct {
         _ = try self.expectName(.s_name, kind.wantsAName(), kind.needsAName());
 
         const type_params = try self.parseTypeParams(.admitted);
-        const params = try self.parseParams();
+        const params = try self.parseParams(.declaration);
 
         var returns: node.TypeRef = .{ .name = .none };
         var return_type: TokenId = .none;
@@ -2824,6 +2825,12 @@ const Parser = struct {
             try self.endBodilessDecl(
                 if (body_rule == .external) "this declaration ends here" else "this signature ends here",
             );
+        }
+
+        if (kind == .projection) {
+            try self.refuseParameterPatterns(params, "a projection's parameter is a name", "a projection names a place and binds nothing");
+        } else if (body == ExprId.none and !wants_body) {
+            try self.refuseParameterPatterns(params, "a parameter of a declaration without a body is a name", "a pattern takes an argument apart where a body begins");
         }
 
         return self.builder.addDecl(.{
@@ -3250,7 +3257,7 @@ const Parser = struct {
             else => .read,
         };
         _ = self.cursor.advance();
-        const params = try self.parseParams();
+        const params = try self.parseParams(.callable_type);
         // No `->` is a callable type returning `()`, as it is for a function.
         var result: node.TypeRef = .{ .name = .none };
         if (self.cursor.eat(.arrow)) |arrow| {
@@ -3691,12 +3698,16 @@ const Parser = struct {
     /// list and nothing past it needs to see a violation to react to it.
     const ParamDelimiter = enum { parens, pipes };
     const ParamTypes = enum { required, optional };
+    /// What owns the list, which decides whether a parameter may take its
+    /// argument apart: a pattern binds where a body begins, and a callable
+    /// type has no body.
+    const ParamSite = enum { declaration, callable_type };
 
-    fn parseParams(self: *Parser) !node.ParamRange {
-        return self.parseParameterRun(.parens, .required);
+    fn parseParams(self: *Parser, site: ParamSite) !node.ParamRange {
+        return self.parseParameterRun(.parens, .required, site);
     }
 
-    fn parseParameterRun(self: *Parser, delimiter: ParamDelimiter, annotations: ParamTypes) !node.ParamRange {
+    fn parseParameterRun(self: *Parser, delimiter: ParamDelimiter, annotations: ParamTypes, site: ParamSite) !node.ParamRange {
         const open: Tag = if (delimiter == .parens) .l_paren else .pipe;
         const close: Tag = if (delimiter == .parens) .r_paren else .pipe;
         if (self.cursor.eat(open) == null) {
@@ -3731,34 +3742,14 @@ const Parser = struct {
                 break :blk .read;
             };
 
-            const pname_at = self.cursor.current();
-            var pattern = ExprId.none;
-            var argument = ExprId.none;
-            var pname = TokenId.none;
-            var recovered = false;
-            if (self.cursor.at(.l_paren)) {
-                if (delimiter == .pipes) {
-                    pattern = try self.descendIntoPattern(parseTuplePattern);
-                    argument = try self.builder.addLiteral(.param_argument, pname_at, self.rangeFrom(pname_at));
-                } else {
-                    // A declaration parameter's name is the label a call
-                    // writes, so a pattern has none. Skip the pattern and
-                    // read the `:` and the type after it as usual.
-                    try self.reportAt(
-                        .s_params,
-                        pname_at,
-                        "a parameter is a name",
-                        "a declaration parameter's name is the label a call writes; take the pair apart in the body",
-                    );
-                    if (self.delimiterEnd(pname_at)) |end| self.cursor.seek(@intCast(end.index() + 1));
-                    recovered = true;
-                }
-            } else {
-                pname = try self.expectName(.s_params, "expected a parameter name", "a parameter is a name and a type");
-                // Nothing that names a parameter is here, so there is no
-                // parameter: the reported token is not taken as its name.
-                if (delimiter == .pipes and pname == .none and !self.cursor.at(.colon) and !self.cursor.at(.equal)) break;
-            }
+            const head = try self.parseParameterHead(delimiter, site);
+            const pname = head.name;
+            const pattern = head.pattern;
+            const argument = head.argument;
+            var recovered = head.recovered;
+            // Nothing that names a parameter is here, so there is no
+            // parameter: the reported token is not taken as its name.
+            if (delimiter == .pipes and !head.named and !self.cursor.at(.colon) and !self.cursor.at(.equal)) break;
 
             var written: node.TypeRef = .{ .name = .none };
             if (self.cursor.eat(.colon) != null) {
@@ -3799,7 +3790,7 @@ const Parser = struct {
             }
 
             try parsed.append(self.gpa, .{
-                .name = if (pname != .none) pname else pname_at,
+                .name = pname,
                 .pattern = pattern,
                 .argument = argument,
                 .written = written,
@@ -3825,6 +3816,139 @@ const Parser = struct {
         const start = self.builder.paramMark();
         for (parsed.items) |param| try self.builder.addParam(param);
         return .{ .start = start, .end = self.builder.paramMark() };
+    }
+
+    /// What a parameter is written as before its `:`.
+    const ParamHead = struct {
+        name: TokenId,
+        pattern: ExprId = .none,
+        argument: ExprId = .none,
+        recovered: bool = false,
+        /// False when no name stands where one was expected.
+        named: bool = true,
+    };
+
+    /// A parameter's name, or its label and the pattern after it, or for a
+    /// lambda a pattern alone.
+    ///
+    /// The one place a parameter's head is read, for a declaration's list and
+    /// a lambda's alike. Whether a name before `(` or `{` is a label or the
+    /// type a pattern takes apart is decided by its case, as it is inside
+    /// every pattern: a capitalised name opens a struct or newtype pattern.
+    fn parseParameterHead(self: *Parser, delimiter: ParamDelimiter, site: ParamSite) !ParamHead {
+        const at = self.cursor.current();
+        if (self.atParameterPattern()) {
+            // A pattern with no label names nothing, so its parameter stands
+            // at the bracket that opens it, a token no rule about names reads:
+            // `Point { x }`'s head names the type, not the parameter.
+            const unnamed = if (self.cursor.at(.identifier)) self.cursor.ahead(1) orelse at else at;
+            const pattern = try self.descendIntoPattern(parseDestructuringPattern);
+            if (delimiter == .pipes) return .{ .name = unnamed, .pattern = pattern, .argument = try self.patternArgument(at) };
+            if (site == .callable_type) {
+                try self.reportAt(.s_params, at, "a callable type's parameter is a name", "a type has no body for a pattern to bind in");
+                return .{ .name = unnamed, .recovered = true };
+            }
+            // Read as written apart from the label, so its binders are
+            // declared and the body reports only its own mistakes.
+            try self.sink.add(.{
+                .severity = .err,
+                .code = .s_params,
+                .message = "a function's pattern parameter needs a label",
+                .labels = try self.sink.arena.dupe(Label, &.{.{
+                    .file = self.file,
+                    .span = self.cursor.spanAt(at),
+                    .message = "a call names this parameter by its label",
+                }}),
+                .notes = try self.sink.arena.dupe([]const u8, &.{try self.labelHelp(at)}),
+            });
+            return .{ .name = unnamed, .pattern = pattern, .argument = try self.patternArgument(at) };
+        }
+
+        const name = try self.expectName(.s_params, "expected a parameter name", "a parameter is a name and a type");
+        if (name == .none) return .{ .name = at, .named = false };
+        if (self.cursor.tags[name.index()] != .identifier) return .{ .name = name };
+
+        if (self.atParameterPattern()) {
+            const pattern_at = self.cursor.current();
+            const pattern = try self.descendIntoPattern(parseDestructuringPattern);
+            if (site == .callable_type) {
+                try self.reportAt(.s_params, pattern_at, "a callable type's parameter is a name", "a type has no body for a pattern to bind in");
+                return .{ .name = name };
+            }
+            if (std.mem.eql(u8, self.cursor.textOf(name), "self")) {
+                try self.reportAt(.s_params, pattern_at, "the receiver `self` takes no pattern", "take `self` apart in the body with `let`");
+                return .{ .name = name };
+            }
+            return .{ .name = name, .pattern = pattern, .argument = try self.patternArgument(pattern_at) };
+        }
+
+        // `entry e: T`: a second name, which a parameter does not have.
+        if (self.cursor.at(.identifier) and switch (self.cursor.peekAt(1)) {
+            .colon, .comma, .r_paren, .pipe, .equal => true,
+            else => false,
+        }) {
+            const second = self.cursor.advance();
+            try self.sink.add(.{
+                .severity = .err,
+                .code = .s_params,
+                .message = "a parameter's label is its name",
+                .labels = try self.sink.arena.dupe(Label, &.{.{
+                    .file = self.file,
+                    .span = self.cursor.spanAt(second),
+                    .message = "a second name declares nothing",
+                }}),
+                .notes = try self.sink.arena.dupe([]const u8, &.{
+                    try std.fmt.allocPrint(self.sink.arena, "write `{s}: …` to name the parameter once", .{self.cursor.textOf(name)}),
+                }),
+            });
+        }
+        return .{ .name = name };
+    }
+
+    /// Reports each pattern in a list whose owner has no body for it to bind
+    /// in, and reads the parameter whole under its label.
+    fn refuseParameterPatterns(self: *Parser, range: node.ParamRange, message: []const u8, label: []const u8) !void {
+        for (self.builder.params.items[range.start..range.end]) |*p| {
+            if (p.pattern == ExprId.none) continue;
+            // A pattern with no label was reported where it was read.
+            if (self.cursor.tags[p.name.index()] != .identifier)
+                p.recovered = true
+            else
+                try self.reportAt(.s_params, self.builder.exprStart(p.pattern), message, label);
+            p.pattern = .none;
+            p.argument = .none;
+        }
+    }
+
+    /// Whether a parameter's pattern begins here: a tuple, an inferred struct,
+    /// or a capitalised name opening a struct or newtype pattern.
+    fn atParameterPattern(self: *const Parser) bool {
+        if (self.cursor.at(.l_paren) or self.cursor.at(.l_brace)) return true;
+        if (!self.cursor.at(.identifier)) return false;
+        const text = self.cursor.textOf(self.cursor.current());
+        if (text.len == 0 or !std.ascii.isUpper(text[0])) return false;
+        return switch (self.cursor.peekAt(1)) {
+            .l_paren, .l_brace => true,
+            else => false,
+        };
+    }
+
+    /// The `param_argument` standing for what a pattern parameter takes
+    /// apart, at the pattern's first token.
+    fn patternArgument(self: *Parser, at: TokenId) !ExprId {
+        return self.builder.addLiteral(.param_argument, at, .{ .start = at, .end = TokenId.at(at.index() + 1) });
+    }
+
+    /// The help for a declaration parameter written as a pattern alone: the
+    /// same parameter with a label, quoting the pattern where it is short.
+    fn labelHelp(self: *Parser, start: TokenId) ![]const u8 {
+        const first = self.cursor.spanAt(start);
+        const last = self.cursor.spanAt(self.cursor.previousToken());
+        if (last.end <= first.start) return "write the label a call uses before the pattern, as in `entry (first, second)`";
+        const text = self.cursor.source[first.start..last.end];
+        if (text.len <= 40 and std.mem.indexOfScalar(u8, text, '\n') == null)
+            return std.fmt.allocPrint(self.sink.arena, "write the label a call uses before the pattern: `entry {s}`", .{text});
+        return "write the label a call uses before the pattern, as in `entry (first, second)`";
     }
 
     test parseParameterRun {
@@ -3951,7 +4075,7 @@ const Parser = struct {
                 try self.reportAt(.s_lambda, open, "expected `|`", "a lambda opens its parameter list with `|`");
                 return self.errExpr(start);
             }
-            params = try self.parseParameterRun(.pipes, .optional);
+            params = try self.parseParameterRun(.pipes, .optional, .declaration);
             close = self.cursor.previousToken();
         }
 

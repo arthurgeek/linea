@@ -1,0 +1,18 @@
+error[N-Duplicate]: `entry` is already declared by this declaration
+  --> tests/pattern_parameters/a_duplicate_binder_or_label_is_refused.lin:13:41
+   |
+13 | fn labels(entry (a, b): (UInt8, UInt8), entry (c, d): (UInt8, UInt8)) -> UInt8 {
+   |           ----- already declared here
+   |                                         ^^^^^ a declaration declares each parameter once
+error[N-Duplicate]: `count` is already declared by this pattern
+ --> tests/pattern_parameters/a_duplicate_binder_or_label_is_refused.lin:5:31
+  |
+5 | fn mixed(count: UInt8, entry (count, other): (UInt8, UInt8)) -> UInt8 {
+  |          ----- already declared here
+  |                               ^^^^^ a pattern declares each name once
+error[N-Duplicate]: `same` is already declared by this pattern
+ --> tests/pattern_parameters/a_duplicate_binder_or_label_is_refused.lin:9:23
+  |
+9 | fn twice(entry (same, same): (UInt8, UInt8)) -> UInt8 {
+  |                 ---- already declared here
+  |                       ^^^^ a pattern declares each name once

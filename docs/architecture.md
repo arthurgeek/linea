@@ -880,7 +880,7 @@ for every row at once as rustc does. `checkMatch` hands it the sound arms' rows
 and a wildcard row after them; the arms no value reaches are [T-Unreachable],
 and the values that reach the wildcard row are [T-Cover]'s witnesses. The
 irrefutable positions (`let`, `let read`, `let ... else`, a walk's binder and a
-lambda's parameter) hand it their one pattern and a wildcard ([T-Refutable]).
+function's or lambda's parameter) hand it their one pattern and a wildcard ([T-Refutable]).
 The pass splits each column by the constructors its type has; a row naming a
 constructor joins that branch alone and a row with a wildcard joins every
 branch, so the cells copied into branches are the cost: the size of the

@@ -1,0 +1,10 @@
+error[S-Params]: a projection's parameter is a name
+  --> tests/pattern_parameters/a_projection_or_traversal_parameter_is_a_name.lin:11:33
+   |
+11 |     proj at(inout self: Self, i (row, column): (UInt64, UInt64)) -> UInt8 where carries(self) {
+   |                                 ^ a projection names a place and binds nothing
+error[S-Params]: a traversal's parameter is a name
+  --> tests/pattern_parameters/a_projection_or_traversal_parameter_is_a_name.lin:17:23
+   |
+17 |     trav corners(grid Grid { cells }: Self) = 0..grid.cells.length()
+   |                       ^^^^ a traversal's receiver is the value it walks

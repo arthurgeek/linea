@@ -1,0 +1,5 @@
+error[N-Unused]: `second` is never used
+ --> tests/pattern_parameters/an_unused_pattern_binder_is_reported.lin:3:27
+  |
+3 | fn first_of(entry (first, second): (UInt8, UInt8)) -> UInt8 {
+  |                           ^^^^^^ bind it as `_` if the value is not wanted

@@ -1233,15 +1233,17 @@ fn lowerFunction(
         }
     }
 
-    // A parameter written as a tuple pattern is taken apart before the body
-    // runs: a `sink` parameter's components are moved into slots of their own,
-    // and any other convention lends the components in place.
+    // A parameter written as a pattern is taken apart before the body runs:
+    // a `sink` parameter's parts are moved into slots of their own, and any
+    // other convention lends the parts in place, from the argument's place
+    // as `let read` lends from its initialiser's.
     for (params) |param| {
         if (param.pattern == ExprId.none) continue;
         const pattern_span = ast.exprSpan(param.pattern);
         const of = try l.typeAt(param.argument);
-        const value = try l.expr(param.argument);
-        try l.bindPattern(param.pattern, l.matchedValueOf(of, value), param.convention != .sink, pattern_span);
+        const lending = param.convention != .sink;
+        const m = if (lending) try l.matchedPlaceOf(param.argument, of, pattern_span) else l.matchedValueOf(of, try l.expr(param.argument));
+        try l.bindPattern(param.pattern, m, lending, pattern_span);
     }
 
     const body = source.body;
@@ -3185,7 +3187,7 @@ const Lowerer = struct {
         const source = self.ast.withoutGroups(id);
         const target = self.res.targetOf(source);
         if (self.ast.isSelection(source) or self.res.constantNamed(source) != BindingId.none or
-            (self.ast.exprTag(source) == .name_ref and target != BindingId.none))
+            ((self.ast.exprTag(source) == .name_ref or self.ast.exprTag(source) == .param_argument) and target != BindingId.none))
             return self.addressOfPlace(source, span);
         const value = try self.expr(id);
         const local = try self.b.addLocal(ty, .value);
