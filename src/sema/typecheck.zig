@@ -35375,7 +35375,7 @@ const Checker = struct {
                     continue;
                 }
             } else if (bound == .poison or !self.callableInputsKnown(bound, settling)) {
-                self.reportCallbackInputs(value);
+                if (!try self.reportArgumentThatSettledNothing(d, args, params, walked, settling)) self.reportCallbackInputs(value);
                 _ = try self.check(value, .{ .ty = .poison, .at = self.locOf(value), .reason = .parameter, .callable_context = true });
                 walked[j] = true;
                 delayed_refused = true;
@@ -35452,11 +35452,15 @@ const Checker = struct {
                 delayed_refused = true;
             }
         }
+        // An argument of another type than its parameter is the reason the
+        // callbacks beside it wait: it is reported once, and they are not.
+        var mismatch_reported = false;
         for (callbacks.remaining, 0..) |remaining, j| {
             if (remaining == 0 or walked[j]) continue;
             const a = args[j];
             const value = if (self.ast.exprTag(a) == .marked) self.ast.unaryOperand(a) else a;
-            self.reportCallbackInputs(value);
+            if (!mismatch_reported) mismatch_reported = try self.reportArgumentThatSettledNothing(d, args, params, walked, settling);
+            if (!mismatch_reported) self.reportCallbackInputs(value);
             _ = try self.check(value, .{ .ty = .poison, .at = self.locOf(value), .reason = .parameter, .callable_context = true });
             walked[j] = true;
             delayed_refused = true;
@@ -35736,6 +35740,40 @@ const Checker = struct {
                 if (try self.settle(wanted.ty, written, s.owner, tried, &clash)) @memcpy(s.found, tried);
             }
         }
+    }
+
+    /// Reports the first argument already checked whose type is built from
+    /// another declaration than its parameter's, as `Chan[Send[T, N]]` passed
+    /// for a `Chan[Recv[T, N]]`: it settled none of the type parameters its
+    /// parameter names, so a callback waiting on them waits because of it.
+    /// Answers whether one was reported.
+    fn reportArgumentThatSettledNothing(self: *Checker, d: node.DeclId, args: []const ExprId, params: []const node.Param, walked: []const bool, settling: []const Settling) std.mem.Allocator.Error!bool {
+        for (args, 0..) |a, j| {
+            if (j >= params.len or a == ExprId.none or !walked[j]) continue;
+            const value = if (self.ast.exprTag(a) == .marked) self.ast.unaryOperand(a) else a;
+            const declared = try paramType(self, d, j);
+            if (self.callbackParameter(declared) != null or !self.hasOpenParameter(declared, settling)) continue;
+            const got = self.builder.exprType(value);
+            if (got == .poison or !self.builtFromAnotherDeclaration(declared, got)) continue;
+            const at_parameter: Loc = .{ .file = self.ast.fileOf(params[j].name), .span = self.ast.tokenSpan(params[j].name) };
+            _ = self.reportMismatch(value, got, .{ .ty = declared, .at = at_parameter, .reason = .parameter }, "");
+            return true;
+        }
+        return false;
+    }
+
+    /// Whether `declared` and `actual` are instantiations of different
+    /// declarations at some position both spell, which no choice of
+    /// `declared`'s type parameters reconciles.
+    fn builtFromAnotherDeclaration(self: *const Checker, declared: TypeId, actual: TypeId) bool {
+        const want = self.builder.instanceOf(declared) orelse return false;
+        const got = self.builder.instanceOf(actual) orelse return false;
+        if (want.decl != got.decl) return true;
+        const wanted = self.builder.argsOf(want);
+        const given = self.builder.argsOf(got);
+        if (wanted.len != given.len) return false;
+        for (wanted, given) |w, g| if (self.builtFromAnotherDeclaration(w, g)) return true;
+        return false;
     }
 
     fn reportCallbackInputs(self: *Checker, value: ExprId) void {

@@ -1,0 +1,14 @@
+error[T-Mismatch]: expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End], ()]`
+  --> tests/inference/an_argument_of_another_type_is_reported_before_the_callback_it_leaves_open.lin:27:14
+   |
+13 | fn received[T: Owned, N: Protocol, H, M, W: Release + fn(sink ready: Chan[Recv[T, N], H]) -> M](sink chan: Chan[Recv[T,  ...
+   |                                                                                                      ---- expected because of this parameter
+27 |     received(chan, |sink ready| Turn.Got(ready))
+   |              ^^^^ expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End], ()]`
+error[T-Mismatch]: expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End], ()]`
+  --> tests/inference/an_argument_of_another_type_is_reported_before_the_callback_it_leaves_open.lin:31:14
+   |
+13 | fn received[T: Owned, N: Protocol, H, M, W: Release + fn(sink ready: Chan[Recv[T, N], H]) -> M](sink chan: Chan[Recv[T,  ...
+   |                                                                                                      ---- expected because of this parameter
+31 |     received(chan, wrapped)
+   |              ^^^^ expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End], ()]`
