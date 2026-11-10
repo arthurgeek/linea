@@ -10,7 +10,10 @@ granted root call the runtime's functions directly, and the clauses of
 [0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md) that let
 a root granted `extern` hold an address, keep corpus cases that reach freed
 storage through the runtime, and pass over a case recording a storage report;
-extends [0254](0254-a-newtype-takes-type-parameters.md).
+extends [0254](0254-a-newtype-takes-type-parameters.md). Extended by
+[0264](0264-an-address-lives-no-longer-than-what-it-was-made-from.md),
+which supersedes the clause of §1 that keeps an address out of the
+dependency table.
 
 ## Context
 

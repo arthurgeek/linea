@@ -34,20 +34,20 @@ internal fn call_owner[S, R, F: Release + fn(inout state: S) -> R](queue: UInt64
         let value = job(&state)
         let shape: SlotType[R] = .Type
         var answer: Storage[R, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
-        let len = answer.len
+        let len = answer.capacity()
         slot_put(&answer, 0, value)
-        linea_owner_answer(queue, address.raw(answer.at), len)
+        linea_owner_answer(queue, address.raw(answer.address()), len)
         answer.dispose()
     }
     let erased: Closure[fn(inout state: S)] = Closure.open(request).unwrap()
     let request_shape: SlotType[Closure[fn(inout state: S)]] = .Type
     var storage: Storage[Closure[fn(inout state: S)], SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(request_shape)).unwrap())
-    let len = storage.len
+    let len = storage.capacity()
     slot_put(&storage, 0, erased)
     let answer_shape: SlotType[R] = .Type
     var answer: Storage[R, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(answer_shape)).unwrap())
-    let answer_len = answer.len
-    linea_owner_call(queue, address.raw(storage.at), len, address.raw(answer.at), answer_len)
+    let answer_len = answer.capacity()
+    linea_owner_call(queue, address.raw(storage.address()), len, address.raw(answer.address()), answer_len)
     storage.dispose()
     let value: R = slot_take(&answer, 0)
     answer.dispose()
@@ -58,8 +58,8 @@ internal fn call_owner[S, R, F: Release + fn(inout state: S) -> R](queue: UInt64
 internal fn next_owner_request[S](queue: UInt64) -> Option[Closure[fn(inout state: S)]] {
     let shape: SlotType[Closure[fn(inout state: S)]] = .Type
     var storage: Storage[Closure[fn(inout state: S)], SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
-    let len = storage.len
-    if linea_owner_next(queue, address.raw(storage.at), len) == 1 {
+    let len = storage.capacity()
+    if linea_owner_next(queue, address.raw(storage.address()), len) == 1 {
         let request: Closure[fn(inout state: S)] = slot_take(&storage, 0)
         storage.dispose()
         .Some(request)

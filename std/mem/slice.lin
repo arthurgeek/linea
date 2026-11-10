@@ -1,3 +1,4 @@
+import std.mem.address
 import std.hash
 import std.testing
 
@@ -22,9 +23,10 @@ extern fn slice_place[T](owner: Slice[T], i: UInt64) -> T where carries(owner)
 extern fn slice_subspan[T](owner: Slice[T], start: UInt64, count: UInt64) -> Slice[T] where carries(owner)
 
 // The address of a slice's first element, which names values of its element
-// type, for a runtime call that reads the slice's bytes. The compiler replaces
-// this declaration.
-extern fn slice_address[T](view: Slice[T]) -> Address[T]
+// type, for a runtime call that reads the slice's bytes. The address carries
+// what the slice carries, so it lives no longer than the slice's owner. The
+// compiler replaces this declaration.
+extern fn slice_address[T](view: Slice[T]) -> Address[T] where carries(view)
 
 // Process argument spans refer to runtime-owned immutable storage.
 extern fn argument_span(i: UInt64) -> Slice[UInt8]
@@ -426,23 +428,36 @@ test fn slice_iteration_collects_observations_and_transformed_values() {
 }
 
 // The address of a byte view's first byte, which `std.ffi` lends to C for the
-// length of a call. A view of no bytes may hold no address, and answers zero.
-internal fn foreign_address(view: Slice[UInt8]) -> UInt64 {
-    view.at
+// length of a call. It carries what the view carries, so it lives no longer
+// than the view's owner.
+internal fn foreign_address(view: Slice[UInt8]) -> address.Address[UInt8] where carries(view) {
+    slice_address(view)
 }
 
 test fn a_foreign_address_is_where_the_bytes_are() {
     let bytes = [UInt8(7), 9]
     let view = bytes.as_slice()
-    let at = foreign_address(view)
-    testing.assert(at != 0, "a view of two bytes answered no address")?
-    testing.assert_eq(foreign_byte(at, 1), UInt8(9), "the address did not hold the view's bytes")?
+    testing.assert_eq(foreign_byte(foreign_address(view), 1), UInt8(9), "the address did not hold the view's bytes")?
     .Ok(())
 }
 
+// The address at `number`, which names whatever the number does: memory C
+// handed over, or a test log's words carried through text. The compiler
+// replaces this declaration, and its table names the few declarations that
+// call it, each of which reads only the memory its number was given for.
+extern fn number_address[T](number: UInt64) -> address.Address[T]
+
+// The address of the bytes a C view names, for `std.ffi` to read. Only a C
+// view's own operations call this, each under a contract that ties the
+// address to the view, and the test of it beside `Buffer`, which may read a
+// buffer's number.
+internal fn foreign_at(number: UInt64) -> address.Address[UInt8] {
+    number_address(number)
+}
+
 // The byte at `offset` past an address C handed over.
-internal fn foreign_byte(at: UInt64, offset: UInt64) -> UInt8 {
-    linea_raw_load8(at, offset + 1, offset)
+internal fn foreign_byte(at: address.Address[UInt8], offset: UInt64) -> UInt8 {
+    linea_raw_load8(address.raw(at), offset + 1, offset)
 }
 
 test fn a_foreign_byte_is_read_at_its_offset() {
@@ -453,8 +468,8 @@ test fn a_foreign_byte_is_read_at_its_offset() {
 
 // The eight bytes at `offset` past an address C handed over, as a C pointer
 // or `uint64_t` stored there. `offset` is a multiple of eight.
-internal fn foreign_word(at: UInt64, offset: UInt64) -> UInt64 {
-    linea_raw_load(at, offset + 8, offset)
+internal fn foreign_word(at: address.Address[UInt8], offset: UInt64) -> UInt64 {
+    linea_raw_load(address.raw(at), offset + 8, offset)
 }
 
 test fn a_foreign_word_is_read_at_its_offset() {
@@ -462,7 +477,7 @@ test fn a_foreign_word_is_read_at_its_offset() {
         return testing.assert(false, "a buffer of sixteen bytes was refused")
     }
     &words.store(8, 20)
-    let loaded = foreign_word(words.at, 8)
+    let loaded = foreign_word(foreign_address(words.as_slice()), 8)
     words.release()
     testing.assert_eq(loaded, UInt64(20), "the wrong word was read")?
     .Ok(())

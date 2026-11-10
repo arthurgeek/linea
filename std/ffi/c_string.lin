@@ -1,4 +1,5 @@
 import std.mem
+import std.mem.address
 import std.testing
 
 use mem.Lender
@@ -68,7 +69,7 @@ impl[A: Allocator] CString[A] {
     // Lend the text to C as a `const char *`. The result borrows the
     // `CString`, so it cannot be released while C may still read it.
     pub fn text(self: Self) -> CText where borrows(self) {
-        CText(mem.foreign_address(self.bytes.as_slice()))
+        CText(address.raw(mem.foreign_address(self.bytes.as_slice())))
     }
 
     test fn lent_text_reads_back_as_the_original() {

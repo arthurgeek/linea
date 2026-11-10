@@ -28,9 +28,44 @@ impl[T, A: Allocator] Storage[T, A] {
     // Take a buffer's bytes as slot storage.
     fn from_buffer(sink buffer: Buffer[A]) -> Self where carries(buffer) {
         let allocator = copy(buffer.allocator)
-        let at: Address[T] = address_in(buffer, 0)
+        let at: Address[T] = owned_address_in(buffer, 0)
         let length = buffer.len
         .{ buffer = .Some(buffer), allocator, at, len = length }
+    }
+
+    // The address of the slots, which borrows the storage, so the address is
+    // used only while the storage still owns the bytes it names. Every other
+    // declaration reads a storage's address through this one ([T-RawAddress]).
+    fn address(self: Self) -> Address[T] where borrows(self) {
+        copy(self.at)
+    }
+
+    // The address of the slots `offset` bytes in, which borrows the storage.
+    // Storage that holds no buffer has only its own address, which names no
+    // bytes.
+    fn address_at(self: Self, offset: UInt64) -> Address[T] where borrows(self) {
+        match read self.buffer {
+            Some(buffer) => address_in(buffer, offset),
+            None => copy(self.at),
+        }
+    }
+
+    // How many bytes of slots the storage holds.
+    fn capacity(self: Self) -> UInt64 {
+        self.len
+    }
+
+    // The allocator the storage's buffer comes from, and a larger one would.
+    fn allocator(self: Self) -> A where carries(self) {
+        copy(self.allocator)
+    }
+
+    // Give up the slots and answer the buffer that held them, if any.
+    // Disposal settles no slot, so every live element must already have been
+    // taken or released.
+    fn into_buffer(sink self: Self) -> Option[Buffer[A]] where carries(self) {
+        let Storage { buffer, allocator: _, at: _, len: _ } = self
+        buffer
     }
 
     // Dispose the backing buffer. Disposal settles no slot, so every live
@@ -79,7 +114,16 @@ extern fn slot_put[T, A: Allocator](inout owner: Storage[T, A], i: UInt64, sink 
 extern fn slot_place[T, A: Allocator](owner: Storage[T, A], live: UInt64, i: UInt64) -> T
 
 // The address of `T` slots `offset` bytes into `buffer`, checking that the
-// offset lies within it. The compiler replaces this declaration.
-extern fn address_in[T, A: Allocator](buffer: Buffer[A], offset: UInt64) -> Address[T]
+// offset lies within it. The address borrows `buffer`, so it is used only
+// while the buffer still holds its bytes. The compiler replaces this
+// declaration.
+extern fn address_in[T, A: Allocator](buffer: Buffer[A], offset: UInt64) -> Address[T] where borrows(buffer)
+
+// The same address, for a value that takes `buffer` and keeps the address
+// beside it: `Storage.from_buffer` and `keep_body`. The address carries what
+// `buffer` carries but does not borrow it, so it outlives the buffer's place,
+// and the value that takes the buffer owns the bytes the address names. The
+// compiler replaces this declaration.
+extern fn owned_address_in[T, A: Allocator](buffer: Buffer[A], offset: UInt64) -> Address[T] where carries(buffer)
 
 extern fn slot_span[T, A: Allocator](owner: Storage[T, A], live: UInt64, start: UInt64, count: UInt64) -> Slice[T] where borrows(owner)
