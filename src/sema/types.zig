@@ -1543,9 +1543,10 @@ const BorrowContainment = struct {
         if (arguments.len == 0) return;
         if (declaration == certified.storage or declaration == certified.slice)
             return visit.child(.stored, arguments[0]);
-        // An address is a number, and the storage that owns its bytes
-        // carries the dependencies of what is kept there; what those values
-        // may write through or may not share is the address's as well.
+        // An address carries what the buffer or slice it was made from
+        // carries, which the value itself seeds; the values kept at it are
+        // counted by the storage that owns its bytes. What those values may
+        // write through or may not share is the address's as well.
         if (declaration == certified.address) {
             if (mode != .raw_carriers) try visit.child(.stored, arguments[0]);
             return;
@@ -1597,10 +1598,12 @@ const BorrowContainment = struct {
             // the columns under any slice of them.
             .struct_ => |record| {
                 for (0..record.field_count) |index| {
-                    // Certified storage's optional backing owner erases its
-                    // elements. Its logical T and separate allocator field
+                    // Certified storage's optional backing owner (field 0)
+                    // erases its elements, and its address (field 2) is the
+                    // address of that owner's bytes, carrying what the owner
+                    // carries. Its logical T and separate allocator field
                     // describe their dependencies without that raw erasure.
-                    if (typed_storage and index == 0 and mode == .raw_carriers) continue;
+                    if (typed_storage and (index == 0 or index == 2) and mode == .raw_carriers) continue;
                     const at = record.first_field + index;
                     try visit.child(.{ .field = source.fields.items(.name)[at] }, source.fields.items(.ty)[at]);
                 }
@@ -7738,6 +7741,9 @@ pub const Typing = struct {
             if (view != .none and declaration == view) return true;
         }
         if (self.raw_accesses.buffer != .none and declaration == self.raw_accesses.buffer) return true;
+        // An address is made from a buffer or a slice and carries what its
+        // source carries, so it lives no longer than what owns its bytes.
+        if (self.raw_accesses.address != .none and declaration == self.raw_accesses.address) return true;
         return self.raw_accesses.storage != .none and declaration == self.raw_accesses.storage and self.instanceOf(t) == null;
     }
 

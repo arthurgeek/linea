@@ -2053,12 +2053,10 @@ module {
     %v4 = llvm.load %v1 : !llvm.ptr -> i64 loc("std/mem/fd.lin":L:C)
     %v5 = func.call @"lin.std.mem.address;raw[UInt8]"(%v4) : (i64) -> i64 loc("std/mem/fd.lin":L:C)
     %v6 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/fd.lin":L:C)
-    %v7 = arith.constant 8 : i64 loc("std/mem/fd.lin":L:C)
-    %v8 = llvm.getelementptr %v6[%v7] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/mem/fd.lin":L:C)
-    %v9 = llvm.load %v8 : !llvm.ptr -> i64 loc("std/mem/fd.lin":L:C)
-    %va10_0 = arith.trunci %v0 : i64 to i32 loc("std/mem/fd.lin":L:C)
-    %v10 = func.call @linea_write_some(%va10_0, %v5, %v9) : (i32, i64, i64) -> i64 loc("std/mem/fd.lin":L:C)
-    func.return %v10 : i64 loc("std/mem/fd.lin":L:C)
+    %v7 = func.call @"lin.std.mem;Slice[UInt8].length"(%v6) : (!llvm.ptr) -> i64 loc("std/mem/fd.lin":L:C)
+    %va8_0 = arith.trunci %v0 : i64 to i32 loc("std/mem/fd.lin":L:C)
+    %v8 = func.call @linea_write_some(%va8_0, %v5, %v7) : (i32, i64, i64) -> i64 loc("std/mem/fd.lin":L:C)
+    func.return %v8 : i64 loc("std/mem/fd.lin":L:C)
   }
   func.func private @"lin.std.io.core;IoError.from_os"(%sret: !llvm.ptr, %a0: i64, %a1: i64, %a2: i64) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 1 : i64

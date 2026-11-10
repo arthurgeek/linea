@@ -6241,6 +6241,549 @@ test "the View certificate holds its carried field to mem.Carried of its element
     }
 }
 
+// An address made from a slice or a buffer lives no longer than what it was
+// made from, and the raw types that hold an address or an extent are built
+// and changed only where the compiler's table says: the runtime reads and
+// writes the bytes an address names, so an address kept past its source, or
+// one a declaration chose, reaches freed or unallocated storage. Only the
+// library can write these, so it is checked with these functions added to
+// `std/mem/fd.lin`. Each is held to the one rule that refuses it, by the
+// function its diagnostics fall in, and the `live_` and `empty_` ones are
+// accepted.
+test "an address lives no longer than the slice, buffer or storage it was made from" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const added =
+        \\
+        \\pub fn storage_field_address() -> Int64 {
+        \\    var values: Vec[UInt8] = Vec.new()
+        \\    &values.push(65).unwrap()
+        \\    let at = copy(values.storage.at)
+        \\    values.release()
+        \\    linea_write_some(1, address.raw(at), 1)
+        \\}
+        \\
+        \\pub fn storage_pattern_address() -> Int64 {
+        \\    let bytes = system().acquire(8).unwrap()
+        \\    let storage: Storage[UInt8, SystemAllocator] = Storage.from_buffer(bytes)
+        \\    let Storage { buffer, allocator: _, at, len: _ } = storage
+        \\    buffer.release()
+        \\    linea_write_some(1, address.raw(at), 1)
+        \\}
+        \\
+        \\pub fn storage_built_around_a_slice() -> Int64 {
+        \\    var values: Vec[UInt8] = Vec.new()
+        \\    &values.push(65).unwrap()
+        \\    let held: Storage[UInt8, SystemAllocator] = .{ buffer = .None, allocator = system(), at = slice_address(values.as_slice()), len = 1 }
+        \\    values.release()
+        \\    let written = linea_write_some(1, address.raw(held.address()), 1)
+        \\    held.dispose()
+        \\    written
+        \\}
+        \\
+        \\pub fn storage_of_nothing_with_a_length() {
+        \\    var held: Storage[UInt8, SystemAllocator] = .{ buffer = .None, allocator = system(), at = address.nowhere(), len = 4096 }
+        \\    slot_put(&held, 16, UInt8(1))
+        \\    held.dispose()
+        \\}
+        \\
+        \\pub fn storage_length_written() {
+        \\    let bytes = system().acquire(8).unwrap()
+        \\    var storage: Storage[UInt8, SystemAllocator] = Storage.from_buffer(bytes)
+        \\    storage.len = 4096
+        \\    slot_put(&storage, 4000, UInt8(1))
+        \\    storage.dispose()
+        \\}
+        \\
+        \\pub fn buffer_built_from_a_number() {
+        \\    let forged: Buffer[SystemAllocator] = .{ at = 16, len = 8, allocated = 8, allocator = system(), obligation = SystemAllocation {} }
+        \\    forged.release()
+        \\}
+        \\
+        \\pub fn owned_address_of_a_vector() -> Int64 {
+        \\    var values: Vec[UInt8] = Vec.new()
+        \\    &values.push(65).unwrap()
+        \\    let at: Address[UInt8] = match read values.storage.buffer {
+        \\        Some(buffer) => owned_address_in(buffer, 0),
+        \\        None => address.nowhere(),
+        \\    }
+        \\    values.release()
+        \\    linea_write_some(1, address.raw(at), 1)
+        \\}
+        \\
+        \\pub fn owned_address_named_through_its_module() -> Int64 {
+        \\    let bytes = system().acquire(8).unwrap()
+        \\    let at: Address[UInt8] = mem.owned_address_in(bytes, 0)
+        \\    bytes.release()
+        \\    linea_write_some(1, address.raw(at), 1)
+        \\}
+        \\
+        \\pub fn kept_body_taken_from_nowhere() -> UInt8 {
+        \\    let at: Address[UInt8] = address.nowhere()
+        \\    take_kept_body(at)
+        \\}
+        \\
+        \\pub fn kept_bytes_released_at_nowhere() {
+        \\    let at: Address[Buffer[SystemAllocator]] = address.nowhere()
+        \\    release_kept_bytes(at, 0)
+        \\}
+        \\
+        \\pub fn body_kept_outside_a_task() -> UInt64 {
+        \\    let bytes = system().acquire(64).unwrap()
+        \\    let kept = keep_body(bytes, UInt8(1))
+        \\    address.raw(kept.body)
+        \\}
+        \\
+        \\pub fn view_built_longer_than_its_storage() -> Int64 {
+        \\    let storage: Storage[UInt8, SystemAllocator] = Storage.from_buffer(system().acquire(8).unwrap())
+        \\    var view: View[UInt8] = .{ at = storage.address(), len = 4096, carried = .{} }
+        \\    view[4000] = 1
+        \\    let _seen = view.length()
+        \\    storage.dispose()
+        \\    0
+        \\}
+        \\
+        \\fn view_side_grown(inout left: View[UInt8], inout _right: View[UInt8]) {
+        \\    left.len = 4096
+        \\    left[4000] = 1
+        \\}
+        \\
+        \\pub fn view_side_grown_by_its_body() -> Int64 {
+        \\    var values: Vec[UInt8] = Vec.new()
+        \\    &values.push(1).unwrap()
+        \\    var body = view_side_grown
+        \\    &values.split_inout(0, &body)
+        \\    values.release()
+        \\    0
+        \\}
+        \\
+        \\pub fn vector_length_written() -> Int64 {
+        \\    var values: Vec[Vec[UInt8]] = Vec.new()
+        \\    var inner: Vec[UInt8] = Vec.new()
+        \\    &inner.push(1).unwrap()
+        \\    &values.push(inner).unwrap()
+        \\    let popped = &values.pop()
+        \\    values.len = 1
+        \\    popped.release()
+        \\    values.release()
+        \\    0
+        \\}
+        \\
+        \\trait TakeOut {
+        \\    fn take_out(inout self: Self) -> Self
+        \\}
+        \\
+        \\impl[T] TakeOut for Option[T] {
+        \\    fn take_out(inout self: Self) -> Self {
+        \\        let old = self
+        \\        self = .None
+        \\        old
+        \\    }
+        \\}
+        \\
+        \\trait Grow {
+        \\    fn grow(inout self: Self)
+        \\}
+        \\
+        \\impl Grow for UInt64 {
+        \\    fn grow(inout self: Self) {
+        \\        self = 4096
+        \\    }
+        \\}
+        \\
+        \\pub fn storage_buffer_taken_by_a_method() -> Int64 {
+        \\    var storage: Storage[UInt8, SystemAllocator] = Storage.from_buffer(system().acquire(8).unwrap())
+        \\    let old = &storage.buffer.take_out()
+        \\    old.release()
+        \\    let written = linea_write_some(1, address.raw(storage.address()), 1)
+        \\    storage.dispose()
+        \\    written
+        \\}
+        \\
+        \\pub fn storage_length_grown_by_a_method() -> Int64 {
+        \\    var storage: Storage[UInt8, SystemAllocator] = Storage.from_buffer(system().acquire(8).unwrap())
+        \\    &storage.len.grow()
+        \\    slot_put(&storage, 4000, UInt8(1))
+        \\    storage.dispose()
+        \\    0
+        \\}
+        \\
+        \\fn size_of_callable[F](_f: F) -> UInt64 {
+        \\    let shape: SlotType[F] = .Type
+        \\    slot_stride(shape)
+        \\}
+        \\
+        \\pub fn closure_release_called_through_its_field() -> Int64 {
+        \\    var inner: Vec[UInt8] = Vec.new()
+        \\    &inner.push(1).unwrap()
+        \\    let body = [sink inner] || -> UInt64 { inner.length() }
+        \\    let size = size_of_callable(body)
+        \\    let held = Closure.open(body).unwrap()
+        \\    (held.settle)(16, size)
+        \\    held.release()
+        \\    0
+        \\}
+        \\
+        \\@copyable
+        \\struct ForgingAllocator {}
+        \\
+        \\impl Allocator for ForgingAllocator {
+        \\    type Obligation = SystemAllocation
+        \\
+        \\    fn reclaims(_self: Self) -> Bool {
+        \\        true
+        \\    }
+        \\
+        \\    fn acquire(_self: Self, _size: UInt64) -> Result[Buffer[Self], Oom] {
+        \\        let forged: Buffer[SystemAllocator] = .{ at = 16, len = 8, allocated = 8, allocator = system(), obligation = SystemAllocation {} }
+        \\        forged.release()
+        \\        .Err(.Exhausted)
+        \\    }
+        \\
+        \\    fn dispose(sink b: Buffer[Self]) {
+        \\        let Buffer { at, len: length, allocated, allocator: _, obligation } = b
+        \\        let backing = Buffer[SystemAllocator] { at, len = length, allocated, allocator = system(), obligation }
+        \\        backing.release()
+        \\    }
+        \\}
+        \\
+        \\pub fn forging_allocator_acquires() {
+        \\    let forging = ForgingAllocator {}
+        \\    match forging.acquire(8) {
+        \\        Ok(buffer) => buffer.release(),
+        \\        Err(_) => {},
+        \\    }
+        \\}
+        \\
+        \\pub fn slot_taken_twice() {
+        \\    let shape: SlotType[Vec[UInt8]] = .Type
+        \\    var storage: Storage[Vec[UInt8], SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
+        \\    var inner: Vec[UInt8] = Vec.new()
+        \\    &inner.push(1).unwrap()
+        \\    slot_put(&storage, 0, inner)
+        \\    let first: Vec[UInt8] = slot_take(&storage, 0)
+        \\    let second: Vec[UInt8] = slot_take(&storage, 0)
+        \\    first.release()
+        \\    second.release()
+        \\    storage.dispose()
+        \\}
+        \\
+        \\pub fn storage_disposed_with_a_live_slot() {
+        \\    let shape: SlotType[Vec[UInt8]] = .Type
+        \\    let storage: Storage[Vec[UInt8], SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
+        \\    storage.dispose()
+        \\}
+        \\
+        \\impl[T, A: Allocator] Storage[T, A] {
+        \\    pub fn stale_slice_address() -> Int64 {
+        \\        var values: Vec[UInt8, SystemAllocator] = Vec.new()
+        \\        &values.push(65).unwrap()
+        \\        let at = slice_address(values.as_slice())
+        \\        values.release()
+        \\        linea_write_some(1, address.raw(at), 1)
+        \\    }
+        \\
+        \\    pub fn stale_buffer_address() -> Int64 {
+        \\        let bytes = system().acquire(8).unwrap()
+        \\        let at: Address[UInt8] = address_in(bytes, 0)
+        \\        bytes.release()
+        \\        linea_write_some(1, address.raw(at), 1)
+        \\    }
+        \\
+        \\    pub fn stale_foreign_address() -> Int64 {
+        \\        var values: Vec[UInt8, SystemAllocator] = Vec.new()
+        \\        &values.push(65).unwrap()
+        \\        let at = foreign_address(values.as_slice())
+        \\        values.release()
+        \\        linea_write_some(1, address.raw(at), 1)
+        \\    }
+        \\
+        \\    pub fn live_slice_address() -> Int64 {
+        \\        var values: Vec[UInt8, SystemAllocator] = Vec.new()
+        \\        &values.push(65).unwrap()
+        \\        let at = slice_address(values.as_slice())
+        \\        let written = linea_write_some(1, address.raw(at), 1)
+        \\        values.release()
+        \\        written
+        \\    }
+        \\
+        \\    pub fn stale_storage_address() -> Int64 {
+        \\        let bytes = system().acquire(8).unwrap()
+        \\        let storage: Storage[UInt8, SystemAllocator] = Storage.from_buffer(bytes)
+        \\        let at = storage.address()
+        \\        storage.dispose()
+        \\        linea_write_some(1, address.raw(at), 1)
+        \\    }
+        \\
+        \\    pub fn stale_arena_storage_address() -> Int64 {
+        \\        let arena = Arena.open(system(), 64)
+        \\        let handle = arena.handle()
+        \\        let bytes = handle.acquire(8).unwrap()
+        \\        let storage: Storage[UInt8, Handle[SystemAllocator]] = Storage.from_buffer(bytes)
+        \\        let at = storage.address()
+        \\        storage.dispose()
+        \\        arena.release()
+        \\        linea_write_some(1, address.raw(at), 1)
+        \\    }
+        \\
+        \\    pub fn slots_released_by_any_counts() {
+        \\        let shape: SlotType[UInt64] = .Type
+        \\        var storage: Storage[UInt64, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
+        \\        release_from(&storage, 0, 1)
+        \\        storage.dispose()
+        \\    }
+        \\
+        \\    pub fn live_storage_address() -> Int64 {
+        \\        let storage: Storage[UInt8, SystemAllocator] = Storage.from_buffer(system().acquire(8).unwrap())
+        \\        let written = linea_write_some(1, address.raw(storage.address()), 1)
+        \\        storage.dispose()
+        \\        written
+        \\    }
+        \\}
+        \\
+        \\pub fn empty_storage_anywhere() -> Storage[UInt8, SystemAllocator] {
+        \\    .{ buffer = .None, allocator = system(), at = address.nowhere(), len = 0 }
+        \\}
+        \\
+        \\pub fn raw_load_at_a_number() -> UInt64 {
+        \\    linea_raw_load(16, 8, 0)
+        \\}
+        \\
+        \\pub fn address_made_from_any_number() -> UInt8 {
+        \\    let at: Address[UInt8] = number_address(16)
+        \\    foreign_byte(at, 0)
+        \\}
+        \\
+        \\pub fn chunks_given_back_from_any_buffer() -> Int64 {
+        \\    let arena = Arena.open(system(), 1048576)
+        \\    let big = arena.handle().acquire(100000).unwrap()
+        \\    var fake = system().acquire(256).unwrap()
+        \\    &fake.store(arena_grown, 1)
+        \\    arena_give_back(arena, fake)
+        \\    let seen = big.load_byte(0)
+        \\    fake.release()
+        \\    arena.release()
+        \\    Int64(seen)
+        \\}
+        \\
+        \\pub fn release_recorded_at_any_number() {
+        \\    record_release(16, 16, 1)
+        \\}
+        \\
+        \\pub fn raw_store_past_its_buffer() {
+        \\    let bytes = system().acquire(8).unwrap()
+        \\    linea_raw_store(address.raw(bytes_in(bytes, 0)), 8192, 4096, 1)
+        \\    bytes.release()
+        \\}
+        \\
+        \\pub fn foreign_byte_past_its_view() -> UInt8 {
+        \\    let values = [UInt8(1)]
+        \\    foreign_byte(foreign_address(values.as_slice()), 4096)
+        \\}
+        \\
+        \\pub fn payload_received_as_an_address() {
+        \\    let _forged: Address[UInt8] = receive_payload(0)
+        \\}
+        \\
+        \\pub fn bytes_written_past_a_slice() -> Int64 {
+        \\    let values = [UInt8(1)]
+        \\    linea_write_some(1, address.raw(slice_address(values.as_slice())), 4096)
+        \\}
+        \\
+    ;
+    const Expected = struct { name: []const u8, code: ?Code };
+    const expected = [_]Expected{
+        .{ .name = "stale_slice_address", .code = .o_borrow },
+        .{ .name = "stale_buffer_address", .code = .o_borrow },
+        .{ .name = "stale_storage_address", .code = .o_borrow },
+        .{ .name = "stale_arena_storage_address", .code = .o_borrow },
+        .{ .name = "storage_field_address", .code = .t_raw_address },
+        .{ .name = "storage_pattern_address", .code = .t_raw_address },
+        .{ .name = "storage_built_around_a_slice", .code = .t_raw_address },
+        .{ .name = "storage_of_nothing_with_a_length", .code = .t_raw_address },
+        .{ .name = "storage_length_written", .code = .t_raw_address },
+        .{ .name = "buffer_built_from_a_number", .code = .t_raw_address },
+        .{ .name = "owned_address_of_a_vector", .code = .t_raw_address },
+        .{ .name = "owned_address_named_through_its_module", .code = .t_raw_address },
+        .{ .name = "kept_body_taken_from_nowhere", .code = .t_raw_address },
+        .{ .name = "kept_bytes_released_at_nowhere", .code = .t_raw_address },
+        .{ .name = "body_kept_outside_a_task", .code = .t_raw_address },
+        .{ .name = "view_built_longer_than_its_storage", .code = .t_raw_address },
+        .{ .name = "view_side_grown", .code = .t_raw_address },
+        .{ .name = "vector_length_written", .code = .t_raw_address },
+        .{ .name = "storage_buffer_taken_by_a_method", .code = .t_raw_address },
+        .{ .name = "storage_length_grown_by_a_method", .code = .t_raw_address },
+        .{ .name = "task_entry_run_at_nowhere", .code = .t_raw_address },
+        .{ .name = "closure_release_called_through_its_field", .code = .t_raw_address },
+        .{ .name = "acquire", .code = .t_raw_address },
+        .{ .name = "dispose", .code = .t_raw_address },
+        .{ .name = "slot_taken_twice", .code = .t_raw_address },
+        .{ .name = "storage_disposed_with_a_live_slot", .code = .t_raw_address },
+        .{ .name = "slots_released_by_any_counts", .code = .t_raw_address },
+        .{ .name = "stale_foreign_address", .code = .o_borrow },
+        .{ .name = "raw_load_at_a_number", .code = .t_raw_address },
+        .{ .name = "text_rebuilt_from_a_stale_number", .code = .t_raw_address },
+        .{ .name = "address_made_from_any_number", .code = .t_raw_address },
+        .{ .name = "chunks_given_back_from_any_buffer", .code = .t_raw_address },
+        .{ .name = "release_recorded_at_any_number", .code = .t_raw_address },
+        .{ .name = "raw_store_past_its_buffer", .code = .t_raw_address },
+        .{ .name = "foreign_byte_past_its_view", .code = .t_raw_address },
+        .{ .name = "payload_received_as_an_address", .code = .t_raw_address },
+        .{ .name = "bytes_written_past_a_slice", .code = .t_raw_address },
+        .{ .name = "channel_opened_on_any_endpoint", .code = .t_raw_address },
+        .{ .name = "endpoint_taken_from_a_channel", .code = .t_raw_address },
+        .{ .name = "foreign_bytes_read_at_any_number", .code = .t_raw_address },
+        .{ .name = "live_slice_address", .code = null },
+        .{ .name = "live_storage_address", .code = null },
+        .{ .name = "empty_storage_anywhere", .code = null },
+        .{ .name = "forging_allocator_acquires", .code = null },
+    };
+    const task_added =
+        \\pub fn channel_opened_on_any_endpoint[P: Protocol]() -> Chan[P] {
+        \\    Chan.opened(7)
+        \\}
+        \\
+        \\pub fn task_entry_run_at_nowhere[P: Protocol, F: sink fn(sink me: Chan[P])](_body: F) {
+        \\    let at: Address[F] = address.nowhere()
+        \\    run_body[P, F](0, at, 0)
+        \\}
+        \\
+    ;
+    const session_added =
+        \\
+        \\pub fn endpoint_taken_from_a_channel[P: Protocol, H](sink chan: Chan[P, H]) -> UInt64 {
+        \\    let Chan { endpoint, body: _ } = chan
+        \\    endpoint
+        \\}
+        \\
+    ;
+    const ffi_added =
+        \\pub fn foreign_bytes_read_at_any_number() -> UInt8 {
+        \\    mem.foreign_byte(mem.foreign_at(16), 0)
+        \\}
+        \\
+        \\pub fn text_rebuilt_from_a_stale_number() -> UInt64 {
+        \\    let held = CString.open("x").unwrap()
+        \\    let CText(at) = held.text()
+        \\    held.release()
+        \\    CText(at).length()
+        \\}
+        \\
+    ;
+    const files = try gpa.dupe(InMemoryFile, &library.files);
+    var texts: [4][]const u8 = .{ "", "", "", "" };
+    const paths = [4][]const u8{ "std/mem/fd.lin", "std/task/task.lin", "std/ffi/c_text.lin", "std/session/chan.lin" };
+    for (files) |*file| {
+        if (std.mem.eql(u8, file.path, paths[0])) {
+            file.text = try std.mem.concat(gpa, u8, &.{ "import std.mem\n", file.text, added });
+            texts[0] = file.text;
+        } else if (std.mem.eql(u8, file.path, paths[1])) {
+            file.text = try std.mem.concat(gpa, u8, &.{ file.text, task_added });
+            texts[1] = file.text;
+        } else if (std.mem.eql(u8, file.path, paths[2])) {
+            file.text = try std.mem.concat(gpa, u8, &.{ file.text, ffi_added });
+            texts[2] = file.text;
+        } else if (std.mem.eql(u8, file.path, paths[3])) {
+            file.text = try std.mem.concat(gpa, u8, &.{ file.text, session_added });
+            texts[3] = file.text;
+        }
+    }
+    for (texts) |text| try testing.expect(text.len != 0);
+    var table: FileTable = .empty;
+    var interner: Interner = .empty;
+    var sink = Sink.init(gpa);
+    // Checked for its tests, as `linea test std` checks it, so every module is
+    // loaded, `std.ffi` included, whether or not an import reaches it.
+    var program = try loadFromMemory(gpa, &table, &sink, &interner, library.prelude_dir, files, .tests, false, .borrow);
+    program.kind = .library;
+    var semantics = try checkProgram(gpa, gpa, &program, &interner, &sink, .tests);
+    defer semantics.deinit(gpa);
+    var seen = [_]bool{false} ** expected.len;
+    for (sink.items()) |d| {
+        if (d.severity != .err) continue;
+        const label = d.primaryLabel() orelse return error.TestUnexpectedResult;
+        const file_path = table.get(label.file).path;
+        const text = for (paths, texts) |path, written| {
+            if (std.mem.eql(u8, file_path, path)) break written;
+        } else {
+            std.debug.print("unexpected outside the added functions: {s}\n", .{d.message});
+            return error.TestUnexpectedResult;
+        };
+        // The function a diagnostic falls in is the last one declared before
+        // it, at the start of a line or as an implementation's member.
+        const before = text[0..label.span.start];
+        var at: usize = 0;
+        for ([_][]const u8{ "\npub fn ", "\nfn ", "\n    fn ", "\n    pub fn " }) |head| {
+            if (std.mem.lastIndexOf(u8, before, head)) |p| at = @max(at, p + head.len);
+        }
+        if (at == 0) return error.TestUnexpectedResult;
+        const rest = text[at..];
+        const name = rest[0 .. std.mem.indexOfAny(u8, rest, "[(") orelse return error.TestUnexpectedResult];
+        const index = for (expected, 0..) |e, k| {
+            if (std.mem.eql(u8, e.name, name)) break k;
+        } else {
+            std.debug.print("unexpected in `{s}`: {s}\n", .{ name, d.message });
+            return error.TestUnexpectedResult;
+        };
+        if (expected[index].code != d.code) {
+            std.debug.print("`{s}`: {s}\n", .{ name, d.message });
+            return error.TestUnexpectedResult;
+        }
+        seen[index] = true;
+    }
+    var mismatches: usize = 0;
+    for (expected, seen) |e, refused| {
+        if ((e.code != null) != refused) {
+            std.debug.print("`{s}` was {s}\n", .{ e.name, if (refused) "refused" else "accepted" });
+            mismatches += 1;
+        }
+    }
+    try testing.expectEqual(@as(usize, 0), mismatches);
+}
+
+// The address primitives' contracts are part of their compiler-defined
+// signatures: one that declares a weaker contract, or promises an
+// independent result, is refused, so an address cannot be made that the
+// checker ties to nothing.
+test "an address primitive keeps the contract that ties it to its source" {
+    const cases = [_]struct { path: []const u8, written: []const u8, replacement: []const u8 }{
+        .{ .path = "std/mem/slice.lin", .written = "-> Address[T] where carries(view)\n", .replacement = "-> Address[T] where carries()\n" },
+        .{ .path = "std/mem/slots.lin", .written = "offset: UInt64) -> Address[T] where borrows(buffer)\n", .replacement = "offset: UInt64) -> Address[T] where carries(buffer)\n" },
+        .{ .path = "std/mem/slots.lin", .written = "offset: UInt64) -> Address[T] where carries(buffer)\n", .replacement = "offset: UInt64) -> Address[T] where carries()\n" },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        const files = try gpa.dupe(InMemoryFile, &library.files);
+        var replaced = false;
+        for (files) |*file| {
+            if (!std.mem.eql(u8, file.path, case.path)) continue;
+            const at = std.mem.indexOf(u8, file.text, case.written) orelse return error.TestUnexpectedResult;
+            file.text = try std.mem.concat(gpa, u8, &.{ file.text[0..at], case.replacement, file.text[at + case.written.len ..] });
+            replaced = true;
+        }
+        try testing.expect(replaced);
+        var table: FileTable = .empty;
+        var interner: Interner = .empty;
+        var sink = Sink.init(gpa);
+        var program = try loadFromMemory(gpa, &table, &sink, &interner, library.prelude_dir, files, .program, false, .borrow);
+        program.kind = .library;
+        var resolved = try @import("../sema/resolve.zig").resolveLibraryPrefix(gpa, &program, &interner, &sink);
+        defer resolved.deinit();
+        if (@import("../sema/typecheck.zig").typecheckLibraryPrefix(gpa, &resolved.result.expanded, &resolved.result.resolution, &sink)) |checked| {
+            var held = checked;
+            held.deinit();
+        } else |err| if (err != error.InvalidLibraryPrefix) return err;
+        var refused = false;
+        for (sink.items()) |d| {
+            if (d.code == .t_extern and std.mem.indexOf(u8, d.message, "typed storage primitive") != null) refused = true;
+        }
+        try testing.expect(refused);
+    }
+}
+
 test "slow: checked construction derives survive library reuse and fallback" {
     try slow_tests.skipUnlessRun();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);

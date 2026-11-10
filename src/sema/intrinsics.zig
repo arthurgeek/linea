@@ -138,13 +138,153 @@ pub const RawAccesses = struct {
     slice: DeclId = .none,
     /// `mem.address.Address`, the newtype over a `UInt64` that names the type
     /// of the values kept at it; `address.raw`, the one function that reads
-    /// the number in one ([T-RawAddress]); and `mem.address_in`, the address
-    /// of slots at an offset into a buffer, which lowering computes; and
-    /// `mem.slice_address`, the address of a slice's first element.
+    /// the number in one ([T-RawAddress]); `mem.address_in`, the address of
+    /// slots at an offset into a buffer, which lowering computes and which
+    /// borrows the buffer; `mem.owned_address_in`, the same address for a
+    /// value that takes the buffer and keeps the address beside it, which
+    /// carries what the buffer carries; and `mem.slice_address`, the address
+    /// of a slice's first element, which carries what the slice carries.
     address: DeclId = .none,
     address_raw: DeclId = .none,
+    /// `address.nowhere`, the address of no bytes, which any `Storage`
+    /// literal may hold.
+    address_nowhere: DeclId = .none,
     address_in: DeclId = .none,
+    owned_address_in: DeclId = .none,
     slice_address: DeclId = .none,
+    /// `mem.number_address`, the address at a number: C's, or one the
+    /// library's test logs carry through text. It names whatever the number
+    /// does, so only the declarations `number_address_callers` lists call it
+    /// ([T-RawAddress]).
+    number_address: DeclId = .none,
+    number_address_callers: [2]DeclId = @splat(.none),
+    /// `mem.foreign_at`, through which `std.ffi` reads the memory a C view
+    /// names; only the members of `CText` and `CTextList` and its own test
+    /// call it.
+    foreign_at: DeclId = .none,
+    foreign_at_test: DeclId = .none,
+    /// The declarations beside a C view's own members that build one: a lent
+    /// view of bytes (`bytes_of`), a `CString`'s text (`CString.text`), and an
+    /// entry of a list C handed over (`CTextList.get`).
+    foreign_view_builders: [3]DeclId = @splat(.none),
+    /// The declarations that may build a certified `Storage` from a literal
+    /// with an address other than `address.nowhere()`, and so choose its `at`
+    /// ([T-RawAddress]): `Storage.from_buffer`, whose address is its own
+    /// buffer's, and `keep_body`, `take_kept_body` and `release_kept_bytes`,
+    /// which reach a kept task body through the addresses that own it.
+    storage_builders: [4]DeclId = @splat(.none),
+    /// `Storage.address`, the one declaration that reads a storage's `at`;
+    /// its contract borrows the storage, so the address lives no longer.
+    storage_address: DeclId = .none,
+    /// `Closure.erase`, the one declaration that takes a storage apart and
+    /// keeps its address, as the `at` of the closure that then owns the bytes.
+    closure_erase: DeclId = .none,
+    /// The declarations that may call `owned_address_in`, whose address
+    /// outlives the buffer's place: `Storage.from_buffer` and `keep_body`,
+    /// each of which takes the buffer into what the address names.
+    owned_address_callers: [3]DeclId = @splat(.none),
+    /// `mem.keep_body`, `mem.take_kept_body` and `mem.release_kept_bytes`,
+    /// which move a task's body into bytes, out of them, and free them, each
+    /// trusting the address it is handed. `task.Slot.start` alone keeps a
+    /// body and names the release, and `task.run_body`, the entry the new
+    /// thread runs, alone takes it ([T-RawAddress]).
+    keep_body: DeclId = .none,
+    take_kept_body: DeclId = .none,
+    release_kept_bytes: DeclId = .none,
+    task_run_body: DeclId = .none,
+    /// `mem.Vec`, whose `storage` and `len` are the bytes it owns and how many
+    /// of its slots are live, which `slot_place` and its release trust.
+    vec: DeclId = .none,
+    /// `mem.Kept`, the addresses that own a task body kept in bytes.
+    kept: DeclId = .none,
+    /// `mem.vector_from_buffer` and `mem.vector_into_buffer`, which make a
+    /// byte vector from a buffer and take it back.
+    vector_from_buffer: DeclId = .none,
+    vector_into_buffer: DeclId = .none,
+    /// `Vec.split_inout`, which lends a vector's two sides as views.
+    vec_split_inout: DeclId = .none,
+    /// The declarations that hand a buffer's or a slice's bytes out as
+    /// numbers: an arena's own bookkeeping (`Arena.rewind`, `arena_reserve`),
+    /// and the logs the library's tests write through
+    /// (`AllocationLog.refuse_attempt`, `ReleaseLog.words`).
+    buffer_numbers: [9]DeclId = @splat(.none),
+    /// `mem.Arena`, whose `chunks` is the address of its table of later chunks
+    /// inside its first buffer, and the free declarations of its allocator
+    /// that read it.
+    arena: DeclId = .none,
+    arena_users: [5]DeclId = @splat(.none),
+    arena_table_of: DeclId = .none,
+    /// `mem.Handle` and the arena's free functions that trust the first chunk
+    /// they are handed: `arena_zero` and `arena_give_back` are named only by
+    /// `Arena`'s members, `arena_reserve` and `arena_holds` only by `Handle`'s,
+    /// and `arena_table_of` only by the three that read the table.
+    handle: DeclId = .none,
+    arena_zero: DeclId = .none,
+    arena_give_back: DeclId = .none,
+    arena_reserve: DeclId = .none,
+    arena_holds: DeclId = .none,
+    /// `Storage.from_buffer`, which takes a buffer apart into slot storage.
+    storage_from_buffer: DeclId = .none,
+    /// `Storage.dispose` and `Storage.into_buffer`, which give up a storage's
+    /// slots without settling them.
+    storage_dispose: DeclId = .none,
+    storage_into_buffer: DeclId = .none,
+    /// The declarations beside `Storage`'s and `Vec`'s own members that move
+    /// values in and out of slots and give storage up: each takes or hands
+    /// on every value it puts before it disposes, so no slot is left live
+    /// ([T-RawAddress]). A task body's keeping, taking and release, a
+    /// closure's erasure, a payload's send and receive, an owning task's call
+    /// and request, the release of a vector's elements, and the byte vector
+    /// given back as a buffer, whose bytes need no settling.
+    slot_users: [14]DeclId = @splat(.none),
+    /// The test allocators that build a buffer of their backing allocator,
+    /// which they hand out and take back on its behalf.
+    backing_buffer_builders: [7]DeclId = @splat(.none),
+    /// `mem.Drain`, which takes a vector's elements out of its storage.
+    drain: DeclId = .none,
+    /// `mem.release_from`, which releases the slots between two counts it
+    /// trusts; only `Vec`'s and `Drain`'s members name it ([T-RawAddress]).
+    release_from: DeclId = .none,
+    /// `Chan.opened` and the three that move a value through an endpoint,
+    /// which trust that the endpoint carries a value of the type asked for:
+    /// only a `Chan`'s own members move one, and only `task.Slot.start` and
+    /// `task.run_body` open a `Chan` on the endpoint a task was started with.
+    chan_opened: DeclId = .none,
+    send_payload: DeclId = .none,
+    receive_payload: DeclId = .none,
+    receive_payload_until: DeclId = .none,
+    /// `call_owner` and `next_owner_request`, which trust that a queue holds
+    /// jobs for the state asked for: `task.Client.call` and `task.run_owner`.
+    call_owner: DeclId = .none,
+    next_owner_request: DeclId = .none,
+    client_call: DeclId = .none,
+    /// `task.Owner`, whose `queue` is trusted as an endpoint is, and the
+    /// declarations beside its members that name its fields.
+    owner: DeclId = .none,
+    owner_users: [6]DeclId = @splat(.none),
+    run_owner: DeclId = .none,
+    /// The free declarations that name a `Chan`'s fields.
+    endpoint_users: [6]DeclId = @splat(.none),
+    /// `record_release`, which writes at the number it is given, and its two
+    /// callers: `ReleaseTag.release`, whose number is its log's, and the HTTP
+    /// test `ProbeTag`, whose extractor reaches the log only through a request
+    /// header, so the number crosses as text. `ProbeTag` is built only by
+    /// `probe_tag`.
+    record_release: DeclId = .none,
+    record_release_callers: [2]DeclId = @splat(.none),
+    probe_tag: DeclId = .none,
+    probe_tag_builder: DeclId = .none,
+    /// `foreign_byte` and `foreign_word`, which read at an extent they cannot
+    /// check, C's memory having none: only `CText`'s and `CTextList`'s members,
+    /// `copied_in` and their own tests name them.
+    foreign_byte: DeclId = .none,
+    foreign_word: DeclId = .none,
+    foreign_readers: [5]DeclId = @splat(.none),
+    /// The declarations beside `Buffer`'s and `Storage`'s and `Chan`'s own
+    /// members that hand the runtime or a raw load an address and an extent,
+    /// each an extent it has read from what owns the bytes
+    /// ([T-RawAddress]).
+    byte_operations: [31]DeclId = @splat(.none),
     /// `mem.Carried`, the zero-sized field type that carries its argument's
     /// dependencies.
     carried: DeclId = .none,
@@ -228,19 +368,167 @@ pub const RawAccesses = struct {
     /// Identify private storage declarations before checking their generic signatures.
     pub fn init(program: *const ExpandedProgram, ast: *const Ast) RawAccesses {
         var raw: RawAccesses = .{
-            .storage = program.libraryDeclIn("mem", "Storage") orelse .none,
-            .buffer = program.libraryDeclIn("mem", "Buffer") orelse .none,
-            .slice = program.libraryDeclIn("mem", "Slice") orelse .none,
+            .storage = structIn(program, ast, "mem", "Storage"),
+            .buffer = structIn(program, ast, "mem", "Buffer"),
+            .slice = structIn(program, ast, "mem", "Slice"),
             .address = program.libraryDeclIn("address", "Address") orelse .none,
             .address_raw = moduleFunction(program, ast, "address", "raw"),
+            .address_nowhere = moduleFunction(program, ast, "address", "nowhere"),
             .address_in = rawAccessDecl(program, ast, "address_in", 2),
+            .owned_address_in = rawAccessDecl(program, ast, "owned_address_in", 2),
             .slice_address = rawAccessDecl(program, ast, "slice_address", 1),
-            .carried = program.libraryDeclIn("mem", "Carried") orelse .none,
+            .number_address = rawAccessDecl(program, ast, "number_address", 1),
+            .number_address_callers = .{
+                moduleFunction(program, ast, "mem", "foreign_at"),
+                moduleFunction(program, ast, "mem", "record_release"),
+            },
+            .foreign_at = moduleFunction(program, ast, "mem", "foreign_at"),
+            .foreign_at_test = testIn(program, ast, "mem", "an_address_at_a_number_names_the_bytes_there"),
+            .foreign_view_builders = .{
+                moduleFunction(program, ast, "ffi", "bytes_of"),
+                memberOf(program, ast, "ffi", "CString", "text"),
+                memberOf(program, ast, "ffi", "CTextList", "get"),
+            },
+            .storage_builders = .{
+                memberOf(program, ast, "mem", "Storage", "from_buffer"),
+                moduleFunction(program, ast, "mem", "keep_body"),
+                moduleFunction(program, ast, "mem", "take_kept_body"),
+                moduleFunction(program, ast, "mem", "release_kept_bytes"),
+            },
+            .keep_body = moduleFunction(program, ast, "mem", "keep_body"),
+            .take_kept_body = moduleFunction(program, ast, "mem", "take_kept_body"),
+            .release_kept_bytes = moduleFunction(program, ast, "mem", "release_kept_bytes"),
+            .task_run_body = moduleFunction(program, ast, "task", "run_body"),
+            .vec = structIn(program, ast, "mem", "Vec"),
+            .kept = structIn(program, ast, "mem", "Kept"),
+            .vector_from_buffer = moduleFunction(program, ast, "mem", "vector_from_buffer"),
+            .vector_into_buffer = moduleFunction(program, ast, "mem", "vector_into_buffer"),
+            .vec_split_inout = memberOf(program, ast, "mem", "Vec", "split_inout"),
+            .buffer_numbers = .{
+                memberOf(program, ast, "mem", "Arena", "rewind"),
+                moduleFunction(program, ast, "mem", "arena_reserve"),
+                memberOf(program, ast, "mem", "AllocationLog", "refuse_attempt"),
+                memberOf(program, ast, "mem", "ReleaseLog", "words"),
+                memberOf(program, ast, "mem", "Arena", "open"),
+                moduleFunction(program, ast, "mem", "arena_table_of"),
+                moduleFunction(program, ast, "mem", "arena_zero"),
+                moduleFunction(program, ast, "mem", "arena_give_back"),
+                moduleFunction(program, ast, "mem", "arena_holds"),
+            },
+            .arena = structIn(program, ast, "mem", "Arena"),
+            .arena_users = .{
+                moduleFunction(program, ast, "mem", "arena_table_of"),
+                moduleFunction(program, ast, "mem", "arena_give_back"),
+                moduleFunction(program, ast, "mem", "arena_reserve"),
+                moduleFunction(program, ast, "mem", "arena_holds"),
+                memberOf(program, ast, "mem", "Handle", "dispose"),
+            },
+            .arena_table_of = moduleFunction(program, ast, "mem", "arena_table_of"),
+            .handle = structIn(program, ast, "mem", "Handle"),
+            .arena_zero = moduleFunction(program, ast, "mem", "arena_zero"),
+            .arena_give_back = moduleFunction(program, ast, "mem", "arena_give_back"),
+            .arena_reserve = moduleFunction(program, ast, "mem", "arena_reserve"),
+            .arena_holds = moduleFunction(program, ast, "mem", "arena_holds"),
+            .chan_opened = memberOf(program, ast, "session", "Chan", "opened"),
+            .send_payload = moduleFunction(program, ast, "mem", "send_payload"),
+            .receive_payload = moduleFunction(program, ast, "mem", "receive_payload"),
+            .receive_payload_until = moduleFunction(program, ast, "mem", "receive_payload_until"),
+            .call_owner = moduleFunction(program, ast, "mem", "call_owner"),
+            .next_owner_request = moduleFunction(program, ast, "mem", "next_owner_request"),
+            .client_call = memberOf(program, ast, "task", "Client", "call"),
+            .owner = structIn(program, ast, "task", "Owner"),
+            .owner_users = .{ memberOf(program, ast, "task", "Client", "call"), moduleFunction(program, ast, "task", "own"), .none, .none, .none, .none },
+            .run_owner = moduleFunction(program, ast, "task", "run_owner"),
+            .endpoint_users = .{ moduleFunction(program, ast, "session", "detach"), .none, .none, .none, .none, .none },
+            .record_release = moduleFunction(program, ast, "mem", "record_release"),
+            .record_release_callers = .{ memberOf(program, ast, "mem", "ReleaseTag", "release"), memberOf(program, ast, "http", "ProbeTag", "release") },
+            .probe_tag = structIn(program, ast, "http", "ProbeTag"),
+            .probe_tag_builder = moduleFunction(program, ast, "http", "probe_tag"),
+            .foreign_byte = moduleFunction(program, ast, "mem", "foreign_byte"),
+            .foreign_word = moduleFunction(program, ast, "mem", "foreign_word"),
+            .foreign_readers = .{
+                moduleFunction(program, ast, "ffi", "copied_in"),
+                testIn(program, ast, "mem", "a_foreign_address_is_where_the_bytes_are"),
+                testIn(program, ast, "mem", "a_foreign_byte_is_read_at_its_offset"),
+                testIn(program, ast, "mem", "a_foreign_word_is_read_at_its_offset"),
+                testIn(program, ast, "mem", "an_address_at_a_number_names_the_bytes_there"),
+            },
+            .byte_operations = .{
+                moduleFunction(program, ast, "mem", "arena_reserve"),
+                moduleFunction(program, ast, "mem", "arena_zero"),
+                moduleFunction(program, ast, "mem", "arena_give_back"),
+                moduleFunction(program, ast, "mem", "arena_holds"),
+                memberOf(program, ast, "mem", "Arena", "rewind"),
+                memberOf(program, ast, "mem", "SystemAllocator", "dispose"),
+                moduleFunction(program, ast, "mem", "read_fd"),
+                moduleFunction(program, ast, "mem", "write_slice_fd"),
+                moduleFunction(program, ast, "mem", "read_fd_at"),
+                moduleFunction(program, ast, "mem", "write_slice_fd_at"),
+                moduleFunction(program, ast, "mem", "_random_bytes"),
+                moduleFunction(program, ast, "mem", "_open_parent_fd"),
+                moduleFunction(program, ast, "mem", "_open_at_fd"),
+                moduleFunction(program, ast, "mem", "_mode_at_fd"),
+                moduleFunction(program, ast, "mem", "_publish_at_fd"),
+                moduleFunction(program, ast, "mem", "_unlink_at_fd"),
+                moduleFunction(program, ast, "mem", "parse_float64_bits"),
+                moduleFunction(program, ast, "mem", "parse_float32_bits"),
+                moduleFunction(program, ast, "mem", "call_owner"),
+                moduleFunction(program, ast, "mem", "next_owner_request"),
+                moduleFunction(program, ast, "mem", "send_payload"),
+                moduleFunction(program, ast, "mem", "receive_payload"),
+                moduleFunction(program, ast, "mem", "receive_payload_until"),
+                memberOf(program, ast, "mem", "AllocationLog", "refuse_attempt"),
+                memberOf(program, ast, "mem", "RefusingAllocator", "acquire"),
+                memberOf(program, ast, "mem", "RefusingAllocator", "dispose"),
+                moduleFunction(program, ast, "mem", "record_release"),
+                moduleFunction(program, ast, "mem", "foreign_byte"),
+                moduleFunction(program, ast, "mem", "foreign_word"),
+                moduleFunction(program, ast, "mem", "vec_test_log_store"),
+                memberOf(program, ast, "task", "Slot", "start"),
+            },
+            .storage_from_buffer = memberOf(program, ast, "mem", "Storage", "from_buffer"),
+            .storage_dispose = memberOf(program, ast, "mem", "Storage", "dispose"),
+            .storage_into_buffer = memberOf(program, ast, "mem", "Storage", "into_buffer"),
+            .drain = structIn(program, ast, "mem", "Drain"),
+            .release_from = moduleFunction(program, ast, "mem", "release_from"),
+            .backing_buffer_builders = .{
+                memberOf(program, ast, "mem", "RefusingAllocator", "acquire"),
+                memberOf(program, ast, "mem", "RefusingAllocator", "dispose"),
+                memberOf(program, ast, "mem", "SharedRefusingAllocator", "acquire"),
+                memberOf(program, ast, "mem", "SharedRefusingAllocator", "dispose"),
+                memberOf(program, ast, "mem", "VecTestAllocator", "acquire"),
+                memberOf(program, ast, "mem", "VecTestAllocator", "dispose"),
+                memberOf(program, ast, "mem", "Handle", "dispose"),
+            },
+            .slot_users = .{
+                moduleFunction(program, ast, "mem", "keep_body"),
+                moduleFunction(program, ast, "mem", "take_kept_body"),
+                moduleFunction(program, ast, "mem", "release_kept_bytes"),
+                memberOf(program, ast, "mem", "Closure", "erase"),
+                moduleFunction(program, ast, "mem", "send_payload"),
+                moduleFunction(program, ast, "mem", "receive_payload"),
+                moduleFunction(program, ast, "mem", "receive_payload_until"),
+                moduleFunction(program, ast, "mem", "call_owner"),
+                moduleFunction(program, ast, "mem", "next_owner_request"),
+                moduleFunction(program, ast, "mem", "release_from"),
+                moduleFunction(program, ast, "mem", "vector_into_buffer"),
+                moduleFunction(program, ast, "mem", "arena_give_back"),
+                moduleFunction(program, ast, "mem", "arena_reserve"),
+                moduleFunction(program, ast, "mem", "arena_holds"),
+            },
+            .storage_address = memberOf(program, ast, "mem", "Storage", "address"),
+            .closure_erase = memberOf(program, ast, "mem", "Closure", "erase"),
+            .owned_address_callers = .{
+                memberOf(program, ast, "mem", "Arena", "open"),
+                memberOf(program, ast, "mem", "Storage", "from_buffer"),
+                moduleFunction(program, ast, "mem", "keep_body"),
+            },
+            .carried = structIn(program, ast, "mem", "Carried"),
             .span = rawAccessDecl(program, ast, "slot_span", 4),
             .buffer_span = rawAccessDecl(program, ast, "buffer_span", 3),
             .subspan = rawAccessDecl(program, ast, "slice_subspan", 3),
             .slice_place = rawAccessDecl(program, ast, "slice_place", 2),
-            .view = program.libraryDeclIn("mem", "View") orelse .none,
+            .view = structIn(program, ast, "mem", "View"),
             .view_place = rawAccessDecl(program, ast, "view_place", 2),
             .argument_span = rawAccessDecl(program, ast, "argument_span", 1),
             .environment_span = rawAccessDecl(program, ast, "environment_span", 1),
@@ -248,9 +536,9 @@ pub const RawAccesses = struct {
             .take = rawAccessDecl(program, ast, "slot_take", 2),
             .put = rawAccessDecl(program, ast, "slot_put", 3),
             .place = rawAccessDecl(program, ast, "slot_place", 3),
-            .closure = program.libraryDeclIn("mem", "Closure") orelse .none,
-            .closure_entry_type = program.libraryDeclIn("mem", "ClosureEntry") orelse .none,
-            .endpoint = program.libraryDeclIn("session", "Chan") orelse .none,
+            .closure = structIn(program, ast, "mem", "Closure"),
+            .closure_entry_type = structIn(program, ast, "mem", "ClosureEntry"),
+            .endpoint = structIn(program, ast, "session", "Chan"),
             .closure_open_in = memberOf(program, ast, "mem", "Closure", "open_in"),
             .closure_open = memberOf(program, ast, "mem", "Closure", "open"),
             .closure_entry = rawAccessDecl(program, ast, "closure_entry", 1),
@@ -368,8 +656,57 @@ pub const RawAccesses = struct {
         return self.preparesTask(d) or self.startsTask(d);
     }
 
+    /// A raw type: one whose fields hold an address, an extent of bytes, or
+    /// what the bytes they describe hold, which the slot primitives, the
+    /// runtime or lowering trust. Every field of one is named (read, written,
+    /// lent, bound by a pattern or given in a literal) only in a member of an
+    /// implementation for the type itself, in a member of an implementation
+    /// of `mem.Allocator` where `allocators` says so, and in the declarations
+    /// `also` lists ([T-RawAddress]). A field added to one later is covered as
+    /// its others are.
+    const also_slots = 10;
+
+    pub const RawType = struct {
+        decl: DeclId,
+        also: [also_slots]DeclId = @splat(.none),
+        allocators: bool = false,
+    };
+
+    /// The raw types, with where else each one's fields are named. A
+    /// storage's are named where a task body is kept and where a closure
+    /// erases the callable it holds; a buffer's by the allocators that hand
+    /// it out and take it back; a view's where `Vec.split_inout` lends its
+    /// two sides; a vector's where a byte vector is made from a buffer and
+    /// taken back; a kept body's where `task.Slot.start` hands its
+    /// addresses to the thread it starts; a buffer's where
+    /// `Storage.from_buffer` takes it into slot storage; and a buffer's and a
+    /// slice's where `buffer_numbers` and `foreign_address` hand their bytes
+    /// out as numbers.
+    pub fn rawTypes(self: RawAccesses) [11]RawType {
+        return .{
+            .{ .decl = self.storage, .also = also(.{ self.keep_body, self.take_kept_body, self.release_kept_bytes, self.closure_erase, self.arena_table_of }) },
+            .{ .decl = self.buffer, .allocators = true, .also = also(self.buffer_numbers ++ [1]DeclId{self.storage_from_buffer}) },
+            .{ .decl = self.slice },
+            .{ .decl = self.view, .also = also(.{self.vec_split_inout}) },
+            .{ .decl = self.closure },
+            .{ .decl = self.vec, .also = also(.{ self.vector_from_buffer, self.vector_into_buffer }) },
+            .{ .decl = self.kept, .also = also(.{ self.keep_body, self.task_slot_start }) },
+            .{ .decl = self.endpoint, .also = also(self.endpoint_users) },
+            .{ .decl = self.owner, .also = also(self.owner_users) },
+            .{ .decl = self.arena, .also = also(self.arena_users) },
+            .{ .decl = self.probe_tag, .also = also(.{self.probe_tag_builder}) },
+        };
+    }
+
+    /// A row's listed declarations, the rest of its slots empty.
+    fn also(listed: anytype) [also_slots]DeclId {
+        var row: [also_slots]DeclId = @splat(.none);
+        inline for (listed, 0..) |d, i| row[i] = d;
+        return row;
+    }
+
     pub fn typed(self: RawAccesses, d: DeclId) bool {
-        return d != DeclId.none and (d == self.stride or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.view_place or d == self.address_in or d == self.slice_address or self.processText(d) != null or self.erasure(d));
+        return d != DeclId.none and (d == self.stride or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.view_place or d == self.address_in or d == self.owned_address_in or d == self.slice_address or d == self.number_address or self.processText(d) != null or self.erasure(d));
     }
 
     /// The runtime declarations a process-text span reads: how many entries
@@ -435,6 +772,18 @@ pub fn memberOf(program: *const ExpandedProgram, ast: *const Ast, module_name: [
     return .none;
 }
 
+/// The library struct `name` of `module_name`. An implementation for a type
+/// is named by its head, so the first declaration with the name may be one.
+fn structIn(program: *const ExpandedProgram, ast: *const Ast, module_name: []const u8, name: []const u8) DeclId {
+    const declared = program.libraryDeclIn(module_name, name) orelse return .none;
+    for (program.declsOf(program.moduleOf(declared))) |d| {
+        const named = ast.declName(d);
+        if (named == .none or ast.declTag(d) != .struct_) continue;
+        if (std.mem.eql(u8, ast.tokenText(named), name)) return d;
+    }
+    return .none;
+}
+
 /// The library function `name` of `module_name` that is no type's member.
 fn moduleFunction(program: *const ExpandedProgram, ast: *const Ast, module_name: []const u8, name: []const u8) DeclId {
     const declared = program.libraryDeclIn(module_name, name) orelse return .none;
@@ -450,6 +799,12 @@ fn moduleFunction(program: *const ExpandedProgram, ast: *const Ast, module_name:
 /// checker holds each to its whole signature, so a parameter's name decides
 /// nothing: a name is a label.
 const float_bits_symbols = [_][]const u8{ "linea_float64_to_bits", "linea_float64_from_bits", "linea_float32_to_bits", "linea_float32_from_bits" };
+
+/// The library test `name` of `module_name`.
+fn testIn(program: *const ExpandedProgram, ast: *const Ast, module_name: []const u8, name: []const u8) DeclId {
+    const declared = program.libraryDeclIn(module_name, name) orelse return .none;
+    return if (ast.declIsTest(declared)) declared else .none;
+}
 
 fn rawAccessDecl(program: *const ExpandedProgram, ast: *const Ast, name: []const u8, arity: usize) DeclId {
     const d = program.libraryDeclIn("mem", name) orelse return DeclId.none;

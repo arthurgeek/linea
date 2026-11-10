@@ -1,3 +1,4 @@
+import std.mem.address
 import std.testing
 
 // A Buffer holds allocated bytes and the allocator's settlement obligation.
@@ -88,6 +89,14 @@ impl[A: Allocator] Buffer[A] {
     // Eight-byte alignment supports all scalar loads and stores.
     let alignment: UInt64 = 8
 
+    test fn an_address_at_a_number_names_the_bytes_there() {
+        var bytes = system().acquire(8).unwrap()
+        &bytes.store_byte(0, 7)
+        let found = foreign_byte(foreign_at(bytes.at), 0)
+        bytes.release()
+        testing.assert_eq(found, UInt8(7), "the address named other bytes")?
+    }
+
     // Return the requested length in bytes, excluding any extra space the
     // allocator reserved.
     pub fn length(self: Self) -> UInt64 {
@@ -132,7 +141,7 @@ impl[A: Allocator] Buffer[A] {
     // Store eight bytes at a byte offset. The offset must be eight-byte aligned
     // and the complete value must fit in the buffer; otherwise the access traps.
     pub fn store(inout self: Self, i: UInt64, v: UInt64) {
-        linea_raw_store(self.at, self.len, i, v)
+        linea_raw_store(address.raw(bytes_in(self, 0)), self.len, i, v)
     }
 
     test trap fn store_traps_past_the_end() -> Result[(), testing.Failure] {
@@ -189,7 +198,7 @@ impl[A: Allocator] Buffer[A] {
 
     // Load eight bytes. Misalignment or an access past the end traps.
     pub fn load(self: Self, i: UInt64) -> UInt64 {
-        linea_raw_load(self.at, self.len, i)
+        linea_raw_load(address.raw(bytes_in(self, 0)), self.len, i)
     }
 
     test trap fn load_traps_past_the_end() -> Result[(), testing.Failure] {
@@ -218,7 +227,7 @@ impl[A: Allocator] Buffer[A] {
 
     // Store one byte; an offset past the end traps.
     pub fn store_byte(inout self: Self, i: UInt64, v: UInt8) {
-        linea_raw_store8(self.at, self.len, i, v)
+        linea_raw_store8(address.raw(bytes_in(self, 0)), self.len, i, v)
     }
 
     test trap fn store_byte_traps_past_the_end() -> Result[(), testing.Failure] {
@@ -253,7 +262,7 @@ impl[A: Allocator] Buffer[A] {
 
     // Load one byte; an offset past the end traps.
     pub fn load_byte(self: Self, i: UInt64) -> UInt8 {
-        linea_raw_load8(self.at, self.len, i)
+        linea_raw_load8(address.raw(bytes_in(self, 0)), self.len, i)
     }
 
     test trap fn load_byte_traps_past_the_end() -> Result[(), testing.Failure] {

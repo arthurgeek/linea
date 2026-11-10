@@ -1,4 +1,5 @@
 import std.mem
+import std.mem.address
 import std.testing
 import std.text
 
@@ -22,7 +23,7 @@ pub enum CTextError {
 }
 
 // Copy `length` bytes from the C address `at` into storage from `allocator`.
-fn copied_in[A: Allocator](allocator: A, at: UInt64, length: UInt64) -> Result[mem.Vec[UInt8, A], mem.Oom] where carries(.Ok: allocator) {
+fn copied_in[A: Allocator](allocator: A, at: address.Address[UInt8], length: UInt64) -> Result[mem.Vec[UInt8, A], mem.Oom] where carries(.Ok: allocator) {
     defer var copied: mem.Vec[UInt8, A] = mem.Vec.new_in(allocator)
     &copied.reserve(length)?
     for i in 0..length {
@@ -34,14 +35,20 @@ fn copied_in[A: Allocator](allocator: A, at: UInt64, length: UInt64) -> Result[m
 test fn bytes_are_copied_from_an_address() {
     defer let held = CString.open("xyz").unwrap()
     let lent = held.text()
-    let read CText(at) = lent
-    defer let copied = copied_in(mem.system(), at, 2).unwrap()
+    defer let copied = copied_in(mem.system(), lent.at(), 2).unwrap()
     testing.assert_eq(copied.length(), UInt64(2), "the copy took another length")?
     testing.assert_eq(copied[1], UInt8(121), "the copy read another byte")?
     .Ok(())
 }
 
 impl CText {
+    // The address of the text's bytes, which carries what the text does, so
+    // the bytes are read only while what holds them lives.
+    fn at(self: Self) -> address.Address[UInt8] where carries(self) {
+        let read CText(number) = self
+        mem.foreign_at(number)
+    }
+
     // Whether C answered a null pointer rather than text.
     pub fn is_null(self: Self) -> Bool {
         let read CText(at) = self
@@ -61,8 +68,9 @@ impl CText {
         if at == 0 {
             return 0
         }
+        let bytes = self.at()
         var count: UInt64 = 0
-        while mem.foreign_byte(at, count) != 0 {
+        while mem.foreign_byte(bytes, count) != 0 {
             count += 1
         }
         count
@@ -80,8 +88,7 @@ impl CText {
         if self.is_null() {
             return .Err(.Null)
         }
-        let read CText(at) = self
-        let bytes = copied_in(allocator, at, self.length())?
+        let bytes = copied_in(allocator, self.at(), self.length())?
         match String.from_bytes(bytes) {
             Ok(owned) => .Ok(owned),
             Err(failure) => {
@@ -127,8 +134,7 @@ impl CText {
         if length != 0 && self.is_null() {
             return .Err(.Null)
         }
-        let read CText(at) = self
-        .Ok(copied_in(allocator, at, length)?)
+        .Ok(copied_in(allocator, self.at(), length)?)
     }
 
     test fn bytes_past_a_nul_are_copied_by_length() {

@@ -52,11 +52,17 @@ test fn settling_a_refused_push_releases_the_value_and_keeps_the_reason() {
     defer let log = system().acquire(16).unwrap()
     defer let empty = Arena.open(system(), 0)
     defer var values: Vec[VecTestElement, Handle] = Vec.new_in(empty.handle())
-    let element = VecTestElement { value = 7, log_at = log.at, log_len = log.len }
+    let element = VecTestElement { value = 7, log = borrow log }
     let settled = &values.push(element).settled()
     testing.assert_eq(settled, .Err(Oom.Exhausted), "settling lost the allocation reason")?
     testing.assert_eq(log.load(0), 1, "settling did not release the refused value once")?
     testing.assert_eq(log.load(8), 7, "settling released another value")?
+}
+
+// Write a word of a test's log through a read of it: a `VecTestElement` and a
+// `VecTestAllocator` release and allocate while the test still reads the log.
+fn vec_test_log_store(log: Buffer[SystemAllocator], i: UInt64, v: UInt64) {
+    linea_raw_store(address.raw(bytes_in(log, 0)), log.length(), i, v)
 }
 
 // VecTestElement records its value in a release log when it is released. The
@@ -65,16 +71,15 @@ test fn settling_a_refused_push_releases_the_value_and_keeps_the_reason() {
 @linear
 struct VecTestElement {
     value: UInt64,
-    log_at: UInt64,
-    log_len: UInt64,
+    log: borrow Buffer[SystemAllocator],
 }
 
 impl Release for VecTestElement {
     fn release(sink self: Self) {
-        let VecTestElement { value: value, log_at: at, log_len: extent } = self
-        let count = linea_raw_load(at, extent, 0)
-        linea_raw_store(at, extent, (count + 1) * 8, value)
-        linea_raw_store(at, extent, 0, count + 1)
+        let VecTestElement { value: value, log: log } = self
+        let count = log.load(0)
+        vec_test_log_store(*log, (count + 1) * 8, value)
+        vec_test_log_store(*log, 0, count + 1)
     }
 }
 
@@ -85,8 +90,7 @@ impl Release for VecTestElement {
 // `@unshareable`, and every copy of the allocator borrows it.
 @unshareable
 struct VecTestLog {
-    at: UInt64,
-    len: UInt64,
+    buffer: borrow Buffer[SystemAllocator],
 }
 
 @copyable
@@ -105,8 +109,8 @@ impl Allocator for VecTestAllocator {
         match system().acquire(size) {
             Err(reason) => .Err(reason),
             Ok(buffer) => {
-                let acquired = linea_raw_load(self.log.at, self.log.len, 64)
-                linea_raw_store(self.log.at, self.log.len, 64, acquired + 1)
+                let acquired = self.log.buffer.load(64)
+                vec_test_log_store(*self.log.buffer, 64, acquired + 1)
                 let Buffer { at: at, len: length, allocated: allocated, allocator: _, obligation: obligation } = buffer
                 Result.Ok(.{ at, len = length, allocated, allocator = copy(self), obligation })
             },
@@ -115,9 +119,9 @@ impl Allocator for VecTestAllocator {
 
     fn dispose(sink b: Buffer[Self]) {
         let Buffer { at: at, len: length, allocated: allocated, allocator: allocator, obligation: obligation } = b
-        let count = linea_raw_load(allocator.log.at, allocator.log.len, 0)
-        linea_raw_store(allocator.log.at, allocator.log.len, (count + 1) * 8, 99)
-        linea_raw_store(allocator.log.at, allocator.log.len, 0, count + 1)
+        let count = allocator.log.buffer.load(0)
+        vec_test_log_store(*allocator.log.buffer, (count + 1) * 8, 99)
+        vec_test_log_store(*allocator.log.buffer, 0, count + 1)
         let backing = Buffer[SystemAllocator] { at, len = length, allocated, allocator = system(), obligation }
         backing.release()
     }
@@ -127,17 +131,16 @@ impl Allocator for VecTestAllocator {
 // discarding it does nothing. Its log holds a UInt64 count followed by
 // eight-byte tags.
 struct VecReleaseNotice {
-    at: UInt64,
-    extent: UInt64,
+    log: borrow Buffer[SystemAllocator],
     tag: UInt64,
 }
 
 impl Release for VecReleaseNotice {
     fn release(sink self: Self) {
-        let VecReleaseNotice { at: at, extent: extent, tag: tag } = self
-        let count = linea_raw_load(at, extent, 0)
-        linea_raw_store(at, extent, (count + 1) * 8, tag)
-        linea_raw_store(at, extent, 0, count + 1)
+        let VecReleaseNotice { log: log, tag: tag } = self
+        let count = log.load(0)
+        vec_test_log_store(*log, (count + 1) * 8, tag)
+        vec_test_log_store(*log, 0, count + 1)
     }
 }
 
@@ -168,8 +171,8 @@ internal fn vector_from_buffer[A: Allocator](sink buffer: Buffer[A], length: UIn
 // Return allocated backing, including initialized bytes beyond Vec.len.
 // A vector that has never allocated has no buffer to return.
 internal fn vector_into_buffer[A: Allocator](sink bytes: Vec[UInt8, A]) -> Option[Buffer[A]] where carries(.Some: bytes) {
-    let Vec { storage: Storage { buffer, allocator: _, at: _, len: _ }, len: _length } = bytes
-    buffer
+    let Vec { storage, len: _length } = bytes
+    storage.into_buffer()
 }
 
 test fn vec_byte_buffer_transfers_preserve_storage_without_allocator_headroom() {
@@ -183,8 +186,6 @@ test fn vec_byte_buffer_transfers_preserve_storage_without_allocator_headroom() 
     &buffer.store_byte(1, 66)
     &buffer.store_byte(2, 67)
     &buffer.store_byte(23, 255)
-    let address = buffer.at
-    let reserved = buffer.allocated
     let exhausted = match allocator.acquire(1) {
         Err(_) => true,
         Ok(extra) => {
@@ -201,8 +202,6 @@ test fn vec_byte_buffer_transfers_preserve_storage_without_allocator_headroom() 
     testing.assert(exhausted, "the arena still had allocation headroom")?
     testing.assert_eq(length, UInt64(3), "transferring a buffer exposed its unused tail")?
     testing.assert(prefix, "transferring a buffer changed its live bytes")?
-    testing.assert_eq(restored.at, address, "byte transfer replaced the allocation")?
-    testing.assert_eq(restored.allocated, reserved, "byte transfer changed the reserved allocation extent")?
     testing.assert_eq(restored.length(), UInt64(24), "reverse transfer lost the full buffer extent")?
     testing.assert_eq(restored.load_byte(1), UInt8(90), "reverse transfer lost a vector mutation")?
     testing.assert_eq(restored.load_byte(23), UInt8(255), "byte transfer changed bytes beyond the live prefix")?
@@ -336,7 +335,7 @@ impl[T, A: Allocator] Vec[T, A] {
 
     test fn vec_empty_construction_and_disposal_do_not_call_the_allocator() {
         defer let log = system().acquire(72).unwrap()
-        let record = VecTestLog { at = log.at, len = log.len }
+        let record = VecTestLog { buffer = borrow log }
         let allocator = VecTestAllocator { log = borrow record }
         var values: Vec[UInt8, VecTestAllocator] = Vec.new_in(allocator)
         &values.reserve(0).unwrap()
@@ -379,15 +378,15 @@ impl[T, A: Allocator] Vec[T, A] {
 
     test fn vec_constructors_reserve_exact_capacity_once() {
         defer let log = system().acquire(72).unwrap()
-        let record = VecTestLog { at = log.at, len = log.len }
+        let record = VecTestLog { buffer = borrow log }
         let allocator = VecTestAllocator { log = borrow record }
         defer let repeated = Vec.filled_in(allocator, count: 3, value: UInt64(7)).unwrap()
         testing.assert_eq(log.load(64), UInt64(1), "filled allocated more than once")?
-        testing.assert_eq(repeated.storage.len, UInt64(24), "filled rounded up capacity")?
+        testing.assert_eq(repeated.storage.capacity(), UInt64(24), "filled rounded up capacity")?
         let built: Result[Vec[UInt64, VecTestAllocator], Oom] = Vec.from_fn_in(allocator, count: 3, initializer: |index| index * index)
         defer let generated = built.unwrap()
         testing.assert_eq(log.load(64), UInt64(2), "from_fn allocated more than once")?
-        testing.assert_eq(generated.storage.len, UInt64(24), "from_fn rounded up capacity")?
+        testing.assert_eq(generated.storage.capacity(), UInt64(24), "from_fn rounded up capacity")?
         testing.assert_eq(generated[2], UInt64(4), "from_fn did not pass the element index")?
     }
 
@@ -494,7 +493,7 @@ impl[T, A: Allocator] Vec[T, A] {
 
     test fn vec_from_fn_inout_preserves_state_and_constructs_linear_elements() {
         defer let log = system().acquire(72).unwrap()
-        let record = VecTestLog { at = log.at, len = log.len }
+        let record = VecTestLog { buffer = borrow log }
         let allocator = VecTestAllocator { log = borrow record }
         let seed = VecGeneratedElement { index = 10 }
         var initializer = inout [sink seed, sink calls = UInt64(0)] |index: UInt64| {
@@ -504,7 +503,7 @@ impl[T, A: Allocator] Vec[T, A] {
         }
         let built: Result[Vec[VecGeneratedElement, VecTestAllocator], Oom] = Vec.from_fn_inout_in(allocator, count: 4, initializer: &initializer)
         let values = built.unwrap()
-        let capacity = values.storage.len
+        let capacity = values.storage.capacity()
         var pending = values.drain()
         var intact = true
         var index: UInt64 = 0
@@ -615,7 +614,7 @@ impl[T, A: Allocator] Vec[T, A] {
             return .Err(Oom.Exhausted)
         }
         let required = self.len + additional
-        let capacity = self.storage.len / stride
+        let capacity = self.storage.capacity() / stride
         if required <= capacity {
             return .Ok(())
         }
@@ -639,7 +638,7 @@ impl[T, A: Allocator] Vec[T, A] {
         } else {
             doubled
         }
-        let acquired = self.storage.allocator.acquire(grown * stride)?
+        let acquired = self.storage.allocator().acquire(grown * stride)?
         let Vec { storage: previous, len: length } = self
         var storage = previous
         var next: Storage[T, A] = Storage.from_buffer(acquired)
@@ -656,7 +655,7 @@ impl[T, A: Allocator] Vec[T, A] {
         defer let log = system().acquire(72) else |_| {
             return testing.assert(false, "allocation log was refused")
         }
-        let record = VecTestLog { at = log.at, len = log.len }
+        let record = VecTestLog { buffer = borrow log }
         let allocator = VecTestAllocator { log = borrow record }
         defer var values: Vec[UInt64, VecTestAllocator] = Vec.new_in(allocator)
         match &values.reserve(100) {
@@ -843,11 +842,8 @@ impl[T, A: Allocator] Vec[T, A] {
         // A vector that never allocated has no buffer, and both sides of it
         // are empty and start where it does.
         let shape: SlotType[T] = .Type
-        let start: address.Address[T] = match read self.storage.buffer {
-            Some(buffer) => address_in(buffer, at * slot_stride(shape)),
-            None => copy(self.storage.at),
-        }
-        var left: View[T] = .{ at = copy(self.storage.at), len = at, carried = .{} }
+        let start = self.storage.address_at(at * slot_stride(shape))
+        var left: View[T] = .{ at = self.storage.address(), len = at, carried = .{} }
         var right: View[T] = .{ at = start, len = self.len - at, carried = .{} }
         &body(&left, &right)
     }
@@ -888,14 +884,14 @@ impl[T, A: Allocator] Vec[T, A] {
         for number in UInt64(0)..3 {
             &values.push(number).unwrap()
         }
-        let capacity = values.storage.len
+        let capacity = values.storage.capacity()
         testing.assert_eq(&values.pop(), Option.Some(UInt64(2)), "pop did not take the last element")?
         testing.assert_eq(&values.pop(), Option.Some(UInt64(1)), "pop did not take the new last element")?
         testing.assert_eq(values.as_slice(), [UInt64(0)].as_slice(), "pop moved an element it did not take")?
         testing.assert_eq(&values.pop(), Option.Some(UInt64(0)), "pop did not take the first element")?
         testing.assert(&values.pop().is_none(), "an empty vector popped an element")?
         testing.assert_eq(values.length(), UInt64(0), "popping an empty vector changed its length")?
-        testing.assert_eq(values.storage.len, capacity, "pop gave up capacity")?
+        testing.assert_eq(values.storage.capacity(), capacity, "pop gave up capacity")?
     }
 
     test fn vec_pop_hands_over_linear_elements_from_an_arena() {
@@ -1071,7 +1067,7 @@ impl[T: Copyable + Owned, A: Allocator] Vec[T, A] {
         let none: [UInt8; 0] = []
         &values.append_slice(none.as_slice()).unwrap()
         testing.assert_eq(values.length(), UInt64(0), "an empty append added elements")?
-        testing.assert_eq(values.storage.len, UInt64(0), "an empty append allocated")?
+        testing.assert_eq(values.storage.capacity(), UInt64(0), "an empty append allocated")?
     }
 
     test fn vec_append_slice_keeps_every_element_across_growth() {
@@ -1187,8 +1183,8 @@ impl[T, A: Allocator] Index[UInt64] for Vec[T, A] {
 }
 
 // Push a counting element that records its release in `log`.
-fn push_element(inout values: Vec[VecTestElement], number: UInt64, log: Buffer[SystemAllocator]) {
-    let element = VecTestElement { value = number, log_at = log.at, log_len = log.len }
+fn push_element(inout values: Vec[VecTestElement], number: UInt64, log: Buffer[SystemAllocator]) where retains(values: borrow log) {
+    let element = VecTestElement { value = number, log = borrow log }
     &values.push(element).unwrap()
 }
 
@@ -1211,7 +1207,7 @@ impl[T: Release, A: Allocator] Vec[T, A] {
         for number in UInt64(0)..5 {
             push_element(&values, number, log)
         }
-        let capacity = values.storage.len
+        let capacity = values.storage.capacity()
         &values.truncate(2)
         let released = log.load(0)
         let in_order = log.load(8) == 4 && log.load(16) == 3 && log.load(24) == 2
@@ -1220,7 +1216,7 @@ impl[T: Release, A: Allocator] Vec[T, A] {
         testing.assert(in_order, "the tail was not released last first")?
         testing.assert_eq(values.length(), 2, "truncating kept the wrong length")?
         testing.assert_eq(log.load(0), 3, "truncating past the end released an element")?
-        testing.assert_eq(values.storage.len, capacity, "truncating gave up capacity")?
+        testing.assert_eq(values.storage.capacity(), capacity, "truncating gave up capacity")?
         testing.assert_eq(values[1].value, 1, "a kept element changed")?
     }
 
@@ -1235,14 +1231,14 @@ impl[T: Release, A: Allocator] Vec[T, A] {
         for number in UInt64(0)..3 {
             push_element(&values, number, log)
         }
-        let capacity = values.storage.len
+        let capacity = values.storage.capacity()
         &values.clear()
         testing.assert_eq(values.length(), 0, "clearing left elements")?
         testing.assert(log.load(0) == 3 && log.load(8) == 2 && log.load(24) == 0, "clearing did not release every element last first")?
-        testing.assert_eq(values.storage.len, capacity, "clearing gave up capacity")?
+        testing.assert_eq(values.storage.capacity(), capacity, "clearing gave up capacity")?
         // Growing back into the kept storage allocates nothing new.
         push_element(&values, 9, log)
-        testing.assert_eq(values.storage.len, capacity, "refilling a cleared vector reallocated")?
+        testing.assert_eq(values.storage.capacity(), capacity, "refilling a cleared vector reallocated")?
     }
 }
 
@@ -1277,7 +1273,7 @@ test fn vec_release_visits_each_element_once_in_reverse_order() {
     }
     var values: Vec[VecTestElement] = Vec.new_in(allocator)
     for number in UInt64(0)..5 {
-        let element = VecTestElement { value = number, log_at = log.at, log_len = log.len }
+        let element = VecTestElement { value = number, log = borrow log }
         &values.push(element).unwrap()
     }
     values.release()
@@ -1297,7 +1293,7 @@ test fn vec_release_excludes_a_removed_element() {
     }
     defer var values: Vec[VecTestElement] = Vec.new_in(allocator)
     for number in UInt64(0)..5 {
-        let element = VecTestElement { value = number, log_at = log.at, log_len = log.len }
+        let element = VecTestElement { value = number, log = borrow log }
         &values.push(element).unwrap()
     }
     let removed = &values.remove(2) else {
@@ -1315,13 +1311,13 @@ test fn arena_vector_discard_does_not_invoke_optional_element_release() {
     defer let arena = Arena.open(system(), 256)
     {
         var values: Vec[VecReleaseNotice, Handle] = Vec.new_in(arena.handle())
-        &values.push(.{ at = log.at, extent = log.len, tag = 1 }).unwrap()
+        &values.push(.{ log = borrow log, tag = 1 }).unwrap()
     }
     testing.assert_eq(log.load(0), UInt64(0), "discard invoked element release")?
     {
         var values: Vec[VecReleaseNotice, Handle] = Vec.new_in(arena.handle())
-        &values.push(.{ at = log.at, extent = log.len, tag = 2 }).unwrap()
-        &values.push(.{ at = log.at, extent = log.len, tag = 3 }).unwrap()
+        &values.push(.{ log = borrow log, tag = 2 }).unwrap()
+        &values.push(.{ log = borrow log, tag = 3 }).unwrap()
         values.release()
     }
     testing.assert_eq(log.load(0), UInt64(2), "explicit release skipped discardable elements")?
@@ -1333,18 +1329,18 @@ test fn vec_release_disposes_backing_once_after_its_elements() {
     defer var log = system().acquire(72) else |_| {
         return testing.assert(false, "release log allocation failed")
     }
-    let record = VecTestLog { at = log.at, len = log.len }
+    let record = VecTestLog { buffer = borrow log }
     let allocator = VecTestAllocator { log = borrow record }
     var values: Vec[VecTestElement, VecTestAllocator] = Vec.new_in(allocator)
     for number in UInt64(0)..5 {
-        let element = VecTestElement { value = number, log_at = log.at, log_len = log.len }
+        let element = VecTestElement { value = number, log = borrow log }
         match &values.push(element) {
             Ok(_) => {},
             Err(_) => panic("push failed"),
         }
     }
     let growth_disposals = log.load(0)
-    &log.store(0, 0)
+    vec_test_log_store(log, 0, 0)
     values.release()
     testing.assert_eq(growth_disposals + 1, log.load(64), "growth did not dispose each replaced buffer")?
     testing.assert_eq(log.load(0), 6, "release did not dispose five elements and one buffer")?
@@ -1458,12 +1454,12 @@ test fn releasing_a_drain_stopped_early_releases_only_what_remains() {
     // Nine UInt64 words: the event count, release tags from byte 8, and the
     // allocation count at byte 64.
     defer let log = system().acquire(72).unwrap()
-    let record = VecTestLog { at = log.at, len = log.len }
+    let record = VecTestLog { buffer = borrow log }
     let allocator = VecTestAllocator { log = borrow record }
     var values: Vec[VecTestElement, VecTestAllocator] = Vec.new_in(allocator)
     &values.reserve(4).unwrap()
     for number in UInt64(0)..4 {
-        &values.push(VecTestElement { value = number, log_at = log.at, log_len = log.len }).unwrap()
+        &values.push(VecTestElement { value = number, log = borrow log }).unwrap()
     }
     var pending = values.drain()
     let first = &pending.next().unwrap()
