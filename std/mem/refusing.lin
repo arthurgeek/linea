@@ -229,24 +229,24 @@ impl[H: Allocator] Allocator for RefusingAllocator[H] {
     }
 
     fn acquire(self: Self, size: UInt64) -> Result[Buffer[Self], Oom] {
-        let attempt = linea_raw_load(address.raw(bytes_in(self.log.buffer, 0)), self.log.buffer.len, log_attempts) + 1
+        let attempt = self.log.buffer.load(log_attempts) + 1
         linea_raw_store(address.raw(bytes_in(self.log.buffer, 0)), self.log.buffer.len, log_attempts, attempt)
-        if attempt == linea_raw_load(address.raw(bytes_in(self.log.buffer, 0)), self.log.buffer.len, log_refuse_at) {
+        if attempt == self.log.buffer.load(log_refuse_at) {
             return .Err(.Exhausted)
         }
         match self.log.backing.acquire(size) {
             Err(reason) => .Err(reason),
             Ok(buffer) => {
-                let index = linea_raw_load(address.raw(bytes_in(self.log.buffer, 0)), self.log.buffer.len, log_acquired)
+                let index = self.log.buffer.load(log_acquired)
                 if index >= log_capacity {
                     panic("allocation log capacity exceeded")
                 }
                 linea_raw_store(address.raw(bytes_in(self.log.buffer, 0)), self.log.buffer.len, log_acquired, index + 1)
                 linea_raw_store(address.raw(bytes_in(self.log.buffer, 0)), self.log.buffer.len, log_flags + index * log_word_bytes, 1)
                 let Buffer { at, len, allocated, allocator: _, obligation: backing } = buffer
-                let live = linea_raw_load(address.raw(bytes_in(self.log.buffer, 0)), self.log.buffer.len, log_live_bytes) + allocated
+                let live = self.log.buffer.load(log_live_bytes) + allocated
                 linea_raw_store(address.raw(bytes_in(self.log.buffer, 0)), self.log.buffer.len, log_live_bytes, live)
-                if live > linea_raw_load(address.raw(bytes_in(self.log.buffer, 0)), self.log.buffer.len, log_peak_bytes) {
+                if live > self.log.buffer.load(log_peak_bytes) {
                     linea_raw_store(address.raw(bytes_in(self.log.buffer, 0)), self.log.buffer.len, log_peak_bytes, live)
                 }
                 return .Ok(.{ at, len, allocated, allocator = copy(self), obligation = .{ backing, index } })
@@ -257,13 +257,13 @@ impl[H: Allocator] Allocator for RefusingAllocator[H] {
     fn dispose(sink b: Buffer[Self]) {
         let Buffer { at, len, allocated, allocator, obligation: RefusingAllocation { backing, index } } = b
         let flag = log_flags + index * log_word_bytes
-        if linea_raw_load(address.raw(bytes_in(allocator.log.buffer, 0)), allocator.log.buffer.len, flag) != 1 {
+        if allocator.log.buffer.load(flag) != 1 {
             panic("an allocation was disposed more than once")
         }
         linea_raw_store(address.raw(bytes_in(allocator.log.buffer, 0)), allocator.log.buffer.len, flag, 0)
-        let disposed = linea_raw_load(address.raw(bytes_in(allocator.log.buffer, 0)), allocator.log.buffer.len, log_disposed)
+        let disposed = allocator.log.buffer.load(log_disposed)
         linea_raw_store(address.raw(bytes_in(allocator.log.buffer, 0)), allocator.log.buffer.len, log_disposed, disposed + 1)
-        let live = linea_raw_load(address.raw(bytes_in(allocator.log.buffer, 0)), allocator.log.buffer.len, log_live_bytes)
+        let live = allocator.log.buffer.load(log_live_bytes)
         linea_raw_store(address.raw(bytes_in(allocator.log.buffer, 0)), allocator.log.buffer.len, log_live_bytes, live - allocated)
         let buffer: Buffer[H] = .{ at, len, allocated, allocator = copy(allocator.log.backing), obligation = backing }
         buffer.release()

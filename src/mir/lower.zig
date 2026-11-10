@@ -5284,10 +5284,10 @@ const Lowerer = struct {
             _ = try self.check(at, ty, span, .overflow);
             return at;
         }
-        // The address of a slice's first element: the slice's own address,
-        // which names values of its element type.
         // An address at a number is the number itself.
         if (d == self.library.raw.number_address) return args.items[0];
+        // The address of a slice's first element: the slice's own address,
+        // which names values of its element type.
         if (d == self.library.raw.slice_address) {
             const view = args.items[0];
             return self.fieldValue(view, self.b.insts.items(.ty)[view.index()], "at", span);
