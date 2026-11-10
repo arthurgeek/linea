@@ -165,18 +165,20 @@ impl Simulation {
         testing.assert_eq(plain_ms, slow_ms, "two simulations started their clocks at different instants")?
     }
 
-    // Run `body` as the simulation's one task and answer what it answers. The simulation is lent to the run, so no other task runs it
-    // meanwhile. While it runs, `io.current()` is the simulation,
-    // `time.Instant.now()` reads the virtual clock, `time.sleep` moves it, and
-    // `net.listen` and `net.connect` make simulated descriptors, on which no
-    // system call is made. A wait moves the clock straight to its next event,
-    // so a deadline a minute away passes at once. A simulated descriptor used
-    // outside a run of its simulation, a real socket used inside one, a task
-    // started inside one, a wait on another task's session, and a wait with
-    // no deadline that nothing can end all trap, since none could be repeated
-    // from the seed. An instant read inside a run is on the virtual clock and
-    // one read outside on the real clock, so neither means anything to the
-    // other.
+    // Run `body` as the simulation's one task and answer what it answers.
+    // The simulation is lent to the run, so no other task runs it meanwhile.
+    // While it runs, `io.current()` is the simulation, `time.Instant.now()`
+    // reads the virtual clock, `time.sleep` moves it, and `net.listen` and
+    // `net.connect` make simulated descriptors, on which no system call is
+    // made. A wait moves the clock straight to its next event, so a deadline
+    // a minute away passes at once. A simulated descriptor used outside a run
+    // of its simulation, a real socket used inside one, a task started inside
+    // one, a wait on another task's session, and a wait with no deadline that
+    // nothing can end all trap, since none could be repeated from the seed.
+    // A simulated descriptor closed between runs is closed at the next
+    // operation of its simulation. An instant read inside a run is on the
+    // virtual clock and one read outside on the real clock, so neither means
+    // anything to the other.
     pub fn run[R, F: inout fn(inout world: World) -> R](inout self: Self, sink body: F) -> R where carries(body), F: Discardable {
         let outer = linea_io_switch(self.identity)
         var world = World { identity = self.identity }

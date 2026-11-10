@@ -23,8 +23,9 @@
  * positive, as every descriptor an operation answers is, and the in-place
  * backend refuses a real descriptor numbered that high, so no real
  * descriptor shares it. An entry knows its simulation until that simulation
- * ends, so an operation on it from any other loop traps, and releasing it there forgets the entry and
- * does nothing else. A real socket used while a simulation runs traps too,
+ * ends, so an operation on it from any other loop traps. Releasing it outside
+ * a run marks it, and the simulation's next operation closes it; releasing it
+ * after the simulation ended forgets the entry. A real socket used while a simulation runs traps too,
  * since it would wait on the kernel against a virtual clock.
  *
  * Every entry and every simulation is guarded by one lock, held across each
@@ -74,8 +75,9 @@ long linea_sim_local_address(int fd);
 long linea_sim_peer_address(int fd);
 long linea_sim_shutdown_write(int fd);
 long linea_sim_reset(int fd);
-/* Close a simulated descriptor: inside its simulation as a socket closes,
- * anywhere else by forgetting its entry. */
+/* Close a simulated descriptor: inside a run of its simulation as a socket
+ * closes, outside one at the simulation's next operation, and after the
+ * simulation ended by forgetting its entry. */
 long linea_sim_release(int fd);
 /* Read the running simulation's clock, as `linea_clock_read` does. */
 long linea_sim_clock_read(uint8_t clock, long *seconds, unsigned long *nanoseconds);

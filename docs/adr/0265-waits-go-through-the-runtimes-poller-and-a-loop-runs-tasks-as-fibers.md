@@ -1364,8 +1364,10 @@ test fn a_read_past_its_deadline_times_out() {
 - **Simulated descriptors stay inside.** A simulated descriptor that leaves
   `run` (returned from the body) names nothing outside it: an operation on it
   from any other `Io` traps with `linea: a simulated descriptor was used
-  outside its simulation`, and releasing it outside does nothing but forget
-  its table entry.
+  outside its simulation`. Releasing it outside a run takes no effect until
+  the simulation's next operation, which closes it in the order the program
+  released it; once the simulation is closed, releasing it only forgets its
+  table entry.
 - **Tasks.** In phases 1 to 3 every task is a thread, and threads scheduled by
   the kernel cannot be made deterministic, so `run` admits one task: a `start`
   inside it traps with `linea: a simulation runs one task until fibers`. A

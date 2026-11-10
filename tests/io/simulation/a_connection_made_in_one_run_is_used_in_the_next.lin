@@ -8,8 +8,8 @@ use net.Acceptor
 
 // A connection belongs to its simulation, not to one run of it: a later run
 // of the same simulation reads what an earlier one sent. Closed outside a
-// run, a simulated connection is only forgotten, and the simulation frees it
-// when it is closed.
+// run, a simulated connection is closed at its simulation's next operation,
+// and here that operation never comes before the simulation is closed.
 fn main() -> Result[UInt8, io.IoError] {
     var sim = io.Simulation.open(seed: 1).unwrap()
     let (listener, client, accepted) = &sim.run(

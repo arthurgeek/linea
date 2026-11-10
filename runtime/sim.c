@@ -59,8 +59,8 @@ struct entry {
     unsigned char *received;
     size_t received_len, received_capacity;
     int ended, reset, write_shut, reset_scheduled;
-    /* Released outside its simulation while the simulation still runs: no
-     * one holds its number, and the simulation frees it when it ends. */
+    /* Released outside a run of its simulation, which is still open: no one
+     * holds its number, and the simulation closes it at its next operation. */
     int forgotten;
 };
 
@@ -420,6 +420,25 @@ static void close_listener(struct sim *s, long index) {
     drop_entry(index);
 }
 
+/* Close, as a socket closes, every entry of `s` that was released outside a
+ * run. A release between runs is ordered by the program, so doing it here,
+ * at the simulation's next operation and in the order the descriptors were
+ * made, leaves the run as repeatable as a close made inside it. Called
+ * locked, at the start of every operation. */
+static void settle(struct sim *s) {
+    size_t m = 0;
+    while (m < s->member_count) {
+        const long index = s->members[m];
+        struct entry *e = entries[index];
+        if (!e->forgotten) {
+            m += 1;
+            continue;
+        }
+        if (e->listening) close_listener(s, index); else close_end(s, index, 0);
+        m = 0;
+    }
+}
+
 static long attempt_accept(struct sim *s, struct entry *l) {
     if (!l->listening) return -(long)EINVAL;
     for (size_t i = 0; i < l->pending_count; i++) {
@@ -592,6 +611,7 @@ void linea_sim_advance(unsigned long identity, unsigned long nanoseconds) {
     if (s != linea_loop_running()) fail("linea: a simulation's world was used outside its run\n");
     struct linea_op op = { LINEA_OP_SLEEP, -1, 0, 0, 0, 0 };
     lock();
+    settle(s);
     if (nanoseconds != 0) {
         op.deadline_ns = add_saturating(s->now, nanoseconds);
         (void)perform(s, &op);
@@ -659,6 +679,7 @@ static struct sim *running_sim(void) {
 long linea_sim_perform(struct linea_op *op) {
     struct sim *s = running_sim();
     lock();
+    settle(s);
     const long answer = perform(s, op);
     unlock();
     return answer;
@@ -668,6 +689,7 @@ long linea_sim_listen(unsigned long address, unsigned long backlog) {
     struct sim *s = running_sim();
     if (backlog > 4096) return -(long)EINVAL;
     lock();
+    settle(s);
     unsigned long bound = address;
     long answer;
     if (port_of(address) == 0) {
@@ -706,6 +728,7 @@ long linea_sim_peer_address(int fd) {
 long linea_sim_shutdown_write(int fd) {
     struct sim *s = running_sim();
     lock();
+    settle(s);
     struct entry *e = entry_of(fd);
     long answer = 0;
     if (e->listening || e->reset) {
@@ -722,6 +745,7 @@ long linea_sim_shutdown_write(int fd) {
 long linea_sim_reset(int fd) {
     struct sim *s = running_sim();
     lock();
+    settle(s);
     const long index = index_of(fd);
     if (entries[index]->listening) close_listener(s, index); else close_end(s, index, 1);
     unlock();
@@ -735,12 +759,12 @@ long linea_sim_release(int fd) {
     if (e == NULL) { unlock(); return -(long)EBADF; }
     const long index = index_of(fd);
     if (e->sim != NULL && e->sim == running) {
+        settle(running);
         if (e->listening) close_listener(running, index); else close_end(running, index, 0);
     } else {
-        /* Outside its simulation the entry is forgotten and nothing else
-         * happens: a simulation that has ended has already cut its links,
-         * and one still open keeps them, so its runs do not depend on when
-         * another thread let go of the number. */
+        /* Outside its simulation the entry is forgotten: a simulation that
+         * has ended has already cut its links, and one still open closes it
+         * at its next operation (`settle`). */
         if (e->sim == NULL) drop_entry(index); else e->forgotten = 1;
     }
     unlock();

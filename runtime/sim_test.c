@@ -448,23 +448,40 @@ static void different_bytes_of_one_length_give_different_fingerprints(void) {
     assert(fingerprint_of_sending("abc") != fingerprint_of_sending("abd"));
 }
 
-/* Closing a simulated descriptor outside a run of its open simulation only
- * forgets its number: the peer, in a later run, hears neither an end nor a
- * reset, so the run does not depend on when the number was let go. */
-static void a_descriptor_closed_between_runs_is_only_forgotten(void) {
+/* A connection closed between runs of its open simulation is closed at the
+ * simulation's next operation, in the order the program closed it, so the
+ * peer reads the end of input in the next run whichever thread let it go. */
+static void a_connection_closed_between_runs_ends_its_peers_input(void) {
     const unsigned long sim = plain(ms);
     (void)linea_io_switch(sim);
     struct pair p = connected_pair();
     (void)linea_io_switch(0);
     assert(linea_net_close((int)p.client) == 0);
     (void)linea_io_switch(sim);
-    char bytes[2] = { 'o', 'k' };
-    assert(linea_net_write((int)p.server, ADDRESS(bytes), 2, 0) == 2);
     char got[2];
-    assert(linea_net_read((int)p.server, ADDRESS(got), 2, virtual_now() + 50 * ms) == -(long)ETIMEDOUT);
-    assert(linea_net_write((int)p.server, ADDRESS(bytes), 2, 0) == 2);
+    assert(linea_net_read((int)p.server, ADDRESS(got), 2, 0) == 0);
     assert(linea_net_close((int)p.server) == 0);
     assert(linea_net_close((int)p.listener) == 0);
+    (void)linea_io_switch(0);
+    linea_sim_close(sim);
+}
+
+/* A listener closed between runs gives its port back by the next run: the
+ * port listens again, and a connection made before the close is reset. */
+static void a_listener_closed_between_runs_frees_its_port(void) {
+    const unsigned long sim = plain(ms);
+    (void)linea_io_switch(sim);
+    struct pair p = connected_pair();
+    (void)linea_io_switch(0);
+    assert(linea_net_close((int)p.listener) == 0);
+    assert(linea_net_close((int)p.server) == 0);
+    (void)linea_io_switch(sim);
+    const long again = linea_net_listen(loopback(80), 4);
+    assert(again >= LINEA_SIM_FIRST_DESCRIPTOR);
+    char got[1];
+    assert(linea_net_read((int)p.client, ADDRESS(got), 1, 0) == 0);
+    assert(linea_net_close((int)again) == 0);
+    assert(linea_net_close((int)p.client) == 0);
     (void)linea_io_switch(0);
     linea_sim_close(sim);
 }
@@ -520,8 +537,9 @@ int main(void) {
     each_side_traps_on_the_others_descriptors();
     a_real_socket_closes_inside_a_simulation();
     different_bytes_of_one_length_give_different_fingerprints();
-    a_descriptor_closed_between_runs_is_only_forgotten();
+    a_connection_closed_between_runs_ends_its_peers_input();
+    a_listener_closed_between_runs_frees_its_port();
     a_session_wait_and_a_foreign_world_trap_inside();
-    puts("native sim: loop identities, virtual clocks, tie rules, deadlines, chunks, resets, seeds, forgetting and traps passed");
+    puts("native sim: loop identities, virtual clocks, tie rules, deadlines, chunks, resets, seeds, closes between runs and traps passed");
     return 0;
 }
