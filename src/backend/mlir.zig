@@ -282,6 +282,9 @@ pub fn emit(
         if (used) try declareOwned(w, signature);
     }
 
+    const link_symbols = try linkSymbols(gpa, module, options.foreign_symbols);
+    defer gpa.free(link_symbols);
+
     // A declaration per external, because MLIR refuses a call to a name the
     // module does not hold. The body is the linker's to find; writing one here
     // would put this compiler's invention under a name the runtime already
@@ -293,9 +296,9 @@ pub fn emit(
     for (module.functions, 0..) |*f, i| {
         const id = FunctionId.at(@intCast(i));
         if (!module.isExternal(id)) continue;
-        if ((try declared.getOrPut(gpa, externalSymbol(module, options.foreign_symbols, id))).found_existing) continue;
+        if ((try declared.getOrPut(gpa, link_symbols[i])).found_existing) continue;
         try w.writeAll("  func.func private @");
-        try writeSymbol(w, module, options.foreign_symbols, id);
+        try writeCallee(w, module, link_symbols, id);
         try w.writeAll("(");
         const indirect = module.returnsIndirectly(id);
         if (indirect) try w.writeAll("!llvm.ptr");
@@ -322,7 +325,7 @@ pub fn emit(
     for (module.functions, 0..) |*f, i| {
         const id = FunctionId.at(@intCast(i));
         if (module.isExternal(id)) continue;
-        try emitFunction(gpa, w, module, f, try table.buildMap(gpa, f.file), table.get(f.file).path, id, file_symbols[f.file.index()].?, options);
+        try emitFunction(gpa, w, module, f, try table.buildMap(gpa, f.file), table.get(f.file).path, id, file_symbols[f.file.index()].?, options.sanitize, link_symbols);
     }
 
     // Only where something is to be entered. A library holds no entry point, so
@@ -513,7 +516,7 @@ fn emitEntryWrapper(w: *std.Io.Writer, module: *const Module, sanitize: ?Sanitiz
     try writeOwnedCallType(w, runtime_symbols.set_args_signature);
     try w.writeAll("\n");
     try w.writeAll("    %status = func.call @");
-    try writeSymbol(w, module, &.{}, module.entry);
+    try writeSymbol(w, module, module.entry);
     try w.print("() : () -> {s}\n", .{int_type});
     // The status narrows to the runtime's width here and nowhere else -- the
     // one place a 64-bit computation meets a 32-bit interface.
@@ -729,7 +732,7 @@ fn emitForeignEntry(
     } else {
         try w.writeAll("    func.call @");
     }
-    try writeSymbol(w, module, &.{}, id);
+    try writeSymbol(w, module, id);
     try w.writeAll("(");
     for (0..mir.param_count) |i| {
         if (i > 0) try w.writeAll(", ");
@@ -775,9 +778,10 @@ fn emitFunction(
     path: []const u8,
     id: FunctionId,
     file_symbol: u32,
-    options: Options,
+    sanitize: ?Sanitizer,
+    /// The symbol each function is linked under, from `linkSymbols`.
+    link_symbols: []const []const u8,
 ) (std.mem.Allocator.Error || std.Io.Writer.Error)!void {
-    const sanitize = options.sanitize;
     // An answer too wide for a register is written into storage the caller
     // owns, handed in as a leading pointer. Asked of the module because the
     // call sites ask the same routine, so the two sides cannot disagree.
@@ -790,11 +794,11 @@ fn emitFunction(
         .file_symbol = file_symbol,
         .module = module,
         .indirect = indirect,
-        .foreign_symbols = options.foreign_symbols,
+        .link_symbols = link_symbols,
     };
 
     try w.writeAll("  func.func private @");
-    try writeSymbol(w, module, &.{}, id);
+    try writeSymbol(w, module, id);
     try w.writeAll("(");
     if (indirect) try w.writeAll("%sret: !llvm.ptr");
     for (0..mir.param_count) |i| {
@@ -1001,9 +1005,9 @@ const FunctionEmitter = struct {
     /// Whether this function writes its answer through a caller-owned pointer
     /// rather than returning it.
     indirect: bool,
-    /// The symbols C gives the `extern` declarations it calls, where they are
-    /// not their names.
-    foreign_symbols: []const ForeignSymbol = &.{},
+    /// The symbol each function it calls or takes the address of is linked
+    /// under, by `FunctionId`, from `linkSymbols`.
+    link_symbols: []const []const u8,
     /// The terminal call writes directly to this function's caller-owned result.
     return_call: InstId = .none,
     /// Names the temporaries a check expands into, and the trap blocks it
@@ -1358,7 +1362,7 @@ const FunctionEmitter = struct {
                 const n = id.index();
                 const target = mir.functionOf(id);
                 try self.w.print("    %fa{d} = func.constant @", .{n});
-                try writeSymbol(self.w, self.module, self.foreign_symbols, target);
+                try writeCallee(self.w, self.module, self.link_symbols, target);
                 try self.w.writeAll(" : ");
                 try self.writeFunctionType(target);
                 try self.here(span);
@@ -1518,7 +1522,7 @@ const FunctionEmitter = struct {
         } else {
             try w.print("    %v{d} = func.call @", .{n});
         }
-        try writeSymbol(w, module, self.foreign_symbols, c.func);
+        try writeCallee(w, module, self.link_symbols, c.func);
         try w.writeAll("(");
         if (indirect) {
             if (id == self.return_call) try w.writeAll("%sret") else try w.print("%rs{d}", .{n});
@@ -2414,6 +2418,7 @@ test "emitted locations follow repeated and reordered Unicode source spans" {
     var buffer: [256]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buffer);
     var emitter: FunctionEmitter = .{
+        .link_symbols = &.{},
         .w = &writer,
         .mir = undefined,
         .module = undefined,
@@ -2700,31 +2705,51 @@ fn resultTypeOf(module: *const Module, id: FunctionId, ret: TypeId) ?[]const u8 
     return computationType(module.representationOf(ret).computation);
 }
 
+/// The symbol each function is linked under, by `FunctionId`. An external's
+/// is the one its C declaration gives it, where `foreign_symbols` names one,
+/// and otherwise its name; every other function's is its name. Resolved once
+/// per module, so a reference reads it by index.
+fn linkSymbols(gpa: std.mem.Allocator, module: *const Module, foreign_symbols: []const ForeignSymbol) std.mem.Allocator.Error![]const []const u8 {
+    var by_name: std.StringHashMapUnmanaged([]const u8) = .empty;
+    defer by_name.deinit(gpa);
+    for (foreign_symbols) |held| {
+        const entry = try by_name.getOrPut(gpa, held.name);
+        if (!entry.found_existing) entry.value_ptr.* = held.symbol;
+    }
+    const out = try gpa.alloc([]const u8, module.functions.len);
+    for (out, 0..) |*symbol, i| {
+        const id = FunctionId.at(@intCast(i));
+        const name = module.nameOf(id);
+        symbol.* = if (module.isExternal(id)) by_name.get(name) orelse name else name;
+    }
+    return out;
+}
+
 /// The name a function is emitted under. Read from the module rather than
 /// rebuilt, because a name computed twice is a name that can differ, and every
 /// reference to a declaration must spell it the way its definition does.
-/// The symbol an external function is emitted under: the one its C
-/// declaration gives it, where that is not its name.
-fn externalSymbol(module: *const Module, foreign_symbols: []const ForeignSymbol, id: FunctionId) []const u8 {
-    const name = module.nameOf(id);
-    for (foreign_symbols) |held| if (std.mem.eql(u8, held.name, name)) return held.symbol;
-    return name;
-}
-
-fn writeSymbol(w: *std.Io.Writer, module: *const Module, foreign_symbols: []const ForeignSymbol, id: FunctionId) std.Io.Writer.Error!void {
+fn writeSymbol(w: *std.Io.Writer, module: *const Module, id: FunctionId) std.Io.Writer.Error!void {
     const name = module.nameOf(id);
     std.debug.assert(symbol_names.holds(name));
     if (module.isExternal(id)) {
         // Somebody else's symbol, spelled as they spelled it: the prefix is
         // this language's claim on a name it defined, and this is not one.
-        // C's declaration may give it another symbol than its name.
-        const symbol = externalSymbol(module, foreign_symbols, id);
-        std.debug.assert(symbol_names.holds(symbol));
-        try writeSymbolName(w, symbol, "");
+        try writeSymbolName(w, name, "");
     } else {
         std.debug.assert(name.len <= symbol_names.max_len);
         try writeSymbolName(w, name, symbol_names.defined_prefix);
     }
+}
+
+/// A function as its call, its address and an external's declaration name
+/// it: an external by the symbol C's declaration links it under, which may be
+/// another than its name, and every other function as `writeSymbol` spells it.
+fn writeCallee(w: *std.Io.Writer, module: *const Module, link_symbols: []const []const u8, id: FunctionId) std.Io.Writer.Error!void {
+    if (!module.isExternal(id)) return writeSymbol(w, module, id);
+    std.debug.assert(symbol_names.holds(module.nameOf(id)));
+    const symbol = link_symbols[id.index()];
+    std.debug.assert(symbol_names.holds(symbol));
+    try writeSymbolName(w, symbol, "");
 }
 
 /// A symbol reference, quoted where this dialect's bare form cannot spell it.
@@ -2851,6 +2876,7 @@ test "integer to float emission preserves the recorded source width" {
         var out: std.Io.Writer.Allocating = .init(gpa);
         defer out.deinit();
         var emitter: FunctionEmitter = .{
+            .link_symbols = &.{},
             .w = &out.writer,
             .mir = &mir,
             .module = &module,
@@ -2940,6 +2966,7 @@ test "borrow aliases survive named and payload pointer stores" {
     var output: std.Io.Writer.Allocating = .init(gpa);
     defer output.deinit();
     var emitter: FunctionEmitter = .{
+        .link_symbols = &.{},
         .w = &output.writer,
         .mir = &mir,
         .module = &module,
@@ -2992,6 +3019,7 @@ test "checked wide multiplication does not introduce division" {
         var out: std.Io.Writer.Allocating = .init(testing.allocator);
         defer out.deinit();
         var emitter: FunctionEmitter = .{
+            .link_symbols = &.{},
             .w = &out.writer,
             .mir = &mir,
             .module = undefined,
@@ -3105,7 +3133,9 @@ test "aggregate tail calls use the final return destination only across an empty
         defer map.deinit();
         var output: std.Io.Writer.Allocating = .init(gpa);
         defer output.deinit();
-        try emitFunction(gpa, &output.writer, &module, &mir, &map, source.path, .at(0), 0, .{});
+        const link_symbols = try linkSymbols(gpa, &module, &.{});
+        defer gpa.free(link_symbols);
+        try emitFunction(gpa, &output.writer, &module, &mir, &map, source.path, .at(0), 0, null, link_symbols);
         const forwards = shape == .direct or shape == .copied_join;
         try testing.expectEqual(forwards, std.mem.indexOf(u8, output.written(), "func.call @lin.tail(%sret,") != null);
         try testing.expectEqual(!forwards, std.mem.indexOf(u8, output.written(), "%rs") != null);

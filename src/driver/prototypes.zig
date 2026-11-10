@@ -43,6 +43,7 @@ const loader = @import("loader.zig");
 const toolchain = @import("toolchain.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
 const symbol_names = @import("../support/symbol.zig");
+const article = @import("../support/article.zig");
 const foreign = @import("../sema/foreign.zig");
 const RawAccesses = @import("../sema/intrinsics.zig").RawAccesses;
 const ForeignScalar = @import("../sema/types.zig").ForeignScalar;
@@ -233,7 +234,7 @@ fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: [
         const shown = if (facts.headers.len == 1)
             try std.fmt.allocPrint(arena, "`{s}`", .{facts.headers[0]})
         else
-            try std.fmt.allocPrint(arena, "the {d} headers linea.json names", .{facts.headers.len});
+            try std.fmt.allocPrint(arena, "the {d} headers " ++ loader.manifest_name ++ " names", .{facts.headers.len});
         try units.append(arena, .{ .shown = shown, .includes = lines });
     }
     for (facts.native) |source| {
@@ -296,20 +297,21 @@ fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: [
             .ir => |text| text,
             .refused => |reports| return reporter.unread(subjects[0], firstError(reports) orelse "`cc` could not compile the declarations"),
         };
+        const index = try IrIndex.of(arena, ir);
         // C may call an export under another name, through a label; every
         // IR declaration of the export's symbol is held to the export. A
         // unit that declares it by its name is compared by its prototype,
         // which says more.
         for (subjects, row) |subject, seen| {
             if (!subject.exported or seen.ctype != null) continue;
-            for (try signaturesNamed(arena, ir, subject.name)) |signature| {
+            for (try index.signaturesNamed(arena, subject.name)) |signature| {
                 if (signatureAgrees(subject.implied, signature)) continue;
                 if (try reporter.called(subject, unit.shown, signature)) break;
             }
         }
         for (row, 0..) |*seen, i| {
             if (seen.ctype == null or seen.macro) continue;
-            seen.linked = linkedOf(arena, ir, k, i);
+            seen.linked = try index.linkedOf(arena, k, i);
             if (seen.linked) |linked| if (linked.signature) |signature| {
                 widenEnumerations(&seen.ctype.?, signature);
             };
@@ -338,59 +340,55 @@ fn checkRoot(arena: std.mem.Allocator, io: std.Io, facts: RootFacts, subjects: [
                 continue;
             }
         }
-        // Every C declaration of the function is held to the declaration,
-        // since any of them may be the one C code calling it was built with,
-        // and all of them must give it one symbol.
-        var symbol: ?struct { name: []const u8, unit: Unit } = null;
-        var refused = false;
-        for (units.items, 0..) |unit, k| {
-            const seen = found[k * subjects.len + i];
-            const ctype = seen.ctype orelse continue;
-            if (!subject.exported) {
-                if (seen.internal) {
-                    try reporter.internal(subject, unit.shown);
-                    refused = true;
-                    break;
-                }
-                const linked = seen.linked orelse {
-                    try reporter.unread(subject, "`cc` names no symbol for it");
-                    refused = true;
-                    break;
-                };
-                if (linked.kind != .function) {
-                    try reporter.notFunction(subject, unit.shown, linked.kind);
-                    refused = true;
-                    break;
-                }
-                const name = callableSymbol(linked.symbol) orelse {
-                    try reporter.unnameable(subject, unit.shown, linked.symbol);
-                    refused = true;
-                    break;
-                };
-                // A symbol C names is held to the reservations a written
-                // name is: it may not be one the runtime, this compiler's
-                // own definitions or LLVM spell.
-                if (!std.mem.eql(u8, name, subject.name) and symbol_names.reservedForeign(name)) {
-                    try reporter.reserved(subject, unit.shown, name);
-                    refused = true;
-                    break;
-                }
-                if (symbol) |earlier| {
-                    if (!std.mem.eql(u8, earlier.name, name)) {
-                        try reporter.symbols(subject, earlier.unit.shown, earlier.name, unit.shown, name);
-                        refused = true;
-                        break;
-                    }
-                } else symbol = .{ .name = name, .unit = unit };
-            }
-            if (try reporter.compare(subject, ctype, unit.shown)) {
-                refused = true;
-                break;
-            }
-        }
-        if (refused or subject.exported) continue;
-        try resolved.append(arena, .{ .subject = subject, .symbol = (symbol orelse continue).name });
+        const symbol = try heldAcross(reporter, subject, units.items, found, subjects.len, i) orelse continue;
+        try resolved.append(arena, .{ .subject = subject, .symbol = symbol });
     }
+}
+
+/// Holds subject `i` to every C declaration of it the units give, since any
+/// of them may be the one C code calling it was built with, and an `extern`
+/// to the one symbol all of them must give it. Answers that symbol, or null
+/// once it reported a disagreement, and for an export, which links against
+/// nothing.
+fn heldAcross(reporter: *Reporter, subject: Subject, units: []const Unit, found: []const Found, per_unit: usize, i: usize) !?[]const u8 {
+    var symbol: ?struct { name: []const u8, unit: Unit } = null;
+    for (units, 0..) |unit, k| {
+        const seen = found[k * per_unit + i];
+        const ctype = seen.ctype orelse continue;
+        if (!subject.exported) {
+            if (seen.internal) {
+                try reporter.internal(subject, unit.shown);
+                return null;
+            }
+            const linked = seen.linked orelse {
+                try reporter.unread(subject, "`cc` names no symbol for it");
+                return null;
+            };
+            if (linked.kind != .function) {
+                try reporter.notFunction(subject, unit.shown, linked.kind);
+                return null;
+            }
+            const name = callableSymbol(linked.symbol) orelse {
+                try reporter.unnameable(subject, unit.shown, linked.symbol);
+                return null;
+            };
+            // A symbol C names is held to the reservations a written name
+            // is: it may not be one the runtime, this compiler's own
+            // definitions or LLVM spell.
+            if (!std.mem.eql(u8, name, subject.name) and symbol_names.reservedForeign(name)) {
+                try reporter.reserved(subject, unit.shown, name);
+                return null;
+            }
+            if (symbol) |earlier| {
+                if (!std.mem.eql(u8, earlier.name, name)) {
+                    try reporter.symbols(subject, earlier.unit.shown, earlier.name, unit.shown, name);
+                    return null;
+                }
+            } else symbol = .{ .name = name, .unit = unit };
+        }
+        if (try reporter.compare(subject, ctype, unit.shown)) return null;
+    }
+    return if (symbol) |held| held.name else null;
 }
 
 fn joined(arena: std.mem.Allocator, base: []const u8, path: []const u8) ![]const u8 {
@@ -446,7 +444,7 @@ fn writeProbe(arena: std.mem.Allocator, io: std.Io, path: []const u8, unit_index
             try roles.append(arena, .{ .linkage = i });
         }
     }
-    try writeFile(io, path, text.written());
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = text.written() });
     return roles.items;
 }
 
@@ -464,26 +462,28 @@ fn writeSymbols(arena: std.mem.Allocator, io: std.Io, path: []const u8, unit_ind
     }
     // Written even with no probe, where the root exports: the IR of what
     // the unit's own code calls is what an export is held to.
-    try writeFile(io, path, text.written());
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = text.written() });
     return any;
 }
 
-fn writeFile(io: std.Io, path: []const u8, text: []const u8) !void {
-    const file = try std.Io.Dir.cwd().createFile(io, path, .{});
-    defer file.close(io);
-    var buffer: [4096]u8 = undefined;
-    var writer = file.writer(io, &buffer);
-    try writer.interface.writeAll(text);
-    try writer.interface.flush();
-}
+/// An error `cc` reported on one line: where, and what it says.
+const Reported = struct {
+    /// Everything before the message: the file, line and column, and for a
+    /// fatal error the word `fatal`.
+    location: []const u8,
+    message: []const u8,
+
+    /// The error `line` reports, or null where it reports none.
+    fn of(line: []const u8) ?Reported {
+        const at = std.mem.indexOf(u8, line, "error: ") orelse return null;
+        return .{ .location = line[0..at], .message = line[at + "error: ".len ..] };
+    }
+};
 
 /// The first error `cc` reported, without its location.
 fn firstError(reports: []const u8) ?[]const u8 {
     var lines = std.mem.splitScalar(u8, reports, '\n');
-    while (lines.next()) |line| {
-        const at = std.mem.indexOf(u8, line, "error: ") orelse continue;
-        return line[at + "error: ".len ..];
-    }
+    while (lines.next()) |line| if (Reported.of(line)) |reported| return reported.message;
     return null;
 }
 
@@ -494,9 +494,9 @@ fn firstError(reports: []const u8) ?[]const u8 {
 fn readReports(reports: []const u8, path: []const u8, includes: usize, roles: []const Role, row: []Found) !?[]const u8 {
     var lines = std.mem.splitScalar(u8, reports, '\n');
     while (lines.next()) |line| {
-        const at = std.mem.indexOf(u8, line, "error: ") orelse continue;
-        const message = line[at + "error: ".len ..];
-        const location = line[0..at];
+        const reported = Reported.of(line) orelse continue;
+        const message = reported.message;
+        const location = reported.location;
         if (std.mem.startsWith(u8, location, path) and location.len > path.len + 1 and location[path.len] == ':') {
             const rest = location[path.len + 1 ..];
             const end = std.mem.indexOfScalar(u8, rest, ':') orelse rest.len;
@@ -574,42 +574,77 @@ const Passed = struct {
     const Kind = enum { integer, float, pointer, void, other };
 };
 
-/// The symbol global `linea_symbol_K_I` holds, its signature and whether it
-/// is an alias, read from the IR, or null where the IR holds no such global.
-fn linkedOf(arena: std.mem.Allocator, ir: []const u8, unit: usize, index: usize) ?Linked {
-    const global = std.fmt.allocPrint(arena, "@{s}{d}_{d} = ", .{ symbol_prefix, unit, index }) catch return null;
-    var lines = std.mem.splitScalar(u8, ir, '\n');
-    var symbol: ?[]const u8 = null;
-    while (lines.next()) |line| {
-        if (!std.mem.startsWith(u8, line, global)) continue;
-        const at = std.mem.indexOf(u8, line, " ptr @") orelse return null;
-        symbol = irName(line[at + " ptr ".len ..]);
-        break;
-    }
-    const named = symbol orelse return null;
-    var linked: Linked = .{ .symbol = named, .kind = .other, .signature = null };
-    var global_kind: ?Linked.Kind = null;
-    lines = std.mem.splitScalar(u8, ir, '\n');
-    while (lines.next()) |line| {
-        if (std.mem.startsWith(u8, line, "@") and irName(line) != null and std.mem.eql(u8, irName(line).?, named)) {
-            global_kind = if (std.mem.indexOf(u8, line, " alias ") != null)
-                .alias
-            else if (std.mem.indexOf(u8, line, " ifunc ") != null)
-                .ifunc
-            else
-                .other;
+/// What one unit's IR says of its globals and functions, read in one pass
+/// and asked once per subject.
+const IrIndex = struct {
+    /// The IR name each `linea_symbol_K_I` global points at, or null where
+    /// its line points at none, by the global's name.
+    targets: std.StringHashMapUnmanaged(?[]const u8) = .empty,
+    /// What the last global line of each IR name makes of it.
+    kinds: std.StringHashMapUnmanaged(Linked.Kind) = .empty,
+    /// The last `declare` or `define` line of each IR name.
+    functions: std.StringHashMapUnmanaged(Declared) = .empty,
+    /// Every `declare` or `define` line, in order, by the symbol an `extern`
+    /// is emitted under to reach it.
+    callable: std.StringHashMapUnmanaged(std.ArrayList(Declared)) = .empty,
+
+    /// A `declare` or `define` line, and where its function's name begins.
+    const Declared = struct { line: []const u8, at: usize };
+
+    fn of(arena: std.mem.Allocator, ir: []const u8) !IrIndex {
+        var index: IrIndex = .{};
+        var lines = std.mem.splitScalar(u8, ir, '\n');
+        while (lines.next()) |line| {
+            if (std.mem.startsWith(u8, line, "@")) {
+                const name = irName(line) orelse continue;
+                if (std.mem.startsWith(u8, line[1..], symbol_prefix) and std.mem.startsWith(u8, line[1 + name.len ..], " = ")) {
+                    const target = try index.targets.getOrPut(arena, name);
+                    if (!target.found_existing) target.value_ptr.* = if (std.mem.indexOf(u8, line, " ptr @")) |at| irName(line[at + " ptr ".len ..]) else null;
+                }
+                try index.kinds.put(arena, name, if (std.mem.indexOf(u8, line, " alias ") != null)
+                    .alias
+                else if (std.mem.indexOf(u8, line, " ifunc ") != null)
+                    .ifunc
+                else
+                    .other);
+                continue;
+            }
+            if (!std.mem.startsWith(u8, line, "declare ") and !std.mem.startsWith(u8, line, "define ")) continue;
+            const at = std.mem.indexOf(u8, line, " @") orelse continue;
+            const name = irName(line[at + 1 ..]) orelse continue;
+            const declared: Declared = .{ .line = line, .at = at };
+            try index.functions.put(arena, name, declared);
+            const symbol = callableSymbol(name) orelse continue;
+            const listed = try index.callable.getOrPut(arena, symbol);
+            if (!listed.found_existing) listed.value_ptr.* = .empty;
+            try listed.value_ptr.append(arena, declared);
         }
-        if (!std.mem.startsWith(u8, line, "declare ") and !std.mem.startsWith(u8, line, "define ")) continue;
-        const at = std.mem.indexOf(u8, line, " @") orelse continue;
-        const name = irName(line[at + 1 ..]) orelse continue;
-        if (!std.mem.eql(u8, name, named)) continue;
-        linked.signature = signatureOf(arena, line, at) catch null;
+        return index;
     }
-    // A global of the symbol's name is never a function, so it decides; a
-    // function is one only where a `declare` or `define` gives a signature.
-    linked.kind = global_kind orelse if (linked.signature != null) .function else .other;
-    return linked;
-}
+
+    /// The symbol global `linea_symbol_K_I` holds, its signature and what
+    /// the IR makes of it, or null where the IR holds no such global.
+    fn linkedOf(self: *const IrIndex, arena: std.mem.Allocator, unit: usize, index: usize) !?Linked {
+        const global = try std.fmt.allocPrint(arena, "{s}{d}_{d}", .{ symbol_prefix, unit, index });
+        const named = (self.targets.get(global) orelse return null) orelse return null;
+        const signature = if (self.functions.get(named)) |declared| signatureOf(arena, declared.line, declared.at) catch null else null;
+        // A global of the symbol's name is never a function, so it decides; a
+        // function is one only where a `declare` or `define` gives a signature.
+        const kind = self.kinds.get(named) orelse if (signature != null) Linked.Kind.function else .other;
+        return .{ .symbol = named, .kind = kind, .signature = signature };
+    }
+
+    /// Every signature the IR declares or defines a function by whose symbol
+    /// is `name` once emitted, whatever C calls the function.
+    fn signaturesNamed(self: *const IrIndex, arena: std.mem.Allocator, name: []const u8) ![]const Signature {
+        var out: std.ArrayList(Signature) = .empty;
+        const declared = self.callable.get(name) orelse return &.{};
+        for (declared.items) |held| {
+            if (try signatureOf(arena, held.line, held.at)) |signature| try out.append(arena, signature);
+        }
+        return out.items;
+    }
+};
 
 /// The IR name `text` begins with, `@name` or `@"name"`, as written between
 /// the quotes, or null where it begins with none.
@@ -628,7 +663,11 @@ fn irName(text: []const u8) ?[]const u8 {
 /// begins at `at`.
 fn signatureOf(arena: std.mem.Allocator, line: []const u8, at: usize) !?Signature {
     const open = std.mem.indexOfScalarPos(u8, line, at, '(') orelse return null;
+    var params: std.ArrayList(Passed) = .empty;
+    // A comma at depth one, directly inside the parameter list, ends a
+    // parameter, and so does the bracket that closes the list.
     var depth: usize = 0;
+    var start = open + 1;
     var close = open;
     while (close < line.len) : (close += 1) {
         switch (line[close]) {
@@ -637,26 +676,24 @@ fn signatureOf(arena: std.mem.Allocator, line: []const u8, at: usize) !?Signatur
                 depth -= 1;
                 if (depth == 0) break;
             },
+            ',' => if (depth == 1) {
+                try appendPassed(arena, &params, line[start..close]);
+                start = close + 1;
+            },
             else => {},
         }
     }
     if (close >= line.len) return null;
-    var params: std.ArrayList(Passed) = .empty;
-    var start = open + 1;
-    depth = 0;
-    var i = open + 1;
-    while (i <= close) : (i += 1) {
-        const c = line[i];
-        if (c == '(' or c == '[' or c == '{' or c == '<') depth += 1;
-        if ((c == ')' or c == ']' or c == '}' or c == '>') and i != close) depth -= 1;
-        if ((c == ',' and depth == 0) or i == close) {
-            const piece = std.mem.trim(u8, line[start..i], " ");
-            if (piece.len > 0) try params.append(arena, passedOf(piece));
-            start = i + 1;
-        }
-    }
+    try appendPassed(arena, &params, line[start..close]);
     const head = line[std.mem.indexOfScalar(u8, line, ' ').? + 1 .. at];
     return .{ .result = passedOf(head), .params = params.items };
+}
+
+/// Appends how the IR passes the parameter `piece` spells, where it spells
+/// one.
+fn appendPassed(arena: std.mem.Allocator, params: *std.ArrayList(Passed), piece: []const u8) !void {
+    const trimmed = std.mem.trim(u8, piece, " ");
+    if (trimmed.len > 0) try params.append(arena, passedOf(trimmed));
 }
 
 /// How the IR passes a value whose type and attributes `text` holds.
@@ -711,22 +748,6 @@ fn signatureAgrees(implied: foreign.Prototype, signature: Signature) bool {
     return signature.result.kind == .void;
 }
 
-/// Every signature the IR declares or defines a function by whose symbol is
-/// `name` once emitted, whatever C calls the function.
-fn signaturesNamed(arena: std.mem.Allocator, ir: []const u8, name: []const u8) ![]const Signature {
-    var out: std.ArrayList(Signature) = .empty;
-    var lines = std.mem.splitScalar(u8, ir, '\n');
-    while (lines.next()) |line| {
-        if (!std.mem.startsWith(u8, line, "declare ") and !std.mem.startsWith(u8, line, "define ")) continue;
-        const at = std.mem.indexOf(u8, line, " @") orelse continue;
-        const spelled = irName(line[at + 1 ..]) orelse continue;
-        const symbol = callableSymbol(spelled) orelse continue;
-        if (!std.mem.eql(u8, symbol, name)) continue;
-        if (try signatureOf(arena, line, at)) |signature| try out.append(arena, signature);
-    }
-    return out.items;
-}
-
 test "a signature C calls an export by is compared whatever C names it" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
@@ -735,7 +756,8 @@ test "a signature C calls an export by is compared whatever C names it" {
         "declare i64 @\"\\01_scale\"(i64 noundef) #1\n"
     else
         "declare i64 @scale(i64 noundef) #1\n";
-    const found = try signaturesNamed(arena, ir, "scale");
+    const index = try IrIndex.of(arena, ir);
+    const found = try index.signaturesNamed(arena, "scale");
     try testing.expectEqual(@as(usize, 1), found.len);
     const narrow: foreign.Prototype = .{ .params = &.{.{ .scalar = .{ .integer = .{ .bits = 32, .signed = true } } }}, .result = .{ .scalar = .{ .integer = .{ .bits = 32, .signed = true } } } };
     try testing.expect(!signatureAgrees(narrow, found[0]));
@@ -753,26 +775,27 @@ test "the IR names the symbol C reaches and how it passes each value" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    const realpath = linkedOf(arena, ir, 0, 0).?;
+    const index = try IrIndex.of(arena, ir);
+    const realpath = (try index.linkedOf(arena, 0, 0)).?;
     try testing.expectEqualStrings("\\01_realpath$DARWIN_EXTSN", realpath.symbol);
     try testing.expectEqual(Linked.Kind.function, realpath.kind);
-    const raise = linkedOf(arena, ir, 0, 1).?;
+    const raise = (try index.linkedOf(arena, 0, 1)).?;
     try testing.expectEqualStrings("raise_", raise.symbol);
     const signature = raise.signature.?;
     try testing.expectEqual(Passed{ .bits = 8, .extension = false, .kind = .integer }, signature.result);
     try testing.expectEqual(Passed{ .bits = 8, .extension = false, .kind = .integer }, signature.params[0]);
     try testing.expectEqual(Passed{ .bits = 64, .kind = .integer }, signature.params[1]);
-    try testing.expectEqual(@as(?Linked, null), linkedOf(arena, ir, 0, 2));
+    try testing.expectEqual(@as(?Linked, null), try index.linkedOf(arena, 0, 2));
     const resolved =
         \\@linea_symbol_0_0 = constant ptr @twice, align 8
         \\@twice = ifunc i64 (i64), ptr @resolve
     ;
-    try testing.expectEqual(Linked.Kind.ifunc, linkedOf(arena, resolved, 0, 0).?.kind);
+    try testing.expectEqual(Linked.Kind.ifunc, (try (try IrIndex.of(arena, resolved)).linkedOf(arena, 0, 0)).?.kind);
     const variable =
         \\@linea_symbol_0_0 = constant ptr @count, align 8
         \\@count = global i32 0, align 4
     ;
-    try testing.expectEqual(Linked.Kind.other, linkedOf(arena, variable, 0, 0).?.kind);
+    try testing.expectEqual(Linked.Kind.other, (try (try IrIndex.of(arena, variable)).linkedOf(arena, 0, 0)).?.kind);
 }
 
 /// The symbol an `extern` is emitted under to reach the IR symbol `spelled`,
@@ -1242,93 +1265,99 @@ const Reporter = struct {
     /// The exports already reported as called by another signature.
     called_exports: std.ArrayList(DeclId) = .empty,
 
-    fn nameLabel(self: *Reporter, subject: Subject, message: []const u8) ![]const Label {
-        const labels = try self.sink.arena.alloc(Label, 1);
-        labels[0] = .{ .file = self.ast.fileOf(self.ast.declName(subject.decl)), .span = self.ast.tokenSpan(self.ast.declName(subject.decl)), .message = message };
-        return labels;
+    /// A label at the subject's name.
+    fn atName(self: *Reporter, subject: Subject, message: []const u8) Label {
+        const name = self.ast.declName(subject.decl);
+        return .{ .file = self.ast.fileOf(name), .span = self.ast.tokenSpan(name), .message = message };
     }
 
-    fn declaredBy(self: *Reporter, subject: Subject, shown: []const u8) ![]const []const u8 {
+    /// The remark naming the C declarations `shown` describes.
+    fn declaredBy(self: *Reporter, subject: Subject, shown: []const u8) ![]const u8 {
+        return std.fmt.allocPrint(self.sink.arena, "`{s}` is declared by {s}", .{ subject.name, shown });
+    }
+
+    /// Adds one [T-ExternPrototype] error: the message `fmt` and `args`
+    /// spell, `label` on the source, `remark` where there is one, and the
+    /// help `note`.
+    fn report(self: *Reporter, label: Label, remark: ?[]const u8, note: []const u8, comptime fmt: []const u8, args: anytype) !void {
         const a = self.sink.arena;
-        return a.dupe([]const u8, &.{try std.fmt.allocPrint(a, "`{s}` is declared by {s}", .{ subject.name, shown })});
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_extern_prototype,
+            .message = try std.fmt.allocPrint(a, fmt, args),
+            .labels = try a.dupe(Label, &.{label}),
+            .remarks = if (remark) |text| try a.dupe([]const u8, &.{text}) else &.{},
+            .notes = try a.dupe([]const u8, &.{note}),
+        });
     }
 
     fn unread(self: *Reporter, subject: Subject, reason: []const u8) !void {
-        const a = self.sink.arena;
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "the C declarations this root names cannot be read, so `{s}` cannot be held to its prototype: {s}", .{ subject.name, reason }),
-            .labels = try self.nameLabel(subject, "held to the prototype its root's C declarations give it"),
-            .notes = try a.dupe([]const u8, &.{"correct `headers` or `native` in linea.json, or install the C library whose header it names"}),
-        });
+        try self.report(
+            self.atName(subject, "held to the prototype its root's C declarations give it"),
+            null,
+            "correct `headers` or `native` in " ++ loader.manifest_name ++ ", or install the C library whose header it names",
+            "the C declarations this root names cannot be read, so `{s}` cannot be held to its prototype: {s}",
+            .{ subject.name, reason },
+        );
     }
 
     fn macro(self: *Reporter, subject: Subject) !void {
-        const a = self.sink.arena;
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "`{s}` is a macro in C, so C code calling it reaches what the macro expands to, not the symbol this declaration names", .{subject.name}),
-            .labels = try self.nameLabel(subject, "a macro has no prototype to hold this to"),
-            .notes = try a.dupe([]const u8, &.{"declare the function the macro expands to, or call it through a C function in `native`"}),
-        });
+        try self.report(
+            self.atName(subject, "a macro has no prototype to hold this to"),
+            null,
+            "declare the function the macro expands to, or call it through a C function in `native`",
+            "`{s}` is a macro in C, so C code calling it reaches what the macro expands to, not the symbol this declaration names",
+            .{subject.name},
+        );
     }
 
     fn undeclared(self: *Reporter, subject: Subject, named: usize) !void {
-        const a = self.sink.arena;
         const why = if (named == 0)
-            "linea.json names no C declarations for this root"
+            loader.manifest_name ++ " names no C declarations for this root"
         else
-            "neither the `headers` nor the `native` sources its linea.json names declare it";
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "no C declaration of `{s}` is in reach: {s}", .{ subject.name, why }),
-            .labels = try self.nameLabel(subject, "held to the prototype C gives it, and C gives it none"),
-            .notes = try a.dupe([]const u8, &.{"name the header that declares it under \"headers\" in linea.json, such as \"stdlib.h\", or build the C that defines it under \"native\""}),
-        });
+            "neither the `headers` nor the `native` sources its " ++ loader.manifest_name ++ " names declare it";
+        try self.report(
+            self.atName(subject, "held to the prototype C gives it, and C gives it none"),
+            null,
+            "name the header that declares it under \"headers\" in " ++ loader.manifest_name ++ ", such as \"stdlib.h\", or build the C that defines it under \"native\"",
+            "no C declaration of `{s}` is in reach: {s}",
+            .{ subject.name, why },
+        );
     }
 
     fn internal(self: *Reporter, subject: Subject, shown: []const u8) !void {
-        const a = self.sink.arena;
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "C declares `{s}` `static`, so it has no symbol this declaration could link against", .{subject.name}),
-            .labels = try self.nameLabel(subject, "C gives this function no symbol"),
-            .remarks = try self.declaredBy(subject, shown),
-            .notes = try a.dupe([]const u8, &.{"call it through a C function that is not `static`, built under \"native\""}),
-        });
+        try self.report(
+            self.atName(subject, "C gives this function no symbol"),
+            try self.declaredBy(subject, shown),
+            "call it through a C function that is not `static`, built under \"native\"",
+            "C declares `{s}` `static`, so it has no symbol this declaration could link against",
+            .{subject.name},
+        );
     }
 
     fn notFunction(self: *Reporter, subject: Subject, shown: []const u8, kind: Linked.Kind) !void {
-        const a = self.sink.arena;
         const what = switch (kind) {
             .alias => "an alias of another function",
             .ifunc => "an `ifunc`, which the program's loader resolves to some function",
             .other, .function => "something that is not a function",
         };
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "C defines `{s}` as {s}, whose prototype its declaration does not show", .{ subject.name, what }),
-            .labels = try self.nameLabel(subject, "C's symbol for this is not a function its declaration describes"),
-            .remarks = try self.declaredBy(subject, shown),
-            .notes = try a.dupe([]const u8, &.{"declare the function itself, or call it through a C function, built under \"native\""}),
-        });
+        try self.report(
+            self.atName(subject, "C's symbol for this is not a function its declaration describes"),
+            try self.declaredBy(subject, shown),
+            "declare the function itself, or call it through a C function, built under \"native\"",
+            "C defines `{s}` as {s}, whose prototype its declaration does not show",
+            .{ subject.name, what },
+        );
     }
 
     fn reserved(self: *Reporter, subject: Subject, shown: []const u8, symbol: []const u8) !void {
-        const a = self.sink.arena;
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "C code calling `{s}` reaches the symbol `{s}`, which belongs to the Linea runtime or the program's own code", .{ subject.name, symbol }),
-            .labels = try self.nameLabel(subject, "C gives this function a symbol no `extern` may link against"),
-            .remarks = try self.declaredBy(subject, shown),
-            .notes = try a.dupe([]const u8, &.{"declare the C function under its own symbol, or reach the runtime through the standard library"}),
-        });
+        try self.report(
+            self.atName(subject, "C gives this function a symbol no `extern` may link against"),
+            try self.declaredBy(subject, shown),
+            "declare the C function under its own symbol, or reach the runtime through the standard library",
+            "C code calling `{s}` reaches the symbol `{s}`, which belongs to the Linea runtime or the program's own code",
+            .{ subject.name, symbol },
+        );
     }
 
     /// Reports C calling an export by an IR signature the export does not
@@ -1343,61 +1372,55 @@ const Reporter = struct {
             if (i > 0) try text.writer.writeAll(", ");
             try text.writer.writeAll(passedSpelling(param));
         }
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "C code calls the symbol `{s}` this export defines through a declaration that takes {s} and answers {s}, which this export does not", .{ subject.name, text.written(), passedSpelling(signature.result) }),
-            .labels = try self.nameLabel(subject, "C calls this export through a declaration of another prototype"),
-            .remarks = try a.dupe([]const u8, &.{try std.fmt.allocPrint(a, "the call is compiled from {s}", .{shown})}),
-            .notes = try a.dupe([]const u8, &.{"declare the export as C calls it, or the C declaration that reaches it as the export is"}),
-        });
+        try self.report(
+            self.atName(subject, "C calls this export through a declaration of another prototype"),
+            try std.fmt.allocPrint(a, "the call is compiled from {s}", .{shown}),
+            "declare the export as C calls it, or the C declaration that reaches it as the export is",
+            "C code calls the symbol `{s}` this export defines through a declaration that takes {s} and answers {s}, which this export does not",
+            .{ subject.name, text.written(), passedSpelling(signature.result) },
+        );
         return true;
     }
 
     fn sharedName(self: *Reporter, subject: Subject, first: []const u8, then: []const u8) !void {
-        const a = self.sink.arena;
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "C gives `{s}` the symbol `{s}` in one root and `{s}` in another, and every `extern` of one name is one function", .{ subject.name, first, then }),
-            .labels = try self.nameLabel(subject, "this root's C calls it by another symbol"),
-            .notes = try a.dupe([]const u8, &.{"give the function one symbol in every root's C, or declare one of them under another name"}),
-        });
+        try self.report(
+            self.atName(subject, "this root's C calls it by another symbol"),
+            null,
+            "give the function one symbol in every root's C, or declare one of them under another name",
+            "C gives `{s}` the symbol `{s}` in one root and `{s}` in another, and every `extern` of one name is one function",
+            .{ subject.name, first, then },
+        );
     }
 
     fn sharedSymbol(self: *Reporter, subject: Subject, symbol: []const u8, other: []const u8) !void {
-        const a = self.sink.arena;
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "C gives `{s}` the symbol `{s}`, which `{s}` also links against with another signature", .{ subject.name, symbol, other }),
-            .labels = try self.nameLabel(subject, "one symbol is one function, with one signature"),
-            .notes = try a.dupe([]const u8, &.{"declare both alike, since C calls one function through both"}),
-        });
+        try self.report(
+            self.atName(subject, "one symbol is one function, with one signature"),
+            null,
+            "declare both alike, since C calls one function through both",
+            "C gives `{s}` the symbol `{s}`, which `{s}` also links against with another signature",
+            .{ subject.name, symbol, other },
+        );
     }
 
     fn unnameable(self: *Reporter, subject: Subject, shown: []const u8, spelled: []const u8) !void {
-        const a = self.sink.arena;
         const symbol = if (std.mem.startsWith(u8, spelled, "\\01")) spelled[3..] else spelled;
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "C code calling `{s}` reaches the symbol `{s}`, which a Linea declaration cannot name", .{ subject.name, symbol }),
-            .labels = try self.nameLabel(subject, "C gives this function a symbol Linea cannot link against"),
-            .remarks = try self.declaredBy(subject, shown),
-            .notes = try a.dupe([]const u8, &.{"call it through a C function with a plain symbol, built under \"native\""}),
-        });
+        try self.report(
+            self.atName(subject, "C gives this function a symbol Linea cannot link against"),
+            try self.declaredBy(subject, shown),
+            "call it through a C function with a plain symbol, built under \"native\"",
+            "C code calling `{s}` reaches the symbol `{s}`, which a Linea declaration cannot name",
+            .{ subject.name, symbol },
+        );
     }
 
     fn symbols(self: *Reporter, subject: Subject, first_shown: []const u8, first: []const u8, then_shown: []const u8, then: []const u8) !void {
-        const a = self.sink.arena;
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "C's declarations give `{s}` two symbols: `{s}` in {s} and `{s}` in {s}", .{ subject.name, first, first_shown, then, then_shown }),
-            .labels = try self.nameLabel(subject, "this links against one symbol, and C code calls two"),
-            .notes = try a.dupe([]const u8, &.{"declare the function alike in every C source and header linea.json names"}),
-        });
+        try self.report(
+            self.atName(subject, "this links against one symbol, and C code calls two"),
+            null,
+            "declare the function alike in every C source and header " ++ loader.manifest_name ++ " names",
+            "C's declarations give `{s}` two symbols: `{s}` in {s} and `{s}` in {s}",
+            .{ subject.name, first, first_shown, then, then_shown },
+        );
     }
 
     /// Reports where C's prototype `c` disagrees with the subject, and
@@ -1409,56 +1432,45 @@ const Reporter = struct {
         const found = try rendered(a, c.spelled, subject.name);
         const implied = try impliedText(a, subject, function);
         const params = self.ast.declParams(subject.decl);
-        const file = self.ast.fileOf(self.ast.declName(subject.decl));
-        var span = self.ast.tokenSpan(self.ast.declName(subject.decl));
-        var label: []const u8 = "";
+        var at = self.atName(subject, "");
         var help: []const u8 = "";
         switch (mismatch) {
             .unprototyped => {
-                label = "C declares this without a prototype, which states no parameter types";
+                at.message = "C declares this without a prototype, which states no parameter types";
                 help = "declare the function in C with a prototype, `long long f(long long value)` rather than `long long f()`";
             },
             .convention => |convention| {
-                label = try std.fmt.allocPrint(a, "C declares it with the `{s}` calling convention, which is not C's own", .{convention});
+                at.message = try std.fmt.allocPrint(a, "C declares it with the `{s}` calling convention, which is not C's own", .{convention});
                 help = "call it through a C function with C's own calling convention, built under \"native\"";
             },
             .variadic => {
-                label = "C reads a variable list of arguments, which an `extern` cannot pass";
+                at.message = "C reads a variable list of arguments, which an `extern` cannot pass";
                 help = "call it through a C function with fixed parameters, built under \"native\"";
             },
             .arity => |counts| {
-                label = try std.fmt.allocPrint(a, "C takes {d} parameter{s}, and this declares {d}", .{ counts.c, plural(counts.c), counts.linea });
+                at.message = try std.fmt.allocPrint(a, "C takes {d} parameter{s}, and this declares {d}", .{ counts.c, plural(counts.c), counts.linea });
                 help = try std.fmt.allocPrint(a, "declare one parameter for each of the {d} C takes, in its order", .{counts.c});
             },
-            .param => |at| {
-                span = self.ast.writtenWholeSpan(params[at.index].written);
-                const name = self.ast.tokenText(params[at.index].name);
-                if (at.inner) |inner| {
-                    label = try std.fmt.allocPrint(a, "C calls this back as `{s}`", .{at.c.spelled});
+            .param => |position| {
+                at.span = self.ast.writtenWholeSpan(params[position.index].written);
+                const name = self.ast.tokenText(params[position.index].name);
+                if (position.inner) |inner| {
+                    at.message = try std.fmt.allocPrint(a, "C calls this back as `{s}`", .{position.c.spelled});
                     help = try std.fmt.allocPrint(a, "in the callback, {s}", .{try innerHelp(a, inner.*)});
                 } else {
-                    label = try std.fmt.allocPrint(a, "C takes `{s}` here", .{at.c.spelled});
-                    help = try positionHelp(a, at.implied, at.c, try std.fmt.allocPrint(a, "`{s}`", .{name}));
+                    at.message = try std.fmt.allocPrint(a, "C takes `{s}` here", .{position.c.spelled});
+                    help = try positionHelp(a, position.implied, position.c, try std.fmt.allocPrint(a, "`{s}`", .{name}));
                 }
             },
-            .result => |at| {
+            .result => |position| {
                 const returns = self.ast.declReturnRef(subject.decl);
-                if (returns.wasWritten()) span = self.ast.writtenWholeSpan(returns);
-                label = try std.fmt.allocPrint(a, "C answers `{s}`", .{at.c.spelled});
-                help = try resultHelp(a, at.implied, at.c, subject.implied.errno);
+                if (returns.wasWritten()) at.span = self.ast.writtenWholeSpan(returns);
+                at.message = try std.fmt.allocPrint(a, "C answers `{s}`", .{position.c.spelled});
+                help = try resultHelp(a, position.implied, position.c, subject.implied.errno);
             },
         }
-        const labels = try a.alloc(Label, 1);
-        labels[0] = .{ .file = file, .span = span, .message = label };
         const verb = if (subject.exported) "this export defines it as" else "this declaration calls it as";
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .t_extern_prototype,
-            .message = try std.fmt.allocPrint(a, "C declares `{s}`, and {s} `{s}`", .{ found, verb, implied }),
-            .labels = labels,
-            .remarks = try self.declaredBy(subject, shown),
-            .notes = try a.dupe([]const u8, &.{help}),
-        });
+        try self.report(at, try self.declaredBy(subject, shown), help, "C declares `{s}`, and {s} `{s}`", .{ found, verb, implied });
         return true;
     }
 };
@@ -1482,12 +1494,6 @@ fn passedSpelling(passed: Passed) []const u8 {
         .void => "nothing",
         .other => "a value no Linea type crosses as",
     };
-}
-
-/// `a` or `an` before `word`, by its first letter.
-fn article(word: []const u8) []const u8 {
-    if (word.len > 0 and std.mem.indexOfScalar(u8, "aeiouAEIOU", word[0]) != null) return "an";
-    return "a";
 }
 
 fn innerHelp(a: std.mem.Allocator, mismatch: Mismatch) ![]const u8 {
@@ -1568,7 +1574,7 @@ fn positionHelp(a: std.mem.Allocator, implied: foreign.Value, c: CType, name: []
                     return try std.fmt.allocPrint(a, "C takes the object's own address, which a plain parameter passes: drop `inout` from {s}", .{name});
                 if (try untranslatable(a, pointee.*)) |why| return why;
                 const held = lineaName(pointee.*).?;
-                return try std.fmt.allocPrint(a, "C writes {s} `{s}` through the address: declare {s} as an `inout` `{s}`, or a newtype over {s}", .{ article(pointee.spelled), pointee.spelled, name, held, overWhich(held) });
+                return try std.fmt.allocPrint(a, "C writes {s} `{s}` through the address: declare {s} as an `inout` `{s}`, or a newtype over {s}", .{ article.before(pointee.spelled), pointee.spelled, name, held, overWhich(held) });
             },
             else => {
                 if (scalarAccepts(scalar, c)) return try std.fmt.allocPrint(a, "C takes the value itself: drop `inout` from {s}", .{name});
