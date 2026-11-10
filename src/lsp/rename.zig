@@ -131,6 +131,9 @@ pub fn forPositionReporting(
     if (declared_token == TokenId.none) {
         return Refused.APrimitiveIsNotRenameable;
     }
+    // A lambda's pattern written with no label stands at the bracket that
+    // opens it, which is no name to rewrite.
+    if (checked.program.ast.tokenTag(declared_token) != .identifier) return null;
     if (references.hasGeneratedSupplier(checked, named)) {
         return Refused.AGeneratedMemberIsNotRenameable;
     }

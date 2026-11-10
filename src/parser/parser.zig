@@ -2831,6 +2831,8 @@ const Parser = struct {
             try self.refuseParameterPatterns(params, "a projection's parameter is a name", "a projection names a place and binds nothing");
         } else if (body == ExprId.none and !wants_body) {
             try self.refuseParameterPatterns(params, "a parameter of a declaration without a body is a name", "a pattern takes an argument apart where a body begins");
+        } else {
+            try self.refuseUnlabelledPatterns(params);
         }
 
         return self.builder.addDecl(.{
@@ -3837,6 +3839,17 @@ const Parser = struct {
     /// every pattern: a capitalised name opens a struct or newtype pattern.
     fn parseParameterHead(self: *Parser, delimiter: ParamDelimiter, site: ParamSite) !ParamHead {
         const at = self.cursor.current();
+        if (delimiter == .parens and site == .declaration and self.atCapitalisedLabel()) {
+            // `Entry (a, b)`: a newtype pattern is written against its
+            // bracket, so a capitalised name set apart from one is a label in
+            // a type's case. Read as the label it stands for, which [N-Case]
+            // reports, so the pattern is checked against the parameter's type
+            // and binds as written.
+            const name = self.cursor.advance();
+            const pattern_at = self.cursor.current();
+            const pattern = try self.descendIntoPattern(parseDestructuringPattern);
+            return .{ .name = name, .pattern = pattern, .argument = try self.patternArgument(pattern_at) };
+        }
         if (self.atParameterPattern()) {
             // A pattern with no label names nothing, so its parameter stands
             // at the bracket that opens it, a token no rule about names reads:
@@ -3849,18 +3862,9 @@ const Parser = struct {
                 return .{ .name = unnamed, .recovered = true };
             }
             // Read as written apart from the label, so its binders are
-            // declared and the body reports only its own mistakes.
-            try self.sink.add(.{
-                .severity = .err,
-                .code = .s_params,
-                .message = "a function's pattern parameter needs a label",
-                .labels = try self.sink.arena.dupe(Label, &.{.{
-                    .file = self.file,
-                    .span = self.cursor.spanAt(at),
-                    .message = "a call names this parameter by its label",
-                }}),
-                .notes = try self.sink.arena.dupe([]const u8, &.{try self.labelHelp(at)}),
-            });
+            // declared and the body reports only its own mistakes. Reported
+            // once the declaration's body is read: without one, a pattern is
+            // refused for that instead, and the label would not help.
             return .{ .name = unnamed, .pattern = pattern, .argument = try self.patternArgument(at) };
         }
 
@@ -3906,18 +3910,47 @@ const Parser = struct {
     }
 
     /// Reports each pattern in a list whose owner has no body for it to bind
-    /// in, and reads the parameter whole under its label.
+    /// in, and reads the parameter whole under its label. One with no label
+    /// is no parameter a call could name, so it is read as recovered.
     fn refuseParameterPatterns(self: *Parser, range: node.ParamRange, message: []const u8, label: []const u8) !void {
         for (self.builder.params.items[range.start..range.end]) |*p| {
             if (p.pattern == ExprId.none) continue;
-            // A pattern with no label was reported where it was read.
-            if (self.cursor.tags[p.name.index()] != .identifier)
-                p.recovered = true
-            else
-                try self.reportAt(.s_params, self.builder.exprStart(p.pattern), message, label);
+            try self.reportAt(.s_params, self.builder.exprStart(p.pattern), message, label);
+            if (self.cursor.tags[p.name.index()] != .identifier) p.recovered = true;
             p.pattern = .none;
             p.argument = .none;
         }
+    }
+
+    /// Reports each pattern in a declaration's list written with no label,
+    /// once the declaration is known to have a body for it to bind in.
+    fn refuseUnlabelledPatterns(self: *Parser, range: node.ParamRange) !void {
+        for (self.builder.params.items[range.start..range.end]) |p| {
+            if (p.pattern == ExprId.none or self.cursor.tags[p.name.index()] == .identifier) continue;
+            const start = self.builder.exprStart(p.pattern);
+            try self.sink.add(.{
+                .severity = .err,
+                .code = .s_params,
+                .message = "a function's pattern parameter needs a label",
+                .labels = try self.sink.arena.dupe(Label, &.{.{
+                    .file = self.file,
+                    .span = self.cursor.spanAt(start),
+                    .message = "a call names this parameter by its label",
+                }}),
+                .notes = try self.sink.arena.dupe([]const u8, &.{try self.labelHelp(start, self.builder.exprEnd(p.pattern))}),
+            });
+        }
+    }
+
+    /// Whether a capitalised name stands here set apart from the `(` after
+    /// it, which a newtype pattern never is.
+    fn atCapitalisedLabel(self: *const Parser) bool {
+        if (!self.cursor.at(.identifier) or self.cursor.peekAt(1) != .l_paren) return false;
+        const name = self.cursor.current();
+        const text = self.cursor.textOf(name);
+        if (text.len == 0 or !std.ascii.isUpper(text[0])) return false;
+        const bracket = self.cursor.ahead(1) orelse return false;
+        return self.cursor.spanAt(bracket).start > self.cursor.spanAt(name).end;
     }
 
     /// Whether a parameter's pattern begins here: a tuple, an inferred struct,
@@ -3941,9 +3974,10 @@ const Parser = struct {
 
     /// The help for a declaration parameter written as a pattern alone: the
     /// same parameter with a label, quoting the pattern where it is short.
-    fn labelHelp(self: *Parser, start: TokenId) ![]const u8 {
+    fn labelHelp(self: *Parser, start: TokenId, end: TokenId) ![]const u8 {
         const first = self.cursor.spanAt(start);
-        const last = self.cursor.spanAt(self.cursor.previousToken());
+        if (end.index() <= start.index()) return "write the label a call uses before the pattern, as in `entry (first, second)`";
+        const last = self.cursor.spanAt(TokenId.at(end.index() - 1));
         if (last.end <= first.start) return "write the label a call uses before the pattern, as in `entry (first, second)`";
         const text = self.cursor.source[first.start..last.end];
         if (text.len <= 40 and std.mem.indexOfScalar(u8, text, '\n') == null)

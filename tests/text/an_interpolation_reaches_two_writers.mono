@@ -312,8 +312,7 @@ pub fn std.io.core;write_all[std.io.core.Descriptor](inout writer: std.io.core.D
     .Ok(written)
 }
 
-fn std.io.core.IoError;std.convert;From[std.io.core.WriteFailure[std.io.core.IoError]].from(sink source: std.io.core.WriteFailure[std.io.core.IoError]) -> std.io.core.IoError {
-    let WriteFailure { kind: kind, reason: reason, written: written } = source
+fn std.io.core.IoError;std.convert;From[std.io.core.WriteFailure[std.io.core.IoError]].from(sink source { kind: kind, reason: reason, written: written }: std.io.core.WriteFailure[std.io.core.IoError]) -> std.io.core.IoError {
     var error: std.io.core.IoError = match reason {
         Some(error) => error,
         None => .{ operation = .Write, category = .Other, code = .None, progress = 0 },

@@ -5,6 +5,12 @@ fn total((first, second): (UInt8, UInt8)) -> UInt8 {
     first + second
 }
 
+// A capitalised name set apart from the pattern is a label in the wrong case,
+// and is reported once for its case.
+fn larger(Entry (first, second): (UInt8, UInt8)) -> UInt8 {
+    if first > second { first } else { second }
+}
+
 fn main() -> UInt8 {
-    total((1, 2))
+    total((1, 2)) + larger((3, 4))
 }

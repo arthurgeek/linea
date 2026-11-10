@@ -2123,6 +2123,11 @@ pub const Ast = struct {
             return self.exprs.items(.token_range)[id.index()].start;
         }
 
+        /// The token after an already-built expression's last.
+        pub fn exprEnd(self: *const Builder, id: ExprId) TokenId {
+            return self.exprs.items(.token_range)[id.index()].end;
+        }
+
         /// The tag of an already-built expression, so a caller can tell whether
         /// a subexpression was already reported.
         pub fn exprTag(self: *const Builder, id: ExprId) Expr.Tag {

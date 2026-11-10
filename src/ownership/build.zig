@@ -613,7 +613,7 @@ const Builder = struct {
             const holding: Holding = switch (param.convention) {
                 .sink => .owned,
                 .read => .lent_until_last_use,
-                .inout => .lent,
+                .inout => .lent_writably,
             };
             try self.bindPatternHolders(param.pattern, param.argument, param.argument, holding);
         }
@@ -702,7 +702,11 @@ const Builder = struct {
     /// How a pattern's binders hold what they name: owned by the binder, lent
     /// for the extent of the construct that bound them, or lent until their
     /// last use.
-    const Holding = enum { owned, lent, lent_until_last_use };
+    /// How a binder holds the part it names. `lent_writably` is an `inout`
+    /// pattern parameter's binder: lent, and holding the caller's part, so
+    /// a write over it replaces a value the checker asks about as it asks
+    /// about a write over an `inout` parameter's part.
+    const Holding = enum { owned, lent, lent_writably, lent_until_last_use };
 
     /// Binds what each binder of `pattern` names, at every depth: the part
     /// of `source` its path selects, held as `holding` says.
@@ -783,6 +787,9 @@ const Builder = struct {
             self.ops.items(.projection)[self.ops.len - 1] = projection;
         }
         if (!lending) try self.beginScope(binder);
+        // The binder now holds the caller's part, which a later write would
+        // replace.
+        if (holding == .lent_writably) try self.emit(.init, .{ .root = binder }, at);
     }
 
     /// Puts a binding on the live stack, and records the node it holds.

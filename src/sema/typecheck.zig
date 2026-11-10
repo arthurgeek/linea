@@ -1669,10 +1669,6 @@ fn typecheckInternal(
             defer answer_fixes.deinit(gpa);
             c.returns_seen = &returns;
             c.answer_fixes = &answer_fixes;
-            for (resolution.parametersOf(d)) |b| {
-                const param = ast.declParams(d)[resolution.paramIndexOf(b)];
-                if (param.pattern != ExprId.none) try c.checkParameterPattern(param, c.binding_types.get(b));
-            }
             const actual = try c.checkBody(body, want);
             c.returns_seen = null;
             c.answer_fixes = null;
@@ -21425,6 +21421,13 @@ const Checker = struct {
             self.current = outer_module;
             self.generic = outer_generic;
         }
+        // A pattern parameter's binders are typed first: a default naming one
+        // is then refused as any default naming a parameter is, rather than
+        // read as a binder with no type yet.
+        for (self.res.parametersOf(d)) |b| {
+            const param = self.ast.declParams(d)[self.res.paramIndexOf(b)];
+            if (param.pattern != ExprId.none) try self.checkParameterPattern(param, self.binding_types.get(b));
+        }
         try self.foldDefaults(d);
     }
 
@@ -33261,8 +33264,10 @@ const Checker = struct {
             // The signature owns the name, because the signature is what every
             // call is checked against: an argument naming the parameter it
             // fills spells what the trait declares, and a member renaming it
-            // declares a name no call can write.
-            if (!namedAlike(self.ast, want.name, member_names[k].name)) {
+            // declares a name no call can write. A parameter the parser read
+            // only to recover names nothing, and its mistake is reported.
+            const named = !want.recovered and !member_names[k].recovered;
+            if (named and !namedAlike(self.ast, want.name, member_names[k].name)) {
                 return self.sink.addErrorFmt(
                     mismatch_code,
                     file,

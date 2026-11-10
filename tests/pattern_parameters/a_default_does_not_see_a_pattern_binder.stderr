@@ -1,0 +1,5 @@
+error[T-Default]: a default is worked out where the parameter is declared, so it is a constant expression
+ --> tests/pattern_parameters/a_default_does_not_see_a_pattern_binder.lin:4:53
+  |
+4 | fn sum(entry (a, b): (UInt8, UInt8), extra: UInt8 = a) -> UInt8 {
+  |                                                     ^ this is not a constant

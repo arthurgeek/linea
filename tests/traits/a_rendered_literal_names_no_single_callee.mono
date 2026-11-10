@@ -540,8 +540,7 @@ fn std.mem.SliceIter[UInt8];std.iter;Iterator.next(inout self: std.mem.SliceIter
     std.mem;Slice[UInt8].get(self.view, index)
 }
 
-fn std.io.core.IoError;std.convert;From[std.io.core.WriteFailure[std.io.core.IoError]].from(sink source: std.io.core.WriteFailure[std.io.core.IoError]) -> std.io.core.IoError {
-    let WriteFailure { kind: kind, reason: reason, written: written } = source
+fn std.io.core.IoError;std.convert;From[std.io.core.WriteFailure[std.io.core.IoError]].from(sink source { kind: kind, reason: reason, written: written }: std.io.core.WriteFailure[std.io.core.IoError]) -> std.io.core.IoError {
     var error: std.io.core.IoError = match reason {
         Some(error) => error,
         None => .{ operation = .Write, category = .Other, code = .None, progress = 0 },
