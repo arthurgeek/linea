@@ -169,6 +169,12 @@ impl DecodeError[mem.SystemAllocator] {
         testing.assert_eq(shown.view(), "missing field at $", "a new failure had a path")?
     }
 
+    test fn failure_starts_a_value_error_at_the_root() {
+        defer let error = DecodeError.failure(.UnknownField)
+        defer let shown = fmt.render_owned(error).unwrap()
+        testing.assert_eq(shown.view(), "unknown field at $", "a new failure had a path")?
+    }
+
     // Record that the error lies under the field `name`, copying the name
     // into the system allocator, as `at_field_in` does.
     pub fn at_field(sink self: Self, name: Str) -> Self where carries(self) {
@@ -186,12 +192,6 @@ impl[A: Allocator] DecodeError[A] {
     // Start a value error for `reason`, with an empty path.
     pub fn failure_in(allocator: A, reason: DecodeReason) -> Self where carries(allocator) {
         .Value(.{ cause = reason, path = Vec.new_in(allocator) })
-    }
-
-    test fn failure_starts_a_value_error_at_the_root() {
-        defer let error = DecodeError.failure(.UnknownField)
-        defer let shown = fmt.render_owned(error).unwrap()
-        testing.assert_eq(shown.view(), "unknown field at $", "a new failure had a path")?
     }
 
     // Record that the error lies under the field `name`, copying the name. A

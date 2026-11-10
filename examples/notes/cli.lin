@@ -138,6 +138,18 @@ impl CliParser {
         cmd.usage()
     }
 
+    test fn usage_contains_all_command_names() {
+        defer let text = CliParser.usage().unwrap()
+        testing.assert(text.view().find("add").is_some(), "usage missing add")?
+        testing.assert(text.view().find("list").is_some(), "usage missing list")?
+        testing.assert(text.view().find("done").is_some(), "usage missing done")?
+        testing.assert(text.view().find("remove").is_some(), "usage missing remove")?
+        testing.assert(text.view().find("show").is_some(), "usage missing show")?
+        testing.assert(text.view().find("help").is_some(), "usage missing help")?
+        testing.assert(text.view().find("notes.cfg").is_some(), "usage missing notes.cfg default")?
+        .Ok(())
+    }
+
     pub fn parse(args: env.Args) -> Result[CliInvocation, cli.CliError] where carries(.Ok: args), carries(.Err: args) {
         var cursor = cli.ArgCursor.new(args)
         defer var cmd = build_cli()
@@ -249,17 +261,5 @@ impl CliParser {
         }
 
         .Ok(.{ action, format, config_path })
-    }
-
-    test fn usage_contains_all_command_names() {
-        defer let text = CliParser.usage().unwrap()
-        testing.assert(text.view().find("add").is_some(), "usage missing add")?
-        testing.assert(text.view().find("list").is_some(), "usage missing list")?
-        testing.assert(text.view().find("done").is_some(), "usage missing done")?
-        testing.assert(text.view().find("remove").is_some(), "usage missing remove")?
-        testing.assert(text.view().find("show").is_some(), "usage missing show")?
-        testing.assert(text.view().find("help").is_some(), "usage missing help")?
-        testing.assert(text.view().find("notes.cfg").is_some(), "usage missing notes.cfg default")?
-        .Ok(())
     }
 }

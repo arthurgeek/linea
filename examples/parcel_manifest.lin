@@ -33,6 +33,23 @@ fn build_manifest(sink arrivals: mem.Slice[UInt64], limit: UInt64) -> Result[Man
     .Ok(.{ weights = values, inspected })
 }
 
+test fn manifest_filters_and_transforms_in_arrival_order() {
+    let arrivals = [UInt64(1200), 3500, 6400, 5000, 900]
+    let { weights, inspected } = build_manifest(arrivals.as_slice(), limit: 5000).unwrap()
+    defer weights.release()
+    testing.assert_eq(weights.length(), 4, "overweight parcel entered the manifest")?
+    testing.assert_eq([weights[0], weights[1], weights[2], weights[3]], [UInt64(1300), 3600, 5100, 1000], "manifest order, limit boundary, or packaging weight changed")?
+    testing.assert_eq(inspected, 5, "not every arrival was inspected")?
+}
+
+test fn an_empty_batch_builds_an_empty_manifest() {
+    let arrivals: [UInt64; 0] = []
+    let { weights, inspected } = build_manifest(arrivals.as_slice(), limit: 5000).unwrap()
+    defer weights.release()
+    testing.assert_eq(weights.length(), 0, "empty batch added a parcel")?
+    testing.assert_eq(inspected, 0, "empty batch invoked the predicate")?
+}
+
 // `*parcel` reads the weight the walk points at.
 fn shipping_weight(sink parcel: borrow UInt64) -> UInt64 {
     let packaging_grams: UInt64 = 100
@@ -44,6 +61,14 @@ fn shipping_weight(sink parcel: borrow UInt64) -> UInt64 {
 fn append_late(inout manifest: Vec[UInt64], late: [UInt64; 2]) -> Result[(), Oom] {
     var arrivals = late.as_slice().map(|sink parcel| *parcel)
     iter.extend(&manifest, &arrivals).settled()
+}
+
+test fn late_parcels_follow_the_existing_manifest() {
+    let arrivals = [UInt64(1200)]
+    let { weights, inspected: _ } = build_manifest(arrivals.as_slice(), limit: 5000).unwrap()
+    defer var manifest = weights
+    append_late(&manifest, [750, 1600]).unwrap()
+    testing.assert_eq([manifest[0], manifest[1], manifest[2]], [UInt64(1300), 750, 1600], "extension replaced or reordered an existing parcel")?
 }
 
 fn print_manifest(weights: Vec[UInt64], inspected: UInt64) -> Result[(), io.IoError] {
@@ -71,29 +96,4 @@ fn main() -> Result[UInt8, io.IoError] {
     }
     print_manifest(manifest, inspected)?
     .Ok(0)
-}
-
-test fn manifest_filters_and_transforms_in_arrival_order() {
-    let arrivals = [UInt64(1200), 3500, 6400, 5000, 900]
-    let { weights, inspected } = build_manifest(arrivals.as_slice(), limit: 5000).unwrap()
-    defer weights.release()
-    testing.assert_eq(weights.length(), 4, "overweight parcel entered the manifest")?
-    testing.assert_eq([weights[0], weights[1], weights[2], weights[3]], [UInt64(1300), 3600, 5100, 1000], "manifest order, limit boundary, or packaging weight changed")?
-    testing.assert_eq(inspected, 5, "not every arrival was inspected")?
-}
-
-test fn an_empty_batch_builds_an_empty_manifest() {
-    let arrivals: [UInt64; 0] = []
-    let { weights, inspected } = build_manifest(arrivals.as_slice(), limit: 5000).unwrap()
-    defer weights.release()
-    testing.assert_eq(weights.length(), 0, "empty batch added a parcel")?
-    testing.assert_eq(inspected, 0, "empty batch invoked the predicate")?
-}
-
-test fn late_parcels_follow_the_existing_manifest() {
-    let arrivals = [UInt64(1200)]
-    let { weights, inspected: _ } = build_manifest(arrivals.as_slice(), limit: 5000).unwrap()
-    defer var manifest = weights
-    append_late(&manifest, [750, 1600]).unwrap()
-    testing.assert_eq([manifest[0], manifest[1], manifest[2]], [UInt64(1300), 750, 1600], "extension replaced or reordered an existing parcel")?
 }

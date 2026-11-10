@@ -178,6 +178,14 @@ impl Value[mem.SystemAllocator] {
         testing.assert_eq(string.as_str().unwrap(), "tea", "string changed its text")?
     }
 
+    test fn string_values_own_their_text() {
+        let source = "tea".to_owned().unwrap()
+        let string = Value.string(source.view()).unwrap()
+        source.release()
+        defer string.release()
+        testing.assert_eq(string.as_str().unwrap(), "tea", "string retained its source")?
+    }
+
     // Make a number value from `input` in the system allocator, as
     // `number_in` does.
     pub fn number(input: Str) -> Result[Self, NumberError] where carries() {
@@ -200,6 +208,11 @@ impl Value[mem.SystemAllocator] {
         testing.assert_eq(signed.as_int64().unwrap(), Int64(-7), "signed constructor changed its value")?
     }
 
+    test fn from_int_makes_a_number_value() {
+        defer let signed = Value.from_int(Int64.min).unwrap()
+        testing.assert_eq(signed.as_int64().unwrap(), Int64.min, "signed constructor changed its value")?
+    }
+
     // Make a number value whose token is the decimal text of `value`, in the
     // system allocator.
     pub fn from_uint(value: UInt64) -> Result[Self, mem.Oom] {
@@ -209,6 +222,11 @@ impl Value[mem.SystemAllocator] {
     test fn from_uint_makes_a_number_value_in_the_system_allocator() {
         defer let unsigned = Value.from_uint(7).unwrap()
         testing.assert_eq(unsigned.as_uint64().unwrap(), UInt64(7), "unsigned constructor changed its value")?
+    }
+
+    test fn from_uint_makes_a_number_value() {
+        defer let unsigned = Value.from_uint(UInt64.max).unwrap()
+        testing.assert_eq(unsigned.as_uint64().unwrap(), UInt64.max, "unsigned constructor changed its value")?
     }
 }
 
@@ -267,14 +285,6 @@ impl[A: Allocator] Value[A] {
         .Ok(value_from_string(allocator, owned))
     }
 
-    test fn string_values_own_their_text() {
-        let source = "tea".to_owned().unwrap()
-        let string = Value.string(source.view()).unwrap()
-        source.release()
-        defer string.release()
-        testing.assert_eq(string.as_str().unwrap(), "tea", "string retained its source")?
-    }
-
     // Make a number value from `input`, which must be one complete JSON number;
     // its spelling is kept.
     pub fn number_in(allocator: A, input: Str) -> Result[Self, NumberError] where carries(.Ok: allocator) {
@@ -302,20 +312,10 @@ impl[A: Allocator] Value[A] {
         .Ok(value_from_number(allocator, owned))
     }
 
-    test fn from_int_makes_a_number_value() {
-        defer let signed = Value.from_int(Int64.min).unwrap()
-        testing.assert_eq(signed.as_int64().unwrap(), Int64.min, "signed constructor changed its value")?
-    }
-
     // Make a number value whose token is the decimal text of `value`.
     pub fn from_uint_in(allocator: A, value: UInt64) -> Result[Self, mem.Oom] where carries(.Ok: allocator) {
         let owned = Number.from_uint_in(allocator, value)?
         .Ok(value_from_number(allocator, owned))
-    }
-
-    test fn from_uint_makes_a_number_value() {
-        defer let unsigned = Value.from_uint(UInt64.max).unwrap()
-        testing.assert_eq(unsigned.as_uint64().unwrap(), UInt64.max, "unsigned constructor changed its value")?
     }
 
     // Return what kind of value this is.

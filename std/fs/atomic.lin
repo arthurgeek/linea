@@ -99,6 +99,52 @@ pub fn save_atomic_in[A: Allocator](allocator: A, path: Path, bytes: mem.Slice[U
     finish_atomic(target, temporary, .None, false, FsFailure.new(.Io(last_error)))
 }
 
+test fn an_atomic_save_takes_its_scratch_names_from_an_arena() {
+    // The arena holds the path scratch and anything the operation returns.
+    defer let arena = mem.Arena.open(mem.system(), size: 1024)
+    let allocator = arena.handle()
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    testing.assert(save_atomic_in(allocator, path, "tea".as_bytes(), policy: .CreateNew).is_ok(), "an atomic save over an arena failed")?
+    defer let bytes = read_file(path, max_bytes: 8).unwrap()
+    testing.assert_eq(bytes.as_slice(), "tea".as_bytes(), "an atomic save over an arena changed its bytes")?
+    .Ok(())
+}
+
+test fn each_allocation_failure_covers_both_scratch_names_of_an_atomic_save() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), FsFailure] {
+            defer let owned = scratch_path()
+            let path = Path.from_str(owned.view()).unwrap()
+            defer remove_scratch(path)
+            save_atomic_in(allocator, path, "tea".as_bytes(), policy: .CreateNew)?
+            return .Ok(())
+        },
+        FsFailure.is_refusal,
+    )
+    // The parent path, the file name and the temporary name are the walk's three
+    // acquisitions.
+    testing.assert(checked.unwrap_or(0) == 3, "an atomic save was reported as failing, or took scratch from another allocator")?
+    .Ok(())
+}
+
+test fn an_atomic_save_reports_scratch_allocation_failure() {
+    // An empty arena refuses every acquisition, so the call fails only if its
+    // scratch comes from the allocator it was given.
+    defer let arena = mem.Arena.open(mem.system(), 0)
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let refused = match save_atomic_in(arena.handle(), path, "tea".as_bytes(), policy: .CreateNew) {
+        Ok(_) => false,
+        Err(failure) => match read failure.primary { Some(Allocation(_)) => true, _ => false },
+    }
+    testing.assert(refused, "an atomic save took its scratch from another allocator")?
+    .Ok(())
+}
+
 // Save `bytes` to `path` atomically, as `save_atomic_in` does, with the system
 // allocator for the operation's scratch storage.
 pub fn save_atomic(path: Path, bytes: mem.Slice[UInt8], policy: WritePolicy, permissions: SavePermissions = .Preserve) -> Result[(), FsFailure] where carries() {
@@ -191,52 +237,6 @@ test fn atomic_save_rejects_an_observed_nonregular_destination_before_writing() 
     .Ok(())
 }
 
-test fn an_atomic_save_takes_its_scratch_names_from_an_arena() {
-    // The arena holds the path scratch and anything the operation returns.
-    defer let arena = mem.Arena.open(mem.system(), size: 1024)
-    let allocator = arena.handle()
-    defer let owned = scratch_path()
-    let path = Path.from_str(owned.view()).unwrap()
-    defer remove_scratch(path)
-    testing.assert(save_atomic_in(allocator, path, "tea".as_bytes(), policy: .CreateNew).is_ok(), "an atomic save over an arena failed")?
-    defer let bytes = read_file(path, max_bytes: 8).unwrap()
-    testing.assert_eq(bytes.as_slice(), "tea".as_bytes(), "an atomic save over an arena changed its bytes")?
-    .Ok(())
-}
-
-test fn each_allocation_failure_covers_both_scratch_names_of_an_atomic_save() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), FsFailure] {
-            defer let owned = scratch_path()
-            let path = Path.from_str(owned.view()).unwrap()
-            defer remove_scratch(path)
-            save_atomic_in(allocator, path, "tea".as_bytes(), policy: .CreateNew)?
-            return .Ok(())
-        },
-        FsFailure.is_refusal,
-    )
-    // The parent path, the file name and the temporary name are the walk's three
-    // acquisitions.
-    testing.assert(checked.unwrap_or(0) == 3, "an atomic save was reported as failing, or took scratch from another allocator")?
-    .Ok(())
-}
-
-test fn an_atomic_save_reports_scratch_allocation_failure() {
-    // An empty arena refuses every acquisition, so the call fails only if its
-    // scratch comes from the allocator it was given.
-    defer let arena = mem.Arena.open(mem.system(), 0)
-    defer let owned = scratch_path()
-    let path = Path.from_str(owned.view()).unwrap()
-    defer remove_scratch(path)
-    let refused = match save_atomic_in(arena.handle(), path, "tea".as_bytes(), policy: .CreateNew) {
-        Ok(_) => false,
-        Err(failure) => match read failure.primary { Some(Allocation(_)) => true, _ => false },
-    }
-    testing.assert(refused, "an atomic save took its scratch from another allocator")?
-    .Ok(())
-}
-
 // permission_bits is octal 0777, the nine ordinary rwx bits. A requested mode
 // with any higher bit, such as setuid or the sticky bit, is refused.
 let permission_bits: UInt64 = 511
@@ -278,12 +278,6 @@ fn random_name[A: Allocator](inout buffer: mem.Buffer[A]) -> Result[(), io.IoErr
     .Ok(())
 }
 
-// `digit_byte` is the ASCII byte of the lowercase hexadecimal digit that
-// spells `nibble`, which is below 16.
-fn digit_byte(nibble: UInt8) -> UInt8 {
-    text.hex_digit(nibble).unwrap().byte(0).unwrap()
-}
-
 test fn temporary_names_have_a_fixed_ascii_extent_and_a_single_terminator() {
     let allocator = mem.system()
     defer var bytes = allocator.acquire(temporary_name_size).unwrap()
@@ -299,6 +293,12 @@ test fn temporary_names_have_a_fixed_ascii_extent_and_a_single_terminator() {
     }
     testing.assert_eq(bytes.load_byte(44), UInt8(0), "temporary name lost its terminator")?
     .Ok(())
+}
+
+// `digit_byte` is the ASCII byte of the lowercase hexadecimal digit that
+// spells `nibble`, which is below 16.
+fn digit_byte(nibble: UInt8) -> UInt8 {
+    text.hex_digit(nibble).unwrap().byte(0).unwrap()
 }
 
 // Compare two NUL-terminated names byte for byte.

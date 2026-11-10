@@ -50,52 +50,6 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
     &router.route(r"GET /hello/{name}", hello)
 }
 
-fn main() -> UInt8 {
-    match port_argument() {
-        Some(port) => serve(port),
-        None => {
-            io.eprintln("usage: welcome_back PORT")
-            64
-        },
-    }
-}
-
-// Read the first command-line argument as a port number.
-fn port_argument() -> Option[UInt16] {
-    let text = env.args().at(1)?
-    match text.parse[UInt16]() {
-        Ok(port) => .Some(port),
-        Err(_) => .None,
-    }
-}
-
-// A serving task's router. `serve` registered the same routes before
-// serving, so registering them here cannot fail.
-fn serving_router() -> http.Router[()] {
-    var router: http.Router[()] = http.Router.new()
-    routes(&router).unwrap()
-    router
-}
-
-fn serve(port: UInt16) -> UInt8 {
-    // The routes are registered once here, so a refused pattern is reported
-    // before anything is served.
-    var checked: http.Router[()] = http.Router.new()
-    let _ = routes(&checked) else |error| {
-        io.eprintln("cannot register a route: {error}")
-        checked.release()
-        return 2
-    }
-    checked.release()
-    io.eprintln("listening on http://127.0.0.1:{port}")
-    // Each serving task builds its own router with `serving_router`.
-    let _ = http.listen_and_serve(net.loopback(port), serving_router) else |error| {
-        io.eprintln("{error}")
-        return 1
-    }
-    0
-}
-
 test fn a_first_visit_sets_the_cookie() {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
@@ -150,4 +104,50 @@ test fn a_name_with_markup_is_shown_as_text() {
     var nothing = ()
     let response = &router.serve_http(&nothing, sent.request()).unwrap()
     testing.assert_ok_eq(response.text(), "<h1>Hello, &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;!</h1><p>Visit 1.</p>", "the name was not escaped")?
+}
+
+fn main() -> UInt8 {
+    match port_argument() {
+        Some(port) => serve(port),
+        None => {
+            io.eprintln("usage: welcome_back PORT")
+            64
+        },
+    }
+}
+
+// Read the first command-line argument as a port number.
+fn port_argument() -> Option[UInt16] {
+    let text = env.args().at(1)?
+    match text.parse[UInt16]() {
+        Ok(port) => .Some(port),
+        Err(_) => .None,
+    }
+}
+
+// A serving task's router. `serve` registered the same routes before
+// serving, so registering them here cannot fail.
+fn serving_router() -> http.Router[()] {
+    var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    router
+}
+
+fn serve(port: UInt16) -> UInt8 {
+    // The routes are registered once here, so a refused pattern is reported
+    // before anything is served.
+    var checked: http.Router[()] = http.Router.new()
+    let _ = routes(&checked) else |error| {
+        io.eprintln("cannot register a route: {error}")
+        checked.release()
+        return 2
+    }
+    checked.release()
+    io.eprintln("listening on http://127.0.0.1:{port}")
+    // Each serving task builds its own router with `serving_router`.
+    let _ = http.listen_and_serve(net.loopback(port), serving_router) else |error| {
+        io.eprintln("{error}")
+        return 1
+    }
+    0
 }

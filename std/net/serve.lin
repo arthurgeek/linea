@@ -208,6 +208,124 @@ pub fn serve[L: Acceptor + io.Close, H: inout fn(sink connection: Connection, pe
     finish(accepting, stopped)
 }
 
+test fn serve_runs_the_handler_once_for_each_connection_and_returns() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let first = connect(bound).unwrap()
+    let second = connect(bound).unwrap()
+    var handler = inout [sink served = UInt64(0)] |sink connection: Connection, _peer: Address| {
+        let _closed = connection.close()
+        served += 1
+    }
+    let ended = serve(listener, &handler, connections: .Some(2))
+    let { served } = handler.into_captures()
+    first.close().unwrap()
+    second.close().unwrap()
+    testing.assert_eq(ended, .Ok(()), "serving did not end after two connections")?
+    testing.assert_eq(served, 2, "the handler did not run once per connection")?
+    .Ok(())
+}
+
+test fn the_handler_reads_from_each_connection_and_names_its_peer() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    var client = connect(bound).unwrap()
+    let sent = io.write_all(&client, "ping".as_bytes()).is_ok()
+    let client_closed = client.close().is_ok()
+    var handler = inout [sink received = false, sink from_loopback = false] |sink connection: Connection, peer: Address| {
+        from_loopback = peer == loopback(peer.port)
+        var reader = io.BufferedReader.open(capacity: 16, reader: connection) else |_| {
+            panic("the reader was refused its buffer")
+        }
+        received = match &reader.read_line_borrowed(max_bytes: 16) {
+            Ok(Some(text)) => text == "ping",
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let _closed = reader.abandon().close()
+    }
+    let ended = serve(listener, &handler, connections: .Some(1))
+    let { received, from_loopback } = handler.into_captures()
+    testing.assert(sent && client_closed, "the client could not send")?
+    testing.assert_eq(ended, .Ok(()), "serving did not end")?
+    testing.assert(received, "the handler did not receive the bytes sent")?
+    testing.assert(from_loopback, "the peer address was not the loopback address")?
+    .Ok(())
+}
+
+test fn serving_no_connections_returns_at_once_and_closes_the_listener() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    var handler = inout [sink served = UInt64(0)] |sink connection: Connection, _peer: Address| {
+        let _closed = connection.close()
+        served += 1
+    }
+    let ended = serve(listener, &handler, connections: .Some(0))
+    let { served } = handler.into_captures()
+    let refused = match connect(bound) {
+        Ok(connection) => {
+            connection.close().unwrap()
+            false
+        },
+        Err(_) => true,
+    }
+    testing.assert_eq(ended, .Ok(()), "serving no connections failed")?
+    testing.assert_eq(served, 0, "the handler ran with no connection to serve")?
+    testing.assert(refused, "the listener was left open")?
+    .Ok(())
+}
+
+test fn transient_accept_failures_are_retried_until_a_connection_is_served() {
+    let listener = listen(loopback(0)).unwrap()
+    let client = connect(listener.local_address().unwrap()).unwrap()
+    let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
+    let reset = io.IoError { operation = .Accept, category = .ConnectionReset, code = .None, progress = 0 }
+    let scripted = scripted(listener, [.Some(.Io(exhausted)), .Some(.Io(reset)), .None, .None], .None)
+    var handler = inout [sink served = UInt64(0)] |sink connection: Connection, _peer: Address| {
+        let _closed = connection.close()
+        served += 1
+    }
+    let ended = serve(scripted, &handler, connections: .Some(1))
+    let { served } = handler.into_captures()
+    client.close().unwrap()
+    testing.assert_eq(ended, .Ok(()), "serving did not retry")?
+    testing.assert_eq(served, 1, "the connection after the failures was not served")?
+    .Ok(())
+}
+
+test fn a_fatal_accept_failure_ends_serving_and_closes_the_listener() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
+    let scripted = scripted(listener, [.Some(.Io(copy(invalid))), .None, .None, .None], .None)
+    var handler = |sink connection: Connection, _peer: Address| {
+        let _closed = connection.close()
+    }
+    let ended = serve(scripted, &handler, connections: .Some(1))
+    let refused = match connect(bound) {
+        Ok(connection) => {
+            connection.close().unwrap()
+            false
+        },
+        Err(_) => true,
+    }
+    testing.assert_eq(ended, .Err(.Accept(.Io(invalid))), "a fatal accept failure did not end serving")?
+    testing.assert(refused, "the listener was left open")?
+    .Ok(())
+}
+
+test fn a_failed_listener_close_ends_serving_with_close() {
+    let listener = listen(loopback(0)).unwrap()
+    let failure = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
+    let scripted = scripted(listener, [.None, .None, .None, .None], .Some(copy(failure)))
+    var handler = |sink connection: Connection, _peer: Address| {
+        let _closed = connection.close()
+    }
+    let ended = serve(scripted, &handler, connections: .Some(0))
+    testing.assert_eq(ended, .Err(.Close(failure)), "a failed close was not reported")?
+    .Ok(())
+}
+
 // Accept connections from `listener` and hand each to `handler` across
 // worker tasks according to `policy`. `policy` defaults to `.Threads(128)`,
 // serving connections concurrently. Each worker takes its next connection
@@ -237,6 +355,107 @@ pub fn serve_workers[L: Acceptor + io.Close + Owned + Shareable + Isolated, H: O
     }
     on_tasks(workers, owner.client(), handler, serve_connections[L, H], both_served)
     owner.close().finish()
+}
+
+test fn serve_workers_handles_connections_concurrently() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let client1 = connect(bound).unwrap()
+    let client2 = connect(bound).unwrap()
+    let handler = |sink connection: Connection, _peer: Address| {
+        var conn = connection
+        match io.write_all(&conn, "pong\n".as_bytes()) {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+        let _closed = conn.close()
+    }
+    let ended = serve_workers(listener, handler, policy: .Threads(2), connections: .Some(2))
+    var reader1 = io.BufferedReader.open(capacity: 16, reader: client1) else |_| {
+        panic("reader1 failed")
+    }
+    var reader2 = io.BufferedReader.open(capacity: 16, reader: client2) else |_| {
+        panic("reader2 failed")
+    }
+    let ok1 = match &reader1.read_line_borrowed(max_bytes: 16) {
+        Ok(Some(text)) => text == "pong",
+        _ => false,
+    }
+    let ok2 = match &reader2.read_line_borrowed(max_bytes: 16) {
+        Ok(Some(text)) => text == "pong",
+        _ => false,
+    }
+    let c1 = reader1.abandon().close().is_ok()
+    let c2 = reader2.abandon().close().is_ok()
+    testing.assert_eq(ended, .Ok(()), "threaded serving did not end after two connections")?
+    testing.assert(ok1, "first client did not get response")?
+    testing.assert(ok2, "second client did not get response")?
+    testing.assert(c1 && c2, "closing readers failed")?
+    .Ok(())
+}
+
+// The first client sends its line only after the third is answered. Two
+// tasks serve: one holds the first client, so the other must serve both the
+// second and the third.
+test fn a_client_that_holds_its_task_holds_up_no_other() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let clients = task.prepare(
+        sink [bound] |sink me: session.Chan[session.Send[Bool, session.End]]| {
+            let slow = connect(bound).unwrap()
+            let quick = connect(bound).unwrap()
+            let third = connect(bound).unwrap()
+            let quick_answered = asked(quick)
+            let third_answered = asked(third)
+            let slow_answered = asked(slow)
+            me.send(quick_answered && third_answered && slow_answered).close()
+        },
+    ).unwrap().start()
+    let ended = serve_workers(listener, answer_a_line, policy: .Threads(2), connections: .Some(3))
+    let (answered, done) = clients.recv()
+    done.close()
+    testing.assert_ok_eq(ended, (), "serving failed")?
+    testing.assert(answered, "a client waited behind one that held its task")?
+}
+
+test fn zero_workers_closes_the_listener_and_returns() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let handler = |sink connection: Connection, _peer: Address| {
+        let _closed = connection.close()
+    }
+    let res = serve_workers(listener, handler, policy: .Threads(0), connections: .Some(1))
+    testing.assert_ok_eq(res, (), "zero workers should succeed immediately")?
+    defer let attempt = connect(bound)
+    testing.assert(attempt.is_err(), "connecting to closed listener should fail")?
+    .Ok(())
+}
+
+test fn serve_workers_sequential_policy() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let client1 = connect(bound).unwrap()
+    let handler = |sink connection: Connection, _peer: Address| {
+        var conn = connection
+        match io.write_all(&conn, "seq\n".as_bytes()) {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+        let _closed = conn.close()
+    }
+    let ended = serve_workers(listener, handler, policy: .Sequential, connections: .Some(1))
+    var reader = io.BufferedReader.open(capacity: 16, reader: client1) else |_| {
+        panic("reader failed")
+    }
+    let ok = match &reader.read_line_borrowed(max_bytes: 16) {
+        Ok(Some(text)) => text == "seq",
+        _ => false,
+    }
+    let c = reader.abandon().close().is_ok()
+    testing.assert_eq(ended, .Ok(()), "sequential serving did not end after one connection")?
+    testing.assert(ok, "client did not get response")?
+    testing.assert(c, "closing reader failed")?
+    .Ok(())
 }
 
 // What two shares of `serve_workers`' tasks answered together: nothing, since
@@ -353,6 +572,27 @@ impl[L: Acceptor] Accepting[L] {
         }
     }
 
+    // Two clients wait, so a listener asked too early accepts one and the
+    // test fails at `early` instead of blocking at `later`.
+    test fn next_asks_the_listener_nothing_until_a_retry_has_waited_its_pause() {
+        let listener = listen(loopback(0)).unwrap()
+        let client = connect(listener.local_address().unwrap()).unwrap()
+        let other = connect(listener.local_address().unwrap()).unwrap()
+        let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
+        let script = scripted(listener, [.Some(.Io(exhausted)), .None, .None, .None], .None)
+        var accepting = Accepting.open(script, limit: .None)
+        let retried = told(&accepting.next())
+        let early = told(&accepting.next())
+        time.sleep(time.Duration.from_milliseconds(first_pause_ms))
+        let later = told(&accepting.next())
+        accepting.finish().unwrap()
+        client.close().unwrap()
+        other.close().unwrap()
+        testing.assert_eq(retried, Told.Retried, "the failed accept was not retried")?
+        testing.assert_eq(early, Told.Waited, "the listener was asked again before the pause ended")?
+        testing.assert_eq(later, Told.Connected, "the connection was not accepted after the pause")?
+    }
+
     // Accept nothing until `count` serving tasks have each called `ready`, or
     // been given up by `unstarted`, so no task waits in `accept` while
     // another is still building what it serves with.
@@ -398,27 +638,6 @@ impl[L: Acceptor] Accepting[L] {
         testing.assert_eq(one_preparing, Told.Waited, "a connection was handed out before every task was ready")?
         testing.assert_eq(still_preparing, Told.Waited, "a connection was handed out before the last task was ready")?
         testing.assert_eq(after_a_failure, Told.Stopped, "a connection was handed out after a task failed to get ready")?
-    }
-
-    // Two clients wait, so a listener asked too early accepts one and the
-    // test fails at `early` instead of blocking at `later`.
-    test fn next_asks_the_listener_nothing_until_a_retry_has_waited_its_pause() {
-        let listener = listen(loopback(0)).unwrap()
-        let client = connect(listener.local_address().unwrap()).unwrap()
-        let other = connect(listener.local_address().unwrap()).unwrap()
-        let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
-        let script = scripted(listener, [.Some(.Io(exhausted)), .None, .None, .None], .None)
-        var accepting = Accepting.open(script, limit: .None)
-        let retried = told(&accepting.next())
-        let early = told(&accepting.next())
-        time.sleep(time.Duration.from_milliseconds(first_pause_ms))
-        let later = told(&accepting.next())
-        accepting.finish().unwrap()
-        client.close().unwrap()
-        other.close().unwrap()
-        testing.assert_eq(retried, Told.Retried, "the failed accept was not retried")?
-        testing.assert_eq(early, Told.Waited, "the listener was asked again before the pause ended")?
-        testing.assert_eq(later, Told.Connected, "the connection was not accepted after the pause")?
     }
 
     // The listener, for a thread that serves it alone because its owning
@@ -547,43 +766,6 @@ test fn tasks_that_cannot_be_made_do_not_hold_up_the_one_that_runs() {
     testing.assert(served, "the task that ran waited for tasks that were never made")?
 }
 
-test fn serve_workers_handles_connections_concurrently() {
-    let listener = listen(loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    let client1 = connect(bound).unwrap()
-    let client2 = connect(bound).unwrap()
-    let handler = |sink connection: Connection, _peer: Address| {
-        var conn = connection
-        match io.write_all(&conn, "pong\n".as_bytes()) {
-            Ok(_) => {},
-            Err(_) => {},
-        }
-        let _closed = conn.close()
-    }
-    let ended = serve_workers(listener, handler, policy: .Threads(2), connections: .Some(2))
-    var reader1 = io.BufferedReader.open(capacity: 16, reader: client1) else |_| {
-        panic("reader1 failed")
-    }
-    var reader2 = io.BufferedReader.open(capacity: 16, reader: client2) else |_| {
-        panic("reader2 failed")
-    }
-    let ok1 = match &reader1.read_line_borrowed(max_bytes: 16) {
-        Ok(Some(text)) => text == "pong",
-        _ => false,
-    }
-    let ok2 = match &reader2.read_line_borrowed(max_bytes: 16) {
-        Ok(Some(text)) => text == "pong",
-        _ => false,
-    }
-    let c1 = reader1.abandon().close().is_ok()
-    let c2 = reader2.abandon().close().is_ok()
-    testing.assert_eq(ended, .Ok(()), "threaded serving did not end after two connections")?
-    testing.assert(ok1, "first client did not get response")?
-    testing.assert(ok2, "second client did not get response")?
-    testing.assert(c1 && c2, "closing readers failed")?
-    .Ok(())
-}
-
 // `answer_a_line` waits for its client's line, then answers `ok`. A client
 // that sends nothing holds the task serving it until its read times out.
 fn answer_a_line(sink connection: Connection, _peer: Address) {
@@ -621,188 +803,6 @@ fn asked(sink connection: Connection) -> Bool {
     }
     let _closed = reader.abandon().close()
     answered
-}
-
-// The first client sends its line only after the third is answered. Two
-// tasks serve: one holds the first client, so the other must serve both the
-// second and the third.
-test fn a_client_that_holds_its_task_holds_up_no_other() {
-    let listener = listen(loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    let clients = task.prepare(
-        sink [bound] |sink me: session.Chan[session.Send[Bool, session.End]]| {
-            let slow = connect(bound).unwrap()
-            let quick = connect(bound).unwrap()
-            let third = connect(bound).unwrap()
-            let quick_answered = asked(quick)
-            let third_answered = asked(third)
-            let slow_answered = asked(slow)
-            me.send(quick_answered && third_answered && slow_answered).close()
-        },
-    ).unwrap().start()
-    let ended = serve_workers(listener, answer_a_line, policy: .Threads(2), connections: .Some(3))
-    let (answered, done) = clients.recv()
-    done.close()
-    testing.assert_ok_eq(ended, (), "serving failed")?
-    testing.assert(answered, "a client waited behind one that held its task")?
-}
-
-test fn zero_workers_closes_the_listener_and_returns() {
-    let listener = listen(loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    let handler = |sink connection: Connection, _peer: Address| {
-        let _closed = connection.close()
-    }
-    let res = serve_workers(listener, handler, policy: .Threads(0), connections: .Some(1))
-    testing.assert_ok_eq(res, (), "zero workers should succeed immediately")?
-    defer let attempt = connect(bound)
-    testing.assert(attempt.is_err(), "connecting to closed listener should fail")?
-    .Ok(())
-}
-
-test fn serve_workers_sequential_policy() {
-    let listener = listen(loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    let client1 = connect(bound).unwrap()
-    let handler = |sink connection: Connection, _peer: Address| {
-        var conn = connection
-        match io.write_all(&conn, "seq\n".as_bytes()) {
-            Ok(_) => {},
-            Err(_) => {},
-        }
-        let _closed = conn.close()
-    }
-    let ended = serve_workers(listener, handler, policy: .Sequential, connections: .Some(1))
-    var reader = io.BufferedReader.open(capacity: 16, reader: client1) else |_| {
-        panic("reader failed")
-    }
-    let ok = match &reader.read_line_borrowed(max_bytes: 16) {
-        Ok(Some(text)) => text == "seq",
-        _ => false,
-    }
-    let c = reader.abandon().close().is_ok()
-    testing.assert_eq(ended, .Ok(()), "sequential serving did not end after one connection")?
-    testing.assert(ok, "client did not get response")?
-    testing.assert(c, "closing reader failed")?
-    .Ok(())
-}
-
-test fn serve_runs_the_handler_once_for_each_connection_and_returns() {
-    let listener = listen(loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    let first = connect(bound).unwrap()
-    let second = connect(bound).unwrap()
-    var handler = inout [sink served = UInt64(0)] |sink connection: Connection, _peer: Address| {
-        let _closed = connection.close()
-        served += 1
-    }
-    let ended = serve(listener, &handler, connections: .Some(2))
-    let { served } = handler.into_captures()
-    first.close().unwrap()
-    second.close().unwrap()
-    testing.assert_eq(ended, .Ok(()), "serving did not end after two connections")?
-    testing.assert_eq(served, 2, "the handler did not run once per connection")?
-    .Ok(())
-}
-
-test fn the_handler_reads_from_each_connection_and_names_its_peer() {
-    let listener = listen(loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    var client = connect(bound).unwrap()
-    let sent = io.write_all(&client, "ping".as_bytes()).is_ok()
-    let client_closed = client.close().is_ok()
-    var handler = inout [sink received = false, sink from_loopback = false] |sink connection: Connection, peer: Address| {
-        from_loopback = peer == loopback(peer.port)
-        var reader = io.BufferedReader.open(capacity: 16, reader: connection) else |_| {
-            panic("the reader was refused its buffer")
-        }
-        received = match &reader.read_line_borrowed(max_bytes: 16) {
-            Ok(Some(text)) => text == "ping",
-            Ok(None) => false,
-            Err(_) => false,
-        }
-        let _closed = reader.abandon().close()
-    }
-    let ended = serve(listener, &handler, connections: .Some(1))
-    let { received, from_loopback } = handler.into_captures()
-    testing.assert(sent && client_closed, "the client could not send")?
-    testing.assert_eq(ended, .Ok(()), "serving did not end")?
-    testing.assert(received, "the handler did not receive the bytes sent")?
-    testing.assert(from_loopback, "the peer address was not the loopback address")?
-    .Ok(())
-}
-
-test fn serving_no_connections_returns_at_once_and_closes_the_listener() {
-    let listener = listen(loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    var handler = inout [sink served = UInt64(0)] |sink connection: Connection, _peer: Address| {
-        let _closed = connection.close()
-        served += 1
-    }
-    let ended = serve(listener, &handler, connections: .Some(0))
-    let { served } = handler.into_captures()
-    let refused = match connect(bound) {
-        Ok(connection) => {
-            connection.close().unwrap()
-            false
-        },
-        Err(_) => true,
-    }
-    testing.assert_eq(ended, .Ok(()), "serving no connections failed")?
-    testing.assert_eq(served, 0, "the handler ran with no connection to serve")?
-    testing.assert(refused, "the listener was left open")?
-    .Ok(())
-}
-
-test fn transient_accept_failures_are_retried_until_a_connection_is_served() {
-    let listener = listen(loopback(0)).unwrap()
-    let client = connect(listener.local_address().unwrap()).unwrap()
-    let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
-    let reset = io.IoError { operation = .Accept, category = .ConnectionReset, code = .None, progress = 0 }
-    let scripted = scripted(listener, [.Some(.Io(exhausted)), .Some(.Io(reset)), .None, .None], .None)
-    var handler = inout [sink served = UInt64(0)] |sink connection: Connection, _peer: Address| {
-        let _closed = connection.close()
-        served += 1
-    }
-    let ended = serve(scripted, &handler, connections: .Some(1))
-    let { served } = handler.into_captures()
-    client.close().unwrap()
-    testing.assert_eq(ended, .Ok(()), "serving did not retry")?
-    testing.assert_eq(served, 1, "the connection after the failures was not served")?
-    .Ok(())
-}
-
-test fn a_fatal_accept_failure_ends_serving_and_closes_the_listener() {
-    let listener = listen(loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
-    let scripted = scripted(listener, [.Some(.Io(copy(invalid))), .None, .None, .None], .None)
-    var handler = |sink connection: Connection, _peer: Address| {
-        let _closed = connection.close()
-    }
-    let ended = serve(scripted, &handler, connections: .Some(1))
-    let refused = match connect(bound) {
-        Ok(connection) => {
-            connection.close().unwrap()
-            false
-        },
-        Err(_) => true,
-    }
-    testing.assert_eq(ended, .Err(.Accept(.Io(invalid))), "a fatal accept failure did not end serving")?
-    testing.assert(refused, "the listener was left open")?
-    .Ok(())
-}
-
-test fn a_failed_listener_close_ends_serving_with_close() {
-    let listener = listen(loopback(0)).unwrap()
-    let failure = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
-    let scripted = scripted(listener, [.None, .None, .None, .None], .Some(copy(failure)))
-    var handler = |sink connection: Connection, _peer: Address| {
-        let _closed = connection.close()
-    }
-    let ended = serve(scripted, &handler, connections: .Some(0))
-    testing.assert_eq(ended, .Err(.Close(failure)), "a failed close was not reported")?
-    .Ok(())
 }
 
 // `reached` says whether `served` connections reach the limit `connections`.

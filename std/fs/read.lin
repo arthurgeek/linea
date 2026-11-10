@@ -121,6 +121,42 @@ pub fn read_file_in[A: Allocator](allocator: A, path: Path, max_bytes: UInt64) -
     finish_file_read(file, outcome)
 }
 
+test fn reading_a_file_allocates_its_bytes_from_an_arena() {
+    // The arena holds the path scratch and anything the operation returns.
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    let allocator = arena.handle()
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let _written = write_file(path, "green tea".as_bytes(), policy: .CreateNew).unwrap()
+    // An arena's bytes are reclaimed with the arena, so the vector is dropped.
+    let bytes = read_file_in(allocator, path, max_bytes: 16) else |_| {
+        return testing.assert(false, "reading a file into an arena failed")
+    }
+    testing.assert_eq(bytes.as_slice(), "green tea".as_bytes(), "reading a file into an arena changed its bytes")?
+    .Ok(())
+}
+
+test fn each_allocation_failure_covers_every_growth_step_of_a_file_read() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), ReadFileReason] {
+            defer let owned = scratch_path()
+            let path = Path.from_str(owned.view()).unwrap()
+            defer remove_scratch(path)
+            // Five thousand bytes outgrow the first 4096-byte read buffer.
+            defer let input = Vec.filled(count: 5000, value: UInt8(7)).unwrap()
+            let _written = write_file(path, input.as_slice(), policy: .CreateNew).unwrap()
+            let bytes = read_file_in(allocator, path, max_bytes: 5000).settled()?
+            bytes.release()
+            return .Ok(())
+        },
+        ReadFileReason.is_refusal,
+    )
+    testing.assert(checked.is_ok(), "a growing file read was reported as failing")?
+    .Ok(())
+}
+
 // Read the file at `path` through EOF into storage from the system allocator,
 // under the limits of `read_file_in`.
 pub fn read_file(path: Path, max_bytes: UInt64) -> Result[Vec[UInt8, mem.SystemAllocator], ReadFileFailure[mem.SystemAllocator]] where carries() {
@@ -169,42 +205,6 @@ test fn reading_a_file_accepts_its_exact_byte_limit() {
     for index in 0..bytes.length() {
         testing.assert_eq(bytes[index], input.byte(index).unwrap(), "reading a file changed a byte")?
     }
-    .Ok(())
-}
-
-test fn reading_a_file_allocates_its_bytes_from_an_arena() {
-    // The arena holds the path scratch and anything the operation returns.
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let allocator = arena.handle()
-    defer let owned = scratch_path()
-    let path = Path.from_str(owned.view()).unwrap()
-    defer remove_scratch(path)
-    let _written = write_file(path, "green tea".as_bytes(), policy: .CreateNew).unwrap()
-    // An arena's bytes are reclaimed with the arena, so the vector is dropped.
-    let bytes = read_file_in(allocator, path, max_bytes: 16) else |_| {
-        return testing.assert(false, "reading a file into an arena failed")
-    }
-    testing.assert_eq(bytes.as_slice(), "green tea".as_bytes(), "reading a file into an arena changed its bytes")?
-    .Ok(())
-}
-
-test fn each_allocation_failure_covers_every_growth_step_of_a_file_read() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), ReadFileReason] {
-            defer let owned = scratch_path()
-            let path = Path.from_str(owned.view()).unwrap()
-            defer remove_scratch(path)
-            // Five thousand bytes outgrow the first 4096-byte read buffer.
-            defer let input = Vec.filled(count: 5000, value: UInt8(7)).unwrap()
-            let _written = write_file(path, input.as_slice(), policy: .CreateNew).unwrap()
-            let bytes = read_file_in(allocator, path, max_bytes: 5000).settled()?
-            bytes.release()
-            return .Ok(())
-        },
-        ReadFileReason.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "a growing file read was reported as failing")?
     .Ok(())
 }
 

@@ -83,29 +83,6 @@ fn fill[W: Writer](inout w: W, form: Str, fields: [Field; 3]) -> Result[(), W.Er
     &w.write_str(rest)
 }
 
-// The complete guest-book page, streamed directly into `http.html` through
-// `Display` without building an intermediate `entries` string.
-@(copyable, derive(Debug))
-pub struct Page {
-    action: Str,
-    name: Str,
-    entries: Slice[Entry],
-}
-
-impl Display for Page {
-    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
-        fill(
-            &w,
-            page_template,
-            [
-                Field { name = "action", value = .Text(copy(self.action)) },
-                Field { name = "name", value = .Text(copy(self.name)) },
-                Field { name = "entries", value = .Entries(copy(self.entries)) },
-            ],
-        )
-    }
-}
-
 test fn fill_escapes_text_and_streams_entries_without_unreplaced_placeholders() {
     let stamp = time.Timestamp.from_unix(1792497600, 0).unwrap()
     defer var row = String.new()
@@ -130,6 +107,29 @@ test fn fill_escapes_text_and_streams_entries_without_unreplaced_placeholders() 
     testing.assert(row.view().find(r"{{").is_none(), "entry.html left an unreplaced placeholder")?
     testing.assert(rendered.view().find(r"{{").is_none(), "page.html left an unreplaced placeholder")?
     .Ok(())
+}
+
+// The complete guest-book page, streamed directly into `http.html` through
+// `Display` without building an intermediate `entries` string.
+@(copyable, derive(Debug))
+pub struct Page {
+    action: Str,
+    name: Str,
+    entries: Slice[Entry],
+}
+
+impl Display for Page {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        fill(
+            &w,
+            page_template,
+            [
+                Field { name = "action", value = .Text(copy(self.action)) },
+                Field { name = "name", value = .Text(copy(self.name)) },
+                Field { name = "entries", value = .Entries(copy(self.entries)) },
+            ],
+        )
+    }
 }
 
 test fn duplicate_fields_render_only_the_first_match() {

@@ -76,40 +76,6 @@ impl[S, A: Allocator] Closure[S, A] {
         Closure.erase(allocator, callback)
     }
 
-    // Move `callback` into bytes from `allocator`. `open` and `open_in` both
-    // erase through this, so the callable is stored one way.
-    fn erase[F: Release](allocator: A, sink callback: F) -> Result[Self, Oom] where carries(.Ok: callback, allocator) {
-        let shape: SlotType[F] = .Type
-        let size = closure_size(shape)
-        var storage: Storage[F, A] = if size == 0 {
-            .{ buffer = .None, allocator = copy(allocator), at = address.nowhere(), len = 0 }
-        } else {
-            match allocator.acquire(size) {
-                Ok(buffer) => Storage.from_buffer(buffer),
-                Err(reason) => {
-                    callback.release()
-                    return .Err(reason)
-                },
-            }
-        }
-        slot_put(&storage, 0, callback)
-        let Storage { buffer, allocator: _, at, len } = storage
-        .Ok(.{ entry = closure_entry(shape), settle = closure_settle(shape), at = address.raw(at), len, storage = buffer })
-    }
-
-    test fn a_closure_calls_what_it_captured() {
-        let rate: UInt64 = 10
-        let discount = Closure.open(
-            [sink rate] |cents: UInt64| -> UInt64 {
-                cents - cents * rate / 100
-            },
-        ).unwrap()
-        let paid = discount(2000)
-        discount.release()
-        testing.assert_eq(paid, 1800, "the closure lost its rate")?
-        .Ok(())
-    }
-
     test fn a_closure_keeps_its_captures_in_an_arena() {
         defer let arena = Arena.open(system(), 64)
         let rate: UInt64 = 10
@@ -154,21 +120,25 @@ impl[S, A: Allocator] Closure[S, A] {
         .Ok(())
     }
 
-    test fn a_lambda_that_captures_nothing_allocates_nothing() {
-        let log = AllocationLog.open(system(), 0).unwrap()
-        let doubling = Closure.open_in(
-            log.allocator(),
-            |value: UInt64| -> UInt64 {
-                value * 2
-            },
-        ).unwrap()
-        let doubled = doubling(21)
-        doubling.release()
-        let attempts = log.attempts()
-        log.release()
-        testing.assert_eq(doubled, 42, "the closure did not double")?
-        testing.assert_eq(attempts, 0, "a closure with no captures allocated")?
-        .Ok(())
+    // Move `callback` into bytes from `allocator`. `open` and `open_in` both
+    // erase through this, so the callable is stored one way.
+    fn erase[F: Release](allocator: A, sink callback: F) -> Result[Self, Oom] where carries(.Ok: callback, allocator) {
+        let shape: SlotType[F] = .Type
+        let size = closure_size(shape)
+        var storage: Storage[F, A] = if size == 0 {
+            .{ buffer = .None, allocator = copy(allocator), at = address.nowhere(), len = 0 }
+        } else {
+            match allocator.acquire(size) {
+                Ok(buffer) => Storage.from_buffer(buffer),
+                Err(reason) => {
+                    callback.release()
+                    return .Err(reason)
+                },
+            }
+        }
+        slot_put(&storage, 0, callback)
+        let Storage { buffer, allocator: _, at, len } = storage
+        .Ok(.{ entry = closure_entry(shape), settle = closure_settle(shape), at = address.raw(at), len, storage = buffer })
     }
 }
 
@@ -190,6 +160,36 @@ impl[S] Closure[S, SystemAllocator] {
         let raised = kept(10)
         kept.release()
         testing.assert_eq(raised, UInt64(15), "the closure lost its capture")?
+    }
+
+    test fn a_closure_calls_what_it_captured() {
+        let rate: UInt64 = 10
+        let discount = Closure.open(
+            [sink rate] |cents: UInt64| -> UInt64 {
+                cents - cents * rate / 100
+            },
+        ).unwrap()
+        let paid = discount(2000)
+        discount.release()
+        testing.assert_eq(paid, 1800, "the closure lost its rate")?
+        .Ok(())
+    }
+
+    test fn a_lambda_that_captures_nothing_allocates_nothing() {
+        let log = AllocationLog.open(system(), 0).unwrap()
+        let doubling = Closure.open_in(
+            log.allocator(),
+            |value: UInt64| -> UInt64 {
+                value * 2
+            },
+        ).unwrap()
+        let doubled = doubling(21)
+        doubling.release()
+        let attempts = log.attempts()
+        log.release()
+        testing.assert_eq(doubled, 42, "the closure did not double")?
+        testing.assert_eq(attempts, 0, "a closure with no captures allocated")?
+        .Ok(())
     }
 }
 

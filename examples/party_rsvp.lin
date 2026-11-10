@@ -94,25 +94,6 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
     &router.route("POST /reply", reply)
 }
 
-fn main() -> UInt8 {
-    let logger = log.to_stderr(minimum: .Info)
-    var router: http.Router[()] = http.Router.new()
-    let _ = routes(&router) else |error| {
-        logger.error("cannot register a route", log.field("error", error))
-        router.release()
-        return 2
-    }
-    // `serve_cgi` answers the one request this process was started for and
-    // returns. `http.logged` writes one line for it to standard error.
-    let _ = http.serve_cgi(http.logged(logger, router)) else |error| {
-        // Run from a shell without `REQUEST_METHOD`, there is no request.
-        io.eprintln("party_rsvp: {error}")
-        io.eprintln("run it from a web server, or describe a request: REQUEST_METHOD=GET party_rsvp")
-        return 64
-    }
-    0
-}
-
 // Each test builds a request in an arena, as `serve_cgi` does, and hands it
 // to the router.
 test fn the_invitation_is_an_html_form() {
@@ -153,4 +134,23 @@ test fn a_reply_without_a_name_or_with_too_many_guests_is_refused() {
         }
         testing.assert_eq(refused.status(), http.Status.UnprocessableContent, "the status changed")?
     }
+}
+
+fn main() -> UInt8 {
+    let logger = log.to_stderr(minimum: .Info)
+    var router: http.Router[()] = http.Router.new()
+    let _ = routes(&router) else |error| {
+        logger.error("cannot register a route", log.field("error", error))
+        router.release()
+        return 2
+    }
+    // `serve_cgi` answers the one request this process was started for and
+    // returns. `http.logged` writes one line for it to standard error.
+    let _ = http.serve_cgi(http.logged(logger, router)) else |error| {
+        // Run from a shell without `REQUEST_METHOD`, there is no request.
+        io.eprintln("party_rsvp: {error}")
+        io.eprintln("run it from a web server, or describe a request: REQUEST_METHOD=GET party_rsvp")
+        return 64
+    }
+    0
 }

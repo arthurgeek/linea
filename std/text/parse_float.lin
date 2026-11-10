@@ -11,19 +11,6 @@ pub fn parse_float64(input: Str) -> Result[Float64, ParseError] where carries() 
     parsed_status(status, bits, offset)
 }
 
-// The runtime answers 0 for a value, 1 for a syntax error at `offset`, 2 for a
-// value out of range, and 3 for a token over the length limit. A value's bits
-// are those of the Float64 holding it.
-fn parsed_status(status: UInt64, bits: UInt64, offset: UInt64) -> Result[Float64, ParseError] where carries() {
-    match read status {
-        0 => .Ok(Float64.from_bits(bits)),
-        1 => .Err(.Syntax(offset)),
-        2 => .Err(.OutOfRange),
-        3 => .Err(.TokenLimit),
-        _ => panic("invalid float parser status"),
-    }
-}
-
 test fn float_parsing_preserves_exact_values_and_signed_zero() {
     testing.assert_eq(parse_float64("+000.125").unwrap(), 0.125, "decimal grammar changed")?
     testing.assert_eq(parse_float64("9007199254740993").unwrap(), 9007199254740992.0, "halfway integer did not round to even")?
@@ -66,6 +53,19 @@ test fn float_parsing_bounds_token_work_before_conversion() {
     testing.assert_eq(parse_float64(input.view()).unwrap(), 0.0, "maximum-length zero token was refused")?
     &input.append("0").unwrap()
     testing.assert(match parse_float64(input.view()) { Err(error) => error == ParseError.TokenLimit, Ok(_) => false }, "oversized decimal token was accepted")?
+}
+
+// The runtime answers 0 for a value, 1 for a syntax error at `offset`, 2 for a
+// value out of range, and 3 for a token over the length limit. A value's bits
+// are those of the Float64 holding it.
+fn parsed_status(status: UInt64, bits: UInt64, offset: UInt64) -> Result[Float64, ParseError] where carries() {
+    match read status {
+        0 => .Ok(Float64.from_bits(bits)),
+        1 => .Err(.Syntax(offset)),
+        2 => .Err(.OutOfRange),
+        3 => .Err(.TokenLimit),
+        _ => panic("invalid float parser status"),
+    }
 }
 
 // Parse one decimal token as `parse_float64` does, rounding once to the

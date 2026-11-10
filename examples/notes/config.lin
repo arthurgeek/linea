@@ -106,6 +106,14 @@ impl Config[mem.SystemAllocator] {
         }
     }
 
+    test fn default_config_holds_expected_defaults() {
+        defer let config = Config.default()
+        testing.assert_eq(config.default_format, OutputFormat.Table, "default format differs")?
+        testing.assert_eq(config.default_priority, Priority.Normal, "default priority differs")?
+        testing.assert_eq(config.data_file.view(), "notes.json", "default data file differs")?
+        .Ok(())
+    }
+
     // Load configuration. If path_opt is Some(path), requires the file to exist and be valid JSON.
     // If path_opt is None, looks for "notes.cfg" in the current directory; if not found, returns default.
     // If "notes.cfg" exists but cannot be parsed, reports an error.
@@ -140,13 +148,5 @@ impl Config[mem.SystemAllocator] {
                 }
             },
         }
-    }
-
-    test fn default_config_holds_expected_defaults() {
-        defer let config = Config.default()
-        testing.assert_eq(config.default_format, OutputFormat.Table, "default format differs")?
-        testing.assert_eq(config.default_priority, Priority.Normal, "default priority differs")?
-        testing.assert_eq(config.data_file.view(), "notes.json", "default data file differs")?
-        .Ok(())
     }
 }

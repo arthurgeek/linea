@@ -19,43 +19,6 @@ pub fn render_owned_in[A: Allocator, T: Display](allocator: A, value: T) -> Resu
     .Ok(rendered)
 }
 
-// Render `value` with Display into a new String allocated from the system
-// allocator. See `render_owned_in`.
-pub fn render_owned[T: Display](value: T) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
-    render_owned_in(mem.system(), value)
-}
-
-test fn owned_rendering_allocates_from_the_system_allocator() {
-    defer let rendered = render_owned(UInt64(42)).unwrap()
-    testing.assert_eq(rendered.view(), "42", "rendering into the system allocator changed the value")?
-}
-
-test fn owned_rendering_formats_interpolation_values() {
-    let count: UInt64 = 3
-    let enabled = true
-    defer let rendered = render_owned("count={count}, enabled={enabled}").unwrap()
-    testing.assert_eq(rendered.view(), "count=3, enabled=true", "owned interpolation rendering changed its values")?
-    .Ok(())
-}
-
-test fn owned_rendering_outlives_its_input_owner() {
-    defer let rendered = {
-        defer let source = "source á".to_owned().unwrap()
-        render_owned(source.view()).unwrap()
-    }
-    testing.assert_eq(rendered.view(), "source á", "owned rendering retained its source owner")?
-    .Ok(())
-}
-
-struct PartialRenderFixture {}
-
-impl Display for PartialRenderFixture {
-    fn fmt[W: Writer](_self: Self, inout w: W) -> Result[(), W.Error] {
-        &w.write_str("a")?
-        &w.write_str("0123456789")
-    }
-}
-
 test fn owned_rendering_settles_its_partial_string_on_allocation_failure() {
     // The eight-byte cursor and rounded first allocation consume 16 bytes.
     // The remaining eight cannot hold the next fragment's 16-byte reservation.
@@ -93,6 +56,43 @@ test fn each_allocation_failure_covers_every_growth_step_of_an_owned_rendering()
     )
     testing.assert(checked.is_ok(), "a growing owned rendering was reported as failing")?
     .Ok(())
+}
+
+// Render `value` with Display into a new String allocated from the system
+// allocator. See `render_owned_in`.
+pub fn render_owned[T: Display](value: T) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
+    render_owned_in(mem.system(), value)
+}
+
+test fn owned_rendering_allocates_from_the_system_allocator() {
+    defer let rendered = render_owned(UInt64(42)).unwrap()
+    testing.assert_eq(rendered.view(), "42", "rendering into the system allocator changed the value")?
+}
+
+test fn owned_rendering_formats_interpolation_values() {
+    let count: UInt64 = 3
+    let enabled = true
+    defer let rendered = render_owned("count={count}, enabled={enabled}").unwrap()
+    testing.assert_eq(rendered.view(), "count=3, enabled=true", "owned interpolation rendering changed its values")?
+    .Ok(())
+}
+
+test fn owned_rendering_outlives_its_input_owner() {
+    defer let rendered = {
+        defer let source = "source á".to_owned().unwrap()
+        render_owned(source.view()).unwrap()
+    }
+    testing.assert_eq(rendered.view(), "source á", "owned rendering retained its source owner")?
+    .Ok(())
+}
+
+struct PartialRenderFixture {}
+
+impl Display for PartialRenderFixture {
+    fn fmt[W: Writer](_self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("a")?
+        &w.write_str("0123456789")
+    }
 }
 
 impl Display for Str {

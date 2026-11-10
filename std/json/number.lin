@@ -42,47 +42,6 @@ impl Number[mem.SystemAllocator] {
         testing.assert_eq(number.text(), "-1.5e3", "number spelling changed")?
     }
 
-    // Make the number whose token is the decimal text of `value`, in the
-    // system allocator.
-    pub fn from_int(value: Int64) -> Result[Self, mem.Oom] {
-        Number.from_int_in(mem.system(), value)
-    }
-
-    test fn from_int_keeps_the_token_in_the_system_allocator() {
-        defer let number = Number.from_int(-42).unwrap()
-        testing.assert_eq(number.text(), "-42", "signed constructor changed decimal text")?
-    }
-
-    // Make the number whose token is the decimal text of `value`, in the
-    // system allocator.
-    pub fn from_uint(value: UInt64) -> Result[Self, mem.Oom] {
-        Number.from_uint_in(mem.system(), value)
-    }
-
-    test fn from_uint_keeps_the_token_in_the_system_allocator() {
-        defer let number = Number.from_uint(42).unwrap()
-        testing.assert_eq(number.text(), "42", "unsigned constructor changed decimal text")?
-    }
-}
-
-impl[A: Allocator] Number[A] {
-    // Validate `input` as one complete JSON number and keep a copy of it.
-    pub fn parse_in(allocator: A, input: Str) -> Result[Self, NumberError] where carries(.Ok: allocator) {
-        let end = scan_number(input, 0, hard_number_bytes) else |error| {
-            return .Err(match read error.kind {
-                NumberLimit => .TokenLimit,
-                _ => .Syntax(error.offset),
-            })
-        }
-        if end != input.length() {
-            return .Err(.Syntax(end))
-        }
-        match number_from_scanned(allocator, input) {
-            Ok(number) => .Ok(number),
-            Err(_) => .Err(.Allocation),
-        }
-    }
-
     test fn number_preserves_validated_decimal_spelling() {
         let cases = ["0", "-0", "-9223372036854775808", "18446744073709551615", "9007199254740993", "1.00", "1e400", "-12.34E+56"]
         for input in cases {
@@ -140,6 +99,47 @@ impl[A: Allocator] Number[A] {
             Err(reason) => testing.assert_eq(reason, NumberError.TokenLimit, "oversized token did not report its limit")?,
         }
         .Ok(())
+    }
+
+    // Make the number whose token is the decimal text of `value`, in the
+    // system allocator.
+    pub fn from_int(value: Int64) -> Result[Self, mem.Oom] {
+        Number.from_int_in(mem.system(), value)
+    }
+
+    test fn from_int_keeps_the_token_in_the_system_allocator() {
+        defer let number = Number.from_int(-42).unwrap()
+        testing.assert_eq(number.text(), "-42", "signed constructor changed decimal text")?
+    }
+
+    // Make the number whose token is the decimal text of `value`, in the
+    // system allocator.
+    pub fn from_uint(value: UInt64) -> Result[Self, mem.Oom] {
+        Number.from_uint_in(mem.system(), value)
+    }
+
+    test fn from_uint_keeps_the_token_in_the_system_allocator() {
+        defer let number = Number.from_uint(42).unwrap()
+        testing.assert_eq(number.text(), "42", "unsigned constructor changed decimal text")?
+    }
+}
+
+impl[A: Allocator] Number[A] {
+    // Validate `input` as one complete JSON number and keep a copy of it.
+    pub fn parse_in(allocator: A, input: Str) -> Result[Self, NumberError] where carries(.Ok: allocator) {
+        let end = scan_number(input, 0, hard_number_bytes) else |error| {
+            return .Err(match read error.kind {
+                NumberLimit => .TokenLimit,
+                _ => .Syntax(error.offset),
+            })
+        }
+        if end != input.length() {
+            return .Err(.Syntax(end))
+        }
+        match number_from_scanned(allocator, input) {
+            Ok(number) => .Ok(number),
+            Err(_) => .Err(.Allocation),
+        }
     }
 
     test fn number_allocation_failure_is_a_value() {

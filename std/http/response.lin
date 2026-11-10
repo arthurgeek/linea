@@ -150,11 +150,6 @@ pub fn status[P: Allocator](request: Request[P], status: Status) -> Response[P] 
     held(request, empty).with_status(status)
 }
 
-// `no_content` answers 204 No Content with no body.
-pub fn no_content[P: Allocator](request: Request[P]) -> Response[P] {
-    status(request, .NoContent)
-}
-
 test fn a_status_response_has_no_body() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "DELETE", "/items/1", body: "").unwrap()
@@ -162,6 +157,11 @@ test fn a_status_response_has_no_body() {
     testing.assert_eq(response.status(), Status.NoContent, "the status changed")?
     testing.assert_ok_eq(response.text(), "", "an empty response had a body")?
     .Ok(())
+}
+
+// `no_content` answers 204 No Content with no body.
+pub fn no_content[P: Allocator](request: Request[P]) -> Response[P] {
+    status(request, .NoContent)
 }
 
 // `redirect` answers `status` with an empty body and sets `Location` to
@@ -890,22 +890,6 @@ test fn a_streamed_body_may_exceed_the_arena() {
     .Ok(())
 }
 
-test fn an_error_is_answered_with_its_message() {
-    defer let messaged = exchanged(.Get, refused_with_message)
-    defer let bare = exchanged(.Get, refused)
-    defer let head = exchanged(.Head, refused_with_message)
-    testing.assert_eq(messaged.view(), "HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nthe body is not JSON\n", "the message was not sent")?
-    testing.assert_eq(bare.view(), "HTTP/1.1 422 Unprocessable Content\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nUnprocessable Content\n", "the reason phrase was not sent")?
-    testing.assert_eq(head.view(), "HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a HEAD error sent a body")?
-    .Ok(())
-}
-
-test fn an_error_is_answered_with_its_headers() {
-    defer let challenge = exchanged(.Get, challenged)
-    testing.assert_eq(challenge.view(), "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nWWW-Authenticate: Bearer\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nsign in first\n", "the error's header was not sent")?
-    .Ok(())
-}
-
 // An error the stream returns after the head leaves the body as it stands.
 test fn a_stream_that_fails_stops_where_it_stands() {
     defer let received = exchanged(.Get, stream_of("/count", fail_after_one))
@@ -939,6 +923,22 @@ fn write_error[P: Allocator](inout body: BodyWriter[P], error: Error[P], head_on
         Some(failed) => .Err(.Io(copy(failed))),
         None => .Ok(()),
     }
+}
+
+test fn an_error_is_answered_with_its_message() {
+    defer let messaged = exchanged(.Get, refused_with_message)
+    defer let bare = exchanged(.Get, refused)
+    defer let head = exchanged(.Head, refused_with_message)
+    testing.assert_eq(messaged.view(), "HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nthe body is not JSON\n", "the message was not sent")?
+    testing.assert_eq(bare.view(), "HTTP/1.1 422 Unprocessable Content\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nUnprocessable Content\n", "the reason phrase was not sent")?
+    testing.assert_eq(head.view(), "HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a HEAD error sent a body")?
+    .Ok(())
+}
+
+test fn an_error_is_answered_with_its_headers() {
+    defer let challenge = exchanged(.Get, challenged)
+    testing.assert_eq(challenge.view(), "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nWWW-Authenticate: Bearer\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nsign in first\n", "the error's header was not sent")?
+    .Ok(())
 }
 
 // Write the head, ending with the empty line, and answer how many bytes that

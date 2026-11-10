@@ -413,17 +413,6 @@ impl ObjectDecoder[mem.SystemAllocator] {
         fields.finish().unwrap()
         testing.assert_eq(tea, UInt8(2), "the member did not decode")?
     }
-}
-
-impl[A: Allocator] ObjectDecoder[A] {
-    // Start decoding the members of `value`, which must be an object,
-    // recording the names read in storage from `allocator`.
-    pub fn open_in(allocator: A, value: Value[A]) -> Result[Self, DecodeError[A]] where borrows(.Ok.object: value), carries(.Ok.allocator: allocator), carries(.Ok.used: allocator), carries(.Err: allocator) {
-        if value.kind() != .Object {
-            return .Err(DecodeError.failure_in(allocator, .WrongKind))
-        }
-        .Ok(.{ object = borrow value, allocator = copy(allocator), used = Map.new_in(allocator) })
-    }
 
     test fn open_accepts_only_an_object() {
         defer let array = parse("[]").unwrap()
@@ -442,6 +431,17 @@ impl[A: Allocator] ObjectDecoder[A] {
         let fields = ObjectDecoder.open(object).unwrap()
         fields.release()
         testing.assert(refused, "an array opened as an object")?
+    }
+}
+
+impl[A: Allocator] ObjectDecoder[A] {
+    // Start decoding the members of `value`, which must be an object,
+    // recording the names read in storage from `allocator`.
+    pub fn open_in(allocator: A, value: Value[A]) -> Result[Self, DecodeError[A]] where borrows(.Ok.object: value), carries(.Ok.allocator: allocator), carries(.Ok.used: allocator), carries(.Err: allocator) {
+        if value.kind() != .Object {
+            return .Err(DecodeError.failure_in(allocator, .WrongKind))
+        }
+        .Ok(.{ object = borrow value, allocator = copy(allocator), used = Map.new_in(allocator) })
     }
 
     // Decode the member `name` when it is present, and record that it was read.

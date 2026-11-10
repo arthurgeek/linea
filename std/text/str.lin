@@ -30,6 +30,20 @@ impl Str {
         .Ok(())
     }
 
+    test fn initial_copy_refusal_releases_the_empty_owner() {
+        // The cursor fills the arena, leaving no space for content.
+        defer let arena = mem.Arena.open(mem.system(), 8)
+        let refused = match "content".to_owned_in(arena.handle()) {
+            Err(_) => true,
+            Ok(text) => {
+                text.release()
+                false
+            },
+        }
+        testing.assert(refused, "initial content copy ignored reservation refusal")?
+        .Ok(())
+    }
+
     // Copy encoded text into storage owned by the system allocator.
     pub fn to_owned(self: Self) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
         self.to_owned_in(mem.system())
@@ -46,20 +60,6 @@ impl Str {
         original.release()
         defer copied.release()
         testing.assert_eq(copied.view(), "kept á\u{0}", "explicit text copy retained the source owner")?
-        .Ok(())
-    }
-
-    test fn initial_copy_refusal_releases_the_empty_owner() {
-        // The cursor fills the arena, leaving no space for content.
-        defer let arena = mem.Arena.open(mem.system(), 8)
-        let refused = match "content".to_owned_in(arena.handle()) {
-            Err(_) => true,
-            Ok(text) => {
-                text.release()
-                false
-            },
-        }
-        testing.assert(refused, "initial content copy ignored reservation refusal")?
         .Ok(())
     }
 

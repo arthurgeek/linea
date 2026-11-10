@@ -196,41 +196,6 @@ impl File {
         open_file(allocator, path, code)
     }
 
-    // Create a file for writing under `policy`, taking the path's scratch
-    // storage from the system allocator.
-    pub fn create(path: Path, policy: WritePolicy) -> Result[File, FsFailure] where carries() {
-        File.create_in(mem.system(), path, policy)
-    }
-
-    test fn creating_a_file_makes_an_entry_that_opens() {
-        defer let owned = scratch_path()
-        let path = Path.from_str(owned.view()).unwrap()
-        defer remove_scratch(path)
-        let created = File.create(path, policy: .CreateNew).unwrap()
-        created.close().unwrap()
-        let opened = File.open(path).unwrap()
-        opened.close().unwrap()
-    }
-
-    test fn create_refuses_an_existing_entry_unless_it_replaces_it() {
-        defer let owned = scratch_path()
-        let path = Path.from_str(owned.view()).unwrap()
-        defer remove_scratch(path)
-        let first = File.create(path, policy: .CreateNew).unwrap()
-        first.close().unwrap()
-        let refused = match File.create(path, policy: .CreateNew) {
-            Ok(file) => {
-                file.release()
-                false
-            },
-            Err(_) => true,
-        }
-        let replaced = File.create(path, policy: .Replace).unwrap()
-        replaced.close().unwrap()
-        testing.assert(refused, "creating a new file replaced an existing entry")?
-        .Ok(())
-    }
-
     test fn creating_a_file_takes_its_path_scratch_from_an_arena() {
         // The arena holds the path scratch and anything the operation returns.
         defer let arena = mem.Arena.open(mem.system(), size: 1024)
@@ -278,6 +243,41 @@ impl File {
             Err(failure) => match read failure.primary { Some(Allocation(_)) => true, _ => false },
         }
         testing.assert(refused, "creating a file took its scratch from another allocator")?
+        .Ok(())
+    }
+
+    // Create a file for writing under `policy`, taking the path's scratch
+    // storage from the system allocator.
+    pub fn create(path: Path, policy: WritePolicy) -> Result[File, FsFailure] where carries() {
+        File.create_in(mem.system(), path, policy)
+    }
+
+    test fn creating_a_file_makes_an_entry_that_opens() {
+        defer let owned = scratch_path()
+        let path = Path.from_str(owned.view()).unwrap()
+        defer remove_scratch(path)
+        let created = File.create(path, policy: .CreateNew).unwrap()
+        created.close().unwrap()
+        let opened = File.open(path).unwrap()
+        opened.close().unwrap()
+    }
+
+    test fn create_refuses_an_existing_entry_unless_it_replaces_it() {
+        defer let owned = scratch_path()
+        let path = Path.from_str(owned.view()).unwrap()
+        defer remove_scratch(path)
+        let first = File.create(path, policy: .CreateNew).unwrap()
+        first.close().unwrap()
+        let refused = match File.create(path, policy: .CreateNew) {
+            Ok(file) => {
+                file.release()
+                false
+            },
+            Err(_) => true,
+        }
+        let replaced = File.create(path, policy: .Replace).unwrap()
+        replaced.close().unwrap()
+        testing.assert(refused, "creating a new file replaced an existing entry")?
         .Ok(())
     }
 
@@ -417,6 +417,52 @@ pub fn write_file_in[A: Allocator](allocator: A, path: Path, bytes: mem.Slice[UI
     }
 }
 
+test fn a_direct_file_write_takes_its_path_scratch_from_an_arena() {
+    // The arena holds the path scratch and anything the operation returns.
+    defer let arena = mem.Arena.open(mem.system(), size: 1024)
+    let allocator = arena.handle()
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let written = write_file_in(allocator, path, "tea".as_bytes(), policy: .CreateNew) else |_| {
+        return testing.assert(false, "a direct write over an arena failed")
+    }
+    testing.assert_eq(written, UInt64(3), "a direct write over an arena lost its accepted count")?
+    .Ok(())
+}
+
+test fn each_allocation_failure_covers_a_direct_file_write() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), FsFailure] {
+            defer let owned = scratch_path()
+            let path = Path.from_str(owned.view()).unwrap()
+            defer remove_scratch(path)
+            let _written = write_file_in(allocator, path, "tea".as_bytes(), policy: .CreateNew)?
+            return .Ok(())
+        },
+        FsFailure.is_refusal,
+    )
+    // The parent path and the file name are the walk's two acquisitions.
+    testing.assert(checked.unwrap_or(0) == 2, "a direct file write was reported as failing, or took scratch from another allocator")?
+    .Ok(())
+}
+
+test fn a_direct_file_write_reports_scratch_allocation_failure() {
+    // An empty arena refuses every acquisition, so the call fails only if its
+    // scratch comes from the allocator it was given.
+    defer let arena = mem.Arena.open(mem.system(), 0)
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let refused = match write_file_in(arena.handle(), path, "tea".as_bytes(), policy: .CreateNew) {
+        Ok(_) => false,
+        Err(failure) => match read failure.primary { Some(Allocation(_)) => true, _ => false },
+    }
+    testing.assert(refused, "a direct write took its scratch from another allocator")?
+    .Ok(())
+}
+
 // Write `bytes` to a file created under `policy`, as `write_file_in` does, with
 // the system allocator for the path's scratch storage.
 pub fn write_file(path: Path, bytes: mem.Slice[UInt8], policy: WritePolicy) -> Result[UInt64, FsFailure] where carries() {
@@ -501,52 +547,6 @@ test fn removing_a_file_takes_its_name_and_reports_a_missing_one() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let _again = write_file(path, "abc".as_bytes(), policy: .CreateNew).unwrap()
     testing.assert_ok_eq(remove_file_in(arena.handle(), path), (), "a file was not removed with an arena's scratch")?
-}
-
-test fn a_direct_file_write_takes_its_path_scratch_from_an_arena() {
-    // The arena holds the path scratch and anything the operation returns.
-    defer let arena = mem.Arena.open(mem.system(), size: 1024)
-    let allocator = arena.handle()
-    defer let owned = scratch_path()
-    let path = Path.from_str(owned.view()).unwrap()
-    defer remove_scratch(path)
-    let written = write_file_in(allocator, path, "tea".as_bytes(), policy: .CreateNew) else |_| {
-        return testing.assert(false, "a direct write over an arena failed")
-    }
-    testing.assert_eq(written, UInt64(3), "a direct write over an arena lost its accepted count")?
-    .Ok(())
-}
-
-test fn each_allocation_failure_covers_a_direct_file_write() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), FsFailure] {
-            defer let owned = scratch_path()
-            let path = Path.from_str(owned.view()).unwrap()
-            defer remove_scratch(path)
-            let _written = write_file_in(allocator, path, "tea".as_bytes(), policy: .CreateNew)?
-            return .Ok(())
-        },
-        FsFailure.is_refusal,
-    )
-    // The parent path and the file name are the walk's two acquisitions.
-    testing.assert(checked.unwrap_or(0) == 2, "a direct file write was reported as failing, or took scratch from another allocator")?
-    .Ok(())
-}
-
-test fn a_direct_file_write_reports_scratch_allocation_failure() {
-    // An empty arena refuses every acquisition, so the call fails only if its
-    // scratch comes from the allocator it was given.
-    defer let arena = mem.Arena.open(mem.system(), 0)
-    defer let owned = scratch_path()
-    let path = Path.from_str(owned.view()).unwrap()
-    defer remove_scratch(path)
-    let refused = match write_file_in(arena.handle(), path, "tea".as_bytes(), policy: .CreateNew) {
-        Ok(_) => false,
-        Err(failure) => match read failure.primary { Some(Allocation(_)) => true, _ => false },
-    }
-    testing.assert(refused, "a direct write took its scratch from another allocator")?
-    .Ok(())
 }
 
 impl Release for File {

@@ -31,6 +31,17 @@ pub fn read_file_in[A: Allocator](allocator: A, path: fs.Path, limits: ParseLimi
     .Ok(parse_bytes_in(allocator, bytes.as_slice(), limits: limits)?)
 }
 
+test fn a_file_is_read_into_an_arena() {
+    defer let owned = scratch_file_with(r#"{"name":"tea"}"#)
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    defer fs.remove_scratch(path)
+    // The arena holds the text while it is parsed, and then the document. A
+    // file read starts with a 4096-byte buffer, so the arena is larger.
+    defer let arena = mem.Arena.open(mem.system(), 65536)
+    defer let document = read_file_in(arena.handle(), path).unwrap()
+    testing.assert_eq(document.get("name").unwrap().as_str().unwrap(), "tea", "a document read into an arena changed")?
+}
+
 // Read and parse the file at `path` into a document in the system allocator.
 // See `read_file_in`.
 pub fn read_file(path: fs.Path, limits: ParseLimits = standard_limits) -> Result[Value[mem.SystemAllocator], ParseFileError] where carries() {
@@ -91,17 +102,6 @@ test fn an_empty_file_fails_to_parse_and_a_directory_fails_to_read() {
     testing.assert(failed_at_read(read_file(directory)), "a directory was not a read failure")?
 }
 
-test fn a_file_is_read_into_an_arena() {
-    defer let owned = scratch_file_with(r#"{"name":"tea"}"#)
-    let path = fs.Path.from_str(owned.view()).unwrap()
-    defer fs.remove_scratch(path)
-    // The arena holds the text while it is parsed, and then the document. A
-    // file read starts with a 4096-byte buffer, so the arena is larger.
-    defer let arena = mem.Arena.open(mem.system(), 65536)
-    defer let document = read_file_in(arena.handle(), path).unwrap()
-    testing.assert_eq(document.get("name").unwrap().as_str().unwrap(), "tea", "a document read into an arena changed")?
-}
-
 // DecodeFileError says whether loading a typed value from a file failed to read
 // the file or to decode its bytes; bytes that are not UTF-8 fail to decode as a
 // parse error of kind `InvalidUtf8`. `Decode` keeps the release obligation of
@@ -130,6 +130,17 @@ pub fn decode_file_in[A: Allocator, T: Decode[A]](allocator: A, path: fs.Path, l
     let parsed: Result[Value[A], DecodeError[A]] = parse_bytes_in(allocator, bytes.as_slice(), limits: limits).map_err(.Parse)
     defer let document = parsed?
     .Ok(T.decode(document, allocator)?)
+}
+
+test fn a_file_is_decoded_into_an_arena() {
+    defer let owned = scratch_file_with(r#"{"name":"tea","port":8080}"#)
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    defer fs.remove_scratch(path)
+    defer let arena = mem.Arena.open(mem.system(), 65536)
+    let decoded: Result[FileSettings[mem.Handle], DecodeFileError[mem.Handle]] = decode_file_in(arena.handle(), path)
+    defer let settings = decoded.unwrap()
+    testing.assert_eq(settings.name.view(), "tea", "a value decoded into an arena lost its text")?
+    testing.assert_eq(settings.port, 8080, "a value decoded into an arena changed its port")?
 }
 
 // Read and decode the file at `path` into a T in the system allocator. See
@@ -244,17 +255,6 @@ test fn a_decode_file_error_shows_its_variant_and_converts_through_question_mark
 // Decode `text` as `FileSettings`, converting the `DecodeError` with `?`.
 fn decode_text_through_question_mark(text: Str) -> Result[FileSettings[mem.SystemAllocator], DecodeFileError] {
     .Ok(decode(text)?)
-}
-
-test fn a_file_is_decoded_into_an_arena() {
-    defer let owned = scratch_file_with(r#"{"name":"tea","port":8080}"#)
-    let path = fs.Path.from_str(owned.view()).unwrap()
-    defer fs.remove_scratch(path)
-    defer let arena = mem.Arena.open(mem.system(), 65536)
-    let decoded: Result[FileSettings[mem.Handle], DecodeFileError[mem.Handle]] = decode_file_in(arena.handle(), path)
-    defer let settings = decoded.unwrap()
-    testing.assert_eq(settings.name.view(), "tea", "a value decoded into an arena lost its text")?
-    testing.assert_eq(settings.port, 8080, "a value decoded into an arena changed its port")?
 }
 
 // FileSettings derives Decode for the file tests.

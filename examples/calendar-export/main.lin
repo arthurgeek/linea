@@ -38,6 +38,14 @@ fn is_leap(year: UInt64) -> Bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
+test fn leap_years_follow_the_gregorian_rule() {
+    testing.assert(is_leap(2024), "2024 is a leap year")?
+    testing.assert(!is_leap(2026), "2026 is not a leap year")?
+    testing.assert(!is_leap(1900), "1900 is not a leap year")?
+    testing.assert(is_leap(2000), "2000 is a leap year")?
+    testing.assert_eq(days_in(2024, 2), 29, "February 2024 lost its leap day")?
+}
+
 fn days_in(year: UInt64, month: UInt64) -> UInt64 {
     if month == 2 && is_leap(year) {
         return 29
@@ -55,6 +63,13 @@ fn weekday(year: UInt64, month: UInt64, day: UInt64) -> UInt64 {
     }
     let sum = shifted + shifted / 4 - shifted / 100 + shifted / 400 + month_offsets[month - 1] + day
     sum % 7
+}
+
+test fn a_weekday_is_found_from_the_date() {
+    // 1 January 2026 is a Thursday, and 29 February 2024 was one too.
+    testing.assert_eq(weekday_names[weekday(2026, 1, 1)], "Thursday", "1 January 2026 moved")?
+    testing.assert_eq(weekday_names[weekday(2024, 2, 29)], "Thursday", "29 February 2024 moved")?
+    testing.assert_eq(weekday_names[weekday(2000, 12, 31)], "Sunday", "31 December 2000 moved")?
 }
 
 // `App` is what each serving task lends its route on every request, through
@@ -99,6 +114,48 @@ fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
     &router.route_raw(r"GET /calendar/{year}", calendar)
 }
 
+// A request built in an arena goes through the router, which records the
+// path value the handler reads.
+test fn a_year_out_of_range_is_refused_before_streaming() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    var app = quiet()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let late = http.new_request(arena.handle(), "GET", "/calendar/12000", body: "").unwrap()
+    let refused = match &router.serve_http(&app, late.request()) {
+        Ok(_) => return testing.assert(false, "a year past 9999 was accepted"),
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), http.Status.BadRequest, "the status changed")?
+    testing.assert_eq(refused.message(), Option.Some("12000 is not a year from 1 to 9999"), "the message changed")?
+    let named = http.new_request(arena.handle(), "GET", "/calendar/next", body: "").unwrap()
+    let unread = match &router.serve_http(&app, named.request()) {
+        Ok(_) => return testing.assert(false, "a year that is not a number was accepted"),
+        Err(error) => error,
+    }
+    testing.assert_eq(unread.message(), Option.Some(r#"cannot read path value "year" from "next": invalid decimal syntax at byte 0"#), "the refusal of a word changed")?
+    let valid = http.new_request(arena.handle(), "GET", "/calendar/2026", body: "").unwrap()
+    let answered = &router.serve_http(&app, valid.request()).unwrap()
+    testing.assert_eq(answered.header("Content-Type"), Option.Some("text/csv; charset=utf-8"), "a valid year was not answered with CSV")?
+}
+
+// `recorded_body` runs the streamed body into the request's arena, so a test
+// reads the CSV a client would receive.
+test fn a_year_streams_one_line_per_day() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    var app = quiet()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "GET", "/calendar/2024", body: "").unwrap()
+    let csv = &router.serve_http(&app, sent.request()).unwrap().recorded_body().unwrap()
+    let calendar_text = Str.from_bytes(csv.as_slice()).unwrap()
+    // `filter` keeps the newline bytes, and `count` says how many there are.
+    let lines = calendar_text.as_bytes().filter(|byte| *byte == 10).count()
+    testing.assert(calendar_text.starts_with("date,weekday,day_of_year\n2024-01-01,Monday,1\n"), "the calendar's first lines changed")?
+    testing.assert(calendar_text.ends_with("2024-12-31,Tuesday,366\n"), "the calendar's last line changed")?
+    testing.assert_eq(lines, 367, "a leap year did not have 366 days and a header")?
+}
+
 // Write the calendar of `year` to `body` a line at a time. Each `?` stops at
 // a failed write: the client has gone, and the server resets the connection.
 fn write_days(year: UInt64, inout body: http.BodyWriter) -> Result[(), http.Error] {
@@ -120,6 +177,12 @@ fn write_days(year: UInt64, inout body: http.BodyWriter) -> Result[(), http.Erro
 // digits, and `:02` to two, so 7 March 987 is written `0987-03-07`.
 fn write_date[W: Writer](inout out: W, year: UInt64, month: UInt64, day: UInt64) -> Result[(), W.Error] where carries(.Err: out) {
     "{year:04}-{month:02}-{day:02}".fmt(&out)
+}
+
+test fn a_date_is_written_with_leading_zeros() {
+    defer var out = String.new()
+    write_date(&out, 987, 3, 7).unwrap()
+    testing.assert_eq(out.view(), "0987-03-07", "the date changed")?
 }
 
 fn main() -> UInt8 {
@@ -230,71 +293,8 @@ fn print_help(cmd: cli.Command, matches: borrow cli.Matches) -> UInt8 {
     }
 }
 
-test fn leap_years_follow_the_gregorian_rule() {
-    testing.assert(is_leap(2024), "2024 is a leap year")?
-    testing.assert(!is_leap(2026), "2026 is not a leap year")?
-    testing.assert(!is_leap(1900), "1900 is not a leap year")?
-    testing.assert(is_leap(2000), "2000 is a leap year")?
-    testing.assert_eq(days_in(2024, 2), 29, "February 2024 lost its leap day")?
-}
-
-test fn a_weekday_is_found_from_the_date() {
-    // 1 January 2026 is a Thursday, and 29 February 2024 was one too.
-    testing.assert_eq(weekday_names[weekday(2026, 1, 1)], "Thursday", "1 January 2026 moved")?
-    testing.assert_eq(weekday_names[weekday(2024, 2, 29)], "Thursday", "29 February 2024 moved")?
-    testing.assert_eq(weekday_names[weekday(2000, 12, 31)], "Sunday", "31 December 2000 moved")?
-}
-
-test fn a_date_is_written_with_leading_zeros() {
-    defer var out = String.new()
-    write_date(&out, 987, 3, 7).unwrap()
-    testing.assert_eq(out.view(), "0987-03-07", "the date changed")?
-}
-
 // The tests hand the handler a state whose logger writes only errors, so the
 // lines it logs while answering stay out of the test report.
 fn quiet() -> App {
     .{ logger = log.to_stderr(minimum: .Error) }
-}
-
-// A request built in an arena goes through the router, which records the
-// path value the handler reads.
-test fn a_year_out_of_range_is_refused_before_streaming() {
-    defer var router: http.Router[App] = http.Router.new()
-    routes(&router).unwrap()
-    var app = quiet()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let late = http.new_request(arena.handle(), "GET", "/calendar/12000", body: "").unwrap()
-    let refused = match &router.serve_http(&app, late.request()) {
-        Ok(_) => return testing.assert(false, "a year past 9999 was accepted"),
-        Err(error) => error,
-    }
-    testing.assert_eq(refused.status(), http.Status.BadRequest, "the status changed")?
-    testing.assert_eq(refused.message(), Option.Some("12000 is not a year from 1 to 9999"), "the message changed")?
-    let named = http.new_request(arena.handle(), "GET", "/calendar/next", body: "").unwrap()
-    let unread = match &router.serve_http(&app, named.request()) {
-        Ok(_) => return testing.assert(false, "a year that is not a number was accepted"),
-        Err(error) => error,
-    }
-    testing.assert_eq(unread.message(), Option.Some(r#"cannot read path value "year" from "next": invalid decimal syntax at byte 0"#), "the refusal of a word changed")?
-    let valid = http.new_request(arena.handle(), "GET", "/calendar/2026", body: "").unwrap()
-    let answered = &router.serve_http(&app, valid.request()).unwrap()
-    testing.assert_eq(answered.header("Content-Type"), Option.Some("text/csv; charset=utf-8"), "a valid year was not answered with CSV")?
-}
-
-// `recorded_body` runs the streamed body into the request's arena, so a test
-// reads the CSV a client would receive.
-test fn a_year_streams_one_line_per_day() {
-    defer var router: http.Router[App] = http.Router.new()
-    routes(&router).unwrap()
-    var app = quiet()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "GET", "/calendar/2024", body: "").unwrap()
-    let csv = &router.serve_http(&app, sent.request()).unwrap().recorded_body().unwrap()
-    let calendar_text = Str.from_bytes(csv.as_slice()).unwrap()
-    // `filter` keeps the newline bytes, and `count` says how many there are.
-    let lines = calendar_text.as_bytes().filter(|byte| *byte == 10).count()
-    testing.assert(calendar_text.starts_with("date,weekday,day_of_year\n2024-01-01,Monday,1\n"), "the calendar's first lines changed")?
-    testing.assert(calendar_text.ends_with("2024-12-31,Tuesday,366\n"), "the calendar's last line changed")?
-    testing.assert_eq(lines, 367, "a leap year did not have 366 days and a header")?
 }

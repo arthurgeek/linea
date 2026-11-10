@@ -247,6 +247,74 @@ pub fn read_all_in[R: Reader, A: Allocator](allocator: A, inout reader: R, max_b
     }
 }
 
+test fn whole_input_initial_allocation_refusal_does_not_read() {
+    defer let arena = mem.Arena.open(mem.system(), 0)
+    let input = "data"
+    var source = WholeInputFixture { bytes = input.as_bytes(), position = 0, step = 4, fail_at = UInt64.max, calls = 0 }
+    match read_all_in(arena.handle(), &source, max_bytes: 4) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "a refusing allocator produced whole-input storage")
+        },
+        Err(failure) => {
+            let no_storage = failure.partial.is_none()
+            let refused = match read failure.reason { Allocation(_) => true, _ => false }
+            failure.release()
+            testing.assert(no_storage && refused, "initial refusal invented partial ownership")?
+        },
+    }
+    testing.assert_eq(source.calls, UInt64(0), "allocation refusal consumed input")?
+    .Ok(())
+}
+
+test fn whole_input_is_allocated_from_an_arena() {
+    // The arena holds the first 4096-byte buffer and its cursor.
+    defer let arena = mem.Arena.open(mem.system(), 4104)
+    var source = WholeInputFixture { bytes = "data".as_bytes(), position = 0, step = 4, fail_at = UInt64.max, calls = 0 }
+    let bytes = read_all_in(arena.handle(), &source, max_bytes: 16).unwrap()
+    testing.assert_eq(bytes.as_slice(), "data".as_bytes(), "a whole input read into an arena changed its bytes")?
+    .Ok(())
+}
+
+test fn whole_input_growth_refusal_preserves_bytes_before_reading_more() {
+    defer let input = Vec.filled(count: 4097, value: UInt8(7)).unwrap()
+    // The eight-byte arena cursor leaves exactly the initial 4096-byte buffer.
+    defer let arena = mem.Arena.open(mem.system(), 4104)
+    var source = WholeInputFixture { bytes = input.as_slice(), position = 0, step = 4097, fail_at = UInt64.max, calls = 0 }
+    match read_all_in(arena.handle(), &source, max_bytes: 4097) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "whole-input growth ignored exhausted storage")
+        },
+        Err(failure) => {
+            let refused = match read failure.reason { Allocation(_) => true, _ => false }
+            let intact = match read failure.partial { Some(bytes) => bytes.length() == 4096 && bytes[0] == 7 && bytes[4095] == 7, None => false }
+            failure.release()
+            testing.assert(refused && intact, "growth refusal changed its retained prefix")?
+        },
+    }
+    testing.assert_eq(source.position, UInt64(4096), "growth refusal consumed unretained input")?
+    testing.assert_eq(source.calls, UInt64(1), "growth refusal performed another read")?
+    .Ok(())
+}
+
+test fn each_allocation_failure_covers_every_growth_step_of_a_whole_input() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), ReadAllError[UInt8]] {
+            // Ten thousand bytes outgrow the first 4096-byte buffer twice.
+            defer let input = Vec.filled(count: 10000, value: UInt8(7)).unwrap()
+            var source = WholeInputFixture { bytes = input.as_slice(), position = 0, step = 4096, fail_at = UInt64.max, calls = 0 }
+            let bytes = read_all_in(allocator, &source, max_bytes: 10000).settled()?
+            bytes.release()
+            return .Ok(())
+        },
+        ReadAllError.is_refusal,
+    )
+    testing.assert(checked.is_ok(), "a growing whole-input read was reported as failing")?
+    .Ok(())
+}
+
 // Read `reader` through EOF into storage from the system allocator, under the
 // limits of `read_all_in`.
 pub fn read_all[R: Reader](inout reader: R, max_bytes: UInt64) -> Result[Vec[UInt8, mem.SystemAllocator], ReadAllFailure[mem.SystemAllocator, R.Error]] where carries(.Err.reason.Input.reason: reader) {
@@ -334,57 +402,6 @@ test fn whole_input_failure_retains_a_partial_scalar_and_its_stream_offset() {
     .Ok(())
 }
 
-test fn whole_input_initial_allocation_refusal_does_not_read() {
-    defer let arena = mem.Arena.open(mem.system(), 0)
-    let input = "data"
-    var source = WholeInputFixture { bytes = input.as_bytes(), position = 0, step = 4, fail_at = UInt64.max, calls = 0 }
-    match read_all_in(arena.handle(), &source, max_bytes: 4) {
-        Ok(bytes) => {
-            bytes.release()
-            return testing.assert(false, "a refusing allocator produced whole-input storage")
-        },
-        Err(failure) => {
-            let no_storage = failure.partial.is_none()
-            let refused = match read failure.reason { Allocation(_) => true, _ => false }
-            failure.release()
-            testing.assert(no_storage && refused, "initial refusal invented partial ownership")?
-        },
-    }
-    testing.assert_eq(source.calls, UInt64(0), "allocation refusal consumed input")?
-    .Ok(())
-}
-
-test fn whole_input_is_allocated_from_an_arena() {
-    // The arena holds the first 4096-byte buffer and its cursor.
-    defer let arena = mem.Arena.open(mem.system(), 4104)
-    var source = WholeInputFixture { bytes = "data".as_bytes(), position = 0, step = 4, fail_at = UInt64.max, calls = 0 }
-    let bytes = read_all_in(arena.handle(), &source, max_bytes: 16).unwrap()
-    testing.assert_eq(bytes.as_slice(), "data".as_bytes(), "a whole input read into an arena changed its bytes")?
-    .Ok(())
-}
-
-test fn whole_input_growth_refusal_preserves_bytes_before_reading_more() {
-    defer let input = Vec.filled(count: 4097, value: UInt8(7)).unwrap()
-    // The eight-byte arena cursor leaves exactly the initial 4096-byte buffer.
-    defer let arena = mem.Arena.open(mem.system(), 4104)
-    var source = WholeInputFixture { bytes = input.as_slice(), position = 0, step = 4097, fail_at = UInt64.max, calls = 0 }
-    match read_all_in(arena.handle(), &source, max_bytes: 4097) {
-        Ok(bytes) => {
-            bytes.release()
-            return testing.assert(false, "whole-input growth ignored exhausted storage")
-        },
-        Err(failure) => {
-            let refused = match read failure.reason { Allocation(_) => true, _ => false }
-            let intact = match read failure.partial { Some(bytes) => bytes.length() == 4096 && bytes[0] == 7 && bytes[4095] == 7, None => false }
-            failure.release()
-            testing.assert(refused && intact, "growth refusal changed its retained prefix")?
-        },
-    }
-    testing.assert_eq(source.position, UInt64(4096), "growth refusal consumed unretained input")?
-    testing.assert_eq(source.calls, UInt64(1), "growth refusal performed another read")?
-    .Ok(())
-}
-
 test fn whole_input_rejects_unreported_destination_overflow() {
     var source = ExcessReadFixture {}
     match read_all(&source, max_bytes: 3) {
@@ -399,23 +416,6 @@ test fn whole_input_rejects_unreported_destination_overflow() {
             testing.assert(invalid && empty, "an invalid read count invented initialized progress")?
         },
     }
-    .Ok(())
-}
-
-test fn each_allocation_failure_covers_every_growth_step_of_a_whole_input() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), ReadAllError[UInt8]] {
-            // Ten thousand bytes outgrow the first 4096-byte buffer twice.
-            defer let input = Vec.filled(count: 10000, value: UInt8(7)).unwrap()
-            var source = WholeInputFixture { bytes = input.as_slice(), position = 0, step = 4096, fail_at = UInt64.max, calls = 0 }
-            let bytes = read_all_in(allocator, &source, max_bytes: 10000).settled()?
-            bytes.release()
-            return .Ok(())
-        },
-        ReadAllError.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "a growing whole-input read was reported as failing")?
     .Ok(())
 }
 
