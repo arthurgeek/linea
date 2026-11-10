@@ -6,7 +6,7 @@ error[O-Leak]: `ticket` (a linear `Ticket`) is still owned when this write repla
 16 |     ticket = .{ number = 9 }
    |     ^^^^^^ this write drops the old value
    |
-   = help: take it apart with `let Ticket { number: _ } = ticket`, or give it to something that takes it
+   = help: settle what this part holds before writing over it
 error[O-Leak]: `items` (a linear `Vec[UInt8, mem.SystemAllocator]`) is still owned when this write replaces it
   --> tests/pattern_parameters/a_write_over_an_inout_binders_linear_part_is_refused.lin:21:5
    |
@@ -15,7 +15,7 @@ error[O-Leak]: `items` (a linear `Vec[UInt8, mem.SystemAllocator]`) is still own
 21 |     items = Vec.new()
    |     ^^^^^ this write drops the old value
    |
-   = help: settle the old value first with `items.release()`
+   = help: settle what this part holds before writing over it
 error[O-Leak]: `items` (a linear `Vec[UInt8, mem.SystemAllocator]`) is still owned when this write replaces it
   --> tests/pattern_parameters/a_write_over_an_inout_binders_linear_part_is_refused.lin:38:13
    |
@@ -24,4 +24,4 @@ error[O-Leak]: `items` (a linear `Vec[UInt8, mem.SystemAllocator]`) is still own
 38 |             items = Vec.new()
    |             ^^^^^ this write drops the old value
    |
-   = help: settle the old value first with `items.release()`
+   = help: settle what this part holds before writing over it

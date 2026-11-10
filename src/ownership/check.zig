@@ -1578,8 +1578,9 @@ const Checker = struct {
         };
         const notes = try arena.alloc([]const u8, 1);
         // A part cannot be taken on its own, so neither an operation taking it
-        // nor taking it apart is something to suggest for one.
-        notes[0] = if (place.isWhole())
+        // nor taking it apart is something to suggest for one. A lent binder
+        // names a part of what its construct lent, so it is one too.
+        notes[0] = if (place.isWhole() and !self.cfg.isLend(place.root))
             try self.settleHelp(ty, "settle the old value first with", written)
         else
             "settle what this part holds before writing over it";

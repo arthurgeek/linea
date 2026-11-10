@@ -33265,8 +33265,10 @@ const Checker = struct {
             // call is checked against: an argument naming the parameter it
             // fills spells what the trait declares, and a member renaming it
             // declares a name no call can write. A parameter the parser read
-            // only to recover names nothing, and its mistake is reported.
-            const named = !want.recovered and !member_names[k].recovered;
+            // only to recover, or a pattern written with no label, names
+            // nothing, and its mistake is reported.
+            const named = !want.recovered and !member_names[k].recovered and
+                self.ast.paramLabel(want) != .none and self.ast.paramLabel(member_names[k]) != .none;
             if (named and !namedAlike(self.ast, want.name, member_names[k].name)) {
                 return self.sink.addErrorFmt(
                     mismatch_code,
