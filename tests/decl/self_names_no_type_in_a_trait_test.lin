@@ -1,0 +1,40 @@
+// A test inside a trait declaration is resolved at module scope, so `Self`
+// names no type in it, in an annotation, before a call or in a pattern.
+import std.testing
+
+trait Starting {
+    fn start() -> Self
+
+    test fn self_in_an_annotation() {
+        let gauge: Self = Gauge.start()
+        testing.assert_eq(gauge.level, 1, "a gauge starts at one")?
+    }
+
+    test fn self_before_a_call() {
+        let gauge = Self.start()
+        testing.assert_eq(gauge.level, 1, "a gauge starts at one")?
+    }
+
+    test fn self_in_a_pattern() {
+        let Self { level } = Gauge.start()
+        testing.assert_eq(level, 1, "a gauge starts at one")?
+    }
+}
+
+struct Gauge {
+    level: UInt32,
+}
+
+impl Starting for Gauge {
+    fn start() -> Self {
+        Gauge { level = 1 }
+    }
+}
+
+fn main() -> UInt8 {
+    if Gauge.start().level == 1 {
+        0
+    } else {
+        1
+    }
+}

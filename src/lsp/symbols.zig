@@ -190,6 +190,11 @@ test "a symbol carries the kind the parser gave its declaration" {
         \\
         \\trait Measure {
         \\    fn of(x: Self) -> UInt8
+        \\
+        \\    test fn an_account_measures_its_balance() {
+        \\        let a: Account = .{ balance = limit }
+        \\        let _measured = Measure.of(a)
+        \\    }
         \\}
         \\
         \\impl Measure for Account {
@@ -220,6 +225,7 @@ test "a symbol carries the kind the parser gave its declaration" {
         .{ .name = "Colour", .kind = .Enum },
         .{ .name = "Measure", .kind = .Interface },
         .{ .name = "of", .kind = .Function },
+        .{ .name = "an_account_measures_its_balance", .kind = .Function },
         .{ .name = "Account", .kind = .Object },
         .{ .name = "of", .kind = .Function },
         .{ .name = "main", .kind = .Function },

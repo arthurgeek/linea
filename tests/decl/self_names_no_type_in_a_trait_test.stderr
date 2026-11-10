@@ -1,0 +1,15 @@
+error[S-Test]: `Self` names no type in a test
+ --> tests/decl/self_names_no_type_in_a_trait_test.lin:9:20
+  |
+9 |         let gauge: Self = Gauge.start()
+  |                    ^^^^ a test inside a trait is resolved at module scope; write the type it tests
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_names_no_type_in_a_trait_test.lin:14:21
+   |
+14 |         let gauge = Self.start()
+   |                     ^^^^ a test inside a trait is resolved at module scope; write the type it tests
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_names_no_type_in_a_trait_test.lin:19:13
+   |
+19 |         let Self { level } = Gauge.start()
+   |             ^^^^ a test inside a trait is resolved at module scope; write the type it tests

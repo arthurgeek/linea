@@ -467,6 +467,54 @@ test "a name is changed everywhere it is used" {
     , applied);
 }
 
+test "a type is renamed where a test inside a trait names it" {
+    const gpa = testing.allocator;
+    const program =
+        \\trait Sized {
+        \\    fn size(self: Self) -> UInt8
+        \\
+        \\    test fn a_parcel_has_its_weight_for_a_size() {
+        \\        let parcel = Parcel { weight = 2 }
+        \\        let _size = parcel.size()
+        \\    }
+        \\}
+        \\
+        \\struct Parcel {
+        \\    weight: UInt8,
+        \\}
+        \\
+        \\impl Sized for Parcel {
+        \\    fn size(self: Self) -> UInt8 {
+        \\        self.weight
+        \\    }
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let parcel = Parcel { weight = 0 }
+        \\    parcel.size()
+        \\}
+        \\
+    ;
+
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{
+        .{ .path = "main.lin", .text = program },
+    }, "main.lin");
+    defer checked.deinit();
+
+    const use = std.mem.lastIndexOf(u8, program, "Parcel").?;
+    const edit = (try forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(program, use + 1), .@"utf-16", "", "Crate")).?;
+    defer free(gpa, edit);
+
+    // The declaration, the implementation's head, the test inside the trait
+    // and `main`.
+    const edits = editsFor(edit, "main.lin");
+    try testing.expectEqual(@as(usize, 4), edits.len);
+    const applied = try applyTo(gpa, program, edits, .@"utf-16");
+    defer gpa.free(applied);
+    try testing.expect(std.mem.indexOf(u8, applied, "Parcel") == null);
+    try testing.expect(std.mem.indexOf(u8, applied, "let parcel = Crate { weight = 2 }") != null);
+}
+
 test "a lambda pattern's binder is renamed and its parenthesis is not a name" {
     const gpa = testing.allocator;
     const text =

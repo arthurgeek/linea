@@ -1,0 +1,5 @@
+error[S-Test]: a test declares no visibility
+ --> tests/decl/a_test_in_a_trait_declares_no_visibility.lin:7:5
+  |
+7 |     pub test fn a_rope_is_measured() {
+  |     ^^^ the compiler writes the only call to a test, so nothing can import it

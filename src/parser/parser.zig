@@ -1154,10 +1154,10 @@ const Parser = struct {
             // Read here for the reason `test` is, and refused for one of its
             // own: a foreign entry point is named by the module that declares
             // it, and a member is reached through the type it belongs to.
-            if (self.cursor.eat(.keyword_export) != null) {
+            if (self.cursor.eat(.keyword_export)) |export_at| {
                 try self.reportAt(
                     .s_export,
-                    at,
+                    export_at,
                     "an export does not sit in an impl",
                     "an impl holds what its type or its trait declares, and an export names a module's own entry point",
                 );
@@ -1687,8 +1687,56 @@ const Parser = struct {
             const before = self.cursor.current();
             const at = self.cursor.current();
 
+            // A test may sit in a trait, beside the provided operation it
+            // tests, and is a member of nothing there, as in an inherent
+            // `impl`. Visibility is read only before `test`, where [S-Test]
+            // refuses it, and before `export`; before anything else it is no
+            // member a trait holds.
+            //
+            // `export`, after any visibility, is refused by [S-Export] as in
+            // an `impl`, and what follows it is read as written.
+            const has_visibility = self.cursor.at(.keyword_pub) or self.cursor.at(.keyword_internal);
+            const after_visibility: u32 = @intFromBool(has_visibility);
+            const exports = self.cursor.peekAt(after_visibility) == .keyword_export;
+            const visible = has_visibility and
+                (exports or self.cursor.peekAt(after_visibility) == .keyword_test);
+            if (visible) _ = self.cursor.advance();
+            const exported = self.cursor.eat(.keyword_export);
+            if (exported) |export_at| {
+                try self.reportAt(
+                    .s_export,
+                    export_at,
+                    "an export does not sit in a trait",
+                    "a trait declares what its implementations supply, and an export names a module's own entry point",
+                );
+            }
+            const is_test = self.cursor.eat(.keyword_test) != null;
+            const expects_trap = is_test and self.cursor.eat(.keyword_trap) != null;
+            if (is_test) {
+                if (visible) {
+                    try self.reportAt(
+                        .s_test,
+                        at,
+                        "a test declares no visibility",
+                        "the compiler writes the only call to a test, so nothing can import it",
+                    );
+                }
+                if (!self.cursor.at(.keyword_fn)) {
+                    try self.reportAt(
+                        .s_test,
+                        at,
+                        "only a function is a test",
+                        "a test is a body the compiler runs, and this declares none",
+                    );
+                }
+            }
+
+            // Only a function is marked a test. A projection or a type written
+            // after `test` was refused above and stays the member it is, so
+            // nothing reports it again as a test or as a name nothing uses.
+            const tests_a_function = is_test and self.cursor.at(.keyword_fn);
             const declared: ?node.DeclId = if (self.cursor.at(.keyword_fn))
-                try self.parseSignature()
+                try (if (is_test) self.parseFunction(.test_) else self.parseSignature())
             else if (self.atProjection())
                 try self.parseProjection(.signature)
             else if (self.atAssociatedType())
@@ -1702,11 +1750,22 @@ const Parser = struct {
                 // outside could see would be one nobody outside could
                 // implement -- so `pub` on one would say nothing.
                 self.builder.markOwner(d, name);
+                self.builder.markTest(d, tests_a_function);
+                self.builder.markExpectedTrap(d, tests_a_function and expects_trap);
             } else {
-                try self.reportAt(.s_entry, at, "a trait holds signatures, projections and types", "expected `fn`, `proj` or `type` here");
-                while (!self.cursor.atEnd() and !self.cursor.at(.r_brace) and
-                    !self.cursor.at(.keyword_fn) and !self.atProjection() and !self.atAssociatedType())
-                {
+                // A `test` followed by no function was reported where it was
+                // read, and is one mistake, as is an `export` the trait's
+                // braces close after.
+                const export_ends_it = exported != null and (self.cursor.atEnd() or self.cursor.at(.r_brace));
+                if (!is_test and !export_ends_it) try self.reportAt(.t_impl, at, "a trait holds signatures, projections, types and tests", "expected `fn`, `proj`, `type` or `test` here");
+                // Braces opened by what is skipped are skipped with it, so
+                // the `}` of a `struct` written here does not close the trait.
+                var depth: usize = 0;
+                while (!self.cursor.atEnd()) {
+                    if (depth == 0 and (self.cursor.at(.r_brace) or self.cursor.at(.keyword_fn) or
+                        self.cursor.at(.keyword_test) or self.atProjection() or self.atAssociatedType())) break;
+                    if (self.cursor.at(.l_brace)) depth += 1;
+                    if (self.cursor.at(.r_brace)) depth -= 1;
                     _ = self.cursor.advance();
                 }
             }
@@ -10079,6 +10138,50 @@ test "a test in an impl is written inside it and a member of nothing" {
         }
     }
     try testing.expectEqual(@as(usize, 3), functions);
+}
+
+test "a test in a trait is written inside it and a member of nothing" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    const source: Source = .{ .path = "t.lin", .text =
+        \\trait Sized {
+        \\    fn size(self: Self) -> UInt8
+        \\    fn twice(self: Self) -> UInt8 { self.size() * 2 }
+        \\    test fn doubles() {}
+        \\    test trap fn overflows() {}
+        \\    let unit = 1
+        \\    test fn recovers() {}
+        \\}
+    };
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    const ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    try testing.expectEqual(@as(usize, 1), sink.items().len);
+    try testing.expectEqual(Code.t_impl, sink.items()[0].code.?);
+    try testing.expectEqualStrings("a trait holds signatures, projections, types and tests", sink.items()[0].message);
+    var tests: usize = 0;
+    var traps: usize = 0;
+    var members: usize = 0;
+    for (0..ast.declCount()) |i| {
+        const d = node.DeclId.at(@intCast(i));
+        if (ast.declTag(d) != .function) continue;
+        try testing.expectEqualStrings("Sized", ast.tokenText(ast.declOwner(d)));
+        if (ast.declIsTest(d)) {
+            tests += 1;
+            if (ast.declExpectsTrap(d)) traps += 1;
+            try testing.expectEqual(TokenId.none, ast.memberOwner(d));
+            try testing.expect(!ast.declIsSignature(d));
+            try testing.expect(!ast.declIsProvided(d));
+        } else {
+            members += 1;
+            try testing.expect(ast.declIsSignature(d));
+        }
+    }
+    try testing.expectEqual(@as(usize, 3), tests);
+    try testing.expectEqual(@as(usize, 1), traps);
+    try testing.expectEqual(@as(usize, 2), members);
 }
 
 test "a dangling attribute reports its missing nominal declaration once" {

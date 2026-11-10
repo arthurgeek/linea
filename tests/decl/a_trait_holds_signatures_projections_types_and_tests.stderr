@@ -1,0 +1,5 @@
+error[T-Impl]: a trait holds signatures, projections, types and tests
+ --> tests/decl/a_trait_holds_signatures_projections_types_and_tests.lin:6:5
+  |
+6 |     let unit = 1
+  |     ^^^ expected `fn`, `proj`, `type` or `test` here

@@ -1,0 +1,44 @@
+// A pattern's head names a type without its arguments, which the value it
+// takes apart settles. So where `Self` in a test's pattern is refused, the
+// type to write in its place is the implementation's type by name alone,
+// `Boxed`, whether the implementation writes its arguments or leaves them open.
+import std.testing
+
+struct Boxed[T] {
+    value: T,
+}
+
+impl Boxed[UInt8] {
+    pub fn small() -> Boxed[UInt8] {
+        Boxed[UInt8] { value = 1 }
+    }
+
+    test fn self_for_written_arguments() {
+        let Self { value } = Boxed.small()
+        testing.assert_eq(value, 1, "a small box holds one")?
+    }
+}
+
+struct Shelf[T] {
+    item: T,
+}
+
+impl[T] Shelf[T] {
+    pub fn count(_self: Self) -> UInt32 {
+        1
+    }
+
+    test fn self_for_open_parameters() {
+        let Self { item } = Shelf[UInt32] { item = 3 }
+        testing.assert_eq(item, 3, "the shelf holds three")?
+    }
+}
+
+fn main() -> UInt8 {
+    let shelf = Shelf[UInt32] { item = 3 }
+    if Boxed.small().value == 1 && shelf.count() == 1 {
+        0
+    } else {
+        1
+    }
+}

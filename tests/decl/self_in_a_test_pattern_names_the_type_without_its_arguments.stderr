@@ -1,0 +1,10 @@
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_in_a_test_pattern_names_the_type_without_its_arguments.lin:17:13
+   |
+17 |         let Self { value } = Boxed.small()
+   |             ^^^^ a test inside an `impl` is resolved at module scope; write `Boxed`
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_in_a_test_pattern_names_the_type_without_its_arguments.lin:32:13
+   |
+32 |         let Self { item } = Shelf[UInt32] { item = 3 }
+   |             ^^^^ a test inside an `impl` is resolved at module scope; write `Shelf`

@@ -1,0 +1,10 @@
+error[N-Undefined]: `Naming` declares no `a_label_is_named`
+  --> tests/decl/a_test_in_a_trait_is_no_member_of_it.lin:29:12
+   |
+29 |     Naming.a_label_is_named(label)
+   |            ^^^^^^^^^^^^^^^^ only what the trait declares is reached through it
+error[T-Impl]: `Naming` declares no `a_label_is_named`
+  --> tests/decl/a_test_in_a_trait_is_no_member_of_it.lin:22:8
+   |
+22 |     fn a_label_is_named(_self: Self) -> Bool {
+   |        ^^^^^^^^^^^^^^^^ declare it on the trait, or move it to an inherent `impl`

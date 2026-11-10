@@ -1,0 +1,34 @@
+// `test` marks a function. Written before a projection or a type inside a
+// trait it is refused once, and what it was written on stays the trait's
+// member.
+trait Shelved {
+    type Item
+
+    test type Spare
+
+    test proj first(self: Self) -> Item
+
+    fn count(self: Self) -> UInt8
+}
+
+struct Shelf {
+    books: UInt8,
+}
+
+impl Shelved for Shelf {
+    type Item = UInt8
+    type Spare = Bool
+
+    proj first(self: Self) -> UInt8 {
+        self.books
+    }
+
+    fn count(self: Self) -> UInt8 {
+        self.books
+    }
+}
+
+fn main() -> UInt8 {
+    let shelf = Shelf { books = 0 }
+    shelf.count()
+}

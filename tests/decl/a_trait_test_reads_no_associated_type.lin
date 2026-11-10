@@ -1,0 +1,62 @@
+// A test inside a trait declaration is not instantiated, so neither the
+// trait's associated types nor its parameters name a type in it, whether
+// written alone or selected through `Self`.
+import std.testing
+
+trait Holding {
+    type Item
+
+    fn held(self: Self) -> Item
+
+    test fn an_associated_type_alone() {
+        let item: Item = Crate.fill(2).held()
+        testing.assert_eq(item, 2, "the crate holds two")?
+    }
+
+    test fn an_associated_type_through_self() {
+        let item: Self.Item = Crate.fill(2).held()
+        testing.assert_eq(item, 2, "the crate holds two")?
+    }
+}
+
+trait Opening[K] {
+    fn opens(self: Self, key: K) -> Bool
+
+    test fn a_parameter_of_the_trait() {
+        let key: K = true
+        testing.assert(Crate.fill(2).opens(key), "the key opens the crate")?
+    }
+}
+
+struct Crate {
+    count: UInt8,
+}
+
+impl Crate {
+    fn fill(count: UInt8) -> Crate {
+        Crate { count = count }
+    }
+}
+
+impl Holding for Crate {
+    type Item = UInt8
+
+    fn held(self: Self) -> UInt8 {
+        self.count
+    }
+}
+
+impl Opening[Bool] for Crate {
+    fn opens(self: Self, key: Bool) -> Bool {
+        key && self.count > 0
+    }
+}
+
+fn main() -> UInt8 {
+    let crate = Crate.fill(0)
+    if crate.opens(true) {
+        1
+    } else {
+        crate.held()
+    }
+}

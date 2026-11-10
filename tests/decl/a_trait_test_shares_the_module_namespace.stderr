@@ -1,0 +1,5 @@
+error[N-Duplicate]: `starts_empty` is already declared
+  --> tests/decl/a_trait_test_shares_the_module_namespace.lin:28:9
+   |
+28 | test fn starts_empty() {
+   |         ^^^^^^^^^^^^ a name is declared once

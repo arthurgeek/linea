@@ -329,9 +329,9 @@ pub const Ast = struct {
     /// declaration, or `.none` at the top level.
     ///
     /// Where a declaration is written, which is what the formatter and the
-    /// source rewrites need: a test written inside an `impl` is printed and
-    /// moved with it. Whether the declaration belongs to that type is
-    /// `memberOwner`.
+    /// source rewrites need: a test written inside an `impl` or a trait is
+    /// printed and moved with it. Whether the declaration belongs to that
+    /// type is `memberOwner`.
     pub fn declOwner(self: *const Ast, id: DeclId) TokenId {
         return self.decls.items(.owner)[id.index()];
     }
@@ -340,11 +340,11 @@ pub const Ast = struct {
     /// where it is a member of nothing.
     ///
     /// A test is a member of nothing wherever it is written. Inside an `impl`
-    /// it is named, resolved and run at module scope ([S-Test]): it is not
-    /// instantiated, so the implementation's parameters and `Self` would name
-    /// nothing in it, and the compiler writes its one call, so no path through
-    /// the type reaches it. Every question about membership asks this, so that
-    /// is decided here once.
+    /// or a trait it is named, resolved and run at module scope ([S-Test]): it
+    /// is not instantiated, so the implementation's or the trait's parameters
+    /// and `Self` would name nothing in it, and the compiler writes its one
+    /// call, so no path through the type or the trait reaches it. Every
+    /// question about membership asks this, so that is decided here once.
     pub fn memberOwner(self: *const Ast, id: DeclId) TokenId {
         if (self.declIsTest(id)) return .none;
         return self.declOwner(id);

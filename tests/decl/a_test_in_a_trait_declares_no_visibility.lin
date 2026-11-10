@@ -1,0 +1,30 @@
+// A test declares no visibility, inside a trait declaration as anywhere else.
+import std.testing
+
+trait Measured {
+    fn length(self: Self) -> UInt32
+
+    pub test fn a_rope_is_measured() {
+        let rope = Rope { metres = 3 }
+        testing.assert_eq(rope.length(), 3, "the rope is three metres")?
+    }
+}
+
+struct Rope {
+    metres: UInt32,
+}
+
+impl Measured for Rope {
+    fn length(self: Self) -> UInt32 {
+        self.metres
+    }
+}
+
+fn main() -> UInt8 {
+    let rope = Rope { metres = 3 }
+    if rope.length() == 3 {
+        0
+    } else {
+        1
+    }
+}

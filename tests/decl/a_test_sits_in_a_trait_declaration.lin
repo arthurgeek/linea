@@ -1,0 +1,45 @@
+// A test may sit inside a trait declaration, beside the provided operation it
+// tests. It names the concrete type it tests, and an implementation neither
+// sees it nor supplies it.
+import std.testing
+
+trait Doubling {
+    fn value(self: Self) -> UInt32
+
+    fn doubled(self: Self) -> UInt32 {
+        self.value() * 2
+    }
+
+    test fn doubling_a_meter_doubles_its_reading() {
+        let meter = Meter { reading = 4 }
+        testing.assert_eq(meter.doubled(), 8, "twice four is eight")?
+    }
+
+    test trap fn doubling_past_the_largest_reading_traps() {
+        let meter = Meter { reading = largest_reading() }
+        let _doubled = meter.doubled()
+    }
+}
+
+struct Meter {
+    reading: UInt32,
+}
+
+impl Doubling for Meter {
+    fn value(self: Self) -> UInt32 {
+        self.reading
+    }
+}
+
+fn largest_reading() -> UInt32 {
+    4000000000
+}
+
+fn main() -> UInt8 {
+    let meter = Meter { reading = 3 }
+    if meter.doubled() == 6 {
+        0
+    } else {
+        1
+    }
+}

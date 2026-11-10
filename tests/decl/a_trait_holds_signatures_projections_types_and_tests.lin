@@ -1,0 +1,26 @@
+// A trait's braces hold signatures, provided operations, projections,
+// associated types and tests. A constant is none of them and a structure is
+// none of them. They are refused once, and the structure's braces do not end
+// the trait: the signature after them is still the trait's.
+trait Sized {
+    let unit = 1
+
+    struct Inner {}
+
+    fn size(self: Self) -> UInt8
+}
+
+struct Parcel {
+    weight: UInt8,
+}
+
+impl Sized for Parcel {
+    fn size(self: Self) -> UInt8 {
+        self.weight
+    }
+}
+
+fn main() -> UInt8 {
+    let parcel = Parcel { weight = 0 }
+    parcel.size()
+}

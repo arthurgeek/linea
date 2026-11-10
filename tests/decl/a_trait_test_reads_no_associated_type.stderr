@@ -1,0 +1,15 @@
+error[S-Test]: `Item` names no type in a test
+  --> tests/decl/a_trait_test_reads_no_associated_type.lin:12:19
+   |
+12 |         let item: Item = Crate.fill(2).held()
+   |                   ^^^^ a test is not instantiated, so no implementation settles the trait's types in it; write a concrete type
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/a_trait_test_reads_no_associated_type.lin:17:19
+   |
+17 |         let item: Self.Item = Crate.fill(2).held()
+   |                   ^^^^ a test inside a trait is resolved at module scope; write the type it tests
+error[S-Test]: `K` names no type in a test
+  --> tests/decl/a_trait_test_reads_no_associated_type.lin:26:18
+   |
+26 |         let key: K = true
+   |                  ^ a test is not instantiated, so the parameters of its trait name no type in it; write a concrete type

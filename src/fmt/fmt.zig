@@ -987,8 +987,9 @@ const Printer = struct {
                 (last != null and d.index() != last.?.index() + 1))
                 self.cursor = self.ast.partOf(self.ast.declTokens(d).start).token_start;
             last = d;
-            // A member of an `impl` lies inside its block's extent and is
-            // written there. Emitting it here as well would write it twice.
+            // A declaration written inside an `impl` or a trait lies inside
+            // its block's extent and is written there. Emitting it here as
+            // well would write it twice.
             if (self.ast.declOwner(d) != TokenId.none) continue;
             // One blank line between declarations, whatever the author wrote.
             // Vertical space is preserved where it groups statements; between
@@ -5149,6 +5150,34 @@ test "omitted test signatures survive formatting twice" {
         \\
     ;
     try check(arena.allocator(), "test fn succeeds(){}\ntest fn returns(){return}\ntest fn custom()->Result[(),Failure]{return .Ok(())}\ntest trap fn traps(){panic(\"expected\")}\n", written);
+    try check(arena.allocator(), written, written);
+}
+
+test "a test in a trait is formatted as a member of its braces" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const written =
+        \\trait Sized {
+        \\    type Unit
+        \\
+        \\    fn size(self: Self) -> UInt8
+        \\
+        \\    fn twice(self: Self) -> UInt8 {
+        \\        self.size() * 2
+        \\    }
+        \\
+        \\    // Doubling is checked on a parcel.
+        \\    test fn doubles() {
+        \\        check()
+        \\    }
+        \\
+        \\    test trap fn overflows() {
+        \\        check()
+        \\    }
+        \\}
+        \\
+    ;
+    try check(arena.allocator(), "trait Sized{type Unit\nfn size(self:Self)->UInt8\nfn twice(self:Self)->UInt8{self.size()*2}\n// Doubling is checked on a parcel.\ntest fn doubles(){check()}\ntest   trap fn overflows(){check()}}\n", written);
     try check(arena.allocator(), written, written);
 }
 
