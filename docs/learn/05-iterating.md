@@ -346,7 +346,7 @@ impl Timer for Countdown {
 
 // `I.Item` is the `Item` that `Iterator` declares: `Timer` requires
 // `Iterator`, so the bound `I: Timer` reaches it.
-fn announce[I: Timer](sink timer: I) -> Result[UInt8, io.IoError] where I.Item: Display + Discardable {
+fn announce[I: Timer](sink timer: I) -> Result[UInt8, io.IoError] where I: Discardable, I.Item: Display + Discardable {
     io.println("{timer.remaining()} to go")?
     for tick in timer {
         io.println("{tick}...")?
