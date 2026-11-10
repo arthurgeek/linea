@@ -4284,8 +4284,14 @@ pub const ImplIndex = struct {
     }
 
     /// A parameter or settled reference after one implementation head has
-    /// bound all of its parameters. Null where resolving it would need to mint
-    /// a constructed type; callable comparison handles those structurally.
+    /// bound all of its parameters. Null where no implementation answers a
+    /// reference's key.
+    ///
+    /// A member settled by a constructed type, `borrow T` or `Boxed[T]`, is
+    /// substituted with the selected implementation's arguments, which mints
+    /// it. A comparison could match it structurally, but a reference that
+    /// reads it, `I.Item.Inner` with `I.Item` settled to `borrow T`, needs
+    /// the type itself as the key of its own lookup.
     ///
     /// A settled reference reuses this index and the supplied-member table, so
     /// checking a dependent callable bound selects no implementation beside
@@ -4328,12 +4334,10 @@ pub const ImplIndex = struct {
             const written = pool.settledTypeWritten(implementation, standin.member) orelse return null;
             if (implementation.parameters == 0) return written;
 
-            // A constructed type that still mentions the implementation's
-            // parameters would need minting to substitute them, which this
-            // reader never does; leaving it as written would hand the caller
-            // another implementation's parameters.
-            if (pool.get(written) != .parameter and !isGround(pool, written)) return null;
             const inner = at.impl_args;
+            if (pool.get(written) != .parameter and !isGround(pool, written)) {
+                return try pool.substitute(written, implementation.decl.index(), inner);
+            }
             return self.directlySubstituted(
                 impls,
                 pool,
@@ -4351,6 +4355,39 @@ pub const ImplIndex = struct {
                 ty,
             else => ty,
         };
+    }
+
+    test "a settled reference whose member is a constructed type is substituted into that type" {
+        const gpa = testing.allocator;
+        var builder = try Typing.Builder.init(gpa);
+        defer builder.deinit();
+        const trait: u32 = 1;
+        const sig = DeclId.at(2);
+        const observing = DeclId.at(3);
+        const member = DeclId.at(4);
+        // `impl[T] Unwrap for borrow T { type Inner = borrow T }`.
+        const parameter = try builder.addParameter("T", @intCast(observing.index()), 0, .unrestricted, &.{});
+        const observed = try builder.borrowOf(parameter);
+        const implementations = [_]Implementation{
+            .{ .trait = trait, .head = .borrow_, .ty = observed, .decl = observing, .parameters = 1 },
+        };
+        var index = try ImplIndex.build(gpa, &implementations);
+        defer index.deinit(gpa);
+        builder.implementations = &implementations;
+        builder.impl_index = index;
+        var supply = try SupplyIndex.build(gpa, 5, &.{.{ .impl = observing, .sig = sig, .member = member }});
+        defer supply.deinit(gpa);
+        builder.supply = supply;
+        const returns = [_]TypeId{ .poison, .poison, .poison, .poison, observed };
+        builder.decl_returns = .{ .entries = &returns };
+
+        // `(borrow UInt8).Inner` is `borrow UInt8`, a key a further
+        // reference can be looked up by.
+        const held = try builder.borrowOf(.u8);
+        const reference = try builder.addSettledStandin(trait, &.{}, held, sig, "Inner");
+        var decided: Decided = .{ .gpa = gpa, .scope = .none };
+        defer decided.deinit();
+        try testing.expectEqual(@as(?TypeId, held), try index.directlySubstituted(&implementations, &builder, &decided, reference, 0, &.{}));
     }
 
     /// Whether `actual` is `written` after one implementation receiver binds

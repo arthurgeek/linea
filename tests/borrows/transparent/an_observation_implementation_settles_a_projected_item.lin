@@ -1,0 +1,36 @@
+import std.mem
+
+trait Unwrap {
+    type Inner
+
+    fn inner(self: Self) -> Self.Inner where carries(self)
+}
+
+impl[T: Copyable] Unwrap for borrow T {
+    type Inner = T
+
+    fn inner(self: Self) -> T where carries(self) {
+        copy(*self)
+    }
+}
+
+struct Unwrapped[I] { source: I }
+
+impl[I: Iterator] Iterator for Unwrapped[I]
+where I.Item: Unwrap + Discardable {
+    type Item = I.Item.Inner
+
+    fn next(inout self: Self) -> Option[I.Item.Inner] where carries(.Some: self) {
+        match &self.source.next() {
+            Some(boxed) => .Some(boxed.inner()),
+            None => .None,
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let xs = [UInt8(2), 3]
+    var unwrapped = Unwrapped[mem.SliceIter[UInt8]] { source = xs.as_slice().iterate() }
+    let first: UInt8 = &unwrapped.next().unwrap()
+    first + &unwrapped.next().unwrap()
+}
