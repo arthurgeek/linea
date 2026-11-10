@@ -9723,13 +9723,17 @@ const Checker = struct {
         // A supertrait is reached at the arguments its requirement chain
         // gives it, which the parameter's admitted bounds already hold
         // substituted. Two entries for it are two implementations the name
-        // could be read through.
+        // could be read through, whichever bound the declaration was found
+        // through first: a written `Lookup[UInt8]` beside a `Fancy` that
+        // requires `Lookup[UInt64]` is the same two in either order. Two
+        // written bounds of one trait were already counted as two
+        // declarations, so a second entry here is one a supertrait requires.
+        const admitted = admittedAt(self.builder.boundsOn(through.ty), trait);
+        if (admitted == .several) return self.refuseRequiredTwice(ref, run, self.ast.tokenText(through.named), trait, at);
         const args = if (!found.inherited)
             self.boundArgsWritten(through.ty, trait, .{ .named = .{ .name = found.bound, .args = found.args } })
-        else switch (admittedAt(self.builder.boundsOn(through.ty), trait)) {
-            .one => |admitted| admitted,
-            .several => return self.refuseRequiredTwice(ref, run, self.ast.tokenText(through.named), trait, at),
-        };
+        else
+            admitted.one;
 
         const sig = try self.declaredTypeNamed(trait, run, at) orelse return .{};
 
@@ -9853,12 +9857,15 @@ const Checker = struct {
             self.ast.fileOf(ref.at),
             run.span,
             "read it through a parameter bounded by one of them alone",
-            "`{s}` and `{s}` both declare `{s}`, and `{s}` reaches both through supertraits",
+            "`{s}` and `{s}` both declare `{s}`, and `{s}` reaches both through its {s}",
             .{
                 self.ast.tokenText(self.ast.declName(first)),
                 self.ast.tokenText(self.ast.declName(second)),
                 self.ast.tokenText(at),
                 head,
+                // `Self` reads its trait's supertraits; a parameter reads its
+                // bounds, of which one may name a declaring trait directly.
+                if (std.mem.eql(u8, head, "Self")) "supertraits" else "bounds",
             },
         );
         return .{};
@@ -9880,7 +9887,12 @@ const Checker = struct {
             .n_ambiguous,
             self.ast.fileOf(ref.at),
             run.span,
-            "bound it by one of them",
+            // `Self` is bounded by its trait's supertraits, which are what
+            // can change; a parameter's own bounds are written where it is.
+            if (std.mem.eql(u8, head, "Self"))
+                "require it at one argument list among the trait's supertraits"
+            else
+                "bound it by one of them",
             "`{s}`'s bounds require `{s}` at two argument lists, and each settles its own `{s}`",
             .{ head, self.ast.tokenText(self.ast.declName(trait)), self.ast.tokenText(at) },
         );

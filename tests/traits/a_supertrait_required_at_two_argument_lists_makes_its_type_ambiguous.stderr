@@ -1,10 +1,35 @@
 error[N-Ambiguous]: `T`'s bounds require `Lookup` at two argument lists, and each settles its own `Elem`
-  --> tests/traits/a_supertrait_required_at_two_argument_lists_makes_its_type_ambiguous.lin:13:46
+  --> tests/traits/a_supertrait_required_at_two_argument_lists_makes_its_type_ambiguous.lin:20:46
    |
-13 | fn _either[T: Fancy + Lookup[UInt8]](sink v: T.Elem) -> T.Elem {
+20 | fn _either[T: Fancy + Lookup[UInt8]](sink v: T.Elem) -> T.Elem {
    |                                              ^^^^^^ bound it by one of them
 error[N-Ambiguous]: `T`'s bounds require `Lookup` at two argument lists, and each settles its own `Elem`
-  --> tests/traits/a_supertrait_required_at_two_argument_lists_makes_its_type_ambiguous.lin:13:57
+  --> tests/traits/a_supertrait_required_at_two_argument_lists_makes_its_type_ambiguous.lin:24:48
    |
-13 | fn _either[T: Fancy + Lookup[UInt8]](sink v: T.Elem) -> T.Elem {
+24 | fn _reversed[T: Lookup[UInt8] + Fancy](sink v: T.Elem) -> T.Elem {
+   |                                                ^^^^^^ bound it by one of them
+error[N-Ambiguous]: `T`'s bounds require `Lookup` at two argument lists, and each settles its own `Elem`
+  --> tests/traits/a_supertrait_required_at_two_argument_lists_makes_its_type_ambiguous.lin:28:30
+   |
+28 | fn _written_apart[T](sink v: T.Elem) -> T.Elem where T: Lookup[UInt8], T: Fancy {
+   |                              ^^^^^^ bound it by one of them
+error[N-Ambiguous]: `Self`'s bounds require `Lookup` at two argument lists, and each settles its own `Elem`
+  --> tests/traits/a_supertrait_required_at_two_argument_lists_makes_its_type_ambiguous.lin:17:28
+   |
+17 |     fn pick(self: Self) -> Self.Elem
+   |                            ^^^^^^^^^ require it at one argument list among the trait's supertraits
+error[N-Ambiguous]: `T`'s bounds require `Lookup` at two argument lists, and each settles its own `Elem`
+  --> tests/traits/a_supertrait_required_at_two_argument_lists_makes_its_type_ambiguous.lin:20:57
+   |
+20 | fn _either[T: Fancy + Lookup[UInt8]](sink v: T.Elem) -> T.Elem {
    |                                                         ^^^^^^ bound it by one of them
+error[N-Ambiguous]: `T`'s bounds require `Lookup` at two argument lists, and each settles its own `Elem`
+  --> tests/traits/a_supertrait_required_at_two_argument_lists_makes_its_type_ambiguous.lin:24:59
+   |
+24 | fn _reversed[T: Lookup[UInt8] + Fancy](sink v: T.Elem) -> T.Elem {
+   |                                                           ^^^^^^ bound it by one of them
+error[N-Ambiguous]: `T`'s bounds require `Lookup` at two argument lists, and each settles its own `Elem`
+  --> tests/traits/a_supertrait_required_at_two_argument_lists_makes_its_type_ambiguous.lin:28:41
+   |
+28 | fn _written_apart[T](sink v: T.Elem) -> T.Elem where T: Lookup[UInt8], T: Fancy {
+   |                                         ^^^^^^ bound it by one of them
