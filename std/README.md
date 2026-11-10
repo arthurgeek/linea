@@ -618,13 +618,18 @@ lends each element it views as a place, as it does for an array or a `Vec`.
 The view is read-only, so `for inout` over a slice is refused.
 `Sequence` provides the pipeline operations `map`, `filter`, `filter_map`, `fold`,
 `find`, `find_map`, `any`, `all`, `for_each`, `count`, `collect`, `enumerate`, `zip`,
-`take`, `skip` and their `_inout` forms, and `Iterator` provides the in-place
+`take`, `skip` and their `_inout` forms, then `copied`, `rev`, `peekable`, `scan`,
+`sum`, `product`, `min`, `max`, `reduce` and `position`, which have no `_inout`
+form, and `Iterator` provides the in-place
 searches `find_counted` and `find_counted_inout`; every iterator is also a
 sequence, so it offers both, and `Sequence.map(values, f)` is the same operation
 as `values.map(f)`. A callback is taken `sink`, so a named callback is moved by
 its first use and a copyable one is passed as `copy(f)` to be used again; the
 comment after `Sequence` in [iter/iter.lin](iter/iter.lin) states the rest of
 the convention.
+`view.windows(n)` yields each run of `n` neighbouring elements as a slice of
+the same storage, so `readings.as_slice().windows(2)` walks every pair of
+neighbours without copying one.
 Slices compare, order, hash and print by their elements, so
 `testing.assert_eq(values.as_slice(), expected.as_slice(), message)` checks a
 vector against an array in one assertion.

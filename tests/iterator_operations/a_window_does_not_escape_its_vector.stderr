@@ -1,0 +1,7 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/iterator_operations/a_window_does_not_escape_its_vector.lin:10:5
+   |
+10 |     &pairs.next().unwrap()
+   |     ^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `readings` belongs to `first_pair` and ends when it returns, so nothing returned may observe it

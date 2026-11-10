@@ -1,0 +1,15 @@
+import std.iter
+import std.mem
+
+// A peekable over a slice of a vector the function owns views storage that is
+// released when the function returns.
+fn upcoming() -> iter.Peekable[mem.SliceIter[UInt8]] {
+    defer var readings: Vec[UInt8] = Vec.new()
+    &readings.push(3).unwrap()
+    readings.as_slice().peekable()
+}
+
+fn main() -> UInt8 {
+    var line = upcoming()
+    *&line.next().unwrap()
+}

@@ -1,0 +1,5 @@
+error[O-Move]: `ticket` is lent, and this takes it
+  --> tests/iterator_operations/next_if_does_not_settle_the_item_it_judges.lin:25:35
+   |
+25 |             let Ticket { seat } = ticket
+   |                                   ^^^^^^ `copy` it, or declare the parameter `sink` to take it

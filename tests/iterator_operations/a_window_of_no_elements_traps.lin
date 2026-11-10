@@ -1,0 +1,6 @@
+// A window holds at least one element, so asking for windows of none stops
+// the program instead of yielding empty views without end.
+fn main() -> UInt8 {
+    let readings = [UInt8(3), 5, 8]
+    UInt8(readings.as_slice().windows(0).count())
+}

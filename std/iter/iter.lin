@@ -81,10 +81,12 @@ impl[T: Copyable] Observation for borrow T {
 //
 // Every sequence also offers the operations below, so a pipeline reads left to
 // right from what it walks: `values.map(f).filter(p).fold(0, add)`. Each takes
-// the sequence and walks the iterator `iterate` gives it. `map`, `filter_map`
-// and `filter` are lazy and return an adapter that is itself an iterator; the
-// others walk now. An operation ending in `_inout` borrows a callback whose
-// state the caller keeps, where the plain one takes the callback by value.
+// the sequence and walks the iterator `iterate` gives it. An adapter (`map`,
+// `filter`, `filter_map`, `enumerate`, `zip`, `take`, `skip`, `copied`, `rev`,
+// `peekable`, `scan`) is lazy: it returns an iterator and calls nothing until
+// that iterator is walked. Every other operation is a terminal and walks now.
+// An operation ending in `_inout` borrows a callback whose state the caller
+// keeps, where the plain one takes the callback by value.
 pub trait Sequence {
     type Iter: Iterator
 
@@ -284,10 +286,19 @@ pub trait Sequence {
     {
         var walking = self.iterate()
         var combining = combine
-        match &walking.next() {
-            Some(first) => .Some(walking.fold_inout(first, &combining)),
-            None => .None,
+        var combined: Self.Iter.Item = match &walking.next() {
+            Some(first) => first,
+            None => return .None,
         }
+        loop {
+            match &walking.next() {
+                Some(item) => combine_into(&combined, item, &combining),
+                None => {
+                    break
+                },
+            }
+        }
+        .Some(combined)
     }
 
     // Return the position of the first item `predicate` accepts, counting
@@ -2139,6 +2150,14 @@ fn token_number(token: Token) -> UInt8 {
     match read token {
         Number(number) => number,
     }
+}
+
+// Replace the value combined so far with `combine` of it and `item`.
+fn combine_into[
+    T,
+    F: inout fn(sink accumulator: T, sink item: T) -> T where carries(accumulator, item),
+](inout combined: T, sink item: T, inout combine: F) where retains(combined: item, combine) {
+    combined = &combine(combined, item)
 }
 
 // Add `item` to the running total.

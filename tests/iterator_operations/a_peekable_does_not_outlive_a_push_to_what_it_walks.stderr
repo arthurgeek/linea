@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/iterator_operations/a_peekable_does_not_outlive_a_push_to_what_it_walks.lin:10:5
+   |
+10 |     &readings.push(8).unwrap()
+   |     ^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+11 |     let again = *&upcoming.next().unwrap()
+   |                   -------- the observation is still used here

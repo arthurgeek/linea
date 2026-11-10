@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/iterator_operations/a_reversed_window_does_not_outlive_a_push.lin:9:5
+   |
+9  |     &readings.push(8).unwrap()
+   |     ^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+10 |     let rise = last[1] - last[0]
+   |                ------- the observation is still used here

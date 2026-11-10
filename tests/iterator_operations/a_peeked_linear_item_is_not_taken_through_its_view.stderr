@@ -1,0 +1,5 @@
+error[O-Move]: this read-only observation cannot give away the value it observes
+  --> tests/iterator_operations/a_peeked_linear_item_is_not_taken_through_its_view.lin:24:35
+   |
+24 |             let Ticket { seat } = *ticket
+   |                                   ^^^^^^^ read the observation, or copy a copyable referent

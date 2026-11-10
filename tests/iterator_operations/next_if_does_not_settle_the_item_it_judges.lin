@@ -1,0 +1,45 @@
+// The predicate of `next_if` reads the item it judges, because a refused item
+// stays held. A predicate that settles the ticket would leave the peekable
+// holding a ticket already settled.
+@linear
+struct Ticket { seat: UInt8 }
+
+struct Tickets { next_seat: UInt8 }
+
+impl Iterator for Tickets {
+    type Item = Ticket
+
+    fn next(inout self: Self) -> Option[Ticket] {
+        if self.next_seat == 3 {
+            return .None
+        }
+        self.next_seat += 1
+        .Some(Ticket { seat = self.next_seat })
+    }
+}
+
+fn main() -> UInt8 {
+    var line = (Tickets { next_seat = 0 }).peekable()
+    let taken = &line.next_if(
+        |ticket| {
+            let Ticket { seat } = ticket
+            seat == 9
+        },
+    )
+    let (rest, held) = line.into_parts()
+    var seats: UInt8 = 0
+    for ticket in [taken, held] {
+        match ticket {
+            Some(ticket) => {
+                let Ticket { seat } = ticket
+                seats += seat
+            },
+            None => {},
+        }
+    }
+    for ticket in rest {
+        let Ticket { seat } = ticket
+        seats += seat
+    }
+    seats
+}

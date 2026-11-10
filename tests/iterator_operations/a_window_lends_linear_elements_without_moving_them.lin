@@ -1,0 +1,18 @@
+// A window is a view, so an element cannot be moved out of it: the array
+// still owns the ticket.
+@linear
+struct Ticket { seat: UInt8 }
+
+fn main() -> UInt8 {
+    let tickets = [Ticket { seat = 1 }, Ticket { seat = 2 }, Ticket { seat = 3 }]
+    var seats: UInt8 = 0
+    for pair in tickets.as_slice().windows(2) {
+        let Ticket { seat } = pair[0]
+        seats += seat
+    }
+    for ticket in tickets {
+        let Ticket { seat } = ticket
+        seats += seat
+    }
+    seats
+}

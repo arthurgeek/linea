@@ -1,0 +1,9 @@
+// A window views two elements of the array, so writing one of them while the
+// window is in use would change what the window reads.
+fn main() -> UInt8 {
+    var readings = [UInt8(3), 5, 8]
+    var pairs = readings.as_slice().windows(2)
+    let first = &pairs.next().unwrap()
+    readings[1] = 9
+    first[1] - first[0]
+}

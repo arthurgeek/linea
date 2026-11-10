@@ -1,0 +1,8 @@
+error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Ticket` does not have that capability
+  --> tests/iterator_operations/a_minimum_of_linear_items_is_refused.lin:37:39
+   |
+37 |     match (Tickets { next_seat = 0 }).min() {
+   |                                       ^^^ `min` may dispose of a `Ticket`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
+  ::: std/iter/iter.lin
+L  |         Self.Iter.Item: Ordered + Discardable
+   |         -------------- required by this `where` clause

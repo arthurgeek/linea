@@ -1,0 +1,9 @@
+error[O-Leak]: `line` (a linear `iter.Peekable[Tickets]`) is still owned when this path leaves
+  --> tests/iterator_operations/a_peekable_holding_a_linear_item_must_be_settled.lin:21:9
+   |
+21 |     var line = (Tickets { next_seat = 0 }).peekable()
+   |         ^^^^ never settled on the path that reaches the end of this block
+26 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it
