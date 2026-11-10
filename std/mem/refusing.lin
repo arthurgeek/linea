@@ -254,8 +254,7 @@ impl[H: Allocator] Allocator for RefusingAllocator[H] {
         }
     }
 
-    fn dispose(sink b: Buffer[Self]) {
-        let Buffer { at, len, allocated, allocator, obligation: RefusingAllocation { backing, index } } = b
+    fn dispose(sink b { at, len, allocated, allocator, obligation: RefusingAllocation { backing, index } }: Buffer[Self]) {
         let flag = log_flags + index * log_word_bytes
         if allocator.log.buffer.load(flag) != 1 {
             panic("an allocation was disposed more than once")

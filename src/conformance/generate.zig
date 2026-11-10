@@ -1195,6 +1195,11 @@ const Gen = struct {
         try w.print("    fn item({s}x: Self) -> Self.Item\n", .{conv});
         try w.writeAll("}\n\n");
 
+        // A subtrait declaring nothing, so a bound on it reaches `Item`
+        // through its supertrait and names the type a bound on `_Measure`
+        // names.
+        try w.writeAll("trait _Ranked: _Measure {}\n\n");
+
         for (0..shape.impls) |i| {
             try w.print("struct _M{d} {{", .{i});
             for (0..shape.fields[i]) |f| {
@@ -1230,12 +1235,19 @@ const Gen = struct {
                 });
             }
             try w.writeAll("}\n\n");
+            try w.print("impl _Ranked for _M{d} {{}}\n\n", .{i});
         }
 
         // Written against the bound and answering what the bound declares, so
         // the return type is settled by the argument at each instantiation
-        // rather than by anything written here.
-        try w.print("fn _itemOf[T: _Measure]({s}v: T) -> T.Item {{\n", .{conv});
+        // rather than by anything written here. `_itemOf` reads `T.Item`
+        // through `_Ranked`, which inherits it, and passes `T` on to a bound
+        // on `_Measure`, which declares it: the call checks only where the
+        // two readings name one type.
+        try w.print("fn _itemOf[T: _Ranked]({s}v: T) -> T.Item {{\n", .{conv});
+        try w.writeAll("    _itemDeclared(v)\n");
+        try w.writeAll("}\n\n");
+        try w.print("fn _itemDeclared[T: _Measure]({s}v: T) -> T.Item {{\n", .{conv});
         try w.writeAll("    _Measure.item(v)\n");
         try w.writeAll("}\n\n");
 
@@ -1409,6 +1421,18 @@ const Gen = struct {
             try w.print("fn _tuple{d}() -> ({s}, {s}) {{\n    ", .{ k, returns[0].spelling(), returns[1].spelling() });
             try self.tupleLiteral(w, returns, 0);
             try w.writeAll("\n}\n\n");
+
+            // The pair taken apart by a labelled pattern parameter and built
+            // again, `sink` for an even group and `read` for an odd one. It
+            // draws no choice, so no other axis changes phase.
+            try w.print("fn _opened{d}({s}pair (first, second): ({s}, {s})) -> ({s}, {s}) {{\n    (first, second)\n}}\n\n", .{
+                k,
+                if (k % 2 == 0) "sink " else "",
+                returns[0].spelling(),
+                returns[1].spelling(),
+                returns[0].spelling(),
+                returns[1].spelling(),
+            });
         }
     }
 
@@ -1464,7 +1488,8 @@ const Gen = struct {
         try indent(w, at);
         try w.print("let ({s}, {s}) = ", .{ binders[0], binders[1] });
         if (call) |k| {
-            try w.print("_tuple{d}()", .{k});
+            // By label for an even group and by position for an odd one.
+            try w.print("_opened{d}({s}_tuple{d}())", .{ k, if (k % 2 == 0) "pair: " else "", k });
         } else {
             try self.tupleLiteral(w, types, visible);
         }
@@ -3399,6 +3424,8 @@ test "the trait a generated program declares is not one fixed program" {
         try testing.expect(std.mem.indexOf(u8, block, "type Item = UInt8") != null);
         try testing.expect(std.mem.indexOf(u8, block, "type Item = Bool") != null);
         try testing.expect(std.mem.indexOf(u8, block, "-> T.Item") != null);
+        // Read through a subtrait that inherits it, too.
+        try testing.expect(std.mem.indexOf(u8, block, "fn _itemOf[T: _Ranked]") != null);
 
         if (seed < 32) {
             if (std.mem.indexOf(u8, text, ": UInt8 = _itemOf(") != null) through_the_bound.insert(.u8_);
@@ -4057,7 +4084,7 @@ test "some generated program declares a projection" {
     try testing.expect(try seedsContaining(gpa, 200, "proj at(") < 200);
 }
 
-test "a generated program takes tuples apart by position" {
+test "a generated program takes tuples apart by position and by a parameter's pattern" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
@@ -4066,6 +4093,9 @@ test "a generated program takes tuples apart by position" {
     const text = try generate(gpa, bytes, .{ .max_tuples = 2 });
     try testing.expect(std.mem.indexOf(u8, text, "let (") != null);
     try testing.expect(std.mem.indexOf(u8, text, "-> (") != null);
+    try testing.expect(std.mem.indexOf(u8, text, "fn _opened0(sink pair (first, second): (") != null);
+    try testing.expect(std.mem.indexOf(u8, text, "_opened0(pair: _tuple0())") != null);
+    try testing.expect(std.mem.indexOf(u8, text, "_opened1(_tuple1())") != null);
 
     // None where the options ask for none.
     const none = try generate(gpa, bytes, .{ .max_tuples = 0 });

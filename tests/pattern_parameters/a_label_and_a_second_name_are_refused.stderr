@@ -1,0 +1,7 @@
+error[S-Params]: a parameter's label is its name
+ --> tests/pattern_parameters/a_label_and_a_second_name_are_refused.lin:3:17
+  |
+3 | fn double(value number: UInt8) -> UInt8 {
+  |                 ^^^^^^ a second name declares nothing
+  |
+  = help: write `value: …` to name the parameter once

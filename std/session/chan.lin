@@ -61,8 +61,7 @@ impl[P: Protocol, H] Chan[P, H] {
 // Permitted only when `H: Owned`, proving that the body and allocator
 // hold no live borrows, lends, or local allocations. The erased handle
 // remains linear and must still be closed/joined.
-pub fn detach[P: Protocol, H: Owned](sink chan: Chan[P, H]) -> Chan[P, ()] {
-    let Chan { endpoint, body: _ } = chan
+pub fn detach[P: Protocol, H: Owned](sink chan { endpoint, body: _ }: Chan[P, H]) -> Chan[P, ()] {
     .{ endpoint, body = .{} }
 }
 

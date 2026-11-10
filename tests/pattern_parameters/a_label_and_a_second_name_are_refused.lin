@@ -1,0 +1,9 @@
+// A parameter has one name: a second one after the label is refused, and the
+// parameter is read under its label.
+fn double(value number: UInt8) -> UInt8 {
+    value * 2
+}
+
+fn main() -> UInt8 {
+    double(value: 2)
+}

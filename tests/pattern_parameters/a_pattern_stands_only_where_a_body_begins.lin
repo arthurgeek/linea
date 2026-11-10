@@ -1,0 +1,37 @@
+// A pattern takes an argument apart where a body begins. A callable type, a
+// trait operation without a body and the receiver `self` have none to take it
+// apart in, so each reads the parameter whole under its label.
+trait Score {
+    fn score(self: Self, entry (a, b): (UInt8, UInt8)) -> UInt8
+    fn bonus(self: Self, (a, b): (UInt8, UInt8)) -> UInt8
+}
+
+struct Pair {
+    left: UInt8,
+    right: UInt8,
+}
+
+impl Pair {
+    fn sum(self Pair { left, right }: Self) -> UInt8 {
+        self.left + self.right
+    }
+}
+
+impl Score for Pair {
+    fn score(self: Self, entry: (UInt8, UInt8)) -> UInt8 {
+        self.left + entry._0
+    }
+
+    fn bonus(self: Self, entry: (UInt8, UInt8)) -> UInt8 {
+        self.right + entry._1
+    }
+}
+
+fn apply[F: fn(entry (a, b): (UInt8, UInt8)) -> UInt8](pair: (UInt8, UInt8), with: F) -> UInt8 {
+    with(pair)
+}
+
+fn main() -> UInt8 {
+    let pair: Pair = .{ left = 1, right = 2 }
+    pair.sum() + pair.score((1, 2)) + pair.bonus((1, 2)) + apply((1, 2), |entry| entry._0)
+}

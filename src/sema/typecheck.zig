@@ -1681,10 +1681,11 @@ fn typecheckInternal(
             c.answer_unknown = false;
             const want: ?Expected = if (written_return.wasWritten()) blk: {
                 const ty = try c.declaredResultType(d);
-                if (ty == .poison) {
-                    c.answer_unknown = true;
-                    break :blk null;
-                }
+                // A refused result type was reported where it is written. The
+                // body is still checked against it, as poison, so what stands
+                // in the result position -- a bare `.None` among them -- is
+                // not reported a second time for having nothing to answer.
+                if (ty == .poison) c.answer_unknown = true;
                 break :blk .{
                     .ty = ty,
                     .at = c.locOfWritten(written_return),
@@ -8249,7 +8250,8 @@ const Checker = struct {
             try names.put(self.gpa, self.ast.tokenName(name), .{ .capture = .{ .closure = owner, .field = @enumFromInt(index) } });
         };
         for (params, 0..) |param, index| {
-            if (param.name != .none) try names.put(self.gpa, self.ast.tokenName(param.name), .{ .parameter = @intCast(index) });
+            const label = self.ast.paramLabel(param);
+            if (label != .none) try names.put(self.gpa, self.ast.tokenName(label), .{ .parameter = @intCast(index) });
         }
         return names;
     }
@@ -8786,7 +8788,7 @@ const Checker = struct {
             }
             if (ty == .poison) valid = false;
             callable_params[i] = .{
-                .spelling = self.ast.tokenText(param.name),
+                .spelling = self.ast.paramSpelling(param),
                 .convention = param.convention,
                 .ty = ty,
                 .default = default,
@@ -9625,8 +9627,25 @@ const Checker = struct {
         }
 
         const reading = try self.implementationReading(owner) orelse {
-            return self.standinAwaitingInstantiation(owner, run, at);
+            return self.standinAwaitingInstantiation(owner, ref, run, at);
         };
+
+        // A name the implementation's trait inherits is settled by the
+        // supertrait's implementation for the same type, not by this one.
+        const declaring = try self.traitDeclaringForSelf(reading.trait, ref, run, at) orelse return .{};
+        if (declaring != reading.trait) {
+            const signature = self.ast.declIsSignature(owner);
+            return self.inheritedThroughSelf(
+                owner,
+                ref,
+                run,
+                reading.trait,
+                if (signature) self.traitArgumentsHere(reading.trait) else reading.impl.args,
+                declaring,
+                if (signature) self.self_at_call.? else reading.impl.ty,
+                at,
+            );
+        }
 
         const sig = try self.declaredTypeNamed(reading.trait, run, at) orelse return .{};
 
@@ -9703,6 +9722,12 @@ const Checker = struct {
         // has instead is a name bounded by one of them.
         if (found.declaring > 1) {
             try self.noteRefused(run.last);
+            // A declaration reached through a supertrait is named by the
+            // trait declaring it, since the bound naming the subtrait is not
+            // what declares anything.
+            const both_written = !found.inherited and found.also != found.bound and
+                traitAt(self.ast, self.res, found.also) == found.also_trait;
+            if (!both_written) return self.refuseInheritedAmbiguity(ref, run, self.ast.tokenText(through.named), found.trait, found.also_trait, at);
             try self.sink.addErrorFmt(
                 .n_ambiguous,
                 self.ast.fileOf(ref.at),
@@ -9750,7 +9775,21 @@ const Checker = struct {
         // own bounds already interned them when it was declared. The bound
         // the name is read through is what picks the entry, because one trait
         // may bound the parameter at several arguments.
-        const args = self.boundArgsWritten(through.ty, trait, .{ .named = .{ .name = found.bound, .args = found.args } });
+        //
+        // A supertrait is reached at the arguments its requirement chain
+        // gives it, which the parameter's admitted bounds already hold
+        // substituted. Two entries for it are two implementations the name
+        // could be read through, whichever bound the declaration was found
+        // through first: a written `Lookup[UInt8]` beside a `Fancy` that
+        // requires `Lookup[UInt64]` is the same two in either order. Two
+        // written bounds of one trait were already counted as two
+        // declarations, so a second entry here is one a supertrait requires.
+        const admitted = admittedAt(self.builder.boundsOn(through.ty), trait);
+        if (admitted == .several) return self.refuseRequiredTwice(ref, run, self.ast.tokenText(through.named), trait, at);
+        const args = if (!found.inherited)
+            self.boundArgsWritten(through.ty, trait, .{ .named = .{ .name = found.bound, .args = found.args } })
+        else
+            admitted.one;
 
         const sig = try self.declaredTypeNamed(trait, run, at) orelse return .{};
 
@@ -9772,6 +9811,148 @@ const Checker = struct {
             .settled_once = through.settled_once,
             .head_definition = settled.head_definition,
         };
+    }
+
+    /// The trait that declares a name `Self` reads inside `trait` or an
+    /// implementation of it: `trait` itself, or the one supertrait whose
+    /// declaration the name reaches. `trait` where nothing declares it, so
+    /// `declaredTypeNamed` reports the hole against the trait the reader
+    /// wrote in. Null where two supertraits declare it, which is reported.
+    fn traitDeclaringForSelf(
+        self: *Checker,
+        trait: node.DeclId,
+        ref: node.TypeRef,
+        run: Run,
+        at: TokenId,
+    ) std.mem.Allocator.Error!?node.DeclId {
+        const reached = try resolve_mod.traitDeclaringMember(self.ast, trait, self.ast.tokenName(at), BoundsRead{ .checker = self });
+        return switch (reached.declaring) {
+            0 => trait,
+            1 => reached.trait,
+            else => {
+                _ = try self.refuseInheritedAmbiguity(ref, run, "Self", reached.trait, reached.also, at);
+                return null;
+            },
+        };
+    }
+
+    /// `Self.Item` where `sub` inherits `Item` from `declaring`: the key
+    /// (`declaring`, `Item`, `held`) at the arguments `sub`'s requirement
+    /// chain gives `declaring`, settled through the one routine every
+    /// settled reference reaches. So `Self.Item` inside `DoubleEnded` and
+    /// `I.Item` under `I: Iterator` name one type for one `held`.
+    ///
+    /// **Bound:** the supertrait closure of `sub`, which `traitsBounding`
+    /// already walks for a trait's own `Self`, and one keyed lookup.
+    fn inheritedThroughSelf(
+        self: *Checker,
+        owner: node.DeclId,
+        ref: node.TypeRef,
+        run: Run,
+        sub: node.DeclId,
+        sub_args: []const TypeId,
+        declaring: node.DeclId,
+        held: TypeId,
+        at: TokenId,
+    ) std.mem.Allocator.Error!Selected {
+        const sig = try self.declaredTypeNamed(declaring, run, at) orelse return .{};
+        const closure = try self.traitsBounding(.{ .module = self.program.moduleOf(sub), .owner = sub }, self.ast.declBounds(sub));
+        defer types_mod.freeBoundTraits(self.gpa, closure);
+        const raw = switch (admittedAt(closure, declaring)) {
+            .one => |admitted| admitted,
+            .several => return self.refuseRequiredTwice(ref, run, "Self", declaring, at),
+        };
+        const args = try self.substitutedBoundArgs(raw, sub, sub_args);
+        defer if (args.len > 0) self.gpa.free(args);
+        const settled = try self.builder.settledAtWithin(
+            self.generic,
+            @intCast(declaring.index()),
+            args,
+            held,
+            sig,
+            self.ast.tokenText(at),
+        );
+        return .{
+            .ty = settled.ty,
+            .declared = sig,
+            .named = at,
+            .settled_once = !self.ast.declIsSignature(owner),
+            .head_definition = settled.head_definition,
+        };
+    }
+
+    /// The arguments `trait` is admitted at among `bounds`, or `several`
+    /// where the bounds require it at two different argument lists.
+    const Admitted = union(enum) { one: []const TypeId, several };
+
+    fn admittedAt(bounds: []const types_mod.BoundTrait, trait: node.DeclId) Admitted {
+        var first: ?[]const TypeId = null;
+        for (bounds) |b| {
+            if (b.trait != trait.index()) continue;
+            if (first) |seen| {
+                if (!std.mem.eql(TypeId, seen, b.args)) return .several;
+            } else first = b.args;
+        }
+        return .{ .one = first orelse &.{} };
+    }
+
+    /// [N-Ambiguous] for a name two traits declare where the reader reaches
+    /// both through supertraits, so no written bound picks one.
+    fn refuseInheritedAmbiguity(
+        self: *Checker,
+        ref: node.TypeRef,
+        run: Run,
+        head: []const u8,
+        first: node.DeclId,
+        second: node.DeclId,
+        at: TokenId,
+    ) std.mem.Allocator.Error!Selected {
+        try self.noteRefused(run.last);
+        try self.sink.addErrorFmt(
+            .n_ambiguous,
+            self.ast.fileOf(ref.at),
+            run.span,
+            "read it through a parameter bounded by one of them alone",
+            "`{s}` and `{s}` both declare `{s}`, and `{s}` reaches both through its {s}",
+            .{
+                self.ast.tokenText(self.ast.declName(first)),
+                self.ast.tokenText(self.ast.declName(second)),
+                self.ast.tokenText(at),
+                head,
+                // `Self` reads its trait's supertraits; a parameter reads its
+                // bounds, of which one may name a declaring trait directly.
+                if (std.mem.eql(u8, head, "Self")) "supertraits" else "bounds",
+            },
+        );
+        return .{};
+    }
+
+    /// [N-Ambiguous] for a name declared by a supertrait the reader's bounds
+    /// require at two argument lists: each is an implementation that settles
+    /// its own member.
+    fn refuseRequiredTwice(
+        self: *Checker,
+        ref: node.TypeRef,
+        run: Run,
+        head: []const u8,
+        trait: node.DeclId,
+        at: TokenId,
+    ) std.mem.Allocator.Error!Selected {
+        try self.noteRefused(run.last);
+        try self.sink.addErrorFmt(
+            .n_ambiguous,
+            self.ast.fileOf(ref.at),
+            run.span,
+            // `Self` is bounded by its trait's supertraits, which are what
+            // can change; a parameter's own bounds are written where it is.
+            if (std.mem.eql(u8, head, "Self"))
+                "require it at one argument list among the trait's supertraits"
+            else
+                "bound it by one of them",
+            "`{s}`'s bounds require `{s}` at two argument lists, and each settles its own `{s}`",
+            .{ head, self.ast.tokenText(self.ast.declName(trait)), self.ast.tokenText(at) },
+        );
+        return .{};
     }
 
     /// The declared type a settled reference names, or null where the trait
@@ -9856,6 +10037,7 @@ const Checker = struct {
     fn standinAwaitingInstantiation(
         self: *Checker,
         owner: node.DeclId,
+        ref: node.TypeRef,
         run: Run,
         at: TokenId,
     ) std.mem.Allocator.Error!Selected {
@@ -9865,6 +10047,9 @@ const Checker = struct {
         if (held == .poison) return .{};
         const trait_args = self.traitArgumentsHere(trait);
         if (!self.builder.awaitsTypes(held, trait_args)) return .{};
+
+        const declaring = try self.traitDeclaringForSelf(trait, ref, run, at) orelse return .{};
+        if (declaring != trait) return self.inheritedThroughSelf(owner, ref, run, trait, trait_args, declaring, held, at);
 
         const sig = try self.declaredTypeNamed(trait, run, at) orelse return .{};
         return .{
@@ -12412,6 +12597,10 @@ const Checker = struct {
 
         pub fn allocator(self: BoundsRead) std.mem.Allocator {
             return self.checker.gpa;
+        }
+
+        pub fn syntax(self: BoundsRead) *const Ast {
+            return self.checker.ast;
         }
 
         /// **Bound:** one lookup in the index this pass already holds members
@@ -16058,20 +16247,27 @@ const Checker = struct {
                     _ = self.report(.t_lend, d.init, "a borrowed pattern requires a place", .{}, "bind the value before reading it apart");
                 }
             }
-            // A call-shaped head names a newtype, or one variant of the
-            // value's own enum -- a pattern that may not match, which
-            // [T-Refutable] says once it is checked. Any other spelling is
-            // the newtype check's to refuse.
-            const saved_site = self.pattern_site;
-            self.pattern_site = .binding;
-            const checked = if (self.ast.exprTag(d.pattern) == .call and
-                (try self.variantNamed(of, self.ast.tokenText(self.ast.exprMain(d.pattern)))) == null)
-                try self.checkNewtypePattern(d.pattern, of, taken)
-            else
-                try self.checkPattern(d.pattern, of, taken);
-            self.pattern_site = saved_site;
-            if (checked == .matches) try self.refuseRefutable(d.pattern, of);
+            try self.checkBindingPattern(d.pattern, of, taken);
         }
+    }
+
+    /// A pattern that takes a whole value apart with no other arm: a
+    /// destructuring `let`'s, or a parameter's. It must match every value of
+    /// its type ([T-Refutable]).
+    fn checkBindingPattern(self: *Checker, pattern: ExprId, of: TypeId, taken: ExprId) std.mem.Allocator.Error!void {
+        // A call-shaped head names a newtype, or one variant of the value's
+        // own enum -- a pattern that may not match, which [T-Refutable] says
+        // once it is checked. Any other spelling is the newtype check's to
+        // refuse.
+        const saved_site = self.pattern_site;
+        self.pattern_site = .binding;
+        const checked = if (self.ast.exprTag(pattern) == .call and
+            (try self.variantNamed(of, self.ast.tokenText(self.ast.exprMain(pattern)))) == null)
+            try self.checkNewtypePattern(pattern, of, taken)
+        else
+            try self.checkPattern(pattern, of, taken);
+        self.pattern_site = saved_site;
+        if (checked == .matches) try self.refuseRefutable(pattern, of);
     }
 
     /// A scheduled expression may not itself leave the scope.
@@ -18504,20 +18700,17 @@ const Checker = struct {
         return false;
     }
 
-    /// A lambda parameter written as a tuple pattern takes its argument apart
-    /// where the body begins, as `let (a, b) = argument` does for a `sink`
-    /// parameter and `let read (a, b) = argument` does for a `read` or `inout`
-    /// one: the components are owned under `sink`, and lent from the
-    /// argument's place otherwise. The body cannot name the argument, so the
-    /// checker records no place for a lent component: two components are
-    /// bindings of their own, which is all its overlap rules ask of them.
+    /// A parameter written as a pattern, a declaration's or a lambda's,
+    /// takes its argument apart where the body begins, as
+    /// `let pattern = argument` does for a `sink` parameter and
+    /// `let read pattern = argument` does for a `read` or `inout` one: the
+    /// parts are owned under `sink`, and lent from the argument's place
+    /// otherwise. The body cannot name the argument, so the checker records
+    /// no place for a lent part: two parts are bindings of their own, which
+    /// is all its overlap rules ask of them.
     fn checkParameterPattern(self: *Checker, param: node.Param, ty: TypeId) std.mem.Allocator.Error!void {
         _ = self.record(param.argument, ty);
-        const saved_site = self.pattern_site;
-        self.pattern_site = .binding;
-        const checked = try self.checkTuplePattern(param.pattern, ty, ExprId.none);
-        self.pattern_site = saved_site;
-        if (checked == .matches) try self.refuseRefutable(param.pattern, ty);
+        try self.checkBindingPattern(param.pattern, ty, ExprId.none);
     }
 
     test checkParameterPattern {
@@ -21449,6 +21642,13 @@ const Checker = struct {
             self.current = outer_module;
             self.generic = outer_generic;
         }
+        // A pattern parameter's binders are typed first: a default naming one
+        // is then refused as any default naming a parameter is, rather than
+        // read as a binder with no type yet.
+        for (self.res.parametersOf(d)) |b| {
+            const param = self.ast.declParams(d)[self.res.paramIndexOf(b)];
+            if (param.pattern != ExprId.none) try self.checkParameterPattern(param, self.binding_types.get(b));
+        }
         try self.foldDefaults(d);
     }
 
@@ -23251,7 +23451,10 @@ const Checker = struct {
         }
 
         fn paramName(owner: CallParameters, self: *const Checker, at: usize) StringId {
-            if (owner.labels(self)) |params| return self.ast.tokenName(params[at].name);
+            if (owner.labels(self)) |params| {
+                const label = self.ast.paramLabel(params[at]);
+                return if (label == .none) .none else self.ast.tokenName(label);
+            }
             return .none;
         }
 
@@ -23348,7 +23551,8 @@ const Checker = struct {
     ) std.mem.Allocator.Error!?u32 {
         if (owner == .labelled) {
             for (owner.labelled.params, 0..) |param, j| {
-                if (self.ast.tokenName(param.name) == name) return @intCast(j);
+                const label = self.ast.paramLabel(param);
+                if (label != .none and self.ast.tokenName(label) == name) return @intCast(j);
             }
             return null;
         }
@@ -24508,7 +24712,7 @@ const Checker = struct {
             }
             if (parameter_ty == .poison) signature_valid = false;
             callable_params[j] = .{
-                .spelling = self.ast.tokenText(p.name),
+                .spelling = self.ast.paramSpelling(p),
                 .convention = p.convention,
                 .ty = parameter_ty,
                 .default = default,
@@ -33281,8 +33485,12 @@ const Checker = struct {
             // The signature owns the name, because the signature is what every
             // call is checked against: an argument naming the parameter it
             // fills spells what the trait declares, and a member renaming it
-            // declares a name no call can write.
-            if (!namedAlike(self.ast, want.name, member_names[k].name)) {
+            // declares a name no call can write. A parameter the parser read
+            // only to recover, or a pattern written with no label, names
+            // nothing, and its mistake is reported.
+            const named = !want.recovered and !member_names[k].recovered and
+                self.ast.paramLabel(want) != .none and self.ast.paramLabel(member_names[k]) != .none;
+            if (named and !namedAlike(self.ast, want.name, member_names[k].name)) {
                 return self.sink.addErrorFmt(
                     mismatch_code,
                     file,

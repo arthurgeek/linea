@@ -9,13 +9,13 @@ struct Transaction {
     amount: UInt64,
 }
 
-fn commit(sink transaction: Transaction) -> Result[(), io.IoError] {
-    let { recipient, amount } = transaction
+// `sink transaction { recipient, amount }` moves the transaction's fields into
+// two names where the body begins; using both settles the linear transaction.
+fn commit(sink transaction { recipient, amount }: Transaction) -> Result[(), io.IoError] {
     io.println("Paid {recipient}: {amount} cents.")
 }
 
-fn rollback(sink transaction: Transaction) -> Result[(), io.IoError] {
-    let { recipient, amount } = transaction
+fn rollback(sink transaction { recipient, amount }: Transaction) -> Result[(), io.IoError] {
     io.println("Declined {recipient}: {amount} cents (insufficient funds).")
 }
 

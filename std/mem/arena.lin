@@ -684,8 +684,7 @@ impl[H: Allocator] Allocator for Handle[H] {
 
     // The buffer supplies its allocator, so callers cannot select another arena.
     // Keep extent checks before discarding a reservation; reclamation is collective.
-    fn dispose(sink b: Buffer[Handle[H]]) {
-        let Buffer { at: at, len: length, allocated: allocated, allocator: allocator, obligation: _ } = b
+    fn dispose(sink b { at: at, len: length, allocated: allocated, allocator: allocator, obligation: _ }: Buffer[Handle[H]]) {
         match read allocator.owner.first {
             None => panic("an allocation has no backing arena"),
             Some(first) => {

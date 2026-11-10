@@ -66,8 +66,9 @@ true of a different implementation.
 | [0219](0219-a-function-type-parameter-and-its-parameter-may-default.md) | A function type parameter and its parameter may default | Accepted; extends 0077, 0215 and 0217; extended by 0225 |
 | [0199](0199-tuple-syntax-denotes-a-positional-aggregate-with-a-prelude-identity.md) | Tuple syntax denotes a positional aggregate whose identity is a prelude declaration | Accepted; builds on 0060, 0129, 0151, 0179 and 0188; extended by 0200 |
 | [0200](0200-a-tuples-arity-is-a-readability-policy-the-parser-enforces.md) | A tuple's arity is a readability policy the parser enforces | Accepted; extends 0199 |
-| [0201](0201-a-tuple-pattern-binds-by-position-and-does-not-nest.md) | A tuple pattern binds by position wherever a struct pattern binds by name, and does not nest | Accepted; extends 0129 and 0147; nesting clause and lending-walk place superseded by 0224 |
-| [0224](0224-a-pattern-nests-wherever-a-binder-stands.md) | A pattern nests wherever a binder stands | Accepted; supersedes the nesting clause and lending-walk place of 0201; extends 0129, 0147 and 0167 |
+| [0201](0201-a-tuple-pattern-binds-by-position-and-does-not-nest.md) | A tuple pattern binds by position wherever a struct pattern binds by name, and does not nest | Accepted; extends 0129 and 0147; nesting clause and lending-walk place superseded by 0224; declaration-parameter clause superseded by 0242 |
+| [0224](0224-a-pattern-nests-wherever-a-binder-stands.md) | A pattern nests wherever a binder stands | Accepted; supersedes the nesting clause and lending-walk place of 0201; extends 0129, 0147 and 0167; extended by 0242 |
+| [0242](0242-a-parameter-may-carry-a-label-and-a-pattern.md) | A parameter may carry a label and a pattern | Accepted; supersedes the declaration-parameter clause of 0201; extends 0177 and 0224 |
 | [0207](0207-linea-converts-nothing-implicitly.md) | Linea converts nothing implicitly | Accepted; extends 0018 and 0061 |
 | [0208](0208-defer-let-binds-and-schedules-its-release.md) | `defer let` binds a value and schedules its release | Accepted; extends 0063 and narrows 0104's no-scheduling sentence to "never without a written `defer`" |
 | [0203](0203-zip-and-skip-require-discardable-items-and-zip-is-left-biased.md) | `zip` and `skip` require the items they dispose of to be Discardable, and `zip` is left-biased | Accepted; extends 0192 |
@@ -187,7 +188,8 @@ true of a different implementation.
 | [0157](0157-a-newtype-built-from-a-constant-is-a-constant-expression.md) | A newtype built from a constant is a constant expression | Accepted; extends 0020, 0127 and 0140 |
 | [0160](0160-a-postfix-call-reaches-the-types-own-operation-first.md) | A postfix call reaches the type's own operation before a trait's | Accepted; extended by 0186 and 0187 |
 | [0186](0186-a-type-reaches-the-operations-of-the-traits-it-implements.md) | A type reaches the operations of the traits it implements | Accepted; extends 0160; extended by 0187 |
-| [0187](0187-a-bound-brings-its-traits-operations-into-reach.md) | A bound brings its trait's operations into reach | Accepted; extends 0160 and 0186 |
+| [0187](0187-a-bound-brings-its-traits-operations-into-reach.md) | A bound brings its trait's operations into reach | Accepted; extends 0160 and 0186; extended by 0243 |
+| [0243](0243-a-bound-reaches-its-supertraits-associated-types.md) | A bound reaches the associated types its supertraits declare | Accepted; extends 0187 |
 | [0161](0161-a-postfix-call-reaches-an-operation-never-a-field.md) | A postfix call reaches an operation, never a field | Accepted; replaces the field-precedence sentence of the semantics; extended by 0181 |
 | [0181](0181-a-call-may-name-its-type-arguments.md) | A call may name its type arguments | Accepted; replaces the unimplemented bracket clause of 0062; extends 0161; refines 0176 |
 | [0162](0162-question-mark-converts-an-error-through-from.md) | `?` converts a different error through `From` | Accepted; extended by 0184 and 0218 |
@@ -295,7 +297,7 @@ ones most likely to be superseded as the compiler grows.
 | [0105](0105-callable-values-have-static-call-targets.md) | Callable values have static call targets | Accepted; extended by 0117, 0128, 0153, 0173, 0176 and 0177; capture exclusion superseded by 0130; conversion name equality superseded by 0136 |
 | [0153](0153-an-inherent-impl-function-is-a-function-value.md) | An inherent implementation's function is a function value | Accepted; extends 0105; extended by 0176 |
 | [0176](0176-a-function-name-is-a-value-its-uses-instantiate.md) | A function name is a value, and its uses instantiate it | Accepted; extends 0105, 0152, 0153 and 0173; extended by 0177; refined by 0181 |
-| [0177](0177-a-parameter-name-is-a-label-not-part-of-a-function-type.md) | A parameter's name is a label, not part of a function type | Accepted; supersedes labels in callable identity from 0136; extends 0105 and 0176 |
+| [0177](0177-a-parameter-name-is-a-label-not-part-of-a-function-type.md) | A parameter's name is a label, not part of a function type | Accepted; supersedes labels in callable identity from 0136; extends 0105 and 0176; extended by 0242 |
 | [0114](0114-ownership-records-the-disposal-plan.md) | Ownership records the disposal plan that lowering emits | Accepted; refines 0034 and 0063 |
 | [0115](0115-emission-reads-settled-semantic-answers.md) | Emission reads settled semantic answers | Accepted; extends 0048 |
 | [0116](0116-external-mlir-tools-exchange-bytecode.md) | External MLIR tools exchange bytecode | Accepted; extends 0090 |

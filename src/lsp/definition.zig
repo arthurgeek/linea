@@ -274,6 +274,35 @@ test "structural derive source names reach source declarations" {
     );
 }
 
+test "a type read through a subtrait bound reaches the supertrait's declaration" {
+    const gpa = testing.allocator;
+    const text =
+        \\trait Source {
+        \\    type Item
+        \\
+        \\    fn take(sink self: Self) -> Self.Item
+        \\}
+        \\
+        \\trait Counted: Source {
+        \\    fn count(self: Self) -> UInt64
+        \\}
+        \\
+        \\fn _take[I: Counted](sink source: I) -> I.Item { Source.take(source) }
+        \\
+        \\fn main() -> UInt8 { 0 }
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    try testing.expect(!checked.sink.hasErrors());
+
+    const cursor = std.mem.indexOf(u8, text, "I.Item").? + 3;
+    const found = (try forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(text, cursor), .@"utf-16", "")).?;
+    defer gpa.free(found.uri);
+    try testing.expectEqualStrings("Item", declared(&checked, found));
+    try testing.expectEqual(at(text, std.mem.indexOf(u8, text, "type Item").? + 5), found.range.start);
+}
+
 test "a qualified trait reference reaches its declaration" {
     const gpa = testing.allocator;
     const main_text =

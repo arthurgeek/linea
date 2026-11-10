@@ -223,9 +223,12 @@ fn labelFor(
     };
     // The tree question first and the index second, because nearly every call
     // in a program names nothing and a tag comparison settles it.
-    const shown = !namesItsParameter(ast, argument, param.name) and
+    // A lambda's pattern written with no label has no name a call could
+    // write, so its hint shows the convention alone.
+    const label = ast.paramLabel(param);
+    const shown = label != .none and !namesItsParameter(ast, argument, label) and
         !named.contains(argument);
-    const name: []const u8 = if (shown) ast.tokenText(param.name) else "";
+    const name: []const u8 = if (shown) ast.tokenText(label) else "";
 
     if (word.len == 0 and name.len == 0) return "";
     if (receiver) return std.fmt.allocPrint(gpa, "{s}{s}{s}{s}{s}", .{

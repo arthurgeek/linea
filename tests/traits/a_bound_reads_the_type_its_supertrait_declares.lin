@@ -1,0 +1,39 @@
+// `Countdown` declares no `Item`; its supertrait `Iterator` does, so a
+// bound on `Countdown` reads `I.Item` as the type `Iterator` settles.
+pub trait Countdown: Iterator {
+    fn remaining(self: Self) -> UInt64
+}
+
+struct Up {
+    lo: UInt64,
+    hi: UInt64,
+}
+
+impl Iterator for Up {
+    type Item = UInt64
+
+    fn next(inout self: Self) -> Option[UInt64] where carries() {
+        if self.lo >= self.hi {
+            return .None
+        }
+        self.lo += 1
+        .Some(self.lo - 1)
+    }
+}
+
+impl Countdown for Up {
+    fn remaining(self: Self) -> UInt64 {
+        self.hi - self.lo
+    }
+}
+
+fn first_of[I: Countdown](sink it: I) -> Option[I.Item] where carries(.Some: it), I: Discardable {
+    var walking = it
+    &walking.next()
+}
+
+fn main() -> UInt8 {
+    let up = Up { lo = 3, hi = 5 }
+    let left = up.remaining()
+    UInt8(first_of(up).unwrap() + left)
+}

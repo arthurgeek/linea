@@ -1,0 +1,20 @@
+// `sink discount Percent(percent)` reads the newtype's base out under a name,
+// as `let Percent(percent) = discount` would. A `read` parameter lends the
+// base from the caller's newtype, as `let read` does.
+type Percent = UInt8 where it in 0..=100
+
+fn discounted(price: UInt8, sink discount Percent(percent): Percent) -> UInt8 {
+    price - price / 100 * percent
+}
+
+fn doubled(length Meters(m): Meters) -> UInt8 {
+    m * 2
+}
+
+type Meters = UInt8
+
+fn main() -> UInt8 {
+    let length = Meters(3)
+    let twice = |Meters(m): Meters| m * 2
+    discounted(200, discount: Percent(10)) - doubled(length) - twice(length)
+}

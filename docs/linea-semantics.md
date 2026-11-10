@@ -850,19 +850,43 @@ trailing comma is accepted after the second component or later.
 
 **[S-Brace]** A block is closed.
 
-**[S-Params]** A parameter is a name optionally preceded by a convention. A
-lambda parameter may instead be a tuple pattern, `|sink (i, x)|`, whose binders
-are locals of the lambda. Its type comes from the expected callable at its
-position, or from the annotation written after it, and must be a tuple with as
-many components as the pattern has binders ([T-Arity], [T-Mismatch]). The
-convention decides how the pattern takes the argument apart, as it does for a
-`let`: `sink` moves each component into its binder, so a linear component must
-be settled there; `read`, the default, lends each component from the caller's
-pair, which stays whole; `inout` lends each component writably. A pattern
-parameter has no name, so a contract cannot refer to it and a call through the
-lambda passes it by position. A declaration parameter is always a name, because
-its name is the label a call writes; a pair is taken apart in the body with
-`let (a, b) = pair`.
+**[S-Params]** A parameter is a name, or a label followed by a pattern,
+optionally preceded by a convention: `count: UInt8`,
+`sink entry (position, name): (UInt64, Str)`. The order is convention, name or
+label and pattern, `:` and type, `=` and default. The label is the parameter's
+name for everything outside the body: a named argument writes it, a positional
+one fills it, a borrow contract names it, and a hover or a type to write spells
+the parameter by it. The pattern takes the argument apart where the body
+begins, and its binders are locals of the body; the label declares nothing
+there, so a body naming it is [N-Undefined]
+([ADR 0242](adr/0242-a-parameter-may-carry-a-label-and-a-pattern.md)).
+
+The pattern is a tuple, struct or newtype pattern, the heads a destructuring
+`let` takes, with parts of the full pattern grammar ([S-Match]). Whether a name
+before `(` or `{` is a label or the type a pattern names is decided by its case
+([N-Case]): `entry { x, y }` is a label and an inferred struct pattern,
+`Point { x, y }` a struct pattern alone. A second name after a label,
+`entry e: T`, is refused: a parameter has one name.
+
+A lambda reads its parameters the same way, and its label is optional: a
+lambda parameter may be a pattern alone, `|sink (i, x)|`, which a call through
+the lambda fills by position. A declaration parameter's pattern needs a label;
+one written without is refused, with the label to write as help, and is
+otherwise read as written, so its binders are declared. A pattern stands only
+where a body begins: a structural callable type, a trait operation without a
+body, the receiver `self`, and a projection's or traversal's parameter refuse
+it and read the parameter under its label.
+
+A pattern parameter's type is its annotation, or for a lambda the type the
+expected callable supplies at its position; the pattern is checked against it
+as `let pattern: Type = argument` is, so a pattern over a bare type parameter is
+[T-Mismatch], and one that misses a value is [T-Refutable]. The convention
+decides how the pattern takes the argument apart, as it does for a `let`:
+`sink` moves each part into its binder, so a linear part must be settled there;
+`read`, the default, lends each part from the caller's argument, which stays
+whole; `inout` lends each part writably. A default is a constant argument and
+is taken apart like any other. Each binder is held to [N-Unused]; `_` discards
+a part.
 
 A declaration or structural callable parameter has a type separated by `:`. A
 lambda parameter may omit its type only when an expected structural callable
@@ -1047,7 +1071,9 @@ produces no further diagnostic.
 ## §3 Names
 
 **[N-Undefined]** A name refers to the nearest enclosing binding of that name
-declared before it. A name with no such binding refers to nothing.
+declared before it. A name with no such binding refers to nothing. A
+parameter's label is not a binding of its body ([S-Params]): naming it there
+refers to nothing, and the report shows the pattern that holds its parts.
 
 **[N-Unused]** A binding must be referred to, and so must a function: both are
 declarations. A name beginning with `_` declares the value deliberately unused;
@@ -3382,9 +3408,22 @@ parameter; both forms contribute to one per-declaration set of subject type
 expressions and requirements. All constraints are collected before projected
 subjects resolve, so predicate order is irrelevant: `where I.Item: Copyable,
 I: Iterator` and its reverse define the same set. Resolving an associated name
-requires a declaring bound in that set. No such bound gives the ordinary
-unresolved-name error at the projection; two possible bounds give
-[N-Ambiguous].
+requires a declaring bound in that set. A bound declares the name when its
+trait does or, where its trait does not, when a supertrait does: the search
+follows the trait's supertraits transitively and stops at the nearest
+declaration on each path. So `I.Item` under `I: DoubleEnded`, where `trait
+DoubleEnded: Iterator`, is `Iterator`'s `Item` read at the key (`Iterator`,
+`Item`, `I`), the same type `I: Iterator` names, and the supertrait is read at
+the arguments the requirement chain gives it. `Self.Item` inside a trait, and
+inside an implementation of it, resolves the same way through the trait's own
+supertraits; in an implementation it is what the supertrait's implementation
+for the same type settled. One trait reached along two paths is one
+declaration. No such bound gives the ordinary unresolved-name error at the
+projection, naming the trait the bound wrote; two declaring traits, whether
+named by two bounds or reached through supertraits, and one supertrait
+required at two argument lists give [N-Ambiguous]. No qualification selects
+between them; a parameter bounded by one of the traits alone reads its
+declaration.
 
 Instantiation substitutes a concrete type for each constraint subject, and
 [T-Bound] checks every requirement. When a generic declaration passes an open
@@ -4129,7 +4168,7 @@ more than 2^20 cells is refused. Deciding whether nested patterns cover a type i
 NP-complete, so without a ceiling the cost of checking one `match` could grow
 exponentially with the width of its patterns. A `match` refused this way is
 split into nested `match`es, each covering one part. The pattern of a `let`,
-`let read`, `let ... else`, `for` or lambda parameter is checked the same way
+`let read`, `let ... else`, `for` or parameter is checked the same way
 against a wildcard ([T-Refutable]); one pattern costs about its own size, so
 only a pattern of about a million parts reaches the limit, and it is taken apart
 in more than one step.
@@ -4995,7 +5034,7 @@ owns the error, and everything the function still holds where the block leaves i
 checked by [O-Leak] at that exit as it is at any `return`.
 
 **[T-Refutable]** A pattern in a `let`, `let read`, `let … else`, `for` or
-lambda parameter must match every value of its type: there is no arm to take the
+parameter must match every value of its type: there is no arm to take the
 values it misses. `let Some(n) = found` misses `None` and is refused, with
 `match` or `let n = found else { … }` as the two ways to handle the other case.
 A pattern nested inside the head is held to the same rule, so

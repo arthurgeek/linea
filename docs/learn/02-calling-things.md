@@ -1578,7 +1578,7 @@ closure that borrows a variable mutably: no one else touches the variable
 until the closure is done. [Borrowing](06-borrowing.md#a-closure-that-lends-a-variable)
 shows the same lend reaching through a chain of iterator operations.
 
-### A closure that takes a pair apart
+### A parameter that takes a pair apart
 
 Some operations hand a closure a pair: `enumerate` pairs each item with its
 position, and `zip` pairs the items of two sequences
@@ -1618,8 +1618,73 @@ hands it over, and moves each half into its own name. The pattern needs a type
 to take apart, which the operation supplies: a pair of position and score
 here. The slice's scores stay borrowed, so `*x` reads one.
 
-A pattern is for a lambda only. A declaration's parameter is a name, because
-that name is the label a call can write:
+A function takes a pair apart the same way, with one difference: a call can
+name its arguments, so a function's parameter keeps a name for callers to
+write. That name is the **label**, and the pattern follows it.
+`entry (position, name)` is one parameter: callers see `entry`, and the body
+sees `position` and `name`.
+
+```linea
+import std.io
+
+// `entry` is what a call writes; `(position, name)` takes the pair apart
+// before the body runs, so the body uses the two halves directly.
+fn show(entry (position, name): (UInt64, Str)) -> Result[(), io.IoError] {
+    io.println("{position}. {name}")
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    show(entry: (1, "Ada"))?
+    show((2, "Grace"))?
+    .Ok(0)
+}
+```
+
+```
+1. Ada
+2. Grace
+```
+
+The first call writes the label and the second passes the pair by position,
+as any argument may be passed. The label names nothing inside the body: there,
+only the pattern's names exist.
+
+The pattern can take apart a struct, as `let { recipient, amount } = …` does.
+`sink transaction { recipient, amount }` moves each field of the transaction
+into its own name, which is how the `@linear` transaction below is settled:
+the body uses both parts.
+
+```linea
+import std.io
+
+@linear
+struct Transaction {
+    recipient: Str,
+    amount: UInt64,
+}
+
+fn commit(sink transaction { recipient, amount }: Transaction) -> Result[(), io.IoError] {
+    io.println("Paid {recipient}: {amount} cents.")
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    commit(.{ recipient = "rent", amount = 7000 })?
+    .Ok(0)
+}
+```
+
+```
+Paid rent: 7000 cents.
+```
+
+The convention works as it does for a lambda's pattern: `sink` moves the
+parts, the default `read` lends them from the caller's value, which stays
+whole, and `inout` lends them so that assigning a name changes the caller's
+part. The pattern must match every value of its type, since there is no other
+case to fall back on.
+
+A function's pattern without a label is refused, and the help shows the label
+to add:
 
 ```linea
 import std.io
@@ -1629,42 +1694,24 @@ fn show((position, name): (UInt64, Str)) -> Result[(), io.IoError] {
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    show((1, "ada"))?
+    show((1, "Ada"))?
     .Ok(0)
 }
 ```
 
-<!-- guide: first 1 diagnostic -->
 ```
-error[S-Params]: a parameter is a name
+error[S-Params]: a function's pattern parameter needs a label
  --> pair_parameter.lin:3:9
   |
 3 | fn show((position, name): (UInt64, Str)) -> Result[(), io.IoError] {
-  |         ^ a declaration parameter's name is the label a call writes; take the pair apart in the body
+  |         ^ a call names this parameter by its label
+  |
+  = help: write the label a call uses before the pattern: `entry (position, name)`
 ```
 
-Names the pattern would have bound are undefined in the body, so more errors
-follow this one. Take the pair as one parameter and open it with a `let`:
-
-```linea
-import std.io
-
-// A declaration parameter is a name, because a call can write it as a label.
-// The body takes the pair apart with a `let`.
-fn show(sink entry: (UInt64, Str)) -> Result[(), io.IoError] {
-    let (position, name) = entry
-    io.println("{position}. {name}")
-}
-
-fn main() -> Result[UInt8, io.IoError] {
-    show((1, "ada"))?
-    .Ok(0)
-}
-```
-
-```
-1. ada
-```
+Rust accepts `fn show((position, name): (u64, &str))`, because a Rust call
+never names its arguments. In Linea every function parameter has a name a call
+can write, so a pattern comes after one.
 
 ### If you know Rust
 
@@ -1678,6 +1725,7 @@ fn main() -> Result[UInt8, io.IoError] {
 | `inout [inout x] \|a\| …` | an `FnMut` closure that borrows `x` mutably |
 | `F: fn(a: A) -> B` | `F: Fn(A) -> B` |
 | `mem.Closure[fn(a: A) -> B, Alloc]` | `Box<dyn Fn(A) -> B>`, with the allocator named |
+| `fn show(entry (position, name): (UInt64, Str))` | `fn show((position, name): (u64, &str))`, with a label for callers |
 
 Every lambda has a type of its own, as in Rust, so an array or a `Vec` cannot
 hold two closures that captured different things. `mem.Closure` keeps any

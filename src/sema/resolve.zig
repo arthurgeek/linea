@@ -2854,12 +2854,86 @@ pub const Declaring = struct {
     /// one trait once per argument list, so the trait alone names no
     /// implementation.
     args: node.TypeRefRange = node.TypeRefRange.empty,
-    /// Its trait.
+    /// The trait declaring the name: the bound's own trait, or a supertrait
+    /// of it where the bound's trait declares no member of that name.
     trait: DeclId = DeclId.none,
+    /// Whether `trait` is a supertrait of the bound's trait rather than the
+    /// trait the bound names. A supertrait is reached at the arguments the
+    /// requirement chain gives it, not at the bound's written arguments.
+    inherited: bool = false,
     /// The second bound declaring the name, which is the other half of what an
-    /// ambiguity is between.
+    /// ambiguity is between. The same token as `bound` where one bound's
+    /// supertraits hold both declarations.
     also: TokenId = .none,
+    /// The trait the second declaration belongs to.
+    also_trait: DeclId = DeclId.none,
 };
+
+/// Which traits declare a name read through one trait.
+pub const Inherited = struct {
+    /// How many distinct traits declare it.
+    declaring: u32 = 0,
+    /// The first trait found declaring it.
+    trait: DeclId = DeclId.none,
+    /// The second, where there are two.
+    also: DeclId = DeclId.none,
+};
+
+/// The trait that declares `name` for a reading through `trait`: `trait`
+/// itself where it declares a member of that name, and otherwise the nearest
+/// declaring trait along each of its supertrait paths, transitively.
+///
+/// Nearest on each path, because a supertrait that declares the name answers
+/// for everything above it: under `trait Mid: Iterator { type Item }` a
+/// reading through `Mid` reaches `Mid`'s `Item`, and `Iterator`'s is not a
+/// second candidate. Two paths reaching one trait reach one declaration, so a
+/// diamond whose two sides both require `Iterator` names one `Item`. Two
+/// distinct traits declaring it is the ambiguity the caller reports.
+///
+/// **Bound:** the supertrait closure of `trait`, each trait visited once
+/// through a set sized by that closure, so a cycle (refused elsewhere) ends
+/// the walk rather than repeating it.
+pub fn traitDeclaringMember(
+    ast: *const Ast,
+    trait: DeclId,
+    name: StringId,
+    lookup: anytype,
+) @TypeOf(lookup).Error!Inherited {
+    var found: Inherited = .{};
+    if (lookup.declaresMember(trait, name)) {
+        found.declaring = 1;
+        found.trait = trait;
+        return found;
+    }
+
+    const gpa = lookup.allocator();
+    var walk: std.ArrayList(DeclId) = .empty;
+    defer walk.deinit(gpa);
+    var seen: std.AutoHashMapUnmanaged(DeclId, void) = .empty;
+    defer seen.deinit(gpa);
+    try seen.put(gpa, trait, {});
+    try walk.append(gpa, trait);
+
+    var at: usize = 0;
+    while (at < walk.items.len) : (at += 1) {
+        for (ast.declBounds(walk.items[at])) |b| {
+            if (b.kind == .callable) continue;
+            const super = lookup.traitBoundAt(b.named.name) orelse continue;
+            if ((try seen.getOrPut(gpa, super)).found_existing) continue;
+            if (!lookup.declaresMember(super, name)) {
+                try walk.append(gpa, super);
+                continue;
+            }
+            found.declaring += 1;
+            switch (found.declaring) {
+                1 => found.trait = super,
+                2 => found.also = super,
+                else => {},
+            }
+        }
+    }
+    return found;
+}
 
 /// Which of a type parameter's bounds declares the name a settled reference
 /// writes after the dot.
@@ -2905,6 +2979,14 @@ pub fn boundDeclaring(
     var repeats: Repeats(Lookup) = .{ .bounds = bounds, .lookup = lookup };
     defer repeats.deinit();
 
+    // The traits an inherited declaration was found in, so a second bound
+    // reaching the same trait -- `I: Countdown + Iterator`, both reaching
+    // `Iterator`'s `Item` -- reaches the declaration already counted. Two
+    // bounds naming one trait directly at different arguments still count
+    // twice: those are two implementations a type may hold.
+    var inherited_from: std.ArrayList(DeclId) = .empty;
+    defer inherited_from.deinit(lookup.allocator());
+
     for (bounds, 0..) |b, at| {
         if (b.kind == .callable) continue;
         const trait = lookup.traitBoundAt(b.named.name) orelse continue;
@@ -2914,16 +2996,29 @@ pub fn boundDeclaring(
             sole = b;
             sole_trait = trait;
         }
-        if (!lookup.declaresMember(trait, name)) continue;
-        found.declaring += 1;
-        switch (found.declaring) {
-            1 => {
-                found.bound = b.named.name;
-                found.args = b.named.args;
-                found.trait = trait;
-            },
-            2 => found.also = b.named.name,
-            else => {},
+        const reached = try traitDeclaringMember(lookup.syntax(), trait, name, lookup);
+        for ([_]DeclId{ reached.trait, reached.also }) |declaring| {
+            if (declaring == DeclId.none) continue;
+            const inherited = declaring != trait;
+            const counted = for (inherited_from.items) |earlier| {
+                if (earlier == declaring) break true;
+            } else inherited and (declaring == found.trait or declaring == found.also_trait);
+            if (counted) continue;
+            if (inherited) try inherited_from.append(lookup.allocator(), declaring);
+            found.declaring += 1;
+            switch (found.declaring) {
+                1 => {
+                    found.bound = b.named.name;
+                    found.args = b.named.args;
+                    found.trait = declaring;
+                    found.inherited = inherited;
+                },
+                2 => {
+                    found.also = b.named.name;
+                    found.also_trait = declaring;
+                },
+                else => {},
+            }
         }
     }
 
@@ -3908,6 +4003,7 @@ fn resolveInternal(
     defer r.type_in_module.deinit(gpa);
     defer r.local_of.deinit(gpa);
     defer r.pattern_names.deinit(gpa);
+    defer r.body_labels.deinit(gpa);
     defer r.shadowed.deinit(gpa);
     defer r.import_at.deinit(gpa);
     defer r.top_named.deinit(gpa);
@@ -6155,6 +6251,10 @@ const Resolver = struct {
     capture_bindings: std.AutoHashMapUnmanaged(BindingId, CaptureLocation) = .empty,
     current_closure: ClosureId = .none,
     closure_binding_start: usize = 0,
+    /// The labelled pattern parameters of the bodies being resolved, the
+    /// innermost last. A label names its parameter for callers only, so a
+    /// body naming one is told which pattern holds the parts.
+    body_labels: std.ArrayList(node.Param) = .empty,
     /// Every module's top-level bindings, concatenated, with `module_runs`
     /// giving each module's run. Kept apart from the working chain so a body
     /// can be resolved against its own module's declarations and a qualified
@@ -11727,7 +11827,7 @@ const Resolver = struct {
         try names.ensureTotalCapacity(self.gpa, params.len);
         // A name the parser read only to recover from a malformed parameter
         // declares nothing, so it is not a second of anything.
-        for (params) |p| if (!p.recovered) names.appendAssumeCapacity(p.name);
+        for (params) |p| if (!p.recovered and self.ast.paramLabel(p) != .none) names.appendAssumeCapacity(self.ast.paramLabel(p));
         try self.refuseNamesDeclaredTwice(names.items, "a declaration declares each parameter once");
     }
 
@@ -11854,7 +11954,7 @@ const Resolver = struct {
         }
         // A body's names may shadow what encloses them, so a respelling is
         // compared against nothing there.
-        for (source.params) |p| if (!p.recovered and p.pattern == ExprId.none) try checks.name(p.name, .parameter, .none);
+        for (source.params) |p| if (!p.recovered and source.paramLabel(p) != .none) try checks.name(source.paramLabel(p), .parameter, .none);
         for (source.captures) |c| if (c.equals != TokenId.none) try checks.name(c.name, .capture, .none);
 
         for (self.bindings.items[own_bindings..]) |b| {
@@ -12344,7 +12444,12 @@ const Resolver = struct {
             if (declared == .none) return;
             break :blk (try self.traitBounding(self.ast.declBounds(declared), wanted)) orelse return;
         };
-        const declared = self.memberOf(self.moduleOf(trait), self.ast.tokenName(self.ast.declName(trait)), .none, wanted) orelse return;
+        // A bound already answered with the declaring trait; `Self` answers
+        // with its own trait, whose supertraits may be what declares the name.
+        const inherited = try traitDeclaringMember(self.ast, trait, wanted, BoundsHere{ .res = self });
+        if (inherited.declaring != 1) return;
+        const declaring = inherited.trait;
+        const declared = self.memberOf(self.moduleOf(declaring), self.ast.tokenName(self.ast.declName(declaring)), .none, wanted) orelse return;
         self.bindings.items[declared.index()].used = true;
         self.reached(ref.name, declared);
     }
@@ -12518,6 +12623,10 @@ const Resolver = struct {
 
         pub fn allocator(self: BoundsHere) std.mem.Allocator {
             return self.res.gpa;
+        }
+
+        pub fn syntax(self: BoundsHere) *const Ast {
+            return self.res.ast;
         }
 
         /// The declaration a written name reached, as far as resolution has
@@ -13213,10 +13322,27 @@ const Resolver = struct {
         // nor reported unused.
         var names: std.AutoHashMapUnmanaged(StringId, void) = .empty;
         defer names.deinit(self.gpa);
+        // A pattern's binders and the named parameters are locals of one
+        // body, so they share one spelling space; a label is in neither.
+        self.pattern_names.restart();
         for (self.ast.declParams(d), 0..) |p, i| {
+            if (p.pattern != ExprId.none) {
+                if (self.ast.tokenTag(p.name) == .identifier) _ = try names.getOrPut(self.gpa, self.ast.tokenName(p.name));
+                try self.bindPatternParameter(p, @intCast(i), .{ .declaration = d });
+                continue;
+            }
             if (self.ast.tokenTag(p.name) != .identifier) continue;
             const text = self.ast.tokenText(p.name);
-            const repeated = (try names.getOrPut(self.gpa, self.ast.tokenName(p.name))).found_existing;
+            var repeated = (try names.getOrPut(self.gpa, self.ast.tokenName(p.name))).found_existing;
+            // A parameter named after an earlier pattern's binder is a second
+            // declaration of it, which the list check cannot see, since a
+            // pattern's binders are not in the list.
+            if (!repeated and !std.mem.eql(u8, text, "_")) {
+                if (self.pattern_names.get(self.ast.tokenName(p.name))) |first| {
+                    try self.reportNameDeclaredTwice(first, p.name, "declaration", "a function's parameters and its patterns' binders are declared once");
+                    repeated = true;
+                } else try self.pattern_names.put(self.gpa, self.ast.tokenName(p.name), p.name);
+            }
             if (!repeated) try self.pushLocal(
                 BindingId.at(@intCast(self.bindings.items.len)),
                 self.ast.tokenName(p.name),
@@ -13281,6 +13407,7 @@ const Resolver = struct {
         self.trait_scope = if (self.ast.declIsProvided(d)) self.signatures.?.traitOf(self.ast, d) orelse DeclId.none else DeclId.none;
         defer self.trait_scope = DeclId.none;
 
+        self.body_labels.clearRetainingCapacity();
         try self.declareParameters(d);
 
         // A default is an expression like any other the declaration writes,
@@ -13968,6 +14095,23 @@ const Resolver = struct {
         };
 
         if (try self.refuseImplNameInTest(self.ast.exprMain(id), .expression)) return;
+        var labels = std.mem.reverseIterator(self.body_labels.items);
+        while (labels.next()) |p| {
+            const label = self.ast.paramLabel(p);
+            if (self.ast.tokenName(label) != name) continue;
+            const marks = try self.sink.arena.alloc(Label, 2);
+            marks[0] = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id), .message = "no binding with this name is in scope" };
+            marks[1] = .{ .file = self.ast.fileOf(label), .span = self.ast.tokenSpan(label), .message = "a label names the parameter for callers", .style = .secondary };
+            return self.sink.add(.{
+                .severity = .err,
+                .code = .n_undefined,
+                .message = try std.fmt.allocPrint(self.sink.arena, "undefined name `{s}`", .{self.ast.tokenText(label)}),
+                .labels = marks,
+                .notes = try self.sink.arena.dupe([]const u8, &.{
+                    try std.fmt.allocPrint(self.sink.arena, "the body holds the parts its pattern binds, `{s}`", .{self.ast.exprText(p.pattern)}),
+                }),
+            });
+        }
         try self.sink.addErrorFmt(
             .n_undefined,
             self.ast.fileOfExpr(id),
@@ -14633,6 +14777,36 @@ const Resolver = struct {
         return .{ .reached = b };
     }
 
+    /// A parameter written as a pattern: its argument is still a parameter,
+    /// so its owner's parameter bindings stay one per parameter, and the
+    /// pattern's binders are locals of the body, bound as a pattern's are.
+    ///
+    /// The one routine a declaration's and a lambda's parameter list bind a
+    /// pattern parameter with. No name reaches the argument: a label is the
+    /// parameter's name for callers and contracts, which find it in the
+    /// list, and the body sees only the parts. The caller has opened the
+    /// list's spelling space, so a binder spelled like a named parameter or
+    /// another binder is a second declaration of it.
+    fn bindPatternParameter(self: *Resolver, p: node.Param, index: u32, owner: ParameterOwner) !void {
+        const argument = BindingId.at(@intCast(self.bindings.items.len));
+        try self.bindings.append(self.gpa, .{
+            .name = self.ast.tokenName(p.name),
+            .kind = .parameter,
+            .stmt = .none,
+            .decl = if (owner == .declaration) owner.declaration else .none,
+            .param_index = index,
+            .parameter_owner = owner,
+            .at = p.name,
+            .used = true,
+            .mutable = p.convention == .inout,
+            .exempt = true,
+        });
+        // Settled at no token: nothing written names it.
+        self.settle(p.argument, argument, .none);
+        if (self.ast.paramLabel(p) != .none) try self.body_labels.append(self.gpa, p);
+        try self.bindParts(p.pattern, p.convention == .inout);
+    }
+
     /// Declares the names a pattern binds, at every depth.
     ///
     /// One spelling space covers the whole pattern, so a name bound twice is
@@ -14885,9 +15059,11 @@ const Resolver = struct {
                 const previous_start = self.closure_binding_start;
                 self.current_closure = closure;
                 self.closure_binding_start = self.bindings.items.len;
+                const labels_mark = self.body_labels.items.len;
                 defer {
                     self.current_closure = previous_closure;
                     self.closure_binding_start = previous_start;
+                    self.body_labels.shrinkRetainingCapacity(labels_mark);
                 }
 
                 const mark = self.visible.items.len;
@@ -14902,7 +15078,7 @@ const Resolver = struct {
                     var listed: std.ArrayList(TokenId) = .empty;
                     defer listed.deinit(self.gpa);
                     for (lambda.captures) |capture| try listed.append(self.gpa, capture.name);
-                    for (lambda.params) |p| try listed.append(self.gpa, p.name);
+                    for (lambda.params) |p| if (self.ast.paramLabel(p) != .none) try listed.append(self.gpa, self.ast.paramLabel(p));
                     try self.refuseNamesDeclaredTwice(listed.items, "a closure's captures and parameters are declared once");
                 }
                 var names: std.AutoHashMapUnmanaged(StringId, void) = .empty;
@@ -14937,24 +15113,7 @@ const Resolver = struct {
                     // name reaches it; the pattern's binders are locals of
                     // the lambda, bound as a pattern's are.
                     if (p.pattern != ExprId.none) {
-                        const argument = BindingId.at(@intCast(self.bindings.items.len));
-                        try self.bindings.append(self.gpa, .{
-                            .name = self.ast.tokenName(p.name),
-                            .kind = .parameter,
-                            .stmt = .none,
-                            .decl = .none,
-                            .param_index = @intCast(i),
-                            .parameter_owner = .{ .closure = closure },
-                            .at = p.name,
-                            .used = true,
-                            .mutable = p.convention == .inout,
-                            .exempt = true,
-                        });
-                        // Settled at no token: nothing written names it.
-                        self.settle(p.argument, argument, .none);
-                        // One spelling space with the captures and the other
-                        // parameters, which the restart above opened.
-                        try self.bindParts(p.pattern, p.convention == .inout);
+                        try self.bindPatternParameter(p, @intCast(i), .{ .closure = closure });
                         continue;
                     }
                     if (self.ast.tokenTag(p.name) != .identifier) continue;

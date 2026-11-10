@@ -25,8 +25,7 @@ fn decide(name: Str) -> Rsvp {
 
 // Add the friend who answered to the guest list if they are coming, and let
 // go of the name otherwise.
-fn admit(inout guests: Vec[text.String], sink answer: Rsvp) {
-    let Rsvp { name, attending } = answer
+fn admit(inout guests: Vec[text.String], sink answer Rsvp { name, attending }: Rsvp) {
     if attending {
         &guests.push(name).settled().unwrap()
     } else {

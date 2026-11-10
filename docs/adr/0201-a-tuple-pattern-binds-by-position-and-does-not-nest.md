@@ -1,7 +1,9 @@
 # 201. A tuple pattern binds by position wherever a struct pattern binds by name, and does not nest
 
 Status: Accepted — 2026-10-04. The nesting clause and the lending-walk place
-are superseded by [0224](0224-a-pattern-nests-wherever-a-binder-stands.md).
+are superseded by [0224](0224-a-pattern-nests-wherever-a-binder-stands.md);
+the clause that a declaration parameter takes no pattern is superseded by
+[0242](0242-a-parameter-may-carry-a-label-and-a-pattern.md).
 
 Extends [0129](0129-struct-destructuring-may-infer-its-type.md) and
 [0147](0147-a-borrowed-let-pattern-reads-a-stable-place.md).

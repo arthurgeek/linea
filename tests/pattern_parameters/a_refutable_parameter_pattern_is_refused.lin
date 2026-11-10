@@ -1,0 +1,9 @@
+// A parameter's pattern has no other arm, so it must match every value of its
+// type: `(Some(first), second)` misses a pair whose first part is `None`.
+fn total(entry (Some(first), second): (Option[UInt8], UInt8)) -> UInt8 {
+    first + second
+}
+
+fn main() -> UInt8 {
+    total((.Some(1), 2))
+}

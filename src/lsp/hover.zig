@@ -437,6 +437,24 @@ test "a function value is described with the labels its calls use" {
     try testing.expectEqualStrings("fn(read UInt8) -> UInt8", positional);
 }
 
+test "a function taking a pattern parameter is described with its label" {
+    const gpa = testing.allocator;
+    const text =
+        \\fn total(entry (first, second): (UInt8, UInt8)) -> UInt8 { first + second }
+        \\fn main() -> UInt8 {
+        \\    let step = total
+        \\    step(entry: (1, 2))
+        \\}
+        \\
+    ;
+    const described_value = try said(gpa, text, std.mem.indexOf(u8, text, "let step").? + 4);
+    defer gpa.free(described_value);
+    try testing.expectEqualStrings("fn(read entry: (UInt8, UInt8)) -> UInt8", described_value);
+    const binder = try said(gpa, text, std.mem.indexOf(u8, text, "first + ").?);
+    defer gpa.free(binder);
+    try testing.expectEqualStrings("UInt8", binder);
+}
+
 const written_program =
     \\struct Point {
     \\    x: UInt8,
@@ -473,6 +491,33 @@ test "a written type says what it settled to" {
     const held = try said(gpa, written_program, std.mem.indexOf(u8, written_program, "Cell[Point]").? + 1);
     defer gpa.free(held);
     try testing.expectEqualStrings("Cell[Point]", held);
+}
+
+test "a type read through a subtrait bound says what the supertrait bound says" {
+    const gpa = testing.allocator;
+    const text =
+        \\trait Source {
+        \\    type Item
+        \\
+        \\    fn take(sink self: Self) -> Self.Item
+        \\}
+        \\
+        \\trait Counted: Source {
+        \\    fn count(self: Self) -> UInt64
+        \\}
+        \\
+        \\fn _direct[I: Source](sink source: I) -> I.Item { Source.take(source) }
+        \\fn _inherited[I: Counted](sink source: I) -> I.Item { _direct(source) }
+        \\
+        \\fn main() -> UInt8 { 0 }
+        \\
+    ;
+    const direct = try said(gpa, text, std.mem.indexOf(u8, text, "I.Item").? + 3);
+    defer gpa.free(direct);
+    const inherited = try said(gpa, text, std.mem.lastIndexOf(u8, text, "I.Item").? + 3);
+    defer gpa.free(inherited);
+    try testing.expect(direct.len > 0);
+    try testing.expectEqualStrings(direct, inherited);
 }
 
 const alias_program =

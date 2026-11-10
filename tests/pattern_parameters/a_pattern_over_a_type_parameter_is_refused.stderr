@@ -1,0 +1,5 @@
+error[T-Mismatch]: this takes a tuple apart, and the value is a `T`
+ --> tests/pattern_parameters/a_pattern_over_a_type_parameter_is_refused.lin:3:27
+  |
+3 | fn first_of[T](sink entry (first, _second): T) -> T {
+  |                           ^^^^^^^^^^^^^^^^ a tuple pattern takes a tuple apart

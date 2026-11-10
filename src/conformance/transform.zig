@@ -1658,6 +1658,9 @@ fn renameBindings(
         if (res.kindOf(b) == .binder) continue;
         const declaring = res.declaringToken(b);
         if (declaring == .none or declaring.index() >= ast.tokenCount()) continue;
+        // A lambda's pattern written with no label stands at the bracket
+        // that opens it, which is no name to rename.
+        if (ast.tokenTag(declaring) != .identifier) continue;
         const span = ast.tokenSpan(declaring);
         try sites.append(gpa, .{
             .start = span.start,

@@ -1,0 +1,5 @@
+error[T-Impl]: `Iterator` declares `next` as an operation, and a settled reference names a type
+ --> tests/traits/a_name_a_supertrait_declares_as_an_operation_names_that_supertrait.lin:7:39
+  |
+7 | fn _step_of[I: Countdown](it: I) -> I.next {
+  |                                       ^^^^ name a type the trait declares

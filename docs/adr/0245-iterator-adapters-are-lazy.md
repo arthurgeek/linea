@@ -4,7 +4,8 @@ Status: Proposed — 2026-10-18. Would extend
 [0192](0192-iterator-operations-belong-to-every-sequence.md) and
 [0203](0203-zip-and-skip-require-discardable-items-and-zip-is-left-biased.md).
 `rev` and `fold_right` depend on a bound reaching its supertraits'
-associated types, which is proposed separately.
+associated types, which
+[0243](0243-a-bound-reaches-its-supertraits-associated-types.md) decides.
 
 ## Context
 

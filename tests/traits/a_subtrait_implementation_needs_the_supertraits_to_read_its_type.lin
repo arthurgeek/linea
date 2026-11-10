@@ -1,0 +1,24 @@
+// `Up` implements `Countdown` but not its supertrait `Iterator`, so no
+// implementation settles the `Item` that `Self.Item` names.
+trait Countdown: Iterator {
+    fn peek_last(self: Self) -> Option[Self.Item]
+}
+
+struct Up {
+    lo: UInt64,
+    hi: UInt64,
+}
+
+impl Countdown for Up {
+    fn peek_last(self: Self) -> Option[Self.Item] {
+        if self.lo >= self.hi {
+            return .None
+        }
+        .Some(self.hi - 1)
+    }
+}
+
+fn main() -> UInt8 {
+    let up = Up { lo = 3, hi = 6 }
+    UInt8(up.peek_last().unwrap())
+}

@@ -127,8 +127,7 @@ fn prepare[A: Allocator](allocator: A, path: Path) -> Result[Target[A], FsFailur
 }
 
 // Settle both scratch and parent ownership, retaining a failed parent close.
-fn complete[A: Allocator](sink target: Target[A], sink failure: FsFailure) -> Result[(), FsFailure] where carries(.Err: failure) {
-    let Target { parent: parent, name: name } = target
+fn complete[A: Allocator](sink target { parent: parent, name: name }: Target[A], sink failure: FsFailure) -> Result[(), FsFailure] where carries(.Err: failure) {
     name.release()
     FsFailure { parent_close = close_descriptor(parent), ..failure }.result()
 }

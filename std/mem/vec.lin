@@ -117,8 +117,7 @@ impl Allocator for VecTestAllocator {
         }
     }
 
-    fn dispose(sink b: Buffer[Self]) {
-        let Buffer { at: at, len: length, allocated: allocated, allocator: allocator, obligation: obligation } = b
+    fn dispose(sink b { at: at, len: length, allocated: allocated, allocator: allocator, obligation: obligation }: Buffer[Self]) {
         let count = allocator.log.buffer.load(0)
         vec_test_log_store(*allocator.log.buffer, (count + 1) * 8, 99)
         vec_test_log_store(*allocator.log.buffer, 0, count + 1)

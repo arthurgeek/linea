@@ -502,8 +502,7 @@ fn line_failure[E: Into[io.IoError]](sink error: io.LineError[E], limit_status: 
 // with `progress` counting every byte of the request read before it failed.
 // A read that timed out before the first byte arrived is `Closed`, as a
 // connection the client closed before sending a byte is.
-fn input_failure[E: Into[io.IoError]](sink failure: InputFailure[E]) -> RequestError {
-    let InputFailure { reason, stream_offset } = failure
+fn input_failure[E: Into[io.IoError]](sink failure { reason, stream_offset }: InputFailure[E]) -> RequestError {
     let error: io.IoError = reason.into()
     if stream_offset == 0 && error.progress == 0 && error.category == .TimedOut {
         return .Closed

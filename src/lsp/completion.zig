@@ -90,7 +90,7 @@ fn appendStops(
     for (params[@min(taken, params.len)..]) |p| {
         if (inside > 0 or stops > 0) try written.appendSlice(gpa, ", ");
         stops += 1;
-        try written.print(gpa, "${{{d}:{s}}}", .{ stops, ast.tokenText(p.name) });
+        try written.print(gpa, "${{{d}:{s}}}", .{ stops, ast.paramSpelling(p) });
     }
     return stops;
 }
@@ -3040,6 +3040,29 @@ test "written type selection completion preserves promised members" {
     ;
     for ([_][]const u8{ "Self.Item", "I.Item" }) |written| {
         const after = try offeredAfter(gpa, text, written);
+        defer releaseAll(gpa, after);
+        try testing.expect(holds(after, "Item"));
+        try testing.expectEqual(@as(usize, 1), after.len);
+    }
+}
+
+test "written type selection completion offers a supertrait's members under a subtrait bound" {
+    const gpa = testing.allocator;
+    const text =
+        \\trait Source {
+        \\    type Item
+        \\    fn take(sink self: Self) -> Self.Item
+        \\}
+        \\trait Counted: Source {
+        \\    fn count(self: Self) -> UInt64
+        \\    fn first(sink self: Self) -> Self.Item
+        \\}
+        \\fn _take[I: Counted](sink source: I) -> I.Item { Source.take(source) }
+        \\fn main() -> UInt8 { 0 }
+    ;
+    // The second `Self.Item` is the one inside `Counted`.
+    for ([_]usize{ std.mem.lastIndexOf(u8, text, "Self.Item").? + 5, std.mem.indexOf(u8, text, "I.Item").? + 2 }) |offset| {
+        const after = try offeredAt(gpa, text, offset);
         defer releaseAll(gpa, after);
         try testing.expect(holds(after, "Item"));
         try testing.expectEqual(@as(usize, 1), after.len);

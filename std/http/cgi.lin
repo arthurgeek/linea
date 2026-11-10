@@ -517,8 +517,7 @@ test fn a_header_is_spelled_from_its_variable() {
 
 // `read_described` reads the body a described request announced from
 // `reader` and makes the request of it.
-fn read_described[R: io.Reader, P: Allocator](sink described: Described[P], inout reader: io.BufferedReader[R, mem.Handle[P]], memory: mem.Handle[P], limits: Limits) -> Result[Message[P], RequestError] where R.Error: Into[io.IoError], carries(.Ok: memory, described), retains(reader: reader) {
-    let Described { head, line, header_fields, length } = described
+fn read_described[R: io.Reader, P: Allocator](sink described { head, line, header_fields, length }: Described[P], inout reader: io.BufferedReader[R, mem.Handle[P]], memory: mem.Handle[P], limits: Limits) -> Result[Message[P], RequestError] where R.Error: Into[io.IoError], carries(.Ok: memory, described), retains(reader: reader) {
     let payload = read_body(&reader, memory, length, limits)?
     assembled(memory, head, line, header_fields, payload, limits)
 }
