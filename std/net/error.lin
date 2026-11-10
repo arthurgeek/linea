@@ -1,5 +1,4 @@
 import std.io
-import std.mem
 import std.testing
 
 use io.WriteFailure
@@ -44,9 +43,13 @@ test fn a_net_error_displays_its_reason() {
     .Ok(())
 }
 
+// The runtime closes a socket, or a descriptor of a simulation, and answers 0
+// or a negated errno.
+extern fn linea_net_close(fd: Int32) -> Int64
+
 // Close `fd`, reporting a refusal as an IoError.
 fn close_descriptor(fd: Int32) -> Result[(), io.IoError] where carries() {
-    let answer = mem._close_fd(fd)
+    let answer = linea_net_close(fd)
     if answer < 0 {
         return .Err(io.IoError.from_os(.Close, Int32(-answer)))
     }

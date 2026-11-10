@@ -771,6 +771,138 @@ hello
 two words
 ```
 
+### Waiting a bounded time to connect or accept
+
+`set_timeouts` and `set_deadline` bound the reads and writes of a connection
+you already hold. The two waits that come before it take a bound of their own:
+`net.connect(address, within_ms: 1000)` gives up once a second has passed
+without the listener answering, and `listener.accept_within(ms: 50)` gives up
+once 50 milliseconds have passed without a client. Both fail with an
+`io.IoError` whose category is `TimedOut`, and a listener whose accept timed
+out keeps listening: a client that connects later waits for the next accept.
+Leaving `within_ms` out, or passing 0 to either, waits as long as it takes,
+as `connect` and `accept` do:
+
+```linea
+import std.io
+import std.net
+
+use net.Accepted
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer var listener = net.listen(net.loopback(0)).unwrap()
+    let address = listener.local_address().unwrap()
+
+    // Nobody has connected yet, so the accept gives up after 50 milliseconds.
+    match &listener.accept_within(ms: 50) {
+        Ok(Accepted { connection, address: _ }) => connection.close()?,
+        Err(_) => io.println("no client within 50 ms")?,
+    }
+
+    // The connect waits at most a second for the listener to answer, and the
+    // accept at most a second for the connection.
+    defer let _client = net.connect(address, within_ms: 1000).unwrap()
+    match &listener.accept_within(ms: 1000) {
+        Ok(Accepted { connection, address: _ }) => {
+            connection.close()?
+            io.println("accepted a client")?
+        },
+        Err(_) => io.println("no client within a second")?,
+    }
+    .Ok(0)
+}
+```
+
+```text
+no client within 50 ms
+accepted a client
+```
+
+The second accept finds the client already queued, so it answers at once. A
+connection that is ready just as the time runs out is accepted, not dropped.
+
+### Testing a timeout without waiting
+
+A test of a timeout that waits for real is slow, and a race between bytes
+arriving and a deadline passing goes one way on one run and the other way on
+the next. `io.Simulation` runs a test against a virtual clock and an in-memory
+network instead. Inside `&sim.run(...)`, `net.listen` and `net.connect` make
+simulated sockets, `time.Instant.now()` reads the virtual clock, and a wait
+moves that clock straight to the next thing that can happen: a delivery, or the
+wait's own deadline. This test checks that a server gives up on a silent client
+after thirty seconds, and takes no time doing it:
+
+```linea
+import std.io
+import std.mem
+import std.net
+import std.testing
+import std.time
+
+use io.Reader
+use net.Accepted
+use net.Acceptor
+
+// Wait at most `ms` milliseconds for the client's first byte, and say
+// whether it came.
+fn first_byte_arrives(inout connection: net.Connection, ms: UInt64) -> Bool {
+    &connection.set_timeouts(read_ms: ms, write_ms: ms)
+    var buffer = mem.system().acquire(1).unwrap()
+    let arrived = &connection.read_some(&buffer, offset: 0, count: 1).is_ok()
+    buffer.release()
+    arrived
+}
+
+test fn a_silent_client_is_given_up_on_after_thirty_seconds() {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let (arrived, waited) = &sim.run(
+        |inout _world| {
+            var listener = net.listen(net.loopback(80)).unwrap()
+            let client = net.connect(net.loopback(80)).unwrap()
+            let Accepted { connection, address: _ } = &listener.accept().unwrap()
+            var server = connection
+            let started = time.Instant.now()
+            let arrived = first_byte_arrives(&server, ms: 30000)
+            let waited = started.elapsed()
+            server.close().unwrap()
+            client.close().unwrap()
+            listener.close().unwrap()
+            (arrived, waited)
+        },
+    )
+    sim.close()
+    testing.assert(!arrived, "a silent client sent a byte")?
+    testing.assert_eq(waited, time.Duration.from_seconds(30), "the server waited other than 30 seconds")?
+}
+```
+
+```text
+ok    a_silent_client_is_given_up_on_after_thirty_seconds
+
+1 passed, 0 failed
+```
+
+`run` lends the simulation to its body, so the call is marked `&` and no other
+task can run the same simulation meanwhile. It hands the
+body a `world`, whose `advance` moves the virtual clock forward
+by a duration, as a client that pauses would. The network's choices come from
+the seed: `io.Simulation.open(seed: 7, network: io.Network { latency_ms = 20,
+jitter_ms = 5, chunk_bytes = 3, ..io.Network.default() })` delivers each write
+in chunks of up to three bytes, 20 to 25 milliseconds after it is sent, and
+`sim.fingerprint()` digests every event of the run, so two runs with one seed
+can be compared. Running with the same seed repeats the same deliveries at the
+same virtual instants.
+
+A simulation stops the program rather than let a run depend on the machine:
+a simulated socket used outside a run of its simulation stops with `linea: a
+simulated descriptor was used outside its simulation`, a real socket used
+inside `run` with `linea: a real socket was used inside a simulation`, and a
+task started inside `run`, or a wait there on another task's session, with
+`linea: a simulation runs one task until fibers`, since the kernel would decide
+when its thread runs. Rust's
+`tokio::time::pause` and JavaScript's fake timers stop the clock the same way,
+though neither simulates the network.
+
 ## An HTTP server
 
 `std.http` answers HTTP/1.1 requests. You write **handlers** — functions that
@@ -2317,6 +2449,10 @@ application that runs both ways and stores its entries in SQLite.
 
 - A TCP listener and connection are linear and `@opaque`: `close` them on every
   path, and `&&` does not count as every path.
+- `net.connect(address, within_ms:)` and `listener.accept_within(ms:)` give up
+  as `TimedOut` once their milliseconds pass.
+- `io.Simulation` runs a test against a virtual clock and network, so a
+  timeout takes no time and a seed repeats the same run.
 - A handler's parameters name what it reads: an optional `inout` state, up to
   six extractors, and the request last. The router reads each extractor,
   answers the first refusal with its status, and releases what it read.

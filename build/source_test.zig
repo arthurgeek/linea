@@ -13,7 +13,7 @@ const runtime_symbols = @import("runtime_symbols");
 test "runtime archive members have stable names and separate linkage" {
     const archive = @embedFile("runtime_archive");
     try testing.expect(std.mem.startsWith(u8, archive, "!<arch>\n"));
-    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "clock.o", "task.o", "linea_float.o", "math.o" };
+    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "clock.o", "task.o", "loop.o", "sim.o", "linea_float.o", "math.o" };
     var member: usize = 0;
     var offset: usize = 8;
     var long_names: []const u8 = "";
@@ -2140,6 +2140,8 @@ fn scalarOf(written: []const u8, typedefs: *const Typedefs) ?runtime_symbols.Par
         .{ "double", .{ .scalar = .f64 } },
         .{ "const char *", .{ .scalar = .ptr } },
         .{ "char **", .{ .scalar = .ptr } },
+        .{ "void *", .{ .scalar = .ptr } },
+        .{ "struct linea_op *", .{ .scalar = .ptr } },
         .{ "void", .{ .scalar = .unit } },
         .{ "u8", .{ .scalar = .u8 } },
         .{ "i32", .{ .scalar = .i32 } },

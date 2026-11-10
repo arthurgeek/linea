@@ -1,0 +1,35 @@
+import std.io
+import std.session
+import std.task
+import std.time
+
+use session.Chan
+use session.End
+use session.Send
+
+// The virtual time one body measures across ten sleeps of a millisecond.
+fn measured(inout _world: io.World) -> UInt64 {
+    let before = time.Instant.now()
+    for _ in 0..10 {
+        time.sleep(time.Duration.from_milliseconds(1))
+    }
+    before.elapsed().nanoseconds() / 1000000
+}
+
+// `run` lends the simulation to its body for the whole run, so a task cannot
+// run it while `main` runs it too: their sleeps would share one clock in an
+// order the kernel picks.
+fn main() -> Result[UInt8, io.IoError] {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let body = sink [read sim] |sink me: Chan[Send[UInt64, End]]| {
+        let slept = &sim.run(|inout world| measured(&world))
+        me.send(slept).close()
+    }
+    let handle = task.prepare(body).unwrap().start()
+    let mine = &sim.run(|inout world| measured(&world))
+    let (theirs, done) = handle.recv()
+    done.close()
+    sim.close()
+    io.println("main measured {mine} ms, the task {theirs} ms")?
+    .Ok(0)
+}

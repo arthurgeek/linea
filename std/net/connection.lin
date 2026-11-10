@@ -45,9 +45,15 @@ fn adopt(fd: Int32) -> Connection {
     Connection { fd, read_ms = 0, write_ms = 0, deadline = .None }
 }
 
-// Open a connection and block until the peer accepts it or refuses it.
-pub fn connect(address: Address) -> Result[Connection, NetError] {
-    let answer = linea_net_connect(address.packed(), deadline_ns: 0)
+// Open a connection and wait until the peer accepts it or refuses it, or
+// until `within_ms` milliseconds have passed, which fails as timed out. Zero
+// waits as long as the handshake takes.
+pub fn connect(address: Address, within_ms: UInt64 = 0) -> Result[Connection, NetError] {
+    var deadline: UInt64 = 0
+    if within_ms != 0 {
+        deadline = deadline_after(time.Instant.now().monotonic_nanoseconds(), within_ms)
+    }
+    let answer = linea_net_connect(address.packed(), deadline)
     if answer < 0 {
         return .Err(failure(.Connect, answer))
     }
@@ -69,6 +75,62 @@ test fn a_connection_to_a_closed_port_is_refused() {
     testing.assert(listener_closed, "closing the listener failed")?
     testing.assert(refused, "a connection to a closed port was not refused")?
     .Ok(())
+}
+
+test fn a_connect_whose_handshake_ends_at_its_deadline_connects() {
+    // Every delivery takes 15 ms of virtual time, so the handshake, a SYN
+    // out and a SYN-ACK back, takes 30 ms.
+    let network = io.Network { latency_ms = 15, ..io.Network.default() }
+    var sim = io.Simulation.open(seed: 1, network: network).unwrap()
+    let (early, on_time) = &sim.run(
+        |inout _world| {
+            let listener = listen(loopback(80)).unwrap()
+            let early = match connect(loopback(80), within_ms: 29) {
+                Ok(connection) => {
+                    connection.close().unwrap()
+                    false
+                },
+                Err(Io(reason)) => match read reason.category { TimedOut => true, _ => false },
+                Err(_) => false,
+            }
+            let on_time = match connect(loopback(80), within_ms: 30) {
+                Ok(connection) => {
+                    connection.close().unwrap()
+                    true
+                },
+                Err(_) => false,
+            }
+            listener.close().unwrap()
+            (early, on_time)
+        },
+    )
+    sim.close()
+    testing.assert(early, "a connect ended a millisecond before its handshake did not time out")?
+    testing.assert(on_time, "a connect whose handshake ended at its deadline was not connected")?
+}
+
+test fn a_connect_with_no_bound_waits_for_the_handshake() {
+    let listener = listen(loopback(0)).unwrap()
+    let connected = match connect(listener.local_address().unwrap(), within_ms: 0) {
+        Ok(connection) => connection.close().is_ok(),
+        Err(_) => false,
+    }
+    listener.close().unwrap()
+    testing.assert(connected, "a connect with no bound did not connect")?
+}
+
+test fn a_simulated_connection_kept_past_its_simulation_closes() {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let made = &sim.run(
+        |inout _world| {
+            let listener = listen(loopback(80)).unwrap()
+            let client = connect(loopback(80)).unwrap()
+            listener.close().unwrap()
+            client
+        },
+    )
+    sim.close()
+    testing.assert(made.close().is_ok(), "closing a connection its simulation outlived failed")?
 }
 
 // The moment `ms` milliseconds after `base`, on the monotonic clock in
@@ -96,22 +158,65 @@ impl Connection {
     }
 
     test fn a_silent_peer_times_out_the_read() {
-        var listener = listen(loopback(0)).unwrap()
-        let client = connect(listener.local_address().unwrap()).unwrap()
-        let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
-        var server = accepted
-        &server.set_timeouts(read_ms: 50, write_ms: 50)
-        defer var buffer = mem.system().acquire(8).unwrap()
-        let expired = match &server.read_some(&buffer, offset: 0, count: 8) {
-            Ok(_) => false,
-            Err(error) => match read error.category { TimedOut => true, _ => false },
-        }
-        let server_closed = server.close().is_ok()
-        let client_closed = client.close().is_ok()
-        let listener_closed = listener.close().is_ok()
+        var sim = io.Simulation.open(seed: 1).unwrap()
+        let (expired, waited) = &sim.run(
+            |inout _world| {
+                var listener = listen(loopback(80)).unwrap()
+                let client = connect(loopback(80)).unwrap()
+                let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+                var server = accepted
+                &server.set_timeouts(read_ms: 50, write_ms: 50)
+                defer var buffer = mem.system().acquire(8).unwrap()
+                let started = time.Instant.now()
+                let expired = match &server.read_some(&buffer, offset: 0, count: 8) {
+                    Ok(_) => false,
+                    Err(error) => match read error.category { TimedOut => true, _ => false },
+                }
+                let waited = started.elapsed()
+                server.close().unwrap()
+                client.close().unwrap()
+                listener.close().unwrap()
+                (expired, waited)
+            },
+        )
+        sim.close()
         testing.assert(expired, "a read from a silent peer did not time out")?
-        testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
-        .Ok(())
+        testing.assert_eq(waited, time.Duration.from_milliseconds(50), "the read waited other than its 50 ms")?
+    }
+
+    test fn a_read_whose_bytes_arrive_at_its_deadline_reads_them() {
+        // A byte sent takes 200 ms of virtual time to arrive. A read bound to
+        // 199 ms times out; the next, bound to 1 ms, ends as the byte
+        // arrives, and reads it.
+        let network = io.Network { latency_ms = 200, ..io.Network.default() }
+        var sim = io.Simulation.open(seed: 1, network: network).unwrap()
+        let (early, received) = &sim.run(
+            |inout _world| {
+                var listener = listen(loopback(80)).unwrap()
+                var client = connect(loopback(80)).unwrap()
+                let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+                var server = accepted
+                let _sent = io.write_all(&client, "x".as_bytes()).unwrap()
+                defer var buffer = mem.system().acquire(8).unwrap()
+                &server.set_timeouts(read_ms: 199, write_ms: 0)
+                let early = match &server.read_some(&buffer, offset: 0, count: 8) {
+                    Ok(_) => false,
+                    Err(error) => match read error.category { TimedOut => true, _ => false },
+                }
+                &server.set_timeouts(read_ms: 1, write_ms: 0)
+                let received = match &server.read_some(&buffer, offset: 0, count: 8) {
+                    Ok(count) => count,
+                    Err(_) => 0,
+                }
+                server.close().unwrap()
+                client.close().unwrap()
+                listener.close().unwrap()
+                (early, received)
+            },
+        )
+        sim.close()
+        testing.assert(early, "a read ended a millisecond before its byte did not time out")?
+        testing.assert_eq(received, UInt64(1), "a read whose byte arrived at its deadline did not read it")?
     }
 
     // Bound all later reads together: once `within_ms` milliseconds have passed
@@ -130,55 +235,66 @@ impl Connection {
     }
 
     test fn a_deadline_ends_reads_that_each_arrive_in_time() {
-        var listener = listen(loopback(0)).unwrap()
-        var client = connect(listener.local_address().unwrap()).unwrap()
-        let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
-        var server = accepted
-        // Each byte arrives inside the 150 ms a single read may wait, yet the
-        // third read starts after the 200 ms deadline, which spans them all.
-        &server.set_timeouts(read_ms: 150, write_ms: 150)
-        &server.set_deadline(time.Instant.now(), within_ms: 200)
-        defer var buffer = mem.system().acquire(8).unwrap()
-        var arrived: UInt64 = 0
-        var expired = false
-        var round: UInt64 = 0
-        while round < 4 && !expired {
-            round += 1
-            time.sleep(time.Duration.from_milliseconds(80))
-            let _sent = io.write_all(&client, "x".as_bytes()).unwrap()
-            match &server.read_some(&buffer, offset: 0, count: 8) {
-                Ok(count) => arrived += count,
-                Err(error) => expired = match read error.category { TimedOut => true, _ => false },
-            }
-        }
-        let server_closed = server.close().is_ok()
-        let client_closed = client.close().is_ok()
-        let listener_closed = listener.close().is_ok()
+        var sim = io.Simulation.open(seed: 1).unwrap()
+        let (expired, arrived) = &sim.run(
+            |inout world| {
+                var listener = listen(loopback(80)).unwrap()
+                var client = connect(loopback(80)).unwrap()
+                let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+                var server = accepted
+                // A byte is sent every 80 ms and arrives 1 ms later, inside the
+                // 150 ms a single read may wait, yet the third read starts after
+                // the 200 ms deadline, which spans them all.
+                &server.set_timeouts(read_ms: 150, write_ms: 150)
+                &server.set_deadline(time.Instant.now(), within_ms: 200)
+                defer var buffer = mem.system().acquire(8).unwrap()
+                var arrived: UInt64 = 0
+                var expired = false
+                var round: UInt64 = 0
+                while round < 4 && !expired {
+                    round += 1
+                    &world.advance(time.Duration.from_milliseconds(80))
+                    let _sent = io.write_all(&client, "x".as_bytes()).unwrap()
+                    match &server.read_some(&buffer, offset: 0, count: 8) {
+                        Ok(count) => arrived += count,
+                        Err(error) => expired = match read error.category { TimedOut => true, _ => false },
+                    }
+                }
+                server.close().unwrap()
+                client.close().unwrap()
+                listener.close().unwrap()
+                (expired, arrived)
+            },
+        )
+        sim.close()
         testing.assert(expired, "reads that each arrived in time outlasted the deadline")?
-        testing.assert(arrived >= 1 && arrived < 4, "the deadline did not end the reads between the first and the last")?
-        testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
-        .Ok(())
+        testing.assert_eq(arrived, UInt64(2), "the deadline did not end the reads after the second byte")?
     }
 
     test fn a_deadline_of_zero_leaves_reads_unbounded() {
-        var listener = listen(loopback(0)).unwrap()
-        var client = connect(listener.local_address().unwrap()).unwrap()
-        let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
-        var server = accepted
-        &server.set_deadline(time.Instant.now(), within_ms: 0)
-        time.sleep(time.Duration.from_milliseconds(30))
-        let _sent = io.write_all(&client, "x".as_bytes()).unwrap()
-        defer var buffer = mem.system().acquire(8).unwrap()
-        let received = match &server.read_some(&buffer, offset: 0, count: 8) {
-            Ok(count) => count,
-            Err(_) => 0,
-        }
-        let server_closed = server.close().is_ok()
-        let client_closed = client.close().is_ok()
-        let listener_closed = listener.close().is_ok()
+        var sim = io.Simulation.open(seed: 1).unwrap()
+        let received = &sim.run(
+            |inout world| {
+                var listener = listen(loopback(80)).unwrap()
+                var client = connect(loopback(80)).unwrap()
+                let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+                var server = accepted
+                &server.set_deadline(time.Instant.now(), within_ms: 0)
+                &world.advance(time.Duration.from_seconds(30))
+                let _sent = io.write_all(&client, "x".as_bytes()).unwrap()
+                defer var buffer = mem.system().acquire(8).unwrap()
+                let received = match &server.read_some(&buffer, offset: 0, count: 8) {
+                    Ok(count) => count,
+                    Err(_) => 0,
+                }
+                server.close().unwrap()
+                client.close().unwrap()
+                listener.close().unwrap()
+                received
+            },
+        )
+        sim.close()
         testing.assert_eq(received, UInt64(1), "a zero deadline bounded the read")?
-        testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
-        .Ok(())
     }
 
     // Report the address of the peer at the other end of the connection.
@@ -338,33 +454,42 @@ impl Connection {
     }
 
     test fn a_write_times_out_when_the_peer_reads_nothing() {
-        var listener = listen(loopback(0)).unwrap()
-        var client = connect(listener.local_address().unwrap()).unwrap()
-        let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
-        var server = accepted
-        &server.set_timeouts(read_ms: 0, write_ms: 50)
-        defer var bytes = mem.system().acquire(65536).unwrap()
-        // A peer that never reads fills the socket's buffers, so a later write
-        // has nowhere to put bytes and ends at its deadline.
-        var attempts: UInt64 = 0
-        var expired = false
-        while attempts < 100000 && !expired {
-            attempts += 1
-            match &server.write_some(bytes.as_slice()) {
-                Ok(_) => {},
-                Err(WriteFailure { kind: _, reason: reason, written: _ }) => expired = match reason {
-                    Some(error) => match read error.category { TimedOut => true, _ => false },
-                    None => false,
-                },
-            }
-        }
-        let timed_out = expired
-        let client_closed = client.close().is_ok()
-        let server_closed = server.close().is_ok()
-        let listener_closed = listener.close().is_ok()
-        testing.assert(timed_out, "a write to a peer that reads nothing did not time out")?
-        testing.assert(client_closed && server_closed && listener_closed, "a close failed")?
-        .Ok(())
+        // The network holds 4 KiB each way, so a peer that never reads lets
+        // the first write send 4 KiB and leaves the second nowhere to put
+        // bytes, and it ends at its deadline.
+        let network = io.Network { buffer_bytes = 4096, ..io.Network.default() }
+        var sim = io.Simulation.open(seed: 1, network: network).unwrap()
+        let (first, expired, waited) = &sim.run(
+            |inout _world| {
+                var listener = listen(loopback(80)).unwrap()
+                var client = connect(loopback(80)).unwrap()
+                let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+                var server = accepted
+                &server.set_timeouts(read_ms: 0, write_ms: 50)
+                defer var bytes = mem.system().acquire(65536).unwrap()
+                let first = match &server.write_some(bytes.as_slice()) {
+                    Ok(count) => count,
+                    Err(_) => 0,
+                }
+                let started = time.Instant.now()
+                let expired = match &server.write_some(bytes.as_slice()) {
+                    Ok(_) => false,
+                    Err(WriteFailure { kind: _, reason: reason, written: _ }) => match reason {
+                        Some(error) => match read error.category { TimedOut => true, _ => false },
+                        None => false,
+                    },
+                }
+                let waited = started.elapsed()
+                client.close().unwrap()
+                server.close().unwrap()
+                listener.close().unwrap()
+                (first, expired, waited)
+            },
+        )
+        sim.close()
+        testing.assert_eq(first, UInt64(4096), "the first write did not fill the network")?
+        testing.assert(expired, "a write to a peer that reads nothing did not time out")?
+        testing.assert_eq(waited, time.Duration.from_milliseconds(50), "the write waited other than its 50 ms")?
     }
 }
 

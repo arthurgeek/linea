@@ -1,0 +1,4 @@
+same seed, same trace: true
+same seed, same virtual time: true
+another seed, another trace: true
+virtual time passed: true

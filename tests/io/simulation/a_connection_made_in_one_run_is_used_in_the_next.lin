@@ -1,0 +1,39 @@
+import std.io
+import std.mem
+import std.net
+
+use io.Reader
+use net.Accepted
+use net.Acceptor
+
+// A connection belongs to its simulation, not to one run of it: a later run
+// of the same simulation reads what an earlier one sent. Closed outside a
+// run, a simulated connection is closed at its simulation's next operation,
+// and here that operation never comes before the simulation is closed.
+fn main() -> Result[UInt8, io.IoError] {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let (listener, client, accepted) = &sim.run(
+        |inout _world| {
+            var listener = net.listen(net.loopback(80)).unwrap()
+            var client = net.connect(net.loopback(80)).unwrap()
+            let Accepted { connection, address: _ } = &listener.accept().unwrap()
+            let _sent = io.write_all(&client, "hello".as_bytes()).unwrap()
+            (listener, client, connection)
+        },
+    )
+    var server = accepted
+    let received = &sim.run(
+        inout [inout server] |inout _world| {
+            var buffer = mem.system().acquire(8).unwrap()
+            let count = &server.read_some(&buffer, offset: 0, count: 8).unwrap()
+            buffer.release()
+            count
+        },
+    )
+    server.close().unwrap()
+    client.close().unwrap()
+    listener.close().unwrap()
+    sim.close()
+    io.println("the later run received {received} bytes")?
+    .Ok(0)
+}

@@ -12,7 +12,7 @@ error[T-ExternRuntime]: `linea_close` takes or answers what only the standard li
   --> tests/library/an_allocation_or_a_descriptor_is_reached_only_through_its_library_module/main.lin:12:11
    |
 12 | extern fn linea_close(fd: Int32) -> Int64
-   |           ^^^^^^^^^^^ reach it through `close` on an `fs.File`, a `net.Connection` or a `net.Listener`
+   |           ^^^^^^^^^^^ reach it through `close` on an `fs.File`
 error[T-ExternRuntime]: `linea_float64_parse` takes or answers what only the standard library's `mem` keeps in a type, so only that module declares it
   --> tests/library/an_allocation_or_a_descriptor_is_reached_only_through_its_library_module/main.lin:14:11
    |
