@@ -58,6 +58,16 @@ static const unsigned long guard_bytes = 65536;
  * sanitizer's; pages the storage does not reach are never touched. */
 static const unsigned long thread_storage_bytes = 65536;
 
+/* The fewest bytes a task's stack holds for its own frames. A sanitizer's
+ * `pthread_create` wants 128 KiB beside the thread-local storage whatever
+ * the system's own minimum is, and reports a smaller stack on standard
+ * error. */
+#if defined(LINEA_SANITIZED)
+#define LEAST_STACK_BYTES ((unsigned long)PTHREAD_STACK_MIN > 131072UL ? (unsigned long)PTHREAD_STACK_MIN : 131072UL)
+#else
+#define LEAST_STACK_BYTES ((unsigned long)PTHREAD_STACK_MIN)
+#endif
+
 /* The alternate signal stack each task's thread runs its fault handler on. */
 static const unsigned long signal_stack_bytes = 65536;
 
@@ -181,7 +191,7 @@ long linea_task_prepare(unsigned long stack_bytes) {
     const long page = sysconf(_SC_PAGESIZE);
     if (page <= 0) return -EINVAL;
     unsigned long usable = round_up(stack_bytes, (unsigned long)page);
-    if (usable < (unsigned long)PTHREAD_STACK_MIN) usable = round_up((unsigned long)PTHREAD_STACK_MIN, (unsigned long)page);
+    if (usable < LEAST_STACK_BYTES) usable = round_up(LEAST_STACK_BYTES, (unsigned long)page);
     usable += round_up(thread_storage_bytes, (unsigned long)page);
 
     struct task *t = calloc(1, sizeof *t);
