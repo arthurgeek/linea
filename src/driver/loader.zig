@@ -7020,6 +7020,41 @@ test "the library's erased closure declarations are found and certified" {
     try testing.expect(raw.erasure(raw.closure_size) and !raw.erasure(raw.closure_open_in) and !raw.erasure(raw.closure_open));
 }
 
+test "every declaration the raw-access table names is one the library declares" {
+    var prefix = try LibraryPrefix.init(testing.allocator);
+    defer prefix.deinit();
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var sink: Sink = .init(gpa);
+    // `std.ffi` and `std.http` hold declarations the table names, and only a
+    // root the manifest grants `extern` imports `std.ffi`.
+    const table = try gpa.create(FileTable);
+    table.* = .empty;
+    const names = try gpa.create(Interner);
+    names.* = .empty;
+    const program = try gpa.create(Program);
+    program.* = try prefix.loadFromMemory(gpa, table, &sink, names, "main.lin", &.{
+        .{ .path = "linea.json", .text = "{ \"extern\": [\".\"] }" },
+        .{ .path = "main.lin", .text = "import std.ffi\nimport std.http\nfn _views(_bytes: ffi.Bytes, _status: http.Status) {}\nfn main() -> UInt8 { 0 }" },
+    }, .program, .borrow);
+    const semantics = try checkProgram(gpa, gpa, program, names, &sink, .program);
+    try testing.expect(!sink.hasErrors());
+    // A field the library no longer answers would leave the confinement or
+    // the intrinsic it names with nothing to hold.
+    const raw = semantics.typing.raw_accesses;
+    var missing: usize = 0;
+    inline for (@typeInfo(@TypeOf(raw)).@"struct".fields) |field| {
+        const held = @field(raw, field.name);
+        const all: []const DeclId = if (@TypeOf(held) == DeclId) &.{held} else &held;
+        for (all) |d| if (d == DeclId.none) {
+            std.debug.print("RawAccesses.{s} names no library declaration\n", .{field.name});
+            missing += 1;
+        };
+    }
+    try testing.expectEqual(@as(usize, 0), missing);
+}
+
 test "generatedComponentName and subjectAt spell struct fields, enum payloads and newtype bases" {
     var prefix = try LibraryPrefix.init(testing.allocator);
     defer prefix.deinit();

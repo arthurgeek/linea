@@ -44,7 +44,6 @@ const toolchain = @import("toolchain.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
 const symbol_names = @import("../support/symbol.zig");
 const foreign = @import("../sema/foreign.zig");
-const RawAccesses = @import("../sema/intrinsics.zig").RawAccesses;
 const ForeignScalar = @import("../sema/types.zig").ForeignScalar;
 const ForeignSymbol = @import("../backend/mlir.zig").ForeignSymbol;
 const Sink = @import("../diagnostics/sink.zig").Sink;
@@ -96,7 +95,7 @@ pub fn check(gpa: std.mem.Allocator, io: std.Io, semantics: *const loader.Semant
             const name = ast.tokenText(ast.declName(d));
             if (!exported) {
                 if (std.mem.startsWith(u8, name, runtime_symbols.namespace) or runtime_symbols.signatureOf(name) != null) continue;
-                if (namedByCompiler(semantics.typing.raw_accesses, d)) continue;
+                if (semantics.typing.lowers(d)) continue;
             }
             const implied = try foreign.externPrototype(arena, &semantics.typing, d) orelse continue;
             try by_root[module.root.index()].append(arena, .{ .decl = d, .name = name, .implied = implied, .exported = exported });
@@ -171,24 +170,6 @@ fn sameValue(a: foreign.Value, b: foreign.Value) bool {
         .context => true,
         .callback => |x| samePrototype(x.*, b.callback.*),
     };
-}
-
-/// Whether `d` is one of the standard library's storage primitives, whose
-/// calls lowering replaces and the checker certifies, so no C defines it.
-fn namedByCompiler(raw: RawAccesses, d: DeclId) bool {
-    inline for (@typeInfo(RawAccesses).@"struct".fields) |field| {
-        const value = @field(raw, field.name);
-        switch (@TypeOf(value)) {
-            DeclId => if (value == d) return true,
-            else => switch (@typeInfo(@TypeOf(value))) {
-                .array => |array| if (array.child == DeclId) {
-                    for (value) |held| if (held == d) return true;
-                },
-                else => {},
-            },
-        }
-    }
-    return false;
 }
 
 /// A declaration held to C: an `extern`, which C must declare, or an
