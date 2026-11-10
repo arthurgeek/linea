@@ -1,0 +1,13 @@
+// A window views the vector's storage. A push may move that storage, so the
+// window cannot be used after it.
+fn main() -> UInt8 {
+    var readings: Vec[UInt8] = Vec.new()
+    &readings.push(3).unwrap()
+    &readings.push(5).unwrap()
+    var pairs = readings.as_slice().windows(2)
+    let first = &pairs.next().unwrap()
+    &readings.push(8).unwrap()
+    let rise = first[1] - first[0]
+    readings.release()
+    rise
+}

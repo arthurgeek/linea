@@ -70,10 +70,9 @@ fn main() -> Result[UInt8, IoError] {
         println("{day}: {reading} degrees")?
     }
 
-    var total: UInt64 = 0
-    for read reading in week {
-        total += reading
-    }
+    // `copied` turns the views a slice yields into the readings themselves,
+    // and `sum` adds them up.
+    let total = week.readings.as_slice().copied().sum()
     // Average five readings; multiplying the remainder by 10 extracts tenths.
     let whole = total / 5
     let tenths = (total % 5) * 10 / 5

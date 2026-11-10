@@ -1502,12 +1502,7 @@ impl[A: Allocator] Command[A] {
 
     // Return the index of the subcommand named `name`.
     fn child_index(self: Self, name: Str) -> Option[UInt64] {
-        for i in 0..self.subcommands.length() {
-            if self.subcommands[i].name == name {
-                return .Some(i)
-            }
-        }
-        .None
+        self.subcommands.as_slice().position([name] |sink subcommand| subcommand.name == name)
     }
 
     // Write this command's help: its usage line naming it `path`, its

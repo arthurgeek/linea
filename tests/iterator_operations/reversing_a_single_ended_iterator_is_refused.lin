@@ -1,0 +1,23 @@
+// `rev` needs a source that can yield from its far end. `Countdown` can only
+// go forward, so reversing it is refused rather than gathering its items.
+struct Countdown { left: UInt8 }
+
+impl Iterator for Countdown {
+    type Item = UInt8
+
+    fn next(inout self: Self) -> Option[UInt8] {
+        if self.left == 0 {
+            return .None
+        }
+        self.left -= 1
+        .Some(self.left)
+    }
+}
+
+fn main() -> UInt8 {
+    var last: UInt8 = 0
+    for n in (Countdown { left = 3 }).rev() {
+        last = n
+    }
+    last
+}

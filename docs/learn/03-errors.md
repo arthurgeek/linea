@@ -1356,10 +1356,7 @@ fn main() -> Result[UInt8, io.IoError] {
             return .Ok(1)
         }
     }
-    var readings = 0
-    for read buffer in buffers {
-        readings += buffer.length()
-    }
+    let readings = buffers.as_slice().map(|sink buffer| buffer.length()).sum()
     io.println("{buffers.length()} buffers, {readings} readings")?
     .Ok(0)
 }

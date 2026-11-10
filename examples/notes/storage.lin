@@ -135,12 +135,8 @@ impl NoteStore {
 
     // Compute the next available note ID (maximum existing ID + 1).
     fn next_id(self: Self) -> Result[UInt64, mem.Oom] {
-        var max_id: UInt64 = 0
-        for read note in self.notes {
-            if note.id > max_id {
-                max_id = note.id
-            }
-        }
+        // `max` answers None for an empty store, whose first note gets ID 1.
+        let max_id = self.notes.as_slice().map(|sink note| note.id).max().unwrap_or(0)
         if max_id == 18446744073709551615 {
             return .Err(.Exhausted)
         }
@@ -185,14 +181,9 @@ impl NoteStore {
 
     // Remove note with `id` from the store. Returns whether it was found.
     pub fn remove(inout self: Self, id: UInt64) -> Option[Note] {
-        var index: UInt64 = 0
-        while index < self.notes.length() {
-            if self.notes[index].id == id {
-                return &self.notes.remove(index)
-            }
-            index += 1
-        }
-        .None
+        // `position` finds where the note stands, and `remove` takes it out.
+        let index = self.notes.as_slice().position([id] |sink note| note.id == id)?
+        &self.notes.remove(index)
     }
 
     // Return count of notes.

@@ -1,5 +1,5 @@
 // Report the coldest and warmest overnight temperatures of a weather
-// station's week in a single pass over its readings.
+// station's week.
 import std.io
 import std.testing
 
@@ -7,18 +7,11 @@ use io.IoError
 use io.println
 
 // A tuple suits a result whose two parts are obvious from context: the
-// signature promises (lowest, highest), and the walk keeps both in one pass.
+// signature promises (lowest, highest). `min` and `max` answer None only for
+// no readings, and a week always has seven, so `unwrap` cannot fail here.
 fn bounds(readings: [Int64; 7]) -> (Int64, Int64) {
-    var lowest = readings[0]
-    var highest = readings[0]
-    for read reading in readings {
-        if reading < lowest {
-            lowest = reading
-        }
-        if reading > highest {
-            highest = reading
-        }
-    }
+    let lowest = readings.as_slice().copied().min().unwrap()
+    let highest = readings.as_slice().copied().max().unwrap()
     (lowest, highest)
 }
 

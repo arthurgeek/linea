@@ -1,0 +1,44 @@
+// Each operation replaces a loop: the program checks a week of temperatures.
+fn main() -> UInt8 {
+    let temperatures = [Int64(12), 15, 9, 15, 21, 18, 14]
+    let total = temperatures.as_slice().copied().sum()
+    let coldest = *temperatures.as_slice().min().unwrap()
+    let hottest = *temperatures.as_slice().max().unwrap()
+    let first_hot_day = temperatures.as_slice().position(|sink t| *t > 20).unwrap()
+    let steepest_rise = temperatures.as_slice().windows(2).map(|sink pair| pair[1] - pair[0]).max().unwrap()
+    let last_cool = *temperatures.as_slice().rev().find(|t| *t < 15).unwrap()
+    let running = temperatures.as_slice().copied().scan(
+        Int64(0),
+        |inout sum, sink t| {
+            sum += t
+            sum
+        },
+    ).take(3).reduce(|sink _earlier, sink t| t).unwrap()
+    let product = (Int64(1)..=4).product()
+    var answers: UInt8 = 0
+    if total == 104 {
+        answers += 1
+    }
+    if coldest == 9 {
+        answers += 1
+    }
+    if hottest == 21 {
+        answers += 1
+    }
+    if first_hot_day == 4 {
+        answers += 1
+    }
+    if steepest_rise == 6 {
+        answers += 1
+    }
+    if last_cool == 14 {
+        answers += 1
+    }
+    if running == 36 {
+        answers += 1
+    }
+    if product == 24 {
+        answers += 1
+    }
+    answers
+}

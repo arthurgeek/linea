@@ -1,5 +1,6 @@
 import std.testing
 import std.mem
+import std.num
 
 // An Iterator transfers ownership of one Item at a time, updating its
 // position. Item may be linear, so the caller must settle each one. After next
@@ -44,6 +45,33 @@ pub trait Iterator {
                 None => break .{ found = .None, inspected },
             }
         }
+    }
+}
+
+// A DoubleEnded iterator can also yield from its far end. `next_back` takes
+// the last item not yet yielded from either end, so `next` and `next_back`
+// together yield every item once and both answer None when they meet. A
+// slice, a range, a slice's windows, and `map`, `filter`, `filter_map`,
+// `copied` and `rev` over a double-ended source are double-ended; `rev` turns
+// one around.
+pub trait DoubleEnded: Iterator {
+    fn next_back(inout self: Self) -> Option[Self.Item] where carries(.Some: self)
+}
+
+// An Observation is a read-only view whose viewed value can be copied out.
+// `borrow T` is one for every Copyable `T`, which lets `copied` turn the views
+// a slice yields into the values they view.
+pub trait Observation {
+    type Observed
+
+    fn copy_observed(self: Self) -> Self.Observed where carries(self)
+}
+
+impl[T: Copyable] Observation for borrow T {
+    type Observed = T
+
+    fn copy_observed(self: Self) -> T where carries(self) {
+        copy(*self)
     }
 }
 
@@ -115,6 +143,174 @@ pub trait Sequence {
         Self.Iter.Item: Discardable
     {
         .{ iterator = self.iterate(), remaining = count }
+    }
+
+    // Copy each viewed value out of the views this sequence yields, lazily, so
+    // a slice of numbers walks as the numbers: `prices.as_slice().copied()`
+    // yields UInt64 where the slice yields `borrow UInt64`.
+    fn copied(sink self: Self) -> Copied[Self.Iter] where
+        carries(self),
+        Self.Iter.Item: Observation + Discardable
+    {
+        .{ iterator = self.iterate() }
+    }
+
+    // Walk the items from last to first, lazily. Only a double-ended source
+    // can be reversed without gathering its items first; collect any other
+    // sequence into a `Vec` and reverse its slice.
+    fn rev(sink self: Self) -> Rev[Self.Iter] where
+        carries(self),
+        Self.Iter: DoubleEnded
+    {
+        .{ iterator = self.iterate() }
+    }
+
+    // Yield the items with one held back, lazily, so `peek` can look at the
+    // next item before `next` takes it. The adapter holds at most that one
+    // item. When items are linear, the adapter is too: walk it lent and
+    // recover a held item with `into_parts`.
+    fn peekable(sink self: Self) -> Peekable[Self.Iter] where carries(self) {
+        .{ iterator = self.iterate(), held = .None }
+    }
+
+    // Yield one value per item, lazily, computed by `step` from the item and
+    // a running state that starts as `initial`. `step` updates the state in
+    // place and returns what to yield, so running totals read
+    // `scan(0, |inout total, sink price| { total += price; total })`, which
+    // yields 1, 3 and 6 for items 1, 2 and 3.
+    fn scan[
+        S,
+        U,
+        F: inout fn(inout state: S, sink item: Self.Iter.Item) -> U where carries(item),
+    ](sink self: Self, sink initial: S, sink step: F) -> Scan[Self.Iter, S, U, F] where carries(self, initial, step) {
+        .{ iterator = self.iterate(), state = initial, step = step }
+    }
+
+    // Add up every item, starting from zero, and return the total. An empty
+    // sequence sums to `zero()`. Integer sums are checked, so a total past
+    // the item type's greatest value traps as `+` does. A slice yields views,
+    // so sum its values with `values.as_slice().copied().sum()`.
+    fn sum(sink self: Self) -> Self.Iter.Item where
+        carries(self),
+        Self.Iter: Discardable,
+        Self.Iter.Item: num.Additive
+    {
+        var walking = self.iterate()
+        var total: Self.Iter.Item = num.Additive.zero()
+        loop {
+            match &walking.next() {
+                Some(item) => add_into(&total, item),
+                None => {
+                    break
+                },
+            }
+        }
+        total
+    }
+
+    // Multiply every item, starting from one, and return the product. An
+    // empty sequence multiplies to `one()`. Integer products are checked, so
+    // a product past the item type's greatest value traps as `*` does.
+    fn product(sink self: Self) -> Self.Iter.Item where
+        carries(self),
+        Self.Iter: Discardable,
+        Self.Iter.Item: num.Multiplicative
+    {
+        var walking = self.iterate()
+        var result: Self.Iter.Item = num.Multiplicative.one()
+        loop {
+            match &walking.next() {
+                Some(item) => multiply_into(&result, item),
+                None => {
+                    break
+                },
+            }
+        }
+        result
+    }
+
+    // Return the least item, or None for an empty sequence. Of several equal
+    // least items, `min` returns the first, the one a stable sort would put
+    // first. Every other item is dropped, so items must be Discardable.
+    fn min(sink self: Self) -> Option[Self.Iter.Item] where
+        carries(.Some: self),
+        Self.Iter: Discardable,
+        Self.Iter.Item: Ordered + Discardable
+    {
+        var walking = self.iterate()
+        var least: Option[Self.Iter.Item] = &walking.next()
+        loop {
+            match &walking.next() {
+                Some(item) => keep_lesser(&least, item),
+                None => {
+                    break
+                },
+            }
+        }
+        least
+    }
+
+    // Return the greatest item, or None for an empty sequence. Of several
+    // equal greatest items, `max` returns the last, the one a stable sort
+    // would put last. Every other item is dropped, so items must be
+    // Discardable.
+    fn max(sink self: Self) -> Option[Self.Iter.Item] where
+        carries(.Some: self),
+        Self.Iter: Discardable,
+        Self.Iter.Item: Ordered + Discardable
+    {
+        var walking = self.iterate()
+        var greatest: Option[Self.Iter.Item] = &walking.next()
+        loop {
+            match &walking.next() {
+                Some(item) => keep_greater(&greatest, item),
+                None => {
+                    break
+                },
+            }
+        }
+        greatest
+    }
+
+    // Combine the items with `combine`, starting from the first item rather
+    // than an initial value, and return the result, or None for an empty
+    // sequence. `combine` is dropped at the end.
+    fn reduce[
+        F: inout fn(sink accumulator: Self.Iter.Item, sink item: Self.Iter.Item) -> Self.Iter.Item where carries(accumulator, item),
+    ](sink self: Self, sink combine: F) -> Option[Self.Iter.Item] where
+        carries(.Some: self, combine),
+        Self.Iter: Discardable,
+        F: Discardable
+    {
+        var walking = self.iterate()
+        var combining = combine
+        match &walking.next() {
+            Some(first) => .Some(walking.fold_inout(first, &combining)),
+            None => .None,
+        }
+    }
+
+    // Return the position of the first item `predicate` accepts, counting
+    // from zero, or None when it accepts none. The walk stops at that item.
+    // `predicate` takes each item it is shown and is dropped at the end.
+    fn position[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, sink predicate: F) -> Option[UInt64] where
+        Self.Iter: Discardable,
+        F: Discardable
+    {
+        var walking = self.iterate()
+        var checking = predicate
+        var at: UInt64 = 0
+        loop {
+            match &walking.next() {
+                Some(item) => {
+                    if &checking(item) {
+                        break .Some(at)
+                    }
+                    at += 1
+                },
+                None => break .None,
+            }
+        }
     }
 
     // Combine every item into `initial`, in order, and return the result.
@@ -1483,6 +1679,577 @@ test fn releasing_a_skip_releases_its_iterator_once() {
     log.release()
     testing.assert_eq(item, Option.Some(UInt8(19)), "skip changed its item")?
     testing.assert(released, "releasing a skip did not release its iterator exactly once")?
+}
+
+// Map, FilterMap and Filter run their callback on items taken from either
+// end, so each is double-ended when its source is.
+impl[
+    I: DoubleEnded,
+    U,
+    F: inout fn(sink item: I.Item) -> U,
+] DoubleEnded for Map[I, U, F] {
+    fn next_back(inout self: Self) -> Option[U] where carries(.Some: self) {
+        match &self.iterator.next_back() {
+            Some(item) => Option.Some(&(self.transform)(item)),
+            None => .None,
+        }
+    }
+}
+
+impl[
+    I: DoubleEnded,
+    U,
+    F: inout fn(sink item: I.Item) -> Option[U],
+] DoubleEnded for FilterMap[I, U, F] {
+    fn next_back(inout self: Self) -> Option[U] where carries(.Some: self) {
+        loop {
+            match &self.iterator.next_back() {
+                Some(item) => {
+                    match &(self.transform)(item) {
+                        Some(value) => break .Some(value),
+                        None => {},
+                    }
+                },
+                None => break .None,
+            }
+        }
+    }
+}
+
+impl[
+    I: DoubleEnded,
+    F: inout fn(read item: I.Item) -> Bool,
+] DoubleEnded for Filter[I, F]
+where I.Item: Discardable {
+    fn next_back(inout self: Self) -> Option[I.Item] where carries(.Some: self) {
+        loop {
+            match &self.iterator.next_back() {
+                Some(item) => {
+                    if &(self.predicate)(item) {
+                        break .Some(item)
+                    }
+                },
+                None => break .None,
+            }
+        }
+    }
+}
+
+test fn map_filter_and_filter_map_walk_backwards_over_a_double_ended_source() {
+    let mapped = (UInt8(1)..4).map(|sink item| item * 10).rev().fold(UInt32(0), |sink digits, sink item| digits * 100 + UInt32(item))
+    testing.assert_eq(mapped, UInt32(302010), "a reversed map changed or reordered its items")?
+    let kept = (UInt8(1)..7).filter(|item| item % 2 == 0).rev().fold(UInt16(0), |sink digits, sink item| digits * 10 + UInt16(item))
+    testing.assert_eq(kept, UInt16(642), "a reversed filter changed or reordered its items")?
+    let selected = (UInt8(1)..7).filter_map(
+        |sink item| if item % 3 == 0 {
+            Option.Some(item)
+        } else {
+            .None
+        },
+    ).rev().fold(UInt16(0), |sink digits, sink item| digits * 10 + UInt16(item))
+    testing.assert_eq(selected, UInt16(63), "a reversed filter_map changed or reordered its items")?
+}
+
+test fn a_double_ended_map_yields_from_both_ends_until_they_meet() {
+    var mapped = (UInt8(1)..5).map(|sink item| item * 2)
+    testing.assert_eq(&mapped.next_back(), Option.Some(UInt8(8)), "the back of a map is its source's last item")?
+    testing.assert_eq(&mapped.next(), Option.Some(UInt8(2)), "the front of a map is its source's first item")?
+    testing.assert_eq(&mapped.next_back(), Option.Some(UInt8(6)), "the back of a map moved past an item")?
+    testing.assert_eq(&mapped.next(), Option.Some(UInt8(4)), "the front of a map moved past an item")?
+    testing.assert(&mapped.next().is_none(), "the front walked past the back")?
+    testing.assert(&mapped.next_back().is_none(), "the back walked past the front")?
+}
+
+// Copied yields a copy of the value each item of `iterator` views.
+@opaque
+struct Copied[I] {
+    iterator: I,
+}
+
+impl[I: Iterator] Iterator for Copied[I]
+where I.Item: Observation + Discardable {
+    type Item = I.Item.Observed
+
+    fn next(inout self: Self) -> Option[I.Item.Observed] where carries(.Some: self) {
+        match &self.iterator.next() {
+            Some(item) => .Some(item.copy_observed()),
+            None => .None,
+        }
+    }
+}
+
+impl[I: DoubleEnded] DoubleEnded for Copied[I]
+where I.Item: Observation + Discardable {
+    fn next_back(inout self: Self) -> Option[I.Item.Observed] where carries(.Some: self) {
+        match &self.iterator.next_back() {
+            Some(item) => .Some(item.copy_observed()),
+            None => .None,
+        }
+    }
+}
+
+test fn copied_yields_the_values_a_slice_views() {
+    let prices = [UInt64(250), 175, 40]
+    var copies = prices.as_slice().copied()
+    let first: Option[UInt64] = &copies.next()
+    testing.assert_eq(first, Option.Some(UInt64(250)), "copied changed the first value")?
+    testing.assert_eq(&copies.next_back(), Option.Some(UInt64(40)), "copied changed the last value")?
+    testing.assert_eq(&copies.next(), Option.Some(UInt64(175)), "copied skipped the middle value")?
+    testing.assert(&copies.next().is_none(), "copied yielded past its slice")?
+}
+
+impl[I] Copied[I] {
+    // Recover the source iterator, as far as it advanced.
+    pub fn into_inner(sink self: Self) -> I where carries(self.iterator) {
+        let Copied { iterator } = self
+        iterator
+    }
+
+    test fn copied_into_inner_returns_the_advanced_iterator() {
+        let values = [UInt8(4), 5, 6]
+        var copies = values.as_slice().copied()
+        let _first = &copies.next()
+        var rest = copies.into_inner()
+        testing.assert_eq(*&rest.next().unwrap(), UInt8(5), "copied recovered its source without its progress")?
+    }
+}
+
+impl[I: Iterator + Release] Release for Copied[I] {
+    fn release(sink self: Self) {
+        let Copied { iterator } = self
+        iterator.release()
+    }
+}
+
+// Rev yields the items of `iterator` from its far end.
+@opaque
+struct Rev[I] {
+    iterator: I,
+}
+
+impl[I: DoubleEnded] Iterator for Rev[I] {
+    type Item = I.Item
+
+    fn next(inout self: Self) -> Option[I.Item] where carries(.Some: self) {
+        &self.iterator.next_back()
+    }
+}
+
+impl[I: DoubleEnded] DoubleEnded for Rev[I] {
+    fn next_back(inout self: Self) -> Option[I.Item] where carries(.Some: self) {
+        &self.iterator.next()
+    }
+}
+
+test fn rev_walks_a_range_and_a_slice_from_the_end() {
+    var countdown: UInt16 = 0
+    for item in (UInt8(1)..=4).rev() {
+        // Append one decimal digit to preserve visitation order.
+        countdown = countdown * 10 + UInt16(item)
+    }
+    testing.assert_eq(countdown, UInt16(4321), "rev reordered an inclusive range")?
+    let words = ["one", "two", "three"]
+    var backwards = words.as_slice().rev()
+    testing.assert_eq(*&backwards.next().unwrap(), "three", "rev did not start at the last element")?
+    testing.assert_eq(*&backwards.next_back().unwrap(), "one", "a reversed slice's back is its first element")?
+    testing.assert_eq(*&backwards.next().unwrap(), "two", "rev skipped the middle element")?
+    testing.assert(&backwards.next().is_none(), "rev yielded past the first element")?
+}
+
+test fn reversing_twice_restores_the_order() {
+    let twice = (UInt8(1)..4).rev().rev().fold(UInt16(0), |sink digits, sink item| digits * 10 + UInt16(item))
+    testing.assert_eq(twice, UInt16(123), "reversing twice changed the order")?
+}
+
+impl[I] Rev[I] {
+    // Recover the source iterator, as far as it advanced at either end.
+    pub fn into_inner(sink self: Self) -> I where carries(self.iterator) {
+        let Rev { iterator } = self
+        iterator
+    }
+
+    test fn rev_into_inner_returns_the_source_advanced_from_its_end() {
+        var reversed = (UInt8(1)..4).rev()
+        let _last = &reversed.next()
+        var source = reversed.into_inner()
+        testing.assert_eq(&source.next_back(), Option.Some(UInt8(2)), "rev recovered its source without its progress")?
+    }
+}
+
+impl[I: Iterator + Release] Release for Rev[I] {
+    fn release(sink self: Self) {
+        let Rev { iterator } = self
+        iterator.release()
+    }
+}
+
+test fn releasing_a_rev_releases_its_iterator_once() {
+    let log = mem.ReleaseLog.open(1)
+    let reversed = Rev[LoggedCursor] { iterator = LoggedCursor { tag = log.tag(31), visited = false } }
+    reversed.release()
+    let released = log.holds([UInt64(31)].as_slice())
+    log.release()
+    testing.assert(released, "releasing a rev did not release its iterator exactly once")?
+}
+
+// Peekable yields the items of `iterator`, holding back at most one, `held`,
+// that `peek` took early. When the items are linear the held item makes
+// Peekable linear too, so a program settles it through `into_parts`. Peekable
+// has no Release implementation: releasing it would instantiate the release
+// of `I.Item` from the release of `Peekable[I]`, which [T-PolyRec] refuses,
+// so `into_parts` hands both parts to the program to settle.
+@opaque
+struct Peekable[I: Iterator] {
+    iterator: I,
+    held: Option[I.Item],
+}
+
+impl[I: Iterator] Iterator for Peekable[I] {
+    type Item = I.Item
+
+    fn next(inout self: Self) -> Option[I.Item] where carries(.Some: self) {
+        match mem.exchange(&self.held, .None) {
+            Some(item) => .Some(item),
+            None => &self.iterator.next(),
+        }
+    }
+}
+
+test fn peekable_yields_every_item_once_in_order() {
+    var digits: UInt16 = 0
+    for item in (UInt8(1)..4).peekable() {
+        // Append one decimal digit to preserve visitation order.
+        digits = digits * 10 + UInt16(item)
+    }
+    testing.assert_eq(digits, UInt16(123), "peekable changed or reordered its items")?
+}
+
+impl[I: Iterator] Peekable[I] {
+    // Look at the next item without taking it, or answer None when the
+    // source has ended. The first `peek` takes the item from the source and
+    // holds it; later peeks and the following `next` answer that same item.
+    pub fn peek(inout self: Self) -> Option[borrow I.Item] where borrows(.Some: self), retains(self: self) {
+        if self.held.is_none() {
+            fill_empty(&self.held, &self.iterator.next())
+        }
+        match read self.held {
+            Some(item) => .Some(borrow item),
+            None => .None,
+        }
+    }
+
+    test fn peek_shows_the_next_item_without_taking_it() {
+        var source = (AskedSource { at = 5, stop = 7, asked = 0 }).peekable()
+        testing.assert_eq(*&source.peek().unwrap(), UInt8(5), "peek showed another item than the next")?
+        testing.assert_eq(*&source.peek().unwrap(), UInt8(5), "a second peek moved past the held item")?
+        testing.assert_eq(&source.next(), Option.Some(UInt8(5)), "next did not yield the peeked item")?
+        testing.assert_eq(&source.next(), Option.Some(UInt8(6)), "next skipped an item after a peek")?
+        testing.assert(&source.peek().is_none(), "peek showed an item past the end")?
+        testing.assert(&source.next().is_none(), "next yielded past the end after a peek")?
+        let (inner, held) = source.into_parts()
+        testing.assert(held.is_none(), "an exhausted peekable held an item")?
+        testing.assert_eq(inner.asked, UInt8(4), "peek asked its source again for an item it held")?
+    }
+
+    // Take the next item only when `accept` approves of it; otherwise leave
+    // it held for the next call and answer None.
+    pub fn next_if[F: inout fn(read item: I.Item) -> Bool](inout self: Self, sink accept: F) -> Option[I.Item] where
+        carries(.Some: self),
+        retains(self: self),
+        F: Discardable
+    {
+        let candidate = match mem.exchange(&self.held, .None) {
+            Some(item) => Option.Some(item),
+            None => &self.iterator.next(),
+        }
+        var accepting = accept
+        match candidate {
+            Some(item) => {
+                if &accepting(item) {
+                    .Some(item)
+                } else {
+                    fill_empty(&self.held, .Some(item))
+                    .None
+                }
+            },
+            None => .None,
+        }
+    }
+
+    test fn next_if_takes_only_an_accepted_item() {
+        var digits = "42px".as_bytes().copied().peekable()
+        var value: UInt64 = 0
+        loop {
+            match &digits.next_if(|byte| byte >= 48 && byte <= 57) {
+                Some(digit) => value = value * 10 + UInt64(digit - 48),
+                None => {
+                    break
+                },
+            }
+        }
+        testing.assert_eq(value, UInt64(42), "next_if took a byte it should have left or left a digit")?
+        testing.assert_eq(&digits.next(), Option.Some(UInt8(112)), "next_if lost the byte it refused")?
+    }
+}
+
+impl[I: Iterator] Peekable[I] {
+    // Recover the source iterator, as far as it advanced, and the item a
+    // `peek` took from it but nothing has taken yet. Neither is discarded or
+    // settled, so this is how a peekable over linear items ends.
+    pub fn into_parts(sink self: Self) -> (I, Option[I.Item]) where carries(._0: self.iterator), carries(._1: self.held) {
+        let Peekable { iterator, held } = self
+        (iterator, held)
+    }
+
+    test fn into_parts_hands_back_a_held_linear_item() {
+        var tokens = (TokenCounter { at = 1, stop = 3 }).peekable()
+        let peeked = match &tokens.peek() {
+            Some(token) => token_number(*token),
+            None => 0,
+        }
+        let (rest, held) = tokens.into_parts()
+        let returned = match held {
+            Some(token) => {
+                let number = token_number(token)
+                consume_token(token)
+                number
+            },
+            None => 0,
+        }
+        rest.for_each(consume_token)
+        testing.assert_eq(peeked, UInt8(1), "peek showed another token than the first")?
+        testing.assert_eq(returned, UInt8(1), "into_parts lost the token peek held")?
+    }
+}
+
+// Scan yields what `step` returns for each item of `iterator`, handing it the
+// running `state` to update in place.
+@opaque
+struct Scan[I, S, phantom U, F] {
+    iterator: I,
+    state: S,
+    step: F,
+}
+
+impl[
+    I: Iterator,
+    S,
+    U,
+    F: inout fn(inout state: S, sink item: I.Item) -> U where carries(item),
+] Iterator for Scan[I, S, U, F] {
+    type Item = U
+
+    fn next(inout self: Self) -> Option[U] where carries(.Some: self) {
+        match &self.iterator.next() {
+            Some(item) => Option.Some(&(self.step)(&self.state, item)),
+            None => .None,
+        }
+    }
+}
+
+test fn scan_yields_each_running_total() {
+    var totals = (UInt8(1)..4).scan(
+        UInt8(0),
+        |inout total, sink item| {
+            total += item
+            total
+        },
+    )
+    testing.assert_eq(&totals.next(), Option.Some(UInt8(1)), "scan's first total is the first item")?
+    testing.assert_eq(&totals.next(), Option.Some(UInt8(3)), "scan's second total adds the second item")?
+    testing.assert_eq(&totals.next(), Option.Some(UInt8(6)), "scan's third total adds the third item")?
+    testing.assert(&totals.next().is_none(), "scan yielded past its source")?
+}
+
+test fn scan_runs_its_step_only_for_items_asked_for() {
+    var calls: UInt8 = 0
+    let first_two = (UInt8(1)..9)
+        .scan(
+            UInt8(1),
+            inout [inout calls] |inout product, sink item| {
+                calls += 1
+                product *= item
+                product
+            },
+        )
+        .take(2)
+        .fold(UInt16(0), |sink digits, sink item| digits * 10 + UInt16(item))
+    testing.assert_eq(first_two, UInt16(12), "scan yielded the wrong running products")?
+    testing.assert_eq(calls, UInt8(2), "scan ran its step ahead of the walk")?
+}
+
+impl[I, S, U, F] Scan[I, S, U, F] {
+    // Recover the source iterator, as far as it advanced, the running state
+    // and the step, as a triple. None is discarded or settled.
+    pub fn into_parts(sink self: Self) -> (I, S, F) where carries(._0: self.iterator), carries(._1: self.state), carries(._2: self.step) {
+        let Scan { iterator, state, step } = self
+        (iterator, state, step)
+    }
+
+    test fn scan_recovers_its_source_and_running_state() {
+        var totals = (UInt8(1)..9).scan(
+            UInt8(0),
+            |inout total, sink item| {
+                total += item
+                total
+            },
+        )
+        let _first = &totals.next()
+        let _second = &totals.next()
+        let (rest, total, _) = totals.into_parts()
+        testing.assert_eq(total, UInt8(3), "scan recovered another running state")?
+        testing.assert_eq(rest.count(), UInt64(6), "scan recovered its source without its progress")?
+    }
+}
+
+impl[I: Iterator + Release, S: Release, U, F: Discardable] Release for Scan[I, S, U, F] {
+    fn release(sink self: Self) {
+        let Scan { iterator, state, step: _ } = self
+        state.release()
+        iterator.release()
+    }
+}
+
+test fn releasing_a_scan_releases_its_iterator_once() {
+    let log = mem.ReleaseLog.open(1)
+    let scanned = (LoggedCursor { tag = log.tag(23), visited = false }).scan(
+        UInt64(0),
+        |inout total, sink item| {
+            total += UInt64(item)
+            total
+        },
+    )
+    scanned.release()
+    let released = log.holds([UInt64(23)].as_slice())
+    log.release()
+    testing.assert(released, "releasing a scan did not release its iterator exactly once")?
+}
+
+// Put `value` in a slot that holds None. A slot that holds an item instead
+// would lose it, so that traps.
+fn fill_empty[T](inout slot: Option[T], sink value: Option[T]) where retains(slot: value) {
+    match mem.exchange(&slot, value) {
+        Some(_held) => panic("a held item would be lost"),
+        None => {},
+    }
+}
+
+// Read the number a token holds.
+fn token_number(token: Token) -> UInt8 {
+    match read token {
+        Number(number) => number,
+    }
+}
+
+// Add `item` to the running total.
+fn add_into[T: num.Additive](inout total: T, sink item: T) where retains(total: item) {
+    total = total.add(item)
+}
+
+// Multiply the running product by `item`.
+fn multiply_into[T: num.Multiplicative](inout product: T, sink item: T) where retains(product: item) {
+    product = product.multiply(item)
+}
+
+// Keep the lesser of the least item so far and `item`. On a tie the item held
+// so far stays, so the first of equal items wins.
+fn keep_lesser[T: Ordered + Discardable](inout held: Option[T], sink item: T) where retains(held: item) {
+    let replace = match read held {
+        Some(least) => item.less(least),
+        None => true,
+    }
+    if replace {
+        held = .Some(item)
+    }
+}
+
+// Keep the greater of the greatest item so far and `item`. On a tie `item`
+// replaces it, so the last of equal items wins.
+fn keep_greater[T: Ordered + Discardable](inout held: Option[T], sink item: T) where retains(held: item) {
+    let keep = match read held {
+        Some(greatest) => item.less(greatest),
+        None => false,
+    }
+    if !keep {
+        held = .Some(item)
+    }
+}
+
+// A Rank is ordered by `score` alone and carries a `name` to tell equal ranks
+// apart.
+struct Rank {
+    score: UInt8,
+    name: Str,
+}
+
+impl Equatable for Rank {
+    fn equals(self: Self, other: Self) -> Bool {
+        self.score == other.score
+    }
+}
+
+impl Equivalent for Rank {}
+
+impl Comparable for Rank {
+    fn less(self: Self, other: Self) -> Bool {
+        self.score < other.score
+    }
+}
+
+impl Ordered for Rank {}
+
+test fn min_and_max_pick_the_first_least_and_the_last_greatest() {
+    let ranks = [
+        Rank { score = 3, name = "ana" },
+        Rank { score = 1, name = "bo" },
+        Rank { score = 3, name = "cy" },
+        Rank { score = 1, name = "di" },
+    ]
+    testing.assert_eq(ranks.as_slice().min().unwrap().name, "bo", "min did not keep the first of equal least ranks")?
+    testing.assert_eq(ranks.as_slice().max().unwrap().name, "cy", "max did not keep the last of equal greatest ranks")?
+    testing.assert(ranks.as_slice().take(0).min().is_none(), "an empty sequence had a least item")?
+    testing.assert(ranks.as_slice().take(0).max().is_none(), "an empty sequence had a greatest item")?
+}
+
+test fn sum_and_product_start_from_zero_and_one() {
+    let prices = [UInt64(250), 175, 40]
+    testing.assert_eq(prices.as_slice().copied().sum(), UInt64(465), "sum lost or changed a price")?
+    testing.assert_eq((UInt64(1)..=5).product(), UInt64(120), "product lost or changed a factor")?
+    testing.assert_eq((Int32(0)..0).sum(), Int32(0), "an empty sum was not zero")?
+    testing.assert_eq((Int32(0)..0).product(), Int32(1), "an empty product was not one")?
+    let halves = [Float64(0.5), 0.25]
+    testing.assert_eq(halves.as_slice().copied().sum(), Float64(0.75), "a float sum changed its value")?
+}
+
+test fn reduce_combines_from_the_first_item() {
+    let fruit = ["fig", "banana", "kiwi"]
+    let longest = fruit.as_slice().copied().reduce(
+        |sink best, sink word| if word.length() > best.length() {
+            word
+        } else {
+            best
+        },
+    )
+    testing.assert_eq(longest, Option.Some("banana"), "reduce did not combine from the first item")?
+    testing.assert((UInt8(0)..0).reduce(|sink a, sink b| a + b).is_none(), "an empty reduce produced a value")?
+    testing.assert_eq((UInt8(7)..8).reduce(|sink _a, sink _b| panic("reduce combined a single item")), Option.Some(UInt8(7)), "a single item did not reduce to itself")?
+}
+
+test fn position_counts_from_zero() {
+    let found = (UInt8(10)..20).position(|sink item| item == 12)
+    testing.assert_eq(found, Option.Some(UInt64(2)), "position did not count from zero")?
+    testing.assert((UInt8(0)..5).position(|sink item| item > 9).is_none(), "position found an item none matched")?
+}
+
+test fn position_hands_linear_items_to_its_predicate() {
+    let found = (TokenCounter { at = 0, stop = 4 }).position(
+        |sink token| {
+            let number = token_number(token)
+            consume_token(token)
+            number == 2
+        },
+    )
+    testing.assert_eq(found, Option.Some(UInt64(2)), "position over linear tokens counted wrongly")?
 }
 
 test fn fold_moves_one_accumulator_through_every_item() {

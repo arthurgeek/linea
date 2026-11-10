@@ -1,0 +1,10 @@
+import std.io
+
+// A slice yields views of its elements, and a view is not a number. `copied`
+// turns the views into the values they view, which `sum` adds up.
+fn main() -> Result[UInt8, io.IoError] {
+    let prices = [UInt64(250), 175, 40]
+    let total = prices.as_slice().sum()
+    io.println("{total} cents")?
+    .Ok(0)
+}
