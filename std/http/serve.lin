@@ -1724,15 +1724,14 @@ impl io.Reader for RequestReader {
     fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
         if !self.started && self.first_wait_ms != 0 && self.accepted.elapsed() >= time.Duration.from_milliseconds(self.first_wait_ms) {
             // The first-byte window passed before the server read at all. The
-            // read waits at most a millisecond, the shortest bound a socket
-            // takes, since zero waits forever, and takes the bytes that arrive
-            // by then. It cannot tell bytes sent before the window closed from
+            // read waits at most a millisecond, since zero waits forever, and
+            // takes the bytes that arrive by then. It cannot tell bytes sent before the window closed from
             // bytes sent after, so it takes both.
-            &self.connection.set_timeouts(1, self.write_timeout_ms)?
+            &self.connection.set_timeouts(1, self.write_timeout_ms)
         }
         if self.started && !self.extended {
             self.extended = true
-            &self.connection.set_timeouts(self.read_timeout_ms, self.write_timeout_ms)?
+            &self.connection.set_timeouts(self.read_timeout_ms, self.write_timeout_ms)
             &self.connection.set_deadline(self.accepted, self.read_timeout_ms)
         }
         let received = &self.connection.read_some(&buffer, offset, count)?
@@ -1769,15 +1768,7 @@ fn serve_connection[H: Handler[(), P] + Observer, P: Allocator](sink connection:
     // The deadline bounds the request. Each read also waits at most the
     // read budget, which is the longest the deadline lets one wait, so a read
     // never blocks without a bound.
-    match &configured.set_timeouts(first_wait, limits.write_timeout_ms) {
-        Ok(_) => {},
-        Err(error) => {
-            close_connection(configured)
-            let event: Event[P] = .Exchanged(.{ request = .None, status = .None, body_bytes = 0, duration = .None, failure = .Some(.Timeouts(error)) })
-            &handler.observe(event)
-            return .Answered
-        },
-    }
+    &configured.set_timeouts(first_wait, limits.write_timeout_ms)
     &configured.set_deadline(accepted, first_wait)
     let source = RequestReader {
         connection = configured,
@@ -2012,10 +2003,10 @@ fn refuse[A: Allocator](inout connection: net.Connection, status: Status, alloca
 // `discarded`, so closing it does not reset the connection before the client
 // reads the answer.
 fn linger[A: Allocator](inout connection: net.Connection, inout discarded: mem.Buffer[A], read_timeout_ms: UInt64) {
-    let stopped = &connection.shutdown_write().is_ok() && &connection.set_timeouts(linger_wait(read_timeout_ms), 0).is_ok()
-    if !stopped {
+    if !&connection.shutdown_write().is_ok() {
         return
     }
+    &connection.set_timeouts(linger_wait(read_timeout_ms), 0)
     var reads: UInt64 = 0
     while reads < linger_reads {
         reads += 1

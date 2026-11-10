@@ -7,6 +7,13 @@ extern fn linea_read_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
 
 extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
 
+// The runtime reads or writes a socket at a raw address with a deadline on the
+// monotonic clock, in nanoseconds, or 0 for none. It returns the byte count, or
+// a negated errno, -ETIMEDOUT once the deadline has passed.
+extern fn linea_net_read(fd: Int32, at: UInt64, len: UInt64, deadline_ns: UInt64) -> Int64
+
+extern fn linea_net_write(fd: Int32, at: UInt64, len: UInt64, deadline_ns: UInt64) -> Int64
+
 extern fn linea_read_at(fd: Int32, at: UInt64, len: UInt64, offset: UInt64) -> Int64
 
 extern fn linea_write_at(fd: Int32, at: UInt64, len: UInt64, offset: UInt64) -> Int64
@@ -30,6 +37,21 @@ fn bytes_in[A: Allocator](buffer: Buffer[A], offset: UInt64) -> Address[UInt8] w
 // Write `bytes` to `fd` and return the count written or a negated errno.
 internal fn write_slice_fd(bytes: Slice[UInt8], fd: Int32) -> Int64 {
     linea_write_some(fd, address.raw(slice_address(bytes)), bytes.length())
+}
+
+// Read up to `count` bytes from the socket `fd` into `buffer` at `offset`, by
+// the deadline, and return the runtime's count or negated errno.
+internal fn read_socket[A: Allocator](inout buffer: Buffer[A], fd: Int32, offset: UInt64, count: UInt64, deadline_ns: UInt64) -> Int64 {
+    if offset > buffer.length() || count > buffer.length() - offset {
+        panic("buffer I/O range is out of bounds")
+    }
+    linea_net_read(fd, address.raw(bytes_in(buffer, offset)), count, deadline_ns)
+}
+
+// Write `bytes` to the socket `fd` by the deadline and return the count written
+// or a negated errno.
+internal fn write_slice_socket(bytes: Slice[UInt8], fd: Int32, deadline_ns: UInt64) -> Int64 {
+    linea_net_write(fd, address.raw(slice_address(bytes)), bytes.length(), deadline_ns)
 }
 
 // Read up to `count` bytes from `fd` into `buffer` at `buffer_offset` starting at
@@ -57,6 +79,19 @@ test fn empty_fd_requests_do_not_access_a_descriptor() {
     let empty = bytes.as_slice().subspan(start: 1, count: 0).unwrap()
     testing.assert_eq(write_slice_fd(empty, -1), 0, "an empty write reached the descriptor")?
     testing.assert_eq(write_slice_fd_at(empty, -1, 0), 0, "an empty positional write reached the descriptor")?
+    testing.assert_eq(write_slice_socket(empty, -1, 0), 0, "an empty socket write reached the descriptor")?
+    testing.assert_eq(read_socket(&bytes, -1, 1, 0, 0), 0, "an empty socket read reached the descriptor")?
+    .Ok(())
+}
+
+test trap fn socket_reads_reject_a_range_past_the_buffer() -> Result[(), testing.Failure] {
+    // The invalid descriptor -1 must never reach the runtime.
+    let allocator = system()
+    var bytes = allocator.acquire(1) else |_| {
+        return testing.assert(false, "test buffer allocation failed")
+    }
+    let _result = read_socket(&bytes, -1, 1, UInt64.max, 0)
+    bytes.release()
     .Ok(())
 }
 

@@ -13,6 +13,9 @@ pub const panic = "linea_panic";
 pub const set_args = "linea_set_args";
 /// What the runtime's I/O entries hand every extent to before a system call.
 pub const storage_extent = "linea_storage_extent";
+/// What the socket operations call to check the bytes they are handed, as the
+/// I/O entries do.
+pub const byte_range = "linea_io_byte_range";
 /// Defined only by the checking runtime, so an archive answers whether it
 /// checks storage.
 pub const storage_checked = "linea_storage_checked";
@@ -55,6 +58,7 @@ const owned = [_][]const u8{
     set_args,
     // What the runtime's own files call between themselves.
     storage_extent,
+    byte_range,
     storage_checked,
     thread_begin,
     thread_end,
@@ -268,6 +272,14 @@ pub const storage_extent_signature: Signature = .{
 /// The alternate signal stack's address and size, then the bounds of the
 /// stack's guard pages. It answers zero, or the errno that kept the signal
 /// stack from being installed.
+/// The address and length of a program's bytes; it answers zero, or the errno
+/// that keeps them from a system call.
+pub const byte_range_signature: Signature = .{
+    .symbol = byte_range,
+    .declared_by = .compiler,
+    .parameters = &.{ p(.u64), p(.u64) },
+    .result = .i32,
+};
 pub const thread_begin_signature: Signature = .{
     .symbol = thread_begin,
     .declared_by = .compiler,
@@ -307,6 +319,7 @@ pub const owned_functions = [_]Signature{
     panic_signature,
     set_args_signature,
     storage_extent_signature,
+    byte_range_signature,
     thread_begin_signature,
     thread_end_signature,
 } ++ math_functions;
@@ -364,6 +377,8 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_errno", .parameters = &.{}, .result = .i32, .declared_by = .granted },
     .{ .symbol = "linea_read_some", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_transfer },
     .{ .symbol = "linea_write_some", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_transfer },
+    .{ .symbol = "linea_net_read", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u64) }, .result = .i64, .declared_by = mem_transfer },
+    .{ .symbol = "linea_net_write", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u64) }, .result = .i64, .declared_by = mem_transfer },
     .{ .symbol = "linea_read_at", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u64) }, .result = .i64, .declared_by = mem_transfer },
     .{ .symbol = "linea_write_at", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u64) }, .result = .i64, .declared_by = mem_transfer },
     .{ .symbol = "linea_close", .parameters = &.{descriptor}, .result = .i64, .declared_by = mem_close },
@@ -377,11 +392,10 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_unlink_at", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_files },
     .{ .symbol = "linea_raise_open_files", .parameters = &.{}, .result = .i64, .declared_by = .granted },
     .{ .symbol = "linea_net_listen", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = net_listener },
-    .{ .symbol = "linea_net_accept", .parameters = &.{descriptor}, .result = .i64, .answers = .descriptor, .declared_by = net_listener },
-    .{ .symbol = "linea_net_connect", .parameters = &.{p(.u64)}, .result = .i64, .answers = .descriptor, .declared_by = net_connection },
+    .{ .symbol = "linea_net_accept", .parameters = &.{ descriptor, p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = net_listener },
+    .{ .symbol = "linea_net_connect", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = net_connection },
     .{ .symbol = "linea_net_local_address", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_listener },
     .{ .symbol = "linea_net_peer_address", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection },
-    .{ .symbol = "linea_net_set_timeouts", .parameters = &.{ descriptor, p(.u64), p(.u64) }, .result = .i64, .declared_by = net_connection },
     .{ .symbol = "linea_net_shutdown_write", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection },
     .{ .symbol = "linea_net_reset", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection },
     .{ .symbol = "linea_clock_read", .parameters = &.{ p(.u8), .{ .scalar = .i64, .passing = .inout }, written }, .result = .i64, .declared_by = .granted },

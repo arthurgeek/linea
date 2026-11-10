@@ -61,8 +61,6 @@ pub struct Exchange[P: Allocator = mem.SystemAllocator] {
 //   the status in the exchange, or the connection failed while it was read.
 // - `Memory` means the request's arena or the response buffer could not be
 //   had, and the request was answered 503 or 500 without the handler.
-// - `Timeouts` holds why the connection's timeouts could not be set; nothing
-//   was read or answered.
 // - `Write` holds why writing the answer failed; the connection was reset if
 //   a body was cut short.
 // - `Stream` holds the status and message of the error a streamed body's
@@ -72,7 +70,6 @@ pub enum Failure {
     Refused(Option[Str]),
     Unread(RequestError),
     Memory,
-    Timeouts(io.IoError),
     Write(io.IoError),
     Stream(Status, Option[Str]),
 }
@@ -87,7 +84,6 @@ impl Display for Failure {
             Refused(None) => &w.write_str("the handler refused the request"),
             Unread(error) => "reading the request failed: {error}".fmt(&w),
             Memory => &w.write_str("there was no memory to answer the request"),
-            Timeouts(error) => "setting the connection's timeouts failed: {error}".fmt(&w),
             Write(error) => "writing the response failed: {error}".fmt(&w),
             Stream(status, message) => {
                 let code = status.code()
@@ -106,7 +102,6 @@ test fn a_failure_displays_what_went_wrong() {
     failure_displays_as(.Refused(.None), "the handler refused the request", "a refusal without a message changed")?
     failure_displays_as(.Unread(.Status(.ContentTooLarge)), "reading the request failed: the request was refused with 413 Content Too Large", "an unread request changed")?
     failure_displays_as(.Memory, "there was no memory to answer the request", "running out of memory changed")?
-    failure_displays_as(.Timeouts(copy(broken)), "setting the connection's timeouts failed: Write failed (BrokenPipe) after 0 bytes", "a timeout failure changed")?
     failure_displays_as(.Write(broken), "writing the response failed: Write failed (BrokenPipe) after 0 bytes", "a write failure changed")?
     failure_displays_as(.Stream(.InternalServerError, .Some("the data ran out")), "streaming the response failed with 500: the data ran out", "a stream failure changed")?
     failure_displays_as(.Stream(.InternalServerError, .None), "streaming the response failed with 500", "a stream failure without a message changed")?

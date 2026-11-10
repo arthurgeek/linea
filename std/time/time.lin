@@ -294,6 +294,17 @@ impl Instant {
         .Ok(())
     }
 
+    // The monotonic clock's reading in nanoseconds, as the runtime compares it
+    // with a socket deadline.
+    internal fn monotonic_nanoseconds(self: Self) -> UInt64 {
+        self.nanoseconds
+    }
+
+    test fn an_instant_reads_nanoseconds_of_the_monotonic_clock() {
+        let instant = Instant { nanoseconds = 42 }
+        testing.assert_eq(instant.monotonic_nanoseconds(), UInt64(42), "an instant changed its reading")?
+    }
+
     // `since` returns how long after `earlier` this instant is, or a zero
     // duration when `earlier` is the later of the two.
     pub fn since(self: Self, earlier: Instant) -> Duration {

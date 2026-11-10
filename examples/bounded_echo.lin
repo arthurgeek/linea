@@ -172,15 +172,11 @@ fn run_serve(options: ServeOptions) -> UInt8 {
 // it can read from that connection until reading finishes. Each connection
 // logs one line: how many lines it echoed to `peer`, or why it failed.
 fn echo_connection(sink connection: net.Connection, peer: net.Address, logger: log.Logger[io.Descriptor], bounds: Bounds) {
-    // `set_timeouts` bounds each read and each write, and `set_deadline` bounds
+    // `set_timeouts` bounds each read and each send attempt, and `set_deadline` bounds
     // all the reads together, so a client that stays silent, or sends a
     // byte at a time, cannot hold the server past `session_ms`.
     var bounded = connection
-    let _ = &bounded.set_timeouts(read_ms: bounds.session_ms, write_ms: bounds.session_ms) else |error| {
-        logger.error("cannot bound a connection", log.field("peer", peer).and("error", error))
-        let _closed = bounded.close()
-        return
-    }
+    &bounded.set_timeouts(read_ms: bounds.session_ms, write_ms: bounds.session_ms)
     &bounded.set_deadline(time.Instant.now(), within_ms: bounds.session_ms)
     // A refused buffer hands the connection back. `settled()` closes it and
     // keeps why the buffer was refused, together with a failed close, so the

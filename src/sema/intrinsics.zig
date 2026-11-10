@@ -231,7 +231,7 @@ pub const RawAccesses = struct {
     /// and extent to free.
     system_allocator_dispose: DeclId = .none,
     /// The free functions of `mem` that hand the runtime a buffer's or a
-    /// slice's bytes for a file, a random source or a float parser, by their
+    /// slice's bytes for a file, a socket, a random source or a float parser, by their
     /// names in `runtime_byte_functions`.
     runtime_byte_callers: [runtime_byte_functions.len]DeclId = @splat(.none),
     /// `mem.Drain`, which takes a vector's elements out of its storage.
@@ -364,9 +364,10 @@ pub const RawAccesses = struct {
 
     /// The free functions of `mem` that `runtime_byte_callers` holds.
     const runtime_byte_functions = [_][]const u8{
-        "read_fd",        "write_slice_fd",  "read_fd_at",         "write_slice_fd_at",
-        "_random_bytes",  "_open_parent_fd", "_open_at_fd",        "_mode_at_fd",
-        "_publish_at_fd", "_unlink_at_fd",   "parse_float64_bits", "parse_float32_bits",
+        "read_fd",            "write_slice_fd",     "read_fd_at",     "write_slice_fd_at",
+        "read_socket",        "write_slice_socket", "_random_bytes",  "_open_parent_fd",
+        "_open_at_fd",        "_mode_at_fd",        "_publish_at_fd", "_unlink_at_fd",
+        "parse_float64_bits", "parse_float32_bits",
     };
 
     /// Identify private storage declarations before checking their generic signatures.

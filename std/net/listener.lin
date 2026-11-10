@@ -2,12 +2,12 @@ import std.io
 import std.mem
 import std.testing
 
-// The runtime listens on a packed address, accepts a connection, and reports
-// a socket's packed local address. Each returns its answer, or a negated
-// errno.
+// The runtime listens on a packed address, accepts a connection by a deadline
+// on the monotonic clock (0 waits forever), and reports a socket's packed local
+// address. Each returns its answer, or a negated errno.
 extern fn linea_net_listen(address: UInt64, backlog: UInt64) -> Int64
 
-extern fn linea_net_accept(listener: Int32) -> Int64
+extern fn linea_net_accept(listener: Int32, deadline_ns: UInt64) -> Int64
 
 extern fn linea_net_local_address(fd: Int32) -> Int64
 
@@ -90,9 +90,9 @@ pub trait Acceptor: io.Close {
 }
 
 impl Acceptor for Listener {
-    // Wait for the next connection. The socket blocks until one arrives.
+    // Wait for the next connection, with no bound on how long.
     fn accept(inout self: Self) -> Result[Accepted, NetError] {
-        let answer = linea_net_accept(self.fd)
+        let answer = linea_net_accept(self.fd, deadline_ns: 0)
         if answer < 0 {
             return .Err(failure(.Accept, answer))
         }
