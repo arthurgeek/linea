@@ -1612,12 +1612,15 @@ holds every element it held, in an order nobody promises.
 
 ## Callbacks and searches that keep their state
 
-Some operations come with an `_inout` twin, such as `fold_inout`, which borrows
-the callback instead of taking it, so that whatever the callback kept is still
-yours afterwards. A closure that lends one of your variables, `[inout
+An operation that walks straight away, such as `fold`, `find` or `any`, borrows
+its callback instead of taking it. A closure written in the call lives until
+the end of that statement. A closure you bound to a `var` is lent with `&`, as
+any value a call may change is, so whatever the closure kept is still yours
+afterwards. A closure that lends one of your variables, `[inout
 count]` ([Calling things](02-calling-things.md#a-closure-that-changes-a-value-of-yours)),
-usually says the same thing more simply; `fold_inout` is for a closure that owns
-its state. `find_counted` is `find` for an iterator you keep: it answers a
+usually says the same thing more simply; lending the closure is for one that
+owns its state. In Rust the same call is written `fold(0, &mut adding)`.
+`find_counted` is `find` for an iterator you keep: it answers a
 `FindReport` holding the `found` item and how many were `inspected`, and the
 iterator carries on from there.
 
@@ -1646,13 +1649,13 @@ fn main() -> Result[UInt8, io.IoError] {
     io.println("first: {first.found.is_some()} after {first.inspected}")?
     io.println("second: {second.found.is_some()} after {second.inspected}")?
     io.println("third: {third.found.is_some()} after {third.inspected}")?
-    // `fold_inout` borrows its callback, so what the closure counted is still
-    // yours once the fold is done.
+    // `fold` borrows its callback. `&adding` lends the closure, so what it
+    // counted is still yours once the fold is done.
     var adding = inout [sink calls = UInt64(0)] |sink sum: UInt64, sink cost: UInt64| {
         calls += 1
         sum + cost
     }
-    let total = order.as_slice().map(|sink line| line.cents * line.quantity).fold_inout(0, &adding)
+    let total = order.as_slice().map(|sink line| line.cents * line.quantity).fold(0, &adding)
     let { calls } = adding.into_captures()
     io.println("{total} cents from {calls} lines")?
     .Ok(0)
@@ -1670,8 +1673,17 @@ third: false after 1
 kept in a variable instead. Each `find_counted` call stops at the first line over a hundred cents, and the
 next call starts after it: coffee, then croissant, then jam, which is under the
 limit, so the third search finds nothing after inspecting the one line left.
-`adding` owns `calls`, `fold_inout` calls it once for each line, and
-`into_captures()` hands the count back.
+`adding` owns `calls`, `fold` calls it once for each line, and
+`into_captures()` hands the count back. Leaving out the `&` is refused, so a
+closure you kept is never changed without the call saying so:
+
+<!-- guide: edit 31 let total = order.as_slice().map(|sink line| line.cents * line.quantity).fold(0, &adding) -->
+```linea
+    let total = order.as_slice().map(|sink line| line.cents * line.quantity).fold(0, adding)
+```
+
+```
+```
 
 ## Emptying a `Vec`: `pop` and `finish`
 
@@ -2104,7 +2116,7 @@ without a word; here the held payment has to go somewhere.
 | a vector in ascending order | `&v.sort()`, for `Ordered` elements |
 | a vector in an order you choose | `&v.sort_by(\|left, right\| …)`, true when `left` comes first |
 | a search that continues, with a count of the items inspected | `&it.find_counted(\|x\| …)` on an iterator you keep |
-| a fold or search whose callback keeps its state | `fold_inout`, `find_inout`, `find_counted_inout` |
+| a fold or search whose callback keeps its state | bind the closure with `var` and lend it: `xs.fold(0, &adding)` |
 | a chain across several lines | one step per line, each opening with `.` |
 | each item with its position | `for (i, x) in xs.enumerate()` |
 | the items of two sequences, paired | `for (a, b) in xs.zip(ys)`, with Discardable items in `xs` |

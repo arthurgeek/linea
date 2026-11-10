@@ -1667,6 +1667,15 @@ const Builder = struct {
 
             if (normalized.argumentConvention(self.typing, i) == .sink) {
                 try self.expr(a, .consuming);
+            } else if (self.typing.lentTemporary(self.ast.withoutGroups(a))) {
+                // The temporary an `inout` parameter is lent owns what the
+                // argument yields, since the callee may write it: a place a
+                // branch of the argument names is moved into it, not
+                // observed. Nothing names the temporary after the call, so
+                // it is then yielded where nothing can take it, and a value
+                // that must be settled is a leak there.
+                try self.expr(a, .consuming);
+                try self.yielded(a, .reading);
             } else {
                 try self.expr(a, .reading);
                 try self.hold(a);

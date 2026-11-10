@@ -47,7 +47,7 @@ multiline_strings/a_multiline_literal_joins_its_lines.lin
 # A postfix call marking its receiver `&` written out lends the receiver.
 iter/lent_walks/a_break_in_an_inner_loop_leaves_only_that_loop.lin
 # A capture recovery the file alone cannot settle declines the rename.
-iter/operations/a_callback_owning_a_resource_is_lent_to_the_inout_form.lin
+iter/operations/a_callback_owning_a_resource_is_lent_and_recovered.lin
 # An iterator's item Discardable by the function's bounds owes nothing to a walk.
 iter/operations/a_generic_iterator_offers_the_operations.lin
 # A binding that schedules its own release, written out as the binding and the defer it means.

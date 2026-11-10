@@ -166,6 +166,24 @@ pub fn embeddedMarkdown(gpa: std.mem.Allocator, text: []const u8, call: []const 
     return found.toOwnedSlice(gpa) catch @panic("out of memory");
 }
 
+/// The names in `text` that end in `suffix`, in the order they are written,
+/// each once per place it is written. A name is a run of letters, digits and
+/// underscores, so `fold_inout` ends in `_inout` and `for_inout_walk` and the
+/// keyword `inout` do not.
+pub fn namesEndingIn(gpa: std.mem.Allocator, text: []const u8, suffix: []const u8) []const []const u8 {
+    var found: std.ArrayList([]const u8) = .empty;
+    var at: usize = 0;
+    while (std.mem.indexOfPos(u8, text, at, suffix)) |start| {
+        at = start + suffix.len;
+        if (at < text.len and partOfAName(text[at])) continue;
+        var begin = start;
+        while (begin > 0 and partOfAName(text[begin - 1])) begin -= 1;
+        if (begin == start) continue;
+        found.append(gpa, text[begin..at]) catch @panic("out of memory");
+    }
+    return found.toOwnedSlice(gpa) catch @panic("out of memory");
+}
+
 /// Whether a lane that reads Markdown may read `path`: the guide, the
 /// decision index, the semantics and the corpus, which CI reruns the reading
 /// lanes for when they change.

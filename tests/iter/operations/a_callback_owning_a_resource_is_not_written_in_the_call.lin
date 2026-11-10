@@ -1,0 +1,16 @@
+import std.mem
+
+// A closure written in the call ends with the statement, and nothing releases
+// what it owns. This predicate owns a vector that must be released, so it is
+// bound to a variable, lent with `&`, and taken apart afterwards.
+fn main() -> UInt8 {
+    let seen = mem.Vec.filled(2, UInt64(7)) else |_| {
+        return 1
+    }
+    let found = (UInt64(1)..10).any([sink seen] |sink weight: UInt64| weight > seen.length())
+    if found {
+        0
+    } else {
+        3
+    }
+}

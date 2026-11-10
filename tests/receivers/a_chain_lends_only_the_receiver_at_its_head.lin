@@ -1,6 +1,6 @@
 // `&` in a chain marks the first call. In `&list.first().push(1)` it lends
-// `list` to `first`, which only reads it, and `push` would change the
-// value `first` returned, which is no place to lend.
+// `list` to `first`, which only reads it, so the marker is refused. `push`
+// changes the value `first` returned, a temporary that takes no marker.
 struct Counter {
     count: UInt8,
 }
@@ -25,5 +25,6 @@ fn main() -> UInt8 {
     let a = &list.first().push(1)
     let b = list.first().push(1)
     let c = &list.take().push(1)
-    a + b + c
+    let d = list.take().push(1)
+    a + b + c + d
 }

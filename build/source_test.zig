@@ -800,6 +800,50 @@ test "the build reads no Markdown that CI lets a lane skip" {
     try testing.expectEqual(@as(usize, 0), ungated);
 }
 
+test "a name ending in a suffix is found whole, and a longer name or the bare word is not" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const text =
+        \\fn fold_inout[F: inout fn()](inout combine: F) {}
+        \\for inout item in items { &values.for_each_inout(&visit) }
+        \\let for_inout_walk = _inout
+        \\// `upsert_inout` borrows both callbacks.
+        \\
+    ;
+    const found = source.namesEndingIn(arena.allocator(), text, "_inout");
+    const want = [_][]const u8{ "fold_inout", "for_each_inout", "upsert_inout" };
+    try testing.expectEqual(want.len, found.len);
+    for (want, found) |w, f| try testing.expectEqualStrings(w, f);
+}
+
+test "the library and the examples name no operation for the convention of its callback" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const io = testing.io;
+    var named: usize = 0;
+
+    // An `inout` parameter takes a closure written in the call and a place
+    // lent with `&`, so one operation serves both and no `_inout` form of it
+    // is declared, called or described.
+    for ([_][]const u8{ "std", "examples" }) |tree| {
+        var root = try std.Io.Dir.cwd().openDir(io, tree, .{ .iterate = true });
+        defer root.close(io);
+        var walker = try root.walk(gpa);
+        defer walker.deinit();
+        while (try walker.next(io)) |entry| {
+            if (entry.kind != .file) continue;
+            if (!std.mem.endsWith(u8, entry.basename, ".lin") and !std.mem.endsWith(u8, entry.basename, ".md")) continue;
+            const text = try root.readFileAlloc(io, entry.path, gpa, .limited(1 << 24));
+            for (source.namesEndingIn(gpa, text, "_inout")) |name| {
+                std.debug.print("{s}/{s} names `{s}`; declare one operation that takes its callback `inout`\n", .{ tree, entry.path, name });
+                named += 1;
+            }
+        }
+    }
+    try testing.expectEqual(@as(usize, 0), named);
+}
+
 test "explicit release modes preserve their requested safety and size policy" {
     const Case = struct {
         release: std.Build.ReleaseMode,

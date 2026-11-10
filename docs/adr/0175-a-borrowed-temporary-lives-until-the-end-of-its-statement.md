@@ -1,6 +1,7 @@
 # 175. A borrowed temporary lives until the end of its statement
 
-Status: Accepted — 2026-09-26
+Status: Accepted — 2026-09-26. Extended by
+[0267](0267-an-inout-parameter-takes-a-temporary.md).
 
 Replaces the interpolation clause "interpolated values are held by copy" of
 the original text-writers design

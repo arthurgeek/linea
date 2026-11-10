@@ -1,0 +1,26 @@
+// A closure bound to a variable is a place, so it is lent with `&` and keeps
+// what each call changed: `counting` counts across both walks, and `main`
+// reads the count out of it afterwards.
+import std.io
+
+use io.IoError
+use io.println
+
+fn visit_each[F: inout fn(value: UInt64)](count: UInt64, inout visit: F) {
+    var next: UInt64 = 0
+    while next < count {
+        &visit(next)
+        next += 1
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    var counting = inout [sink seen = UInt64(0)] |_value: UInt64| {
+        seen += 1
+    }
+    visit_each(2, &counting)
+    visit_each(3, &counting)
+    let { seen } = counting.into_captures()
+    println("seen {seen}")?
+    return .Ok(0)
+}

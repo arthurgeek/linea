@@ -1557,6 +1557,8 @@ const Analysis = struct {
             .labels = labels,
             .notes = try self.sink.arena.dupe([]const u8, &.{if (leaves)
                 "return a value that does not borrow it, or borrow a parameter instead"
+            else if (self.typing.lentTemporary(temporary))
+                "bind the value with `var` first, and lend the binding with `&`"
             else
                 "bind the value with `let` first, and borrow the binding"}),
         });

@@ -1,9 +1,9 @@
 import std.mem
 
-// `from_fn` consumes its initializer, so the first vector moves `square` and
-// the second cannot pass it again.
+// `from_fn` is lent its initializer and may change it. `square` is a variable of
+// `main`'s, so it is passed as `&square`.
 fn main() -> UInt8 {
-    let square = |index: UInt64| index * index
+    var square = |index: UInt64| index * index
     let small = mem.Vec.from_fn(2, square) else |_| {
         return 1
     }

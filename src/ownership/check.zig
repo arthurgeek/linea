@@ -1712,14 +1712,21 @@ const Checker = struct {
     /// observed: nothing after this can name it to settle it.
     fn reportUnbound(self: *Checker, at: ExprId) std.mem.Allocator.Error!void {
         const arena = self.sink.arena;
+        const lent = self.typing.lentTemporary(self.ast.withoutGroups(at));
         const labels = try arena.alloc(Label, 1);
         labels[0] = .{
             .file = self.ast.fileOfExpr(at),
             .span = self.ast.exprSpan(at),
-            .message = "nothing can take what this yields",
+            .message = if (lent)
+                "this temporary is lent for the call and ends with its statement, where nothing settles it"
+            else
+                "nothing can take what this yields",
         };
         const notes = try arena.alloc([]const u8, 1);
-        notes[0] = "bind it with `let`, or give it to something that takes it";
+        notes[0] = if (lent)
+            "bind it with `var`, lend it with `&`, and settle it after the call"
+        else
+            "bind it with `let`, or give it to something that takes it";
         try self.emit(.{
             .severity = .err,
             .code = .o_leak,

@@ -1,0 +1,16 @@
+error[O-Temporary]: a returned value cannot borrow a temporary
+  --> tests/temporaries/a_value_borrowing_an_inout_temporary_cannot_outlive_its_statement.lin:22:13
+   |
+22 |     advance(.{ count = 1 })
+   |             ^^^^^^^^^^^^^^ this temporary ends with its statement, before the caller reads the result
+   |
+   = help: return a value that does not borrow it, or borrow a parameter instead
+error[O-Temporary]: a value borrowing a temporary is used after the temporary's statement
+  --> tests/temporaries/a_value_borrowing_an_inout_temporary_cannot_outlive_its_statement.lin:26:24
+   |
+26 |     let kept = advance(.{ count = 41 })
+   |                        ^^^^^^^^^^^^^^^ this temporary ends with its statement
+27 |     UInt8(*kept.value + within() + *leaving().value)
+   |           ----------- and a value borrowing it is used here
+   |
+   = help: bind the value with `var` first, and lend the binding with `&`

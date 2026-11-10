@@ -1,0 +1,12 @@
+import std.io
+
+// `any` is lent its predicate and may change it. `any_of` only reads `heavy`,
+// so it has nothing to lend: it takes the callback `inout` to lend it on.
+fn any_of[F: fn(sink weight: UInt64) -> Bool](stop: UInt64, heavy: F) -> Bool {
+    (UInt64(1)..stop).any(&heavy)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{any_of(10, |sink weight| weight > 4)}")?
+    .Ok(0)
+}

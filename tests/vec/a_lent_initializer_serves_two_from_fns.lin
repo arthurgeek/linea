@@ -1,0 +1,18 @@
+import std.mem
+
+// `from_fn` is lent its initializer, so `&square` passes `square` to the first call and
+// `square` is still there for the second.
+fn main() -> UInt8 {
+    var square = |index: UInt64| index * index
+    let small = mem.Vec.from_fn(2, &square) else |_| {
+        return 1
+    }
+    let large = mem.Vec.from_fn(4, &square) else |_| {
+        small.release()
+        return 1
+    }
+    let total = small.length() + large.length()
+    small.release()
+    large.release()
+    UInt8(total)
+}
