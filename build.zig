@@ -1700,6 +1700,10 @@ pub fn build(b: *std.Build) void {
         "-Dpoll=linea_test_poll",
         "-Dnanosleep=linea_test_nanosleep",
         "-Dlinea_clock_read=linea_test_clock_read",
+        // glibc's fortified wrappers would call the real poll and read past
+        // the renames above; `unfortified.h` turns them off.
+        "-include",
+        b.pathFromRoot("runtime/unfortified.h"),
     }) catch @panic("OOM");
     inline for (.{ false, true }) |faults| {
         native.add(native_net_step, if (faults) "native-net-fault-tests" else "native-net-tests", &.{
