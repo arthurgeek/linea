@@ -1,0 +1,27 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+enum Waited {
+    Answer(Chan[Recv[UInt64, End], ()]),
+}
+
+// A wait set may hold an endpoint, so a call that waits on it could wait on
+// another task while the calls queued behind it wait for the owning task. A
+// set keeps its values in bytes its type does not describe, so it is neither
+// `Owned` nor `Isolated`, and is no owning task's state.
+fn main() -> UInt8 {
+    let body = sink [] |sink me: Chan[Send[UInt64, End]]| {
+        me.send(1).close()
+    }
+    let handle = task.start(body).unwrap().detach()
+    var waiting: task.WaitSet[Waited] = task.WaitSet.open()
+    let _key = &waiting.received(handle, |sink ready| Waited.Answer(ready))
+    let owner = task.own(waiting).unwrap()
+    owner.close().close().finish().unwrap()
+    0
+}

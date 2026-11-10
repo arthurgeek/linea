@@ -1,0 +1,111 @@
+// Ask two price services for a quote and take whichever answers first, or
+// give up after a deadline, as JavaScript's `Promise.race` races promises. A
+// wait set waits on both services and a timer at once. Unlike a promise that
+// loses a race, a service that answers late is not abandoned: its endpoint is
+// taken back from the set by its key, and its quote is still received, so
+// every task is joined and nothing is left running.
+import std.io
+import std.session
+import std.task
+import std.testing
+import std.time
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+// A service's reply: its quote in cents.
+alias Quote = Chan[Recv[UInt64, End], ()]
+
+enum Raced {
+    Quoted(Quote, Str),
+    TooLate,
+}
+
+// The first answer, and the endpoint of the service that has not answered.
+enum Outcome {
+    Won(Str, UInt64, Quote),
+    NoQuote(Quote, Quote),
+}
+
+// Start a service that quotes `cents` after `delay`.
+fn service(cents: UInt64, delay: time.Duration) -> Quote {
+    let body = sink [sink cents, sink delay = copy(delay)] |sink me: Chan[Send[UInt64, End]]| {
+        time.sleep(delay)
+        me.send(cents).close()
+    }
+    task.start(body).unwrap().detach()
+}
+
+// Race two services against `deadline`.
+fn race(sink first: Quote, sink second: Quote, deadline: time.Duration) -> Outcome {
+    var waiting: task.WaitSet[Raced] = task.WaitSet.open()
+    let a = &waiting.received(first, |sink ready| Raced.Quoted(ready, "north"))
+    let b = &waiting.received(second, |sink ready| Raced.Quoted(ready, "south"))
+    let timer = &waiting.after(deadline, (), |sink _expired| Raced.TooLate)
+    let outcome = match &waiting.next() {
+        Some(Quoted(winner, name)) => {
+            let (cents, done) = winner.recv()
+            done.close()
+            let _unfired = &waiting.take(timer)
+            // The loser is whichever key still answers.
+            let loser = match &waiting.take(a) {
+                Some(quote) => quote,
+                None => &waiting.take(b).unwrap(),
+            }
+            Outcome.Won(name, cents, loser)
+        },
+        Some(TooLate) => {
+            let north = &waiting.take(a).unwrap()
+            let south = &waiting.take(b).unwrap()
+            Outcome.NoQuote(north, south)
+        },
+        None => panic("three sources were registered"),
+    }
+    waiting.close().finish().unwrap()
+    outcome
+}
+
+// Receive a late quote, so its service finishes.
+fn collect(sink late: Quote) -> UInt64 {
+    let (cents, done) = late.recv()
+    done.close()
+    cents
+}
+
+test fn the_faster_service_wins() {
+    let outcome = race(service(500, time.Duration.from_milliseconds(200)), service(450, time.Duration.from_milliseconds(0)), time.Duration.from_seconds(60))
+    let (winner, late) = match outcome {
+        Won(name, cents, loser) => (name == "south" && cents == 450, collect(loser)),
+        NoQuote(a, b) => (false, collect(a) + collect(b)),
+    }
+    testing.assert(winner, "the slower service won")?
+    testing.assert_eq(late, UInt64(500), "the late quote was lost")?
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    match race(service(1250, time.Duration.from_milliseconds(300)), service(1190, time.Duration.from_milliseconds(10)), time.Duration.from_seconds(5)) {
+        Won(name, cents, loser) => {
+            let later = collect(loser)
+            io.println("{name} answered first: {cents} cents")?
+            io.println("the other service answered later: {later} cents")?
+        },
+        NoQuote(a, b) => {
+            let (north, south) = (collect(a), collect(b))
+            io.println("no quote in time; later: {north} and {south} cents")?
+        },
+    }
+    match race(service(990, time.Duration.from_milliseconds(400)), service(1010, time.Duration.from_milliseconds(500)), time.Duration.from_milliseconds(50)) {
+        Won(name, cents, loser) => {
+            let later = collect(loser)
+            io.println("{name} answered first: {cents} cents")?
+            io.println("the other service answered later: {later} cents")?
+        },
+        NoQuote(a, b) => {
+            let (north, south) = (collect(a), collect(b))
+            io.println("no quote within 50 ms; they answered later: {north} and {south} cents")?
+        },
+    }
+    .Ok(0)
+}

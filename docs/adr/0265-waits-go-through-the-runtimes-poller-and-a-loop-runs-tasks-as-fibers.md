@@ -8,9 +8,11 @@ the simulation of §12 for one task. In it §1's in-place and simulated backends
 each have one party, the calling thread, so §2's guarantees hold because the
 thread that attempts an operation is the one that answers it, without a state
 word. Of §12, printing a failing test's seed is not built yet: a test reads
-`sim.fingerprint()` and names its own seed. Of phase 2, the park routine of
-§3 on threads is built: every condition-variable wait of `runtime/task.c`
-goes through it. Nothing else is built.
+`sim.fingerprint()` and names its own seed. Phase 2 is built: the park routine
+of §3 on threads, which every condition-variable wait of `runtime/task.c` goes
+through; the wait set of §4 with its keys and registration protocol; signals
+as a source (§4.5); and §5's three properties in the semantics document.
+Nothing else is built.
 Once built, it would change these sentences of existing records:
 
 - [0154](0154-sockets-and-http-follow-go.md),
@@ -366,8 +368,8 @@ access, and a fiber is never runnable before its context is saved.
 ### 4. A task waits on several sources through a linear wait set
 
 `task.WaitSet[M]` is a linear value owned by one task. Each registration moves
-a linear value into the set with a function that wraps it back into the
-program's own enum `M` once it is ready, and answers a key:
+a value into the set with a function that wraps it into the program's own
+type `M` once it is ready, and answers a key:
 
 ```linea
 enum Waited {
@@ -379,11 +381,11 @@ enum Waited {
 // other is taken back by its key, so nothing registered is lost.
 fn ask_within(sink peer: session.Chan[Recv[text.String, End], ()], limit: time.Duration) -> Asked {
     var waiting = task.WaitSet[Waited].open()
-    let answer = &waiting.received(peer, |ready| Waited.Answer(ready))
-    let timer = &waiting.after(limit, Waited.Late)
+    let answer = &waiting.received(peer, |sink ready| Waited.Answer(ready))
+    let timer = &waiting.after(limit, (), |sink _late| Waited.Late)
     let asked = match &waiting.next() {
         Some(Answer(peer)) => {
-            let _late = &waiting.take(timer)   // the timer's message, unfired
+            let _unfired = &waiting.take(timer)   // the timer's message, `()`, unfired
             let (text, peer) = peer.recv()
             peer.close()
             Asked.Answered(text)
@@ -391,35 +393,59 @@ fn ask_within(sink peer: session.Chan[Recv[text.String, End], ()], limit: time.D
         Some(Late) => Asked.TimedOut(&waiting.take(answer).unwrap()),  // the endpoint, still at Recv
         None => panic("two sources were registered"),
     }
-    waiting.close()   // empty: both keys were taken
+    waiting.close().finish().unwrap()   // empty: both keys were taken
     asked
 }
 ```
 
-The sources:
+The sources, each a value and a wrap:
 
 - `readable(holder, wrap)`, `writable(holder, wrap)`: a value whose type
   implements `io.Pollable` (a listener, a connection, a buffered reader over
-  one), ready when its descriptor is;
-- `received(chan, wrap)`: an endpoint whose next operation is `recv` or
-  `offer`, ready when the peer's `send` or `choose` is waiting. Implementation
-  heads ([0252](0252-a-types-own-implementation-may-write-a-parameter-inside-an-argument.md))
-  admit only those states, so registering an endpoint at `Send` is
-  [T-UnknownOperation];
-- `returned(handle, wrap)`: a handle at `End`, ready when the body has
-  returned;
-- `after(duration, message)`: a timer;
-- `signal(sig, wrap)`: an operating-system signal (§4.5).
+  one), ready when its descriptor is. Watching a descriptor takes the set's
+  kernel queue, which the system may refuse to make or extend, so each
+  answers `Result[Registered[T], Unregistered[T]]` and a refusal hands the
+  value back beside its `io.IoError`;
+- `received(chan, wrap)`: an endpoint whose next operation is `recv`, ready
+  when the peer's `send` is waiting; `offered(chan, wrap)`: one whose next
+  operation is `offer`, ready when the peer's `choose` is. Each parameter's
+  type is the endpoint at that state (`Chan[Recv[T, N], H]`,
+  `Chan[Offer[L, R], H]`), so an endpoint at `Send`, at `Choose`, at `End` or
+  at a named protocol not yet entered is [T-Mismatch]. A named protocol is
+  registered after `enter`, since its own type says nothing of its first
+  step. Two names are needed because one type's members are unique per name
+  whatever their heads, and a trait over both states would let a program's
+  own type claim to be one;
+- `returned(handle, wrap)`: a task's handle at `End`, `Chan[End, (F, A)]`,
+  ready when the body has returned. Only a handle carries `(F, A)`, so a
+  task's own end at `End`, whose close never waits, is [T-Mismatch];
+- `after(duration, message, wrap)`: a timer, which delivers `wrap(message)`
+  once `duration` has passed on the clock of the task's loop. Taking its key
+  back answers `message` in its own type. A set's `M` that holds an endpoint
+  is linear, and a timer whose message were an `M` could not be dropped once
+  taken, so a timer's message is a value of its own, `()` where it carries
+  nothing;
+- `signal(sig, wrap)` and `signal_with(share, wrap)`: an operating-system
+  signal (§4.5).
 
-`next` waits until a source is ready, delivers exactly one, and answers it
-wrapped. `take(key)` withdraws one registration and answers its value in its
+The wrap is a `fn(sink ready: T) -> M` that is also `Release`: the set keeps
+it, erased, until the value is delivered, and releases it when the value is
+taken back or closed instead. Its parameter is `sink`, since the wrap moves
+the value into the message.
+
+`next` waits until a source is ready, delivers exactly one, the one signalled
+earliest, and answers it wrapped. `take(key)` withdraws one registration and answers its value in its
 **own type**: taking the answer key gives back the endpoint and taking a
 timer's key gives back its message. `take_if_registered(key)` does the same
 only while the source has not been signalled, and answers `.None` once it has,
 so a program can withdraw a source exactly when it is not ready (§6 evicts idle
-connections by it). `close` answers a `Vec[M]` of every
-registration still held, wrapped, for a set whose keys the program did not
-keep. An empty set answers `.None` from `next` without waiting.
+connections by it). Before either answers for a timer, a descriptor or a
+signal, the set observes what is ready without waiting (the timers past their
+deadline, what its kernel queue has to report), so a timer that has expired
+or a descriptor the kernel already reports counts as signalled whether or not
+`next` has looked. `close` answers a `Vec[M]` of every registration still
+held, wrapped, in the order of their slots, for a set whose keys the program
+did not keep. An empty set answers `.None` from `next` without waiting.
 
 **A key is a non-owning identifier, validated against the set.**
 `task.Registered[T]` is copyable and `Owned` and holds three numbers: the set's
@@ -449,15 +475,25 @@ while any key was held: a program could not keep a timer's key across the
 method answers what the set should wait for:
 
 ```linea
-pub enum Readiness { Now, Wait(io.Source) }
-pub trait Pollable { fn readiness(self: Self, interest: Interest) -> Readiness }
+pub enum Readiness[T] { Now, Wait(io.Source[T]) }
+pub trait Pollable { fn readiness(self: Self, interest: Interest) -> Readiness[Self] where borrows(self) }
 ```
 
 `Now` covers what user space already knows: a buffered reader holding bytes, a
 value whose next read answers end or an error. `Wait` hands the set an opaque
 `io.Source` the runtime makes from a descriptor, which the set arms on
-registration and disarms before the value leaves the set by delivery, `take`
-or `close`. A value with an operation in progress cannot be registered: the
+registration, through a duplicate of its own (§4.2), and disarms before the
+value leaves the set by delivery, `take` or `close`. A `Source[T]` holds a
+`borrow T` of the value it came from, and `readiness` declares
+`where borrows(self)`, so a source, though copyable, borrows its value: a
+program that keeps one, even inside a value of its own that it registers,
+cannot close or move that value while the copy lives ([O-Borrow]), and a set
+never watches a descriptor nothing owns. A value that answers another's
+readiness, as a buffered reader answers its connection's, answers
+`inner.readiness(interest).within(self)`, which borrows the holder and
+carries what the inner readiness borrowed. The borrow is the rule that
+refuses the program; the compiler needs nothing of its own for it, since a
+`borrow` field and a `borrows` clause already mean this. A value with an operation in progress cannot be registered: the
 operation's task is parked in it with the value lent.
 
 #### 4.1 Two readiness contracts
@@ -482,17 +518,35 @@ and each successful swap is the transition's linearization point.
 
 | From | To | By |
 | --- | --- | --- |
-| — | registered | `received`, `returned`, `readable`, `writable`, `after`, `signal`: the value's bytes move into the set, then the source's mark is published, then the source is checked once (below) |
-| registered | signalled | the source: a peer entering `send` or `choose` (under the session's lock, after filling the slot), a body returning (under the task's lock), a descriptor event of the current generation, a timer's expiry, a signal's count passing the one the registration recorded (§4.5); the set's user event (`EVFILT_USER`, an `eventfd` write) is posted after the swap |
+| — | registered | `received`, `offered`, `returned`, `readable`, `writable`, `after`, `signal`, `signal_with`: the value's bytes move into the set, then the source's mark is published, then the source is checked once (below) |
+| registered | signalled | the source: a peer entering `send` or `choose` (under the session's lock, after filling the slot), a body returning (under the task's lock), a descriptor event of the current generation, a timer's expiry, a signal's count passing the one the registration recorded (§4.5); after the swap the registration is queued on the set under the set's lock and the owner is woken: unparked, or through the set's user event (`EVFILT_USER`, an `eventfd` write) once the set has a kernel queue (§3) |
 | signalled | delivered | `next`: it swaps the earliest-signalled registration, then clears the mark and moves the value out wrapped; one `next` delivers one value |
 | registered or signalled | withdrawn | `take` or `close`: the swap, then the mark is cleared and the value moved out |
 | registered | withdrawn | `take_if_registered`: the swap fails, and answers `.None`, if the source was signalled first |
 
-- **No lost wakeup.** Registration publishes its mark before it checks the
-  source (the slot full, the body returned, `readiness` answering `Now`, the timer
-  past), and a source posts after it fills the slot or returns and then reads
-  the mark. Either the source sees the mark and swaps, or the registration's
-  check sees the source and swaps; both may try, and one swap fails.
+- **Where the state lives.** The runtime keeps each registration's state
+  word, slot and generation (`runtime/waitset.c`); the value stays in bytes
+  the `WaitSet` owns, beside the erased wrap, and moves only after the
+  runtime's swap has said which call takes it. A session's record holds the
+  mark for each of its two ends, under the record's lock.
+- **No lost wakeup.** Registration publishes its mark and checks the source
+  (the slot full, the body returned) under the session's lock, and a peer
+  fills the slot, or a body marks itself returned, and reads the mark under
+  the same lock. Either the source sees the mark and swaps, or the
+  registration's check sees the source and swaps. A value whose `readiness`
+  answers `Now` is signalled as it is registered; a timer and a descriptor
+  are the owner's own to observe. The owner then checks the queue of
+  signalled registrations and begins to wait under the set's lock, which a
+  source takes to queue one, so a wake is never between the two.
+- **Who may signal after a withdrawal.** `take` and `close` swap first and
+  disarm second: the mark is cleared under the session's lock, the
+  registration leaves the router's list under the router's lock, the
+  descriptor leaves the kernel queue, the timer leaves the heap. A source
+  that had swapped before the withdrawal has queued the registration by the
+  time the disarm returns, since it queues under the lock the disarm takes;
+  the withdrawal then removes it from the queue. Only after the disarm does
+  the slot's generation move on. The locks are taken in one order: a
+  session's, then the router's, then a set's.
 - **A pending peer.** If `take` or `close` withdraws an endpoint whose peer is
   waiting, the endpoint comes back at its `Recv` or `Offer` state with the
   peer still waiting, and the owner's next `recv` completes at once. No
@@ -508,6 +562,10 @@ and each successful swap is the transition's linearization point.
   its previous context still active (§8).
 - **Concurrent wakeups.** Several sources may be signalled before one `next`;
   each `next` delivers the earliest and leaves the others signalled.
+- **Ties.** Inside a simulation, and wherever the set observes without
+  waiting, descriptors that are ready are signalled before timers that have
+  expired, so of a readiness and an expiry at one instant the readiness is
+  delivered first, as §1's tie rules answer a read.
 - **Timers.** A timer that expires together with another source is signalled
   like any source; `next` picks one winner by its swap, and the loser stays
   registered or signalled. A timer's message moves out only when it is
@@ -516,17 +574,44 @@ and each successful swap is the transition's linearization point.
   and the child's end is settled. It does not finalize the handle: `close`
   still joins the thread or retires the fiber and then releases the captures,
   the four steps of 0250 §2, but it waits on no task.
-- **One registration per descriptor.** The registered value is moved into the
-  set, so a descriptor is in at most one set, once, readable or writable. A
-  connection that needs both directions at once is a later decision.
+- **A set belongs to its loop.** A set is used on the loop it was opened on,
+  and an operation on it from another traps, as a set returned from a
+  simulation's `run` and closed outside it does. A signal's share belongs to
+  the loop it was taken on too: a simulation's share holds none of the
+  process's disposition, so registering it in a set of another loop traps
+  rather than leave a registration that keeps no handler installed. Inside a simulation a timer runs
+  on the virtual clock, a descriptor is the simulation's, and a signal is
+  delivered by `world.deliver`; an endpoint or a handle cannot be registered
+  there until tasks inside a simulation are fibers (§12), which traps with
+  `linea: a simulation runs one task until fibers`.
+- **A registration watches a descriptor of its own.** The set duplicates the
+  descriptor a value's `Source` names when the value is registered, arms the
+  duplicate, and disarms and closes it when the registration leaves. A kernel
+  queue keys a watch by descriptor number, and one descriptor can be
+  registered more than once: a copied `Source` in two registrations, or a
+  connection readable in one and writable in another. On one number `epoll`
+  refuses the second (`EEXIST`) where `kqueue` replaces the first, and taking
+  either back would remove the other's watch, losing its readiness. Through
+  its own duplicate each registration is a watch of its own on both systems.
+  The `Source` borrows its value (above), so the descriptor the duplicate was
+  made from stays open, and owned, while the registration lives. Each
+  registration costs a second descriptor, which phase 3's idle connections
+  count against the process's limit; a refused duplicate answers
+  `Unregistered`.
 
 A set carries the dependencies of what it holds exactly as a `mem.Vec[M]` of
 the same values does, so a set holding a handle whose body read the parent's
 values keeps those values reserved until the handle leaves the set and is
 closed. A set holding such a value is not `Owned`. `WaitSet[M]` exposes `M` to
-the containment tables, so a set holding an endpoint or a handle is not
-`Isolated` ([0261](0261-an-owning-task-holds-nothing-that-waits.md)): it cannot be an owning task's state or be captured by
-a job.
+no table: its values are held behind erased callables (`mem.Closure`), whose
+type says nothing of what they hold. So a set is never `Owned`, `Shareable` or
+`Isolated`, whatever `M` is, by the containment tables' existing rule for
+`mem.Closure` and for raw storage, with no rule of its own: it cannot be an
+owning task's state ([0261](0261-an-owning-task-holds-nothing-that-waits.md)), be captured by a job, or be sent over a
+session. Sending would also be unsound: a registration's value need not appear
+in `M` (a wrap may close a handle and answer a number), so a set's type alone
+cannot say it carries a borrow. A set moves to another task only inside a body
+`start` makes a child of, which is delegation.
 
 #### 4.3 What `close` answers
 
@@ -564,7 +649,7 @@ owner, were accepted too (`tests/tasks/an_owning_task_holds_nothing_that_waits`)
 containment table over the edges `Shareable` follows and seeded by
 `session.Chan` through its declaration: `task.own`, `Owner` and `Client` take
 `S: Owned + Isolated`, and `call` takes `F: Owned + Isolated + Release`. A wait
-set holding an endpoint or a handle is not `Isolated` (§4.2), so the rule covers
+set is never `Isolated`, whatever it holds (§4.2), so the rule covers
 it with no addition here. Phase 2 begins once 0261 has landed.
 
 #### 4.5 Operating-system signals as a source
@@ -636,15 +721,18 @@ let stop = &waiting.signal(.Terminate, |share| Woke.Stop(share))?   // refused w
   may ignore `SIGINT`), and a Linea program cannot override that: it learns the
   signal is ignored and carries on without it.
 - **A host's handler.** When the saved action is a handler a host installed,
-  the router calls it after counting, with the same arguments, so an embedding
-  host still sees its signal.
+  the router calls it after counting and waking, with the same arguments, so
+  an embedding host still sees its signal.
+- **The wake descriptor** is made by the first share and never closed, so the
+  handler can write it whenever it runs.
 - **Carriers** need nothing of their own: on a loop, a fiber parked in `next`
   has its set's kernel queue armed on its carrier's poller, and the wake
   descriptor is in that queue.
 - **The deadlock argument.** A signal is the world: a registration waits on no
   task, as a timer does (§5).
-- **Simulation.** Inside a simulation (§12) the router is replaced by
-  `world.deliver(.Terminate)`, which advances the same counts with no real
+- **Simulation.** Inside a simulation (§12) a share installs nothing and the
+  router is replaced by `world.deliver(.Terminate)`, which signals every
+  registration for the signal made inside that simulation, with no real
   signal, so shutdown is tested deterministically.
 
 ### 5. Three properties, each with its own argument
@@ -1319,8 +1407,8 @@ runs out is answered under §1's tie rules. Two alternatives were weighed:
 | Section | Checker | Library and runtime |
 | --- | --- | --- |
 | §1–§3 operations, parks | nothing | nonblocking sockets, `linea_io_perform` with its state machine, the deadline heap, `linea_park` |
-| §4 wait set | nothing new: registration states are implementation heads, a key is an ordinary copyable type, and what a set carries follows `mem.Vec`'s rule | `task.WaitSet`, `task.Registered`, `io.Pollable`, the runtime set and its protocol |
-| §4.4 prerequisite | none here; 0261's `Isolated` applies, and a set holding an endpoint or a handle is not `Isolated` | — |
+| §4 wait set | nothing new: the states an endpoint is registered at are the parameter types of `received`, `offered` and `returned`, a key is an ordinary copyable type, what a set carries follows `mem.Vec`'s rule, and the runtime's entries are confined to `std.task` and `std.io` by [T-ExternRuntime]; three rows of the raw-access table under [T-RawAddress]: `task.WaitSet` and `task.Registered` are raw types whose fields only their own members name, `mem.keep_value` and `mem.take_value`, which hand a value back as the type asked for, are called only by a set's members, and `Registered.minted` only by its registrations, so a key names a value of the type it says | `task.WaitSet`, `task.Registered`, `io.Pollable`, the runtime set and its protocol |
+| §4.4 prerequisite | none here; 0261's `Isolated` applies, and a set is never `Isolated`, since it holds `mem.Closure` | — |
 | §4.5 signals | nothing | `io.Signal`, `io.SignalError`, `io.SignalShare`, `WaitSet.signal` and `signal_with`, the runtime's signal router |
 | §5 properties | the semantics document's deadlock clause restated as §5's three properties, with the wait set | — |
 | §6 HTTP | nothing | dispatcher, the policy's new rules, `Limits.open_connections` and `idle_timeout_ms`, eviction, `shutdown:` and graceful shutdown |

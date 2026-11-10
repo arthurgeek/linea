@@ -1,0 +1,10 @@
+error[T-Bound]: `T` requires `Owned`, and `task.WaitSet[UInt64]` can carry a borrow: it holds raw storage another value owns
+  --> tests/tasks/a_wait_set_is_not_sent.lin:12:34
+   |
+12 |         let (waiting, done) = me.recv()
+   |                                  ^^^^ `task.WaitSet[UInt64]` is not `Owned`; pass a value whose type owns everything it holds
+error[T-Bound]: `T` requires `Owned`, and `task.WaitSet[UInt64]` can carry a borrow: it holds raw storage another value owns
+  --> tests/tasks/a_wait_set_is_not_sent.lin:18:12
+   |
+18 |     handle.send(waiting).close()
+   |            ^^^^ `task.WaitSet[UInt64]` is not `Owned`; pass a value whose type owns everything it holds

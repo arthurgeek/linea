@@ -82,6 +82,16 @@ long linea_sim_reset(int fd);
 long linea_sim_release(int fd);
 /* Read the running simulation's clock, as `linea_clock_read` does. */
 long linea_sim_clock_read(uint8_t clock, long *seconds, unsigned long *nanoseconds);
+/* The running simulation's monotonic clock, in nanoseconds. */
+unsigned long linea_sim_now(void);
+/* Whether the simulated descriptor `fd` is ready: readable, or writable when
+ * `writable` is 1. */
+int linea_sim_ready(int fd, uint8_t writable);
+/* The earliest instant after now at which the network changes, 0 for none. */
+unsigned long linea_sim_next_event(void);
+/* Move the running simulation's clock to `instant`, delivering what arrives
+ * by then, for a wait set waiting on it. */
+void linea_sim_jump(unsigned long instant);
 /* Wait `nanoseconds` on the running simulation's clock. */
 long linea_sim_sleep(unsigned long nanoseconds);
 

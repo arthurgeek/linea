@@ -1,0 +1,8 @@
+error[T-Mismatch]: expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End], ()]`
+  --> tests/tasks/an_endpoint_at_send_is_not_registered.lin:24:34
+   |
+24 |     let _key = &waiting.received(handle, |sink ready| Waited.Ready(ready))
+   |                                  ^^^^^^ expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End], ()]`
+  ::: std/task/wait_set.lin
+L  | ... nk ready: Chan[Recv[T, N], H]) -> M](inout self: Self, sink chan: Chan[Recv[T, N], H], sink wrap: W) -> Registered[Chan[ ...
+   |                                                                 ---- expected because of this parameter

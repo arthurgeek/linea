@@ -493,6 +493,14 @@ impl Connection {
     }
 }
 
+// A connection is ready to read once bytes, its end or an error can be read
+// without waiting, and ready to write once its send buffer has room.
+impl io.Pollable for Connection {
+    fn readiness(self: Self, _interest: io.Interest) -> io.Readiness[Self] where borrows(self) {
+        .Wait(io.source(self, self.fd))
+    }
+}
+
 // Generic code closes a connection through `io.Close`; this forwards to
 // `Connection.close`.
 impl io.Close for Connection {

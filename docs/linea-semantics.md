@@ -4906,7 +4906,8 @@ keeps the address beside it, declares `where carries(buffer)`, so it outlives
 the buffer's place but not what the buffer carries. A raw type is one whose
 fields are an address, an extent of bytes or what those bytes hold, which the
 slot primitives, the runtime or lowering trust: `mem.Storage`, `Buffer`,
-`Slice`, `View`, `Closure`, `Vec`, `Kept`, `session.Chan` and `task.Owner`. Every field of one is named --
+`Slice`, `View`, `Closure`, `Vec`, `Kept`, `session.Chan`, `task.Owner`,
+`task.WaitSet` and `task.Registered`. Every field of one is named --
 read, written, lent, used as a method's receiver, passed, bound by a pattern
 or given in a literal -- only in a member of an implementation for that type,
 in a test written inside one, and in the declarations the compiler's table
@@ -4928,7 +4929,12 @@ else reaches a storage's address through `Storage.address`, which declares
 `Storage.into_buffer` only by the members of `Storage`, `Vec` and `Drain` and
 the declarations the table names, each of which settles or hands on every
 value it puts; `release_from`, which trusts the counts it is given, only by
-`Vec`'s and `Drain`'s members. A call through a field's value names the field; only a callee
+`Vec`'s and `Drain`'s members; and `mem.keep_value` and `mem.take_value`,
+which move a value into bytes whose type no longer names it and back out as
+the type asked for, only by the members of `task.WaitSet`, which takes a value
+out under the `task.Registered` key its registration minted. A key's fields
+and a wait set's are named only by their own members, and `Registered.minted`
+only by a wait set's, so a key names a value of the type it says. A call through a field's value names the field; only a callee
 the checker resolved to a method is not one. Each of these elsewhere is
 [T-RawAddress]
 ([ADR 0264](adr/0264-an-address-lives-no-longer-than-what-it-was-made-from.md)). Every runtime parameter the
@@ -6399,7 +6405,12 @@ socket inside one (`linea: a real socket was used inside a simulation`),
 starting a task inside one, or waiting there on another task's session or
 owner, whose thread the kernel schedules (`linea: a simulation runs one task
 until fibers`), advancing a simulation's world while another simulation runs
-(`linea: a simulation's world was used outside its run`), and a wait with no
+(`linea: a simulation's world was used outside its run`), a `task.WaitSet`
+used on another loop than the one it was opened on, such as one returned from
+a run (`linea: a wait set was used on a loop other than the one it was opened
+on`), an `io.SignalShare` registered in a set of another loop than the one it
+was taken on (`linea: a signal's share was registered on a loop other than
+the one it was taken on`), and a wait with no
 deadline that nothing in the simulation can end (`linea: a simulation's one
 task waits forever`). An `Io` that names a simulation which has been closed
 stops the program where it is used (`linea: an Io names a loop that has
@@ -6410,6 +6421,61 @@ outside it, and one closed after its simulation was closed is only
 forgotten. An
 instant read inside a run is on the virtual clock, so it is not compared with
 one read outside.
+
+**Waiting and progress.** A task waits in a session's `send`, `recv`,
+`recv_until`, `choose` and `offer`, in `close` on a handle, in a call to an
+owning task, in an operation on the world (a socket, a clock, a file, a
+foreign call), and in `next` on a `task.WaitSet`. Three properties are kept
+apart
+([ADR 0265](adr/0265-waits-go-through-the-runtimes-poller-and-a-loop-runs-tasks-as-fibers.md)
+§5):
+
+1. *Session deadlock freedom.* No reachable state of an accepted program has
+   a set of tasks each waiting on a session, or on several of its own
+   sessions at once, whose other end is held by a task of the set. The
+   sessions of a program form a forest: `start` joins a new task to its
+   creator by one session, an endpoint moves only as a payload along a
+   session or into the body of a task being started, and the two ends follow
+   dual protocols ([T-Dual]). A task waiting in `next` waits on every endpoint
+   it registered with `received` or `offered` and every handle it registered
+   with `returned`, each of which was its own: `received` takes an endpoint
+   whose next operation is `recv`, `offered` one whose next is `offer`, and
+   `returned` a handle at `End`, so the peer's next operation on that session
+   is the `send`, the `choose` or the return that makes the registration
+   ready, and `next` then returns. A registration never performs the
+   exchange, so withdrawing an endpoint with `take` or `close` leaves the
+   session where it was, the peer still waiting where it had begun to send.
+   A timer, a descriptor and a signal wait on the world, not on a task. A
+   wait set holds its values behind `mem.Closure`, so it is not Isolated, not
+   Owned and not Shareable: it is never an owning task's state or part of a
+   job, and it is never a payload, so it stays with the task that opened it or
+   moves into the body of a task that task starts.
+2. *Scheduler progress.* A task whose operation can complete eventually runs.
+   Every task is an operating-system thread, which the system is assumed to
+   schedule fairly.
+3. *External progress.* A descriptor's event, a timer's expiry, a signal and
+   a foreign call arrive or return as the world's own contracts say, and no
+   sooner.
+
+From 1 and 2, no set of tasks waits only on each other forever. Nothing is
+promised of 3: a task waiting on a socket, or in a wait set whose every source
+is of the world, waits as long as the world takes, and the tasks that wait for
+it wait with it. Inside a simulation a wait that nothing in the simulation can
+end stops the program (`linea: a simulation's one task waits forever`).
+
+A wait set delivers each registration at most once: a value registered leaves
+the set by exactly one of `next`, `take`, `take_if_registered` or `close`, and
+a `task.Registered` key names one registration of one set, so a key copied
+and used again, or used on another set, answers `.None`. A source that
+becomes ready is not lost: it is delivered by a later `next`, or handed back
+by `take` or `close`.
+
+A value is registered for its descriptor's readiness through `io.Pollable`,
+whose `readiness` answers an `io.Readiness[Self]` borrowing the value. The
+`io.Source[T]` it carries holds a `borrow T`, so a copy of a source kept
+anywhere, in a value registered in a set included, keeps the value it came
+from from being closed or moved ([O-Borrow]): a set never watches a
+descriptor nothing owns.
 
 **[O-Temporary]** A value that is borrowed where it is written without being a
 place, such as `log.field("count", 3)`'s `3`, an argument `base + 2` to a

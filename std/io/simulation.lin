@@ -22,6 +22,10 @@ extern fn linea_sim_fingerprint(identity: UInt64) -> UInt64
 
 extern fn linea_sim_close(identity: UInt64)
 
+// The runtime signals every wait-set registration for `signal` made inside
+// the running simulation `loop`, as a delivery of the signal would.
+extern fn linea_signal_deliver_simulated(home: UInt64, signal: UInt8)
+
 let nanoseconds_per_millisecond: UInt64 = 1000000
 
 // An Io names what a task's waits run on: the system, where each operation
@@ -115,8 +119,8 @@ struct Simulation {
     identity: UInt64,
 }
 
-// What a simulation's body controls while it runs: its virtual clock. A body
-// receives it from `Simulation.run`.
+// What a simulation's body controls while it runs: its virtual clock and the
+// signals delivered to it. A body receives it from `Simulation.run`.
 @opaque
 struct World {
     identity: UInt64,
@@ -260,5 +264,25 @@ impl World {
         )
         sim.close()
         testing.assert_eq(moved, time.Duration.from_milliseconds(199), "the clock did not move by the advance")?
+    }
+
+    // Deliver `signal` to the simulation: every wait set inside it that
+    // waits for the signal is woken, as a real delivery wakes them, and no
+    // signal is sent to the process.
+    pub fn deliver(inout self: Self, signal: Signal) {
+        linea_signal_deliver_simulated(self.identity, signal.number())
+    }
+
+    test fn a_delivery_with_nothing_waiting_for_it_changes_nothing() {
+        var sim = Simulation.open(seed: 2).unwrap()
+        let moved = &sim.run(
+            |inout world| {
+                let before = time.Instant.now()
+                &world.deliver(.Hangup)
+                before.elapsed()
+            },
+        )
+        sim.close()
+        testing.assert_eq(moved, time.Duration.from_milliseconds(0), "delivering a signal moved the clock")?
     }
 }

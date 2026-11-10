@@ -1727,6 +1727,8 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
         .{ .file = "runtime/task.c", .flags = runtime_flags.items },
         .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
         .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
         .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
         .{ .file = "runtime/sim_test.c", .flags = runtime_flags.items },
@@ -1798,14 +1800,36 @@ pub fn build(b: *std.Build) void {
         native.add(native_task_step, if (checked) "native-checked-task-tests" else "native-task-tests", &.{
             .{ .file = "runtime/task.c", .flags = runtime_flags.items },
             .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+            .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+            .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+            .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
             .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
             .{ .file = "runtime/linea_rt.c", .flags = if (checked) checked_flags.items else runtime_flags.items },
             .{ .file = "runtime/task_test.c", .flags = runtime_flags.items },
         });
     }
+    // The wait set's race tests stop a thread at each linearization point of
+    // the registration protocol, so the task and the set are compiled with
+    // the pauses the tests supply.
+    var paused_flags: std.ArrayList([]const u8) = .empty;
+    paused_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    paused_flags.append(b.allocator, "-DLINEA_WAITSET_PAUSES=1") catch @panic("OOM");
+    native.add(native_task_step, "native-waitset-tests", &.{
+        .{ .file = "runtime/task.c", .flags = paused_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = paused_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset_test.c", .flags = paused_flags.items },
+    });
     native.add(native_task_step, "native-task-fault-tests", &.{
         .{ .file = "runtime/task.c", .flags = refused_task_flags.items },
         .{ .file = "runtime/park.c", .flags = refused_task_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
         .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
         .{ .file = "runtime/linea_rt.c", .flags = refused_signal_flags.items },
         .{ .file = "runtime/task_fault_test.c", .flags = runtime_flags.items },
@@ -1834,6 +1858,8 @@ pub fn build(b: *std.Build) void {
             .{ .name = "clock", .file = "runtime/clock.c", .flags = runtime_flags.items },
             .{ .name = "task", .file = "runtime/task.c", .flags = runtime_flags.items },
             .{ .name = "park", .file = "runtime/park.c", .flags = runtime_flags.items },
+            .{ .name = "waitset", .file = "runtime/waitset.c", .flags = runtime_flags.items },
+            .{ .name = "signals", .file = "runtime/signals.c", .flags = runtime_flags.items },
             .{ .name = "loop", .file = "runtime/loop.c", .flags = runtime_flags.items },
             .{ .name = "sim", .file = "runtime/sim.c", .flags = runtime_flags.items },
         }) |input| {
@@ -1862,6 +1888,7 @@ pub fn build(b: *std.Build) void {
             "clock_fault_test",
             "task_test",
             "task_fault_test",
+            "waitset_test",
         }) |test_name| {
             const file = b.path(b.fmt("runtime/{s}.c", .{test_name}));
             native_runtime_step.dependOn(&runtimeObject(b, platform_target, b.fmt("{s}_{s}", .{ test_name, platform.os }), file, runtime_flags.items).step);
@@ -1928,6 +1955,8 @@ pub fn build(b: *std.Build) void {
         .{ .name = "clock", .file = b.path("runtime/clock.c"), .flags = runtime_flags.items },
         .{ .name = "task", .file = b.path("runtime/task.c"), .flags = runtime_flags.items },
         .{ .name = "park", .file = b.path("runtime/park.c"), .flags = runtime_flags.items },
+        .{ .name = "waitset", .file = b.path("runtime/waitset.c"), .flags = runtime_flags.items },
+        .{ .name = "signals", .file = b.path("runtime/signals.c"), .flags = runtime_flags.items },
         .{ .name = "loop", .file = b.path("runtime/loop.c"), .flags = runtime_flags.items },
         .{ .name = "sim", .file = b.path("runtime/sim.c"), .flags = runtime_flags.items },
         .{ .name = "linea_float", .file = float_c, .flags = float_flags.items },

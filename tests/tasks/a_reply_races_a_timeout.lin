@@ -1,0 +1,81 @@
+import std.io
+import std.session
+import std.task
+import std.text
+import std.time
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+// The end of a session that receives one reply.
+alias Reply = Chan[Recv[text.String, End]]
+
+enum Waited {
+    Answer(Reply),
+    Late,
+}
+
+enum Asked {
+    Answered(text.String),
+    TimedOut(Reply),
+}
+
+// Ask a peer and give up after `limit`. Whichever comes first is answered;
+// the other is taken back by its key, so nothing registered is lost: a reply
+// that is late is still owed, and the endpoint comes back at `Recv`.
+fn ask_within(sink peer: Reply, limit: time.Duration) -> Asked {
+    var waiting: task.WaitSet[Waited] = task.WaitSet.open()
+    let answer = &waiting.received(peer, |sink ready| Waited.Answer(ready))
+    let timer = &waiting.after(limit, (), |sink _late| Waited.Late)
+    let asked = match &waiting.next() {
+        Some(Answer(peer)) => {
+            let _unfired = &waiting.take(timer)
+            let (reply, done) = peer.recv()
+            done.close()
+            Asked.Answered(reply)
+        },
+        Some(Late) => match &waiting.take(answer) {
+            Some(peer) => Asked.TimedOut(peer),
+            None => panic("the reply was registered"),
+        },
+        None => panic("two sources were registered"),
+    }
+    waiting.close().finish().unwrap()
+    asked
+}
+
+// Start a peer that replies `text` after `delay`.
+fn replying(words: Str, delay: time.Duration) -> Reply {
+    let reply = words.to_owned().unwrap()
+    let body = sink [sink reply, sink delay = copy(delay)] |sink me: Chan[Send[text.String, End]]| {
+        time.sleep(delay)
+        me.send(reply).close()
+    }
+    task.prepare(body).unwrap().start().detach()
+}
+
+// Show what a reply against a timeout answered, and collect a late reply.
+fn report(sink asked: Asked) -> Result[(), io.IoError] {
+    match asked {
+        Answered(reply) => {
+            let printed = io.println("answered: {reply}")
+            reply.release()
+            printed
+        },
+        TimedOut(peer) => {
+            let (reply, done) = peer.recv()
+            done.close()
+            let printed = io.println("timed out; the reply came later: {reply}")
+            reply.release()
+            printed
+        },
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    report(ask_within(replying("prompt", time.Duration.from_milliseconds(0)), time.Duration.from_seconds(60)))?
+    report(ask_within(replying("slow", time.Duration.from_milliseconds(300)), time.Duration.from_milliseconds(20)))?
+    .Ok(0)
+}

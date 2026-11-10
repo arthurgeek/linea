@@ -1,0 +1,2 @@
+trap
+linea: a wait set was used on a loop other than the one it was opened on

@@ -1,0 +1,20 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Recv
+
+// A wait set keeps its values behind erased callables, so its type does not
+// say what borrows they carry: it is not `Owned`, and no session sends it.
+fn main() -> UInt8 {
+    let body = sink [] |sink me: Chan[Recv[task.WaitSet[UInt64], End]]| {
+        let (waiting, done) = me.recv()
+        waiting.close().finish().unwrap()
+        done.close()
+    }
+    let handle = task.start(body).unwrap()
+    let waiting: task.WaitSet[UInt64] = task.WaitSet.open()
+    handle.send(waiting).close()
+    0
+}

@@ -1,0 +1,2 @@
+trap
+linea: a signal's share was registered on a loop other than the one it was taken on

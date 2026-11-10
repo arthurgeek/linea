@@ -1,0 +1,27 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+enum Waited {
+    Ready(Chan[Send[UInt64, End], ()]),
+}
+
+// An endpoint is registered only at the state where its peer can make it
+// ready: `received` takes an endpoint whose next operation is `recv`. This
+// one's next operation is its own `send`, which nothing the peer does could
+// make ready.
+fn main() -> UInt8 {
+    let body = sink [] |sink me: Chan[Recv[UInt64, End]]| {
+        let (_, done) = me.recv()
+        done.close()
+    }
+    let handle = task.start(body).unwrap().detach()
+    var waiting: task.WaitSet[Waited] = task.WaitSet.open()
+    let _key = &waiting.received(handle, |sink ready| Waited.Ready(ready))
+    waiting.close().finish().unwrap()
+    0
+}

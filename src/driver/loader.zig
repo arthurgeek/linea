@@ -6310,6 +6310,14 @@ test "an address lives no longer than the slice, buffer or storage it was made f
         \\    address.raw(kept.body)
         \\}
         \\
+        \\pub fn value_kept_outside_a_wait_set() -> Buffer[SystemAllocator] {
+        \\    keep_value(UInt8(1))
+        \\}
+        \\
+        \\pub fn value_taken_as_another_type(sink bytes: Buffer[SystemAllocator]) -> UInt64 {
+        \\    take_value[UInt64](bytes)
+        \\}
+        \\
         \\pub fn view_built_longer_than_its_storage() -> Int64 {
         \\    let storage: Storage[UInt8, SystemAllocator] = Storage.from_buffer(system().acquire(8).unwrap())
         \\    var view: View[UInt8] = .{ at = storage.address(), len = 4096, carried = .{} }
@@ -6584,6 +6592,11 @@ test "an address lives no longer than the slice, buffer or storage it was made f
         .{ .name = "kept_body_taken_from_nowhere", .code = .t_raw_address },
         .{ .name = "kept_bytes_released_at_nowhere", .code = .t_raw_address },
         .{ .name = "body_kept_outside_a_task", .code = .t_raw_address },
+        .{ .name = "value_kept_outside_a_wait_set", .code = .t_raw_address },
+        .{ .name = "value_taken_as_another_type", .code = .t_raw_address },
+        .{ .name = "key_minted_for_any_slot", .code = .t_raw_address },
+        .{ .name = "key_built_from_numbers", .code = .t_raw_address },
+        .{ .name = "wait_set_number_read", .code = .t_raw_address },
         .{ .name = "view_built_longer_than_its_storage", .code = .t_raw_address },
         .{ .name = "view_side_grown", .code = .t_raw_address },
         .{ .name = "vector_length_written", .code = .t_raw_address },
@@ -6617,6 +6630,18 @@ test "an address lives no longer than the slice, buffer or storage it was made f
     const task_added =
         \\pub fn channel_opened_on_any_endpoint[P: Protocol]() -> Chan[P] {
         \\    Chan.opened(7)
+        \\}
+        \\
+        \\pub fn key_minted_for_any_slot() -> Registered[UInt64] {
+        \\    Registered.minted(1, 0, 0)
+        \\}
+        \\
+        \\pub fn key_built_from_numbers() -> Registered[UInt64] {
+        \\    .{ set = 1, slot = 0, generation = 0 }
+        \\}
+        \\
+        \\pub fn wait_set_number_read[M](waiting: WaitSet[M]) -> UInt64 {
+        \\    waiting.set
         \\}
         \\
         \\pub fn task_entry_run_at_nowhere[P: Protocol, F: sink fn(sink me: Chan[P])](_body: F) {

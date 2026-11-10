@@ -1,0 +1,10 @@
+error[T-Bound]: `S` requires `Owned`, and `task.WaitSet[Waited]` can carry a borrow: it holds raw storage another value owns
+  --> tests/tasks/a_wait_set_is_not_an_owning_tasks_state.lin:24:22
+   |
+24 |     let owner = task.own(waiting).unwrap()
+   |                      ^^^ `task.WaitSet[Waited]` is not `Owned`; pass a value whose type owns everything it holds
+error[T-Bound]: `S` requires `Owned`, and `task.WaitSet[Waited]` can carry a borrow: it holds raw storage another value owns
+  --> tests/tasks/a_wait_set_is_not_an_owning_tasks_state.lin:25:11
+   |
+25 |     owner.close().close().finish().unwrap()
+   |           ^^^^^ `task.WaitSet[Waited]` is not `Owned`; pass a value whose type owns everything it holds

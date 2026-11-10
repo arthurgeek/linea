@@ -38,6 +38,8 @@
 #include "park.h"
 #include "pipe_signal.h"
 #include "task.h"
+#include "waitset.h"
+#include "waitset_pause.h"
 
 /* Defined in `linea_rt.c`: install and remove the calling thread's
  * alternate signal stack, and record where its stack's guard pages lie so a
@@ -106,6 +108,13 @@ struct task {
     unsigned long filled;
     unsigned long emptied;
 
+    /* The wait-set registration watching each end of the session, by the
+     * endpoint's lowest bit, and whether the handle's watches for the body
+     * to return rather than for a send. Under the park's lock, so a source
+     * signals a registration only while it is watched. */
+    struct linea_registration *watching[2];
+    int watching_return;
+
     /* The mapping the thread's stack lives in, guard pages first. */
     void *stack;
     unsigned long stack_mapping;
@@ -162,6 +171,8 @@ static void *run(void *arg) {
     linea_park_lock(&t->park);
     t->state = finished;
     linea_unpark(&t->park);
+    if (t->watching[0] != 0 && t->watching_return) linea_registration_signal(t->watching[0]);
+    linea_waitset_pause(linea_pause_body_finished);
     linea_park_unlock(&t->park);
     linea_thread_end();
     return 0;
@@ -274,6 +285,11 @@ void linea_chan_send(unsigned long endpoint, unsigned long at, unsigned long len
     t->filled += 1;
     const unsigned long mine = t->filled;
     linea_unpark(&t->park);
+    /* The peer's end is the other bit. A handle watched for its body's
+     * return is at its end, so no send reaches it. */
+    const unsigned long peer = (endpoint & 1UL) ^ 1UL;
+    if (t->watching[peer] != 0 && !(peer == 0 && t->watching_return)) linea_registration_signal(t->watching[peer]);
+    linea_waitset_pause(linea_pause_send_filled);
     while (t->emptied != mine) (void)linea_park(&t->park, 0);
     linea_park_unlock(&t->park);
 }
@@ -311,6 +327,27 @@ uint8_t linea_chan_offer(unsigned long endpoint) {
     linea_chan_recv(endpoint, (unsigned long)&chosen, 1);
     if (chosen > 1) fail("linea: a session's peer chose a branch that does not exist\n");
     return chosen;
+}
+
+void linea_chan_watch(unsigned long endpoint, struct linea_registration *r, int returned) {
+    struct task *t = task_of(endpoint);
+    const unsigned long side = endpoint & 1UL;
+    linea_park_lock(&t->park);
+    if (t->watching[side] != 0) fail("linea: an endpoint was registered twice\n");
+    t->watching[side] = r;
+    if (side == 0) t->watching_return = returned;
+    linea_waitset_pause(linea_pause_watch_after_publish);
+    const int ready = returned ? t->state == finished : (t->full && t->from != endpoint);
+    if (ready) linea_registration_signal(r);
+    linea_park_unlock(&t->park);
+}
+
+void linea_chan_unwatch(unsigned long endpoint) {
+    struct task *t = task_of(endpoint);
+    linea_park_lock(&t->park);
+    t->watching[endpoint & 1UL] = 0;
+    if ((endpoint & 1UL) == 0) t->watching_return = 0;
+    linea_park_unlock(&t->park);
 }
 
 void linea_chan_close(unsigned long endpoint) {

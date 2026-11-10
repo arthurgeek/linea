@@ -24,6 +24,9 @@ Where Linea matches what you know:
 - A session is a channel, as in Rust's `std::sync::mpsc`, whose type also says
   whose turn it is to send (see
   [A session and its protocol](#a-session-and-its-protocol)).
+- A `task.WaitSet` waits for whichever of several things happens first, as
+  `Promise.race` does in JavaScript and `select!` does in async Rust (see
+  [Waiting on several things at once](#waiting-on-several-things-at-once)).
 
 Where Linea differs:
 
@@ -485,7 +488,7 @@ error[T-UnknownOperation]: `Chan[Send[UInt64, Recv[UInt64, End]], (<closure>, me
 20  |     let (square, done) = asking.recv()
     |                          ^^^^^^ this is `Chan[Send[UInt64, Recv[UInt64, End]], (<closure>, mem.SystemAllocator)]`, which `Chan[Recv[T, N], H]` does not match
    ::: std/session/chan.lin
-112 | impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
+126 | impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
     |                                ------------------- `recv` is declared for `Chan[Recv[T, N], H]`
 ```
 
@@ -951,6 +954,11 @@ task that waits on no one, which keeps going. So no group of tasks ever
 waits on each other forever, provided the system runs every thread whose
 operation can complete, as an operating system does.
 
+A task waiting in a [wait set](#waiting-on-several-things-at-once) waits on
+several of its own sessions at once, and the same argument holds: the peer of
+each one's next step is the very step that wakes the set. A timer, a socket
+and a signal are the outside world, not a task.
+
 What this does not promise:
 
 - that a session completes or a program finishes: a task may loop forever,
@@ -1016,6 +1024,324 @@ the search was told to stop
 A `recv` cannot fail, so there is no "the other end went away" to handle
 either. Every way a conversation can end is a branch of its protocol, which
 both ends must follow.
+
+## Waiting on several things at once
+
+`recv` waits on one session and `close` on one task. A program often waits
+for whichever of several things happens first: a reply or a timeout, the
+first of three workers, a connection or Control-C. JavaScript writes that
+with `Promise.race`, and async Rust with `select!`. Linea has
+`task.WaitSet`.
+
+A wait set is a value you move things into. Each registration takes a value,
+a function that wraps it into a message of your own type once it is ready,
+and answers a **key**. `next` waits until something registered is ready and
+answers its message.
+
+### A reply against a timeout
+
+`ask_within.lin`:
+
+```linea
+import std.io
+import std.session
+import std.task
+import std.time
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+// The end of a session that receives one number.
+alias Reply = Chan[Recv[UInt64, End]]
+
+// What the wait set delivers: the endpoint, once its reply waits, or the
+// news that the time is up.
+enum Waited {
+    Answer(Reply),
+    Late,
+}
+
+enum Asked {
+    Answered(UInt64),
+    TimedOut(Reply),
+}
+
+// Ask a peer and give up after `limit`.
+fn ask_within(sink peer: Reply, limit: time.Duration) -> Asked {
+    var waiting: task.WaitSet[Waited] = task.WaitSet.open()
+    let answer = &waiting.received(peer, |sink ready| Waited.Answer(ready))
+    let timer = &waiting.after(limit, (), |sink _expired| Waited.Late)
+    let asked = match &waiting.next() {
+        Some(Answer(peer)) => {
+            // The reply won. The timer is taken back unfired.
+            let _unfired = &waiting.take(timer)
+            let (number, done) = peer.recv()
+            done.close()
+            Asked.Answered(number)
+        },
+        // The timer won. The endpoint is taken back, still waiting to
+        // receive.
+        Some(Late) => Asked.TimedOut(&waiting.take(answer).unwrap()),
+        None => panic("two sources were registered"),
+    }
+    waiting.close().finish().unwrap()
+    asked
+}
+
+// Start a peer that replies `number` after `delay`.
+fn replying(number: UInt64, delay: time.Duration) -> Reply {
+    let body = sink [sink number, sink delay = copy(delay)] |sink me: Chan[Send[UInt64, End]]| {
+        time.sleep(delay)
+        me.send(number).close()
+    }
+    task.start(body).unwrap().detach()
+}
+
+fn report(sink asked: Asked) -> Result[(), io.IoError] {
+    match asked {
+        Answered(number) => io.println("answered: {number}"),
+        TimedOut(peer) => {
+            let (number, done) = peer.recv()
+            done.close()
+            io.println("timed out; the reply came later: {number}")
+        },
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    report(ask_within(replying(7, time.Duration.from_milliseconds(0)), time.Duration.from_seconds(60)))?
+    report(ask_within(replying(8, time.Duration.from_milliseconds(300)), time.Duration.from_milliseconds(20)))?
+    .Ok(0)
+}
+```
+
+```
+answered: 7
+timed out; the reply came later: 8
+```
+
+`received` registers an endpoint whose next step is `recv`. It is ready once
+the peer's `send` is waiting, and `next` then hands it back wrapped as
+`Waited.Answer`. The set never receives for you: the value is still in the
+session, and `peer.recv()` takes it at once.
+
+`after` registers a timer with a message of its own, here `()`.
+
+### Nothing registered is lost
+
+When a `Promise.race` settles, the promises that lost keep running with
+nobody listening, and a Rust future that loses a `select!` is dropped where
+it stood. In Linea the loser is still yours. Every registration answered a
+key, and `take(key)` hands the value back in its own type: taking `answer`
+gives the endpoint, still waiting to receive, so the late reply is collected
+above and its task joined. Taking `timer` gives back the timer's message.
+
+A key is a small copyable value. Once its registration has been delivered or
+taken, the key answers `.None`, however many copies of it exist, and a key
+of one set answers `.None` from another.
+
+`take_if_registered(key)` takes a registration back only while it is not
+ready, and answers `.None` once it is. `close` ends the set and answers a
+vector of whatever is still registered, wrapped. A wait set is linear, so a
+path that forgets to close it does not compile.
+
+### The first of several tasks
+
+`returned` registers a task's handle. It is ready once the task's body has
+returned, so the `close` that follows joins at once.
+
+`first_child.lin`:
+
+```linea
+import std.io
+import std.session
+import std.task
+import std.time
+
+use session.Chan
+use session.End
+
+// Close a handle taken back from the set, which joins its task.
+fn join_if_left[F, A: Allocator](sink taken: Option[Chan[End, (F, A)]]) {
+    match taken {
+        Some(handle) => handle.close(),
+        None => {},
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let quick = sink [] |sink me: Chan[End]| {
+        me.close()
+    }
+    let slow = sink [] |sink me: Chan[End]| {
+        time.sleep(time.Duration.from_milliseconds(200))
+        me.close()
+    }
+    var waiting: task.WaitSet[UInt64] = task.WaitSet.open()
+    // Each wrap joins the task that returned and answers its number.
+    let second = &waiting.returned(
+        task.start(slow).unwrap(),
+        |sink done| {
+            done.close()
+            UInt64(2)
+        },
+    )
+    let first = &waiting.returned(
+        task.start(quick).unwrap(),
+        |sink done| {
+            done.close()
+            UInt64(1)
+        },
+    )
+    let winner = &waiting.next().unwrap()
+    // The other child is still working. Its handle comes back by its key,
+    // and closing it waits for the child as any `close` does.
+    join_if_left(&waiting.take(first))
+    join_if_left(&waiting.take(second))
+    waiting.close().finish().unwrap()
+    io.println("child {winner} returned first")?
+    .Ok(0)
+}
+```
+
+```
+child 1 returned first
+```
+
+### Only what the other side can make ready
+
+A wait set waits for the other end of a session to act. An endpoint whose
+next step is its own `send` has nothing to wait for, so `received` does not
+take it:
+
+`not_ready.lin`:
+
+```linea
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+enum Waited {
+    Ready(Chan[Send[UInt64, End], ()]),
+}
+
+fn main() -> UInt8 {
+    let body = sink [] |sink me: Chan[Recv[UInt64, End]]| {
+        let (_, done) = me.recv()
+        done.close()
+    }
+    // `sending` is at `Send`: its next step is this task's own.
+    let sending = task.start(body).unwrap().detach()
+    var waiting: task.WaitSet[Waited] = task.WaitSet.open()
+    let _key = &waiting.received(sending, |sink ready| Waited.Ready(ready))
+    waiting.close().finish().unwrap()
+    0
+}
+```
+
+```
+error[T-Mismatch]: expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End], ()]`
+   --> not_ready.lin:21:34
+    |
+21  |     let _key = &waiting.received(sending, |sink ready| Waited.Ready(ready))
+    |                                  ^^^^^^^ expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End], ()]`
+   ::: std/task/wait_set.lin
+276 | ... nk ready: Chan[Recv[T, N], H]) -> M](inout self: Self, sink chan: Chan[Recv[T, N], H], sink wrap: W) -> Registered[Chan[ ...
+    |                                                                 ---- expected because of this parameter
+```
+
+The endpoint's type says it sends next, and `received` asks for one that
+receives next.
+
+`offered` is the same for an endpoint whose next step is `offer`, ready once
+the peer has chosen.
+
+### Timers, sockets and signals
+
+A wait set also waits on the outside world:
+
+- `after(duration, message, wrap)` is a timer.
+- `readable(value, wrap)` and `writable(value, wrap)` take a listener, a
+  connection or a buffered reader over one, ready when it can be read or
+  written without waiting.
+- `signal(which, wrap)` waits for an operating-system signal, such as
+  `.Interrupt`, which Control-C sends, or `.Terminate`, which a supervisor
+  sends to ask a program to stop.
+
+This program ticks once a second until it is told to stop. It runs in a
+[simulation](09-networking.md#testing-a-timeout-without-waiting), so the seconds are virtual and the signal is
+delivered by the program itself; outside a simulation the same code waits on
+the real clock and the real signal.
+
+`ticker.lin`:
+
+```linea
+import std.io
+import std.task
+import std.time
+
+enum Woke {
+    Tick(UInt64),
+    Stop(io.SignalShare),
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let (ticks, seconds) = &sim.run(
+        |inout world| {
+            let started = time.Instant.now()
+            var waiting: task.WaitSet[Woke] = task.WaitSet.open()
+            let _stop = &waiting.signal(.Terminate, |sink share| Woke.Stop(share)).unwrap()
+            var timer = &waiting.after(time.Duration.from_seconds(1), UInt64(1), |sink n| Woke.Tick(n))
+            var ticks = UInt64(0)
+            loop {
+                match &waiting.next().unwrap() {
+                    Tick(n) => {
+                        ticks = n
+                        if n == 3 {
+                            &world.deliver(.Terminate)
+                        }
+                        timer = &waiting.after(time.Duration.from_seconds(1), n + 1, |sink n| Woke.Tick(n))
+                    },
+                    Stop(share) => {
+                        share.settle()
+                        break
+                    },
+                }
+            }
+            // The next tick was registered and never fired.
+            let _unfired = &waiting.take(timer)
+            waiting.close().finish().unwrap()
+            (ticks, started.elapsed().nanoseconds() / 1000000000)
+        },
+    )
+    sim.close()
+    io.println("stopped after {ticks} ticks and {seconds} seconds")?
+    .Ok(0)
+}
+```
+
+```
+stopped after 3 ticks and 3 seconds
+```
+
+The message for a signal carries an `io.SignalShare`. While a share exists,
+the signal wakes the wait sets that wait for it instead of ending the
+program; `share.settle()` gives it back, and once the last share is settled
+a second Control-C ends the program as usual. To keep waiting for the next
+delivery, register the share again with `signal_with(share, wrap)`. A program
+started with a signal ignored, as `nohup` starts one with `Hangup` ignored,
+is told so: `signal` answers `.Err(.Ignored)`.
+
+A wait set belongs to the task that opened it. It holds endpoints, so it is
+not sent over a session and is not an [owning task's](#the-owning-task-pattern)
+state.
 
 ## Independent work: `task.all`, `task.map`, and `task.join`
 
