@@ -40,6 +40,7 @@ const EmbedId = program_mod.EmbedId;
 const embedded = @import("embedded.zig");
 const firstInvalidUtf8 = @import("../support/text.zig").firstInvalidUtf8;
 const lineColumnOf = @import("../support/text.zig").lineColumnOf;
+const strings = @import("../support/strings.zig");
 const Modules = @import("../parser/parser.zig").Modules;
 const ParsedFile = @import("../parser/parser.zig").ParsedFile;
 const instantiate = @import("../sema/instantiate.zig").instantiate;
@@ -591,7 +592,7 @@ fn loadInputs(
     }
     const roots = try l.rootFacts();
     errdefer {
-        for (roots) |r| Loader.freeRootFacts(gpa, r);
+        for (roots) |r| r.deinit(gpa);
         gpa.free(roots);
     }
 
@@ -1543,24 +1544,23 @@ fn namesLibrary(text: []const u8) bool {
     return true;
 }
 
-/// Whether `text` names a C source below the manifest's directory: a relative
-/// path ending in `.c` with no `..` and no empty part, spelled with letters,
-/// digits and `_.+-/`, so a C file including it holds nothing else.
+/// Whether `text` names a C source below the manifest's directory, as a C
+/// file's `#include "..."` takes it.
 fn namesSource(text: []const u8) bool {
-    if (!std.mem.endsWith(u8, text, ".c") or text.len <= 2) return false;
-    for (text) |c| if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '.' or c == '+' or c == '-' or c == '/')) return false;
-    var parts = std.mem.splitScalar(u8, text, '/');
-    while (parts.next()) |part| {
-        if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return false;
-    }
-    return true;
+    return namesCFile(text, ".c");
 }
 
-/// Whether `text` names a C header as `#include <...>` takes it: a relative
-/// path ending in `.h` with no `..` and no empty part, spelled with letters,
-/// digits and `_.+-/`, so the probe's `#include` line holds nothing else.
+/// Whether `text` names a C header as `#include <...>` takes it, below the
+/// manifest's directory or on the compiler's path.
 fn namesHeader(text: []const u8) bool {
-    if (!std.mem.endsWith(u8, text, ".h") or text.len <= 2) return false;
+    return namesCFile(text, ".h");
+}
+
+/// Whether `text` is a relative path ending in `suffix` with no `.` or `..`
+/// part and no empty one, spelled with letters, digits and `_.+-/`, so an
+/// `#include` line naming it holds nothing else.
+fn namesCFile(text: []const u8, suffix: []const u8) bool {
+    if (!std.mem.endsWith(u8, text, suffix) or text.len <= suffix.len) return false;
     for (text) |c| if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '.' or c == '+' or c == '-' or c == '/')) return false;
     var parts = std.mem.splitScalar(u8, text, '/');
     while (parts.next()) |part| {
@@ -3580,46 +3580,21 @@ const Loader = struct {
         const out = try self.gpa.alloc(RootFacts, self.graph.items.len);
         var made: usize = 0;
         errdefer {
-            for (out[0..made]) |r| freeRootFacts(self.gpa, r);
+            for (out[0..made]) |r| r.deinit(self.gpa);
             self.gpa.free(out);
         }
         for (self.graph.items, 0..) |held, i| {
             var facts: RootFacts = .{
                 .module = if (RootId.from(i).isDependency()) self.by_dir.get(held.source_dir) orelse .none else .none,
             };
-            errdefer freeRootFacts(self.gpa, facts);
+            errdefer facts.deinit(self.gpa);
             facts.name = try self.gpa.dupe(u8, held.name);
             facts.dir = try self.gpa.dupe(u8, held.source_dir);
             facts.dependencies = try self.gpa.dupe(RootId, held.dependencies.items);
             facts.manifest_dir = try self.gpa.dupe(u8, held.manifest_dir);
-            facts.native = try dupeStrings(self.gpa, held.native);
-            facts.headers = try dupeStrings(self.gpa, held.headers);
+            facts.native = try strings.dupe(self.gpa, held.native);
+            facts.headers = try strings.dupe(self.gpa, held.headers);
             out[i] = facts;
-            made += 1;
-        }
-        return out;
-    }
-
-    fn freeRootFacts(gpa: std.mem.Allocator, r: RootFacts) void {
-        gpa.free(r.name);
-        gpa.free(r.dir);
-        gpa.free(r.dependencies);
-        gpa.free(r.manifest_dir);
-        for (r.native) |path| gpa.free(path);
-        gpa.free(r.native);
-        for (r.headers) |header| gpa.free(header);
-        gpa.free(r.headers);
-    }
-
-    fn dupeStrings(gpa: std.mem.Allocator, list: []const []const u8) std.mem.Allocator.Error![]const []const u8 {
-        const out = try gpa.alloc([]const u8, list.len);
-        var made: usize = 0;
-        errdefer {
-            for (out[0..made]) |text| gpa.free(text);
-            gpa.free(out);
-        }
-        for (list, out) |text, *copy| {
-            copy.* = try gpa.dupe(u8, text);
             made += 1;
         }
         return out;

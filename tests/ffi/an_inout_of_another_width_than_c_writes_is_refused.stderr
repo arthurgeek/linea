@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `void reading_level(uint8_t *)`, and this declaration calls it as `void reading_level(int64_t *)`
+ --> tests/ffi/an_inout_of_another_width_than_c_writes_is_refused/reading/reading.lin:3:38
+  |
+3 | extern fn reading_level(inout level: Int64)
+  |                                      ^^^^^ C takes `uint8_t *` here
+  |
+  = note: `reading_level` is declared by `reading/reading.c`
+  = help: C writes a `uint8_t` through the address: declare `level` as an `inout` `UInt8`, or a newtype over it

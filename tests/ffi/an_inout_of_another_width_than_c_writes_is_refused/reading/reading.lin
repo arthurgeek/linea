@@ -1,0 +1,9 @@
+// C writes one byte through the address, and an `inout Int64` lends a
+// place of eight.
+extern fn reading_level(inout level: Int64)
+
+pub fn level() -> Int64 {
+    var level = 0
+    reading_level(&level)
+    level
+}
