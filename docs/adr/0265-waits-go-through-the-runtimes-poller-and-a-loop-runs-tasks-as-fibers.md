@@ -2,10 +2,12 @@
 
 Status: Proposed — 2026-11-07. It builds on
 [0261](0261-an-owning-task-holds-nothing-that-waits.md). Phases 1 to 7 of §13
-state what is built when; phase 1, nonblocking sockets with deadlines, is being
-built, and in it §1's in-place backend has one party, the calling thread, so §2's
-guarantees hold because the thread that attempts an operation is the one that
-answers it, without a state word. Nothing else is built.
+state what is built when. Phase 1 is being built: nonblocking sockets with
+deadlines, `io.Io`, `io.system()`, `io.current()`, the loop table of §8 and
+the simulation of §12 for one task. In it §1's in-place and simulated backends
+each have one party, the calling thread, so §2's guarantees hold because the
+thread that attempts an operation is the one that answers it, without a state
+word. Nothing else is built.
 Once built, it would change these sentences of existing records:
 
 - [0154](0154-sockets-and-http-follow-go.md),
@@ -1292,7 +1294,7 @@ reproduced exactly, not hoped for.
 
 ```linea
 test fn a_read_past_its_deadline_times_out() {
-    var sim = io.Simulation.open(seed: 7)
+    var sim = io.Simulation.open(seed: 7).unwrap()
     let outcome = sim.run(|inout world| {
         var listener = net.listen(net.loopback(80)).unwrap()
         var client = net.connect(net.loopback(80)).unwrap()

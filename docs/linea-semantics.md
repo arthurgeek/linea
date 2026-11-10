@@ -6263,6 +6263,24 @@ task's stack has guard pages below it, and every generated function probes a
 frame larger than a page as it grows, so an overflow on any thread, `main`
 included, stops the program with `linea: a stack overflowed`.
 
+A task's waits run on an `io.Io`: the system, where an operation waits on the
+kernel, or a simulation, inside `io.Simulation.run`, where the clocks are
+virtual and sockets are entries of the simulation's own table
+([ADR 0265](adr/0265-waits-go-through-the-runtimes-poller-and-a-loop-runs-tasks-as-fibers.md)
+§8, §12). A simulation's virtual time moves only when its body advances it
+or waits, and every choice its network makes is drawn from its seed, so a run
+is repeated exactly by the same seed. Four uses would make a run depend on
+the machine, and each stops the program: an operation on a simulated
+descriptor outside its simulation (`linea: a simulated descriptor was used
+outside its simulation`), an operation other than closing on a real socket
+inside one (`linea: a real socket was used inside a simulation`), starting a
+task inside one, whose thread the kernel would schedule (`linea: a
+simulation runs one task until fibers`), and a wait with no deadline that
+nothing in the simulation can end (`linea: a simulation's one task waits
+forever`). An `Io` that names a simulation which has been closed stops the
+program where it is used (`linea: an Io names a loop that has ended`).
+Releasing a simulated descriptor outside its simulation only forgets it.
+
 **[O-Temporary]** A value that is borrowed where it is written without being a
 place, such as `log.field("count", 3)`'s `3`, an argument `base + 2` to a
 parameter the result borrows, or an interpolated call whose result must be

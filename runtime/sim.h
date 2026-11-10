@@ -1,0 +1,85 @@
+#ifndef LINEA_SIM_H
+#define LINEA_SIM_H
+
+#include "loop.h"
+#include "op.h"
+
+#include <stdint.h>
+
+/* 2^30: Linux hands a process descriptors below fs.nr_open, 2^20 unless an
+ * administrator raises it, and macOS below kern.maxfilesperproc. */
+#define LINEA_SIM_FIRST_DESCRIPTOR 0x40000000
+
+/* A simulation: a virtual monotonic and wall clock, an in-memory network and
+ * a source of choices seeded by the program. While a thread runs a
+ * simulation (`linea_io_switch` made it the thread's loop), its clock reads
+ * and sleeps and its socket operations are answered here, and no system call
+ * is made for them. Virtual time moves only when the program advances it or
+ * when the simulation's one task waits, which jumps it to the next event: a
+ * delivery, a handshake, or the wait's deadline.
+ *
+ * A simulated descriptor is an entry of a table the runtime keeps for every
+ * simulation, numbered from `LINEA_SIM_FIRST_DESCRIPTOR`. Its number is
+ * positive, as every descriptor an operation answers is, and the in-place
+ * backend refuses a real descriptor numbered that high, so no real
+ * descriptor shares it. An entry knows its simulation until that simulation
+ * ends, so an operation on it from any other loop traps, and releasing it there forgets the entry and
+ * does nothing else. A real socket used while a simulation runs traps too,
+ * since it would wait on the kernel against a virtual clock.
+ *
+ * Every entry and every simulation is guarded by one lock, held across each
+ * whole call, so a descriptor released on another thread never meets an
+ * operation in progress. */
+
+/* Open a simulation and answer its identity, or 0 when it cannot be
+ * allocated or no loop slot is free. Latencies are nanoseconds. Each chunk of
+ * a write arrives `latency_ns` plus a chosen 0 to `jitter_ns` later, in
+ * order; `chunk_bytes`, when not 0, cuts each write into chunks of 1 to that
+ * many bytes; `buffer_bytes` bounds what each direction holds in flight and
+ * unread (0 is taken as 1); `short_writes`, when not 0, lets a write accept a
+ * chosen prefix of what fits; `reset_one_in`, when not 0, resets a
+ * connection in place of delivering a chunk once in that many chunks. */
+unsigned long linea_sim_open(unsigned long seed, unsigned long latency_ns, unsigned long jitter_ns,
+                             unsigned long chunk_bytes, unsigned long buffer_bytes, uint8_t short_writes,
+                             unsigned long reset_one_in);
+/* Move the simulation's clock `nanoseconds` forward, delivering what
+ * arrives meanwhile. */
+void linea_sim_advance(unsigned long identity, unsigned long nanoseconds);
+/* A digest of every event the simulation has run, in order: two
+ * simulations opened alike that run one program report the same. */
+unsigned long linea_sim_fingerprint(unsigned long identity);
+/* End the simulation: free its network, mark its descriptors as outside
+ * every simulation, and retire its loop identity. */
+void linea_sim_close(unsigned long identity);
+
+/* Whether the calling thread runs a simulation. */
+static inline int linea_sim_running(void) {
+    return linea_loop_running() != 0;
+}
+
+/* Whether the simulation answers an operation on `fd`. It traps for a
+ * simulated descriptor outside its simulation, and for a real descriptor
+ * while a simulation runs. */
+int linea_sim_takes(int fd);
+/* Whether `fd` is a simulated descriptor's number. */
+static inline int linea_sim_descriptor(int fd) {
+    return fd >= LINEA_SIM_FIRST_DESCRIPTOR;
+}
+
+/* The simulated backend: perform `op` against the running simulation. A
+ * connect makes the client's descriptor, an accept answers the server's. */
+long linea_sim_perform(struct linea_op *op);
+long linea_sim_listen(unsigned long address, unsigned long backlog);
+long linea_sim_local_address(int fd);
+long linea_sim_peer_address(int fd);
+long linea_sim_shutdown_write(int fd);
+long linea_sim_reset(int fd);
+/* Close a simulated descriptor: inside its simulation as a socket closes,
+ * anywhere else by forgetting its entry. */
+long linea_sim_release(int fd);
+/* Read the running simulation's clock, as `linea_clock_read` does. */
+long linea_sim_clock_read(uint8_t clock, long *seconds, unsigned long *nanoseconds);
+/* Wait `nanoseconds` on the running simulation's clock. */
+long linea_sim_sleep(unsigned long nanoseconds);
+
+#endif

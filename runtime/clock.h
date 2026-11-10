@@ -12,7 +12,9 @@ enum linea_clock {
     LINEA_CLOCK_MONOTONIC = 1
 };
 
-/* Read `clock` into whole seconds and the nanoseconds past them, 0 to
+/* Inside a simulation (`sim.h`) both answer from its virtual clocks.
+ *
+ * Read `clock` into whole seconds and the nanoseconds past them, 0 to
  * 999999999. The result is 0, or a negated errno captured immediately, in
  * which case neither output is written. An unknown clock is -EINVAL. */
 long linea_clock_read(uint8_t clock, long *seconds, unsigned long *nanoseconds);

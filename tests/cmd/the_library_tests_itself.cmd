@@ -650,11 +650,13 @@ The library tests itself.
   ok    io.a_buffered_text_failure_preserves_accepted_progress_and_pending_bytes
   ok    io.a_buffered_writer_holds_its_bytes_in_an_arena
   ok    io.a_buffered_writer_renders_a_utf8_line_across_short_writes
+  ok    io.a_closed_simulation_leaves_the_system_current
   ok    io.a_failed_finish_can_be_released_whole
   ok    io.a_failed_prompt_flush_does_not_read_input
   ok    io.a_failed_prompt_preserves_existing_input_lookahead
   ok    io.a_failed_prompt_write_does_not_read_input
   ok    io.a_full_buffer_accepts_new_bytes_only_after_draining_old_bytes
+  ok    io.a_long_sleep_inside_a_run_waits_for_nothing
   ok    io.a_prompt_finishes_short_writes_and_keeps_input_lookahead
   ok    io.a_prompt_reads_its_response_into_an_arena
   ok    io.a_raw_line_preserves_crlf_without_text_conversion
@@ -664,10 +666,14 @@ The library tests itself.
   ok    io.a_resumed_borrowed_raw_line_is_held_in_an_arena
   ok    io.a_resumed_owned_line_is_allocated_from_an_arena
   ok    io.a_resumed_owned_raw_line_is_allocated_from_an_arena
+  ok    io.a_simulation_opens_with_the_default_network_or_the_one_given
+  ok    io.a_simulation_that_has_done_nothing_has_a_fixed_fingerprint
   ok    io.a_smaller_line_limit_releases_excess_record_capacity
+  ok    io.a_task_runs_on_the_system_outside_a_simulation
   ok    io.a_writer_buffers_from_the_system_allocator
   ok    io.abandon_returns_the_reader_and_drops_its_read_ahead
   ok    io.abort_drops_pending_bytes_and_returns_the_writer
+  ok    io.advancing_the_world_moves_the_virtual_clock_by_exactly_that_much
   ok    io.allocation_failure_preserves_the_prefix_and_unconsumed_lookahead
   ok    io.allocation_refusal_returns_an_untouched_writer
   ok    io.an_empty_buffered_write_does_not_drain_a_full_buffer
@@ -717,6 +723,7 @@ The library tests itself.
   ok    io.finishing_after_an_underlying_flush_failure_does_not_repeat_bytes
   ok    io.invalid_owned_text_restores_the_complete_raw_record
   ok    io.line_errors_display_their_reason
+  ok    io.milliseconds_too_many_to_count_saturate
   ok    io.nested_buffered_drain_failure_counts_only_delivered_bytes
   ok    io.nested_buffered_flush_preserves_delivery_progress_and_pending_bytes
   ok    io.open_returns_the_reader_when_no_buffer_is_made
@@ -748,6 +755,9 @@ The library tests itself.
   ok    io.settling_a_refused_buffer_closes_the_stream_and_keeps_the_reason
   ok    io.taking_an_invalid_complete_line_does_not_discard_the_following_line
   ok    io.text_lines_strip_only_their_terminators
+  ok    io.the_default_network_delivers_whole_writes_after_a_millisecond
+  ok    io.the_io_inside_a_run_is_its_simulation
+  ok    io.the_system_is_not_simulated
   ok    io.three_buffered_layers_count_each_delivered_byte_once
   ok    io.whole_input_accepts_short_reads_and_an_exact_limit
   ok    io.whole_input_errors_display_their_reason
@@ -1198,6 +1208,8 @@ The library tests itself.
   ok    net.a_backlog_holds_one_to_4096_connections
   ok    net.a_client_reports_the_listener_as_its_peer
   ok    net.a_client_that_holds_its_task_holds_up_no_other
+  ok    net.a_connect_whose_handshake_ends_at_its_deadline_connects
+  ok    net.a_connect_with_no_bound_waits_for_the_handshake
   ok    net.a_connection_close_reports_success
   ok    net.a_connection_reaches_its_own_listener
   ok    net.a_connection_reset_before_accept_is_reported_as_reset_and_the_next_is_accepted
@@ -1214,6 +1226,7 @@ The library tests itself.
   ok    net.a_listener_reports_the_port_it_was_given
   ok    net.a_net_error_displays_its_reason
   ok    net.a_read_deadline_is_the_nearer_of_the_read_bound_and_the_session
+  ok    net.a_read_whose_bytes_arrive_at_its_deadline_reads_them
   ok    net.a_reset_connection_is_reset_at_its_peer
   ok    net.a_reset_or_exhausted_accept_is_retried
   ok    net.a_scripted_listener_fails_as_scripted_then_accepts_and_reports_its_close_failure
@@ -1221,8 +1234,11 @@ The library tests itself.
   ok    net.a_serve_error_displays_its_cause
   ok    net.a_shut_down_writer_ends_the_peer_input
   ok    net.a_silent_peer_times_out_the_read
+  ok    net.a_simulated_connection_kept_past_its_simulation_closes
   ok    net.a_write_times_out_when_the_peer_reads_nothing
   ok    net.an_accept_attempt_retries_failures_with_a_growing_pause_that_a_connection_resets
+  ok    net.an_accept_whose_connection_is_ready_at_its_deadline_takes_it
+  ok    net.an_accept_with_no_bound_waits_as_accept_does
   ok    net.an_acceptor_waits_for_every_expected_task_and_stops_when_one_fails
   ok    net.an_address_debugs_its_parts
   ok    net.an_address_displays_as_dotted_octets_and_a_port
@@ -1236,6 +1252,7 @@ The library tests itself.
   ok    net.loopback_names_this_host
   ok    net.next_asks_the_listener_nothing_until_a_retry_has_waited_its_pause
   ok    net.on_tasks_answers_what_every_task_answered
+  ok    net.only_a_timed_out_accept_is_timed_out
   ok    net.serve_runs_the_handler_once_for_each_connection_and_returns
   ok    net.serve_workers_handles_connections_concurrently
   ok    net.serve_workers_sequential_policy
@@ -1543,4 +1560,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1540 passed, 0 failed
+  1557 passed, 0 failed

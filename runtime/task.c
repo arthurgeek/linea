@@ -34,6 +34,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "loop.h"
 #include "pipe_signal.h"
 #include "task.h"
 
@@ -226,6 +227,9 @@ unmap_stack:
 
 unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
                                unsigned long len, unsigned long release_at) {
+    /* Threads the kernel schedules cannot be ordered by a seed, so a
+     * simulation admits only the task running it. */
+    if (linea_io_current() != 0) fail("linea: a simulation runs one task until fibers\n");
     struct task *t = task_of(task);
     must(pthread_mutex_lock(&t->lock));
     t->entry = entry;

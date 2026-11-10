@@ -3,7 +3,9 @@
 
 #include "clock.h"
 #include "io.h"
+#include "op.h"
 #include "pipe_signal.h"
+#include "sim.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -35,6 +37,8 @@ static long pack(const struct sockaddr_in *a) {
  * accepted socket inherits O_NONBLOCK from its listener on macOS and not on
  * Linux, so it is set on every socket. */
 static int configure(int fd) {
+    /* Simulated descriptors are numbered from here, so a real one never is. */
+    if (fd >= LINEA_SIM_FIRST_DESCRIPTOR) return EMFILE;
 #if defined(SO_NOSIGPIPE)
     int nosigpipe = 1;
     (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof nosigpipe);
@@ -55,6 +59,7 @@ static long stream_socket(void) {
 }
 
 long linea_net_listen(unsigned long address, unsigned long backlog) {
+    if (linea_sim_running()) return linea_sim_listen(address, backlog);
     if (backlog > 4096) return -(long)EINVAL;
     long fd = stream_socket();
     if (fd < 0) return fd;
@@ -71,18 +76,6 @@ long linea_net_listen(unsigned long address, unsigned long backlog) {
     }
     return fd;
 }
-
-/* One operation on a descriptor. The operation's bytes stay lent by the caller
- * until `linea_io_perform` returns. */
-enum op_kind { OP_ACCEPT, OP_CONNECT, OP_READ, OP_WRITE };
-
-struct linea_op {
-    enum op_kind kind;
-    int fd;                     /* the socket; -1 for a connect not yet started */
-    unsigned long at, len;      /* the bytes a read fills or a write sends */
-    unsigned long address;      /* connect's packed address */
-    unsigned long deadline_ns;  /* monotonic; 0 for none */
-};
 
 /* -EAGAIN and -EWOULDBLOCK are one answer: the operation would wait. */
 static long failed(void) {
@@ -150,9 +143,9 @@ static long attempt_write(const struct linea_op *op) {
 }
 
 static long attempt(struct linea_op *op) {
-    if (op->kind == OP_ACCEPT) return attempt_accept(op);
-    if (op->kind == OP_CONNECT) return attempt_connect(op);
-    if (op->kind == OP_READ) return attempt_read(op);
+    if (op->kind == LINEA_OP_ACCEPT) return attempt_accept(op);
+    if (op->kind == LINEA_OP_CONNECT) return attempt_connect(op);
+    if (op->kind == LINEA_OP_READ) return attempt_read(op);
     return attempt_write(op);
 }
 
@@ -173,7 +166,7 @@ static long monotonic_now(unsigned long *now) {
 static long wait_ready(const struct linea_op *op, unsigned long remaining_ns, int unbounded) {
     struct pollfd entry;
     entry.fd = op->fd;
-    entry.events = (op->kind == OP_READ || op->kind == OP_ACCEPT) ? POLLIN : POLLOUT;
+    entry.events = (op->kind == LINEA_OP_READ || op->kind == LINEA_OP_ACCEPT) ? POLLIN : POLLOUT;
     entry.revents = 0;
     int timeout_ms = -1;
     if (!unbounded) {
@@ -198,9 +191,9 @@ static long wait_ready(const struct linea_op *op, unsigned long remaining_ns, in
     return 0;
 }
 
-/* Perform `op` on the calling thread and answer its one result. A descriptor
- * that is not ready is polled for what remains of the deadline, and EINTR never
- * reaches the caller.
+/* The in-place backend: perform `op` on the calling thread and answer its one
+ * result. A descriptor that is not ready is polled for what remains of the
+ * deadline, and EINTR never reaches the caller.
  *
  * The deadline is checked once on entry, so an operation whose deadline has
  * already passed answers -ETIMEDOUT before anything is consumed. After that
@@ -211,7 +204,7 @@ static long wait_ready(const struct linea_op *op, unsigned long remaining_ns, in
  * still wait answers -ETIMEDOUT. A connect's attempt reads SO_ERROR when the
  * socket is writable, and a socket still connecting at the deadline times out
  * and is closed here, since the caller never received it. */
-static long linea_io_perform(struct linea_op *op) {
+static long perform_in_place(struct linea_op *op) {
     unsigned long now = 0;
     const int has_deadline = op->deadline_ns != 0;
     if (has_deadline) {
@@ -233,17 +226,26 @@ static long linea_io_perform(struct linea_op *op) {
         const long wait_error = wait_ready(op, remaining_ns, !has_deadline);
         if (wait_error != 0) { answer = wait_error; break; }
     }
-    if (op->kind == OP_CONNECT && answer < 0 && op->fd >= 0) close(op->fd);
+    if (op->kind == LINEA_OP_CONNECT && answer < 0 && op->fd >= 0) close(op->fd);
     return answer;
 }
 
+/* Perform `op` through the backend of the calling thread's loop: the
+ * simulated one inside a simulation, otherwise in place. A connect has no
+ * descriptor yet, so it goes by the loop alone; any other operation also
+ * traps where its descriptor belongs to the other side. */
+static long linea_io_perform(struct linea_op *op) {
+    const int simulated = op->kind == LINEA_OP_CONNECT ? linea_sim_running() : linea_sim_takes(op->fd);
+    return simulated ? linea_sim_perform(op) : perform_in_place(op);
+}
+
 long linea_net_accept(int listener, unsigned long deadline_ns) {
-    struct linea_op op = { OP_ACCEPT, listener, 0, 0, 0, deadline_ns };
+    struct linea_op op = { LINEA_OP_ACCEPT, listener, 0, 0, 0, deadline_ns };
     return linea_io_perform(&op);
 }
 
 long linea_net_connect(unsigned long address, unsigned long deadline_ns) {
-    struct linea_op op = { OP_CONNECT, -1, 0, 0, address, deadline_ns };
+    struct linea_op op = { LINEA_OP_CONNECT, -1, 0, 0, address, deadline_ns };
     return linea_io_perform(&op);
 }
 
@@ -251,7 +253,7 @@ long linea_net_read(int fd, unsigned long at, unsigned long len, unsigned long d
     const int invalid = linea_io_byte_range(at, len);
     if (invalid != 0) return -(long)invalid;
     if (len == 0) return 0;
-    struct linea_op op = { OP_READ, fd, at, len, 0, deadline_ns };
+    struct linea_op op = { LINEA_OP_READ, fd, at, len, 0, deadline_ns };
     return linea_io_perform(&op);
 }
 
@@ -259,7 +261,7 @@ long linea_net_write(int fd, unsigned long at, unsigned long len, unsigned long 
     const int invalid = linea_io_byte_range(at, len);
     if (invalid != 0) return -(long)invalid;
     if (len == 0) return 0;
-    struct linea_op op = { OP_WRITE, fd, at, len, 0, deadline_ns };
+    struct linea_op op = { LINEA_OP_WRITE, fd, at, len, 0, deadline_ns };
     return linea_io_perform(&op);
 }
 
@@ -267,6 +269,7 @@ long linea_net_write(int fd, unsigned long at, unsigned long len, unsigned long 
  * getpeername's observed exposure on macOS below, and Listener.local_address
  * reads a real caller's bound address, so the same retry applies here. */
 long linea_net_local_address(int fd) {
+    if (linea_sim_takes(fd)) return linea_sim_local_address(fd);
     struct sockaddr_in a;
     socklen_t size;
     int result;
@@ -286,6 +289,7 @@ long linea_net_local_address(int fd) {
  * the retry is what accept()'s own EINTR loop above provides for the
  * connection itself. */
 long linea_net_peer_address(int fd) {
+    if (linea_sim_takes(fd)) return linea_sim_peer_address(fd);
     struct sockaddr_in a;
     socklen_t size;
     int result;
@@ -303,11 +307,13 @@ long linea_net_peer_address(int fd) {
 }
 
 long linea_net_shutdown_write(int fd) {
+    if (linea_sim_takes(fd)) return linea_sim_shutdown_write(fd);
     /* shutdown does not block; Linux and macOS document no EINTR for it. */
     return shutdown(fd, SHUT_WR) == 0 ? 0 : -(long)errno;
 }
 
 long linea_net_reset(int fd) {
+    if (linea_sim_takes(fd)) return linea_sim_reset(fd);
     struct linger abort_on_close;
     abort_on_close.l_onoff = 1;
     abort_on_close.l_linger = 0;
@@ -321,4 +327,14 @@ long linea_net_reset(int fd) {
     const int closed = close(fd);
     if (error != 0) return -(long)error;
     return closed == 0 ? 0 : -(long)errno;
+}
+
+/* Closing is the one operation a real socket may have inside a simulation,
+ * since it waits on nothing; a simulated descriptor is closed in its
+ * simulation and forgotten anywhere else. */
+long linea_net_close(int fd) {
+    if (linea_sim_descriptor(fd)) return linea_sim_release(fd);
+    /* close is not retried after EINTR, for the reason `linea_net_reset`
+     * gives. */
+    return close(fd) == 0 ? 0 : -(long)errno;
 }

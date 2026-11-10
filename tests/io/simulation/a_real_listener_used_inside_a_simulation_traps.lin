@@ -1,0 +1,19 @@
+import std.io
+import std.net
+
+use net.Accepted
+
+// A listener opened before `run` waits on the real kernel. Inside a
+// simulation its clock is virtual, so accepting on it traps.
+fn main() -> UInt8 {
+    var listener = net.listen(net.loopback(0)).unwrap()
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let accepted = sim.run(inout [inout listener] |inout _world| &listener.accept_within(ms: 10))
+    sim.close()
+    match accepted {
+        Ok(Accepted { connection, address: _ }) => connection.close().unwrap(),
+        Err(_) => {},
+    }
+    listener.close().unwrap()
+    0
+}
