@@ -8,7 +8,9 @@ the simulation of §12 for one task. In it §1's in-place and simulated backends
 each have one party, the calling thread, so §2's guarantees hold because the
 thread that attempts an operation is the one that answers it, without a state
 word. Of §12, printing a failing test's seed is not built yet: a test reads
-`sim.fingerprint()` and names its own seed. Nothing else is built.
+`sim.fingerprint()` and names its own seed. Of phase 2, the park routine of
+§3 on threads is built: every condition-variable wait of `runtime/task.c`
+goes through it. Nothing else is built.
 Once built, it would change these sentences of existing records:
 
 - [0154](0154-sockets-and-http-follow-go.md),
@@ -17,6 +19,10 @@ Once built, it would change these sentences of existing records:
 
 - [0250](0250-tasks-are-structured-through-linear-sessions.md) §6, "Waiting on
   several sources at once remains open", which §4 answers;
+- 0250 §10, "the join is `pthread_join`", which §3 replaces: a handle's
+  `close` parks until the task's thread has marked its body finished under
+  the record's lock, which is the edge the close promises, and `pthread_join`
+  then only reclaims the thread;
 - 0250 §9, whose theorem §5 restates as three separate properties, and whose
   list of blocking operations §1, §4 and §7 add to, each with the argument §9
   asks of a later record;
@@ -285,22 +291,40 @@ The guarantees, for every backend:
 
 ### 3. The runtime's waits are parks, and a fiber has a scheduling state
 
-The runtime stops a task in one routine and wakes it in one:
+The runtime stops a task in one routine and wakes it in one
+(`runtime/park.h`):
 
 ```c
-void linea_park(struct linea_park *p, unsigned long deadline_ns);
+/* Holding p's lock: wait until unparked or until the monotonic clock reaches
+ * deadline_ns (0 for none). Answers 1 once the deadline has passed. */
+int linea_park(struct linea_park *p, unsigned long deadline_ns);
+/* Holding p's lock: wake every party parked on p. */
 void linea_unpark(struct linea_park *p);
 ```
 
-Session rendezvous, `close`'s join, the owning task's call queue,
-`recv_until`, the wait set and `linea_io_perform` all use it. On a thread a
-park is the condition-variable wait `runtime/task.c` already does, under the
-lock of the record being waited on, except in a wait set's `next`: on a
-thread, `next` waits in the set's own kernel queue (`kevent`, `epoll_wait`)
-with its deadline heap's nearest deadline as the timeout, and the set's user
-event wakes it for the sources the kernel does not see, a session's peer, a
-body's return and a signal's router (§4.2, §4.5). On a fiber it is the
-machine below.
+A park is kept in the record a task waits on and holds the lock that guards
+that record: a session's record, a task's start latch, the owning task's call
+queue, and the wait set. The parker holds the lock, checks the condition it
+waits for, and parks while it does not hold; the party that makes it hold
+does so under the same lock and unparks. A park may return without a wake, so
+the parker checks again. Session rendezvous, `recv_until`, the owning task's
+call queue, a task's start latch and `close`'s join all use it: the join
+parks until the task's thread marks its body finished under the record's
+lock, which is also the event `returned` (§4) waits for, and only then joins
+the thread, which by then has nothing left to run. On a thread a park is a
+condition-variable wait under that lock. A timed park may answer 0 at its
+deadline and 1 only on a later call, so a parker with a deadline parks again
+until its condition holds or the park answers 1.
+
+Two waits on a thread are not parks, because no other party wakes them. The
+in-place backend's wait for one descriptor (§1) is `poll`, which the kernel
+ends; `linea_io_perform` parks only on a fiber (phase 4). A wait set's `next`
+on a thread parks on the set's own park while the set holds only sources the
+runtime signals itself (a session's peer, a body's return, a timer), and waits
+in the set's own kernel queue (`kevent`, `epoll_wait`) once it holds a
+descriptor or a signal, with the nearest deadline as the timeout; the set's
+user event then wakes it for the sources the kernel does not see (§4.2,
+§4.5). On a fiber a park is the machine below.
 
 **An operation's machine and a fiber's machine are separate.** §2 decides who
 completes an operation and when; this one decides when the fiber that waits
