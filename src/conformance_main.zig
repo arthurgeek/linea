@@ -13628,7 +13628,9 @@ fn namesWhatSettlesIt(
     return .checked;
 }
 
-/// Which of a run of bounds declares the name, as the source reads them.
+/// Which of a run of bounds declares the name, as the source reads them: a
+/// bound whose trait declares no member of that name reaches the nearest
+/// declaration along each of its supertrait paths.
 ///
 /// One reader for both heads. A settled reference is read through a bound
 /// wherever it is not read through the implementation enclosing it, and the two
@@ -13645,6 +13647,19 @@ fn whichBoundDeclares(
 ) std.mem.Allocator.Error!Declares {
     var count: u32 = 0;
     var found: Declares = .{ .other = 0 };
+    // The supertrait walk of one bound, and the traits an inherited
+    // declaration was already counted in across the bounds.
+    var walk: std.ArrayList(node_mod.DeclId) = .empty;
+    defer walk.deinit(gpa);
+    var reached: std.AutoHashMapUnmanaged(node_mod.DeclId, void) = .empty;
+    defer reached.deinit(gpa);
+    var inherited: std.AutoHashMapUnmanaged(node_mod.DeclId, void) = .empty;
+    defer inherited.deinit(gpa);
+    // The traits a bound names directly and that declare it: a bound naming
+    // one trait at two argument lists counts twice, but an inheritance
+    // reaching it again does not.
+    var direct: std.AutoHashMapUnmanaged(node_mod.DeclId, void) = .empty;
+    defer direct.deinit(gpa);
 
     for (bounds, 0..) |b, k| {
         if (b.kind == .callable) continue;
@@ -13664,9 +13679,37 @@ fn whichBoundDeclares(
         // trait at the same written arguments is the repetition a program
         // means as one declaration to reach.
         if (try namedBefore(gpa, ast, res, memo, traits, bounds[0..k], b, named)) continue;
-        const member = traits.declares(ast, named, wanted) orelse continue;
-        count += 1;
-        if (count == 1) found = .{ .one = .{ .trait = named, .member = member } };
+        if (traits.declares(ast, named, wanted)) |member| {
+            // Already counted where another bound inherits it.
+            if (inherited.contains(named)) continue;
+            try direct.put(gpa, named, {});
+            count += 1;
+            if (count == 1) found = .{ .one = .{ .trait = named, .member = member } };
+            continue;
+        }
+        // A trait declaring no member of that name reads it from its
+        // supertraits, the nearest declaration on each path. One trait reached
+        // twice, through two paths or two bounds, is one declaration.
+        reached.clearRetainingCapacity();
+        try reached.put(gpa, named, {});
+        walk.clearRetainingCapacity();
+        try walk.append(gpa, named);
+        var at: usize = 0;
+        while (at < walk.items.len) : (at += 1) {
+            for (ast.declBounds(walk.items[at])) |super_bound| {
+                if (super_bound.kind == .callable) continue;
+                const super = traits.named(ast.tokenText(super_bound.named.name)) orelse continue;
+                if ((try reached.getOrPut(gpa, super)).found_existing) continue;
+                const member = traits.declares(ast, super, wanted) orelse {
+                    try walk.append(gpa, super);
+                    continue;
+                };
+                if (direct.contains(super)) continue;
+                if ((try inherited.getOrPut(gpa, super)).found_existing) continue;
+                count += 1;
+                if (count == 1) found = .{ .one = .{ .trait = super, .member = member } };
+            }
+        }
     }
 
     return if (count == 1) found else .{ .other = count };

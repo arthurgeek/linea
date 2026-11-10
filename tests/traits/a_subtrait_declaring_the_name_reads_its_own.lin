@@ -1,0 +1,45 @@
+// `Labelled` declares an `Item` of its own beside `Iterator`'s, so a bound on
+// `Labelled` reads `Labelled`'s, which nothing equates with `Iterator`'s.
+trait Labelled: Iterator {
+    type Item
+
+    fn label(self: Self) -> Self.Item
+}
+
+struct Up {
+    lo: UInt64,
+    hi: UInt64,
+}
+
+impl Iterator for Up {
+    type Item = UInt64
+
+    fn next(inout self: Self) -> Option[UInt64] where carries() {
+        if self.lo >= self.hi {
+            return .None
+        }
+        self.lo += 1
+        .Some(self.lo - 1)
+    }
+}
+
+impl Labelled for Up {
+    type Item = Bool
+
+    fn label(self: Self) -> Bool {
+        self.lo < self.hi
+    }
+}
+
+fn labelled[I: Labelled](i: I) -> I.Item {
+    i.label()
+}
+
+fn main() -> UInt8 {
+    let open: Bool = labelled(Up { lo = 1, hi = 2 })
+    if open {
+        1
+    } else {
+        0
+    }
+}

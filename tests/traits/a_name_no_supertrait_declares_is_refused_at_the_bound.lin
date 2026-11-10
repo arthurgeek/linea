@@ -1,0 +1,12 @@
+// Neither `Countdown` nor its supertrait `Iterator` declares `Size`.
+trait Countdown: Iterator {
+    fn remaining(self: Self) -> UInt64
+}
+
+fn _size_of[I: Countdown](it: I) -> I.Size {
+    it.remaining()
+}
+
+fn main() -> UInt8 {
+    0
+}

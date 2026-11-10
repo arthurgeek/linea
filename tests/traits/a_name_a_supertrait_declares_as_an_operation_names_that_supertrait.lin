@@ -1,0 +1,13 @@
+// `next` is an operation `Iterator` declares, and a settled reference
+// names a type; the refusal names `Iterator`, the trait declaring it.
+trait Countdown: Iterator {
+    fn remaining(self: Self) -> UInt64
+}
+
+fn _step_of[I: Countdown](it: I) -> I.next {
+    it.remaining()
+}
+
+fn main() -> UInt8 {
+    0
+}

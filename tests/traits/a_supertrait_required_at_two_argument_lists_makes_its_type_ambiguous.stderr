@@ -1,0 +1,10 @@
+error[N-Ambiguous]: `T`'s bounds require `Lookup` at two argument lists, and each settles its own `Elem`
+  --> tests/traits/a_supertrait_required_at_two_argument_lists_makes_its_type_ambiguous.lin:13:46
+   |
+13 | fn _either[T: Fancy + Lookup[UInt8]](sink v: T.Elem) -> T.Elem {
+   |                                              ^^^^^^ bound it by one of them
+error[N-Ambiguous]: `T`'s bounds require `Lookup` at two argument lists, and each settles its own `Elem`
+  --> tests/traits/a_supertrait_required_at_two_argument_lists_makes_its_type_ambiguous.lin:13:57
+   |
+13 | fn _either[T: Fancy + Lookup[UInt8]](sink v: T.Elem) -> T.Elem {
+   |                                                         ^^^^^^ bound it by one of them

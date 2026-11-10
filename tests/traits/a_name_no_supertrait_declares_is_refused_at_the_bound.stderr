@@ -1,0 +1,5 @@
+error[T-Impl]: `Countdown` declares no `Size`
+ --> tests/traits/a_name_no_supertrait_declares_is_refused_at_the_bound.lin:6:39
+  |
+6 | fn _size_of[I: Countdown](it: I) -> I.Size {
+  |                                       ^^^^ declare it on the trait, or name one it declares

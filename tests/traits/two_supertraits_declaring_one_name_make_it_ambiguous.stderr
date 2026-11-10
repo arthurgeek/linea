@@ -1,0 +1,10 @@
+error[N-Ambiguous]: `Left` and `Right` both declare `Item`, and `Self` reaches both through supertraits
+  --> tests/traits/two_supertraits_declaring_one_name_make_it_ambiguous.lin:17:28
+   |
+17 |     fn pick(self: Self) -> Self.Item
+   |                            ^^^^^^^^^ read it through a parameter bounded by one of them alone
+error[N-Ambiguous]: `Left` and `Right` both declare `Item`, and `T` reaches both through supertraits
+  --> tests/traits/two_supertraits_declaring_one_name_make_it_ambiguous.lin:24:28
+   |
+24 | fn _both[T: Both](t: T) -> T.Item {
+   |                            ^^^^^^ read it through a parameter bounded by one of them alone

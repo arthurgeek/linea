@@ -1,0 +1,51 @@
+// `Countdown` and `Sized` both require `Iterator`, so under `Window` the
+// two paths reach one declaration of `Item`, and `I.Item` is not ambiguous.
+trait Countdown: Iterator {
+    fn remaining(self: Self) -> UInt64
+}
+
+trait Sized: Iterator {
+    fn total(self: Self) -> UInt64
+}
+
+trait Window: Countdown + Sized {}
+
+struct Up {
+    lo: UInt64,
+    hi: UInt64,
+}
+
+impl Iterator for Up {
+    type Item = UInt64
+
+    fn next(inout self: Self) -> Option[UInt64] where carries() {
+        if self.lo >= self.hi {
+            return .None
+        }
+        self.lo += 1
+        .Some(self.lo - 1)
+    }
+}
+
+impl Countdown for Up {
+    fn remaining(self: Self) -> UInt64 {
+        self.hi - self.lo
+    }
+}
+
+impl Sized for Up {
+    fn total(self: Self) -> UInt64 {
+        self.hi
+    }
+}
+
+impl Window for Up {}
+
+fn first_of[I: Window](sink it: I) -> Option[I.Item] where carries(.Some: it), I: Discardable {
+    var walking = it
+    &walking.next()
+}
+
+fn main() -> UInt8 {
+    UInt8(first_of(Up { lo = 4, hi = 9 }).unwrap())
+}

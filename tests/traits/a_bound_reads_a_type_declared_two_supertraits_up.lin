@@ -1,0 +1,53 @@
+// `Bounded` requires `Countdown`, which requires `Iterator`: the name is
+// found two supertraits up and is still the type `Iterator` settles.
+trait Countdown: Iterator {
+    fn remaining(self: Self) -> UInt64
+}
+
+trait Bounded: Countdown {
+    fn limit(self: Self) -> UInt64
+}
+
+struct Up {
+    lo: UInt64,
+    hi: UInt64,
+}
+
+impl Iterator for Up {
+    type Item = UInt64
+
+    fn next(inout self: Self) -> Option[UInt64] where carries() {
+        if self.lo >= self.hi {
+            return .None
+        }
+        self.lo += 1
+        .Some(self.lo - 1)
+    }
+}
+
+impl Countdown for Up {
+    fn remaining(self: Self) -> UInt64 {
+        self.hi - self.lo
+    }
+}
+
+impl Bounded for Up {
+    fn limit(self: Self) -> UInt64 {
+        self.hi
+    }
+}
+
+fn last_of[I: Bounded](sink it: I) -> Option[I.Item] where carries(.Some: it), I: Discardable, I.Item: Discardable {
+    var walking = it
+    var last: Option[I.Item] = .None
+    while walking.remaining() > 0 {
+        last = &walking.next()
+    }
+    last
+}
+
+fn main() -> UInt8 {
+    let up = Up { lo = 3, hi = 7 }
+    let limit = up.limit()
+    UInt8(last_of(up).unwrap() + limit)
+}

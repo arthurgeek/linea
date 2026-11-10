@@ -1,0 +1,5 @@
+error[T-Bound]: `Countdown` requires `Iterator`, and `Up` does not implement it
+  --> tests/traits/a_subtrait_implementation_needs_the_supertraits_to_read_its_type.lin:12:6
+   |
+12 | impl Countdown for Up {
+   |      ^^^^^^^^^ implement it for that type, or drop the bound

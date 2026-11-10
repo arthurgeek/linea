@@ -1,0 +1,19 @@
+// `T: Fancy + Lookup[UInt8]` holds `Lookup` at `UInt64` through `Fancy` and
+// at `UInt8` as written, and each implementation settles its own `Elem`.
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Self.Elem where carries()
+}
+
+trait Fancy: Lookup[UInt64] {
+    fn tag(self: Self) -> UInt8
+}
+
+fn _either[T: Fancy + Lookup[UInt8]](sink v: T.Elem) -> T.Elem {
+    v
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -307,6 +307,71 @@ An array is not a sequence. A `for` walks an array directly, element by
 element, and `as_slice()` lends an array out as a slice, which is a sequence:
 that is how the chains below start from one.
 
+### A trait built on `Iterator`
+
+A trait can require another: `trait Timer: Iterator` says every `Timer` is an
+`Iterator` too. A bound on `Timer` then reaches `Iterator`'s operations and its
+`Item` as well, so a function asking for `I: Timer` can call `next` and write
+`I.Item` without also asking for `I: Iterator`:
+
+```linea
+import std.io
+
+struct Countdown {
+    left: UInt64,
+}
+
+impl Iterator for Countdown {
+    type Item = UInt64
+
+    fn next(inout self: Self) -> Option[UInt64] {
+        if self.left == 0 {
+            return .None
+        }
+        self.left -= 1
+        .Some(self.left + 1)
+    }
+}
+
+// A `Timer` is an iterator that can also say how much is left.
+trait Timer: Iterator {
+    fn remaining(self: Self) -> UInt64
+}
+
+impl Timer for Countdown {
+    fn remaining(self: Self) -> UInt64 {
+        self.left
+    }
+}
+
+// `I.Item` is the `Item` that `Iterator` declares: `Timer` requires
+// `Iterator`, so the bound `I: Timer` reaches it.
+fn announce[I: Timer](sink timer: I) -> Result[UInt8, io.IoError] where I.Item: Display + Discardable {
+    io.println("{timer.remaining()} to go")?
+    for tick in timer {
+        io.println("{tick}...")?
+    }
+    .Ok(0)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    announce(Countdown { left = 3 })
+}
+```
+
+```
+3 to go
+3...
+2...
+1...
+```
+
+`I.Item` here is the very type `I: Iterator` would name, so `announce` can
+hand its timer to any function that asks for an `Iterator`. Inside `Timer`
+itself, and in `impl Timer for Countdown`, the same `Item` is written
+`Self.Item`. This is Rust's supertrait, `trait Timer: Iterator`, where Rust
+writes `I::Item` and `Self::Item`.
+
 ## Chains: `map`, `filter` and `fold`
 
 Every sequence offers operations that walk it for you. Chained one after
