@@ -1,4 +1,5 @@
 import std.mem
+import std.mem.address
 import std.testing
 
 // The address of an array of C strings, C's `char **`, which crosses as a
@@ -20,7 +21,10 @@ impl CTextList {
             panic("a C string list was read past the count C gave for it")
         }
         let read CTextList(at) = self
-        CText(mem.foreign_word(at, index * pointer_bytes))
+        if at == 0 {
+            panic("a null C string list was read")
+        }
+        CText(mem.foreign_word(mem.foreign_at(at), index * pointer_bytes))
     }
 
     test fn entries_are_read_where_the_list_holds_them() {
@@ -34,7 +38,7 @@ impl CTextList {
         let CText(second_at) = second.text()
         &words.store(0, first_at)
         &words.store(8, second_at)
-        let list = CTextList(mem.foreign_address(words.as_slice()))
+        let list = CTextList(address.raw(mem.foreign_address(words.as_slice())))
         let named = list.get(1, count: 2).to_owned()
         words.release()
         defer let name = named.unwrap()

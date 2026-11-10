@@ -3,3 +3,8 @@ error[T-ExternRuntime]: `linea_raw_load8` is replaced by the compiler where the 
   |
 1 | extern fn linea_raw_load8(at: UInt64, len: UInt64, i: UInt64) -> UInt8
   |           ^^^^^^^^^^^^^^^ reach it through the standard library's checked storage operations
+error[T-RawAddress]: the runtime reads or writes values at this address, so it takes only the number in a `mem.address.Address`
+ --> tests/library/a_lowered_primitive_has_no_runtime_definition/main.lin:4:27
+  |
+4 |     Int64(linea_raw_load8(UInt64(value), 1, 0))
+  |                           ^^^^^^^^^^^^^ pass `address.raw(at)`, whose address names the type of the values kept there

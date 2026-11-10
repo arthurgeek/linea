@@ -211,7 +211,7 @@ impl[T, A: Allocator] Vec[T, A] {
 // deep. A merge with a buffer would make O(n log n) moves, but it would
 // allocate, so every sort could fail; this one cannot.
 fn stable_sort[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Bool](inout values: Vec[T, A], inout less: F) {
-    let count = values.len
+    let count = values.length()
     var run: UInt64 = 1
     while run < count {
         var start: UInt64 = 0
@@ -253,7 +253,7 @@ fn merge[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Bool](inou
         }
         var at = low
         while at + 1 < first {
-            swap_elements(&values, at, at + 1)
+            &values.swap_elements(at, at + 1)
             at += 1
         }
         return
@@ -273,7 +273,7 @@ fn merge[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Bool](inou
         }
         var at = middle
         while at > first {
-            swap_elements(&values, at, at - 1)
+            &values.swap_elements(at, at - 1)
             at -= 1
         }
         return
@@ -335,7 +335,7 @@ fn rotate[T, A: Allocator](inout values: Vec[T, A], low: UInt64, middle: UInt64,
 // Swap the `count` elements from `first` with the `count` from `second`.
 fn swap_blocks[T, A: Allocator](inout values: Vec[T, A], first: UInt64, second: UInt64, count: UInt64) {
     for offset in 0..count {
-        swap_elements(&values, first + offset, second + offset)
+        &values.swap_elements(first + offset, second + offset)
     }
 }
 
@@ -344,14 +344,20 @@ fn sorts_before[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Boo
     &less(values[first], values[second])
 }
 
-// Exchange elements `first` and `second`, two live indexes.
-fn swap_elements[T, A: Allocator](inout values: Vec[T, A], first: UInt64, second: UInt64) {
-    let shape: SlotType[T] = .Type
-    let stride = slot_stride(shape)
-    let earlier: T = slot_take(&values.storage, first * stride)
-    let later: T = slot_take(&values.storage, second * stride)
-    slot_put(&values.storage, first * stride, later)
-    slot_put(&values.storage, second * stride, earlier)
+impl[T, A: Allocator] Vec[T, A] {
+    // Exchange elements `first` and `second`, two live indexes. An index at
+    // or past the length traps, since a slot there holds no element.
+    fn swap_elements(inout self: Self, first: UInt64, second: UInt64) {
+        if first >= self.len || second >= self.len {
+            panic("swap_elements: index out of bounds")
+        }
+        let shape: SlotType[T] = .Type
+        let stride = slot_stride(shape)
+        let earlier: T = slot_take(&self.storage, first * stride)
+        let later: T = slot_take(&self.storage, second * stride)
+        slot_put(&self.storage, first * stride, later)
+        slot_put(&self.storage, second * stride, earlier)
+    }
 }
 
 // Build a vector of the given integers, in order.

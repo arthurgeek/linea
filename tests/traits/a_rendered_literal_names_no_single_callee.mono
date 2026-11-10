@@ -490,7 +490,7 @@ pub fn std.mem;Vec[UInt8,std.mem.SystemAllocator].reserve(inout self: std.mem.Ve
         return .Err(Oom.Exhausted)
     }
     let required = self.len + additional
-    let capacity = self.storage.len / stride
+    let capacity = std.mem;Storage[UInt8,std.mem.SystemAllocator].capacity(self.storage) / stride
     if required <= capacity {
         return .Ok(())
     }
@@ -514,7 +514,7 @@ pub fn std.mem;Vec[UInt8,std.mem.SystemAllocator].reserve(inout self: std.mem.Ve
     } else {
         doubled
     }
-    let acquired = std.mem.SystemAllocator;std.mem;Allocator.acquire(self.storage.allocator, grown * stride)?
+    let acquired = std.mem.SystemAllocator;std.mem;Allocator.acquire(std.mem;Storage[UInt8,std.mem.SystemAllocator].allocator(self.storage), grown * stride)?
     let Vec { storage: previous, len: length } = self
     var storage = previous
     var next: std.mem.Storage[UInt8,std.mem.SystemAllocator] = std.mem;Storage[UInt8,std.mem.SystemAllocator].from_buffer(acquired)
@@ -601,10 +601,10 @@ fn std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Releas
         None => {
             {}
         },
-        Some(_linea_derive_2133_1_0_0) => {
+        Some(_linea_derive_2148_1_0_0) => {
             {
                 {
-                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2133_1_0_0)
+                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2148_1_0_0)
                 }
             }
         },
@@ -645,6 +645,14 @@ fn std.fmt;scale_unsigned(n: UInt64) -> UInt64 {
     p
 }
 
+fn std.mem;Storage[UInt8,std.mem.SystemAllocator].capacity(self: std.mem.Storage[UInt8,std.mem.SystemAllocator]) -> UInt64 {
+    self.len
+}
+
+fn std.mem;Storage[UInt8,std.mem.SystemAllocator].allocator(self: std.mem.Storage[UInt8,std.mem.SystemAllocator]) -> std.mem.SystemAllocator where carries(self) {
+    copy(self.allocator)
+}
+
 fn std.mem.SystemAllocator;std.mem;Allocator.acquire(self: std.mem.SystemAllocator, size: UInt64) -> std.result.Result[std.mem.Buffer[std.mem.SystemAllocator],std.mem.Oom] where carries() {
     match read self {
         System => {
@@ -667,7 +675,7 @@ fn std.mem.SystemAllocator;std.mem;Allocator.acquire(self: std.mem.SystemAllocat
 
 fn std.mem;Storage[UInt8,std.mem.SystemAllocator].from_buffer(sink buffer: std.mem.Buffer[std.mem.SystemAllocator]) -> std.mem.Storage[UInt8,std.mem.SystemAllocator] where carries(buffer) {
     let allocator = copy(buffer.allocator)
-    let at: std.mem.address.Address[UInt8] = address_in(buffer, 0)
+    let at: std.mem.address.Address[UInt8] = owned_address_in(buffer, 0)
     let length = buffer.len
     .{ buffer = .Some(buffer), allocator, at, len = length }
 }
@@ -709,7 +717,7 @@ pub fn std.mem;Slice[UInt8].get(self: std.mem.Slice[UInt8], i: UInt64) -> std.op
 }
 
 internal fn std.mem;write_slice_fd(bytes: std.mem.Slice[UInt8], fd: Int32) -> Int64 {
-    linea_write_some(fd, std.mem.address;raw[UInt8](slice_address(bytes)), bytes.len)
+    linea_write_some(fd, std.mem.address;raw[UInt8](slice_address(bytes)), std.mem;Slice[UInt8].length(bytes))
 }
 
 pub fn std.io.core;IoError.from_os(operation: std.io.core.IoOperation, code: Int32, progress: UInt64 = 0) -> std.io.core.IoError {
@@ -1012,12 +1020,11 @@ extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
 extern fn linea_io_category(code: Int32) -> UInt8
 
 fn std.mem.SystemAllocator;std.mem;Allocator.dispose(sink b: std.mem.Buffer[std.mem.SystemAllocator]) {
-    // The runtime frees the number in an address made from the buffer.
+    // The runtime frees the number in an address made from the buffer,
+    // which borrows it, so the buffer is taken apart only after the call.
     let at: std.mem.address.Address[UInt8] = address_in(b, 0)
-    let Buffer { at: _, len: _length, allocated: allocated, allocator: allocator, obligation: SystemAllocation {} } = b
-    match allocator {
-        System => linea_free(std.mem.address;raw[UInt8](at), allocated, Buffer.alignment),
-    }
+    linea_free(std.mem.address;raw[UInt8](at), b.allocated, Buffer.alignment)
+    let Buffer { at: _, len: _length, allocated: _allocated, allocator: System, obligation: SystemAllocation {} } = b
 }
 
 pub fn std.text;Str.length(self: std.text.Str) -> UInt64 {

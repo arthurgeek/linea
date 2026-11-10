@@ -273,17 +273,19 @@ test "CI deletes each lane's older caches on its own ref after the lanes save" {
         \\            /flake.lock
         \\
         \\      # Each key is the one its lane's restore step names for this run; the
-        \\      # sanitizers are the `sanitize` matrix's.
+        \\      # sanitizers are the `sanitize` matrix's. One call lists the ref's
+        \\      # caches once for every lane.
         \\      - name: Delete each lane's older caches on this ref
         \\        env:
         \\          GH_TOKEN: ${{ github.token }}
         \\          LOCK: ${{ hashFiles('flake.lock') }}
         \\        run: |
         \\          this_run="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+        \\          lanes=()
         \\          for lane in check sanitize-address sanitize-thread optimised-unit optimised-corpus optimised-soundness; do
-        \\            .github/scripts/prune-caches.sh "outcomes-$lane-$RUNNER_OS-$LOCK-$GITHUB_SHA-$this_run" "$GITHUB_SHA-$this_run"
+        \\            lanes+=("outcomes-$lane-$RUNNER_OS-$LOCK-$GITHUB_SHA-$this_run" "$GITHUB_SHA-$this_run")
         \\          done
-        \\          .github/scripts/prune-caches.sh "fuzz-inputs-$RUNNER_OS-$this_run" "$this_run"
+        \\          .github/scripts/prune-caches.sh "${lanes[@]}" "fuzz-inputs-$RUNNER_OS-$this_run" "$this_run"
         \\
         \\
     , try workflowJob(workflow, "prune-caches"));
@@ -327,7 +329,6 @@ test "CI deletes a closed pull request's caches without running its code" {
     try testing.expectEqual(@as(usize, 0), std.mem.count(u8, workflow, "actions/checkout"));
     try testing.expectEqual(@as(usize, 0), std.mem.count(u8, workflow, "github.event.pull_request.head"));
     try testing.expectEqual(@as(usize, 0), std.mem.count(u8, workflow, "head_ref"));
-    try testing.expectEqualStrings("  pull_request_target:\n    types: [closed]", source.between(workflow, "\non:\n", "\n\n") orelse return error.MissingTrigger);
     // Everything from the trigger on, whole: the `closed` trigger alone, a
     // token that may delete caches and nothing else, and a delete scoped to
     // the ref the event's number names.

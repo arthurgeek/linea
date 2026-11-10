@@ -1,15 +1,20 @@
 error[T-RawAddress]: `keep` would pass an address between C and Linea, and C may keep one where no type names what the address holds
-  --> tests/ffi/an_extern_cannot_hand_c_an_address/main.lin:10:11
+  --> tests/ffi/an_extern_cannot_hand_c_an_address/main.lin:11:11
    |
-10 | extern fn keep(at: address.Address[UInt8])
+11 | extern fn keep(at: address.Address[UInt8])
    |           ^^^^ declare a `UInt64` where C takes a number
 error[T-RawAddress]: `find` would pass an address between C and Linea, and C may keep one where no type names what the address holds
-  --> tests/ffi/an_extern_cannot_hand_c_an_address/main.lin:12:11
+  --> tests/ffi/an_extern_cannot_hand_c_an_address/main.lin:13:11
    |
-12 | extern fn find() -> Wrapped
+13 | extern fn find() -> Wrapped
    |           ^^^^ declare a `UInt64` where C takes a number
 error[T-RawAddress]: `fill` would pass an address between C and Linea, and C may keep one where no type names what the address holds
-  --> tests/ffi/an_extern_cannot_hand_c_an_address/main.lin:14:11
+  --> tests/ffi/an_extern_cannot_hand_c_an_address/main.lin:15:11
    |
-14 | extern fn fill(inout at: address.Address[UInt8])
+15 | extern fn fill(inout at: address.Address[UInt8])
    |           ^^^^ declare a `UInt64` where C takes a number
+error[T-RawAddress]: `locate` would pass an address between C and Linea, and C may keep one where no type names what the address holds
+  --> tests/ffi/an_extern_cannot_hand_c_an_address/main.lin:17:11
+   |
+17 | extern fn locate() -> ffi.Errno[address.Address[UInt8]]
+   |           ^^^^^^ declare a `UInt64` where C takes a number

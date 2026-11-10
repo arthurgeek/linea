@@ -1,0 +1,5 @@
+import reading
+
+fn main() -> UInt8 {
+    UInt8(reading.level())
+}

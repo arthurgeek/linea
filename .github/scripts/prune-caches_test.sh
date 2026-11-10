@@ -74,7 +74,7 @@ expect_deleted() {
 }
 
 # Every older attempt and commit of the lane on the ref goes, the one just
-# saved stays, and the listing asked for this ref and this lane's prefix.
+# saved stays, and the one listing asked for every page of this ref.
 reset
 cache 30 "$pr" "${check}$b-200-1"
 cache 20 "$pr" "${check}$a-100-2"
@@ -82,8 +82,8 @@ cache 10 "$pr" "${check}$a-100-1"
 run "older entries of the lane on the ref" "$pr" "${check}$b-200-1" "$b-200-1"
 expect_status 0
 expect_deleted "20 10"
-grep -q -- "^cache list --repo owner/repo --ref $pr --key $check --limit 1000 " "$FAKE/lists" ||
-  fail "the listing was not scoped to the repository, the ref and the prefix, or stopped short of every page"
+grep -q -- "^cache list --repo owner/repo --ref $pr --limit 1000 " "$FAKE/lists" ||
+  fail "the listing was not scoped to the repository and the ref, or stopped short of every page"
 grep -qx -- "cache delete --repo owner/repo 20" "$FAKE/deletes" || fail "the delete named no repository"
 
 # Main's caches are never a pull request run's to delete, even where the
@@ -122,6 +122,24 @@ cache 1 "$pr" "outcomes-check-Linux-0000-$a-100-1"
 run "another flake.lock" "$pr" "${check}$b-200-1" "$b-200-1"
 expect_status 0
 expect_deleted ""
+
+# Every lane named in one call is pruned from one listing, each by its own
+# prefix and its own kept cache; a lane whose key was not saved loses
+# nothing, and the others are still pruned.
+reset
+cache 31 "$pr" "${check}$b-200-1"
+cache 21 "$pr" "${check}$a-100-1"
+cache 32 "$pr" "${corpus}$b-200-1"
+cache 22 "$pr" "${corpus}$a-100-1"
+cache 12 "$pr" "${corpus}$a-90-1"
+cache 23 "$pr" "fuzz-inputs-Linux-100-1"
+run "every lane from one listing" "$pr" \
+  "${check}$b-200-1" "$b-200-1" \
+  "${corpus}$b-200-1" "$b-200-1" \
+  "fuzz-inputs-Linux-200-1" "200-1"
+expect_status 0
+expect_deleted "21 22 12"
+[ "$(wc -l < "$FAKE/lists" | tr -d ' ')" = 1 ] || fail "listed the caches more than once"
 
 # The fuzz inputs name the run without a commit.
 reset
@@ -174,6 +192,12 @@ expect_status 2
 run "a suffix that is the whole key" "$pr" "$b-200-1" "$b-200-1"
 expect_status 2
 run "one argument" "$pr" "${check}$b-200-1"
+expect_status 2
+run "a key without its suffix after another lane" "$pr" "${check}$b-200-1" "$b-200-1" "${corpus}$b-200-1"
+expect_status 2
+run "a later lane naming no prefix" "$pr" "${check}$b-200-1" "$b-200-1" "${corpus}$b-200-1" "$a-100-1"
+expect_status 2
+run "no arguments" "$pr"
 expect_status 2
 run "no ref" "" "${check}$b-200-1" "$b-200-1"
 expect_status 2

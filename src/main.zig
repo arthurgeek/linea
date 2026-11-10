@@ -8,6 +8,7 @@ comptime {
     _ = @import("support/text.zig");
     _ = @import("support/name_case.zig");
     _ = @import("support/article.zig");
+    _ = @import("support/strings.zig");
     _ = @import("support/diff.zig");
     _ = @import("support/cli.zig");
     _ = @import("support/stack.zig");

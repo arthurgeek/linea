@@ -4584,9 +4584,10 @@ shape is [T-Extern] at the declaration, and an `extern` answering it is not
 checked further.
 
 The private `std.mem` declarations `slot_stride`, `slot_take`, `slot_put`,
-`slot_place` and `address_in` are typed storage primitives, not foreign calls.
-A recognized primitive must retain its compiler-defined private signature;
-violations are [T-Extern]. Another module's declaration of the same spelling
+`slot_place`, `address_in`, `owned_address_in`, `slice_address` and
+`number_address` are typed storage primitives, not foreign calls. A recognized primitive must retain its
+compiler-defined private signature, its contract included; violations are
+[T-Extern]. Another module's declaration of the same spelling
 receives no exemption. A slot primitive reads the slots' address and extent
 from the storage it is given, whose address names the element type, so a
 value kept in bytes is always held by a type that names its own
@@ -4821,18 +4822,64 @@ it starts, hands a system call, parses or frees; and as the `at` of a
 The standard library makes the address of a buffer's bytes with `address_in`,
 which checks the offset against the buffer, and of a slice's with
 `slice_address`, so a runtime call that reads, writes or frees bytes is handed
-only an address made from what owns them. Every runtime parameter the
+only an address made from what owns them. An address carries dependencies, so
+it lives no longer than what it was made from: `address_in` declares
+`where borrows(buffer)`, `slice_address` declares `where carries(view)`, and a
+function answering an address is held to its contract like any other, so an
+address used after its buffer or its slice's owner is released is [O-Borrow].
+`owned_address_in`, the same address for a value that takes the buffer and
+keeps the address beside it, declares `where carries(buffer)`, so it outlives
+the buffer's place but not what the buffer carries. A raw type is one whose
+fields are an address, an extent of bytes or what those bytes hold, which the
+slot primitives, the runtime or lowering trust: `mem.Storage`, `Buffer`,
+`Slice`, `View`, `Closure`, `Vec`, `Kept`, `session.Chan` and `task.Owner`. Every field of one is named --
+read, written, lent, used as a method's receiver, passed, bound by a pattern
+or given in a literal -- only in a member of an implementation for that type,
+in a test written inside one, and in the declarations the compiler's table
+lists for it: for a storage, those that keep a task body and `Closure.erase`;
+for a buffer, the members of an implementation of `mem.Allocator` for a
+buffer of that allocator, the test allocators and arena handle the table names
+for their backing allocator's buffers, `Storage.from_buffer` and the
+declarations that hand its bytes out as numbers; for a slice,
+`foreign_address`; for a view, `Vec.split_inout`; for a vector, the
+declarations that make a byte vector from a buffer and take it back; and for a
+kept body, `keep_body` and `task.Slot.start`. A `Storage` literal with no
+buffer, `at = address.nowhere()` and `len = 0` is written anywhere. Everything
+else reaches a storage's address through `Storage.address`, which declares
+`where borrows(self)`. `owned_address_in` is named only by
+`Storage.from_buffer` and `keep_body`; `closure_entry`, `closure_settle` and
+`closure_size` only by `Closure.erase`; `keep_body`, `release_kept_bytes` and
+`task.run_body` only by `task.Slot.start`; `take_kept_body` only by
+`task.run_body`; and the slot primitives, `Storage.dispose` and
+`Storage.into_buffer` only by the members of `Storage`, `Vec` and `Drain` and
+the declarations the table names, each of which settles or hands on every
+value it puts; `release_from`, which trusts the counts it is given, only by
+`Vec`'s and `Drain`'s members. A call through a field's value names the field; only a callee
+the checker resolved to a method is not one. Each of these elsewhere is
+[T-RawAddress]
+([ADR 0264](adr/0264-an-address-lives-no-longer-than-what-it-was-made-from.md)). Every runtime parameter the
 runtime's sources name as an address (`at`, `from`, `to`, or a name ending in
 `_at`) is marked, which a test of the table holds, so one added later cannot
-take a plain number. The storage primitives lowering replaces are the
-exception: each access is checked against the extent passed beside it, and
-the address may be one C handed over. Anywhere else, the call, or `raw` named
+take a plain number. The raw loads and stores lowering replaces are marked as
+well, so every byte the library reads or writes outside a slot primitive is
+read at an address that carries what owns the bytes, and every marked symbol
+is named only by the members of `Buffer`, `Storage` and `Chan` and the
+declarations the compiler's table lists, since it trusts the extent passed
+beside the address. `send_payload`, `receive_payload`,
+`receive_payload_until`, `Chan.opened`, `call_owner` and `next_owner_request`,
+which trust that an endpoint or queue carries the type asked of it, are named
+only where that table says. A number becomes an address only through
+`number_address`, named only by `record_release` and by `foreign_at`, which
+only the members of `ffi.CText` and `ffi.CTextList` name; and a C view (`ffi.Bytes`, `CText`,
+`CTextList`) is built from a number only in its own members, in the
+declarations the table lists, or from the literal `0`. Anywhere else, the call, or `raw` named
 as a value, is refused, because a number would stand for values of a type no
 type names. The argument for a marked parameter is a call of `raw` and nothing
 else: any other number, or a default the declaration gives the parameter, is
 refused, since the runtime would read or write values at an address no type
 names. An `extern` or `export` whose parameters, result or callbacks reach
-an address, through a newtype's base or a place lent `inout`, is refused too,
+an address, through a newtype's base, the `R` of an answered `ffi.Errno[R]`
+or a place lent `inout`, is refused too,
 since C could keep one or write a number where one belongs; a callback's
 context, which C hands back unread, is the one place exempt. A function passed for a runtime
 callback the table marks may declare the marked parameter as an address,

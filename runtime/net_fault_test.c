@@ -490,7 +490,9 @@ static void close_pair(struct pair p) {
     close(p.client); close((int)p.server); close((int)p.listener);
 }
 
-/* Lets bytes written to the peer reach the socket before a scripted read. */
+/* Waits for bytes written to the peer, or a connection queued on a listener, to
+ * reach the socket before a scripted attempt, so the attempt the script lets
+ * through finds them whatever the machine's load. */
 static void settle(int fd) {
     struct pollfd entry = { fd, POLLIN, 0 };
     assert(poll(&entry, 1, 5000) == 1);
@@ -654,6 +656,9 @@ static void accept_at_its_deadline_answers_the_connection(void) {
     long bound = linea_net_local_address((int)listener);
     assert(bound >= 0);
     int client = connect_real_client((unsigned long)bound);
+    /* The client's connect returns once its side of the handshake is done;
+     * the listener holds the connection a moment later. */
+    settle((int)listener);
     const struct poll_step ties[] = { { 0, 1, 5000000 } };
     script_polls(ties, 1);
     accept_eagain = 1;
@@ -669,6 +674,7 @@ static void accept_at_its_deadline_finding_nothing_times_out(void) {
     long bound = linea_net_local_address((int)listener);
     assert(bound >= 0);
     int client = connect_real_client((unsigned long)bound);
+    settle((int)listener);
     const struct poll_step ties[] = { { 0, 1, 5000000 } };
     script_polls(ties, 1);
     accept_eagain = 2;

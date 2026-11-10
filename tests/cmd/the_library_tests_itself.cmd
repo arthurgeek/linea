@@ -1092,6 +1092,7 @@ The library tests itself.
   ok    mem.all_disposed_is_false_while_an_allocation_is_live
   ok    mem.allocating_again_preserves_a_live_buffer_view
   ok    mem.allocator_hands_out_buffers_the_log_records
+  ok    mem.an_address_at_a_number_names_the_bytes_there
   ok    mem.an_arena_backs_another_arena
   ok    mem.an_arena_hands_out_storage_and_gives_the_slab_back
   ok    mem.an_arena_over_an_arena_is_rewound_in_place
@@ -1560,4 +1561,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1557 passed, 0 failed
+  1558 passed, 0 failed

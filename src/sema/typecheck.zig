@@ -58,6 +58,7 @@ const ClosureField = RawAccesses.ClosureField;
 const ErrnoField = RawAccesses.ErrnoField;
 const FloatMath = @import("intrinsics.zig").FloatMath;
 const intrinsics = @import("intrinsics.zig");
+const foreign_mod = @import("foreign.zig");
 const usefulness = @import("usefulness.zig");
 
 const Fold = union(enum) {
@@ -256,169 +257,219 @@ fn attachSeedRows(
     return result;
 }
 
-/// What a symbol calls each of `exprs`, closures' lambdas or qualified
-/// constructor references: the declaration it is written in
-/// (`appendDeclarationName`), `#` and its place among the members of `exprs`
+/// What a symbol calls each of a list of expressions, closures' lambdas or
+/// qualified constructor references: the declaration it is written in
+/// (`appendDeclarationName`), `#` and its place among the members of the list
 /// that declaration holds. Places follow source order, except that a call's
 /// arguments are taken in the order of the parameters they fill (`calls`
 /// holds each accepted call's arguments in that order), so writing named
 /// arguments in another order renames nothing. Neither a resumed check, which
 /// numbers the library's closures and constructors first, nor a rewrite that
 /// moves declarations or respells what is around an expression changes a
-/// name. An entry of `.none` is named by its index after `#`. Allocated in
-/// `gpa`.
+/// name. An entry of `.none` is named by its index after `#`.
 ///
-/// **Bound:** a sort of `exprs` and one of the program's declarations by first
-/// token, and one sweep over both, whose stack holds the declarations nested
-/// around one point. Each call naming two or more arguments adds a step to the
-/// place of each member of `exprs` inside one of its arguments, found by binary
-/// search, so the work is the members of `exprs` times the calls nested around
-/// each.
-pub fn bodyNames(
-    gpa: std.mem.Allocator,
+/// Built once for every list a check names: the program's declarations
+/// sorted by first token, the calls naming two or more arguments sorted the
+/// same way, and each declaration's spelling once it is first asked for.
+const BodyNamer = struct {
+    scratch: std.heap.ArenaAllocator,
     program: *const ExpandedProgram,
     resolution: *const Resolution,
     typing: *const Typing,
     calls: []const types_mod.NormalizedCall,
-    exprs: []const node.ExprId,
-) ![][]const u8 {
-    const ast = &program.ast;
-    var scratch = std.heap.ArenaAllocator.init(gpa);
-    defer scratch.deinit();
-    const temp = scratch.allocator();
+    /// The declarations by first token; a declaration and one nested in it
+    /// from its first token: the outer, which ends later, first.
+    decls: []const u32,
+    /// The calls that write two or more arguments by name, by first token.
+    named: []const Named,
+    /// What `appendDeclarationName` spells for each declaration asked so far.
+    spellings: std.AutoHashMapUnmanaged(DeclId, []const u8) = .empty,
 
-    const startOf = struct {
-        fn expr(tree: *const Ast, e: node.ExprId) u32 {
-            return @intFromEnum(tree.exprTokens(e).start);
-        }
-    };
-
-    // The members of `exprs`, by the token each starts at.
-    var placed: std.ArrayList(u32) = .empty;
-    for (exprs, 0..) |expr, i| if (expr != .none) try placed.append(temp, @intCast(i));
-    const ByStart = struct {
-        tree: *const Ast,
-        exprs: []const node.ExprId,
-        fn less(self: @This(), a: u32, b: u32) bool {
-            return startOf.expr(self.tree, self.exprs[a]) < startOf.expr(self.tree, self.exprs[b]);
-        }
-    };
-    std.mem.sort(u32, placed.items, ByStart{ .tree = ast, .exprs = exprs }, ByStart.less);
-
-    // Where each member sits: a step for each call around it whose arguments
-    // are written by name, outermost first, holding the call's first token and
-    // the parameter the argument fills; then the member's own first token.
-    const steps = try temp.alloc(std.ArrayList(u32), exprs.len);
-    @memset(steps, .empty);
     const Named = struct { start: u32, call: u32 };
-    var named: std.ArrayList(Named) = .empty;
-    for (calls, 0..) |call, i| {
-        if (call.at == .none or !ast.exprTag(call.at).namesArguments()) continue;
-        var names: usize = 0;
-        for (ast.callNames(call.at)) |name| {
-            if (name != TokenId.none) names += 1;
-        }
-        if (names < 2) continue;
-        try named.append(temp, .{ .start = startOf.expr(ast, call.at), .call = @intCast(i) });
+
+    fn startOf(tree: *const Ast, e: node.ExprId) u32 {
+        return @intFromEnum(tree.exprTokens(e).start);
     }
-    std.mem.sort(Named, named.items, {}, struct {
-        fn less(_: void, a: Named, b: Named) bool {
-            return a.start < b.start;
-        }
-    }.less);
-    for (named.items) |entry| {
-        const call = calls[entry.call];
-        for (call.args, 0..) |arg, parameter| {
-            if (arg == .none) continue;
-            const span = ast.exprTokens(arg);
-            // The first member starting inside the argument, and every one
-            // after it that still does.
-            var lo: usize = 0;
-            var hi: usize = placed.items.len;
-            while (lo < hi) {
-                const mid = lo + (hi - lo) / 2;
-                if (startOf.expr(ast, exprs[placed.items[mid]]) < @intFromEnum(span.start)) lo = mid + 1 else hi = mid;
+
+    fn init(
+        gpa: std.mem.Allocator,
+        program: *const ExpandedProgram,
+        resolution: *const Resolution,
+        typing: *const Typing,
+        calls: []const types_mod.NormalizedCall,
+    ) std.mem.Allocator.Error!BodyNamer {
+        const ast = &program.ast;
+        var scratch = std.heap.ArenaAllocator.init(gpa);
+        errdefer scratch.deinit();
+        const temp = scratch.allocator();
+
+        var named: std.ArrayList(Named) = .empty;
+        for (calls, 0..) |call, i| {
+            if (call.at == .none or !ast.exprTag(call.at).namesArguments()) continue;
+            var written: usize = 0;
+            for (ast.callNames(call.at)) |name| {
+                if (name != TokenId.none) written += 1;
             }
-            for (placed.items[lo..]) |position| {
-                if (startOf.expr(ast, exprs[position]) >= @intFromEnum(span.end)) break;
-                try steps[position].append(temp, entry.start);
-                try steps[position].append(temp, @intCast(parameter));
+            if (written < 2) continue;
+            try named.append(temp, .{ .start = startOf(ast, call.at), .call = @intCast(i) });
+        }
+        std.mem.sort(Named, named.items, {}, struct {
+            fn less(_: void, a: Named, b: Named) bool {
+                return a.start < b.start;
+            }
+        }.less);
+
+        const decls = try temp.alloc(u32, ast.declCount());
+        for (decls, 0..) |*d, i| d.* = @intCast(i);
+        std.mem.sort(u32, decls, ast, struct {
+            fn less(tree: *const Ast, a: u32, b: u32) bool {
+                const x = tree.declTokens(DeclId.at(a));
+                const y = tree.declTokens(DeclId.at(b));
+                if (x.start != y.start) return @intFromEnum(x.start) < @intFromEnum(y.start);
+                return @intFromEnum(x.end) > @intFromEnum(y.end);
+            }
+        }.less);
+
+        return .{
+            .scratch = scratch,
+            .program = program,
+            .resolution = resolution,
+            .typing = typing,
+            .calls = calls,
+            .decls = decls,
+            .named = named.items,
+        };
+    }
+
+    fn deinit(self: *BodyNamer) void {
+        self.scratch.deinit();
+        self.* = undefined;
+    }
+
+    /// The name of each of `exprs`, allocated in `gpa`.
+    ///
+    /// **Bound:** a sort of `exprs` and one sweep over it and the sorted
+    /// declarations, whose stack holds the declarations nested around one
+    /// point. Each call naming two or more arguments adds a step to the place
+    /// of each member of `exprs` inside one of its arguments, found by binary
+    /// search, so the work is the members of `exprs` times the calls nested
+    /// around each. Each declaration is spelled once.
+    fn names(self: *BodyNamer, gpa: std.mem.Allocator, exprs: []const node.ExprId) ![][]const u8 {
+        const ast = &self.program.ast;
+        var list_scratch = std.heap.ArenaAllocator.init(gpa);
+        defer list_scratch.deinit();
+        const temp = list_scratch.allocator();
+
+        // The members of `exprs`, by the token each starts at.
+        var placed: std.ArrayList(u32) = .empty;
+        for (exprs, 0..) |expr, i| if (expr != .none) try placed.append(temp, @intCast(i));
+        const ByStart = struct {
+            tree: *const Ast,
+            exprs: []const node.ExprId,
+            fn less(context: @This(), a: u32, b: u32) bool {
+                return startOf(context.tree, context.exprs[a]) < startOf(context.tree, context.exprs[b]);
+            }
+        };
+        std.mem.sort(u32, placed.items, ByStart{ .tree = ast, .exprs = exprs }, ByStart.less);
+
+        // Where each member sits: a step for each call around it whose
+        // arguments are written by name, outermost first, holding the call's
+        // first token and the parameter the argument fills; then the member's
+        // own first token.
+        const steps = try temp.alloc(std.ArrayList(u32), exprs.len);
+        @memset(steps, .empty);
+        const Key = struct {
+            tree: *const Ast,
+            exprs: []const node.ExprId,
+            start: u32,
+            fn order(context: @This(), position: u32) std.math.Order {
+                return std.math.order(context.start, startOf(context.tree, context.exprs[position]));
+            }
+        };
+        for (self.named) |entry| {
+            const call = self.calls[entry.call];
+            for (call.args, 0..) |arg, parameter| {
+                if (arg == .none) continue;
+                const span = ast.exprTokens(arg);
+                // The first member starting inside the argument, and every one
+                // after it that still does.
+                const first = std.sort.lowerBound(u32, placed.items, Key{ .tree = ast, .exprs = exprs, .start = @intFromEnum(span.start) }, Key.order);
+                for (placed.items[first..]) |position| {
+                    if (startOf(ast, exprs[position]) >= @intFromEnum(span.end)) break;
+                    try steps[position].append(temp, entry.start);
+                    try steps[position].append(temp, @intCast(parameter));
+                }
             }
         }
-    }
-    for (placed.items) |position| try steps[position].append(temp, startOf.expr(ast, exprs[position]));
+        for (placed.items) |position| try steps[position].append(temp, startOf(ast, exprs[position]));
 
-    // The declaration each member is written in: the innermost one whose
-    // tokens hold its first token.
-    const decls = try temp.alloc(u32, ast.declCount());
-    for (decls, 0..) |*d, i| d.* = @intCast(i);
-    std.mem.sort(u32, decls, ast, struct {
-        fn less(tree: *const Ast, a: u32, b: u32) bool {
-            const x = tree.declTokens(DeclId.at(a));
-            const y = tree.declTokens(DeclId.at(b));
-            if (x.start != y.start) return @intFromEnum(x.start) < @intFromEnum(y.start);
-            // A declaration and one nested in it from its first token: the
-            // outer, which ends later, opens first.
-            return @intFromEnum(x.end) > @intFromEnum(y.end);
+        // The declaration each member is written in: the innermost one whose
+        // tokens hold its first token.
+        const enclosing = try temp.alloc(DeclId, exprs.len);
+        @memset(enclosing, .none);
+        var open: std.ArrayList(DeclId) = .empty;
+        var next_decl: usize = 0;
+        for (placed.items) |position| {
+            const at = startOf(ast, exprs[position]);
+            while (next_decl < self.decls.len and @intFromEnum(ast.declTokens(DeclId.at(self.decls[next_decl])).start) <= at) : (next_decl += 1) {
+                const d = DeclId.at(self.decls[next_decl]);
+                while (open.items.len > 0 and @intFromEnum(ast.declTokens(open.items[open.items.len - 1]).end) <= @intFromEnum(ast.declTokens(d).start)) _ = open.pop();
+                try open.append(temp, d);
+            }
+            while (open.items.len > 0 and @intFromEnum(ast.declTokens(open.items[open.items.len - 1]).end) <= at) _ = open.pop();
+            if (open.items.len > 0) enclosing[position] = open.items[open.items.len - 1];
         }
-    }.less);
-    const enclosing = try temp.alloc(DeclId, exprs.len);
-    @memset(enclosing, .none);
-    var open: std.ArrayList(DeclId) = .empty;
-    var next_decl: usize = 0;
-    for (placed.items) |position| {
-        const at = startOf.expr(ast, exprs[position]);
-        while (next_decl < decls.len and @intFromEnum(ast.declTokens(DeclId.at(decls[next_decl])).start) <= at) : (next_decl += 1) {
-            const d = DeclId.at(decls[next_decl]);
-            while (open.items.len > 0 and @intFromEnum(ast.declTokens(open.items[open.items.len - 1]).end) <= @intFromEnum(ast.declTokens(d).start)) _ = open.pop();
-            try open.append(temp, d);
+
+        // Each member's place among its declaration's, by its steps.
+        const ByPlace = struct {
+            steps: []const std.ArrayList(u32),
+            enclosing: []const DeclId,
+            fn less(context: @This(), a: u32, b: u32) bool {
+                const x = @intFromEnum(context.enclosing[a]);
+                const y = @intFromEnum(context.enclosing[b]);
+                if (x != y) return x < y;
+                return std.mem.order(u32, context.steps[a].items, context.steps[b].items) == .lt;
+            }
+        };
+        std.mem.sort(u32, placed.items, ByPlace{ .steps = steps, .enclosing = enclosing }, ByPlace.less);
+        const ordinals = try temp.alloc(u32, exprs.len);
+        var previous: DeclId = .none;
+        var ordinal: u32 = 0;
+        for (placed.items, 0..) |position, i| {
+            if (i == 0 or enclosing[position] != previous) ordinal = 0;
+            previous = enclosing[position];
+            ordinals[position] = ordinal;
+            ordinal += 1;
         }
-        while (open.items.len > 0 and @intFromEnum(ast.declTokens(open.items[open.items.len - 1]).end) <= at) _ = open.pop();
-        if (open.items.len > 0) enclosing[position] = open.items[open.items.len - 1];
+
+        const result = try gpa.alloc([]const u8, exprs.len);
+        var filled: usize = 0;
+        errdefer {
+            for (result[0..filled]) |n| gpa.free(n);
+            gpa.free(result);
+        }
+        for (exprs, 0..) |expr, i| {
+            result[i] = if (expr == .none or enclosing[i] == .none)
+                try std.fmt.allocPrint(gpa, "#{d}", .{i})
+            else
+                try std.fmt.allocPrint(gpa, "{s}#{d}", .{ try self.spelling(enclosing[i]), ordinals[i] });
+            filled = i + 1;
+        }
+        return result;
     }
 
-    // Each member's place among its declaration's, by its steps.
-    const ByPlace = struct {
-        steps: []const std.ArrayList(u32),
-        enclosing: []const DeclId,
-        fn less(self: @This(), a: u32, b: u32) bool {
-            const x = @intFromEnum(self.enclosing[a]);
-            const y = @intFromEnum(self.enclosing[b]);
-            if (x != y) return x < y;
-            return std.mem.order(u32, self.steps[a].items, self.steps[b].items) == .lt;
+    /// What `appendDeclarationName` spells for `d`, spelled once.
+    fn spelling(self: *BodyNamer, d: DeclId) ![]const u8 {
+        const temp = self.scratch.allocator();
+        const entry = try self.spellings.getOrPut(temp, d);
+        if (!entry.found_existing) {
+            var spelled: std.ArrayList(u8) = .empty;
+            try appendDeclarationName(temp, &spelled, self.program, self.resolution, self.typing, d);
+            entry.value_ptr.* = spelled.items;
         }
-    };
-    std.mem.sort(u32, placed.items, ByPlace{ .steps = steps, .enclosing = enclosing }, ByPlace.less);
-    const ordinals = try temp.alloc(u32, exprs.len);
-    var previous: DeclId = .none;
-    var ordinal: u32 = 0;
-    for (placed.items, 0..) |position, i| {
-        if (i == 0 or enclosing[position] != previous) ordinal = 0;
-        previous = enclosing[position];
-        ordinals[position] = ordinal;
-        ordinal += 1;
+        return entry.value_ptr.*;
     }
-
-    const names = try gpa.alloc([]const u8, exprs.len);
-    var filled: usize = 0;
-    errdefer {
-        for (names[0..filled]) |n| gpa.free(n);
-        gpa.free(names);
-    }
-    for (exprs, 0..) |expr, i| {
-        var spelled: std.ArrayList(u8) = .empty;
-        defer spelled.deinit(gpa);
-        if (expr == .none or enclosing[i] == .none) {
-            try spelled.print(gpa, "#{d}", .{i});
-        } else {
-            try appendDeclarationName(gpa, &spelled, program, resolution, typing, enclosing[i]);
-            try spelled.print(gpa, "#{d}", .{ordinals[i]});
-        }
-        names[i] = try spelled.toOwnedSlice(gpa);
-        filled = i + 1;
-    }
-    return names;
-}
+};
 
 /// Appends what names declaration `d` whatever order the program was
 /// checked or written in: its module's route and `;`, the implementation or
@@ -678,7 +729,9 @@ fn typecheckInternal(
     c.builder.certified_slice = c.raw_accesses.slice;
     c.builder.certified_address = c.raw_accesses.address;
     c.builder.certified_carried = c.raw_accesses.carried;
-    c.builder.certified_foreign_views = c.raw_accesses.foreign_views;
+    c.builder.certified_foreign_bytes = c.raw_accesses.foreign_bytes;
+    c.builder.certified_c_text = c.raw_accesses.c_text;
+    c.builder.certified_c_text_list = c.raw_accesses.c_text_list;
     c.builder.certified_closure_entry = c.raw_accesses.closure_entry_type;
     c.builder.certified_closure = c.raw_accesses.closure;
     c.builder.certified_endpoint = c.raw_accesses.endpoint;
@@ -1700,6 +1753,7 @@ fn typecheckInternal(
     try c.checkTestAnswers();
     try c.checkForeignCallbacks();
     try c.checkRawAddresses();
+    try c.checkStorageAddresses();
     try c.checkHandleChanges();
     try c.checkForeignUses(foreign_module);
 
@@ -1773,7 +1827,9 @@ fn typecheckInternal(
     // reopened from a checked library holds and a fresh one does not yet.
     var pool_view = c.builder.view();
     pool_view.module_paths = module_paths;
-    const closure_names = try bodyNames(gpa, c.program, c.res, &pool_view, calls, c.res.closures.exprs);
+    var body_namer = try BodyNamer.init(gpa, c.program, c.res, &pool_view, calls);
+    defer body_namer.deinit();
+    const closure_names = try body_namer.names(gpa, c.res.closures.exprs);
     errdefer {
         for (closure_names) |n| gpa.free(n);
         gpa.free(closure_names);
@@ -1785,7 +1841,7 @@ fn typecheckInternal(
         for (function_values) |value| if (value.target == .constructor) {
             exprs[@intFromEnum(value.target.constructor.id)] = value.target.constructor.expr;
         };
-        break :names try bodyNames(gpa, c.program, c.res, &pool_view, calls, exprs);
+        break :names try body_namer.names(gpa, exprs);
     };
     errdefer {
         for (constructor_names) |n| gpa.free(n);
@@ -20157,7 +20213,8 @@ const Checker = struct {
 
     /// [T-RawAddress] at a declaration: an `extern` or `export` whose
     /// signature reaches a `mem.address.Address`, itself, through a newtype's
-    /// base or through a callback, would hand C a
+    /// base, through the `R` of an answered `ffi.Errno[R]` or through a
+    /// callback, would hand C a
     /// number that names a type, or take one from it, and C may keep it where
     /// no type names what the address holds. A runtime callback's function may
     /// take one, because the entry C calls is the compiler's; the `extern`
@@ -20170,13 +20227,13 @@ const Checker = struct {
         };
         var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
         defer seen.deinit(self.gpa);
-        var names = try self.reachesAddress(&seen, signature.result);
+        var names = try self.answerReachesAddress(signature.result);
         const params = self.builder.callableParams(signature);
         for (params) |param| {
             // A callback's context reaches C as an address C hands back
             // unread ([T-ExternCallback]); any other place lent `inout` is
             // one C may write a number into.
-            if (param.convention == .inout and self.isCallbackContext(params, param.ty)) continue;
+            if (param.convention == .inout and foreign_mod.isContext(&self.builder, params, param.ty)) continue;
             if (try self.reachesAddress(&seen, param.ty)) names = true;
         }
         if (!names) return;
@@ -20190,17 +20247,17 @@ const Checker = struct {
         );
     }
 
-    /// Whether `ty` is the context a callback among `params` takes first,
-    /// `inout`, which the `extern` lends C to hand back on every call.
-    fn isCallbackContext(self: *Checker, params: []const types_mod.CallableParam, ty: TypeId) bool {
-        for (params) |param| switch (self.builder.get(param.ty)) {
-            .callable => |callback| {
-                const taken = self.builder.callableParams(callback);
-                if (taken.len != 0 and taken[0].convention == .inout and taken[0].ty == ty) return true;
-            },
-            else => {},
-        };
-        return false;
+    /// Whether an `extern`'s or `export`'s answer reaches a
+    /// `mem.address.Address`, which [T-RawAddress] refuses at the
+    /// declaration. An `ffi.Errno[R]` crosses as its `R`, so it is read as
+    /// that; every other answer that crosses is a scalar, a newtype over one
+    /// or a callback, which `reachesAddress` follows.
+    fn answerReachesAddress(self: *Checker, answer: TypeId) std.mem.Allocator.Error!bool {
+        if (self.raw_accesses.address == .none) return false;
+        var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer seen.deinit(self.gpa);
+        const crossing = self.raw_accesses.errnoValue(&self.builder, answer) orelse answer;
+        return self.reachesAddress(&seen, crossing);
     }
 
     /// Whether `t` is or wraps a `mem.address.Address` as C would see it:
@@ -20270,17 +20327,16 @@ const Checker = struct {
         for (0..self.ast.exprCount()) |i| {
             const id = ExprId.at(@intCast(i));
             switch (self.ast.exprTag(id)) {
+                // The number a C view is built from; where the view may be
+                // built is [T-RawAddress]'s rule at the construction.
+                .call => if (self.foreignViewBuilt(id) != null) {
+                    for (self.ast.call(id).args) |arg| try allowed.put(self.gpa, self.ast.withoutGroups(arg), {});
+                },
                 .struct_literal => {
                     const closure = self.raw_accesses.closure;
                     const built = self.builder.construction_types.items;
                     if (closure == .none or id.index() >= built.len or self.builder.view().declOfType(built[id.index()]) != closure) continue;
-                    const c = self.ast.call(id);
-                    var at: usize = 0;
-                    while (at + 1 < c.args.len) : (at += 2) {
-                        if (self.ast.exprTag(c.args[at]) == .err) continue;
-                        if (std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(c.args[at])), "at"))
-                            try allowed.put(self.gpa, self.ast.withoutGroups(c.args[at + 1]), {});
-                    }
+                    if (self.literalFieldValue(id, "at")) |at| try allowed.put(self.gpa, at, {});
                 },
                 else => {},
             }
@@ -20313,6 +20369,284 @@ const Checker = struct {
         }
     }
 
+    /// [T-RawAddress] at the library's raw layer: where an address or an
+    /// extent of bytes can be chosen, read or trusted, each permitted place is
+    /// a declaration the compiler's table names or finds, so a declaration
+    /// added later is covered without anyone listing it.
+    ///
+    /// Every field of a raw type (`RawAccesses.raw_types`) is named, in any
+    /// expression or pattern and in a literal, only in a member of an
+    /// implementation for that type, in an allocator's member where the type
+    /// says so, and in the declarations its row lists. The check sits at the
+    /// node that names the field, so a read, a write, a lend, a method
+    /// receiver and an argument are one case. A `Storage` literal with no
+    /// buffer, `address.nowhere()` and a length of zero names no bytes and is
+    /// written anywhere.
+    ///
+    /// This is what lets the dependency table skip a storage's buffer and
+    /// address: what they hold is chosen only in the storage's own members
+    /// and the places that keep a task body or erase a closure.
+    ///
+    /// A declaration a resumed check took from its library prefix was held
+    /// to this when the prefix was checked, which a prefix passes only
+    /// without errors, so its expressions are skipped.
+    ///
+    /// One walk over the expressions, each asked a type lookup or a
+    /// resolution and a lookup in the tables `RawLayer` indexes.
+    fn checkStorageAddresses(self: *Checker) std.mem.Allocator.Error!void {
+        const raw = &self.raw_accesses;
+        if (raw.storage == .none) return;
+        var layer = try RawLayer.init(self);
+        defer layer.deinit();
+        // A callee the checker resolved to a declaration names a method, not
+        // a field; a call through a field's value reads the field, so its
+        // callee is checked as the field node it is. Methods a raw layer
+        // confines are held to their places here too.
+        var callees: std.AutoHashMapUnmanaged(ExprId, void) = .empty;
+        defer callees.deinit(self.gpa);
+        for (self.calls.items) |call| {
+            const d = switch (call.target) {
+                .declared => |d| d,
+                else => continue,
+            };
+            if (self.ast.exprTag(call.at) != .call) continue;
+            const callee = self.ast.withoutGroups(self.ast.call(call.at).callee);
+            if (self.ast.exprTag(callee) != .field) continue;
+            try callees.put(self.gpa, callee, {});
+            const owner = self.expression_owners[call.at.index()];
+            if (!self.inUncheckedLibrary(owner)) continue;
+            try layer.checkConfined(d, callee, owner);
+        }
+        for (0..self.ast.exprCount()) |i| {
+            const id = ExprId.at(@intCast(i));
+            const owner = self.expression_owners[i];
+            // Outside the library these types are opaque and these
+            // declarations private, which [M-Opaque] and resolution already
+            // refuse.
+            if (!self.inUncheckedLibrary(owner)) continue;
+            try layer.checkConfinedName(id, owner);
+            if (self.ast.exprTag(id) == .call) try layer.checkForeignViewBuilt(id, owner);
+            const of = switch (self.ast.exprTag(id)) {
+                .field => blk: {
+                    if (callees.contains(id)) continue;
+                    // `Buffer.alignment` names a constant of the type, not a
+                    // field of a value.
+                    const operand = self.ast.withoutGroups(self.ast.unaryOperand(id));
+                    const named = self.res.targetOf(operand);
+                    if (named != .none) switch (self.res.kindOf(named)) {
+                        .declared_type, .builtin_type, .trait => continue,
+                        else => {},
+                    };
+                    break :blk self.builder.exprType(operand);
+                },
+                .struct_pattern => self.builder.exprType(id),
+                .struct_literal => blk: {
+                    const built = self.builder.construction_types.items;
+                    break :blk if (id.index() < built.len and built[id.index()] != .poison) built[id.index()] else self.builder.exprType(id);
+                },
+                else => continue,
+            };
+            const declared = self.rawTypeDecl(of) orelse continue;
+            const row = layer.index.raw_types.get(declared) orelse continue;
+            if (layer.mayNameFields(row, declared, owner, of)) continue;
+            if (self.ast.exprTag(id) == .struct_literal and declared == raw.storage and self.addressesNothing(id)) continue;
+            const name = self.ast.tokenText(self.ast.declName(declared));
+            _ = self.report(
+                .t_raw_address,
+                id,
+                "`{s}.{s}` holds an address or an extent of bytes, so its fields are named only by its own members",
+                .{ self.program.get(self.program.moduleOf(declared)).name, name },
+                "reach it through the type's own operations",
+            );
+        }
+    }
+
+    /// Whether an expression owned by `owner` is held to the library's raw
+    /// layer here: `owner` is a library declaration this check did not take
+    /// from a library prefix.
+    fn inUncheckedLibrary(self: *const Checker, owner: node.DeclId) bool {
+        return owner != .none and self.program.get(self.program.moduleOf(owner)).library and !self.isRetained(owner);
+    }
+
+    /// The declaration of the type `t` is, seen through an observation of
+    /// one.
+    fn rawTypeDecl(self: *Checker, t: TypeId) ?node.DeclId {
+        if (t == .poison) return null;
+        const seen = switch (self.builder.get(t)) {
+            .borrow => |observation| observation.referent,
+            else => t,
+        };
+        const declaration = self.builder.view().declOfType(seen) orelse return null;
+        return if (declaration == .none) null else declaration;
+    }
+
+    /// What `checkStorageAddresses` asks of every expression it holds to the
+    /// library's raw layer, indexed once per check: the rows of the raw
+    /// types and of the confined declarations, and the implementation each
+    /// implementation head names, which a test written inside one is judged
+    /// by.
+    const RawLayer = struct {
+        checker: *Checker,
+        index: RawAccesses.Index,
+        heads: std.AutoHashMapUnmanaged(TokenId, types_mod.Implementation) = .empty,
+
+        fn init(checker: *Checker) std.mem.Allocator.Error!RawLayer {
+            var layer: RawLayer = .{ .checker = checker, .index = try RawAccesses.Index.init(checker.gpa, &checker.raw_accesses) };
+            errdefer layer.deinit();
+            for (checker.implementations) |implementation| {
+                if (implementation.isAmbient() or implementation.decl == .none) continue;
+                const head = checker.ast.declName(implementation.decl);
+                if (head != .none) try layer.heads.put(checker.gpa, head, implementation);
+            }
+            return layer;
+        }
+
+        fn deinit(self: *RawLayer) void {
+            self.index.deinit(self.checker.gpa);
+            self.heads.deinit(self.checker.gpa);
+        }
+
+        /// [T-RawAddress] at the construction of a C view (`std.ffi`'s
+        /// `Bytes`, `CText`, `CTextList`) from a number: its operations read
+        /// at that number, so a view is built only in its own members and in
+        /// `bytes_of`, `CString.text` and `CTextList.get`, each from an
+        /// address whose source its contract names or from a number C handed
+        /// over. A null view, built from the literal `0`, names no bytes and
+        /// is built anywhere.
+        fn checkForeignViewBuilt(self: *const RawLayer, id: ExprId, owner: node.DeclId) std.mem.Allocator.Error!void {
+            const c = self.checker;
+            const built = c.foreignViewBuilt(id) orelse return;
+            if (self.memberOfType(owner, built)) return;
+            if (c.raw_accesses.buildsForeignView(owner)) return;
+            const args = c.ast.call(id).args;
+            if (args.len == 1) {
+                const arg = c.ast.withoutGroups(args[0]);
+                if (c.ast.exprTag(arg) == .int_literal and std.mem.eql(u8, c.ast.tokenText(c.ast.exprMain(arg)), "0")) return;
+            }
+            _ = c.report(
+                .t_raw_address,
+                id,
+                "`ffi.{s}` reads at the number it is built from, so it is built only by its own operations and the declarations the table names",
+                .{c.ast.tokenText(c.ast.declName(built))},
+                "build it from what owns the bytes, through the operation that lends them",
+            );
+        }
+
+        /// Whether `owner` may name the fields of `declared`, the type of row
+        /// `row` of `RawAccesses.raw_types`: a member of an implementation for
+        /// the type, an allocator's member where the row says so, or a
+        /// declaration the row lists.
+        fn mayNameFields(self: *const RawLayer, row: u8, declared: node.DeclId, owner: node.DeclId, t: TypeId) bool {
+            const c = self.checker;
+            if (c.raw_accesses.rawTypeAlso(row, owner)) return true;
+            if (self.memberOfType(owner, declared)) return true;
+            // An allocator's members build and take apart its own buffers, a
+            // `Buffer[Self]`; a buffer of another allocator is built only
+            // where the row lists a backing allocator's member.
+            if (!RawAccesses.raw_types[row].allocators) return false;
+            const allocator = c.allocator_decl orelse return false;
+            const implementation = c.enclosingRow(owner) orelse return false;
+            if (implementation.trait != allocator.index()) return false;
+            const seen = switch (c.builder.get(t)) {
+                .borrow => |observation| observation.referent,
+                else => t,
+            };
+            const args = c.builder.appliedTo(seen);
+            return args.len == 1 and args[0] == implementation.ty;
+        }
+
+        /// Whether `owner` is a member of an implementation for the type
+        /// `decl` declares, or a test written inside one. A test is a member
+        /// of nothing, so it is judged by the implementation whose head it is
+        /// written under.
+        pub fn memberOfType(self: *const RawLayer, owner: node.DeclId, decl: node.DeclId) bool {
+            if (decl == .none or owner == .none) return false;
+            const c = self.checker;
+            const implementation = if (c.ast.declIsTest(owner))
+                self.heads.get(c.ast.declOwner(owner)) orelse return false
+            else
+                c.enclosingRow(owner) orelse return false;
+            return switch (implementation.head) {
+                .applied => |declaration| declaration == decl,
+                .whole => |t| c.builder.view().declOfType(t) == decl,
+                else => false,
+            };
+        }
+
+        /// The raw declarations only named declarations may name, as a
+        /// callee or as a value.
+        fn checkConfinedName(self: *const RawLayer, id: ExprId, owner: node.DeclId) std.mem.Allocator.Error!void {
+            const c = self.checker;
+            const b = c.res.targetOf(id);
+            if (b == .none or c.res.kindOf(b) != .function) return;
+            const d = c.res.declaredBy(b);
+            if (d == .none) return;
+            try self.checkConfined(d, id, owner);
+        }
+
+        /// Holds a name of the confined declaration `d`, at `id` in `owner`,
+        /// to the places the table names for it.
+        fn checkConfined(self: *const RawLayer, d: node.DeclId, id: ExprId, owner: node.DeclId) std.mem.Allocator.Error!void {
+            const c = self.checker;
+            const raw = &c.raw_accesses;
+            // A runtime symbol or lowered primitive that reads or writes bytes
+            // at an address trusts the extent passed beside it, whichever
+            // symbol the table adds later.
+            if (c.ast.declIsExtern(d)) if (runtime_symbols.signatureOf(c.ast.tokenText(c.ast.declName(d)))) |signature| {
+                for (signature.parameters) |parameter| if (parameter.address) {
+                    const passers = RawAccesses.byte_operations;
+                    if (raw.admits(passers, owner, self)) return;
+                    _ = c.report(.t_raw_address, id, "`{s}` " ++ passers.message, .{c.ast.tokenText(c.ast.declName(d))}, passers.help);
+                    return;
+                };
+            };
+            const row = self.index.confined.get(d) orelse return;
+            if (raw.confinementAdmits(row, owner, self)) return;
+            const confinement = RawAccesses.confinements[row];
+            _ = c.report(.t_raw_address, id, "{s}", .{confinement.message}, confinement.help);
+        }
+    };
+
+    /// The C view a call constructs, where it is one.
+    fn foreignViewBuilt(self: *const Checker, id: ExprId) ?node.DeclId {
+        const d = resolve_mod.constructionOf(self.ast, self.res, id) orelse return null;
+        for (self.raw_accesses.foreignViews()) |candidate| if (candidate != .none and candidate == d) return candidate;
+        return null;
+    }
+
+    /// The value a struct literal gives the field `name`, without its
+    /// groups, or null where it gives none. Where a literal names the field
+    /// twice, the last value answers.
+    fn literalFieldValue(self: *const Checker, literal: ExprId, name: []const u8) ?ExprId {
+        const c = self.ast.call(literal);
+        var found: ?ExprId = null;
+        var at: usize = 0;
+        while (at + 1 < c.args.len) : (at += 2) {
+            if (self.ast.exprTag(c.args[at]) == .err) continue;
+            if (!std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(c.args[at])), name)) continue;
+            const value = self.ast.withoutGroups(c.args[at + 1]);
+            if (value != ExprId.none) found = value;
+        }
+        return found;
+    }
+
+    /// Whether a `Storage` literal holds no bytes: its `buffer` is `.None`, its
+    /// `at` a call of `address.nowhere()` and its `len` zero, so no slot can
+    /// be reached through it and nothing a later release could free.
+    fn addressesNothing(self: *Checker, literal: ExprId) bool {
+        const nowhere = self.raw_accesses.address_nowhere;
+        if (nowhere == .none) return false;
+        if (self.ast.call(literal).callee != ExprId.none) return false;
+        const buffer = self.literalFieldValue(literal, "buffer") orelse return false;
+        const at = self.literalFieldValue(literal, "at") orelse return false;
+        const len = self.literalFieldValue(literal, "len") orelse return false;
+        const empty_buffer = self.ast.exprTag(buffer) == .variant_ref and std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(buffer)), "None");
+        const no_bytes = self.ast.exprTag(at) == .call and self.ast.call(at).args.len == 0 and
+            self.namesFunction(self.ast.withoutGroups(self.ast.call(at).callee), nowhere);
+        const no_length = self.ast.exprTag(len) == .int_literal and std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(len)), "0");
+        return empty_buffer and no_bytes and no_length;
+    }
+
     /// [T-RawAddress] at a runtime call: each argument for a parameter
     /// `runtime_symbols` marks as the address of typed bytes is a call of
     /// `raw`, whose `Address[T]` names the type of the bytes the runtime
@@ -20332,11 +20666,13 @@ const Checker = struct {
                 const given = if (arg == ExprId.none) call.at else self.ast.withoutGroups(arg);
                 if (arg != ExprId.none and raw_fn != .none and self.ast.exprTag(given) == .call and
                     self.namesFunction(self.ast.withoutGroups(self.ast.call(given).callee), raw_fn)) continue;
-                _ = self.report(
+                // The argument keeps its type: a number where an address
+                // belongs is refused, and is still the number it is.
+                try self.sink.addError(
                     .t_raw_address,
-                    given,
+                    self.ast.fileOfExpr(given),
+                    self.ast.exprSpan(given),
                     "the runtime reads or writes values at this address, so it takes only the number in a `mem.address.Address`",
-                    .{},
                     if (arg == ExprId.none)
                         try std.fmt.allocPrint(self.sink.arena, "pass `address.raw(at)` for `{s}`, in place of the declaration's default", .{self.ast.tokenText(self.ast.declParams(callee)[i].name)})
                     else
@@ -20751,14 +21087,18 @@ const Checker = struct {
         if (signature != .callable) return false;
         const raw = self.raw_accesses;
         const contracts = signature.callable.contracts;
-        if (d == raw.stride or d == raw.address_in or d == raw.slice_address or raw.processText(d) != null) return contracts.len == 0;
+        if (d == raw.stride or d == raw.number_address or raw.processText(d) != null) return contracts.len == 0;
         if (contracts.len != 1) return false;
         const effect = contracts[0];
         if (effect.target.len != 0 or effect.source.fields.len != 0 or effect.borrows_source) return false;
         if (d == raw.put) return effect.kind == .retains and effect.source.root == .parameter and effect.source.root.parameter == 2 and
             effect.destination != null and effect.destination.?.root == .parameter and effect.destination.?.root.parameter == 0 and effect.destination.?.fields.len == 0;
+        // A span and the address of a buffer's bytes borrow their owner, so
+        // neither outlives it; every other primitive, the address of a slice
+        // and the address a buffer's new owner keeps included, carries what
+        // its first argument carries.
         return effect.destination == null and effect.source.root == .parameter and effect.source.root.parameter == 0 and
-            effect.kind == (if (d == raw.span or d == raw.buffer_span) @as(@FieldType(types_mod.CallableContract, "kind"), .borrows) else .carries);
+            effect.kind == (if (d == raw.span or d == raw.buffer_span or d == raw.address_in) @as(@FieldType(types_mod.CallableContract, "kind"), .borrows) else .carries);
     }
 
     fn validStorageSignature(self: *Checker, d: DeclId) !bool {
@@ -20766,11 +21106,15 @@ const Checker = struct {
         if (!self.validStorageEffects(d)) return false;
         const raw = self.raw_accesses;
         if (d == raw.span or d == raw.buffer_span or d == raw.subspan or d == raw.slice_place or d == raw.view_place or raw.processText(d) != null) return self.validSpanSignature(d);
-        const count: usize = if (d == raw.stride or d == raw.slice_address) 1 else 2;
+        const count: usize = if (d == raw.stride or d == raw.slice_address or d == raw.number_address) 1 else 2;
         const tps = self.ast.declTypeParams(d);
         if (tps.len != count or self.ast.declVisibility(d) != .private) return false;
         const result = try self.declaredResultType(d);
         const ps = self.ast.declParams(d);
+        if (d == raw.number_address) {
+            return ps.len == 1 and self.addressOf(result) == self.param_types[d.index()][0] and ps[0].convention == .read and
+                try self.declaredParamType(d, 0) == .u64;
+        }
         if (d == raw.slice_address) {
             const slice = try self.declaredParamType(d, 0);
             const slice_args = self.builder.appliedTo(slice);
@@ -20778,7 +21122,7 @@ const Checker = struct {
                 raw.slice != .none and self.builder.view().declOfType(slice) == raw.slice and
                 slice_args.len == 1 and slice_args[0] == self.param_types[d.index()][0];
         }
-        if (d == raw.address_in) {
+        if (d == raw.address_in or d == raw.owned_address_in) {
             const buffer = try self.declaredParamType(d, 0);
             const buffer_args = self.builder.appliedTo(buffer);
             return self.addressOf(result) == self.param_types[d.index()][0] and ps[0].convention == .read and
@@ -20963,7 +21307,7 @@ const Checker = struct {
                         "omit `read`; parameters are read by default",
                     );
                 }
-                if (copied and !marked and !self.isCallbackContext(signature_params, t)) {
+                if (copied and !marked and !foreign_mod.isContext(&self.builder, signature_params, t)) {
                     const at = if (written != .none) written else p.name;
                     try self.sink.addErrorFmt(
                         .t_extern_handle,
@@ -21035,9 +21379,12 @@ const Checker = struct {
         // An answer that can point somewhere, such as a `CText`, gets its
         // dependencies from the contract alone: C's body is not read, and no
         // parameter of a handle type carries one by default. So the
-        // declaration states where it points.
+        // declaration states where it points. An answer that reaches a
+        // `mem.address.Address` is already [T-RawAddress], which no contract
+        // answers.
         if (category == .t_extern and answers != .poison and self.ast.declContracts(d).len == 0 and
-            self.crossesForeign(answers) and try self.builder.mayCarryDependencies(answers))
+            self.crossesForeign(answers) and try self.builder.mayCarryDependencies(answers) and
+            !try self.answerReachesAddress(answers))
         {
             try self.sink.addErrorFmt(
                 .t_extern,
@@ -21369,7 +21716,7 @@ const Checker = struct {
 
     fn isForeignView(self: *const Checker, t: TypeId) bool {
         const declared = self.builder.view().declOfType(t) orelse return false;
-        for (self.raw_accesses.foreign_views) |foreign| {
+        for (self.raw_accesses.foreignViews()) |foreign| {
             if (foreign != .none and declared == foreign) return true;
         }
         return false;
