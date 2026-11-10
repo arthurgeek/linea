@@ -82,7 +82,7 @@ test fn a_connect_whose_handshake_ends_at_its_deadline_connects() {
     // out and a SYN-ACK back, takes 30 ms.
     let network = io.Network { latency_ms = 15, ..io.Network.default() }
     var sim = io.Simulation.open(seed: 1, network: network).unwrap()
-    let (early, on_time) = sim.run(
+    let (early, on_time) = &sim.run(
         |inout _world| {
             let listener = listen(loopback(80)).unwrap()
             let early = match connect(loopback(80), within_ms: 29) {
@@ -121,7 +121,7 @@ test fn a_connect_with_no_bound_waits_for_the_handshake() {
 
 test fn a_simulated_connection_kept_past_its_simulation_closes() {
     var sim = io.Simulation.open(seed: 1).unwrap()
-    let made = sim.run(
+    let made = &sim.run(
         |inout _world| {
             let listener = listen(loopback(80)).unwrap()
             let client = connect(loopback(80)).unwrap()
@@ -159,7 +159,7 @@ impl Connection {
 
     test fn a_silent_peer_times_out_the_read() {
         var sim = io.Simulation.open(seed: 1).unwrap()
-        let (expired, waited) = sim.run(
+        let (expired, waited) = &sim.run(
             |inout _world| {
                 var listener = listen(loopback(80)).unwrap()
                 let client = connect(loopback(80)).unwrap()
@@ -190,7 +190,7 @@ impl Connection {
         // arrives, and reads it.
         let network = io.Network { latency_ms = 200, ..io.Network.default() }
         var sim = io.Simulation.open(seed: 1, network: network).unwrap()
-        let (early, received) = sim.run(
+        let (early, received) = &sim.run(
             |inout _world| {
                 var listener = listen(loopback(80)).unwrap()
                 var client = connect(loopback(80)).unwrap()
@@ -236,7 +236,7 @@ impl Connection {
 
     test fn a_deadline_ends_reads_that_each_arrive_in_time() {
         var sim = io.Simulation.open(seed: 1).unwrap()
-        let (expired, arrived) = sim.run(
+        let (expired, arrived) = &sim.run(
             |inout world| {
                 var listener = listen(loopback(80)).unwrap()
                 var client = connect(loopback(80)).unwrap()
@@ -273,7 +273,7 @@ impl Connection {
 
     test fn a_deadline_of_zero_leaves_reads_unbounded() {
         var sim = io.Simulation.open(seed: 1).unwrap()
-        let received = sim.run(
+        let received = &sim.run(
             |inout world| {
                 var listener = listen(loopback(80)).unwrap()
                 var client = connect(loopback(80)).unwrap()
@@ -459,7 +459,7 @@ impl Connection {
         // bytes, and it ends at its deadline.
         let network = io.Network { buffer_bytes = 4096, ..io.Network.default() }
         var sim = io.Simulation.open(seed: 1, network: network).unwrap()
-        let (first, expired, waited) = sim.run(
+        let (first, expired, waited) = &sim.run(
             |inout _world| {
                 var listener = listen(loopback(80)).unwrap()
                 var client = connect(loopback(80)).unwrap()

@@ -59,6 +59,9 @@ struct entry {
     unsigned char *received;
     size_t received_len, received_capacity;
     int ended, reset, write_shut, reset_scheduled;
+    /* Released outside its simulation while the simulation still runs: no
+     * one holds its number, and the simulation frees it when it ends. */
+    int forgotten;
 };
 
 struct sim {
@@ -156,6 +159,28 @@ WRAPS_MODULO_2_64 static void note(struct sim *s, unsigned long what, unsigned l
 }
 
 enum event { event_data = 1, event_end, event_reset, event_op, event_wait, event_listen, event_close };
+
+/* Fold the bytes a delivery carries into the trace, so two runs that
+ * deliver different bytes of one length differ. */
+WRAPS_MODULO_2_64 static void note_bytes(struct sim *s, const unsigned char *bytes, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        s->trace ^= bytes[i];
+        s->trace *= 0x100000001b3ULL;
+    }
+}
+
+/* An answer as the trace records it: a count as it is, and an error as its
+ * place in this list rather than its errno, which differs between Linux
+ * and macOS, so one seed gives one trace on both. */
+static unsigned long traced_answer(long answer) {
+    static const int errors[] = { EAGAIN, ETIMEDOUT, ECONNRESET, ECONNREFUSED, EPIPE,
+                                  ENOTCONN, EINVAL, EADDRINUSE, ENOMEM, EMFILE, EBADF };
+    if (answer >= 0) return (unsigned long)answer;
+    for (size_t i = 0; i < sizeof errors / sizeof *errors; i++) {
+        if (answer == -(long)errors[i]) return ULONG_MAX - i;
+    }
+    return ULONG_MAX - 64;
+}
 
 static int descriptor_of(long index) {
     return (int)(LINEA_SIM_FIRST_DESCRIPTOR + index);
@@ -302,6 +327,7 @@ static void deliver(struct sim *s, unsigned long t) {
                     e->received_len = 0;
                 }
                 note(s, event_data, e->number, c->len);
+                note_bytes(s, c->bytes, c->len);
             }
             free(c);
         }
@@ -530,9 +556,12 @@ static long perform(struct sim *s, struct linea_op *op) {
     }
     if (op->kind == LINEA_OP_SLEEP) answer = 0;
     /* A descriptor's number depends on what other simulations hold, so the
-     * trace names a new descriptor by its place in this one. */
+     * trace names a descriptor by its place in this one: the one operated
+     * on, and the one an accept or a connect made. */
+    const struct entry *operand = op->kind == LINEA_OP_CONNECT ? NULL : entry_of(op->fd);
     const int made = (op->kind == LINEA_OP_ACCEPT || op->kind == LINEA_OP_CONNECT) && answer >= 0;
-    note(s, event_op, (unsigned long)op->kind, made ? entries[index_of((int)answer)]->number : (unsigned long)answer);
+    note(s, event_op * 8 + (unsigned long)op->kind, operand == NULL ? ULONG_MAX : operand->number,
+         made ? entries[index_of((int)answer)]->number : traced_answer(answer));
     return answer;
 }
 
@@ -560,6 +589,7 @@ unsigned long linea_sim_open(unsigned long seed, unsigned long latency_ns, unsig
 
 void linea_sim_advance(unsigned long identity, unsigned long nanoseconds) {
     struct sim *s = linea_loop_find(identity);
+    if (s != linea_loop_running()) fail("linea: a simulation's world was used outside its run\n");
     struct linea_op op = { LINEA_OP_SLEEP, -1, 0, 0, 0, 0 };
     lock();
     if (nanoseconds != 0) {
@@ -578,7 +608,8 @@ unsigned long linea_sim_fingerprint(unsigned long identity) {
 }
 
 /* Free what the simulation's network holds. A server end still in a
- * listener's queue is held by nothing and goes; every other entry stays, as
+ * listener's queue and a forgotten entry are held by nothing and go; every
+ * other entry stays, as
  * a descriptor outside every simulation, until what owns it releases it. */
 void linea_sim_close(unsigned long identity) {
     struct sim *s = linea_loop_find(identity);
@@ -587,7 +618,7 @@ void linea_sim_close(unsigned long identity) {
     while (m < s->member_count) {
         const long index = s->members[m];
         struct entry *e = entries[index];
-        if (e->listener >= 0) {
+        if (e->listener >= 0 || e->forgotten) {
             drop_entry(index);
             continue;
         }
@@ -649,7 +680,7 @@ long linea_sim_listen(unsigned long address, unsigned long backlog) {
         if (index >= 0) entries[index]->backlog = backlog == 0 ? 1 : backlog;
         answer = index < 0 ? index : descriptor_of(index);
     }
-    note(s, event_listen, (unsigned long)bound, answer < 0 ? (unsigned long)answer : entries[index_of((int)answer)]->number);
+    note(s, event_listen, (unsigned long)bound, answer < 0 ? traced_answer(answer) : entries[index_of((int)answer)]->number);
     unlock();
     return answer;
 }
@@ -706,19 +737,11 @@ long linea_sim_release(int fd) {
     if (e->sim != NULL && e->sim == running) {
         if (e->listening) close_listener(running, index); else close_end(running, index, 0);
     } else {
-        /* Outside its simulation the entry is forgotten: a peer still in
-         * a running simulation hears nothing, and a queued handshake is
-         * dropped with its listener. */
-        struct entry *peer = at(e->peer);
-        if (peer != NULL) peer->peer = -1;
-        while (e->pending_count > 0) {
-            const long queued = e->pending[0];
-            remove_index(e->pending, &e->pending_count, queued);
-            struct entry *client = at(at(queued)->peer);
-            if (client != NULL) client->peer = -1;
-            drop_entry(queued);
-        }
-        drop_entry(index);
+        /* Outside its simulation the entry is forgotten and nothing else
+         * happens: a simulation that has ended has already cut its links,
+         * and one still open keeps them, so its runs do not depend on when
+         * another thread let go of the number. */
+        if (e->sim == NULL) drop_entry(index); else e->forgotten = 1;
     }
     unlock();
     return 0;

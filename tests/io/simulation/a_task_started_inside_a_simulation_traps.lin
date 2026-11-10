@@ -6,7 +6,7 @@ import std.task
 // schedules, which no seed could reproduce.
 fn main() -> UInt8 {
     var sim = io.Simulation.open(seed: 1).unwrap()
-    sim.run(
+    &sim.run(
         |inout _world| {
             let handle = task.start(sink [] |sink me: session.Chan[session.End]| me.close()).unwrap()
             handle.close()

@@ -14,7 +14,7 @@ import std.time
 fn exchange(seed: UInt64) -> (UInt64, UInt64) {
     let network = io.Network { latency_ms = 5, jitter_ms = 20, chunk_bytes = 3, ..io.Network.default() }
     var sim = io.Simulation.open(seed, network).unwrap()
-    let elapsed = sim.run(
+    let elapsed = &sim.run(
         |inout _world| {
             let started = time.Instant.now()
             var listener = net.listen(net.loopback(80)).unwrap()

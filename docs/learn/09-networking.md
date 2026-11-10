@@ -826,7 +826,7 @@ connection that is ready just as the time runs out is accepted, not dropped.
 A test of a timeout that waits for real is slow, and a race between bytes
 arriving and a deadline passing goes one way on one run and the other way on
 the next. `io.Simulation` runs a test against a virtual clock and an in-memory
-network instead. Inside `sim.run`, `net.listen` and `net.connect` make
+network instead. Inside `&sim.run(...)`, `net.listen` and `net.connect` make
 simulated sockets, `time.Instant.now()` reads the virtual clock, and a wait
 moves that clock straight to the next thing that can happen: a delivery, or the
 wait's own deadline. This test checks that a server gives up on a silent client
@@ -855,7 +855,7 @@ fn first_byte_arrives(inout connection: net.Connection, ms: UInt64) -> Bool {
 
 test fn a_silent_client_is_given_up_on_after_thirty_seconds() {
     var sim = io.Simulation.open(seed: 1).unwrap()
-    let (arrived, waited) = sim.run(
+    let (arrived, waited) = &sim.run(
         |inout _world| {
             var listener = net.listen(net.loopback(80)).unwrap()
             let client = net.connect(net.loopback(80)).unwrap()
@@ -882,7 +882,9 @@ ok    a_silent_client_is_given_up_on_after_thirty_seconds
 1 passed, 0 failed
 ```
 
-`run` hands its body a `world`, whose `advance` moves the virtual clock forward
+`run` lends the simulation to its body, so the call is marked `&` and no other
+task can run the same simulation meanwhile. It hands the
+body a `world`, whose `advance` moves the virtual clock forward
 by a duration, as a client that pauses would. The network's choices come from
 the seed: `io.Simulation.open(seed: 7, network: io.Network { latency_ms = 20,
 jitter_ms = 5, chunk_bytes = 3, ..io.Network.default() })` delivers each write
@@ -892,11 +894,12 @@ can be compared. Running with the same seed repeats the same deliveries at the
 same virtual instants.
 
 A simulation stops the program rather than let a run depend on the machine:
-a simulated socket used after its simulation is closed stops with `linea: a
+a simulated socket used outside a run of its simulation stops with `linea: a
 simulated descriptor was used outside its simulation`, a real socket used
 inside `run` with `linea: a real socket was used inside a simulation`, and a
-task started inside `run` with `linea: a simulation runs one task until
-fibers`, since the kernel would decide when its thread runs. Rust's
+task started inside `run`, or a wait there on another task's session, with
+`linea: a simulation runs one task until fibers`, since the kernel would decide
+when its thread runs. Rust's
 `tokio::time::pause` and JavaScript's fake timers stop the clock the same way,
 though neither simulates the network.
 

@@ -6,7 +6,7 @@ import std.net
 // write to it traps.
 fn main() -> UInt8 {
     var sim = io.Simulation.open(seed: 1).unwrap()
-    let made = sim.run(
+    let made = &sim.run(
         |inout _world| {
             let listener = net.listen(net.loopback(80)).unwrap()
             let client = net.connect(net.loopback(80)).unwrap()

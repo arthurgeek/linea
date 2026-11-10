@@ -101,6 +101,14 @@ static void fail(const char *message) {
     abort();
 }
 
+/* Threads the kernel schedules cannot be ordered by a seed, so a
+ * simulation admits only the task running it: starting another task, or
+ * waiting on one through a session or an owner's queue, traps while a
+ * simulation is the thread's loop. */
+static void alone(void) {
+    if (linea_io_current() != 0) fail("linea: a simulation runs one task until fibers\n");
+}
+
 /* A pthread call on a mutex or condition variable this file initialised can
  * fail only when the record is corrupt, which is no state to continue in. */
 static void must(int status) {
@@ -227,9 +235,7 @@ unmap_stack:
 
 unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
                                unsigned long len, unsigned long release_at) {
-    /* Threads the kernel schedules cannot be ordered by a seed, so a
-     * simulation admits only the task running it. */
-    if (linea_io_current() != 0) fail("linea: a simulation runs one task until fibers\n");
+    alone();
     struct task *t = task_of(task);
     must(pthread_mutex_lock(&t->lock));
     t->entry = entry;
@@ -254,6 +260,7 @@ void linea_task_cancel(unsigned long task) {
 }
 
 void linea_chan_send(unsigned long endpoint, unsigned long at, unsigned long len) {
+    alone();
     struct task *t = task_of(endpoint);
     linea_storage_extent(at, len);
     must(pthread_mutex_lock(&t->lock));
@@ -270,6 +277,7 @@ void linea_chan_send(unsigned long endpoint, unsigned long at, unsigned long len
 }
 
 void linea_chan_recv(unsigned long endpoint, unsigned long at, unsigned long len) {
+    alone();
     struct task *t = task_of(endpoint);
     linea_storage_extent(at, len);
     must(pthread_mutex_lock(&t->lock));
@@ -283,11 +291,13 @@ void linea_chan_recv(unsigned long endpoint, unsigned long at, unsigned long len
 }
 
 void linea_chan_choose(unsigned long endpoint, uint8_t branch) {
+    alone();
     uint8_t sent = branch;
     linea_chan_send(endpoint, (unsigned long)&sent, 1);
 }
 
 uint8_t linea_chan_offer(unsigned long endpoint) {
+    alone();
     uint8_t chosen = 0;
     linea_chan_recv(endpoint, (unsigned long)&chosen, 1);
     if (chosen > 1) fail("linea: a session's peer chose a branch that does not exist\n");
@@ -295,6 +305,7 @@ uint8_t linea_chan_offer(unsigned long endpoint) {
 }
 
 void linea_chan_close(unsigned long endpoint) {
+    alone();
     /* The task's own end has nothing to wait for: the creator's close waits
      * for the thread itself. */
     if ((endpoint & 1UL) != 0) return;
@@ -340,6 +351,7 @@ unsigned long linea_owner_open(void) {
 
 void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len, unsigned long answer_at,
                       unsigned long answer_len) {
+    alone();
     struct owner_queue *q = (struct owner_queue *)queue;
     linea_storage_extent(at, len);
     linea_storage_extent(answer_at, answer_len);
@@ -397,6 +409,7 @@ void linea_owner_done(unsigned long queue) {
 }
 
 void linea_owner_close(unsigned long queue) {
+    alone();
     struct owner_queue *q = (struct owner_queue *)queue;
     must(pthread_mutex_lock(&q->lock));
     q->closed = 1;
@@ -461,6 +474,7 @@ static int deadline_after(struct timespec now, uint64_t step_sec, long step_nsec
 }
 
 uint8_t linea_chan_recv_until(unsigned long endpoint, unsigned long at, unsigned long len, unsigned long timeout_ns) {
+    alone();
     struct task *t = task_of(endpoint);
     linea_storage_extent(at, len);
     struct timespec now;

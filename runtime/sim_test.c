@@ -428,6 +428,69 @@ static void each_side_traps_on_the_others_descriptors(void) {
     traps_with(read_with_nothing_on_the_way, "linea: a simulation's one task waits forever\n");
 }
 
+/* The fingerprint digests the bytes delivered, not only how many. */
+static unsigned long fingerprint_of_sending(const char *text) {
+    const unsigned long sim = plain(ms);
+    (void)linea_io_switch(sim);
+    struct pair p = connected_pair();
+    assert(linea_net_write((int)p.client, ADDRESS(text), 3, 0) == 3);
+    char got[3];
+    assert(linea_net_read((int)p.server, ADDRESS(got), 3, 0) == 3);
+    close_pair(p);
+    (void)linea_io_switch(0);
+    const unsigned long fingerprint = linea_sim_fingerprint(sim);
+    linea_sim_close(sim);
+    return fingerprint;
+}
+
+static void different_bytes_of_one_length_give_different_fingerprints(void) {
+    assert(fingerprint_of_sending("abc") == fingerprint_of_sending("abc"));
+    assert(fingerprint_of_sending("abc") != fingerprint_of_sending("abd"));
+}
+
+/* Closing a simulated descriptor outside a run of its open simulation only
+ * forgets its number: the peer, in a later run, hears neither an end nor a
+ * reset, so the run does not depend on when the number was let go. */
+static void a_descriptor_closed_between_runs_is_only_forgotten(void) {
+    const unsigned long sim = plain(ms);
+    (void)linea_io_switch(sim);
+    struct pair p = connected_pair();
+    (void)linea_io_switch(0);
+    assert(linea_net_close((int)p.client) == 0);
+    (void)linea_io_switch(sim);
+    char bytes[2] = { 'o', 'k' };
+    assert(linea_net_write((int)p.server, ADDRESS(bytes), 2, 0) == 2);
+    char got[2];
+    assert(linea_net_read((int)p.server, ADDRESS(got), 2, virtual_now() + 50 * ms) == -(long)ETIMEDOUT);
+    assert(linea_net_write((int)p.server, ADDRESS(bytes), 2, 0) == 2);
+    assert(linea_net_close((int)p.server) == 0);
+    assert(linea_net_close((int)p.listener) == 0);
+    (void)linea_io_switch(0);
+    linea_sim_close(sim);
+}
+
+static unsigned long other_world;
+
+static void receive_from_a_task_inside(void) {
+    const long task = linea_task_prepare(1UL << 16);
+    assert(task > 0);
+    (void)linea_io_switch(plain(ms));
+    unsigned long word = 0;
+    linea_chan_recv((unsigned long)task, ADDRESS(&word), sizeof word);
+}
+
+static void advance_another_simulation_inside(void) {
+    other_world = plain(ms);
+    (void)linea_io_switch(plain(ms));
+    linea_sim_advance(other_world, ms);
+}
+
+/* A run waits on no other task, and its world moves only its own clock. */
+static void a_session_wait_and_a_foreign_world_trap_inside(void) {
+    traps_with(receive_from_a_task_inside, "linea: a simulation runs one task until fibers\n");
+    traps_with(advance_another_simulation_inside, "linea: a simulation's world was used outside its run\n");
+}
+
 /* A real socket may be closed inside a simulation, since closing waits on
  * nothing. */
 static void a_real_socket_closes_inside_a_simulation(void) {
@@ -456,6 +519,9 @@ int main(void) {
     one_seed_gives_one_trace();
     each_side_traps_on_the_others_descriptors();
     a_real_socket_closes_inside_a_simulation();
-    puts("native sim: loop identities, virtual clocks, tie rules, deadlines, chunks, resets, seeds and traps passed");
+    different_bytes_of_one_length_give_different_fingerprints();
+    a_descriptor_closed_between_runs_is_only_forgotten();
+    a_session_wait_and_a_foreign_world_trap_inside();
+    puts("native sim: loop identities, virtual clocks, tie rules, deadlines, chunks, resets, seeds, forgetting and traps passed");
     return 0;
 }

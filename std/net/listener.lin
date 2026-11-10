@@ -235,7 +235,7 @@ impl Listener {
         // later.
         let network = io.Network { latency_ms = 10, ..io.Network.default() }
         var sim = io.Simulation.open(seed: 1, network: network).unwrap()
-        let (early, on_time, waited) = sim.run(
+        let (early, on_time, waited) = &sim.run(
             |inout _world| {
                 var listener = listen(loopback(80)).unwrap()
                 let client = connect(loopback(80)).unwrap()

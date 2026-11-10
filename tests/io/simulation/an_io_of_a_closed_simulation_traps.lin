@@ -4,7 +4,7 @@ import std.io
 // closed its loop has ended, and asking about it traps.
 fn main() -> UInt8 {
     var sim = io.Simulation.open(seed: 1).unwrap()
-    let inside = sim.run(|inout _world| io.current())
+    let inside = &sim.run(|inout _world| io.current())
     sim.close()
     let _simulated = inside.is_simulated()
     0
