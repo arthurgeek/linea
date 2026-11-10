@@ -1668,6 +1668,10 @@ pub fn build(b: *std.Build) void {
         "-Dwrite=linea_test_write",
         "-Dclose=linea_test_close",
         "-Dgetentropy=linea_test_getentropy",
+        // glibc's fortified read would call the real read past the rename
+        // above; `unfortified.h` turns it off.
+        "-include",
+        b.pathFromRoot("runtime/unfortified.h"),
     }) catch @panic("OOM");
     native.add(native_io_step, "native-io-tests", &.{
         .{ .file = "runtime/io.c", .flags = runtime_flags.items },
