@@ -17,7 +17,11 @@ fn main() -> UInt8 {
     let near = shelf()
     let far = shelf()
     let first = true
-    (if first { near } else { far }).items.release()
+    (if first {
+        near
+    } else {
+        far
+    }).items.release()
     let { items, spare } = near
     items.release()
     spare.release()

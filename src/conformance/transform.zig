@@ -3914,12 +3914,12 @@ test "capture renaming includes a library callback's local binders" {
     const source =
         \\fn main() -> UInt8 {
         \\    let number: UInt8 = 7
-        \\    let callback = [number] |sink value: UInt8| -> where borrows(number) {
+        \\    var callback = [number] |sink value: UInt8| -> where borrows(number) {
         \\        let _ = value
         \\        borrow number
         \\    }
         \\    let input: Option[UInt8] = .Some(1)
-        \\    let mapped = input.map(callback).unwrap()
+        \\    let mapped = input.map(&callback).unwrap()
         \\    let second: Option[UInt8] = .Some(2)
         \\    let inline_result = second.map([number] |sink value: UInt8| -> where borrows(number) {
         \\        let _ = value

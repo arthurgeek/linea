@@ -665,7 +665,7 @@ error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Payment` does not 
 22  |     for (payment, till) in payments.zip(tills.as_slice()) {
     |                                     ^^^ `zip` may dispose of a `Payment`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before. `zip` draws an item from the first sequence before asking the second, and if the second sequence ends first it disposes of that first item, so the first sequence's items must be Discardable; zip in the other order, with the sequence whose items are Discardable first, or walk both sequences by hand
    ::: std/iter/iter.lin
-427 |         Self.Iter.Item: Discardable
+414 |         Self.Iter.Item: Discardable
     |         -------------- required by this `where` clause
 ```
 
@@ -980,7 +980,7 @@ error[T-Bound]: `Self.Iter.Item` requires `Additive`, and `borrow UInt64` does n
 5   |     let total = prices.as_slice().sum()
     |                                   ^^^ only the library, which declares `Additive`, may implement it for `borrow UInt64`; pass a value whose type implements it
    ::: std/iter/iter.lin
-613 |         Self.Iter.Item: num.Additive
+600 |         Self.Iter.Item: num.Additive
     |         -------------- required by this `where` clause
 ```
 
@@ -1109,7 +1109,7 @@ error[T-Bound]: `Self.Iter` requires `DoubleEnded`, and `Countdown` does not imp
 18  |     for n in (Countdown { left = 3 }).rev() {
     |                                       ^^^ implement it for that type
    ::: std/iter/iter.lin
-525 |         Self.Iter: DoubleEnded
+512 |         Self.Iter: DoubleEnded
     |         --------- required by this `where` clause
 ```
 
@@ -1310,7 +1310,7 @@ error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Payment` does not 
 24  |         .filter([limit] |payment| payment.cents <= limit)
     |          ^^^^^^ `filter` may dispose of a `Payment`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
    ::: std/iter/iter.lin
-366 |         Self.Iter.Item: Discardable
+353 |         Self.Iter.Item: Discardable
     |         -------------- required by this `where` clause
 ```
 
@@ -1689,7 +1689,7 @@ error[S-Mutation]: this argument is mutated, so it is marked `&`
 31  |     let total = order.as_slice().map(|sink line| line.cents * line.quantity).fold(0, adding)
     |                                                                                      ^^^^^^ expected `&` here
    ::: std/iter/iter.lin
-112 |     ](sink self: Self, sink initial: A, inout combine: F) -> A where
+820 |     ](sink self: Self, sink initial: A, inout combine: F) -> A where
     |                                               ------- declared `inout`
 ```
 

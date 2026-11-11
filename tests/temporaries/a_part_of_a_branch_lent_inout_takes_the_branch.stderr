@@ -1,0 +1,14 @@
+error[O-Move]: `near` has already been moved
+  --> tests/temporaries/a_part_of_a_branch_lent_inout_takes_the_branch.lin:31:19
+   |
+25 |             near
+   |             ---- it was taken here
+31 |     taken.count + near.first.count + far.first.count
+   |                   ^^^^^^^^^^^^^^^^ it was already taken, and a value is taken once
+error[O-Move]: `far` has already been moved
+  --> tests/temporaries/a_part_of_a_branch_lent_inout_takes_the_branch.lin:31:38
+   |
+27 |             far
+   |             --- it was taken here
+31 |     taken.count + near.first.count + far.first.count
+   |                                      ^^^^^^^^^^^^^^^ it was already taken, and a value is taken once

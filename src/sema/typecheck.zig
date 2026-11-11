@@ -41250,7 +41250,7 @@ test "a place passed to an inout parameter without its marker is refused" {
         var sink = Sink.init(gpa);
         const text = try std.fmt.allocPrint(gpa,
             \\struct Counter {{ count: UInt8, inner: Inner }}
-            \\struct Inner {{ count: UInt8 }}
+            \\struct Inner: Copyable {{ count: UInt8 }}
             \\let limit: Inner = .{{ count = 9 }}
             \\impl Counter {{ fn advance(inout self: Self) -> UInt8 {{ self.count += 1; self.count }} }}
             \\fn bump[T](inout value: T) -> UInt8 {{ 0 }}
@@ -41262,7 +41262,8 @@ test "a place passed to an inout parameter without its marker is refused" {
         var ast = try parse(gpa, &source, .from(0), tokens, &sink);
         const res = try resolveTree(gpa, &ast, &sink);
         const typing = try typecheckTree(gpa, &res, &sink);
-        try testing.expect(diagnosticSays(&sink, .s_mutation, "marked `&`"));
+        const needle = if (std.mem.eql(u8, argument, "bump(limit)")) "cannot be written" else "marked `&`";
+        try testing.expect(diagnosticSays(&sink, .s_mutation, needle));
         try testing.expectEqual(@as(u32, 0), typing.borrowed_temporaries.count());
     }
 }

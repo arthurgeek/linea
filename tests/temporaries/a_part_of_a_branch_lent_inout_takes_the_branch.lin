@@ -20,6 +20,13 @@ fn main() -> UInt8 {
     let near: Pair = .{ first = .{ count = 1 }, second = .{ count = 2 } }
     let far: Pair = .{ first = .{ count = 3 }, second = .{ count = 4 } }
     let first = true
-    let taken = swap_out((if first { near } else { far }).first, .{ count = 9 })
+    let taken = swap_out(
+        (if first {
+            near
+        } else {
+            far
+        }).first,
+        .{ count = 9 },
+    )
     taken.count + near.first.count + far.first.count
 }

@@ -19,11 +19,17 @@ fn consume[F: sink fn()](total: Tally, sink act: F) -> UInt8 {
 
 fn main() -> UInt8 {
     var total: Tally = .{ count = 1 }
-    let lent = observe(total, inout [inout total] || {
-        total.count += 1
-    })
-    let taken = consume(total, sink [inout total] || {
-        total.count += 1
-    })
+    let lent = observe(
+        total,
+        inout [inout total] || {
+            total.count += 1
+        },
+    )
+    let taken = consume(
+        total,
+        sink [inout total] || {
+            total.count += 1
+        },
+    )
     lent + taken
 }
