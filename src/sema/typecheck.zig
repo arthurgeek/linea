@@ -23136,7 +23136,11 @@ const Checker = struct {
             if (marked) {
                 _ = self.record(arg.*, found);
             } else if (params[i].convention == .inout and !try self.lendsTemporary(value, found)) {
-                _ = self.report(.s_mutation, arg.*, "this argument is mutated, so it is marked `&`", .{}, "expected `&` here");
+                if (self.readOnlyPlace(value)) {
+                    _ = self.report(.s_mutation, arg.*, "this argument is mutated, and this place cannot be written", .{}, "pass a copy of it to change a temporary");
+                } else {
+                    _ = self.report(.s_mutation, arg.*, "this argument is mutated, so it is marked `&`", .{}, "expected `&` here");
+                }
                 refused = true;
             }
             if (found == .poison) refused = true;
@@ -23216,7 +23220,11 @@ const Checker = struct {
                 _ = self.record(arg, found);
                 try self.written.append(self.gpa, .{ .at = value, .refused = "this place cannot be lent" });
             } else if (param.convention == .inout and !try self.lendsTemporary(value, found)) {
-                _ = self.report(.s_mutation, arg, "this argument is mutated, so it is marked `&`", .{}, "expected `&` here");
+                if (self.readOnlyPlace(value)) {
+                    _ = self.report(.s_mutation, arg, "this argument is mutated, and this place cannot be written", .{}, "pass a copy of it to change a temporary");
+                } else {
+                    _ = self.report(.s_mutation, arg, "this argument is mutated, so it is marked `&`", .{}, "expected `&` here");
+                }
                 refused = true;
             }
             if (found == .poison) refused = true;
