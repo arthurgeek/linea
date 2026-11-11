@@ -86,12 +86,6 @@ pub enum Option[Int32] {
 }
 
 @copyable
-pub enum Option[IoError] {
-    None,
-    Some(std.io.core.IoError),
-}
-
-@copyable
 pub enum Option[Str] {
     None,
     Some(std.text.Str),
@@ -102,6 +96,12 @@ pub struct WriteFailure[IoError] {
     kind: std.io.core.WriteFailureKind,
     reason: std.option.Option[std.io.core.IoError],
     written: UInt64,
+}
+
+@copyable
+pub enum Option[IoError] {
+    None,
+    Some(std.io.core.IoError),
 }
 
 @copyable

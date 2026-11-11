@@ -147,12 +147,6 @@ pub enum Option[UInt64] {
 }
 
 @copyable
-pub enum Option[IoError] {
-    None,
-    Some(std.io.core.IoError),
-}
-
-@copyable
 pub enum Option[Str] {
     None,
     Some(std.text.Str),
@@ -163,6 +157,12 @@ pub struct WriteFailure[IoError] {
     kind: std.io.core.WriteFailureKind,
     reason: std.option.Option[std.io.core.IoError],
     written: UInt64,
+}
+
+@copyable
+pub enum Option[IoError] {
+    None,
+    Some(std.io.core.IoError),
 }
 
 @copyable
@@ -539,10 +539,10 @@ fn std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Releas
         None => {
             {}
         },
-        Some(_linea_derive_2927_1_0_0) => {
+        Some(_linea_derive_2724_1_0_0) => {
             {
                 {
-                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2927_1_0_0)
+                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2724_1_0_0)
                 }
             }
         },
