@@ -206,8 +206,8 @@ pub const RawAccesses = struct {
     /// byte vector from a buffer and take it back.
     vector_from_buffer: DeclId = .none,
     vector_into_buffer: DeclId = .none,
-    /// `Vec.split_inout`, which lends a vector's two sides as views.
-    vec_split_inout: DeclId = .none,
+    /// `Vec.split`, which lends a vector's two sides as views.
+    vec_split: DeclId = .none,
     /// `mem.Arena`, whose `chunks` is the address of its table of later chunks
     /// inside its first buffer; `Arena.open`, which builds one, and
     /// `Arena.rewind`, which takes back what it handed out.
@@ -422,7 +422,7 @@ pub const RawAccesses = struct {
             .kept = structIn(program, ast, "mem", "Kept"),
             .vector_from_buffer = moduleFunction(program, ast, "mem", "vector_from_buffer"),
             .vector_into_buffer = moduleFunction(program, ast, "mem", "vector_into_buffer"),
-            .vec_split_inout = memberOf(program, ast, "mem", "Vec", "split_inout"),
+            .vec_split = memberOf(program, ast, "mem", "Vec", "split"),
             .arena = structIn(program, ast, "mem", "Arena"),
             .arena_open = memberOf(program, ast, "mem", "Arena", "open"),
             .arena_rewind = memberOf(program, ast, "mem", "Arena", "rewind"),
@@ -639,7 +639,7 @@ pub const RawAccesses = struct {
     /// chunks; a buffer's where `buffer_numbers` and `Storage.from_buffer`
     /// read or take it apart, and by the allocators that hand one out and
     /// take it back on a backing allocator's behalf; a view's where
-    /// `Vec.split_inout` lends its two sides; a vector's where a byte vector
+    /// `Vec.split` lends its two sides; a vector's where a byte vector
     /// is made from a buffer and taken back; a kept body's where
     /// `task.Slot.start` hands its addresses to the thread it starts; a
     /// `Chan`'s where `session.detach` takes one apart; an owner's where
@@ -652,7 +652,7 @@ pub const RawAccesses = struct {
         .{ .decl = "storage", .also = &.{ "keep_body", "take_kept_body", "release_kept_bytes", "closure_erase", "arena_table_of" } },
         .{ .decl = "buffer", .allocators = true, .also = &(buffer_numbers ++ [_][]const u8{"storage_from_buffer"} ++ backing_buffer_builders) },
         .{ .decl = "slice" },
-        .{ .decl = "view", .also = &.{"vec_split_inout"} },
+        .{ .decl = "view", .also = &.{"vec_split"} },
         .{ .decl = "closure" },
         .{ .decl = "vec", .also = &.{ "vector_from_buffer", "vector_into_buffer" } },
         .{ .decl = "kept", .also = &.{ "keep_body", "task_slot_start" } },

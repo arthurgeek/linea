@@ -1,6 +1,8 @@
 # 170. A marked postfix call lends its receiver
 
-Status: Accepted — 2026-09-24.
+Status: Accepted — 2026-09-24. The clause binding a receiver that is not a
+place to a `var` is superseded by
+[0267](0267-an-inout-parameter-takes-a-temporary.md).
 
 ## Context
 

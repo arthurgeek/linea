@@ -9,9 +9,9 @@ error[S-Mutation]: `&` marks this call, and a function holds nothing a call writ
   --> tests/receivers/a_marker_before_a_function_call_marks_that_call.lin:25:5
    |
 25 |     &hall().warm_up(5)
-   |     ^^^^^^^ bind its result with `var`, then mark the call that changes it
+   |     ^^^^^^^ remove the `&` to change a temporary, or bind its result with `var` and mark the call that changes it
 error[S-Mutation]: `&` marks this call, and a function holds nothing a call writes to
   --> tests/receivers/a_marker_before_a_function_call_marks_that_call.lin:26:5
    |
 26 |     &Thermostat.make().warm_up(5)
-   |     ^^^^^^^^^^^^^^^^^^ bind its result with `var`, then mark the call that changes it
+   |     ^^^^^^^^^^^^^^^^^^ remove the `&` to change a temporary, or bind its result with `var` and mark the call that changes it

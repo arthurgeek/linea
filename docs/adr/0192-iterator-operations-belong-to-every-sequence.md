@@ -6,6 +6,8 @@ Status: Accepted — 2026-09-28. Builds on
 Refines the disjointness sentence of
 [0148](0148-parameter-heads-match-complete-trait-keys.md). Refines the method-call fallback
 clause of [0152](0152-an-integer-literals-type-is-settled-by-its-uses.md).
+The `_inout` forms and the `sink` callbacks of the walking operations are
+superseded by [0267](0267-an-inout-parameter-takes-a-temporary.md).
 
 ## Context
 

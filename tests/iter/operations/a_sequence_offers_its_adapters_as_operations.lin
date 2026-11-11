@@ -66,7 +66,7 @@ fn main() -> Result[UInt8, io.IoError] {
     var visit = inout [sink visited = UInt64(0)] |sink value: UInt64| {
         visited += value
     }
-    values.as_slice().map(|sink value| *value).for_each_inout(&visit)
+    values.as_slice().map(|sink value| *value).for_each(&visit)
     let { visited: seen } = visit.into_captures()
 
     let { values: collected, iterator: _ } = values.as_slice().map(|sink value| *value * 3).collect().unwrap()

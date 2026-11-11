@@ -1,0 +1,12 @@
+error[S-Name]: expected a name
+  --> tests/temporaries/a_temporary_takes_no_marker.lin:15:23
+   |
+15 |     let first = bump(&Counter { count = 1 })
+   |                       ^^^^^^^^^^^^^^^^^^^^^ `&` lends a place the call writes to, and a value that is not one is passed without it
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+  --> tests/temporaries/a_temporary_takes_no_marker.lin:16:23
+   |
+8  | fn bump(inout counter: Counter) -> UInt8 {
+   |               ------- declared `inout`
+16 |     let second = bump(counter)
+   |                       ^^^^^^^ expected `&` here

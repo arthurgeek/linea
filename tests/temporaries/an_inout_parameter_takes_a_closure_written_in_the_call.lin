@@ -1,0 +1,34 @@
+// `visit_each` lends its callback, and a closure written in the call is not a
+// place: it is kept in a temporary until the end of the statement and takes no
+// `&`. The first closure changes `total`, a place it is lent; the second
+// changes a count it owns, which ends with the temporary.
+import std.io
+
+use io.IoError
+use io.println
+
+fn visit_each[F: inout fn(value: UInt64)](count: UInt64, inout visit: F) {
+    var next: UInt64 = 0
+    while next < count {
+        &visit(next)
+        next += 1
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    var total: UInt64 = 0
+    visit_each(
+        5,
+        inout [inout total] |value| {
+            total += value
+        },
+    )
+    println("total {total}")?
+    visit_each(
+        3,
+        inout [sink seen = UInt64(0)] |value| {
+            seen += value
+        },
+    )
+    return .Ok(0)
+}

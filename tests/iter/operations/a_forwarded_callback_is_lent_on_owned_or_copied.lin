@@ -1,0 +1,26 @@
+import std.io
+
+// A function that is lent its callback lends it on to `any`.
+fn any_lent[F: inout fn(sink weight: UInt64) -> Bool](stop: UInt64, inout heavy: F) -> Bool {
+    (UInt64(1)..stop).any(&heavy)
+}
+
+// A function that owns its callback lends `any` the callback it owns.
+fn any_owned[F: fn(sink weight: UInt64) -> Bool](stop: UInt64, sink heavy: F) -> Bool where F: Discardable {
+    var mine = heavy
+    (UInt64(1)..stop).any(&mine)
+}
+
+// A function that only reads a copyable callback passes `any` a copy.
+fn any_copied[F: fn(sink weight: UInt64) -> Bool](stop: UInt64, heavy: F) -> Bool where F: Copyable {
+    (UInt64(1)..stop).any(copy(heavy))
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var lent = |sink weight: UInt64| weight > 4
+    let owned = any_owned(10, |sink weight| weight > 4)
+    let borrowed = any_lent(3, &lent)
+    let copied = any_copied(10, |sink weight| weight > 8)
+    io.println("{owned} {borrowed} {copied}")?
+    .Ok(0)
+}

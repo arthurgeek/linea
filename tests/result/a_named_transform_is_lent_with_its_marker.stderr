@@ -1,0 +1,16 @@
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+  --> tests/result/a_named_transform_is_lent_with_its_marker.lin:12:33
+   |
+12 |     let halved = first.and_then(halve)
+   |                                 ^^^^^ expected `&` here
+  ::: std/result/result.lin
+L  |     pub fn and_then[U, F: inout fn(sink value: T) -> Result[U, E]](sink self: Self, inout transform: F) -> Result[U, E]  ...
+   |                                                                                           --------- declared `inout`
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+  --> tests/result/a_named_transform_is_lent_with_its_marker.lin:13:37
+   |
+13 |     let quartered = halved.and_then(halve)
+   |                                     ^^^^^ expected `&` here
+  ::: std/result/result.lin
+L  |     pub fn and_then[U, F: inout fn(sink value: T) -> Result[U, E]](sink self: Self, inout transform: F) -> Result[U, E]  ...
+   |                                                                                           --------- declared `inout`

@@ -1,0 +1,16 @@
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+ --> tests/maps/a_named_combine_is_lent_with_its_marker.lin:9:25
+  |
+9 |     &totals.merge(7, 5, add).unwrap()
+  |                         ^^^ expected `&` here
+ ::: std/collections/map.lin
+L | ... oming)](inout self: Self, sink key: K, sink value: V, inout combine: F) -> Result[(), InsertFailure[K, V]] where
+  |                                                                 ------- declared `inout`
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+  --> tests/maps/a_named_combine_is_lent_with_its_marker.lin:10:25
+   |
+10 |     &totals.merge(7, 3, add).unwrap()
+   |                         ^^^ expected `&` here
+  ::: std/collections/map.lin
+L  | ... oming)](inout self: Self, sink key: K, sink value: V, inout combine: F) -> Result[(), InsertFailure[K, V]] where
+   |                                                                 ------- declared `inout`

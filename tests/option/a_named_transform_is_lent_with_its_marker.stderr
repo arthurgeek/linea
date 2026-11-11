@@ -1,0 +1,16 @@
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+ --> tests/option/a_named_transform_is_lent_with_its_marker.lin:8:27
+  |
+8 |     let grown = first.map(grow)
+  |                           ^^^^ expected `&` here
+ ::: std/option/option.lin
+L |     pub fn map[U, F: inout fn(sink value: T) -> U](sink self: Self, inout transform: F) -> Option[U] where carries(.Some ...
+  |                                                                           --------- declared `inout`
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+ --> tests/option/a_named_transform_is_lent_with_its_marker.lin:9:27
+  |
+9 |     let also = second.map(grow)
+  |                           ^^^^ expected `&` here
+ ::: std/option/option.lin
+L |     pub fn map[U, F: inout fn(sink value: T) -> U](sink self: Self, inout transform: F) -> Option[U] where carries(.Some ...
+  |                                                                           --------- declared `inout`

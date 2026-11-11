@@ -1,0 +1,15 @@
+// `and_then` is lent its transform and may change it. `halve` is a variable of
+// `main`'s, so it is passed as `&halve`.
+fn main() -> UInt8 {
+    var halve = |sink value: UInt8| -> Result[UInt8, UInt8] {
+        if value % 2 == 0 {
+            .Ok(value / 2)
+        } else {
+            .Err(value)
+        }
+    }
+    let first: Result[UInt8, UInt8] = .Ok(8)
+    let halved = first.and_then(halve)
+    let quartered = halved.and_then(halve)
+    quartered.unwrap_or(0)
+}

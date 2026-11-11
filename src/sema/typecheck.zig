@@ -6166,7 +6166,7 @@ const Checker = struct {
     contract_variants: std.AutoHashMapUnmanaged(TokenId, types_mod.VariantIdentity) = .empty,
     readonly_places: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     carried_places: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
-    borrowed_temporaries: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    borrowed_temporaries: std.AutoHashMapUnmanaged(ExprId, node.Convention) = .empty,
     interpolation_positions: std.AutoHashMapUnmanaged(ExprId, types_mod.PiecePosition) = .empty,
     /// The receivers of `receiver.name` whose type `checkReceiver` has
     /// recorded, one entry per receiver expression. A call is tried as several
@@ -22184,7 +22184,7 @@ const Checker = struct {
                 // marks `make()`. A function or an operation reached through
                 // its type is no place, so the report names the call it marked.
                 if (self.res.marksNoPlace(id))
-                    return self.report(.s_mutation, id, "`&` marks this call, and a function holds nothing a call writes to", .{}, "bind its result with `var`, then mark the call that changes it");
+                    return self.report(.s_mutation, id, "`&` marks this call, and a function holds nothing a call writes to", .{}, "remove the `&` to change a temporary, or bind its result with `var` and mark the call that changes it");
                 return self.report(.s_mutation, id, "`&` invocation requires a callable value", .{}, "bind the callback before invoking it mutably");
             }
         }
@@ -23123,13 +23123,9 @@ const Checker = struct {
 
             const marked = self.ast.exprTag(arg.*) == .marked;
             const value = if (marked) self.ast.unaryOperand(arg.*) else arg.*;
-            if ((params[i].convention == .inout) != marked) {
-                if (params[i].convention == .inout) {
-                    _ = self.report(.s_mutation, arg.*, "this argument is mutated, so it is marked `&`", .{}, "expected `&` here");
-                } else {
-                    _ = self.report(.s_mutation, arg.*, "this argument is not mutated, so it takes no `&`", .{}, "unexpected `&`");
-                    try self.decideMark(arg.*, .refused);
-                }
+            if (marked and params[i].convention != .inout) {
+                _ = self.report(.s_mutation, arg.*, "this argument is not mutated, so it takes no `&`", .{}, "unexpected `&`");
+                try self.decideMark(arg.*, .refused);
                 refused = true;
             } else if (marked) try self.decideMark(arg.*, .lent);
             const found = try self.check(value, .{
@@ -23139,6 +23135,13 @@ const Checker = struct {
             });
             if (marked) {
                 _ = self.record(arg.*, found);
+            } else if (params[i].convention == .inout and !try self.lendsTemporary(value, found)) {
+                if (self.readOnlyPlace(value)) {
+                    _ = self.report(.s_mutation, arg.*, "this argument is mutated, and this place cannot be written", .{}, "pass a copy of it to change a temporary");
+                } else {
+                    _ = self.report(.s_mutation, arg.*, "this argument is mutated, so it is marked `&`", .{}, "expected `&` here");
+                }
+                refused = true;
             }
             if (found == .poison) refused = true;
             if (found == .never) argument_diverges = true;
@@ -23203,13 +23206,9 @@ const Checker = struct {
             if (arg == .none) continue;
             const marked = self.ast.exprTag(arg) == .marked;
             const value = if (marked) self.ast.unaryOperand(arg) else arg;
-            if ((param.convention == .inout) != marked) {
-                if (param.convention == .inout) {
-                    _ = self.report(.s_mutation, arg, "this argument is mutated, so it is marked `&`", .{}, "expected `&` here");
-                } else {
-                    _ = self.report(.s_mutation, arg, "this argument is not mutated, so it takes no `&`", .{}, "unexpected `&`");
-                    try self.decideMark(arg, .refused);
-                }
+            if (marked and param.convention != .inout) {
+                _ = self.report(.s_mutation, arg, "this argument is not mutated, so it takes no `&`", .{}, "unexpected `&`");
+                try self.decideMark(arg, .refused);
                 refused = true;
             } else if (marked) try self.decideMark(arg, .lent);
             const found = try self.check(value, .{
@@ -23220,6 +23219,13 @@ const Checker = struct {
             if (marked) {
                 _ = self.record(arg, found);
                 try self.written.append(self.gpa, .{ .at = value, .refused = "this place cannot be lent" });
+            } else if (param.convention == .inout and !try self.lendsTemporary(value, found)) {
+                if (self.readOnlyPlace(value)) {
+                    _ = self.report(.s_mutation, arg, "this argument is mutated, and this place cannot be written", .{}, "pass a copy of it to change a temporary");
+                } else {
+                    _ = self.report(.s_mutation, arg, "this argument is mutated, so it is marked `&`", .{}, "expected `&` here");
+                }
+                refused = true;
             }
             if (found == .poison) refused = true;
             if (found == .never) argument_diverges = true;
@@ -24757,34 +24763,16 @@ const Checker = struct {
             };
 
             if (marked and p.convention == .inout) try self.decideMark(if (written_mark) a else id, .lent);
+            // A place passed `inout` is lent with `&`. Whether an unmarked
+            // argument is a place is known once its selections are checked, so
+            // one that names a binding is refused here and any other below.
+            const unmarked_place = p.convention == .inout and !marked and self.isAPlace(a);
+            if (unmarked_place) {
+                arguments_valid = false;
+                try self.reportUnmarkedPlace(a, if (receiver) named else null, declared);
+            }
             switch (p.convention) {
-                .inout => if (!marked) {
-                    arguments_valid = false;
-                    if (receiver and self.isAPlace(a)) {
-                        _ = self.reportWithOrigin(
-                            .s_mutation,
-                            a,
-                            "this receiver is mutated, so the call is marked `&`",
-                            try std.fmt.allocPrint(self.sink.arena, "write `&{s}.{s}(...)`", .{
-                                self.ast.exprText(a),
-                                self.ast.tokenText(named),
-                            }),
-                            declared,
-                        );
-                    } else if (receiver) {
-                        // A `&` lends a place, and a call's result is none, so
-                        // marking this call would not reach the value it changes.
-                        _ = self.reportWithOrigin(
-                            .s_mutation,
-                            a,
-                            "this receiver is mutated, and a value that is not a place cannot be lent",
-                            "bind the value to a `var`, then call the operation on it with `&`",
-                            declared,
-                        );
-                    } else {
-                        _ = self.reportWithOrigin(.s_mutation, a, "this argument is mutated, so it is marked `&`", "expected `&` here", declared);
-                    }
-                },
+                .inout => {},
                 // Neither lends: `read` may not be written through and `sink`
                 // is given away outright, so `&` says nothing true of either.
                 .read, .sink => if (marked) {
@@ -24845,6 +24833,10 @@ const Checker = struct {
             // A lend is a write the callee may make, so it asks of a
             // projection exactly what an assignment asks.
             if (marked) try self.written.append(self.gpa, .{ .at = value, .refused = "this place cannot be lent" });
+            if (p.convention == .inout and !marked and !unmarked_place and !try self.lendsTemporary(a, at)) {
+                arguments_valid = false;
+                try self.reportUnmarkedPlace(a, if (receiver) named else null, declared);
+            }
         }
 
         const source_signature = self.builder.get(self.decl_signatures.get(d));
@@ -25358,13 +25350,16 @@ const Checker = struct {
                     continue;
                 }
                 const receiver = mutation == lent;
-                const marked = receiver or self.ast.exprTag(mutation) == .marked or self.ast.exprTag(mutation) == .call;
+                const captured = self.ast.exprTag(mutation) == .lambda;
+                const marked = receiver or captured or self.ast.exprTag(mutation) == .marked or self.ast.exprTag(mutation) == .call;
                 _ = self.reportWithOrigin(
                     .n_aliased,
                     other,
                     "this names a place another argument mutates",
                     if (receiver)
                         "already lent as the receiver of this `&` call"
+                    else if (captured)
+                        "already lent `inout` to a closure in this call"
                     else if (self.ast.exprTag(mutation) == .call)
                         "this argument accesses the same place"
                     else if (marked)
@@ -25537,6 +25532,9 @@ const Checker = struct {
             },
             .lambda => blk: {
                 for (self.ast.lambda(within).captures) |capture| {
+                    // A place lent `inout` to a closure written in the call
+                    // is written when the callee calls the closure.
+                    if (capture.convention == .inout and self.namesPlace(other, capture.source, any, except)) break :blk within;
                     const found = self.sharedMutation(capture.source, other, any, except);
                     if (found != .none) break :blk found;
                 }
@@ -25596,12 +25594,56 @@ const Checker = struct {
         }
     }
 
+    /// Whether an argument passed to an `inout` parameter without `&` is
+    /// lent as a temporary: any value that is not a place. The temporary
+    /// owns the value, the callee changes it, and it ends with its statement.
+    /// A place is lent with `&`, so the caller reads what the callee wrote.
+    fn lendsTemporary(self: *Checker, value: ExprId, found: TypeId) !bool {
+        if (self.isAPlace(value)) return false;
+        if (found != .never and found != .poison) try self.borrowed_temporaries.put(self.gpa, self.ast.withoutGroups(value), .inout);
+        return true;
+    }
+
+    /// [S-Mutation] for a place passed to an `inout` parameter without `&`:
+    /// an argument, or the receiver of the postfix call naming `operation`.
+    fn reportUnmarkedPlace(self: *Checker, place: ExprId, operation: ?TokenId, declared: Label) !void {
+        if (operation) |named| {
+            _ = self.reportWithOrigin(
+                .s_mutation,
+                place,
+                "this receiver is mutated, so the call is marked `&`",
+                try std.fmt.allocPrint(self.sink.arena, "write `&{s}.{s}(...)`", .{
+                    self.ast.exprText(place),
+                    self.ast.tokenText(named),
+                }),
+                declared,
+            );
+        } else if (self.readOnlyPlace(place)) {
+            // A constant and what an observation reaches are places no call
+            // may write, so the marker would be refused too.
+            _ = self.reportWithOrigin(.s_mutation, place, "this argument is mutated, and this place cannot be written", "pass a copy of it to change a temporary", declared);
+        } else {
+            _ = self.reportWithOrigin(.s_mutation, place, "this argument is mutated, so it is marked `&`", "expected `&` here", declared);
+        }
+    }
+
+    /// Whether a place is a constant or is reached through an observation,
+    /// neither of which grants a write.
+    fn readOnlyPlace(self: *const Checker, place: ExprId) bool {
+        if (self.res.constantReached(self.ast, place)) return true;
+        var steps = self.ast.placeSteps(place);
+        while (steps.next()) |step| {
+            if (self.ast.exprTag(step) == .dereference) return true;
+        }
+        return false;
+    }
+
     /// Records a value that is borrowed where it is written. A place,
     /// constants included, is borrowed where it lives; any other value is
     /// evaluated into a temporary that ends with its statement.
     fn noteBorrowed(self: *Checker, value: ExprId) !void {
         if (self.isAPlace(value)) return;
-        try self.borrowed_temporaries.put(self.gpa, self.ast.withoutGroups(value), {});
+        try self.borrowed_temporaries.put(self.gpa, self.ast.withoutGroups(value), .read);
     }
 
     fn checkBorrow(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
@@ -41215,6 +41257,61 @@ test "a borrowed argument that is not a place is recorded as a temporary" {
     try testing.expectEqual(@as(u32, 1), typing.borrowed_temporaries.count());
     var recorded = typing.borrowed_temporaries.keyIterator();
     while (recorded.next()) |key| try testing.expectEqual(node.Expr.Tag.add, res.expanded.ast.exprTag(key.*));
+}
+
+test "an argument to an inout parameter that is not a place is recorded as a temporary lent inout" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var sink = Sink.init(gpa);
+    const source: Source = .{ .path = "t.lin", .text =
+        \\struct Counter { count: UInt8 }
+        \\impl Counter { fn advance(inout self: Self) -> UInt8 { self.count += 1; self.count } }
+        \\fn bump(inout counter: Counter) -> UInt8 { counter.count += 1; counter.count }
+        \\fn fresh() -> Counter { .{ count = 0 } }
+        \\fn main() -> UInt8 { var kept: Counter = .{ count = 3 }; bump(&kept) + bump((fresh())) + fresh().advance() + &kept.advance() }
+    };
+    var interner: Interner = .empty;
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    const res = try resolveTree(gpa, &ast, &sink);
+    const typing = try typecheckTree(gpa, &res, &sink);
+    try testing.expectEqual(@as(u32, 0), sink.error_count);
+    // The two calls of `fresh` are temporaries, recorded without their
+    // parentheses; `kept` is a place, lent where it lives.
+    try testing.expectEqual(@as(u32, 2), typing.borrowed_temporaries.count());
+    var recorded = typing.borrowed_temporaries.keyIterator();
+    while (recorded.next()) |key| {
+        try testing.expectEqual(node.Expr.Tag.call, res.expanded.ast.exprTag(key.*));
+        try testing.expect(typing.lentTemporary(key.*));
+    }
+}
+
+test "a place passed to an inout parameter without its marker is refused" {
+    const arguments = [_][]const u8{ "bump(kept)", "bump(kept.inner)", "bump((kept))", "kept.advance()", "bump(limit)" };
+    for (arguments) |argument| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var sink = Sink.init(gpa);
+        const text = try std.fmt.allocPrint(gpa,
+            \\struct Counter {{ count: UInt8, inner: Inner }}
+            \\struct Inner: Copyable {{ count: UInt8 }}
+            \\let limit: Inner = .{{ count = 9 }}
+            \\impl Counter {{ fn advance(inout self: Self) -> UInt8 {{ self.count += 1; self.count }} }}
+            \\fn bump[T](inout value: T) -> UInt8 {{ 0 }}
+            \\fn main() -> UInt8 {{ var kept: Counter = .{{ count = 3, inner = .{{ count = 0 }} }}; {s} }}
+        , .{argument});
+        const source: Source = .{ .path = "t.lin", .text = text };
+        var interner: Interner = .empty;
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+        const res = try resolveTree(gpa, &ast, &sink);
+        const typing = try typecheckTree(gpa, &res, &sink);
+        const needle = if (std.mem.eql(u8, argument, "bump(limit)")) "cannot be written" else "marked `&`";
+        try testing.expect(diagnosticSays(&sink, .s_mutation, needle));
+        try testing.expectEqual(@as(u32, 0), typing.borrowed_temporaries.count());
+    }
 }
 
 test "borrow value projection is readonly through fields and indexes" {

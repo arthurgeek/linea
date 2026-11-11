@@ -264,15 +264,6 @@ impl[T] Vec[T, SystemAllocator] {
         testing.assert_eq(length, 0, "the two spellings were not one type")?
     }
 
-    // Build a vector in the system allocator by calling the initializer once
-    // per index, as `from_fn_in` does.
-    pub fn from_fn[F: inout fn(index: UInt64) -> T](count: UInt64, sink initializer: F) -> Result[Self, Oom] where
-        carries(.Ok: initializer),
-        F: Discardable
-    {
-        Vec.from_fn_in(system(), count, initializer)
-    }
-
     test fn from_fn_builds_a_vector_in_the_system_allocator() {
         let built: Result[Vec[UInt64], Oom] = Vec.from_fn(count: 3, initializer: |index| index + 1)
         defer let values = built.unwrap()
@@ -335,21 +326,21 @@ impl[T] Vec[T, SystemAllocator] {
         testing.assert_eq(index, 41, "vector construction consumed its borrowed record")?
     }
 
-    // Build a vector in the system allocator as `from_fn_inout_in` does, with
-    // an initializer whose state the caller keeps.
-    pub fn from_fn_inout[F: inout fn(index: UInt64) -> T](count: UInt64, inout initializer: F) -> Result[Self, Oom] where carries(.Ok: initializer) {
-        Vec.from_fn_inout_in(system(), count, &initializer)
+    // Build a vector in the system allocator by calling the initializer once
+    // per index, as `from_fn_in` does.
+    pub fn from_fn[F: inout fn(index: UInt64) -> T](count: UInt64, inout initializer: F) -> Result[Self, Oom] where carries(.Ok: initializer) {
+        Vec.from_fn_in(system(), count, &initializer)
     }
 
-    test fn from_fn_inout_builds_a_vector_in_the_system_allocator() {
+    test fn from_fn_lends_an_initializer_the_caller_keeps() {
         var calls = UInt64(0)
         var initializer = inout [inout calls] |index: UInt64| {
             calls += 1
             index * 2
         }
-        let built: Result[Vec[UInt64], Oom] = Vec.from_fn_inout(count: 2, initializer: &initializer)
+        let built: Result[Vec[UInt64], Oom] = Vec.from_fn(count: 2, initializer: &initializer)
         defer let values = built.unwrap()
-        testing.assert_eq(values.as_slice(), [UInt64(0), 2].as_slice(), "from_fn_inout built the wrong elements")?
+        testing.assert_eq(values.as_slice(), [UInt64(0), 2].as_slice(), "from_fn built the wrong elements")?
         testing.assert_eq(calls, UInt64(2), "the initializer was not called once per index")?
     }
 }
@@ -404,17 +395,6 @@ impl[T, A: Allocator] Vec[T, A] {
             Err(oom) => .Err(oom),
             Ok(storage) => .Ok(.{ storage = Storage.from_buffer(storage), len = 0 }),
         }
-    }
-
-    // Allocate before calling the initializer once per index, in increasing
-    // order. An empty or refused allocation never calls the initializer, and
-    // the initializer is dropped at the end.
-    pub fn from_fn_in[F: inout fn(index: UInt64) -> T](allocator: A, count: UInt64, sink initializer: F) -> Result[Self, Oom] where
-        carries(.Ok: allocator, initializer),
-        F: Discardable
-    {
-        var initializing = initializer
-        Vec.from_fn_inout_in(allocator, count, &initializing)
     }
 
     test fn vec_constructors_reserve_exact_capacity_once() {
@@ -476,9 +456,10 @@ impl[T, A: Allocator] Vec[T, A] {
         testing.assert_eq(values.as_slice(), [UInt64(0), 10, 20, 30].as_slice(), "elements built in an arena were lost or reordered")?
     }
 
-    // Build a vector as `from_fn` does, with an initializer whose state the
-    // caller keeps.
-    pub fn from_fn_inout_in[F: inout fn(index: UInt64) -> T](allocator: A, count: UInt64, inout initializer: F) -> Result[Self, Oom] where carries(.Ok: allocator, initializer) {
+    // Allocate before calling the initializer once per index, in increasing
+    // order. An empty or refused allocation never calls the initializer. An
+    // initializer lent with `&` keeps its state for the caller.
+    pub fn from_fn_in[F: inout fn(index: UInt64) -> T](allocator: A, count: UInt64, inout initializer: F) -> Result[Self, Oom] where carries(.Ok: allocator, initializer) {
         let allocated: Result[Self, Oom] = Vec.allocate(allocator, count)
         var values = allocated?
         let shape: SlotType[T] = .Type
@@ -490,7 +471,7 @@ impl[T, A: Allocator] Vec[T, A] {
         .Ok(values)
     }
 
-    test fn vec_from_fn_inout_preserves_state_and_constructs_linear_elements() {
+    test fn vec_from_fn_preserves_state_and_constructs_linear_elements() {
         defer let log = system().acquire(72).unwrap()
         let record = VecTestLog { buffer = borrow log }
         let allocator = VecTestAllocator { log = borrow record }
@@ -500,7 +481,7 @@ impl[T, A: Allocator] Vec[T, A] {
             let element = VecGeneratedElement { index = seed.index + index + calls }
             element
         }
-        let built: Result[Vec[VecGeneratedElement, VecTestAllocator], Oom] = Vec.from_fn_inout_in(allocator, count: 4, initializer: &initializer)
+        let built: Result[Vec[VecGeneratedElement, VecTestAllocator], Oom] = Vec.from_fn_in(allocator, count: 4, initializer: &initializer)
         let values = built.unwrap()
         let capacity = values.storage.capacity()
         var pending = values.drain()
@@ -523,17 +504,17 @@ impl[T, A: Allocator] Vec[T, A] {
         testing.assert_eq(capacity, UInt64(32), "mutable vector constructor rounded up capacity")?
     }
 
-    test fn vec_from_fn_inout_preserves_callbacks_on_empty_overflow_and_refusal() {
+    test fn vec_from_fn_preserves_callbacks_on_empty_overflow_and_refusal() {
         let seed = VecGeneratedElement { index = 7 }
         var initializer = inout [sink seed, sink calls = UInt64(0)] |index: UInt64| {
             calls += 1
             seed.index + index
         }
-        let opened: Result[Vec[UInt64], Oom] = Vec.from_fn_inout(count: 0, initializer: &initializer)
+        let opened: Result[Vec[UInt64], Oom] = Vec.from_fn(count: 0, initializer: &initializer)
         let empty = opened.unwrap()
         let empty_length = empty.length()
         empty.release()
-        let overflowing: Result[Vec[UInt64], Oom] = Vec.from_fn_inout(count: UInt64.max, initializer: &initializer)
+        let overflowing: Result[Vec[UInt64], Oom] = Vec.from_fn(count: UInt64.max, initializer: &initializer)
         let overflow_refused = match overflowing {
             Ok(values) => {
                 values.release()
@@ -542,7 +523,7 @@ impl[T, A: Allocator] Vec[T, A] {
             Err(_) => true,
         }
         let arena = Arena.open(system(), 0)
-        let refused: Result[Vec[UInt64, Handle], Oom] = Vec.from_fn_inout_in(arena.handle(), count: 1, initializer: &initializer)
+        let refused: Result[Vec[UInt64, Handle], Oom] = Vec.from_fn_in(arena.handle(), count: 1, initializer: &initializer)
         let allocation_refused = match refused {
             Ok(values) => {
                 values.release()
@@ -558,13 +539,13 @@ impl[T, A: Allocator] Vec[T, A] {
         testing.assert_eq(seed_index, UInt64(7), "refused vector construction settled its caller's protocol capture")?
     }
 
-    test fn vec_from_fn_inout_builds_its_elements_in_an_arena() {
+    test fn vec_from_fn_lends_an_initializer_that_builds_in_an_arena() {
         defer let arena = Arena.open(system(), 64)
         var initializer = inout [sink calls = UInt64(0)] |index: UInt64| {
             calls += 1
             index + calls
         }
-        let built: Result[Vec[UInt64, Handle], Oom] = Vec.from_fn_inout_in(arena.handle(), count: 3, initializer: &initializer)
+        let built: Result[Vec[UInt64, Handle], Oom] = Vec.from_fn_in(arena.handle(), count: 3, initializer: &initializer)
         let values = built.unwrap()
         testing.assert_eq(values.as_slice(), [UInt64(1), 3, 5].as_slice(), "elements built in an arena lost the initializer's state")?
     }
@@ -865,9 +846,9 @@ impl[T, A: Allocator] Vec[T, A] {
     // Split the vector at `at` and lend `body` the two sides as views: `left`
     // holds the first `at` elements and `right` the rest. An `at` past the
     // vector's length traps.
-    pub fn split_inout[F: inout fn(inout left: View[T], inout right: View[T])](inout self: Self, at: UInt64, inout body: F) {
+    pub fn split[F: inout fn(inout left: View[T], inout right: View[T])](inout self: Self, at: UInt64, inout body: F) {
         if at > self.len {
-            panic("split_inout: split index out of bounds")
+            panic("split: split index out of bounds")
         }
         // A vector that never allocated has no buffer, and both sides of it
         // are empty and start where it does.
@@ -878,7 +859,7 @@ impl[T, A: Allocator] Vec[T, A] {
         &body(&left, &right)
     }
 
-    test fn vec_split_inout_lends_disjoint_halves() {
+    test fn vec_split_lends_disjoint_halves() {
         defer var values: Vec[UInt64] = Vec.new()
         for i in 0..10 {
             &values.push(i).unwrap()
@@ -889,11 +870,11 @@ impl[T, A: Allocator] Vec[T, A] {
             testing.assert_eq(right.length(), 6, "right length wrong").unwrap()
             verified = true
         }
-        &values.split_inout(4, &check)
-        testing.assert(verified, "split_inout callback did not run")?
+        &values.split(4, &check)
+        testing.assert(verified, "split callback did not run")?
     }
 
-    test fn split_inout_lends_the_elements_on_each_side_of_the_split() {
+    test fn split_lends_the_elements_on_each_side_of_the_split() {
         defer var values: Vec[UInt64] = Vec.new()
         for i in 0..6 {
             &values.push(i).unwrap()
@@ -904,7 +885,7 @@ impl[T, A: Allocator] Vec[T, A] {
             left[0] = 10
             right[1] = 30
         }
-        &values.split_inout(2, &mark)
+        &values.split(2, &mark)
         testing.assert_eq(firsts, (UInt64(0), UInt64(2)), "a view did not start where its side of the split starts")?
         testing.assert_eq(values.as_slice(), [UInt64(10), 1, 2, 30, 4, 5].as_slice(), "a write through a view reached the wrong element")?
     }

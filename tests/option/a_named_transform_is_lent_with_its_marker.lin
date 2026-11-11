@@ -1,0 +1,11 @@
+// `map` is lent its transform and may change it. `grow` is a variable of
+// `main`'s, so it is passed as `&grow`.
+fn main() -> UInt8 {
+    let step: UInt8 = 2
+    var grow = [step] |sink value: UInt8| value + step
+    let first: Option[UInt8] = .Some(1)
+    let second: Option[UInt8] = .Some(5)
+    let grown = first.map(grow)
+    let also = second.map(grow)
+    grown.unwrap_or(0) + also.unwrap_or(0)
+}

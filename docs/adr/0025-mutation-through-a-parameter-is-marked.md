@@ -1,6 +1,7 @@
 # 25. Mutation through a parameter is a convention, and it is marked at the call
 
-Status: Accepted — 2026-07-26
+Status: Accepted — 2026-07-26. Extended by
+[0267](0267-an-inout-parameter-takes-a-temporary.md).
 
 The reference/address ABI and storage lifetime clauses are superseded by
 [0123](0123-observations-carry-owner-dependencies-through-callable-contracts.md).

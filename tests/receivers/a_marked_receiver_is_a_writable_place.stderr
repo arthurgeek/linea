@@ -2,7 +2,7 @@ error[S-Name]: expected a name
   --> tests/receivers/a_marked_receiver_is_a_writable_place.lin:18:7
    |
 18 |     &(fresh()).bump()
-   |       ^^^^^^^ `&` marks a binding the call writes to
+   |       ^^^^^^^ `&` lends a place the call writes to, and a value that is not one is passed without it
 error[N-Immutable]: `fixed` is declared with `let`
   --> tests/receivers/a_marked_receiver_is_a_writable_place.lin:17:6
    |

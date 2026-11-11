@@ -1,0 +1,25 @@
+// `link` stores a borrow of `counter` in `holder`. Lent a temporary, the
+// holder would observe storage that ends with the statement, so reading the
+// holder afterwards is refused.
+struct Counter {
+    count: Int64,
+}
+
+struct Holder {
+    seen: borrow Int64,
+}
+
+fn link(inout holder: Holder, inout counter: Counter) where retains(holder: borrow counter) {
+    holder.seen = borrow counter.count
+}
+
+fn fresh() -> Counter {
+    .{ count = 3 }
+}
+
+fn main() -> UInt8 {
+    let base: Int64 = 5
+    var holder: Holder = .{ seen = borrow base }
+    link(&holder, fresh())
+    UInt8(*holder.seen)
+}

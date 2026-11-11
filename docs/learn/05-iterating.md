@@ -665,7 +665,7 @@ error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Payment` does not 
 22  |     for (payment, till) in payments.zip(tills.as_slice()) {
     |                                     ^^^ `zip` may dispose of a `Payment`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before. `zip` draws an item from the first sequence before asking the second, and if the second sequence ends first it disposes of that first item, so the first sequence's items must be Discardable; zip in the other order, with the sequence whose items are Discardable first, or walk both sequences by hand
    ::: std/iter/iter.lin
-427 |         Self.Iter.Item: Discardable
+414 |         Self.Iter.Item: Discardable
     |         -------------- required by this `where` clause
 ```
 
@@ -980,7 +980,7 @@ error[T-Bound]: `Self.Iter.Item` requires `Additive`, and `borrow UInt64` does n
 5   |     let total = prices.as_slice().sum()
     |                                   ^^^ only the library, which declares `Additive`, may implement it for `borrow UInt64`; pass a value whose type implements it
    ::: std/iter/iter.lin
-613 |         Self.Iter.Item: num.Additive
+600 |         Self.Iter.Item: num.Additive
     |         -------------- required by this `where` clause
 ```
 
@@ -1109,7 +1109,7 @@ error[T-Bound]: `Self.Iter` requires `DoubleEnded`, and `Countdown` does not imp
 18  |     for n in (Countdown { left = 3 }).rev() {
     |                                       ^^^ implement it for that type
    ::: std/iter/iter.lin
-525 |         Self.Iter: DoubleEnded
+512 |         Self.Iter: DoubleEnded
     |         --------- required by this `where` clause
 ```
 
@@ -1310,7 +1310,7 @@ error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Payment` does not 
 24  |         .filter([limit] |payment| payment.cents <= limit)
     |          ^^^^^^ `filter` may dispose of a `Payment`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
    ::: std/iter/iter.lin
-366 |         Self.Iter.Item: Discardable
+353 |         Self.Iter.Item: Discardable
     |         -------------- required by this `where` clause
 ```
 
@@ -1612,12 +1612,15 @@ holds every element it held, in an order nobody promises.
 
 ## Callbacks and searches that keep their state
 
-Some operations come with an `_inout` twin, such as `fold_inout`, which borrows
-the callback instead of taking it, so that whatever the callback kept is still
-yours afterwards. A closure that lends one of your variables, `[inout
+An operation that walks straight away, such as `fold`, `find` or `any`, borrows
+its callback instead of taking it. A closure written in the call lives until
+the end of that statement. A closure you bound to a `var` is lent with `&`, as
+any value a call may change is, so whatever the closure kept is still yours
+afterwards. A closure that lends one of your variables, `[inout
 count]` ([Calling things](02-calling-things.md#a-closure-that-changes-a-value-of-yours)),
-usually says the same thing more simply; `fold_inout` is for a closure that owns
-its state. `find_counted` is `find` for an iterator you keep: it answers a
+usually says the same thing more simply; lending the closure is for one that
+owns its state. In Rust the same call is written `fold(0, &mut adding)`.
+`find_counted` is `find` for an iterator you keep: it answers a
 `FindReport` holding the `found` item and how many were `inspected`, and the
 iterator carries on from there.
 
@@ -1646,13 +1649,13 @@ fn main() -> Result[UInt8, io.IoError] {
     io.println("first: {first.found.is_some()} after {first.inspected}")?
     io.println("second: {second.found.is_some()} after {second.inspected}")?
     io.println("third: {third.found.is_some()} after {third.inspected}")?
-    // `fold_inout` borrows its callback, so what the closure counted is still
-    // yours once the fold is done.
+    // `fold` borrows its callback. `&adding` lends the closure, so what it
+    // counted is still yours once the fold is done.
     var adding = inout [sink calls = UInt64(0)] |sink sum: UInt64, sink cost: UInt64| {
         calls += 1
         sum + cost
     }
-    let total = order.as_slice().map(|sink line| line.cents * line.quantity).fold_inout(0, &adding)
+    let total = order.as_slice().map(|sink line| line.cents * line.quantity).fold(0, &adding)
     let { calls } = adding.into_captures()
     io.println("{total} cents from {calls} lines")?
     .Ok(0)
@@ -1670,8 +1673,25 @@ third: false after 1
 kept in a variable instead. Each `find_counted` call stops at the first line over a hundred cents, and the
 next call starts after it: coffee, then croissant, then jam, which is under the
 limit, so the third search finds nothing after inspecting the one line left.
-`adding` owns `calls`, `fold_inout` calls it once for each line, and
-`into_captures()` hands the count back.
+`adding` owns `calls`, `fold` calls it once for each line, and
+`into_captures()` hands the count back. Leaving out the `&` is refused, so a
+closure you kept is never changed without the call saying so:
+
+<!-- guide: edit 31 let total = order.as_slice().map(|sink line| line.cents * line.quantity).fold(0, &adding) -->
+```linea
+    let total = order.as_slice().map(|sink line| line.cents * line.quantity).fold(0, adding)
+```
+
+```
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+   --> main.lin:31:86
+    |
+31  |     let total = order.as_slice().map(|sink line| line.cents * line.quantity).fold(0, adding)
+    |                                                                                      ^^^^^^ expected `&` here
+   ::: std/iter/iter.lin
+820 |     ](sink self: Self, sink initial: A, inout combine: F) -> A where
+    |                                               ------- declared `inout`
+```
 
 ## Emptying a `Vec`: `pop` and `finish`
 
@@ -2104,7 +2124,7 @@ without a word; here the held payment has to go somewhere.
 | a vector in ascending order | `&v.sort()`, for `Ordered` elements |
 | a vector in an order you choose | `&v.sort_by(\|left, right\| …)`, true when `left` comes first |
 | a search that continues, with a count of the items inspected | `&it.find_counted(\|x\| …)` on an iterator you keep |
-| a fold or search whose callback keeps its state | `fold_inout`, `find_inout`, `find_counted_inout` |
+| a fold or search whose callback keeps its state | bind the closure with `var` and lend it: `xs.fold(0, &adding)` |
 | a chain across several lines | one step per line, each opening with `.` |
 | each item with its position | `for (i, x) in xs.enumerate()` |
 | the items of two sequences, paired | `for (a, b) in xs.zip(ys)`, with Discardable items in `xs` |
