@@ -1749,6 +1749,7 @@ const Parser = struct {
                 // wherever the trait is -- a trait with a requirement nobody
                 // outside could see would be one nobody outside could
                 // implement -- so `pub` on one would say nothing.
+                self.builder.markVisibility(d, .private, at);
                 self.builder.markOwner(d, name);
                 self.builder.markTest(d, tests_a_function);
                 self.builder.markExpectedTrap(d, tests_a_function and expects_trap);
