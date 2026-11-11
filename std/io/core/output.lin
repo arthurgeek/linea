@@ -124,6 +124,11 @@ test fn println_ends_the_value_with_a_line_on_standard_output() {
     .Ok(())
 }
 
+test fn a_value_that_prints_while_it_is_printed_is_printed() {
+    testing.assert(println(Noisy {}).is_ok(), "printing a value that prints failed")?
+    .Ok(())
+}
+
 // Render `x` to `w` and ignore a failed write. `eprint` writes to standard
 // error this way.
 fn eprint_to[T: Display, W: Writer](x: T, inout w: W) where W.Error: Discardable {
@@ -182,11 +187,6 @@ impl Display for Noisy {
         eprintln("rendering a noisy value")
         "noisy".fmt(&w)
     }
-}
-
-test fn a_value_that_prints_while_it_is_printed_is_printed() {
-    testing.assert(println(Noisy {}).is_ok(), "printing a value that prints failed")?
-    .Ok(())
 }
 
 test fn eprintln_renders_a_line_and_ignores_a_refused_write() {

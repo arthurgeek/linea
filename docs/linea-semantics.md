@@ -125,7 +125,7 @@ typedecl     ::= "struct" name generics? where_clause? "{" fields? "}"
                | "type" name generics? "=" type_name refinement?
 refinement   ::= "where" "it" "in" litbound rangeop litbound
 litbound     ::= "-"? integer
-trait        ::= "trait" name generics? (":" type_bound ("+" type_bound)*)? where_clause? "{" (signature | projsig | declared)* "}"
+trait        ::= "trait" name generics? (":" type_bound ("+" type_bound)*)? where_clause? "{" (signature | function | projsig | declared)* "}"
 declared     ::= "type" name (":" type_bound ("+" type_bound)*)?
 settled      ::= "type" name "=" type_name
 reexport     ::= "use" path
@@ -393,25 +393,53 @@ is.
 **[S-Test]** `test fn` declares a function called by the compiler and excluded
 from shipped artefacts. A test has **no visibility**: `pub` would export a name
 that imports cannot reach. The modifier applies only to a function. A test may
-sit at module scope or inside an inherent `impl`, beside the members it tests.
-Inside an implementation for a trait it is refused, because a trait
-implementation declares only what its trait requires, and inside a template it
-is refused, because a template is instantiated for every type that satisfies
-it while the compiler writes a test's one call.
+sit at module scope, inside an inherent `impl` beside the members it tests, or
+inside a trait declaration beside the operation it tests. Inside an
+implementation for a trait it is refused, because a trait implementation
+declares only what its trait requires, and inside a template it is refused,
+because a template is instantiated for every type that satisfies it while the
+compiler writes a test's one call.
 
-A test inside an `impl` is a member of nothing: it is named, resolved and run
-exactly as if it were written at module scope. No path through the type reaches
-it. Its name shares the module's one namespace with every other test and
-top-level name, so two implementations in one module do not each declare a test
-of one name ([N-Duplicate]), and the implementation adds nothing to its
+A test inside an `impl` or a trait is a member of nothing: it is named,
+resolved and run exactly as if it were written at module scope. No path through
+the type or the trait reaches it. Its name shares the module's one namespace
+with every other test and top-level name, so two implementations in one module
+do not each declare a test of one name, and neither do a trait and the module
+around it ([N-Duplicate]); the implementation or the trait adds nothing to its
 qualified name. A test named `main`, inside an `impl` or not, is never the
 entry point ([S-Entry]); in the root module beside the program's `main` it is a
 second declaration of that name ([N-Duplicate]). A test is not instantiated, so
 neither `Self` nor the implementation's type parameters name a type in it;
 writing either is refused, and the test names the concrete types it tests
-instead: `Boxed[UInt8]` in an annotation, and `Boxed` before a call, whose
-arguments settle the instance. Inside a trait implementation or a template,
-where the test itself is refused, neither name is reported again.
+instead: `Boxed[UInt8]` in an annotation, `Boxed` before a call, whose
+arguments settle the instance, and `Boxed` as a pattern's head, which takes
+apart the value's instance. A `where` predicate on a test constrains nothing
+and is refused by [T-Where] whatever it names, so one naming either is refused
+by both rules. Inside a trait implementation or a template, where the test
+itself is refused, neither name is reported again.
+
+A test inside a trait declaration is no part of what the trait declares
+([T-Impl]): an implementation neither supplies it nor sees it, `Trait.name`
+does not reach it, and importing the trait imports no test. Neither `Self`, the
+trait's own parameters nor its associated types, alone or selected through
+`Self`, name a type in it, for the reason an implementation's parameters do
+not: no implementation is selected where the test runs. Writing one is refused,
+and the test names a type that implements the trait instead:
+
+```linea
+trait Doubling {
+    fn value(self: Self) -> UInt32
+
+    fn doubled(self: Self) -> UInt32 {
+        self.value() * 2
+    }
+
+    test fn doubling_a_meter_doubles_its_reading() {
+        let meter = Meter { reading = 4 }
+        testing.assert_eq(meter.doubled(), 8, "twice four is eight")?
+    }
+}
+```
 
 A test may instead be written `test trap fn`. It succeeds only when its child
 process reaches a language trap; returning successfully, returning a failure,
@@ -2093,10 +2121,11 @@ artefact no C-visible symbol: the program calls it as an ordinary `pub`
 function, and none of these rules is asked of it. Building the library on its
 own publishes it.
 
-**[S-Export]** An `export` does not sit in an `impl`. It has a dedicated
-diagnostic, as [S-Test] does, so the restriction is not obscured by a generic
-message about permitted members. An export names a module entry point; a member
-is accessed through its type.
+**[S-Export]** An `export` does not sit in an `impl` or a trait declaration. It
+has a dedicated diagnostic, as [S-Test] does, so the restriction is not
+obscured by a generic message about permitted members. An export names a module
+entry point; a member is accessed through its type, and a trait declares what
+its implementations supply.
 
 **[M-Opaque]** A sealed representation is accessible only in its declaring
 module. Within that module, construction and representation access follow the
@@ -2556,6 +2585,12 @@ relationship already supplied by the compiler is [N-Duplicate].
 declares. Omitting a member leaves a trait call without an implementation.
 Adding a member makes it unreachable: the trait namespace does not declare it,
 and members of a trait implementation do not belong to the type's namespace.
+
+A trait's braces hold signatures, provided operations, projection signatures,
+associated type declarations and tests, and nothing else: a constant or a
+`struct` written there is refused under this rule. A test is the one of them
+the trait does not declare ([S-Test]): it is a member of nothing, so no
+implementation supplies it.
 
 A trait's operation written with a body is **provided**: every type
 implementing the trait offers it, reached as any trait operation is, and runs

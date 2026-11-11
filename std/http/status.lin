@@ -122,14 +122,6 @@ impl Status {
         }
     }
 
-    // Return whether responses with this status code must never include a
-    // message body (RFC 9110 §6.4.1 / §6.5.5: 1xx Informational, 204 No Content,
-    // and 304 Not Modified).
-    pub fn is_bodyless(self: Self) -> Bool {
-        let code = self.code()
-        (code >= 100 && code < 200) || code == 204 || code == 304
-    }
-
     test fn a_status_has_its_code() {
         let statuses = [Status.Ok, Status.Created, Status.Accepted, Status.NoContent, Status.MovedPermanently, Status.Found, Status.SeeOther, Status.NotModified, Status.TemporaryRedirect, Status.PermanentRedirect, Status.BadRequest, Status.Unauthorized, Status.Forbidden, Status.NotFound, Status.MethodNotAllowed, Status.RequestTimeout, Status.ContentTooLarge, Status.UriTooLong, Status.UnsupportedMediaType, Status.UnprocessableContent, Status.RequestHeaderFieldsTooLarge, Status.InternalServerError, Status.NotImplemented, Status.ServiceUnavailable, Status.HttpVersionNotSupported, Status.Other(Code(418))]
         let codes: [UInt16; 26] = [200, 201, 202, 204, 301, 302, 303, 304, 307, 308, 400, 401, 403, 404, 405, 408, 413, 414, 415, 422, 431, 500, 501, 503, 505, 418]
@@ -137,6 +129,14 @@ impl Status {
             testing.assert_eq(statuses[index].code(), codes[index], "a status changed its code")?
         }
         .Ok(())
+    }
+
+    // Return whether responses with this status code must never include a
+    // message body (RFC 9110 §6.4.1 / §6.5.5: 1xx Informational, 204 No Content,
+    // and 304 Not Modified).
+    pub fn is_bodyless(self: Self) -> Bool {
+        let code = self.code()
+        (code >= 100 && code < 200) || code == 204 || code == 304
     }
 
     test fn bodyless_statuses_are_recognised() {

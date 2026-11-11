@@ -184,7 +184,8 @@ until it is green.
   `let` or `var` that binds the value or first in the body of the function or
   closure whose parameter it is; a member [T-Impl] says to drop; the type a
   concrete implementation names, in place of `Self` written in a test inside
-  it; the other
+  it, and by its name alone as a pattern's head, under type parameters too;
+  the other
   allocator form of a call, where the program holds one allocator to pass; a
   type parameter for each of two closures; the `import` an [N-Undefined]
   qualifier names, one per module it could mean (a loaded one, the library's
@@ -202,7 +203,9 @@ until it is green.
   binds to something else, and a parameter written as a pattern, which no
   clause can name. Helps that carry none, because the edit is a choice the
   reader makes: the [T-Infer] annotation and defaulted parameters (which
-  type), the arguments a test in a generic implementation means, `let … else`
+  type), the arguments a test in a generic implementation means outside a
+  pattern's head, the
+  implementing type a test in a trait means, `let … else`
   (what the `else` block does), releasing before a path
   leaves, a `defer` for a pattern's or a loop's binder, and [O-Merge] (where,
   and on which path), the owned copy kept in a field or an `inout` parameter

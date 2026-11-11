@@ -53,6 +53,32 @@ fn limits() -> http.Limits {
     http.Limits { max_body_bytes = longest_form, ..http.Limits.default() }
 }
 
+test fn the_longest_non_ascii_signature_fits_the_body_limit() {
+    defer var router: http.Router[Ctx] = http.Router.new()
+    routes(&router).unwrap()
+    defer var app = Ctx.in_memory("the_longest_non_ascii_signature_fits_the_body_limit", .None).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 131072)
+
+    // `😀` is four bytes of UTF-8, and a form writes each byte as `%XX`, so a
+    // name of 60 and a message of 500 of them is the longest body a form sends.
+    defer var name = String.new()
+    for _ in 0..longest_name {
+        &name.append("😀").unwrap()
+    }
+    defer var message = String.new()
+    for _ in 0..longest_message {
+        &message.append("😀").unwrap()
+    }
+    defer var body = String.new()
+    "name={http.percent_encoded(name.view())}&message={http.percent_encoded(message.view())}".fmt(&body).unwrap()
+    testing.assert_eq(body.length(), limits().max_body_bytes, "the longest signature does not fill the body limit")?
+    var longest = http.new_request(arena.handle(), "POST", "/sign", body: body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
+    &longest.add_header("Host", "example.test").unwrap()
+    let accepted = &router.serve_http(&app, longest.request()).unwrap()
+    testing.assert_eq(accepted.status(), http.Status.SeeOther, "the longest non-ASCII signature was refused")?
+    .Ok(())
+}
+
 // Whether `text` holds a character that does not belong in a signature. A
 // name is one line, so it holds no control character. A message comes from a
 // `<textarea>`, whose tabs and line breaks are kept: `\t` and `\n` are allowed
@@ -240,84 +266,6 @@ fn routes(inout router: http.Router[Ctx]) -> Result[(), http.RouteError] {
     &router.route("POST /sign", sign)
 }
 
-fn main() -> UInt8 {
-    let port_arg = env.args().at(1) else {
-        io.eprintln("usage: guest-book PORT")
-        return 64
-    }
-    if env.args().count() > 2 {
-        io.eprintln("usage: guest-book PORT")
-        return 64
-    }
-    let port = port_arg.parse[UInt16]() else |_| {
-        io.eprintln("usage: guest-book PORT")
-        return 64
-    }
-    let logger = log.to_stderr(minimum: .Info)
-    // The routes are registered once here, so a refused pattern is reported
-    // before anything is served.
-    var checked: http.Router[Ctx] = http.Router.new()
-    let _ = routes(&checked) else |error| {
-        logger.error("cannot register a route", log.field("error", error))
-        checked.release()
-        return 2
-    }
-    checked.release()
-    // The guest book starts in three steps: it prepares what every task
-    // shares, the room for open files and the database file, then each
-    // serving task opens its own connection, and only then is a connection
-    // accepted.
-    //
-    // A macOS shell starts a program allowed 256 open files, too few for a
-    // connection on every serving task, so the guest book raises its own
-    // limit as far as the system allows. A library leaves the limit to the
-    // program, since it is the whole process's. `files_needed` is an
-    // estimate: SQLite may open a temporary file for a large query, so a
-    // request can still fail for want of a descriptor, and answers 500 like
-    // any other storage failure. Stopping here when even the estimate does
-    // not fit says why at once, rather than as one task's failure to open
-    // its connection.
-    let files_needed = serving_tasks * files_per_task + files_besides_tasks
-    let open_files = process.raise_open_file_limit() else |error| {
-        io.eprintln("guest-book: cannot raise the open-file limit: {error}")
-        return 1
-    }
-    if open_files < files_needed {
-        io.eprintln("guest-book: serving needs {files_needed} open files, and this process may open {open_files}; raise the hard limit with `ulimit -H -n`")
-        return 1
-    }
-    let path = database_path()
-    // Creating the table and switching the file to the write-ahead log happen
-    // once, here, before any task opens a connection.
-    let _ = Book.initialize(path) else |error| {
-        io.eprintln("guest-book: {error}")
-        error.release()
-        return 1
-    }
-    // Each serving task builds its own handler with this closure: a router
-    // lent the task's own `Ctx` by `http.with_state`, inside `http.logged`.
-    // Opening the task's connection can fail, so the closure returns the
-    // `Result` of `Ctx.connect`, whose `map` turns an opened `Ctx` into the
-    // handler and keeps a `BookError` as it is. When one task's is `.Err`,
-    // serving ends before accepting anything and reports it. The routes were
-    // checked above, so registering them again cannot fail.
-    let serving = [sink logger, path] || {
-        Ctx.connect(path).map(
-            [sink logger = copy(logger)] |sink ctx: Ctx| {
-                var router: http.Router[Ctx] = http.Router.new()
-                routes(&router).unwrap()
-                http.logged(copy(logger), http.with_state(ctx, router))
-            },
-        )
-    }
-    let _ = http.listen_and_serve(net.loopback(port), serving, limits: limits()) else |error| {
-        io.eprintln("guest-book: {error}")
-        error.release()
-        return 1
-    }
-    0
-}
-
 test fn signing_redirects_sets_a_cookie_and_renders_on_the_home_page() {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
@@ -396,32 +344,6 @@ test fn exact_length_boundaries_are_accepted_and_one_scalar_past_is_refused() {
         }
         testing.assert_eq(refused.status(), http.Status.UnprocessableContent, "the status was not 422")?
     }
-    .Ok(())
-}
-
-test fn the_longest_non_ascii_signature_fits_the_body_limit() {
-    defer var router: http.Router[Ctx] = http.Router.new()
-    routes(&router).unwrap()
-    defer var app = Ctx.in_memory("the_longest_non_ascii_signature_fits_the_body_limit", .None).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 131072)
-
-    // `😀` is four bytes of UTF-8, and a form writes each byte as `%XX`, so a
-    // name of 60 and a message of 500 of them is the longest body a form sends.
-    defer var name = String.new()
-    for _ in 0..longest_name {
-        &name.append("😀").unwrap()
-    }
-    defer var message = String.new()
-    for _ in 0..longest_message {
-        &message.append("😀").unwrap()
-    }
-    defer var body = String.new()
-    "name={http.percent_encoded(name.view())}&message={http.percent_encoded(message.view())}".fmt(&body).unwrap()
-    testing.assert_eq(body.length(), limits().max_body_bytes, "the longest signature does not fill the body limit")?
-    var longest = http.new_request(arena.handle(), "POST", "/sign", body: body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
-    &longest.add_header("Host", "example.test").unwrap()
-    let accepted = &router.serve_http(&app, longest.request()).unwrap()
-    testing.assert_eq(accepted.status(), http.Status.SeeOther, "the longest non-ASCII signature was refused")?
     .Ok(())
 }
 
@@ -606,4 +528,82 @@ test fn forwarded_proto_https_is_recognised_for_same_origin() {
     let response = &router.serve_http(&app_trusted, post.request()).unwrap()
     testing.assert_eq(response.status(), http.Status.SeeOther, "forwarded https was refused when trusted")?
     .Ok(())
+}
+
+fn main() -> UInt8 {
+    let port_arg = env.args().at(1) else {
+        io.eprintln("usage: guest-book PORT")
+        return 64
+    }
+    if env.args().count() > 2 {
+        io.eprintln("usage: guest-book PORT")
+        return 64
+    }
+    let port = port_arg.parse[UInt16]() else |_| {
+        io.eprintln("usage: guest-book PORT")
+        return 64
+    }
+    let logger = log.to_stderr(minimum: .Info)
+    // The routes are registered once here, so a refused pattern is reported
+    // before anything is served.
+    var checked: http.Router[Ctx] = http.Router.new()
+    let _ = routes(&checked) else |error| {
+        logger.error("cannot register a route", log.field("error", error))
+        checked.release()
+        return 2
+    }
+    checked.release()
+    // The guest book starts in three steps: it prepares what every task
+    // shares, the room for open files and the database file, then each
+    // serving task opens its own connection, and only then is a connection
+    // accepted.
+    //
+    // A macOS shell starts a program allowed 256 open files, too few for a
+    // connection on every serving task, so the guest book raises its own
+    // limit as far as the system allows. A library leaves the limit to the
+    // program, since it is the whole process's. `files_needed` is an
+    // estimate: SQLite may open a temporary file for a large query, so a
+    // request can still fail for want of a descriptor, and answers 500 like
+    // any other storage failure. Stopping here when even the estimate does
+    // not fit says why at once, rather than as one task's failure to open
+    // its connection.
+    let files_needed = serving_tasks * files_per_task + files_besides_tasks
+    let open_files = process.raise_open_file_limit() else |error| {
+        io.eprintln("guest-book: cannot raise the open-file limit: {error}")
+        return 1
+    }
+    if open_files < files_needed {
+        io.eprintln("guest-book: serving needs {files_needed} open files, and this process may open {open_files}; raise the hard limit with `ulimit -H -n`")
+        return 1
+    }
+    let path = database_path()
+    // Creating the table and switching the file to the write-ahead log happen
+    // once, here, before any task opens a connection.
+    let _ = Book.initialize(path) else |error| {
+        io.eprintln("guest-book: {error}")
+        error.release()
+        return 1
+    }
+    // Each serving task builds its own handler with this closure: a router
+    // lent the task's own `Ctx` by `http.with_state`, inside `http.logged`.
+    // Opening the task's connection can fail, so the closure returns the
+    // `Result` of `Ctx.connect`, whose `map` turns an opened `Ctx` into the
+    // handler and keeps a `BookError` as it is. When one task's is `.Err`,
+    // serving ends before accepting anything and reports it. The routes were
+    // checked above, so registering them again cannot fail.
+    let serving = [sink logger, path] || {
+        Ctx.connect(path).map(
+            [sink logger = copy(logger)] |sink ctx: Ctx| {
+                var router: http.Router[Ctx] = http.Router.new()
+                routes(&router).unwrap()
+                http.logged(copy(logger), http.with_state(ctx, router))
+            },
+        )
+    }
+    let _ = http.listen_and_serve(net.loopback(port), serving, limits: limits()) else |error| {
+        io.eprintln("guest-book: {error}")
+        error.release()
+        return 1
+    }
+    0
 }

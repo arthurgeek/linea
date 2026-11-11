@@ -1,0 +1,9 @@
+// An item is one entry of a parcel's contents.
+pub struct Item {
+    grams: UInt32,
+}
+
+// The heaviest item a parcel may hold.
+pub fn heaviest() -> Item {
+    Item { grams = 900 }
+}

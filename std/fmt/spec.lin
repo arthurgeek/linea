@@ -374,6 +374,26 @@ test fn write_integer_writes_hexadecimal_digits_in_the_case_asked() {
     .Ok(())
 }
 
+test fn write_integer_reaches_both_ends_of_every_width() {
+    let least: Int8 = -128
+    let most: UInt64 = 18446744073709551615
+    let lowest: Int64 = -9223372036854775808
+    expect_integer(least, Spec.padded(5), " -128", "Int8.min lost its magnitude")?
+    expect_integer(most, Spec.default(), "18446744073709551615", "UInt64.max changed")?
+    expect_integer(lowest, Spec.default(), "-9223372036854775808", "Int64.min changed")?
+    .Ok(())
+}
+
+test fn write_integer_appends_to_what_the_writer_holds() {
+    defer var out = String.new()
+    &out.write_str(">").unwrap()
+    write_integer(-7, Spec { zero = true, ..Spec.padded(4) }, &out).unwrap()
+    write_integer(7, Spec { plus = true, zero = true, ..Spec.padded(4) }, &out).unwrap()
+    &out.write_str("<").unwrap()
+    testing.assert_eq(out.view(), ">-007+007<", "the padded text was not written between its neighbours")?
+    .Ok(())
+}
+
 // Count the base-16 digits of `n`: one for zero, and one more for each
 // further four bits.
 fn hexadecimal_digits(n: UInt64) -> UInt64 {
@@ -405,26 +425,6 @@ fn write_hexadecimal[W: Writer](n: UInt64, case: LetterCase, inout w: W) -> Resu
         &w.write_str(text.hex_digit(digit, case: case).unwrap())?
         place /= 16
     }
-    .Ok(())
-}
-
-test fn write_integer_reaches_both_ends_of_every_width() {
-    let least: Int8 = -128
-    let most: UInt64 = 18446744073709551615
-    let lowest: Int64 = -9223372036854775808
-    expect_integer(least, Spec.padded(5), " -128", "Int8.min lost its magnitude")?
-    expect_integer(most, Spec.default(), "18446744073709551615", "UInt64.max changed")?
-    expect_integer(lowest, Spec.default(), "-9223372036854775808", "Int64.min changed")?
-    .Ok(())
-}
-
-test fn write_integer_appends_to_what_the_writer_holds() {
-    defer var out = String.new()
-    &out.write_str(">").unwrap()
-    write_integer(-7, Spec { zero = true, ..Spec.padded(4) }, &out).unwrap()
-    write_integer(7, Spec { plus = true, zero = true, ..Spec.padded(4) }, &out).unwrap()
-    &out.write_str("<").unwrap()
-    testing.assert_eq(out.view(), ">-007+007<", "the padded text was not written between its neighbours")?
     .Ok(())
 }
 
@@ -558,6 +558,16 @@ fn spec_of(fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fract
     Spec { fill = copy(fill), align = side, plus, zero, width, precision, hex = digits }
 }
 
+test fn a_spec_of_the_written_parts_names_each_one() {
+    let spec = spec_of("*", 3, true, false, 9, true, 2, 0)
+    let expected = Spec { fill = "*", align = .Some(.Center), plus = true, zero = false, width = 9, precision = .Some(2), hex = .None }
+    testing.assert_eq(spec, expected, "a written part was lost")?
+    testing.assert_eq(spec_of(" ", 0, false, true, 4, false, 7, 0), Spec { fill = " ", align = .None, plus = false, zero = true, width = 4, precision = .None, hex = .None }, "an absent part was set")?
+    testing.assert_eq(spec_of(" ", 0, false, false, 0, false, 0, 1).hex, .Some(.Lower), "lowercase hexadecimal was lost")?
+    testing.assert_eq(spec_of(" ", 0, false, false, 0, false, 0, 2).hex, .Some(.Upper), "capital hexadecimal was lost")?
+    .Ok(())
+}
+
 fn interpolate_display[T: Display, W: Writer](value: T, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, hex: UInt8, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
     write_display(value, spec_of(fill, align, plus, zero, width, fraction, places, hex), &w)
 }
@@ -576,16 +586,6 @@ fn interpolate_float[W: Writer](value: Float64, fill: Str, align: UInt8, plus: B
 
 fn interpolate_float32[W: Writer](value: Float32, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, hex: UInt8, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
     write_float32(value, spec_of(fill, align, plus, zero, width, fraction, places, hex), &w)
-}
-
-test fn a_spec_of_the_written_parts_names_each_one() {
-    let spec = spec_of("*", 3, true, false, 9, true, 2, 0)
-    let expected = Spec { fill = "*", align = .Some(.Center), plus = true, zero = false, width = 9, precision = .Some(2), hex = .None }
-    testing.assert_eq(spec, expected, "a written part was lost")?
-    testing.assert_eq(spec_of(" ", 0, false, true, 4, false, 7, 0), Spec { fill = " ", align = .None, plus = false, zero = true, width = 4, precision = .None, hex = .None }, "an absent part was set")?
-    testing.assert_eq(spec_of(" ", 0, false, false, 0, false, 0, 1).hex, .Some(.Lower), "lowercase hexadecimal was lost")?
-    testing.assert_eq(spec_of(" ", 0, false, false, 0, false, 0, 2).hex, .Some(.Upper), "capital hexadecimal was lost")?
-    .Ok(())
 }
 
 // Render with each routine into owned text and compare the whole result, so a

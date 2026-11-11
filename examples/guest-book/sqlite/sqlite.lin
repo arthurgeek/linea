@@ -63,6 +63,13 @@ extern fn sqlite3_errcode(read database: DatabaseHandle) -> Int32
 // connections may be used from separate threads at once.
 extern fn sqlite3_threadsafe() -> Int32
 
+// The SQLite this library links is the one every test runs against, so
+// this checks that a connection per thread is safe there.
+test fn the_linked_sqlite_allows_a_connection_per_thread() {
+    testing.assert(sqlite3_threadsafe() != 0, "the linked SQLite was compiled with SQLITE_THREADSAFE=0")?
+    .Ok(())
+}
+
 // Taken without `read`, a handle parameter lends the object to C as `inout`
 // does: the connection must sit in a place that may change, and any `CText`
 // borrowed from it earlier ends before the call.
@@ -218,13 +225,6 @@ impl Database {
             return .Err(.Refused(code, message))
         }
         .Ok(database)
-    }
-
-    // The SQLite this library links is the one every test runs against, so
-    // this checks that a connection per thread is safe there.
-    test fn the_linked_sqlite_allows_a_connection_per_thread() {
-        testing.assert(sqlite3_threadsafe() != 0, "the linked SQLite was compiled with SQLITE_THREADSAFE=0")?
-        .Ok(())
     }
 
     // Open the database file at `path` for reading and writing, creating it
@@ -645,6 +645,14 @@ impl Statement {
         }
     }
 
+    test fn column_count_reports_number_of_columns() {
+        defer var database = Database.open_in_memory("column_count_reports_number_of_columns").unwrap()
+        &database.execute("CREATE TABLE t (a INTEGER, b TEXT, c INTEGER);").unwrap()
+        defer var select = database.prepare("SELECT a, b, c FROM t").unwrap()
+        testing.assert_eq(select.column_count(), UInt32(3), "column count changed")?
+        .Ok(())
+    }
+
     // Copy the text at 0-based `column` of the current row into `allocator`,
     // checking that it is UTF-8. Answers `InvalidColumn` if `column` is out of
     // bounds, or `NullColumn` when the column is NULL.
@@ -810,14 +818,6 @@ impl Statement {
         }
         testing.assert(text_invalid, "select.text(1) accepted out-of-bounds column")?
         testing.assert(int_invalid, "select.integer(1) accepted out-of-bounds column")?
-        .Ok(())
-    }
-
-    test fn column_count_reports_number_of_columns() {
-        defer var database = Database.open_in_memory("column_count_reports_number_of_columns").unwrap()
-        &database.execute("CREATE TABLE t (a INTEGER, b TEXT, c INTEGER);").unwrap()
-        defer var select = database.prepare("SELECT a, b, c FROM t").unwrap()
-        testing.assert_eq(select.column_count(), UInt32(3), "column count changed")?
         .Ok(())
     }
 

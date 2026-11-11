@@ -14,6 +14,12 @@ internal fn nowhere[T]() -> Address[T] {
     Address(0)
 }
 
+test fn nowhere_is_the_address_of_no_bytes() {
+    let none: Address[UInt64] = nowhere()
+    let Address(number) = none
+    testing.assert_eq(number, 0, "nowhere named a byte")?
+}
+
 // The number an address is. [T-RawAddress] accepts a call to it only where
 // the runtime is told what to do with the bytes: as an argument for a runtime
 // parameter that copies them to another task, writes bytes another task sent
@@ -22,10 +28,4 @@ internal fn nowhere[T]() -> Address[T] {
 internal fn raw[T](at: Address[T]) -> UInt64 {
     let Address(number) = copy(at)
     number
-}
-
-test fn nowhere_is_the_address_of_no_bytes() {
-    let none: Address[UInt64] = nowhere()
-    let Address(number) = none
-    testing.assert_eq(number, 0, "nowhere named a byte")?
 }

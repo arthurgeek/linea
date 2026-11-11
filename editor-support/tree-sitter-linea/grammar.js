@@ -412,7 +412,8 @@ module.exports = grammar({
     // A trait declares signatures and types, and no representation. A
     // signature is a function header with no body, ended by a line break like
     // every other declaration; one written with its body is an operation the
-    // trait provides to every type implementing it.
+    // trait provides to every type implementing it. A test sits beside the
+    // operation it tests and is a member of nothing.
     trait_declaration: $ => seq(
       ...modifiers($),
       'trait',
@@ -425,7 +426,7 @@ module.exports = grammar({
       optional(seq(':', sep1($.bound, '+'))),
       optional($.where_clause),
       '{',
-      repeat(choice($.signature, $.provided_operation, $.projection_signature, $.associated_type)),
+      repeat(choice($.signature, $.provided_operation, $.projection_signature, $.associated_type, alias($.trait_test, $.function_declaration))),
       '}',
     ),
 
@@ -512,6 +513,18 @@ module.exports = grammar({
     // every type implementing the trait runs.
     provided_operation: $ => seq(
       'fn',
+      field('name', $.identifier),
+      optional($.type_parameters),
+      $.parameter_list,
+      optional(seq('->', field('return_type', $._result_type))),
+      optional($.where_clause),
+      field('body', $.block),
+    ),
+
+    // A test written inside a trait: a function the compiler calls, with the
+    // shape a test has at module scope and no visibility to declare.
+    trait_test: $ => seq(
+      'test', optional('trap'), 'fn',
       field('name', $.identifier),
       optional($.type_parameters),
       $.parameter_list,

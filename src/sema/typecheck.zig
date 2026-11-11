@@ -4508,7 +4508,9 @@ fn bindsElsewhere(ast: *const Ast, program: *const ExpandedProgram, from: Module
         if (std.mem.eql(u8, ast.tokenText(ast.declName(import.decl)), q.name)) return true;
     }
     for (program.declsOf(from)) |d| {
-        if (ast.declOwner(d) != .none) continue;
+        // A member is reached through what holds it; a test written in an
+        // `impl` or a trait is a member of nothing, and binds here.
+        if (ast.memberOwner(d) != .none) continue;
         const name = ast.declName(d);
         if (name == .none or ast.declTag(d) == .import_) continue;
         if (std.mem.eql(u8, ast.tokenText(name), q.name)) return true;
@@ -15488,6 +15490,16 @@ const Checker = struct {
         return .matches;
     }
 
+    /// The name a pattern's head is compared with the value's type through:
+    /// the head itself, or, for a `Self` [S-Test] refused in a test, the one
+    /// type its help writes in its place. `.none` where nothing is compared:
+    /// no head was written, or the refused name stands for no single type,
+    /// and the parts are then checked against the value alone.
+    fn patternHeadCompared(self: *const Checker, head: TokenId) TokenId {
+        if (head == TokenId.none or !self.res.namesNoTypeInTest(head)) return head;
+        return self.res.typeSelfStandsForInTest(head);
+    }
+
     /// A struct pattern, against the type of what it is taking apart.
     ///
     /// The one place a pattern's field list is resolved, so a destructuring
@@ -15514,12 +15526,13 @@ const Checker = struct {
         // against its spelling: an instantiation is named `Cell[u8]` and the
         // pattern writes `Cell`, which names the same declaration.
         const head_tok = if (p.callee != ExprId.none) self.ast.exprMain(p.callee) else TokenId.none;
-        if (head_tok != TokenId.none and !self.namesTheSameType(head_tok, of)) {
+        const compared = self.patternHeadCompared(head_tok);
+        if (compared != TokenId.none and !self.namesTheSameType(compared, of)) {
             _ = self.report(
                 .t_mismatch,
                 pattern,
                 "this takes {s} `{s}` apart, and the value is {s} `{s}`",
-                .{ article.before(self.ast.tokenText(head_tok)), self.ast.tokenText(head_tok), article.before(try self.typeName(of)), (try self.typeName(of)) },
+                .{ article.before(self.ast.tokenText(compared)), self.ast.tokenText(compared), article.before(try self.typeName(of)), (try self.typeName(of)) },
                 "the pattern names a different type",
             );
             return self.refuseParts(pattern);
@@ -15728,8 +15741,9 @@ const Checker = struct {
         // declaration `of` came from -- the same reason a struct pattern
         // does, so an instantiation's own spelling is never the question.
         const head_tok = self.ast.exprMain(p.callee);
-        const head = self.ast.tokenText(head_tok);
-        if (!self.namesTheSameType(head_tok, of)) {
+        const compared = self.patternHeadCompared(head_tok);
+        if (compared != TokenId.none and !self.namesTheSameType(compared, of)) {
+            const head = self.ast.tokenText(compared);
             _ = self.report(
                 .t_mismatch,
                 pattern,
@@ -15788,7 +15802,7 @@ const Checker = struct {
         if (compares and self.builder.isRefined(of)) {
             const r = self.refinedValues(of) orelse return .matches;
             if (self.foldedInterval(base)) |iv| if (iv.hi < r.lo or iv.lo > r.hi) {
-                return self.reportEmptyPart(base, try std.fmt.allocPrint(self.sink.arena, "no `{s}` holds this value", .{head}));
+                return self.reportEmptyPart(base, try std.fmt.allocPrint(self.sink.arena, "no `{s}` holds this value", .{if (compared != TokenId.none) self.ast.tokenText(compared) else try self.typeName(of)}));
             };
         }
         return .matches;

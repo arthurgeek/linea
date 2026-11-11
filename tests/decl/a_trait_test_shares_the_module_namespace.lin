@@ -1,0 +1,40 @@
+// A test inside a trait declaration is named at module scope like every other
+// test, so it does not share a name with a test outside the trait.
+import std.testing
+
+trait Counting {
+    fn count(self: Self) -> UInt32
+
+    fn is_empty(self: Self) -> Bool {
+        self.count() == 0
+    }
+
+    test fn starts_empty() {
+        let shelf = Shelf { books = 0 }
+        testing.assert(shelf.is_empty(), "no books is empty")?
+    }
+}
+
+struct Shelf {
+    books: UInt32,
+}
+
+impl Counting for Shelf {
+    fn count(self: Self) -> UInt32 {
+        self.books
+    }
+}
+
+test fn starts_empty() {
+    let shelf = Shelf { books = 0 }
+    testing.assert_eq(shelf.count(), 0, "nothing is shelved")?
+}
+
+fn main() -> UInt8 {
+    let shelf = Shelf { books = 0 }
+    if shelf.is_empty() {
+        0
+    } else {
+        1
+    }
+}

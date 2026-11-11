@@ -116,6 +116,17 @@ impl[P: Allocator, T: FromPath] Extract[P] for Path[T] {
     }
 }
 
+test fn a_path_is_refused_when_no_router_matched() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/orders/42", body: "").unwrap()
+    let refused = match sent.request().extract[Path[UInt64]]() {
+        Ok(_) => return testing.assert(false, "a request no router matched had a path value"),
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), Status.InternalServerError, "the refusal changed its status")?
+    .Ok(())
+}
+
 // Answer a path value that could not be read.
 fn refused_path[P: Allocator](request: Request[P], sink refusal { name, value, problem }: ParamError) -> Error[P] {
     match problem {
@@ -160,17 +171,6 @@ test fn a_path_reads_its_fields_from_the_path_values() {
     testing.assert_eq(wrong.view(), r#"400 cannot read path value "month" from "13x": invalid decimal syntax at byte 2"#, "an invalid value was not refused")?
     testing.assert_eq(unrouted.view(), r#"500 the route has no path value "year""#, "a field the route lacks was not refused")?
     testing.assert_eq(several.view(), "500 the route has 2 path values, and one was read", "a single value read from several was not refused")?
-    .Ok(())
-}
-
-test fn a_path_is_refused_when_no_router_matched() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/orders/42", body: "").unwrap()
-    let refused = match sent.request().extract[Path[UInt64]]() {
-        Ok(_) => return testing.assert(false, "a request no router matched had a path value"),
-        Err(error) => error,
-    }
-    testing.assert_eq(refused.status(), Status.InternalServerError, "the refusal changed its status")?
     .Ok(())
 }
 
@@ -444,6 +444,22 @@ impl[P: Allocator, T: json_format.Decode[mem.Handle[P]]] Extract[P] for Json[T] 
     }
 }
 
+test fn json_refuses_a_body_that_is_not_utf8() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let input = "POST / HTTP/1.1\r\nHost: loopback\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\nhé"
+    let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
+    let refused = match sent.request().extract[Json[Note[mem.Handle]]]() {
+        Ok(note) => {
+            note.release()
+            return testing.assert(false, "a body cut inside a scalar was decoded")
+        },
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), Status.BadRequest, "the refusal changed its status")?
+    testing.assert_eq(refused.message(), Option.Some("the body is not UTF-8"), "the refusal changed its message")?
+    .Ok(())
+}
+
 // `is_json` says whether `content_type` names JSON: `application/json`, or an
 // `application/` type ending in `+json`, compared under ASCII case folding,
 // with any parameters after `;` ignored.
@@ -525,22 +541,6 @@ test fn json_decodes_the_body_or_names_what_is_wrong() {
     testing.assert_eq(malformed.view(), "400 invalid syntax at byte 1", "a body that is not JSON was not refused with 400")?
     testing.assert_eq(missing.view(), r#"422 missing field at $["text"]"#, "a missing field was not refused with 422")?
     testing.assert_eq(wrong.view(), r#"422 wrong kind of value at $["text"]"#, "a field of the wrong kind was not refused with 422")?
-    .Ok(())
-}
-
-test fn json_refuses_a_body_that_is_not_utf8() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let input = "POST / HTTP/1.1\r\nHost: loopback\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\nhé"
-    let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
-    let refused = match sent.request().extract[Json[Note[mem.Handle]]]() {
-        Ok(note) => {
-            note.release()
-            return testing.assert(false, "a body cut inside a scalar was decoded")
-        },
-        Err(error) => error,
-    }
-    testing.assert_eq(refused.status(), Status.BadRequest, "the refusal changed its status")?
-    testing.assert_eq(refused.message(), Option.Some("the body is not UTF-8"), "the refusal changed its message")?
     .Ok(())
 }
 

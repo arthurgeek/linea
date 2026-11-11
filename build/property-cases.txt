@@ -119,3 +119,5 @@ pattern_parameters/a_read_pattern_parameter_lends_its_parts.lin
 pattern_parameters/an_inout_pattern_parameter_writes_the_callers_parts.lin
 pattern_parameters/a_lambda_takes_a_struct_apart_and_may_label_its_pattern.lin
 pattern_parameters/a_generic_pattern_parameter_takes_its_parts_types.lin
+# A test inside a trait beside a signature and a provided operation.
+decl/a_test_sits_in_a_trait_declaration.lin

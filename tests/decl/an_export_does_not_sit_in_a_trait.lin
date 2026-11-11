@@ -1,0 +1,46 @@
+// An export names a module's own entry point, and a trait declares what its
+// implementations supply, so an export does not sit in a trait, before a test,
+// a function or a type, whatever visibility is written before it.
+import std.testing
+
+trait Measured {
+    fn length(self: Self) -> UInt32
+
+    export test fn a_rope_is_measured() {
+        let rope = Rope { metres = 3 }
+        testing.assert_eq(rope.length(), 3, "the rope is three metres")?
+    }
+
+    export fn doubled(self: Self) -> UInt32 {
+        self.length() * 2
+    }
+
+    pub export fn tripled(self: Self) -> UInt32 {
+        self.length() * 3
+    }
+
+    export type Unit
+
+    export
+}
+
+struct Rope {
+    metres: UInt32,
+}
+
+impl Measured for Rope {
+    type Unit = UInt32
+
+    fn length(self: Self) -> UInt32 {
+        self.metres
+    }
+}
+
+fn main() -> UInt8 {
+    let rope = Rope { metres = 3 }
+    if rope.doubled() + rope.tripled() == 15 {
+        0
+    } else {
+        1
+    }
+}

@@ -75,6 +75,16 @@ impl Display for Origin {
     }
 }
 
+test fn an_origin_displays_in_canonical_form() {
+    defer let plain = fmt.render_owned(Origin.parse("http://example.test:80").unwrap()).unwrap()
+    defer let custom = fmt.render_owned(Origin.parse("http://example.test:8080").unwrap()).unwrap()
+    defer let secure = fmt.render_owned(Origin.parse("https://example.test:443").unwrap()).unwrap()
+    testing.assert_eq(plain.view(), "http://example.test", "default port 80 was not omitted")?
+    testing.assert_eq(custom.view(), "http://example.test:8080", "custom port was not rendered")?
+    testing.assert_eq(secure.view(), "https://example.test", "default port 443 was not omitted")?
+    .Ok(())
+}
+
 // Parse a port number: decimal digits in 1..=65535.
 fn parse_port(text: Str) -> Option[UInt16] {
     if text.length() == 0 || text.length() > 5 {
@@ -424,60 +434,6 @@ impl Origin {
         parse_authority(authority, is_https)
     }
 
-    // Build an `Origin` from a `Host` header's authority value and scheme.
-    pub fn from_authority(authority: Str, is_https: Bool) -> Result[Origin, OriginError] where carries(.Ok: authority) {
-        parse_authority(authority.trim_ascii(), is_https)
-    }
-
-    // Return whether `authority` is a syntactically valid HTTP authority (`host` or `host:port`).
-    pub fn is_valid_authority(authority: Str) -> Bool {
-        let trimmed = authority.trim_ascii()
-        if trimmed.length() == 0 {
-            return false
-        }
-        parse_authority(trimmed, false).is_ok()
-    }
-
-    test fn an_authority_is_a_host_and_an_optional_port() {
-        testing.assert(Origin.is_valid_authority("example.test"), "a host was refused")?
-        testing.assert(Origin.is_valid_authority(" example.test:8080 "), "a host and port with spaces around them were refused")?
-        testing.assert(Origin.is_valid_authority("[::1]:443"), "an IPv6 literal and port were refused")?
-        testing.assert(!Origin.is_valid_authority(""), "an empty authority was accepted")?
-        testing.assert(!Origin.is_valid_authority("example.test:http"), "a port that is not a number was accepted")?
-        testing.assert(!Origin.is_valid_authority("user@example.test"), "userinfo was accepted")?
-        testing.assert(!Origin.is_valid_authority("example.test/path"), "a path was accepted")?
-        .Ok(())
-    }
-
-    // Compare two origins for same-origin equivalence.
-    pub fn same_origin(self: Self, other: Self) -> Bool {
-        self == other
-    }
-
-    test fn an_origin_parses_normalizes_default_ports_and_folds_ascii_case() {
-        let plain = Origin.parse("http://example.test").unwrap()
-        let plain_port = Origin.parse("HTTP://EXAMPLE.TEST:80").unwrap()
-        let plain_dot = Origin.parse("http://example.test.:80").unwrap()
-        let secure = Origin.parse("https://example.test").unwrap()
-        let secure_port = Origin.parse("HTTPS://example.test:443").unwrap()
-        let custom_port = Origin.parse("http://example.test:8080").unwrap()
-        let ipv6 = Origin.parse("http://[::1]").unwrap()
-        let ipv6_port = Origin.parse("http://[::1]:80").unwrap()
-
-        testing.assert_eq(plain, plain_port, "http default port was not normalized")?
-        testing.assert_eq(plain, plain_dot, "trailing dot in hostname was not normalized")?
-        testing.assert_eq(secure, secure_port, "https default port was not normalized")?
-        testing.assert_eq(ipv6, ipv6_port, "ipv6 default port was not normalized")?
-        testing.assert(plain != secure, "schemes differed but compared equal")?
-        testing.assert(plain != custom_port, "ports differed but compared equal")?
-        testing.assert(plain.same_origin(plain_port), "same_origin method disagrees with ==")?
-        testing.assert_eq(plain.scheme(), "http", "scheme changed")?
-        testing.assert_eq(secure.scheme(), "https", "scheme changed")?
-        testing.assert_eq(plain.host(), "example.test", "host changed")?
-        testing.assert_eq(plain.port(), UInt16(80), "port changed")?
-        .Ok(())
-    }
-
     test fn an_origin_parses_ipv6_with_custom_port() {
         let ipv6 = Origin.parse("http://[::1]:8080").unwrap()
         testing.assert_eq(ipv6.host(), "[::1]", "host changed")?
@@ -528,14 +484,58 @@ impl Origin {
         .Ok(())
     }
 
-    test fn an_origin_displays_in_canonical_form() {
-        defer let plain = fmt.render_owned(Origin.parse("http://example.test:80").unwrap()).unwrap()
-        defer let custom = fmt.render_owned(Origin.parse("http://example.test:8080").unwrap()).unwrap()
-        defer let secure = fmt.render_owned(Origin.parse("https://example.test:443").unwrap()).unwrap()
-        testing.assert_eq(plain.view(), "http://example.test", "default port 80 was not omitted")?
-        testing.assert_eq(custom.view(), "http://example.test:8080", "custom port was not rendered")?
-        testing.assert_eq(secure.view(), "https://example.test", "default port 443 was not omitted")?
+    test fn an_origin_parses_normalizes_default_ports_and_folds_ascii_case() {
+        let plain = Origin.parse("http://example.test").unwrap()
+        let plain_port = Origin.parse("HTTP://EXAMPLE.TEST:80").unwrap()
+        let plain_dot = Origin.parse("http://example.test.:80").unwrap()
+        let secure = Origin.parse("https://example.test").unwrap()
+        let secure_port = Origin.parse("HTTPS://example.test:443").unwrap()
+        let custom_port = Origin.parse("http://example.test:8080").unwrap()
+        let ipv6 = Origin.parse("http://[::1]").unwrap()
+        let ipv6_port = Origin.parse("http://[::1]:80").unwrap()
+
+        testing.assert_eq(plain, plain_port, "http default port was not normalized")?
+        testing.assert_eq(plain, plain_dot, "trailing dot in hostname was not normalized")?
+        testing.assert_eq(secure, secure_port, "https default port was not normalized")?
+        testing.assert_eq(ipv6, ipv6_port, "ipv6 default port was not normalized")?
+        testing.assert(plain != secure, "schemes differed but compared equal")?
+        testing.assert(plain != custom_port, "ports differed but compared equal")?
+        testing.assert(plain.same_origin(plain_port), "same_origin method disagrees with ==")?
+        testing.assert_eq(plain.scheme(), "http", "scheme changed")?
+        testing.assert_eq(secure.scheme(), "https", "scheme changed")?
+        testing.assert_eq(plain.host(), "example.test", "host changed")?
+        testing.assert_eq(plain.port(), UInt16(80), "port changed")?
         .Ok(())
+    }
+
+    // Build an `Origin` from a `Host` header's authority value and scheme.
+    pub fn from_authority(authority: Str, is_https: Bool) -> Result[Origin, OriginError] where carries(.Ok: authority) {
+        parse_authority(authority.trim_ascii(), is_https)
+    }
+
+    // Return whether `authority` is a syntactically valid HTTP authority (`host` or `host:port`).
+    pub fn is_valid_authority(authority: Str) -> Bool {
+        let trimmed = authority.trim_ascii()
+        if trimmed.length() == 0 {
+            return false
+        }
+        parse_authority(trimmed, false).is_ok()
+    }
+
+    test fn an_authority_is_a_host_and_an_optional_port() {
+        testing.assert(Origin.is_valid_authority("example.test"), "a host was refused")?
+        testing.assert(Origin.is_valid_authority(" example.test:8080 "), "a host and port with spaces around them were refused")?
+        testing.assert(Origin.is_valid_authority("[::1]:443"), "an IPv6 literal and port were refused")?
+        testing.assert(!Origin.is_valid_authority(""), "an empty authority was accepted")?
+        testing.assert(!Origin.is_valid_authority("example.test:http"), "a port that is not a number was accepted")?
+        testing.assert(!Origin.is_valid_authority("user@example.test"), "userinfo was accepted")?
+        testing.assert(!Origin.is_valid_authority("example.test/path"), "a path was accepted")?
+        .Ok(())
+    }
+
+    // Compare two origins for same-origin equivalence.
+    pub fn same_origin(self: Self, other: Self) -> Bool {
+        self == other
     }
 }
 

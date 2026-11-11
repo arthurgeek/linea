@@ -58,6 +58,37 @@ fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
     &router.route(r"GET /countdown/{seconds}", countdown)
 }
 
+// A request built in an arena goes through the router, which records the
+// path value the handler reads.
+test fn a_count_out_of_range_is_refused_before_streaming() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    var app = quiet()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let long = http.new_request(arena.handle(), "GET", "/countdown/11", body: "").unwrap()
+    let refused = match &router.serve_http(&app, long.request()) {
+        Ok(_) => return testing.assert(false, "a count past 10 was accepted"),
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), http.Status.BadRequest, "the status changed")?
+    testing.assert_eq(refused.message(), Option.Some("11 is not a count from 1 to 10"), "the message changed")?
+}
+
+// `recorded_body` runs the streamed body into the request's arena, so a test
+// reads what a client would receive. A countdown from 1 pauses once.
+test fn a_countdown_ends_with_liftoff() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    var app = quiet()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "GET", "/countdown/1", body: "").unwrap()
+    let started = time.Instant.now()
+    let body = &router.serve_http(&app, sent.request()).unwrap().recorded_body().unwrap()
+    let took = started.elapsed()
+    testing.assert_eq(Str.from_bytes(body.as_slice()).unwrap(), "T-1\nliftoff\n", "the countdown changed")?
+    testing.assert(took >= time.Duration.from_seconds(1), "the countdown did not pause for a second")?
+}
+
 // Write one line for each second left, then `liftoff`. The body collects what
 // is written in a buffer, and `flush` sends it to the client at once, so each
 // line arrives before the pause that follows it rather than with the last one.
@@ -188,35 +219,4 @@ fn print_help(cmd: cli.Command, matches: borrow cli.Matches) -> UInt8 {
 // lines it logs while answering stay out of the test report.
 fn quiet() -> App {
     .{ logger = log.to_stderr(minimum: .Error) }
-}
-
-// A request built in an arena goes through the router, which records the
-// path value the handler reads.
-test fn a_count_out_of_range_is_refused_before_streaming() {
-    defer var router: http.Router[App] = http.Router.new()
-    routes(&router).unwrap()
-    var app = quiet()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let long = http.new_request(arena.handle(), "GET", "/countdown/11", body: "").unwrap()
-    let refused = match &router.serve_http(&app, long.request()) {
-        Ok(_) => return testing.assert(false, "a count past 10 was accepted"),
-        Err(error) => error,
-    }
-    testing.assert_eq(refused.status(), http.Status.BadRequest, "the status changed")?
-    testing.assert_eq(refused.message(), Option.Some("11 is not a count from 1 to 10"), "the message changed")?
-}
-
-// `recorded_body` runs the streamed body into the request's arena, so a test
-// reads what a client would receive. A countdown from 1 pauses once.
-test fn a_countdown_ends_with_liftoff() {
-    defer var router: http.Router[App] = http.Router.new()
-    routes(&router).unwrap()
-    var app = quiet()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "GET", "/countdown/1", body: "").unwrap()
-    let started = time.Instant.now()
-    let body = &router.serve_http(&app, sent.request()).unwrap().recorded_body().unwrap()
-    let took = started.elapsed()
-    testing.assert_eq(Str.from_bytes(body.as_slice()).unwrap(), "T-1\nliftoff\n", "the countdown changed")?
-    testing.assert(took >= time.Duration.from_seconds(1), "the countdown did not pause for a second")?
 }

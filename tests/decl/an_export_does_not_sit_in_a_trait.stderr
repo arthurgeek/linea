@@ -1,0 +1,25 @@
+error[S-Export]: an export does not sit in a trait
+ --> tests/decl/an_export_does_not_sit_in_a_trait.lin:9:5
+  |
+9 |     export test fn a_rope_is_measured() {
+  |     ^^^^^^ a trait declares what its implementations supply, and an export names a module's own entry point
+error[S-Export]: an export does not sit in a trait
+  --> tests/decl/an_export_does_not_sit_in_a_trait.lin:14:5
+   |
+14 |     export fn doubled(self: Self) -> UInt32 {
+   |     ^^^^^^ a trait declares what its implementations supply, and an export names a module's own entry point
+error[S-Export]: an export does not sit in a trait
+  --> tests/decl/an_export_does_not_sit_in_a_trait.lin:18:9
+   |
+18 |     pub export fn tripled(self: Self) -> UInt32 {
+   |         ^^^^^^ a trait declares what its implementations supply, and an export names a module's own entry point
+error[S-Export]: an export does not sit in a trait
+  --> tests/decl/an_export_does_not_sit_in_a_trait.lin:22:5
+   |
+22 |     export type Unit
+   |     ^^^^^^ a trait declares what its implementations supply, and an export names a module's own entry point
+error[S-Export]: an export does not sit in a trait
+  --> tests/decl/an_export_does_not_sit_in_a_trait.lin:24:5
+   |
+24 |     export
+   |     ^^^^^^ a trait declares what its implementations supply, and an export names a module's own entry point

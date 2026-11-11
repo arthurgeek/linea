@@ -1,0 +1,31 @@
+// A test inside a trait declaration is a member of nothing: no path through
+// the trait reaches it, and an implementation that writes a member of its name
+// supplies something the trait never declared.
+import std.testing
+
+trait Naming {
+    fn name(_self: Self) -> Str
+
+    test fn a_label_is_named() {
+        let label = Label {}
+        testing.assert_eq(label.name(), "label", "a label names itself")?
+    }
+}
+
+struct Label {}
+
+impl Naming for Label {
+    fn name(_self: Self) -> Str {
+        "label"
+    }
+
+    fn a_label_is_named(_self: Self) -> Bool {
+        true
+    }
+}
+
+fn main() -> UInt8 {
+    let label = Label {}
+    Naming.a_label_is_named(label)
+    0
+}

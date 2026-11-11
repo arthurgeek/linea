@@ -293,6 +293,48 @@ impl[T] Vec[T, SystemAllocator] {
         testing.assert_eq(calls, UInt64(3), "from_fn did not call its initializer once per index")?
     }
 
+    test fn vec_from_fn_constructs_linear_elements() {
+        let built: Result[Vec[VecGeneratedElement], Oom] = Vec.from_fn(count: 4, initializer: vec_generated_element)
+        var pending = built.unwrap().drain()
+        var intact = true
+        var index: UInt64 = 0
+        for element in &pending {
+            let VecGeneratedElement { index: got } = element
+            intact = intact && got == index
+            index += 1
+        }
+        match pending.finish() {
+            Ok(_) => {},
+            Err(_returned) => panic("draining generated elements left some behind"),
+        }
+        testing.assert(intact, "generated linear elements were lost or reordered")?
+    }
+
+    test fn vec_from_fn_preserves_records_borrowed_from_its_callback() {
+        let source = VecGeneratedElement { index = 41 }
+        let values = {
+            Vec.from_fn(
+                count: 3,
+                initializer: [source] |index| {
+                    let _position = index
+                    borrow source
+                },
+            ).unwrap()
+        }
+        var pending = values.drain()
+        var intact = true
+        for observation in &pending {
+            intact = intact && observation.index == 41
+        }
+        match pending.finish() {
+            Ok(_) => {},
+            Err(_returned) => panic("draining borrowed records left some behind"),
+        }
+        let VecGeneratedElement { index } = source
+        testing.assert(intact, "vector construction lost the record borrowed from its callback")?
+        testing.assert_eq(index, 41, "vector construction consumed its borrowed record")?
+    }
+
     // Build a vector in the system allocator as `from_fn_inout_in` does, with
     // an initializer whose state the caller keeps.
     pub fn from_fn_inout[F: inout fn(index: UInt64) -> T](count: UInt64, inout initializer: F) -> Result[Self, Oom] where carries(.Ok: initializer) {
@@ -421,48 +463,6 @@ impl[T, A: Allocator] Vec[T, A] {
         }
     }
 
-    test fn vec_from_fn_constructs_linear_elements() {
-        let built: Result[Vec[VecGeneratedElement], Oom] = Vec.from_fn(count: 4, initializer: vec_generated_element)
-        var pending = built.unwrap().drain()
-        var intact = true
-        var index: UInt64 = 0
-        for element in &pending {
-            let VecGeneratedElement { index: got } = element
-            intact = intact && got == index
-            index += 1
-        }
-        match pending.finish() {
-            Ok(_) => {},
-            Err(_returned) => panic("draining generated elements left some behind"),
-        }
-        testing.assert(intact, "generated linear elements were lost or reordered")?
-    }
-
-    test fn vec_from_fn_preserves_records_borrowed_from_its_callback() {
-        let source = VecGeneratedElement { index = 41 }
-        let values = {
-            Vec.from_fn(
-                count: 3,
-                initializer: [source] |index| {
-                    let _position = index
-                    borrow source
-                },
-            ).unwrap()
-        }
-        var pending = values.drain()
-        var intact = true
-        for observation in &pending {
-            intact = intact && observation.index == 41
-        }
-        match pending.finish() {
-            Ok(_) => {},
-            Err(_returned) => panic("draining borrowed records left some behind"),
-        }
-        let VecGeneratedElement { index } = source
-        testing.assert(intact, "vector construction lost the record borrowed from its callback")?
-        testing.assert_eq(index, 41, "vector construction consumed its borrowed record")?
-    }
-
     test fn vec_from_fn_builds_its_elements_in_an_arena() {
         defer let arena = Arena.open(system(), 64)
         let built: Result[Vec[UInt64, Handle], Oom] = Vec.from_fn_in(
@@ -574,9 +574,6 @@ impl[T, A: Allocator] Vec[T, A] {
         self.len
     }
 
-    // Traversing a vector visits its live indexes, 0 through len - 1.
-    trav positions(self: Self) = 0..self.len
-
     test fn vec_length_tracks_insertions_and_removals() {
         defer var values: Vec[UInt8] = Vec.new()
         testing.assert_eq(values.length(), 0, "empty length differs")?
@@ -589,6 +586,9 @@ impl[T, A: Allocator] Vec[T, A] {
         testing.assert_eq(removed, Option.Some(UInt8(7)), "remove returned another value")?
         testing.assert_eq(values.length(), 0, "remove did not decrement length")?
     }
+
+    // Traversing a vector visits its live indexes, 0 through len - 1.
+    trav positions(self: Self) = 0..self.len
 
     // Borrow the live elements as a slice; spare capacity is not included.
     pub fn as_slice(self: Self) -> Slice[T] where borrows(self) {
@@ -831,6 +831,37 @@ impl[T, A: Allocator] Vec[T, A] {
         .Some(taken)
     }
 
+    test fn vec_pop_takes_elements_last_first_and_keeps_capacity() {
+        defer var values: Vec[UInt64] = Vec.new()
+        for number in UInt64(0)..3 {
+            &values.push(number).unwrap()
+        }
+        let capacity = values.storage.capacity()
+        testing.assert_eq(&values.pop(), Option.Some(UInt64(2)), "pop did not take the last element")?
+        testing.assert_eq(&values.pop(), Option.Some(UInt64(1)), "pop did not take the new last element")?
+        testing.assert_eq(values.as_slice(), [UInt64(0)].as_slice(), "pop moved an element it did not take")?
+        testing.assert_eq(&values.pop(), Option.Some(UInt64(0)), "pop did not take the first element")?
+        testing.assert(&values.pop().is_none(), "an empty vector popped an element")?
+        testing.assert_eq(values.length(), UInt64(0), "popping an empty vector changed its length")?
+        testing.assert_eq(values.storage.capacity(), capacity, "pop gave up capacity")?
+    }
+
+    test fn vec_pop_hands_over_linear_elements_from_an_arena() {
+        defer let arena = Arena.open(system(), 256)
+        let built: Result[Vec[VecGeneratedElement, Handle], Oom] = Vec.from_fn_in(arena.handle(), count: 3, initializer: vec_generated_element)
+        var values = built.unwrap()
+        var order: UInt64 = 0
+        loop {
+            let VecGeneratedElement { index } = &values.pop() else {
+                break
+            }
+            // Append one decimal digit per element to record the order.
+            order = order * 10 + index + 1
+        }
+        values.finish().unwrap()
+        testing.assert_eq(order, UInt64(321), "pop lost, duplicated or reordered linear elements")?
+    }
+
     // Split the vector at `at` and lend `body` the two sides as views: `left`
     // holds the first `at` elements and `right` the rest. An `at` past the
     // vector's length traps.
@@ -876,37 +907,6 @@ impl[T, A: Allocator] Vec[T, A] {
         &values.split_inout(2, &mark)
         testing.assert_eq(firsts, (UInt64(0), UInt64(2)), "a view did not start where its side of the split starts")?
         testing.assert_eq(values.as_slice(), [UInt64(10), 1, 2, 30, 4, 5].as_slice(), "a write through a view reached the wrong element")?
-    }
-
-    test fn vec_pop_takes_elements_last_first_and_keeps_capacity() {
-        defer var values: Vec[UInt64] = Vec.new()
-        for number in UInt64(0)..3 {
-            &values.push(number).unwrap()
-        }
-        let capacity = values.storage.capacity()
-        testing.assert_eq(&values.pop(), Option.Some(UInt64(2)), "pop did not take the last element")?
-        testing.assert_eq(&values.pop(), Option.Some(UInt64(1)), "pop did not take the new last element")?
-        testing.assert_eq(values.as_slice(), [UInt64(0)].as_slice(), "pop moved an element it did not take")?
-        testing.assert_eq(&values.pop(), Option.Some(UInt64(0)), "pop did not take the first element")?
-        testing.assert(&values.pop().is_none(), "an empty vector popped an element")?
-        testing.assert_eq(values.length(), UInt64(0), "popping an empty vector changed its length")?
-        testing.assert_eq(values.storage.capacity(), capacity, "pop gave up capacity")?
-    }
-
-    test fn vec_pop_hands_over_linear_elements_from_an_arena() {
-        defer let arena = Arena.open(system(), 256)
-        let built: Result[Vec[VecGeneratedElement, Handle], Oom] = Vec.from_fn_in(arena.handle(), count: 3, initializer: vec_generated_element)
-        var values = built.unwrap()
-        var order: UInt64 = 0
-        loop {
-            let VecGeneratedElement { index } = &values.pop() else {
-                break
-            }
-            // Append one decimal digit per element to record the order.
-            order = order * 10 + index + 1
-        }
-        values.finish().unwrap()
-        testing.assert_eq(order, UInt64(321), "pop lost, duplicated or reordered linear elements")?
     }
 
     // Consume the vector and succeed only if it holds nothing. `Ok` proves
@@ -1250,20 +1250,6 @@ impl[T: Release, A: Allocator] Release for Vec[T, A] {
     }
 }
 
-// Release the elements from `kept` up to `length` held in `storage`, last
-// first. Releasing a vector and truncating it both settle elements here, so
-// they settle them the same way.
-fn release_from[T: Release, A: Allocator](inout storage: Storage[T, A], kept: UInt64, length: UInt64) {
-    let shape: SlotType[T] = .Type
-    let stride = slot_stride(shape)
-    var remaining = length
-    while remaining > kept {
-        remaining = remaining - 1
-        let element: T = slot_take(&storage, remaining * stride)
-        element.release()
-    }
-}
-
 test fn vec_release_visits_each_element_once_in_reverse_order() {
     let allocator = system()
     // Six UInt64 words hold one count and five element-release events.
@@ -1348,6 +1334,20 @@ test fn vec_release_disposes_backing_once_after_its_elements() {
         ordered = ordered && log.load((position + 1) * 8) == 4 - position
     }
     testing.assert(ordered && log.load(48) == 99, "backing was disposed before its elements")?
+}
+
+// Release the elements from `kept` up to `length` held in `storage`, last
+// first. Releasing a vector and truncating it both settle elements here, so
+// they settle them the same way.
+fn release_from[T: Release, A: Allocator](inout storage: Storage[T, A], kept: UInt64, length: UInt64) {
+    let shape: SlotType[T] = .Type
+    let stride = slot_stride(shape)
+    var remaining = length
+    while remaining > kept {
+        remaining = remaining - 1
+        let element: T = slot_take(&storage, remaining * stride)
+        element.release()
+    }
 }
 
 // A Drain hands a vector's elements over first to last. It owns the vector's

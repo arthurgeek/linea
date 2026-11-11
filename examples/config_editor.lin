@@ -36,53 +36,6 @@ enum RenderError {
     Limit,
 }
 
-test fn configuration_parsing_retains_trimmed_views() {
-    defer let entries = parse("# settings\n name = Ada \ncount=3\n").unwrap()
-    testing.assert_eq(entries.length(), 2, "the comment line became an entry")?
-    testing.assert_eq(entries[0].key, "name", "the key was not trimmed")?
-    testing.assert_eq(entries[0].value, "Ada", "the value was not trimmed")?
-    testing.assert_eq(entries[1].value, "3", "the second value changed")?
-}
-
-test fn configuration_parsing_refuses_ambiguous_or_malformed_records() {
-    let duplicate = match parse("name=Ada\nname=Grace\n") {
-        Err(error) => match read error.reason { Duplicate => error.line == 2, _ => false },
-        Ok(entries) => {
-            entries.release()
-            false
-        },
-    }
-    let malformed = match parse("name\n") {
-        Err(error) => match read error.reason { Syntax => error.line == 1, _ => false },
-        Ok(entries) => {
-            entries.release()
-            false
-        },
-    }
-    testing.assert(duplicate, "a repeated key was accepted")?
-    testing.assert(malformed, "a line without `=` was accepted")?
-}
-
-test fn parsing_reports_the_record_that_exhausts_entry_storage() {
-    // Four entries fit in 256 bytes; the next eight-entry reservation does not.
-    defer let arena = mem.Arena.open(mem.system(), size: 256)
-    let records =
-        \\a=1
-        \\b=2
-        \\c=3
-        \\d=4
-        \\e=5
-        \\
-    let refused = match parse_in(arena.handle(), records) {
-        Err(error) => error.line == 5 && match read error.reason { Allocation(_) => true, _ => false },
-        Ok(entries) => {
-            entries.release()
-            false
-        },
-    }
-    testing.assert(refused, "entry allocation failure lost its source line")?
-}
-
 // Entries borrow slices of input. The caller keeps that input alive until the
 // entries are released; no string copies are needed while parsing. Like the
 // library's own functions, `parse_in` takes the allocator first and `parse`
@@ -116,8 +69,55 @@ fn parse_in[A: Allocator](allocator: A, input: Str) -> Result[Vec[Entry, A], Con
     .Ok(entries)
 }
 
+test fn parsing_reports_the_record_that_exhausts_entry_storage() {
+    // Four entries fit in 256 bytes; the next eight-entry reservation does not.
+    defer let arena = mem.Arena.open(mem.system(), size: 256)
+    let records =
+        \\a=1
+        \\b=2
+        \\c=3
+        \\d=4
+        \\e=5
+        \\
+    let refused = match parse_in(arena.handle(), records) {
+        Err(error) => error.line == 5 && match read error.reason { Allocation(_) => true, _ => false },
+        Ok(entries) => {
+            entries.release()
+            false
+        },
+    }
+    testing.assert(refused, "entry allocation failure lost its source line")?
+}
+
 fn parse(input: Str) -> Result[Vec[Entry], ConfigError] where carries(.Ok: input) {
     parse_in(mem.system(), input)
+}
+
+test fn configuration_parsing_retains_trimmed_views() {
+    defer let entries = parse("# settings\n name = Ada \ncount=3\n").unwrap()
+    testing.assert_eq(entries.length(), 2, "the comment line became an entry")?
+    testing.assert_eq(entries[0].key, "name", "the key was not trimmed")?
+    testing.assert_eq(entries[0].value, "Ada", "the value was not trimmed")?
+    testing.assert_eq(entries[1].value, "3", "the second value changed")?
+}
+
+test fn configuration_parsing_refuses_ambiguous_or_malformed_records() {
+    let duplicate = match parse("name=Ada\nname=Grace\n") {
+        Err(error) => match read error.reason { Duplicate => error.line == 2, _ => false },
+        Ok(entries) => {
+            entries.release()
+            false
+        },
+    }
+    let malformed = match parse("name\n") {
+        Err(error) => match read error.reason { Syntax => error.line == 1, _ => false },
+        Ok(entries) => {
+            entries.release()
+            false
+        },
+    }
+    testing.assert(duplicate, "a repeated key was accepted")?
+    testing.assert(malformed, "a line without `=` was accepted")?
 }
 
 // Rendering normalizes entries to key=value lines, omitting comments and blank
@@ -146,11 +146,6 @@ fn render_in[A: Allocator, B: Allocator](allocator: B, entries: Vec[Entry, A], k
     .Ok(output)
 }
 
-// `render` renders into memory from the system allocator.
-fn render[A: Allocator](entries: Vec[Entry, A], key: Str, value: Str, max_bytes: UInt64) -> Result[String[mem.SystemAllocator], RenderError] where carries() {
-    render_in(mem.system(), entries, key: key, value: value, max_bytes: max_bytes)
-}
-
 test fn rendering_reports_allocation_failure_after_a_short_entry() {
     defer let entries = parse("a=b\n").unwrap()
     // Sixty-four bytes accommodate the short entry, but not this longer value.
@@ -165,6 +160,11 @@ test fn rendering_reports_allocation_failure_after_a_short_entry() {
         },
     }
     testing.assert(refused, "rendering failed to report exhausted output storage")?
+}
+
+// `render` renders into memory from the system allocator.
+fn render[A: Allocator](entries: Vec[Entry, A], key: Str, value: Str, max_bytes: UInt64) -> Result[String[mem.SystemAllocator], RenderError] where carries() {
+    render_in(mem.system(), entries, key: key, value: value, max_bytes: max_bytes)
 }
 
 test fn rendered_configuration_owns_its_bytes_after_input_is_released() {

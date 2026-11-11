@@ -29,6 +29,22 @@ struct Order[A: Allocator = mem.SystemAllocator] {
 // Orders decode into memory from `mem.system()`.
 alias OrderList = Vec[Order]
 
+test fn an_order_with_a_count_in_words_is_refused() {
+    let decoded: Result[OrderList, json.DecodeError] = json.decode(r#"[{"name":"Ada","count":"three","item":"notebooks","city":"London"}]"#)
+    defer let refused = match decoded {
+        Err(error) => {
+            let shown = fmt.render_owned(error).unwrap()
+            error.release()
+            shown
+        },
+        Ok(list) => {
+            list.release()
+            return testing.assert(false, "a count in words was accepted")
+        },
+    }
+    testing.assert_eq(refused.view(), r#"wrong kind of value at $[0]["count"]"#, "the refusal changed")?
+}
+
 // Release frees the path a decode error owns. `?` wraps another function's
 // error in a `LetterError` through the derived `From` implementations: a decode
 // error in `Orders`, a refused allocation in `Allocation`, and a failed print in
@@ -87,23 +103,6 @@ fn fill[A: Allocator](form: Str, order: Order[A]) -> Result[String[mem.SystemAll
     .Ok(letter)
 }
 
-// Write the field of the order that a placeholder names: text as it reads,
-// and the count as its digits. `sink field` lets an error keep the name.
-fn write_field[A: Allocator, B: Allocator](inout letter: String[B], order: Order[A], sink field: Str) -> Result[(), LetterError] where carries(.Err: field) {
-    if field == "name" {
-        &letter.append(order.name.view())?
-    } else if field == "item" {
-        &letter.append(order.item.view())?
-    } else if field == "city" {
-        &letter.append(order.city.view())?
-    } else if field == "count" {
-        order.count.fmt(&letter)?
-    } else {
-        return .Err(.Missing(field))
-    }
-    .Ok(())
-}
-
 // Each test decodes its order from a raw literal, `r#"…"#`, which holds one
 // line as written: it ends only at a `"` followed by `#`, so the quotes
 // inside are text. The annotation tells `json.decode` to build an `Order`,
@@ -132,20 +131,21 @@ test fn a_field_the_order_lacks_is_refused() {
     testing.assert(refused, "a missing field was filled")?
 }
 
-test fn an_order_with_a_count_in_words_is_refused() {
-    let decoded: Result[OrderList, json.DecodeError] = json.decode(r#"[{"name":"Ada","count":"three","item":"notebooks","city":"London"}]"#)
-    defer let refused = match decoded {
-        Err(error) => {
-            let shown = fmt.render_owned(error).unwrap()
-            error.release()
-            shown
-        },
-        Ok(list) => {
-            list.release()
-            return testing.assert(false, "a count in words was accepted")
-        },
+// Write the field of the order that a placeholder names: text as it reads,
+// and the count as its digits. `sink field` lets an error keep the name.
+fn write_field[A: Allocator, B: Allocator](inout letter: String[B], order: Order[A], sink field: Str) -> Result[(), LetterError] where carries(.Err: field) {
+    if field == "name" {
+        &letter.append(order.name.view())?
+    } else if field == "item" {
+        &letter.append(order.item.view())?
+    } else if field == "city" {
+        &letter.append(order.city.view())?
+    } else if field == "count" {
+        order.count.fmt(&letter)?
+    } else {
+        return .Err(.Missing(field))
     }
-    testing.assert_eq(refused.view(), r#"wrong kind of value at $[0]["count"]"#, "the refusal changed")?
+    .Ok(())
 }
 
 fn write_letters() -> Result[(), LetterError] {

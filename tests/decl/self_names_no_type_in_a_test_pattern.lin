@@ -1,0 +1,71 @@
+// A test inside an `impl` is resolved at module scope, so `Self` names no type
+// in a pattern it writes either: not in a destructuring `let`, a `match` arm
+// or a newtype's pattern. `Self` naming nothing there is reported once, and the
+// pattern's parts are still checked against the value, so a field the type
+// lacks is its own mistake. Where `Self` stands for one type, as in `impl
+// Meter`, a value of another type is a mistake of its own too.
+import std.testing
+
+struct Meter {
+    reading: UInt32,
+}
+
+struct Gauge {
+    reading: UInt32,
+}
+
+impl Meter {
+    pub fn new() -> Meter {
+        Meter { reading = 1 }
+    }
+
+    test fn self_in_a_destructuring_let() {
+        let Self { reading } = Meter.new()
+        testing.assert_eq(reading, 1, "a new meter reads one")?
+    }
+
+    test fn self_with_a_field_the_type_lacks() {
+        let Self { reading, depth } = Meter.new()
+        testing.assert_eq(reading + depth, 1, "a new meter reads one")?
+    }
+
+    test fn self_taking_apart_another_type() {
+        let Self { reading } = Gauge { reading = 1 }
+        testing.assert_eq(reading, 1, "the gauge reads one")?
+    }
+
+    test fn self_in_a_match_arm() {
+        match Meter.new() {
+            Self { reading } => testing.assert_eq(reading, 1, "a new meter reads one")?,
+        }
+    }
+}
+
+type Litres = UInt32
+
+type Gallons = UInt32
+
+impl Litres {
+    pub fn full() -> Litres {
+        Litres(5)
+    }
+
+    test fn self_in_a_newtype_pattern() {
+        let Self(amount) = Litres.full()
+        testing.assert_eq(amount, 5, "a full tank holds five litres")?
+    }
+
+    test fn self_taking_apart_another_newtype() {
+        let Self(amount) = Gallons(5)
+        testing.assert_eq(amount, 5, "five gallons")?
+    }
+}
+
+fn main() -> UInt8 {
+    let Litres(amount) = Litres.full()
+    if Meter.new().reading == 1 && amount == 5 {
+        0
+    } else {
+        1
+    }
+}

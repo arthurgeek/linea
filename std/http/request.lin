@@ -283,6 +283,18 @@ fn decode_encoded_pairs[A: Allocator](inout stored: Vec[UInt8, A], source: Str, 
     }
 }
 
+test fn a_query_that_is_not_percent_encoded_utf8_has_no_pairs() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    var stored: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
+    let short = decode_encoded_pairs(&stored, "a=%4", arena.handle()).unwrap()
+    let letters = decode_encoded_pairs(&stored, "a=%zz", arena.handle()).unwrap()
+    let invalid = decode_encoded_pairs(&stored, "a=%FF", arena.handle()).unwrap()
+    testing.assert(short.is_none(), "an incomplete escape was decoded")?
+    testing.assert(letters.is_none(), "an escape of letters was decoded")?
+    testing.assert(invalid.is_none(), "a byte that is not UTF-8 was decoded")?
+    .Ok(())
+}
+
 // `pair_count` counts the pairs of `source` that are not empty. `split`
 // refuses only an empty separator, so splitting at `&` cannot fail.
 fn pair_count(source: Str) -> UInt64 {
@@ -315,18 +327,6 @@ test fn a_query_decodes_into_its_pairs() {
         "{name}={value};".fmt(&decoded).unwrap()
     }
     testing.assert_eq(decoded.view(), "a=1;name=Ada López;flag=;=x;b=;", "the pairs changed")?
-    .Ok(())
-}
-
-test fn a_query_that_is_not_percent_encoded_utf8_has_no_pairs() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    var stored: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
-    let short = decode_encoded_pairs(&stored, "a=%4", arena.handle()).unwrap()
-    let letters = decode_encoded_pairs(&stored, "a=%zz", arena.handle()).unwrap()
-    let invalid = decode_encoded_pairs(&stored, "a=%FF", arena.handle()).unwrap()
-    testing.assert(short.is_none(), "an incomplete escape was decoded")?
-    testing.assert(letters.is_none(), "an escape of letters was decoded")?
-    testing.assert(invalid.is_none(), "a byte that is not UTF-8 was decoded")?
     .Ok(())
 }
 
@@ -622,6 +622,17 @@ impl[P: Allocator] Request[P] {
         self.known_method
     }
 
+    test fn a_request_names_its_method() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let request = read_in_steps(arena.handle(), "PATCH /x HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+        let method = request.request().method()
+        testing.assert_eq(method, Method.Patch, "the method changed")?
+        let other = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+        let unknown = other.request().method()
+        testing.assert_eq(unknown, Method.Other, "an unknown method was named")?
+        .Ok(())
+    }
+
     // Return whether this request was made with HTTP/1.1 (otherwise HTTP/1.0).
     pub fn is_http_11(self: Self) -> Bool {
         self.is_http_11
@@ -634,17 +645,6 @@ impl[P: Allocator] Request[P] {
         } else {
             "HTTP/1.0"
         }
-    }
-
-    test fn a_request_names_its_method() {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let request = read_in_steps(arena.handle(), "PATCH /x HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
-        let method = request.request().method()
-        testing.assert_eq(method, Method.Patch, "the method changed")?
-        let other = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
-        let unknown = other.request().method()
-        testing.assert_eq(unknown, Method.Other, "an unknown method was named")?
-        .Ok(())
     }
 
     // Return whether this request was made securely (HTTPS).

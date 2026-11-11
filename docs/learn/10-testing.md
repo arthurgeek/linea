@@ -179,8 +179,80 @@ Writing `Meter.new()` fixes it. In a generic `impl[T] Boxed[T]`, a test names
 the instance it checks: `let boxed: Boxed[UInt8] = Boxed.new(3)` writes the
 whole type in the annotation and only `Boxed` before the call, whose argument
 settles `T`. Because trait implementations supply only what a trait declares, tests
-sit in inherent implementations, not in trait implementations
-(`impl Trait for Type`) or templates.
+sit in inherent implementations and in trait declarations, not in trait
+implementations (`impl Trait for Type`) or templates.
+
+## Tests inside a trait
+
+A trait can give an operation a body, and every type that implements the trait
+then runs that body. The test for such an operation sits inside the trait,
+right after the operation:
+
+```linea
+import std.io
+import std.testing
+
+trait Doubling {
+    fn value(self: Self) -> UInt32
+
+    fn doubled(self: Self) -> UInt32 {
+        self.value() * 2
+    }
+
+    test fn doubled_is_twice_the_value() {
+        let meter = Meter { reading = 4 }
+        testing.assert_eq(meter.doubled(), 8, "twice four is eight")?
+    }
+}
+
+struct Meter {
+    reading: UInt32,
+}
+
+impl Doubling for Meter {
+    fn value(self: Self) -> UInt32 {
+        self.reading
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let meter = Meter { reading = 21 }
+    io.println("doubled: {meter.doubled()}")?
+    .Ok(0)
+}
+```
+
+```
+ok    doubled_is_twice_the_value
+
+1 passed, 0 failed
+```
+
+The test is not part of the trait. `impl Doubling for Meter` supplies `value`
+and nothing else, `Doubling.doubled_is_twice_the_value` names nothing, and a
+module that imports `Doubling` gets no test with it. As inside an `impl`, the
+test is named and checked as if it sat at the top level of the module.
+
+A trait's body is written for whatever type implements it, but a test runs
+once, for no type in particular. So `Self`, the trait's own type parameters and
+its associated types name nothing inside a test, and the test names a type that
+implements the trait, as `Meter` above. Writing `Self` is refused:
+
+<!-- guide: edit 12 let meter = Meter { reading = 4 } -->
+```linea
+        let meter: Self = Meter { reading = 4 }
+```
+
+```
+error[S-Test]: `Self` names no type in a test
+  --> main.lin:12:20
+   |
+12 |         let meter: Self = Meter { reading = 4 }
+   |                    ^^^^ a test inside a trait is resolved at module scope; write the type it tests
+```
+
+Rust keeps a trait's tests outside the trait, in a `#[cfg(test)]` module; here
+they sit beside the provided operation they check.
 
 ## Helpers that tests share
 
@@ -692,6 +764,8 @@ it.
   ends a test at the first failure.
 - A helper that only tests call is an ordinary function: it counts as used,
   and it is left out of the program.
+- A `test fn` sits beside what it tests: at the top level of a module, inside
+  an inherent `impl`, or inside a trait, beside the operation it tests.
 - `test trap fn` marks a test that must stop the program.
 - `testing.each_allocation_failure(allocator, body, is_refusal)` refuses each
   allocation in turn and checks that every one is handled.

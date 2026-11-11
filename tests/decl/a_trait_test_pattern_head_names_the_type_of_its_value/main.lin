@@ -1,0 +1,39 @@
+// A pattern's head names the type of the value it takes apart, wherever that
+// type is declared. In a test inside a trait, a head spelled like the trait's
+// associated type still names the type of its value, as it would at module
+// scope: only `Self` names no type there.
+import parcels
+import std.testing
+
+trait Packed {
+    type Item
+
+    fn weight(self: Self) -> UInt32
+
+    test fn the_heaviest_item_weighs_nine_hundred_grams() {
+        let Item { grams } = parcels.heaviest()
+        testing.assert_eq(grams, 900, "the heaviest item weighs 900 g")?
+    }
+}
+
+struct Crate {
+    grams: UInt32,
+}
+
+impl Packed for Crate {
+    type Item = UInt32
+
+    fn weight(self: Self) -> UInt32 {
+        self.grams
+    }
+}
+
+fn main() -> UInt8 {
+    let Item { grams } = parcels.heaviest()
+    let crate = Crate { grams = grams }
+    if crate.weight() == 900 {
+        0
+    } else {
+        1
+    }
+}

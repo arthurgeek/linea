@@ -269,6 +269,111 @@ pub fn parse_in[A: Allocator](allocator: A, input: Str, limits: ParseLimits = st
     parse_document(allocator, input, limits)
 }
 
+test fn parsing_nested_documents_handles_bounded_allocation_refusal() {
+    let input = r#"{"products":[{"name":"tea"},{"name":"coffee"}]}"#
+    var refused: UInt64 = 0
+    var accepted: UInt64 = 0
+    for size in UInt64(0)..64 {
+        defer let arena = mem.Arena.open(mem.system(), size * 1024)
+        match parse_in(arena.handle(), input) {
+            Err(error) => {
+                testing.assert_eq(error.kind, ParseErrorKind.Allocation, "bounded arena changed JSON syntax")?
+                refused += 1
+            },
+            Ok(document) => {
+                let correct = document
+                    .get("products")
+                    .unwrap()
+                    .at(1)
+                    .unwrap()
+                    .get("name")
+                    .unwrap()
+                    .as_str()
+                    .unwrap() == "coffee"
+                document.release()
+                testing.assert(correct, "completed arena document lost a nested value")?
+                accepted += 1
+            },
+        }
+    }
+    testing.assert(refused > 0 && accepted > 0, "allocation sweep did not cross the document's storage requirement")?
+}
+
+// This walk refuses each attempt by hand rather than through
+// `testing.each_allocation_failure`, which accepts a refused run that
+// completes: here every refusal must be reported as an allocation error, and
+// nothing may be allocated after it.
+test fn json_parser_disposes_every_allocation_on_success_and_each_refusal() {
+    let input = r#"{"first":["tea",123,{"nested":"green\nleaf"}],"second":[true,false,null,"a longer owned string"],"last":{"price":1.25}}"#
+    defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let allocator = baseline.allocator()
+    let document = parse_in(allocator, input).unwrap()
+    document.release()
+    let attempts = baseline.attempts()
+    testing.assert(attempts > 0, "parser did not exercise allocated ownership")?
+    testing.assert_eq(baseline.acquired(), attempts, "successful parse refused an acquisition")?
+    testing.assert(baseline.all_disposed(), "successful document release lost or repeated an allocation")?
+    for refusal in UInt64(1)..(attempts + 1) {
+        defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
+        let failing = log.allocator()
+        let allocation_error = match parse_in(failing, input) {
+            Err(error) => error.kind == ParseErrorKind.Allocation,
+            Ok(value) => {
+                value.release()
+                false
+            },
+        }
+        testing.assert(allocation_error, "parser did not propagate an injected allocation refusal")?
+        testing.assert_eq(log.attempts(), refusal, "parser allocated after its first refusal")?
+        testing.assert_eq(log.acquired(), refusal - 1, "parser acquisition count skipped a refusal")?
+        testing.assert(log.all_disposed(), "parser refusal lost or repeated a partial allocation")?
+    }
+}
+
+// This walk refuses each attempt by hand rather than through
+// `testing.each_allocation_failure`, which requires the unrefused run to
+// succeed: each input here is malformed, and every refusal before the syntax
+// error must be reported as an allocation error.
+test fn json_parser_disposes_completed_siblings_and_partial_tokens_on_invalid_input() {
+    let inputs = [
+        r#"{"done":["tea",12],"partial":"allocated text"#,
+        r#"{"done":["tea",12],"partial":"allocated\q"}"#,
+        r#"{"done":["tea",12],"partial":["kept",1e+]}"#,
+        r#"{"done":["tea",12],"done":null}"#,
+        r#"["tea",{"key":"value"},]"#,
+        r#"{"done":["tea",12]} trailing"#,
+    ]
+    for input in inputs {
+        defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
+        let allocator = baseline.allocator()
+        let invalid = match parse_in(allocator, input) {
+            Err(error) => error.kind != ParseErrorKind.Allocation,
+            Ok(value) => {
+                value.release()
+                false
+            },
+        }
+        testing.assert(invalid, "malformed cleanup input was accepted")?
+        let attempts = baseline.attempts()
+        testing.assert(attempts > 0, "malformed input built no partial ownership")?
+        testing.assert(baseline.all_disposed(), "syntax refusal lost or repeated partial ownership")?
+        for refusal in UInt64(1)..(attempts + 1) {
+            defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
+            let failing = log.allocator()
+            let refused = match parse_in(failing, input) {
+                Err(error) => error.kind == ParseErrorKind.Allocation,
+                Ok(value) => {
+                    value.release()
+                    false
+                },
+            }
+            testing.assert(refused, "syntax path ignored an earlier allocation refusal")?
+            testing.assert_eq(log.acquired(), refusal - 1, "syntax path acquired after its refusal")?
+            testing.assert(log.all_disposed(), "syntax-path allocation refusal lost partial ownership")?
+        }
+    }
+}
+
 // Parse `input` as one JSON document, allocating its values from the system
 // allocator, within `limits`.
 pub fn parse(input: Str, limits: ParseLimits = standard_limits) -> Result[Value[mem.SystemAllocator], ParseError] where carries() {
@@ -361,36 +466,6 @@ test fn zero_limits_are_restrictions_and_container_depth_excludes_scalars() {
     testing.assert_eq(nested, expected_nested, "nested depth offset was not its opener")?
 }
 
-test fn parsing_nested_documents_handles_bounded_allocation_refusal() {
-    let input = r#"{"products":[{"name":"tea"},{"name":"coffee"}]}"#
-    var refused: UInt64 = 0
-    var accepted: UInt64 = 0
-    for size in UInt64(0)..64 {
-        defer let arena = mem.Arena.open(mem.system(), size * 1024)
-        match parse_in(arena.handle(), input) {
-            Err(error) => {
-                testing.assert_eq(error.kind, ParseErrorKind.Allocation, "bounded arena changed JSON syntax")?
-                refused += 1
-            },
-            Ok(document) => {
-                let correct = document
-                    .get("products")
-                    .unwrap()
-                    .at(1)
-                    .unwrap()
-                    .get("name")
-                    .unwrap()
-                    .as_str()
-                    .unwrap() == "coffee"
-                document.release()
-                testing.assert(correct, "completed arena document lost a nested value")?
-                accepted += 1
-            },
-        }
-    }
-    testing.assert(refused > 0 && accepted > 0, "allocation sweep did not cross the document's storage requirement")?
-}
-
 test fn configured_limits_accept_the_boundary_and_reject_the_next_value() {
     let inputs = ["null", "[0]", r#""é""#, "12", r#"{"a":0}"#]
     let larger = ["null ", "[0,0]", r#""éa""#, "123", r#"{"a":0,"b":1}"#]
@@ -444,81 +519,6 @@ test fn parser_accepts_128_containers_and_refuses_the_next_opener() {
     testing.assert_eq(error, expected, "excess depth did not name its opening bracket")?
 }
 
-// This walk refuses each attempt by hand rather than through
-// `testing.each_allocation_failure`, which accepts a refused run that
-// completes: here every refusal must be reported as an allocation error, and
-// nothing may be allocated after it.
-test fn json_parser_disposes_every_allocation_on_success_and_each_refusal() {
-    let input = r#"{"first":["tea",123,{"nested":"green\nleaf"}],"second":[true,false,null,"a longer owned string"],"last":{"price":1.25}}"#
-    defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let allocator = baseline.allocator()
-    let document = parse_in(allocator, input).unwrap()
-    document.release()
-    let attempts = baseline.attempts()
-    testing.assert(attempts > 0, "parser did not exercise allocated ownership")?
-    testing.assert_eq(baseline.acquired(), attempts, "successful parse refused an acquisition")?
-    testing.assert(baseline.all_disposed(), "successful document release lost or repeated an allocation")?
-    for refusal in UInt64(1)..(attempts + 1) {
-        defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
-        let failing = log.allocator()
-        let allocation_error = match parse_in(failing, input) {
-            Err(error) => error.kind == ParseErrorKind.Allocation,
-            Ok(value) => {
-                value.release()
-                false
-            },
-        }
-        testing.assert(allocation_error, "parser did not propagate an injected allocation refusal")?
-        testing.assert_eq(log.attempts(), refusal, "parser allocated after its first refusal")?
-        testing.assert_eq(log.acquired(), refusal - 1, "parser acquisition count skipped a refusal")?
-        testing.assert(log.all_disposed(), "parser refusal lost or repeated a partial allocation")?
-    }
-}
-
-// This walk refuses each attempt by hand rather than through
-// `testing.each_allocation_failure`, which requires the unrefused run to
-// succeed: each input here is malformed, and every refusal before the syntax
-// error must be reported as an allocation error.
-test fn json_parser_disposes_completed_siblings_and_partial_tokens_on_invalid_input() {
-    let inputs = [
-        r#"{"done":["tea",12],"partial":"allocated text"#,
-        r#"{"done":["tea",12],"partial":"allocated\q"}"#,
-        r#"{"done":["tea",12],"partial":["kept",1e+]}"#,
-        r#"{"done":["tea",12],"done":null}"#,
-        r#"["tea",{"key":"value"},]"#,
-        r#"{"done":["tea",12]} trailing"#,
-    ]
-    for input in inputs {
-        defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
-        let allocator = baseline.allocator()
-        let invalid = match parse_in(allocator, input) {
-            Err(error) => error.kind != ParseErrorKind.Allocation,
-            Ok(value) => {
-                value.release()
-                false
-            },
-        }
-        testing.assert(invalid, "malformed cleanup input was accepted")?
-        let attempts = baseline.attempts()
-        testing.assert(attempts > 0, "malformed input built no partial ownership")?
-        testing.assert(baseline.all_disposed(), "syntax refusal lost or repeated partial ownership")?
-        for refusal in UInt64(1)..(attempts + 1) {
-            defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
-            let failing = log.allocator()
-            let refused = match parse_in(failing, input) {
-                Err(error) => error.kind == ParseErrorKind.Allocation,
-                Ok(value) => {
-                    value.release()
-                    false
-                },
-            }
-            testing.assert(refused, "syntax path ignored an earlier allocation refusal")?
-            testing.assert_eq(log.acquired(), refusal - 1, "syntax path acquired after its refusal")?
-            testing.assert(log.all_disposed(), "syntax-path allocation refusal lost partial ownership")?
-        }
-    }
-}
-
 // Parse bytes as `parse` does, refusing input that is not UTF-8 before its
 // grammar is read.
 pub fn parse_bytes_in[A: Allocator](allocator: A, input: mem.Slice[UInt8], limits: ParseLimits = standard_limits) -> Result[Value[A], ParseError] where carries(.Ok: allocator) {
@@ -527,6 +527,12 @@ pub fn parse_bytes_in[A: Allocator](allocator: A, input: mem.Slice[UInt8], limit
         return .Err(.{ kind = .InvalidUtf8, offset = error.offset })
     }
     parse_document(allocator, valid, limits)
+}
+
+test fn parsed_bytes_are_allocated_from_an_arena() {
+    defer let arena = mem.Arena.open(mem.system(), 4096)
+    defer let document = parse_bytes_in(arena.handle(), r#"{"tea":["green","black"]}"#.as_bytes()).unwrap()
+    testing.assert_eq(document.get("tea").unwrap().at(1).unwrap().as_str().unwrap(), "black", "parsed bytes lost a value in an arena")?
 }
 
 // Parse bytes as `parse` does, allocating from the system allocator.
@@ -578,10 +584,4 @@ test fn incomplete_documents_release_completed_siblings_and_report_eof() {
             }
         }
     }
-}
-
-test fn parsed_bytes_are_allocated_from_an_arena() {
-    defer let arena = mem.Arena.open(mem.system(), 4096)
-    defer let document = parse_bytes_in(arena.handle(), r#"{"tea":["green","black"]}"#.as_bytes()).unwrap()
-    testing.assert_eq(document.get("tea").unwrap().at(1).unwrap().as_str().unwrap(), "black", "parsed bytes lost a value in an arena")?
 }

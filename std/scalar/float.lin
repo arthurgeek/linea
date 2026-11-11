@@ -337,20 +337,6 @@ impl Float64 {
         self.total_key() < other.total_key()
     }
 
-    // Map the value's bits to an unsigned key that orders as `total_less` does.
-    // A set sign bit reverses the order of the negative patterns and puts them
-    // below every positive one; a clear one lifts the positive patterns above
-    // them. Neither branch can overflow.
-    fn total_key(self: Self) -> UInt64 {
-        let bits = self.to_bits()
-        let sign_bit: UInt64 = 9223372036854775808
-        if bits >= sign_bit {
-            18446744073709551615 - bits
-        } else {
-            bits + sign_bit
-        }
-    }
-
     test fn float64_total_order_ranks_every_class() {
         // Each value comes strictly before the next: -NaN with the largest
         // payload, the negative quiet NaN, a negative signalling NaN, -infinity,
@@ -401,6 +387,20 @@ impl Float64 {
             }
         }
         .Ok(())
+    }
+
+    // Map the value's bits to an unsigned key that orders as `total_less` does.
+    // A set sign bit reverses the order of the negative patterns and puts them
+    // below every positive one; a clear one lifts the positive patterns above
+    // them. Neither branch can overflow.
+    fn total_key(self: Self) -> UInt64 {
+        let bits = self.to_bits()
+        let sign_bit: UInt64 = 9223372036854775808
+        if bits >= sign_bit {
+            18446744073709551615 - bits
+        } else {
+            bits + sign_bit
+        }
     }
 }
 
@@ -486,18 +486,6 @@ impl Float32 {
         self.total_key() < other.total_key()
     }
 
-    // Map the value's bits to an unsigned key that orders as `total_less`
-    // does, as `Float64.total_key` does at 64 bits.
-    fn total_key(self: Self) -> UInt32 {
-        let bits = self.to_bits()
-        let sign_bit: UInt32 = 2147483648
-        if bits >= sign_bit {
-            4294967295 - bits
-        } else {
-            bits + sign_bit
-        }
-    }
-
     test fn float32_total_order_ranks_every_class() {
         // The Float32 forms of the Float64 ladder above, in the same order.
         let ladder: [UInt32; _] = [
@@ -547,5 +535,17 @@ impl Float32 {
             }
         }
         .Ok(())
+    }
+
+    // Map the value's bits to an unsigned key that orders as `total_less`
+    // does, as `Float64.total_key` does at 64 bits.
+    fn total_key(self: Self) -> UInt32 {
+        let bits = self.to_bits()
+        let sign_bit: UInt32 = 2147483648
+        if bits >= sign_bit {
+            4294967295 - bits
+        } else {
+            bits + sign_bit
+        }
     }
 }

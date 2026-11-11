@@ -43,6 +43,17 @@ fn count_lines_in[A: Allocator](allocator: A, input: Str) -> Result[LineCounts[A
     .Ok(counts)
 }
 
+test fn arena_frequencies_outlive_the_separate_input_owner() {
+    // `arena.handle()` lends the arena as the map's allocator, so each key is
+    // carved from the arena's 4096-byte block rather than from the input.
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let input = "café\n茶\ncafé\n".to_owned().unwrap()
+    defer let counts = count_lines_in(arena.handle(), input.view()).unwrap()
+    input.release()
+    testing.assert_eq(*counts.get("café").unwrap(), 2, "arena count retained its input owner")?
+    testing.assert_eq(*counts.get("茶").unwrap(), 1, "arena count lost its owned key")?
+}
+
 fn count_lines(input: Str) -> Result[LineCounts[mem.SystemAllocator], mem.Oom] where carries() {
     count_lines_in(mem.system(), input)
 }
@@ -154,15 +165,4 @@ fn main() -> Result[UInt8, io.IoError] {
         io.println("{row.value:>7} {row.key.view()}")?
     }
     .Ok(0)
-}
-
-test fn arena_frequencies_outlive_the_separate_input_owner() {
-    // `arena.handle()` lends the arena as the map's allocator, so each key is
-    // carved from the arena's 4096-byte block rather than from the input.
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let input = "café\n茶\ncafé\n".to_owned().unwrap()
-    defer let counts = count_lines_in(arena.handle(), input.view()).unwrap()
-    input.release()
-    testing.assert_eq(*counts.get("café").unwrap(), 2, "arena count retained its input owner")?
-    testing.assert_eq(*counts.get("茶").unwrap(), 1, "arena count lost its owned key")?
 }

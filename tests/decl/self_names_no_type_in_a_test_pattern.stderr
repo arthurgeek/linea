@@ -1,0 +1,45 @@
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_names_no_type_in_a_test_pattern.lin:23:13
+   |
+23 |         let Self { reading } = Meter.new()
+   |             ^^^^ a test inside an `impl` is resolved at module scope; write `Meter`
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_names_no_type_in_a_test_pattern.lin:28:13
+   |
+28 |         let Self { reading, depth } = Meter.new()
+   |             ^^^^ a test inside an `impl` is resolved at module scope; write `Meter`
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_names_no_type_in_a_test_pattern.lin:33:13
+   |
+33 |         let Self { reading } = Gauge { reading = 1 }
+   |             ^^^^ a test inside an `impl` is resolved at module scope; write `Meter`
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_names_no_type_in_a_test_pattern.lin:39:13
+   |
+39 |             Self { reading } => testing.assert_eq(reading, 1, "a new meter reads one")?,
+   |             ^^^^ a test inside an `impl` is resolved at module scope; write `Meter`
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_names_no_type_in_a_test_pattern.lin:54:13
+   |
+54 |         let Self(amount) = Litres.full()
+   |             ^^^^ a test inside an `impl` is resolved at module scope; write `Litres`
+error[S-Test]: `Self` names no type in a test
+  --> tests/decl/self_names_no_type_in_a_test_pattern.lin:59:13
+   |
+59 |         let Self(amount) = Gallons(5)
+   |             ^^^^ a test inside an `impl` is resolved at module scope; write `Litres`
+error[T-UnknownField]: `Meter` has no field `depth`
+  --> tests/decl/self_names_no_type_in_a_test_pattern.lin:28:29
+   |
+28 |         let Self { reading, depth } = Meter.new()
+   |                             ^^^^^ not a field of this type
+error[T-Mismatch]: this takes a `Meter` apart, and the value is a `Gauge`
+  --> tests/decl/self_names_no_type_in_a_test_pattern.lin:33:13
+   |
+33 |         let Self { reading } = Gauge { reading = 1 }
+   |             ^^^^^^^^^^^^^^^^ the pattern names a different type
+error[T-Mismatch]: this takes a `Litres` apart, and the value is a `Gallons`
+  --> tests/decl/self_names_no_type_in_a_test_pattern.lin:59:13
+   |
+59 |         let Self(amount) = Gallons(5)
+   |             ^^^^^^^^^^^^ the pattern names a different type

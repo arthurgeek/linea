@@ -48,17 +48,6 @@ fn write_receipt[W: Writer](inout w: W, purchases: mem.Slice[Purchase]) -> Resul
     .Ok(())
 }
 
-fn main() -> Result[UInt8, io.IoError] {
-    let purchases: [Purchase; _] = [
-        .{ name = "apples", amount = 1.25, unit = "kg", cents = 436 },
-        .{ name = "sourdough loaf", amount = 1.0, unit = "pc", cents = 525 },
-        .{ name = "coffee beans", amount = 0.5, unit = "kg", cents = 1299 },
-    ]
-    var out = io.stdout()
-    write_receipt(&out, purchases.as_slice())?
-    .Ok(0)
-}
-
 // A `\\` line holds its text exactly, so the expected receipt reads as it
 // prints, spaces and all.
 test fn the_receipt_lines_up_its_columns() {
@@ -75,4 +64,15 @@ test fn the_receipt_lines_up_its_columns() {
         \\total                   5.28
         \\
     testing.assert_eq(written.view(), expected, "the receipt changed")?
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let purchases: [Purchase; _] = [
+        .{ name = "apples", amount = 1.25, unit = "kg", cents = 436 },
+        .{ name = "sourdough loaf", amount = 1.0, unit = "pc", cents = 525 },
+        .{ name = "coffee beans", amount = 0.5, unit = "kg", cents = 1299 },
+    ]
+    var out = io.stdout()
+    write_receipt(&out, purchases.as_slice())?
+    .Ok(0)
 }

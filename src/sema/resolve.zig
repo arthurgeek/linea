@@ -612,6 +612,17 @@ pub const Resolution = struct {
     /// diagnostic about the selection says so, since the writer may have meant
     /// the module.
     shadowed_heads: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// Names written in a test that name no type there: `Self`, or a
+    /// parameter or associated type of the `impl` or trait whose braces hold
+    /// the test. [S-Test] reported each, or refused the test itself where it
+    /// sits in a trait implementation or a template, so the checker compares
+    /// a pattern headed by one with the type its help names rather than with
+    /// the name.
+    ///
+    /// Each is held with the name of the type `Self` stands for, where it is
+    /// `Self` in an inherent `impl` of a named type, and `.none` where no
+    /// single type is meant.
+    refused_test_names: std.AutoHashMapUnmanaged(TokenId, TokenId) = .empty,
     /// The token spelling the binding each expression reaches, indexed by
     /// `ExprId`; `.none` wherever `targets` is.
     ///
@@ -1082,6 +1093,7 @@ pub const Resolution = struct {
         self.integer_selections.deinit(gpa);
         self.trait_selections.deinit(gpa);
         self.shadowed_heads.deinit(gpa);
+        self.refused_test_names.deinit(gpa);
         self.constraints.deinit(gpa);
         for (self.tests) |t| gpa.free(t.qualified_name);
         gpa.free(self.tests);
@@ -2117,6 +2129,17 @@ pub const Resolution = struct {
     /// module of the same name.
     pub fn headShadowsAnImport(self: *const Resolution, id: ExprId) bool {
         return self.shadowed_heads.contains(id);
+    }
+
+    /// Whether `tok` is a name [S-Test] reported as naming no type in a test.
+    pub fn namesNoTypeInTest(self: *const Resolution, tok: TokenId) bool {
+        return self.refused_test_names.contains(tok);
+    }
+
+    /// The name of the one type a `Self` [S-Test] refused stands for, the
+    /// type its help writes, or `.none` where no single type is meant.
+    pub fn typeSelfStandsForInTest(self: *const Resolution, tok: TokenId) TokenId {
+        return self.refused_test_names.get(tok) orelse .none;
     }
 
     test "a name after a type that only a trait declares is left to the traits" {
@@ -4038,6 +4061,7 @@ fn resolveInternal(
     errdefer r.integer_selections.deinit(gpa);
     errdefer r.trait_selections.deinit(gpa);
     errdefer r.shadowed_heads.deinit(gpa);
+    errdefer r.refused_test_names.deinit(gpa);
     errdefer r.variant_ordinals.deinit(gpa);
     errdefer r.alias_heads.deinit(gpa);
     errdefer r.refused_operations.deinit(gpa);
@@ -4913,6 +4937,7 @@ fn resolveInternal(
         .integer_selections = r.integer_selections,
         .trait_selections = r.trait_selections,
         .shadowed_heads = r.shadowed_heads,
+        .refused_test_names = r.refused_test_names,
         .spelled = spelled,
         .written = written,
         .kinds = kinds,
@@ -6494,6 +6519,8 @@ const Resolver = struct {
     integer_selections: std.AutoHashMapUnmanaged(ExprId, IntegerSelection) = .empty,
     trait_selections: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     shadowed_heads: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// Published as `Resolution.refused_test_names`.
+    refused_test_names: std.AutoHashMapUnmanaged(TokenId, TokenId) = .empty,
     /// Which traits declare which signatures, read while bodies are walked to
     /// tell whether a name after a type's name may be a trait's operation.
     signatures: ?*const Signatures = null,
@@ -6557,6 +6584,11 @@ const Resolver = struct {
         while (through_traits.next()) |id| try self.trait_selections.put(gpa, relocation.id(ExprId, id.*), {});
         var shadowed = res.shadowed_heads.keyIterator();
         while (shadowed.next()) |id| try self.shadowed_heads.put(gpa, relocation.id(ExprId, id.*), {});
+        var refused_names = res.refused_test_names.iterator();
+        while (refused_names.next()) |row| {
+            const stands_for = if (row.value_ptr.* == .none) TokenId.none else relocation.id(TokenId, row.value_ptr.*);
+            try self.refused_test_names.put(gpa, relocation.id(TokenId, row.key_ptr.*), stands_for);
+        }
         var variants = res.variant_ordinals.iterator();
         while (variants.next()) |row| try self.variant_ordinals.put(gpa, relocation.id(ExprId, row.key_ptr.*), row.value_ptr.*);
         // The library's bodies are not walked again, and what their brackets
@@ -12719,6 +12751,12 @@ const Resolver = struct {
             .settled => return,
             .unreached => |name| name,
         };
+        // `Self` names no type in a test inside an `impl` or a trait
+        // ([S-Test]), in a pattern's head as in an annotation. Any other head
+        // names the type of the value it takes apart, as at module scope, so
+        // one spelled like the holder's parameter or associated type is
+        // settled from that value.
+        if (namesSelf(self.ast, tok) and try self.refuseHolderNameInTest(tok, .pattern)) return;
         const head: PatternHead = .{ .token = tok, .name = wanted, .root = self.program.get(self.current).root };
         if (self.record_prefix and self.pattern_index_ready) try self.pattern_heads.append(self.gpa, head);
         self.settlePatternHead(head);
@@ -13165,19 +13203,115 @@ const Resolver = struct {
         return true;
     }
 
-    /// The implementation whose braces hold the test being resolved, or
-    /// `.none` where no test is being resolved or it sits at module scope.
-    fn implHoldingTest(self: *const Resolver) DeclId {
+    /// The `impl` or trait whose braces hold the test being resolved.
+    const TestHolder = union(enum) { none, impl: DeclId, trait: DeclId };
+
+    /// Where the test being resolved was written: `.none` where no test is
+    /// being resolved or it sits at module scope. A test is a member of
+    /// nothing, so membership answers nothing for it; this reads the braces
+    /// it was written in instead.
+    fn testHolder(self: *const Resolver) TestHolder {
         const d = self.generic;
-        if (d == DeclId.none or !self.ast.declIsTest(d)) return DeclId.none;
+        if (d == DeclId.none or !self.ast.declIsTest(d)) return .none;
         const of = self.ast.declOwner(d);
-        if (of == TokenId.none) return DeclId.none;
-        return self.impl_of_head.get(of) orelse DeclId.none;
+        if (of == TokenId.none) return .none;
+        if (self.impl_of_head.get(of)) |impl| return .{ .impl = impl };
+        const signatures = self.signatures orelse return .none;
+        if (signatures.trait_of.get(of)) |trait| return .{ .trait = trait };
+        return .none;
     }
 
-    /// Where a name `refuseImplNameInTest` reports was written: a written
-    /// type, or an expression such as the head of a call.
-    const NamePosition = enum { annotation, expression };
+    /// [S-Test] at `Self`, at one of a trait's parameters or at one of its
+    /// associated types, written in a test that trait's braces hold, and
+    /// whether it was reported.
+    ///
+    /// A test there is a member of nothing and is resolved at module scope,
+    /// as one inside an inherent `impl` is, so none of the three reaches
+    /// anything. `Self.Item` is reported once, at `Self`. No fix is carried:
+    /// which implementing type the test means is the reader's choice.
+    ///
+    /// **Bound:** the trait's parameters and associated types, once each, and
+    /// only for a name nothing else declares.
+    fn refuseTraitNameInTest(self: *Resolver, tok: TokenId) std.mem.Allocator.Error!bool {
+        const trait = switch (self.testHolder()) {
+            .trait => |trait| trait,
+            else => return false,
+        };
+        const signatures = self.signatures.?;
+        const file = self.ast.fileOf(tok);
+        const span = self.ast.tokenSpan(tok);
+
+        if (namesSelf(self.ast, tok)) {
+            try self.sink.addError(
+                .s_test,
+                file,
+                span,
+                "`Self` names no type in a test",
+                "a test inside a trait is resolved at module scope; write the type it tests",
+            );
+            return true;
+        }
+
+        const wanted = self.ast.tokenName(tok);
+        for (self.ast.declTypeParams(trait)) |parameter| {
+            if (self.ast.tokenName(parameter.name) != wanted) continue;
+            try self.sink.addErrorFmt(
+                .s_test,
+                file,
+                span,
+                "a test is not instantiated, so the parameters of its trait name no type in it; write a concrete type",
+                "`{s}` names no type in a test",
+                .{self.ast.tokenText(tok)},
+            );
+            return true;
+        }
+
+        var types = signatures.typesOf(self.ast, trait);
+        while (types.next()) |declared| {
+            if (self.ast.tokenName(self.ast.declName(declared)) != wanted) continue;
+            try self.sink.addErrorFmt(
+                .s_test,
+                file,
+                span,
+                "a test is not instantiated, so no implementation settles the trait's types in it; write a concrete type",
+                "`{s}` names no type in a test",
+                .{self.ast.tokenText(tok)},
+            );
+            return true;
+        }
+        return false;
+    }
+
+    /// Where a name `refuseHolderNameInTest` reports was written: a written
+    /// type, an expression such as the head of a call, or a pattern's head.
+    const NamePosition = enum { annotation, expression, pattern };
+
+    /// [S-Test] at a name written in a test that names nothing there because
+    /// of the `impl` or trait whose braces hold the test, and whether it was
+    /// reported: `Self`, or a parameter of either, or an associated type of
+    /// the trait. Each name reported is recorded in `refused_test_names`, so
+    /// the checker says nothing more about it.
+    fn refuseHolderNameInTest(self: *Resolver, tok: TokenId, position: NamePosition) std.mem.Allocator.Error!bool {
+        if (tok == TokenId.none or self.ast.tokenTag(tok) != .identifier) return false;
+        const refused = try self.refuseTraitNameInTest(tok) or try self.refuseImplNameInTest(tok, position);
+        if (refused) try self.refused_test_names.put(self.gpa, tok, self.typeSelfStandsFor(tok));
+        return refused;
+    }
+
+    /// The name of the type `tok`, a `Self` written in a test, stands for:
+    /// the head of the inherent `impl` holding the test, where that names a
+    /// type. A pattern compares declarations, so the head's parameters,
+    /// settled or not, do not matter. `.none` otherwise.
+    fn typeSelfStandsFor(self: *const Resolver, tok: TokenId) TokenId {
+        if (!namesSelf(self.ast, tok)) return .none;
+        const impl = switch (self.testHolder()) {
+            .impl => |impl| impl,
+            else => return .none,
+        };
+        if (self.ast.declTag(impl) != .impl_ or self.ast.declTrait(impl) != TokenId.none) return .none;
+        const head = self.ast.declHead(impl);
+        return if (head.kind == .named) head.name else .none;
+    }
 
     /// [S-Test] at `Self`, or at one of the implementation's own type
     /// parameters, written in a test that implementation's braces hold, and
@@ -13186,20 +13320,23 @@ const Resolver = struct {
     /// A test there is a member of nothing and is resolved at module scope,
     /// so neither name reaches anything. Said for what it is rather than as a
     /// name nothing declares, because the reader wrote it beside members where
-    /// it does mean something. Where the implementation is for one concrete
-    /// type, the help writes that type in place of `Self`; under type
-    /// parameters, which arguments the test means is the reader's choice.
+    /// it does mean something. The help writes the implementation's type in
+    /// place of `Self`: under type parameters only as a pattern's head, which
+    /// names the type without its arguments; elsewhere which arguments the
+    /// test means is the reader's choice.
     ///
     /// What the help writes depends on `position`. A written type is the whole
-    /// head, `Boxed[UInt8]`; before a call it is the type's name, `Boxed`,
-    /// because a call settles the arguments and a bracketed head is no value.
+    /// head, `Boxed[UInt8]`; before a call or as a pattern's head it is the
+    /// type's name, `Boxed`, because the call or the value settles the
+    /// arguments and a bracketed head is neither a value nor a pattern.
     ///
     /// A test in a trait implementation or a template was refused where it
     /// was parsed, so neither name is reported a second time inside it.
     fn refuseImplNameInTest(self: *Resolver, tok: TokenId, position: NamePosition) std.mem.Allocator.Error!bool {
-        if (tok == TokenId.none or self.ast.tokenTag(tok) != .identifier) return false;
-        const impl = self.implHoldingTest();
-        if (impl == DeclId.none) return false;
+        const impl = switch (self.testHolder()) {
+            .impl => |impl| impl,
+            else => return false,
+        };
         const refused = self.ast.declTag(impl) != .impl_ or self.ast.declTrait(impl) != TokenId.none;
         const generic = self.ast.declTypeParams(impl).len != 0;
         const file = self.ast.fileOf(tok);
@@ -13208,7 +13345,7 @@ const Resolver = struct {
         if (namesSelf(self.ast, tok)) {
             if (refused) return true;
             const head = self.ast.declHead(impl);
-            const written = if (head.kind == .named and position == .expression)
+            const written = if (head.kind == .named and (position == .expression or position == .pattern))
                 self.ast.tokenText(head.name)
             else if (head.kind == .named and head.args.len() != 0)
                 self.ast.writtenText(head)
@@ -13219,13 +13356,18 @@ const Resolver = struct {
                 .file = file,
                 .span = span,
                 .style = .primary,
-                .message = if (generic) switch (position) {
-                    .annotation => try std.fmt.allocPrint(self.sink.arena, "a test is not instantiated, so nothing settles the parameters of `{s}`; write it with concrete arguments", .{written}),
-                    .expression => try std.fmt.allocPrint(self.sink.arena, "a test is not instantiated, so nothing settles the parameters of `Self`; write `{s}` and let the call settle them", .{written}),
-                } else try std.fmt.allocPrint(self.sink.arena, "a test inside an `impl` is resolved at module scope; write `{s}`", .{written}),
+                .message = if (generic and position == .annotation)
+                    try std.fmt.allocPrint(self.sink.arena, "a test is not instantiated, so nothing settles the parameters of `{s}`; write it with concrete arguments", .{written})
+                else if (generic and position == .expression)
+                    try std.fmt.allocPrint(self.sink.arena, "a test is not instantiated, so nothing settles the parameters of `Self`; write `{s}` and let the call settle them", .{written})
+                else
+                    try std.fmt.allocPrint(self.sink.arena, "a test inside an `impl` is resolved at module scope; write `{s}`", .{written}),
             };
+            // A pattern's head names the type without its arguments, which
+            // the value settles, so the name is the whole edit even under
+            // type parameters.
             var fixes: []const Fix = &.{};
-            if (!generic) {
+            if (!generic or position == .pattern) {
                 const edits = try self.sink.arena.alloc(Edit, 1);
                 edits[0] = .{ .file = file, .span = span, .text = written };
                 const one = try self.sink.arena.alloc(Fix, 1);
@@ -13265,7 +13407,7 @@ const Resolver = struct {
     /// what it annotates, and a poisoned value nobody diagnosed is every rule
     /// about it silently skipped.
     fn reportUnknownType(self: *Resolver, tok: TokenId) void {
-        if (self.refuseImplNameInTest(tok, .annotation) catch true) return;
+        if (self.refuseHolderNameInTest(tok, .annotation) catch true) return;
         // `Self` names the type of an implementation for a named type or a
         // tuple; an implementation for `()` has no name to stand for.
         const label = if (namesSelf(self.ast, tok))
@@ -14094,7 +14236,7 @@ const Resolver = struct {
             },
         };
 
-        if (try self.refuseImplNameInTest(self.ast.exprMain(id), .expression)) return;
+        if (try self.refuseHolderNameInTest(self.ast.exprMain(id), .expression)) return;
         var labels = std.mem.reverseIterator(self.body_labels.items);
         while (labels.next()) |p| {
             const label = self.ast.paramLabel(p);
@@ -14424,7 +14566,9 @@ const Resolver = struct {
         const decls = self.program.get(m).decls;
         for (decls.start..decls.end) |i| {
             const d = DeclId.at(@intCast(i));
-            if (self.ast.declOwner(d) != .none) continue;
+            // A member is reached through what holds it; a test written in
+            // an `impl` or a trait is a member of nothing, and binds here.
+            if (self.ast.memberOwner(d) != .none) continue;
             const at = self.ast.declName(d);
             if (at == .none) continue;
             if (self.ast.declTag(d) == .import_ and self.ast.fileOf(at) != file) continue;
@@ -14549,8 +14693,9 @@ const Resolver = struct {
             return self.reachMember(id, b, if (kind == .trait) decl else written);
         }
 
-        // A trait holds signatures and nothing else -- no representation to
-        // select from and no variants -- so a name it does not declare is
+        // A trait declares signatures and types and nothing else -- no
+        // representation to select from, no variants, and a test written in
+        // its braces is no member -- so a name it does not declare is
         // undefined there and that is the whole of it. The type's own member
         // of that name is not what was written: an implementation associates
         // the two namespaces without merging them.

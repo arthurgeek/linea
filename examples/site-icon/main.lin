@@ -52,23 +52,6 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
     &router.route("GET /favicon.ico", icon)
 }
 
-fn main() -> UInt8 {
-    let logger = log.to_stderr(minimum: .Info)
-    var router: http.Router[()] = http.Router.new()
-    let _ = routes(&router) else |error| {
-        logger.error("cannot register a route", log.field("error", error))
-        router.release()
-        return 2
-    }
-    // `serve_cgi` answers the one request this process was started for.
-    let _ = http.serve_cgi(http.logged(logger, router)) else |error| {
-        io.eprintln("site-icon: {error}")
-        io.eprintln("run it from a web server, or describe a request: REQUEST_METHOD=GET PATH_INFO=/favicon.ico site-icon")
-        return 64
-    }
-    0
-}
-
 // Each test builds a request in an arena, as `serve_cgi` does, and hands it
 // to the router.
 test fn the_icon_is_answered_byte_for_byte() {
@@ -93,4 +76,21 @@ test fn the_page_names_the_icon() {
     var nothing = ()
     let answer = &router.serve_http(&nothing, sent.request()).unwrap()
     testing.assert(answer.text().unwrap().find(r#"<link rel="icon" href="favicon.ico""#).is_some(), "the page names no icon")?
+}
+
+fn main() -> UInt8 {
+    let logger = log.to_stderr(minimum: .Info)
+    var router: http.Router[()] = http.Router.new()
+    let _ = routes(&router) else |error| {
+        logger.error("cannot register a route", log.field("error", error))
+        router.release()
+        return 2
+    }
+    // `serve_cgi` answers the one request this process was started for.
+    let _ = http.serve_cgi(http.logged(logger, router)) else |error| {
+        io.eprintln("site-icon: {error}")
+        io.eprintln("run it from a web server, or describe a request: REQUEST_METHOD=GET PATH_INFO=/favicon.ico site-icon")
+        return 64
+    }
+    0
 }

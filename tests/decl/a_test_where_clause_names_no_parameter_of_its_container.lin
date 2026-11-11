@@ -1,0 +1,83 @@
+// A test is not instantiated, so a `where` clause on a test inside a trait or
+// an `impl` names no parameter of either, and no `Self`, alone or inside a
+// written type, a callable type or a selection. A `where` predicate on a test
+// also constrains nothing, which is a mistake of its own whatever it names.
+import std.testing
+
+trait Keyed[K] {
+    fn key(self: Self) -> K
+
+    test fn a_parameter_of_the_trait() where K: Copyable {
+        let locker = Locker { number = 4 }
+        testing.assert_eq(locker.number, 4, "the locker's number is four")?
+    }
+
+    test fn a_parameter_inside_a_written_type() where Vec[K]: Copyable {
+        let locker = Locker { number = 4 }
+        testing.assert_eq(locker.number, 4, "the locker's number is four")?
+    }
+
+    test fn self_inside_a_written_type() where Option[Self]: Copyable {
+        let locker = Locker { number = 4 }
+        testing.assert_eq(locker.number, 4, "the locker's number is four")?
+    }
+
+    test fn a_parameter_inside_a_callable_type() where fn(key: K) -> Bool: Copyable {
+        let locker = Locker { number = 4 }
+        testing.assert_eq(locker.number, 4, "the locker's number is four")?
+    }
+
+    test fn self_under_a_selection() where Option[Self].Item: Copyable {
+        let locker = Locker { number = 4 }
+        testing.assert_eq(locker.number, 4, "the locker's number is four")?
+    }
+}
+
+struct Locker {
+    number: UInt32,
+}
+
+impl Keyed[UInt32] for Locker {
+    fn key(self: Self) -> UInt32 {
+        self.number
+    }
+}
+
+struct Shelf[T] {
+    item: T,
+}
+
+impl[T] Shelf[T] {
+    pub fn count(_self: Self) -> UInt32 {
+        1
+    }
+
+    test fn a_parameter_of_the_impl() where T: Copyable {
+        let shelf: Shelf[UInt32] = Shelf[UInt32] { item = 3 }
+        testing.assert_eq(shelf.count(), 1, "the shelf holds one item")?
+    }
+}
+
+struct Meter {
+    reading: UInt32,
+}
+
+impl Meter {
+    pub fn new() -> Meter {
+        Meter { reading = 1 }
+    }
+
+    test fn self_of_a_concrete_impl() where Self: Copyable {
+        testing.assert_eq(Meter.new().reading, 1, "a new meter reads one")?
+    }
+}
+
+fn main() -> UInt8 {
+    let locker = Locker { number = 4 }
+    let shelf: Shelf[UInt32] = Shelf[UInt32] { item = 3 }
+    if locker.number == 4 && shelf.count() == 1 && Meter.new().reading == 1 {
+        0
+    } else {
+        1
+    }
+}

@@ -383,7 +383,13 @@ fn fill[W: Writer](inout w: W, form: Str, fields: [Field; 3]) -> Result[(), W.Er
     }
     &w.write_str(rest)
 }
+```
 
+The test of `fill` follows it in the file. After the test comes the page
+itself:
+
+<!-- guide: excerpt examples/guest-book/page/page.lin -->
+```linea
 // The complete guest-book page, streamed directly into `http.html` through
 // `Display` without building an intermediate `entries` string.
 @(copyable, derive(Debug))
@@ -647,7 +653,7 @@ error[T-Bound]: `R.Error` requires `Owned`, and `Str` can carry a borrow: it hol
 9    |     let _ = http.listen_and_serve(net.loopback(8080), routes) else |_| {
      |                  ^^^^^^^^^^^^^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds
     ::: std/http/serve.lin
-1220 | ... ler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
+1117 | ... ler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
      |                                                                 ------- required by this `where` clause
 ```
 
@@ -860,7 +866,13 @@ fn routes(inout router: http.Router[Ctx]) -> Result[(), http.RouteError] {
     &router.route("GET /favicon.ico", favicon)?
     &router.route("POST /sign", sign)
 }
+```
 
+The tests of the routes follow `routes` in the file, and `main` comes after
+them:
+
+<!-- guide: excerpt examples/guest-book/main.lin -->
+```linea
 fn main() -> UInt8 {
     let port_arg = env.args().at(1) else {
         io.eprintln("usage: guest-book PORT")
