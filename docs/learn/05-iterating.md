@@ -1683,6 +1683,14 @@ closure you kept is never changed without the call saying so:
 ```
 
 ```
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+   --> main.lin:31:86
+    |
+31  |     let total = order.as_slice().map(|sink line| line.cents * line.quantity).fold(0, adding)
+    |                                                                                      ^^^^^^ expected `&` here
+   ::: std/iter/iter.lin
+112 |     ](sink self: Self, sink initial: A, inout combine: F) -> A where
+    |                                               ------- declared `inout`
 ```
 
 ## Emptying a `Vec`: `pop` and `finish`

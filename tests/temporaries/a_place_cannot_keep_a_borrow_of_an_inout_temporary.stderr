@@ -1,0 +1,9 @@
+error[O-Temporary]: a value borrowing a temporary is used after the temporary's statement
+  --> tests/temporaries/a_place_cannot_keep_a_borrow_of_an_inout_temporary.lin:23:19
+   |
+23 |     link(&holder, fresh())
+   |                   ^^^^^^^ this temporary ends with its statement
+24 |     UInt8(*holder.seen)
+   |           ------------ and a value borrowing it is used here
+   |
+   = help: bind the value with `var` first, and lend the binding with `&`

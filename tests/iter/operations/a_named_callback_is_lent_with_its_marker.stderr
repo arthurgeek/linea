@@ -1,7 +1,16 @@
-error[O-Move]: `heavy` has already been moved
- --> tests/iter/operations/a_named_callback_is_moved_by_its_first_walk.lin:9:37
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+ --> tests/iter/operations/a_named_callback_is_lent_with_its_marker.lin:8:37
   |
 8 |     let first = (UInt64(1)..10).any(heavy)
-  |                                     ----- it was taken here
+  |                                     ^^^^^ expected `&` here
+ ::: std/iter/iter.lin
+L |     fn any[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, inout predicate: F) -> Bool where Self.Iter: ...
+  |                                                                                   --------- declared `inout`
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+ --> tests/iter/operations/a_named_callback_is_lent_with_its_marker.lin:9:37
+  |
 9 |     let second = (UInt64(1)..3).any(heavy)
-  |                                     ^^^^^ it was already taken, and a value is taken once
+  |                                     ^^^^^ expected `&` here
+ ::: std/iter/iter.lin
+L |     fn any[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, inout predicate: F) -> Bool where Self.Iter: ...
+  |                                                                                   --------- declared `inout`

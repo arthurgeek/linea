@@ -5039,7 +5039,7 @@ const Lowerer = struct {
         // An `inout` parameter receives an address: a marked place lowers to
         // its own, and a value that is no place is evaluated into the
         // temporary the parameter is lent.
-        const lent_temporary = self.typing.lentTemporary(self.ast.withoutGroups(arg));
+        const lent_temporary = param.convention == .inout and self.typing.lentTemporary(self.ast.withoutGroups(arg));
         const value = if ((lent_temporary or mir_mod.parameterBorrowsPlace(param)) and try self.typeAt(arg) != .never)
             try self.borrowedAddress(arg, self.ast.exprSpan(arg))
         else

@@ -1,0 +1,25 @@
+// The temporary an `inout` parameter is lent owns its value. A part selected
+// from `if first { near } else { far }` is taken out of the pair each branch
+// names, so neither pair is used afterwards.
+struct Counter {
+    count: UInt8,
+}
+
+struct Pair {
+    first: Counter,
+    second: Counter,
+}
+
+fn swap_out(inout counter: Counter, sink with: Counter) -> Counter {
+    let old = counter
+    counter = with
+    old
+}
+
+fn main() -> UInt8 {
+    let near: Pair = .{ first = .{ count = 1 }, second = .{ count = 2 } }
+    let far: Pair = .{ first = .{ count = 3 }, second = .{ count = 4 } }
+    let first = true
+    let taken = swap_out((if first { near } else { far }).first, .{ count = 9 })
+    taken.count + near.first.count + far.first.count
+}

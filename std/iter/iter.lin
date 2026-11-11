@@ -8,24 +8,11 @@ import std.num
 //
 // Every iterator also offers the searches below, which run in place: the
 // iterator stays with the caller, positioned just after the last item a search
-// inspected, so a later search continues from there. An operation ending in
-// `_inout` borrows a callback whose state the caller keeps.
+// inspected, so a later search continues from there.
 pub trait Iterator {
     type Item
 
     fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self)
-
-    // Search for the first item `predicate` accepts and report how many items
-    // were inspected. The items before the match are dropped, and so is
-    // `predicate` once the search ends.
-    fn find_counted[F: inout fn(read item: Self.Item) -> Bool](inout self: Self, sink predicate: F) -> FindReport[Self.Item] where
-        carries(.found: self),
-        Self.Item: Discardable,
-        F: Discardable
-    {
-        var searching = predicate
-        &self.find_counted_inout(&searching)
-    }
 
     test fn counted_find_reports_empty_absent_first_and_last_matches() {
         var empty = UInt64(0)..0
@@ -80,9 +67,10 @@ pub trait Iterator {
         testing.assert_eq(settled, UInt8(6), "counted search settled or lost a Linear source element")?
     }
 
-    // Search as `find_counted` does, with a predicate whose state the caller
-    // keeps.
-    fn find_counted_inout[F: inout fn(read item: Self.Item) -> Bool](inout self: Self, inout predicate: F) -> FindReport[Self.Item] where
+    // Search for the first item `predicate` accepts and report how many items
+    // were inspected. The items before the match are dropped. A predicate lent
+    // with `&` keeps its state for the caller.
+    fn find_counted[F: inout fn(read item: Self.Item) -> Bool](inout self: Self, inout predicate: F) -> FindReport[Self.Item] where
         carries(.found: self),
         Self.Item: Discardable
     {
@@ -106,9 +94,9 @@ pub trait Iterator {
             calls += 1
             item == 3
         }
-        let report = &arrivals.find_counted_inout(&predicate)
+        let report = &arrivals.find_counted(&predicate)
         let next = &arrivals.next()
-        let repeated = &arrivals.find_counted_inout(&predicate)
+        let repeated = &arrivals.find_counted(&predicate)
         let { calls } = predicate.into_captures()
         let expected = FindReport[UInt64] { found = .Some(3), inspected = 3 }
         let repeated_expected = FindReport[UInt64] { found = .None, inspected = 1 }
@@ -125,7 +113,7 @@ pub trait Iterator {
             let _position = captured.at + item
             item == 2
         }
-        let report = &transaction.find_counted_inout(&predicate)
+        let report = &transaction.find_counted(&predicate)
         let cursor_position = transaction.at
         let { captured: recovered } = predicate.into_captures()
         let callback_position = recovered.at
@@ -174,9 +162,8 @@ impl[T: Copyable] Observation for borrow T {
 // the sequence and walks the iterator `iterate` gives it. An adapter (`map`,
 // `filter`, `filter_map`, `enumerate`, `zip`, `take`, `skip`, `copied`, `rev`,
 // `peekable`, `scan`) is lazy: it returns an iterator and calls nothing until
-// that iterator is walked. Every other operation is a terminal and walks now.
-// An operation ending in `_inout` borrows a callback whose state the caller
-// keeps, where the plain one takes the callback by value.
+// that iterator is walked. Every other operation is a terminal and walks
+// now, and is lent its callback.
 pub trait Sequence {
     type Iter: Iterator
 
@@ -793,20 +780,6 @@ pub trait Sequence {
         testing.assert_eq(found, Option.Some(UInt64(2)), "position over linear tokens counted wrongly")?
     }
 
-    // Combine every item into `initial`, in order, and return the result.
-    // `combine` is dropped at the end.
-    fn fold[
-        A,
-        F: inout fn(sink accumulator: A, sink item: Self.Iter.Item) -> A where carries(accumulator, item),
-    ](sink self: Self, sink initial: A, sink combine: F) -> A where
-        carries(self, initial, combine),
-        Self.Iter: Discardable,
-        F: Discardable
-    {
-        var combining = combine
-        self.fold_inout(initial, &combining)
-    }
-
     test fn fold_moves_one_accumulator_through_every_item() {
         let counter = Counter { at = 1, stop = 5 }
         let total = counter.fold(UInt16(0), |sink accumulator, sink item| accumulator + UInt16(item))
@@ -839,8 +812,9 @@ pub trait Sequence {
         testing.assert_eq(combined, UInt8(3), "fold did not call its callback once per item")?
     }
 
-    // Fold as `fold` does, with a callback whose state the caller keeps.
-    fn fold_inout[
+    // Combine every item into `initial`, in order, and return the result. A
+    // callback lent with `&` keeps its state for the caller.
+    fn fold[
         A,
         F: inout fn(sink accumulator: A, sink item: Self.Iter.Item) -> A where carries(accumulator, item),
     ](sink self: Self, sink initial: A, inout combine: F) -> A where
@@ -851,7 +825,7 @@ pub trait Sequence {
         var accumulator = initial
         loop {
             match &walking.next() {
-                Some(item) => fold_one_inout(&accumulator, item, &combine),
+                Some(item) => fold_one(&accumulator, item, &combine),
                 None => {
                     break
                 },
@@ -918,17 +892,6 @@ pub trait Sequence {
         testing.assert_eq(settled, UInt8(3), "count settled or lost a Linear source element")?
     }
 
-    // Return the first Some that `select` returns, stopping there. `select`
-    // is dropped at the end.
-    fn find_map[U, F: inout fn(sink item: Self.Iter.Item) -> Option[U]](sink self: Self, sink select: F) -> Option[U] where
-        carries(.Some: self, select),
-        Self.Iter: Discardable,
-        F: Discardable
-    {
-        var selecting = select
-        self.find_map_inout(&selecting)
-    }
-
     test fn find_map_stops_at_the_first_selected_item() {
         let present = Counter { at = 1, stop = 6 }
         let found: Option[UInt8] = present.find_map(
@@ -957,8 +920,8 @@ pub trait Sequence {
         }
     }
 
-    // Search as `find_map` does, with a selector whose state the caller keeps.
-    fn find_map_inout[U, F: inout fn(sink item: Self.Iter.Item) -> Option[U]](sink self: Self, inout select: F) -> Option[U] where
+    // Return the first Some that `select` returns, stopping there.
+    fn find_map[U, F: inout fn(sink item: Self.Iter.Item) -> Option[U]](sink self: Self, inout select: F) -> Option[U] where
         carries(.Some: self, select),
         Self.Iter: Discardable
     {
@@ -983,21 +946,12 @@ pub trait Sequence {
                 .None
             }
         }
-        let selected = (UInt8(0)..5).find_map_inout(&select)
-        let empty = (UInt8(0)..0).find_map_inout(&select)
+        let selected = (UInt8(0)..5).find_map(&select)
+        let empty = (UInt8(0)..0).find_map(&select)
         let { calls } = select.into_captures()
         testing.assert_eq(selected, Option.Some(UInt64(2)), "mutable find_map selected the wrong item")?
         testing.assert(empty.is_none(), "mutable find_map found an item in empty input")?
         testing.assert_eq(calls, UInt8(3), "mutable find_map did not stop at selection")?
-    }
-
-    // Hand every item to `visit`, in order. `visit` is dropped at the end.
-    fn for_each[F: inout fn(sink item: Self.Iter.Item)](sink self: Self, sink visit: F) where
-        Self.Iter: Discardable,
-        F: Discardable
-    {
-        var visiting = visit
-        self.for_each_inout(&visiting)
     }
 
     test fn for_each_consumes_linear_items() {
@@ -1014,9 +968,8 @@ pub trait Sequence {
         testing.assert(ordered, "for_each skipped, duplicated, or reordered a linear item")?
     }
 
-    // Visit every item as `for_each` does, with a visitor whose state the
-    // caller keeps.
-    fn for_each_inout[F: inout fn(sink item: Self.Iter.Item)](sink self: Self, inout visit: F) where Self.Iter: Discardable {
+    // Hand every item to `visit`, in order.
+    fn for_each[F: inout fn(sink item: Self.Iter.Item)](sink self: Self, inout visit: F) where Self.Iter: Discardable {
         var walking = self.iterate()
         loop {
             match &walking.next() {
@@ -1033,21 +986,11 @@ pub trait Sequence {
             total += item
         }
         let counted = UInt8(1)..4
-        counted.for_each_inout(&visit)
+        counted.for_each(&visit)
         let empty = UInt8(0)..0
-        empty.for_each_inout(&visit)
+        empty.for_each(&visit)
         let { total } = visit.into_captures()
         testing.assert_eq(total, UInt8(6), "mutable for_each did not retain callback state")?
-    }
-
-    // Return whether any item satisfies `predicate`, stopping at the first
-    // that does. Empty input has none. `predicate` is dropped at the end.
-    fn any[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, sink predicate: F) -> Bool where
-        Self.Iter: Discardable,
-        F: Discardable
-    {
-        var checking = predicate
-        self.any_inout(&checking)
     }
 
     test fn any_short_circuits_and_is_false_for_empty() {
@@ -1058,8 +1001,9 @@ pub trait Sequence {
         testing.assert(!empty.any(token_is_two), "any returned true for an empty iterator")?
     }
 
-    // Search as `any` does, with a predicate whose state the caller keeps.
-    fn any_inout[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, inout predicate: F) -> Bool where Self.Iter: Discardable {
+    // Return whether any item satisfies `predicate`, stopping at the first that
+    // does. Empty input has none.
+    fn any[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, inout predicate: F) -> Bool where Self.Iter: Discardable {
         var walking = self.iterate()
         loop {
             match &walking.next() {
@@ -1076,22 +1020,11 @@ pub trait Sequence {
             calls += 1
             item == 2
         }
-        let found = (UInt8(0)..5).any_inout(&predicate)
-        let empty = (UInt8(0)..0).any_inout(&predicate)
+        let found = (UInt8(0)..5).any(&predicate)
+        let empty = (UInt8(0)..0).any(&predicate)
         let { calls } = predicate.into_captures()
         testing.assert(found && !empty, "mutable any returned the wrong result")?
         testing.assert_eq(calls, UInt8(3), "mutable any did not stop at its match")?
-    }
-
-    // Return whether every item satisfies `predicate`, stopping at the first
-    // that does not. Empty input satisfies it. `predicate` is dropped at the
-    // end.
-    fn all[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, sink predicate: F) -> Bool where
-        Self.Iter: Discardable,
-        F: Discardable
-    {
-        var checking = predicate
-        self.all_inout(&checking)
     }
 
     test fn all_short_circuits_and_is_true_for_empty() {
@@ -1102,8 +1035,9 @@ pub trait Sequence {
         testing.assert(empty.all(token_is_below_two), "all returned false for an empty iterator")?
     }
 
-    // Search as `all` does, with a predicate whose state the caller keeps.
-    fn all_inout[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, inout predicate: F) -> Bool where Self.Iter: Discardable {
+    // Return whether every item satisfies `predicate`, stopping at the first
+    // that does not. Empty input satisfies it.
+    fn all[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, inout predicate: F) -> Bool where Self.Iter: Discardable {
         var walking = self.iterate()
         loop {
             match &walking.next() {
@@ -1120,23 +1054,11 @@ pub trait Sequence {
             calls += 1
             item == 2
         }
-        let found = (UInt8(0)..5).all_inout(&predicate)
-        let empty = (UInt8(0)..0).all_inout(&predicate)
+        let found = (UInt8(0)..5).all(&predicate)
+        let empty = (UInt8(0)..0).all(&predicate)
         let { calls } = predicate.into_captures()
         testing.assert(!found && empty, "mutable all returned the wrong result")?
         testing.assert_eq(calls, UInt8(1), "mutable all did not stop at its first rejection")?
-    }
-
-    // Return the first item `predicate` accepts. The items before it are
-    // dropped, and so is `predicate` at the end.
-    fn find[F: inout fn(read item: Self.Iter.Item) -> Bool](sink self: Self, sink predicate: F) -> Option[Self.Iter.Item] where
-        carries(.Some: self),
-        Self.Iter: Discardable,
-        Self.Iter.Item: Discardable,
-        F: Discardable
-    {
-        var checking = predicate
-        self.find_inout(&checking)
     }
 
     test fn find_returns_the_first_matching_item_or_none() {
@@ -1155,8 +1077,9 @@ pub trait Sequence {
         }
     }
 
-    // Search as `find` does, with a predicate whose state the caller keeps.
-    fn find_inout[F: inout fn(read item: Self.Iter.Item) -> Bool](sink self: Self, inout predicate: F) -> Option[Self.Iter.Item] where
+    // Return the first item `predicate` accepts. The items before it are
+    // dropped.
+    fn find[F: inout fn(read item: Self.Iter.Item) -> Bool](sink self: Self, inout predicate: F) -> Option[Self.Iter.Item] where
         carries(.Some: self),
         Self.Iter: Discardable,
         Self.Iter.Item: Discardable
@@ -1177,8 +1100,8 @@ pub trait Sequence {
             calls += 1
             item == 2
         }
-        let found = (UInt8(0)..5).find_inout(&observe)
-        let empty = (UInt8(0)..0).find_inout(&observe)
+        let found = (UInt8(0)..5).find(&observe)
+        let empty = (UInt8(0)..0).find(&observe)
         let { calls } = observe.into_captures()
         testing.assert_eq(found, Option.Some(UInt8(2)), "mutable find selected the wrong item")?
         testing.assert(empty.is_none(), "mutable find found an item in empty input")?
@@ -1349,23 +1272,22 @@ pub trait Sequence {
 }
 
 // The callback convention of the Sequence operations:
-// Each plain operation takes its callback `sink`, bounded by an `inout fn`, and
-// calls it `inout`. A read callable satisfies that bound, and a closure written
-// in the call may change its captures or a place it is lent, as in
-// `xs.fold(0, inout [inout n] |sum, x| { n += 1; sum + x })`. The operation
-// consumes its callback and drops it when it returns, so it requires the
-// callback to be Discardable. A named callback is therefore moved by its first
-// use, and a copyable one is used again by passing `copy(f)` to the earlier
-// walk. A generic function that forwards a callback it only borrowed cannot
-// move it; it takes the callback `sink`, lends it to the `_inout` form where
-// the operation has one, or requires `F: Copyable` and passes `copy(f)`. An
-// operation without an `_inout` form takes a callback that cannot be copied only
-// once, so such a callback is written at each call, or captures by `read` what
-// it would own. An `_inout` form borrows a callback the caller keeps, to call it
-// again or to read or settle what it owns. The library's other operations that
-// call a callback follow the same convention: `Option` and `Result` `map`,
-// `map_err`, `and_then` and `unwrap_or_else`, `Vec.from_fn`, `Map` `merge`,
-// `update` and `upsert`, and `testing.each_allocation_failure`.
+// An operation that walks at once (`fold`, `find`, `find_map`, `for_each`,
+// `any`, `all`) is lent its callback: the parameter is `inout`, bounded by an
+// `inout fn`. A read callable satisfies that bound. A closure written in the
+// call is kept until the end of the statement and may change its captures or a
+// place it is lent, as in
+// `xs.fold(0, inout [inout n] |sum, x| { n += 1; sum + x })`; it must be
+// Discardable, since nothing settles it. A named callback is lent with `&`,
+// `xs.fold(0, &add)`, and stays with its caller, to call again or to read or
+// settle what it owns. A generic function forwards a callback it was lent the
+// same way. A lazy adapter (`map`, `filter`, `filter_map`) keeps its callback,
+// so it takes the callback `sink`: a named callback is moved by its first use,
+// and a copyable one is used again by passing `copy(f)` to the earlier adapter.
+// The library's other operations that call a callback without keeping it are
+// lent it too: `Option` and `Result` `map`, `map_err`, `and_then` and
+// `unwrap_or_else`, `Vec.from_fn`, `Map` `merge`, `update` and `upsert`, and
+// `testing.each_allocation_failure`.
 
 // Every iterator is a sequence of itself: walking it walks the items it has
 // left. A type that implements `Iterator` has no other `Sequence`
@@ -2736,7 +2658,7 @@ impl Comparable for Rank {
 impl Ordered for Rank {}
 
 // Combine one item into the accumulator with a stateful callback.
-fn fold_one_inout[
+fn fold_one[
     A,
     T,
     F: inout fn(sink accumulator: A, sink item: T) -> A where carries(accumulator, item),
@@ -2749,8 +2671,8 @@ test fn a_mutable_fold_leaves_callback_state_with_the_caller() {
         calls += 1
         accumulator + item
     }
-    let sum = (UInt8(1)..4).fold_inout(UInt8(0), &combine)
-    let empty_sum = (UInt8(0)..0).fold_inout(sum, &combine)
+    let sum = (UInt8(1)..4).fold(UInt8(0), &combine)
+    let empty_sum = (UInt8(0)..0).fold(sum, &combine)
     let { calls } = combine.into_captures()
     testing.assert_eq(sum, UInt8(6), "mutable fold did not combine every item")?
     testing.assert_eq(empty_sum, UInt8(6), "mutable fold changed its empty-input accumulator")?
@@ -2781,15 +2703,15 @@ impl Iterator for TagSource {
 test fn mutable_terminals_borrow_read_callbacks_and_preserve_protocol_captures() {
     var consume = consume_token
     let tokens = TokenCounter { at = 0, stop = 3 }
-    tokens.for_each_inout(&consume)
+    tokens.for_each(&consume)
     let transaction = TransactionCursor { at = 7, stop = 9 }
     var visit = [sink transaction] |sink item: UInt8| {
         let _position = transaction.at + item
     }
     let empty = UInt8(0)..0
-    empty.for_each_inout(&visit)
+    empty.for_each(&visit)
     let visited = UInt8(0)..2
-    visited.for_each_inout(&visit)
+    visited.for_each(&visit)
     let { transaction: recovered } = visit.into_captures()
     let position = recovered.at
     rollback_cursor(recovered)

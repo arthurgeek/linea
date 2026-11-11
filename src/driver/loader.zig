@@ -6328,7 +6328,7 @@ test "an address lives no longer than the slice, buffer or storage it was made f
         \\    var values: Vec[UInt8] = Vec.new()
         \\    &values.push(1).unwrap()
         \\    var body = view_side_grown
-        \\    &values.split_inout(0, &body)
+        \\    &values.split(0, &body)
         \\    values.release()
         \\    0
         \\}

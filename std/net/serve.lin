@@ -182,8 +182,7 @@ test fn finish_closes_the_listener_and_reports_the_accept_failure_before_the_clo
 // holds up the ones queued behind it. `handler` owns the connection and must
 // close or release it. It reports its own failures, and a failed connection
 // never stops serving. It is lent `inout`, so a closure keeps state across
-// connections and the caller reads it back afterwards, as with
-// `for_each_inout`.
+// connections and the caller reads it back afterwards.
 //
 // A reset connection or running out of descriptors while accepting is retried
 // after a pause that grows while the failure repeats; any other accept failure

@@ -3899,7 +3899,7 @@ test "renaming declines a capture recovery the file alone cannot settle" {
         \\        return 1
         \\    }
         \\    var heavy = [sink seen] |sink weight: UInt64| weight > seen.length()
-        \\    let found = (UInt64(1)..10).any_inout(&heavy)
+        \\    let found = (UInt64(1)..10).any(&heavy)
         \\    let { seen } = heavy.into_captures()
         \\    seen.release()
         \\    if found { 0 } else { 3 }

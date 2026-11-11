@@ -48,7 +48,8 @@ the temporary lives until the end of the statement that evaluates it, the
 rule [O-Temporary] already states for `read`. A value borrowing the temporary
 may be used within the statement and not after it, and may not be returned.
 What a place is does not change: a local, a parameter, a capture, a binder, a
-constant, and a field, element or projection of one.
+constant, a field, element or projection of one, and whatever an observation
+reaches.
 
 **The temporary owns what the argument yields.** The callee may write it, so
 it cannot be a copy of bytes another place still owns: the argument sits in a
@@ -56,6 +57,16 @@ consuming position. A branch that names a place, as in
 `bump(if first { a } else { b })`, moves that place into the temporary, and a
 later use of it is [O-Move]. A `read` temporary is unchanged; it is only
 observed.
+
+Two holes that predate this record sat under that sentence, and each is closed
+here because lending a temporary for writing reaches them. A part taken out
+of a value no place names, `(if first { near } else { far }).first`, walked
+its subject as a read, so the part was copied out of a place that kept it;
+the subject is now consumed, and what is left of it must owe nothing. And a
+closure written in a call that is lent a place `inout` writes that place when
+the callee calls it, so it counts as a mutation under [N-Aliased]:
+`observe(total, inout [inout total] || …)` is refused, as
+`observe(total, &total)` is.
 
 **A temporary is discarded where it ends and runs no cleanup**, as every
 temporary is. One that must be settled is refused by [O-Leak] at the argument:
@@ -83,7 +94,7 @@ invoking a callable for mutation, and `&Counter { … }` names no place.
 
 **A receiver is a parameter.** `fresh().advance()` lends the temporary
 `fresh()` returns to an `inout self` and takes no marker, where ADR 0170 asked
-for a `var`. `text.split(",").next()` and `values.iterate().find_counted(p)`
+for a `var`. `values.iterate().next()` and `values.iterate().find_counted(p)`
 are therefore written as chains. `&fresh().advance()` is still refused, since
 the marker binds to the first call after it.
 
@@ -106,10 +117,12 @@ wrappers are removed, and `F: Discardable` leaves their signatures, since the
 operation no longer drops a callback. A closure written in the call is a
 temporary; a named callback is lent with `&` and stays with its caller, so one
 callback serves several operations and one owning a resource is recovered
-afterwards. The lazy adapters (`map`, `filter`, `filter_map` on a sequence,
-`zip`, `take`, `skip`) keep their callbacks `sink`, because the adapter stores
-the callback past the call. `merge`, `update` and `each_allocation_failure`
-take theirs `inout` too. A build gate refuses a declaration in `std/` or
+afterwards. The lazy adapters (`map`, `filter` and `filter_map` on a
+sequence) keep their callbacks `sink`, because the adapter stores
+the callback past the call. `Map.merge`, `Map.update` and
+`testing.each_allocation_failure`, which had no `_inout` form and consumed
+their callbacks, are lent them too, so the library has one convention for a
+callback an operation calls without keeping. A build gate refuses a declaration in `std/` or
 `examples/` whose name ends in `_inout`.
 
 The checker records which arguments are temporaries in
@@ -126,7 +139,9 @@ No pass decides again whether an argument is a place.
 - A named callback is no longer consumed by the operation it is passed to. It
   is lent, `xs.fold(0, &add)`, and usable again; `copy(heavy)` for a second use
   is no longer needed. A named callback passed without `&` is [S-Mutation],
-  where it was accepted and moved.
+  where it was accepted and moved, and a closure bound with `let` to be passed
+  by name is bound with `var`, since only a place that may change is lent. A
+  function's name is not a place and is passed as before, `xs.map(double)`.
 - A callback owning something that must be settled cannot be written in the
   call. This is what the `sink` forms' `F: Discardable` already refused, now
   reported at the argument by [O-Leak] instead of at a bound.

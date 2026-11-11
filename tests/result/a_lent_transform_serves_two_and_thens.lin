@@ -9,6 +9,7 @@ fn main() -> UInt8 {
         }
     }
     let first: Result[UInt8, UInt8] = .Ok(8)
-    let halved = first.and_then(&halve).and_then(&halve)
-    halved.unwrap_or(0)
+    let halved = first.and_then(&halve)
+    let quartered = halved.and_then(&halve)
+    quartered.unwrap_or(0)
 }

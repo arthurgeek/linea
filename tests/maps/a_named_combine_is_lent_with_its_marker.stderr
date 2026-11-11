@@ -1,7 +1,16 @@
-error[O-Move]: `add` has already been moved
-  --> tests/maps/a_named_combine_is_moved_by_its_first_merge.lin:10:25
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+ --> tests/maps/a_named_combine_is_lent_with_its_marker.lin:9:25
+  |
+9 |     &totals.merge(7, 5, add).unwrap()
+  |                         ^^^ expected `&` here
+ ::: std/collections/map.lin
+L | ... oming)](inout self: Self, sink key: K, sink value: V, inout combine: F) -> Result[(), InsertFailure[K, V]] where
+  |                                                                 ------- declared `inout`
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+  --> tests/maps/a_named_combine_is_lent_with_its_marker.lin:10:25
    |
-9  |     &totals.merge(7, 5, add).unwrap()
-   |                         --- it was taken here
 10 |     &totals.merge(7, 3, add).unwrap()
-   |                         ^^^ it was already taken, and a value is taken once
+   |                         ^^^ expected `&` here
+  ::: std/collections/map.lin
+L  | ... oming)](inout self: Self, sink key: K, sink value: V, inout combine: F) -> Result[(), InsertFailure[K, V]] where
+   |                                                                 ------- declared `inout`

@@ -1600,7 +1600,10 @@ bound.
 
 **[N-Aliased]** A place mutated by one argument must not overlap any place
 accessed by another argument, whether that access mutates or only reads it.
-Mutation includes both passing a place with `&` and assigning to it. Places
+Mutation includes passing a place with `&`, assigning to it, and lending it
+`inout` to a closure written in the argument, which the callee may call:
+`observe(total, inout [inout total] || { … })` reads and writes `total` in one
+call. Places
 overlap when they share a root and one path is a prefix of the other; path
 steps are treated as equal whenever they may select the same place. The check
 uses only the arguments at each call site, without inference or lifetimes.
@@ -6031,7 +6034,10 @@ literal's base, and the scrutinee of a plain `match`.
 
 **Reading positions** observe the value: operator operands, conditions, arguments
 to `read` parameters, places lent to `inout` parameters, the scrutinee of `match read`, the initializer of
-`let read`, and the subject of field access. The right-hand side of a compound
+`let read`, and the subject of field access. Where a part is taken out of a
+value no place names, as in `(if first { near } else { far }).items.release()`,
+the subject is consumed: each place a branch names is given up, and what is
+left of the value, which nothing can take, must owe nothing ([O-Leak]). The right-hand side of a compound
 assignment is an operator operand, so `a += b` leaves `b` unchanged just as
 `a = a + b` does.
 

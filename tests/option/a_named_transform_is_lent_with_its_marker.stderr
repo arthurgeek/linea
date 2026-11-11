@@ -1,7 +1,16 @@
-error[O-Move]: `grow` has already been moved
- --> tests/option/a_named_transform_is_moved_by_its_first_map.lin:9:27
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+ --> tests/option/a_named_transform_is_lent_with_its_marker.lin:8:27
   |
 8 |     let grown = first.map(grow)
-  |                           ---- it was taken here
+  |                           ^^^^ expected `&` here
+ ::: std/option/option.lin
+L |     pub fn map[U, F: inout fn(sink value: T) -> U](sink self: Self, inout transform: F) -> Option[U] where carries(.Some ...
+  |                                                                           --------- declared `inout`
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+ --> tests/option/a_named_transform_is_lent_with_its_marker.lin:9:27
+  |
 9 |     let also = second.map(grow)
-  |                           ^^^^ it was already taken, and a value is taken once
+  |                           ^^^^ expected `&` here
+ ::: std/option/option.lin
+L |     pub fn map[U, F: inout fn(sink value: T) -> U](sink self: Self, inout transform: F) -> Option[U] where carries(.Some ...
+  |                                                                           --------- declared `inout`

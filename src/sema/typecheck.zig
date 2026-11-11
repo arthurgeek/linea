@@ -25342,13 +25342,16 @@ const Checker = struct {
                     continue;
                 }
                 const receiver = mutation == lent;
-                const marked = receiver or self.ast.exprTag(mutation) == .marked or self.ast.exprTag(mutation) == .call;
+                const captured = self.ast.exprTag(mutation) == .lambda;
+                const marked = receiver or captured or self.ast.exprTag(mutation) == .marked or self.ast.exprTag(mutation) == .call;
                 _ = self.reportWithOrigin(
                     .n_aliased,
                     other,
                     "this names a place another argument mutates",
                     if (receiver)
                         "already lent as the receiver of this `&` call"
+                    else if (captured)
+                        "already lent `inout` to a closure in this call"
                     else if (self.ast.exprTag(mutation) == .call)
                         "this argument accesses the same place"
                     else if (marked)
@@ -25521,6 +25524,9 @@ const Checker = struct {
             },
             .lambda => blk: {
                 for (self.ast.lambda(within).captures) |capture| {
+                    // A place lent `inout` to a closure written in the call
+                    // is written when the callee calls the closure.
+                    if (capture.convention == .inout and self.namesPlace(other, capture.source, any, except)) break :blk within;
                     const found = self.sharedMutation(capture.source, other, any, except);
                     if (found != .none) break :blk found;
                 }
@@ -25604,9 +25610,24 @@ const Checker = struct {
                 }),
                 declared,
             );
+        } else if (self.readOnlyPlace(place)) {
+            // A constant and what an observation reaches are places no call
+            // may write, so the marker would be refused too.
+            _ = self.reportWithOrigin(.s_mutation, place, "this argument is mutated, and this place cannot be written", "pass a copy of it to change a temporary", declared);
         } else {
             _ = self.reportWithOrigin(.s_mutation, place, "this argument is mutated, so it is marked `&`", "expected `&` here", declared);
         }
+    }
+
+    /// Whether a place is a constant or is reached through an observation,
+    /// neither of which grants a write.
+    fn readOnlyPlace(self: *const Checker, place: ExprId) bool {
+        if (self.res.constantReached(self.ast, place)) return true;
+        var steps = self.ast.placeSteps(place);
+        while (steps.next()) |step| {
+            if (self.ast.exprTag(step) == .dereference) return true;
+        }
+        return false;
     }
 
     /// Records a value that is borrowed where it is written. A place,
