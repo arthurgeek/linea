@@ -407,7 +407,7 @@ const io_loop = heldBy("io", "`io.current`, `io.Io` and `Simulation.run`");
 const task_wait_set = heldBy("task", "`task.WaitSet`");
 // A share is counted by the router, and the last one released restores the
 // signal's saved action.
-const io_signal = heldBy("io", "`signal` on a `task.WaitSet` and the `io.SignalShare` it delivers");
+const io_signal = heldBy("core", "`signal` on a `task.WaitSet` and the `io.SignalShare` it delivers");
 const io_simulation = heldBy("io", "`io.Simulation` and the `io.World` its run lends");
 
 /// Every `linea_` function an `extern` may name, with its signature. The
@@ -460,7 +460,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_net_reset", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection },
     .{ .symbol = "linea_net_close", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_close },
     // The loop table and the simulations in it.
-    .{ .symbol = "linea_io_current", .parameters = &.{}, .result = .u64, .declared_by = io_loop },
+    .{ .symbol = "linea_io_current", .parameters = &.{}, .result = .u64, .declared_by = .granted },
     .{ .symbol = "linea_io_switch", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_loop },
     .{ .symbol = "linea_io_is_simulated", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = io_loop },
     .{ .symbol = "linea_sim_open", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64), p(.u64), p(.u8), p(.u64) }, .result = .u64, .declared_by = io_simulation },
@@ -477,7 +477,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_waitset_unreserve", .parameters = &.{ p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set },
     .{ .symbol = "linea_waitset_received", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set },
     .{ .symbol = "linea_waitset_returned", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_descriptor", .parameters = &.{ p(.u64), p(.u64), descriptor, p(.u8) }, .result = .i64, .declared_by = heldBy("io", "`readable` and `writable` on a `task.WaitSet`") },
+    .{ .symbol = "linea_waitset_descriptor", .parameters = &.{ p(.u64), p(.u64), descriptor, p(.u8) }, .result = .i64, .declared_by = heldBy("core", "`readable` and `writable` on a `task.WaitSet`") },
     .{ .symbol = "linea_waitset_ready", .parameters = &.{ p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set },
     .{ .symbol = "linea_waitset_timer", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set },
     .{ .symbol = "linea_waitset_signal", .parameters = &.{ p(.u64), p(.u64), p(.u8), p(.u64) }, .result = .i64, .declared_by = task_wait_set },

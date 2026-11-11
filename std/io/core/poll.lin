@@ -27,7 +27,7 @@ struct Source[T] {
 }
 
 // The source of `holder`, whose descriptor is `fd`.
-internal fn source[T](holder: T, fd: Int32) -> Source[T] where borrows(holder) {
+pub fn source[T](holder: T, fd: Int32) -> Source[T] where borrows(holder) {
     .{ fd, holder = borrow holder }
 }
 

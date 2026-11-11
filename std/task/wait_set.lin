@@ -1,10 +1,17 @@
-import std.io
+import std.io.core
 import std.mem
-import std.net
 import std.session
 import std.testing
 import std.time
 
+use core.Interest
+use core.IoError
+use core.Pollable
+use core.Readiness
+use core.Signal
+use core.SignalError
+use core.SignalShare
+use core.watch
 use session.Choose
 use session.Offer
 
@@ -83,7 +90,7 @@ impl[T] Registered[T] {
 // kernel queue, which the system may refuse to make or to extend.
 pub struct Unregistered[T] {
     value: T,
-    reason: io.IoError,
+    reason: IoError,
 }
 
 // The value of one registration, kept in bytes, and the callable that turns
@@ -121,10 +128,8 @@ enum WaitTestWoke {
     Chose(Chan[Offer[End, End], ()]),
     Joined(UInt64),
     Tick(UInt64),
-    Arrived(net.Listener),
-    Room(net.Connection),
     Always(WaitTestReady),
-    Stop(io.SignalShare),
+    Stop(SignalShare),
 }
 
 // A value that is always ready, as a reader holding bytes is.
@@ -132,8 +137,8 @@ struct WaitTestReady {
     tag: UInt64,
 }
 
-impl io.Pollable for WaitTestReady {
-    fn readiness(_self: Self, _interest: io.Interest) -> io.Readiness[Self] where borrows(_self) {
+impl Pollable for WaitTestReady {
+    fn readiness(_self: Self, _interest: Interest) -> Readiness[Self] where borrows(_self) {
         .Now
     }
 }
@@ -178,14 +183,6 @@ fn wait_test_settle(sink woke: WaitTestWoke) -> UInt64 {
         },
         Joined(number) => number,
         Tick(number) => number,
-        Arrived(listener) => {
-            listener.release()
-            1002
-        },
-        Room(connection) => {
-            connection.release()
-            1003
-        },
         Always(ready) => ready.tag,
         Stop(share) => {
             share.settle()
@@ -358,23 +355,12 @@ impl[M] WaitSet[M] {
         Registered.minted(self.identity, slot, generation)
     }
 
-    test fn timers_are_delivered_in_the_order_they_expire() {
-        var sim = io.Simulation.open(seed: 1).unwrap()
-        let order = &sim.run(
-            |inout _world| {
-                var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
-                let _late = &waiting.after(time.Duration.from_milliseconds(300), UInt64(2), |sink n| WaitTestWoke.Tick(n))
-                let _soon = &waiting.after(time.Duration.from_milliseconds(100), UInt64(1), |sink n| WaitTestWoke.Tick(n))
-                let started = time.Instant.now()
-                let first = wait_test_settle(&waiting.next().unwrap())
-                let waited = started.elapsed()
-                let second = wait_test_settle(&waiting.next().unwrap())
-                waiting.close().finish().unwrap()
-                (first, second, waited)
-            },
-        )
-        sim.close()
-        testing.assert_eq(order, (UInt64(1), UInt64(2), time.Duration.from_milliseconds(100)), "the timers did not fire in order at their instants")?
+    test fn a_timer_is_registered_and_withdrawn() {
+        var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
+        let key = &waiting.after(time.Duration.from_seconds(60), UInt64(42), |sink n| WaitTestWoke.Tick(n))
+        let taken = &waiting.take(key).unwrap()
+        waiting.close().finish().unwrap()
+        testing.assert_eq(taken, UInt64(42), "the timer's message did not come back")?
         .Ok(())
     }
 
@@ -382,13 +368,13 @@ impl[M] WaitSet[M] {
     // `interest` holds of it. A value that knows it is ready already, such as
     // a reader holding bytes, is ready at once. Readiness is a hint: an
     // operation on a value `next` delivers may still have to wait.
-    fn polled[T: io.Pollable, W: Release + fn(sink ready: T) -> M](inout self: Self, sink holder: T, sink wrap: W, interest: io.Interest) -> Result[Registered[T], Unregistered[T]] where carries(.Err: holder), retains(self: holder, wrap) {
+    fn polled[T: Pollable, W: Release + fn(sink ready: T) -> M](inout self: Self, sink holder: T, sink wrap: W, interest: Interest) -> Result[Registered[T], Unregistered[T]] where carries(.Err: holder), retains(self: holder, wrap) {
         let (slot, generation) = &self.reserve()
         // The source borrows `holder`, so the descriptor is watched before
         // `holder` moves into the set.
         let watched: Option[Int64] = match holder.readiness(interest) {
             Now => .None,
-            Wait(source) => .Some(io.watch(self.set, slot, source, interest)),
+            Wait(source) => .Some(watch(self.set, slot, source, interest)),
         }
         match watched {
             None => {
@@ -400,7 +386,7 @@ impl[M] WaitSet[M] {
                 if refused != 0 {
                     linea_waitset_unreserve(self.set, slot)
                     wrap.release()
-                    return .Err(.{ value = holder, reason = io.IoError.from_os(.Configure, Int32(0 - refused)) })
+                    return .Err(.{ value = holder, reason = IoError.from_os(.Configure, Int32(0 - refused)) })
                 }
                 let deliver = self.wrapping(wrap)
                 &self.hold(slot, holder, deliver)
@@ -412,66 +398,8 @@ impl[M] WaitSet[M] {
     // Register a value that is ready once it can be read without waiting: a
     // listener with a connection to accept, a connection with bytes or its
     // end to read. A failure hands the value back.
-    pub fn readable[T: io.Pollable, W: Release + fn(sink ready: T) -> M](inout self: Self, sink holder: T, sink wrap: W) -> Result[Registered[T], Unregistered[T]] where carries(.Err: holder), retains(self: holder, wrap) {
+    pub fn readable[T: Pollable, W: Release + fn(sink ready: T) -> M](inout self: Self, sink holder: T, sink wrap: W) -> Result[Registered[T], Unregistered[T]] where carries(.Err: holder), retains(self: holder, wrap) {
         &self.polled(holder, wrap, .Readable)
-    }
-
-    test fn a_listener_is_readable_once_a_connection_waits() {
-        var sim = io.Simulation.open(seed: 3).unwrap()
-        let woke = &sim.run(
-            |inout _world| {
-                var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
-                let listener = net.listen(net.loopback(80)).unwrap()
-                let _key = &waiting.readable(listener, |sink ready| WaitTestWoke.Arrived(ready)).unwrap()
-                let _never = &waiting.after(time.Duration.from_seconds(60), UInt64(9), |sink n| WaitTestWoke.Tick(n))
-                let client = net.connect(net.loopback(80)).unwrap()
-                let kind = wait_test_settle(&waiting.next().unwrap())
-                client.release()
-                var left = waiting.close()
-                let unfired = wait_test_settle(&left.pop().unwrap())
-                left.finish().unwrap()
-                (kind, unfired)
-            },
-        )
-        sim.close()
-        testing.assert_eq(woke, (UInt64(1002), UInt64(9)), "the listener was not delivered before the timer")?
-        .Ok(())
-    }
-
-    // A connection is ready to accept three latencies after the client asks
-    // for it, once its SYN, the SYN-ACK and the ACK have each crossed the
-    // simulated network, and a timer set for the same virtual instant
-    // expires with it: the listener is delivered first, on every run of the
-    // seed.
-    test fn a_connection_and_a_timer_at_one_instant_are_delivered_listener_first() {
-        var order: mem.Vec[(UInt64, UInt64)] = mem.Vec.new()
-        var round = UInt64(0)
-        while round < 2 {
-            var sim = io.Simulation.open(seed: 11).unwrap()
-            let woke = &sim.run(
-                |inout _world| {
-                    var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
-                    let _tick = &waiting.after(time.Duration.from_milliseconds(3), UInt64(9), |sink n| WaitTestWoke.Tick(n))
-                    let listener = net.listen(net.loopback(80)).unwrap()
-                    let _key = &waiting.readable(listener, |sink ready| WaitTestWoke.Arrived(ready)).unwrap()
-                    let client = net.connect(net.loopback(80)).unwrap()
-                    let first = wait_test_settle(&waiting.next().unwrap())
-                    let second = wait_test_settle(&waiting.next().unwrap())
-                    client.release()
-                    waiting.close().finish().unwrap()
-                    (first, second)
-                },
-            )
-            sim.close()
-            &order.push(woke).unwrap()
-            round += 1
-        }
-        let again = &order.pop().unwrap()
-        let once = &order.pop().unwrap()
-        order.release()
-        testing.assert_eq(once, again, "one seed gave two orders")?
-        testing.assert_eq(once, (UInt64(1002), UInt64(9)), "the timer was delivered before the listener ready at the same instant")?
-        .Ok(())
     }
 
     test fn a_value_that_is_ready_now_is_delivered_at_once() {
@@ -485,26 +413,16 @@ impl[M] WaitSet[M] {
 
     // Register a value that is ready once it can be written without waiting.
     // A failure hands the value back.
-    pub fn writable[T: io.Pollable, W: Release + fn(sink ready: T) -> M](inout self: Self, sink holder: T, sink wrap: W) -> Result[Registered[T], Unregistered[T]] where carries(.Err: holder), retains(self: holder, wrap) {
+    pub fn writable[T: Pollable, W: Release + fn(sink ready: T) -> M](inout self: Self, sink holder: T, sink wrap: W) -> Result[Registered[T], Unregistered[T]] where carries(.Err: holder), retains(self: holder, wrap) {
         &self.polled(holder, wrap, .Writable)
     }
 
-    test fn a_connection_with_room_is_writable() {
-        var sim = io.Simulation.open(seed: 4).unwrap()
-        let kind = &sim.run(
-            |inout _world| {
-                var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
-                let listener = net.listen(net.loopback(80)).unwrap()
-                let client = net.connect(net.loopback(80)).unwrap()
-                let _key = &waiting.writable(client, |sink ready| WaitTestWoke.Room(ready)).unwrap()
-                let kind = wait_test_settle(&waiting.next().unwrap())
-                listener.release()
-                waiting.close().finish().unwrap()
-                kind
-            },
-        )
-        sim.close()
-        testing.assert_eq(kind, UInt64(1003), "a connection with room to write was not delivered")?
+    test fn a_value_that_is_writable_at_once_is_delivered() {
+        var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
+        let _key = &waiting.writable(WaitTestReady { tag = 6 }, |sink ready| WaitTestWoke.Always(ready)).unwrap()
+        let tag = wait_test_settle(&waiting.next().unwrap())
+        waiting.close().finish().unwrap()
+        testing.assert_eq(tag, UInt64(6), "a value writable at once was not delivered")?
         .Ok(())
     }
 
@@ -514,8 +432,8 @@ impl[M] WaitSet[M] {
     // the signal no longer takes its saved action (ending the process, for
     // `Terminate`). A signal the launcher ignores is refused with
     // `.Ignored`.
-    pub fn signal[W: Release + fn(sink ready: io.SignalShare) -> M](inout self: Self, signal: io.Signal, sink wrap: W) -> Result[Registered[io.SignalShare], io.SignalError] where retains(self: wrap) {
-        match io.SignalShare.acquire(signal) {
+    pub fn signal[W: Release + fn(sink ready: SignalShare) -> M](inout self: Self, signal: Signal, sink wrap: W) -> Result[Registered[SignalShare], SignalError] where retains(self: wrap) {
+        match SignalShare.acquire(signal) {
             Err(refused) => {
                 wrap.release()
                 .Err(refused)
@@ -531,95 +449,36 @@ impl[M] WaitSet[M] {
         }
     }
 
-    test fn a_delivered_signal_wakes_the_set_and_a_timer_at_the_same_instant_waits() {
-        var sim = io.Simulation.open(seed: 5).unwrap()
-        let woke = &sim.run(
-            |inout world| {
-                var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
-                let _stop = &waiting.signal(.Terminate, |sink share| WaitTestWoke.Stop(share)).unwrap()
-                let _tick = &waiting.after(time.Duration.from_milliseconds(50), UInt64(3), |sink n| WaitTestWoke.Tick(n))
-                &world.deliver(.Terminate)
-                let first = wait_test_settle(&waiting.next().unwrap())
-                let second = wait_test_settle(&waiting.next().unwrap())
-                waiting.close().finish().unwrap()
-                (first, second)
-            },
-        )
-        sim.close()
-        testing.assert_eq(woke, (UInt64(1004), UInt64(3)), "the signal was not delivered before the timer")?
-        .Ok(())
-    }
-
-    test fn a_signal_delivered_before_its_registration_does_not_wake_it() {
-        var sim = io.Simulation.open(seed: 6).unwrap()
-        let woke = &sim.run(
-            |inout world| {
-                &world.deliver(.Interrupt)
-                var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
-                let stop = &waiting.signal(.Interrupt, |sink share| WaitTestWoke.Stop(share)).unwrap()
-                let _tick = &waiting.after(time.Duration.from_milliseconds(50), UInt64(3), |sink n| WaitTestWoke.Tick(n))
-                let first = wait_test_settle(&waiting.next().unwrap())
-                let share = &waiting.take(stop).unwrap()
-                let delivered = share.delivered()
-                share.settle()
-                waiting.close().finish().unwrap()
-                (first, delivered)
-            },
-        )
-        sim.close()
-        testing.assert_eq(woke, (UInt64(3), false), "an earlier delivery woke a later registration")?
+    test fn a_signal_is_registered_in_a_wait_set_and_withdrawn() {
+        var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
+        let stop = &waiting.signal(.User2, |sink share| WaitTestWoke.Stop(share)).unwrap()
+        let taken = &waiting.take(stop).unwrap()
+        let delivered = taken.delivered()
+        taken.settle()
+        waiting.close().finish().unwrap()
+        testing.assert(!delivered, "an unfired signal said it was delivered")?
         .Ok(())
     }
 
     // Register again with a share already held, such as the one a delivered
     // message carries, so no moment passes in which the signal would take
     // its saved action.
-    pub fn signal_with[W: Release + fn(sink ready: io.SignalShare) -> M](inout self: Self, sink share: io.SignalShare, sink wrap: W) -> Result[Registered[io.SignalShare], Unregistered[io.SignalShare]] where carries(.Err: share), retains(self: wrap) {
+    pub fn signal_with[W: Release + fn(sink ready: SignalShare) -> M](inout self: Self, sink share: SignalShare, sink wrap: W) -> Result[Registered[SignalShare], Unregistered[SignalShare]] where carries(.Err: share), retains(self: wrap) {
         let (slot, generation) = &self.reserve()
         let watched = linea_waitset_signal(self.set, slot, share.number(), share.home())
         if watched != 0 {
             linea_waitset_unreserve(self.set, slot)
             wrap.release()
-            return .Err(.{ value = share.undelivered(), reason = io.IoError.from_os(.Configure, Int32(0 - watched)) })
+            return .Err(.{ value = share.undelivered(), reason = IoError.from_os(.Configure, Int32(0 - watched)) })
         }
         // The share is marked delivered as it leaves the set through `next`.
         let deliver = self.wrapping(
-            [sink wrap] |sink held: io.SignalShare| -> M {
+            [sink wrap] |sink held: SignalShare| -> M {
                 wrap(held.delivered_now())
             },
         )
         &self.hold(slot, share.undelivered(), deliver)
         .Ok(Registered.minted(self.identity, slot, generation))
-    }
-
-    test fn a_delivered_share_registers_again_for_the_next_delivery() {
-        var sim = io.Simulation.open(seed: 7).unwrap()
-        let delivered = &sim.run(
-            |inout world| {
-                var waiting: WaitSet[io.SignalShare] = WaitSet.open()
-                let _first = &waiting.signal(.User1, |sink share| share).unwrap()
-                &world.deliver(.User1)
-                &world.deliver(.User1)
-                let share = &waiting.next().unwrap()
-                let once = share.delivered()
-                let again = &waiting.signal_with(share, |sink share| share).unwrap()
-                // The two deliveries above were one wake; the new registration
-                // waits for a third.
-                let quiet = match &waiting.take_if_registered(again) {
-                    Some(unfired) => {
-                        let undelivered = !unfired.delivered()
-                        unfired.settle()
-                        undelivered
-                    },
-                    None => false,
-                }
-                waiting.close().finish().unwrap()
-                (once, quiet)
-            },
-        )
-        sim.close()
-        testing.assert_eq(delivered, (true, true), "a share registered again was woken by a delivery before it")?
-        .Ok(())
     }
 
     // Wait until a source is ready and deliver it wrapped, the one signalled
@@ -698,29 +557,6 @@ impl[M] WaitSet[M] {
     // ready.
     pub fn take_if_registered[T](inout self: Self, key: Registered[T]) -> Option[T] where carries(.Some: self) {
         &self.withdraw(key, 1)
-    }
-
-    test fn an_expired_timer_is_not_withdrawn_as_unfired() {
-        var sim = io.Simulation.open(seed: 8).unwrap()
-        let answers = &sim.run(
-            |inout world| {
-                var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
-                let soon = &waiting.after(time.Duration.from_milliseconds(10), UInt64(1), |sink n| WaitTestWoke.Tick(n))
-                let late = &waiting.after(time.Duration.from_milliseconds(500), UInt64(2), |sink n| WaitTestWoke.Tick(n))
-                &world.advance(time.Duration.from_milliseconds(10))
-                let fired = &waiting.take_if_registered(soon).is_none()
-                let unfired = &waiting.take_if_registered(late).unwrap()
-                // Taking the expired timer still answers its message, and it
-                // is never delivered afterwards.
-                let message = &waiting.take(soon).unwrap()
-                let empty = wait_test_nothing(&waiting.next())
-                waiting.close().finish().unwrap()
-                (fired, unfired, message, empty)
-            },
-        )
-        sim.close()
-        testing.assert_eq(answers, (true, UInt64(2), UInt64(1), true), "an expired timer was withdrawn as unfired, or delivered after it was taken")?
-        .Ok(())
     }
 
     fn withdraw[T](inout self: Self, key: Registered[T], only_registered: UInt8) -> Option[T] where carries(.Some: self) {

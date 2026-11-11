@@ -1,0 +1,226 @@
+import std.io
+import std.mem
+import std.net
+import std.task
+import std.testing
+import std.time
+
+use task.WaitSet
+
+@derive(Release)
+enum SimTestWoke {
+    Tick(UInt64),
+    Arrived(net.Listener),
+    Room(net.Connection),
+    Stop(io.SignalShare),
+}
+
+fn sim_test_settle(sink woke: SimTestWoke) -> UInt64 {
+    match woke {
+        Tick(n) => n,
+        Arrived(listener) => {
+            listener.release()
+            1002
+        },
+        Room(connection) => {
+            connection.release()
+            1003
+        },
+        Stop(share) => {
+            share.settle()
+            1004
+        },
+    }
+}
+
+fn test_listener_is_readable_once_a_connection_waits() {
+    var sim = io.Simulation.open(seed: 3).unwrap()
+    let woke = &sim.run(
+        |inout _world| {
+            var waiting: WaitSet[SimTestWoke] = WaitSet.open()
+            let listener = net.listen(net.loopback(80)).unwrap()
+            let _key = &waiting.readable(listener, |sink ready| SimTestWoke.Arrived(ready)).unwrap()
+            let _never = &waiting.after(time.Duration.from_seconds(60), UInt64(9), |sink n| SimTestWoke.Tick(n))
+            let client = net.connect(net.loopback(80)).unwrap()
+            let kind = sim_test_settle(&waiting.next().unwrap())
+            client.release()
+            var left = waiting.close()
+            let unfired = sim_test_settle(&left.pop().unwrap())
+            left.finish().unwrap()
+            (kind, unfired)
+        },
+    )
+    sim.close()
+    testing.assert_eq(woke, (UInt64(1002), UInt64(9)), "the listener was not delivered before the timer").unwrap()
+}
+
+fn test_connection_and_a_timer_at_one_instant_are_delivered_listener_first() {
+    var order: mem.Vec[(UInt64, UInt64)] = mem.Vec.new()
+    var round = UInt64(0)
+    while round < 2 {
+        var sim = io.Simulation.open(seed: 11).unwrap()
+        let woke = &sim.run(
+            |inout _world| {
+                var waiting: WaitSet[SimTestWoke] = WaitSet.open()
+                let _tick = &waiting.after(time.Duration.from_milliseconds(3), UInt64(9), |sink n| SimTestWoke.Tick(n))
+                let listener = net.listen(net.loopback(80)).unwrap()
+                let _key = &waiting.readable(listener, |sink ready| SimTestWoke.Arrived(ready)).unwrap()
+                let client = net.connect(net.loopback(80)).unwrap()
+                let first = sim_test_settle(&waiting.next().unwrap())
+                let second = sim_test_settle(&waiting.next().unwrap())
+                client.release()
+                waiting.close().finish().unwrap()
+                (first, second)
+            },
+        )
+        sim.close()
+        &order.push(woke).unwrap()
+        round += 1
+    }
+    let again = &order.pop().unwrap()
+    let once = &order.pop().unwrap()
+    order.release()
+    testing.assert_eq(once, again, "one seed gave two orders").unwrap()
+    testing.assert_eq(once, (UInt64(1002), UInt64(9)), "the timer was delivered before the listener ready at the same instant").unwrap()
+}
+
+fn test_connection_with_room_is_writable() {
+    var sim = io.Simulation.open(seed: 4).unwrap()
+    let kind = &sim.run(
+        |inout _world| {
+            var waiting: WaitSet[SimTestWoke] = WaitSet.open()
+            let listener = net.listen(net.loopback(80)).unwrap()
+            let client = net.connect(net.loopback(80)).unwrap()
+            let _key = &waiting.writable(client, |sink ready| SimTestWoke.Room(ready)).unwrap()
+            let kind = sim_test_settle(&waiting.next().unwrap())
+            listener.release()
+            waiting.close().finish().unwrap()
+            kind
+        },
+    )
+    sim.close()
+    testing.assert_eq(kind, UInt64(1003), "a connection with room to write was not delivered").unwrap()
+}
+
+fn test_delivered_signal_wakes_the_set_and_a_timer_at_the_same_instant_waits() {
+    var sim = io.Simulation.open(seed: 5).unwrap()
+    let woke = &sim.run(
+        |inout world| {
+            var waiting: WaitSet[SimTestWoke] = WaitSet.open()
+            let _stop = &waiting.signal(.Terminate, |sink share| SimTestWoke.Stop(share)).unwrap()
+            let _tick = &waiting.after(time.Duration.from_milliseconds(50), UInt64(3), |sink n| SimTestWoke.Tick(n))
+            &world.deliver(.Terminate)
+            let first = sim_test_settle(&waiting.next().unwrap())
+            let second = sim_test_settle(&waiting.next().unwrap())
+            waiting.close().finish().unwrap()
+            (first, second)
+        },
+    )
+    sim.close()
+    testing.assert_eq(woke, (UInt64(1004), UInt64(3)), "the signal was not delivered before the timer").unwrap()
+}
+
+fn test_signal_delivered_before_its_registration_does_not_wake_it() {
+    var sim = io.Simulation.open(seed: 6).unwrap()
+    let woke = &sim.run(
+        |inout world| {
+            &world.deliver(.Interrupt)
+            var waiting: WaitSet[SimTestWoke] = WaitSet.open()
+            let stop = &waiting.signal(.Interrupt, |sink share| SimTestWoke.Stop(share)).unwrap()
+            let _tick = &waiting.after(time.Duration.from_milliseconds(50), UInt64(3), |sink n| SimTestWoke.Tick(n))
+            let first = sim_test_settle(&waiting.next().unwrap())
+            let share = &waiting.take(stop).unwrap()
+            let delivered = share.delivered()
+            share.settle()
+            waiting.close().finish().unwrap()
+            (first, delivered)
+        },
+    )
+    sim.close()
+    testing.assert_eq(woke, (UInt64(3), false), "an earlier delivery woke a later registration").unwrap()
+}
+
+fn test_delivered_share_registers_again_for_the_next_delivery() {
+    var sim = io.Simulation.open(seed: 7).unwrap()
+    let delivered = &sim.run(
+        |inout world| {
+            var waiting: WaitSet[io.SignalShare] = WaitSet.open()
+            let _first = &waiting.signal(.User1, |sink share| share).unwrap()
+            &world.deliver(.User1)
+            &world.deliver(.User1)
+            let share = &waiting.next().unwrap()
+            let once = share.delivered()
+            let again = &waiting.signal_with(share, |sink share| share).unwrap()
+            let quiet = match &waiting.take_if_registered(again) {
+                Some(unfired) => {
+                    let undelivered = !unfired.delivered()
+                    unfired.settle()
+                    undelivered
+                },
+                None => false,
+            }
+            waiting.close().finish().unwrap()
+            (once, quiet)
+        },
+    )
+    sim.close()
+    testing.assert_eq(delivered, (true, true), "a share registered again was woken by a delivery before it").unwrap()
+}
+
+fn test_expired_timer_is_not_withdrawn_as_unfired() {
+    var sim = io.Simulation.open(seed: 8).unwrap()
+    let answers = &sim.run(
+        |inout world| {
+            var waiting: WaitSet[SimTestWoke] = WaitSet.open()
+            let soon = &waiting.after(time.Duration.from_milliseconds(10), UInt64(1), |sink n| SimTestWoke.Tick(n))
+            let late = &waiting.after(time.Duration.from_milliseconds(500), UInt64(2), |sink n| SimTestWoke.Tick(n))
+            &world.advance(time.Duration.from_milliseconds(10))
+            let fired = &waiting.take_if_registered(soon).is_none()
+            let unfired = &waiting.take_if_registered(late).unwrap()
+            let message = &waiting.take(soon).unwrap()
+            let empty = match &waiting.next() {
+                None => true,
+                Some(woke) => {
+                    let _s = sim_test_settle(woke)
+                    false
+                },
+            }
+            waiting.close().finish().unwrap()
+            (fired, unfired, message, empty)
+        },
+    )
+    sim.close()
+    testing.assert_eq(answers, (true, UInt64(2), UInt64(1), true), "an expired timer was withdrawn as unfired, or delivered after it was taken").unwrap()
+}
+
+fn test_timers_are_delivered_in_the_order_they_expire() {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let order = &sim.run(
+        |inout _world| {
+            var waiting: WaitSet[SimTestWoke] = WaitSet.open()
+            let _late = &waiting.after(time.Duration.from_milliseconds(300), UInt64(2), |sink n| SimTestWoke.Tick(n))
+            let _soon = &waiting.after(time.Duration.from_milliseconds(100), UInt64(1), |sink n| SimTestWoke.Tick(n))
+            let started = time.Instant.now()
+            let first = sim_test_settle(&waiting.next().unwrap())
+            let waited = started.elapsed()
+            let second = sim_test_settle(&waiting.next().unwrap())
+            waiting.close().finish().unwrap()
+            (first, second, waited)
+        },
+    )
+    sim.close()
+    testing.assert_eq(order, (UInt64(1), UInt64(2), time.Duration.from_milliseconds(100)), "the timers did not fire in order at their instants").unwrap()
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    test_timers_are_delivered_in_the_order_they_expire()
+    test_listener_is_readable_once_a_connection_waits()
+    test_connection_and_a_timer_at_one_instant_are_delivered_listener_first()
+    test_connection_with_room_is_writable()
+    test_delivered_signal_wakes_the_set_and_a_timer_at_the_same_instant_waits()
+    test_signal_delivered_before_its_registration_does_not_wake_it()
+    test_delivered_share_registers_again_for_the_next_delivery()
+    test_expired_timer_is_not_withdrawn_as_unfired()
+    io.println("ok")?
+    .Ok(0)
+}

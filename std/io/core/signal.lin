@@ -8,6 +8,8 @@ extern fn linea_signal_acquire(signal: UInt8) -> Int64
 
 extern fn linea_signal_release(signal: UInt8, home: UInt64)
 
+extern fn linea_io_current() -> UInt64
+
 // Signal names the operating-system signals a wait set can wait for. Every
 // other signal stays the runtime's or the system's: a fault belongs to the
 // runtime's fault handler, a broken pipe to its writes, and `SIGKILL` and
@@ -27,7 +29,7 @@ pub enum Signal {
 
 impl Signal {
     // The router's number for the signal, in declaration order.
-    fn number(self: Self) -> UInt8 {
+    internal fn number(self: Self) -> UInt8 {
         match self {
             Terminate => 0,
             Interrupt => 1,

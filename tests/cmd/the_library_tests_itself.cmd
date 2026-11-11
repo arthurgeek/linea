@@ -662,17 +662,14 @@ The library tests itself.
   ok    io.a_prompt_reads_its_response_into_an_arena
   ok    io.a_raw_line_preserves_crlf_without_text_conversion
   ok    io.a_reader_buffers_from_the_system_allocator
-  ok    io.a_readiness_within_its_holder_watches_the_same_descriptor
   ok    io.a_refused_buffer_displays_a_failed_close
   ok    io.a_resumed_borrowed_line_is_held_in_an_arena
   ok    io.a_resumed_borrowed_raw_line_is_held_in_an_arena
   ok    io.a_resumed_owned_line_is_allocated_from_an_arena
   ok    io.a_resumed_owned_raw_line_is_allocated_from_an_arena
-  ok    io.a_share_taken_back_was_not_delivered
   ok    io.a_simulation_opens_with_the_default_network_or_the_one_given
   ok    io.a_simulation_that_has_done_nothing_has_a_fixed_fingerprint
   ok    io.a_smaller_line_limit_releases_excess_record_capacity
-  ok    io.a_source_names_the_descriptor_it_was_made_from
   ok    io.a_task_runs_on_the_system_outside_a_simulation
   ok    io.a_writer_buffers_from_the_system_allocator
   ok    io.abandon_returns_the_reader_and_drops_its_read_ahead
@@ -687,6 +684,9 @@ The library tests itself.
   ok    io.an_oversized_line_retains_its_consumed_prefix
   ok    io.buffered_output_retries_only_its_unsent_suffix
   ok    io.core.a_line_is_the_value_and_the_ending_after_it
+  ok    io.core.a_readiness_within_its_holder_watches_the_same_descriptor
+  ok    io.core.a_share_taken_back_was_not_delivered
+  ok    io.core.a_source_names_the_descriptor_it_was_made_from
   ok    io.core.a_value_that_prints_while_it_is_printed_is_printed
   ok    io.core.a_write_to_a_descriptor_the_process_lacks_reports_why
   ok    io.core.an_empty_descriptor_read_does_not_access_the_descriptor
@@ -705,6 +705,7 @@ The library tests itself.
   ok    io.core.print_renders_a_value_to_standard_output
   ok    io.core.println_ends_the_value_with_a_line_on_standard_output
   ok    io.core.releasing_a_descriptor_leaves_it_open
+  ok    io.core.settling_the_last_share_lets_the_signal_be_shared_again
   ok    io.core.standard_error_is_descriptor_two
   ok    io.core.standard_input_is_descriptor_zero
   ok    io.core.standard_output_is_descriptor_one
@@ -757,7 +758,6 @@ The library tests itself.
   ok    io.settling_a_failed_finish_keeps_the_write_failure_and_a_failed_close
   ok    io.settling_a_failed_read_releases_the_partial_bytes
   ok    io.settling_a_refused_buffer_closes_the_stream_and_keeps_the_reason
-  ok    io.settling_the_last_share_lets_the_signal_be_shared_again
   ok    io.taking_an_invalid_complete_line_does_not_discard_the_following_line
   ok    io.text_lines_strip_only_their_terminators
   ok    io.the_default_network_delivers_whole_writes_after_a_millisecond
@@ -1399,29 +1399,25 @@ The library tests itself.
   ok    session.the_dual_of_the_dual_is_the_protocol
   ok    task.a_cancelled_slot_runs_nothing_and_gives_the_body_back
   ok    task.a_client_reaches_the_state_its_owner_holds
-  ok    task.a_connection_and_a_timer_at_one_instant_are_delivered_listener_first
-  ok    task.a_connection_with_room_is_writable
   ok    task.a_copied_key_names_the_same_registration
-  ok    task.a_delivered_share_registers_again_for_the_next_delivery
-  ok    task.a_delivered_signal_wakes_the_set_and_a_timer_at_the_same_instant_waits
   ok    task.a_failed_preparation_settles_to_its_reason
   ok    task.a_handle_is_delivered_once_its_body_has_returned
   ok    task.a_key_is_refused_by_another_set_and_after_its_slot_is_reused
-  ok    task.a_listener_is_readable_once_a_connection_waits
   ok    task.a_minted_key_names_what_it_was_minted_for
   ok    task.a_prepared_body_runs_once_its_task_starts
   ok    task.a_refused_allocation_hands_the_body_back
   ok    task.a_registered_endpoint_is_delivered_once_its_peer_sends
   ok    task.a_set_with_nothing_registered_answers_none_without_waiting
-  ok    task.a_signal_delivered_before_its_registration_does_not_wake_it
+  ok    task.a_signal_is_registered_in_a_wait_set_and_withdrawn
   ok    task.a_started_task_answers_its_handle
   ok    task.a_taken_endpoint_comes_back_with_its_peer_still_waiting
   ok    task.a_task_started_in_one_call_runs_its_body
   ok    task.a_task_that_cannot_start_answers_the_reason
   ok    task.a_thread_that_cannot_be_made_hands_the_body_back
+  ok    task.a_timer_is_registered_and_withdrawn
   ok    task.a_value_that_is_ready_now_is_delivered_at_once
+  ok    task.a_value_that_is_writable_at_once_is_delivered
   ok    task.all_runs_sequentially_and_on_threads
-  ok    task.an_expired_timer_is_not_withdrawn_as_unfired
   ok    task.an_offering_endpoint_is_delivered_once_its_peer_chooses
   ok    task.an_owning_task_hands_its_state_back_when_closed
   ok    task.calls_from_two_tasks_run_one_at_a_time
@@ -1438,7 +1434,6 @@ The library tests itself.
   ok    task.map_results_preserves_all_slots
   ok    task.releasing_a_client_leaves_its_owner_serving
   ok    task.releasing_an_owner_joins_its_task
-  ok    task.timers_are_delivered_in_the_order_they_expire
   ok    testing.a_failure_displays_the_callers_message
   ok    testing.a_new_recorder_holds_nothing
   ok    testing.a_recorder_keeps_what_was_rendered_into_it
@@ -1616,4 +1611,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1613 passed, 0 failed
+  1608 passed, 0 failed

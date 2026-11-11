@@ -21,3 +21,11 @@ pub use core.line
 pub use core.println
 pub use core.eprint
 pub use core.eprintln
+pub use core.Pollable
+pub use core.Interest
+pub use core.Readiness
+pub use core.Source
+pub use core.Signal
+pub use core.SignalError
+pub use core.SignalShare
+pub use core.source
