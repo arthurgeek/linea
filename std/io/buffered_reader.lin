@@ -333,6 +333,22 @@ impl[R: Reader] BufferedReader[R, mem.SystemAllocator] {
     }
 }
 
+// A buffered reader is ready to read at once while it holds bytes it has not
+// handed out, or has seen its source end: a wait on the descriptor would miss
+// them. Otherwise it is ready when its source is.
+impl[R: Reader + Pollable, A: Allocator] Pollable for BufferedReader[R, A] {
+    fn readiness(self: Self, interest: Interest) -> Readiness[Self] where borrows(self) {
+        let buffered = match interest {
+            Readable => self.cursor < self.available || self.eof,
+            Writable => false,
+        }
+        if buffered {
+            return .Now
+        }
+        self.reader.readiness(interest).within(self)
+    }
+}
+
 impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Read from `reader` through a read-ahead buffer of `capacity` bytes from
     // `allocator`. A zero capacity or refused storage returns `reader`.

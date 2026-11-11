@@ -651,6 +651,7 @@ The library tests itself.
   ok    io.a_buffered_writer_holds_its_bytes_in_an_arena
   ok    io.a_buffered_writer_renders_a_utf8_line_across_short_writes
   ok    io.a_closed_simulation_leaves_the_system_current
+  ok    io.a_delivery_with_nothing_waiting_for_it_changes_nothing
   ok    io.a_failed_finish_can_be_released_whole
   ok    io.a_failed_prompt_flush_does_not_read_input
   ok    io.a_failed_prompt_preserves_existing_input_lookahead
@@ -683,6 +684,9 @@ The library tests itself.
   ok    io.an_oversized_line_retains_its_consumed_prefix
   ok    io.buffered_output_retries_only_its_unsent_suffix
   ok    io.core.a_line_is_the_value_and_the_ending_after_it
+  ok    io.core.a_readiness_within_its_holder_watches_the_same_descriptor
+  ok    io.core.a_share_taken_back_was_not_delivered
+  ok    io.core.a_source_names_the_descriptor_it_was_made_from
   ok    io.core.a_value_that_prints_while_it_is_printed_is_printed
   ok    io.core.a_write_to_a_descriptor_the_process_lacks_reports_why
   ok    io.core.an_empty_descriptor_read_does_not_access_the_descriptor
@@ -701,6 +705,7 @@ The library tests itself.
   ok    io.core.print_renders_a_value_to_standard_output
   ok    io.core.println_ends_the_value_with_a_line_on_standard_output
   ok    io.core.releasing_a_descriptor_leaves_it_open
+  ok    io.core.settling_the_last_share_lets_the_signal_be_shared_again
   ok    io.core.standard_error_is_descriptor_two
   ok    io.core.standard_input_is_descriptor_zero
   ok    io.core.standard_output_is_descriptor_one
@@ -1082,6 +1087,7 @@ The library tests itself.
   ok    mem.a_foreign_byte_is_read_at_its_offset
   ok    mem.a_foreign_word_is_read_at_its_offset
   ok    mem.a_handle_written_without_a_parent_is_a_handle_over_the_system
+  ok    mem.a_kept_value_comes_back_as_it_went_in
   ok    mem.a_lambda_that_captures_nothing_allocates_nothing
   ok    mem.a_new_release_log_holds_no_releases
   ok    mem.a_parent_refusing_a_chunk_refuses_the_reservation_that_needed_it
@@ -1382,6 +1388,7 @@ The library tests itself.
   ok    session.a_receive_until_answers_what_a_prompt_peer_sent
   ok    session.a_receive_until_hands_the_endpoint_back_when_the_peer_is_late
   ok    session.a_send_hands_the_value_to_the_peer
+  ok    session.an_endpoint_answers_the_number_it_was_opened_with
   ok    session.an_offer_answers_the_branch_the_peer_chose
   ok    session.an_owned_handle_can_be_detached
   ok    session.choosing_left_runs_the_peers_left_branch
@@ -1392,17 +1399,31 @@ The library tests itself.
   ok    session.the_dual_of_the_dual_is_the_protocol
   ok    task.a_cancelled_slot_runs_nothing_and_gives_the_body_back
   ok    task.a_client_reaches_the_state_its_owner_holds
+  ok    task.a_copied_key_names_the_same_registration
   ok    task.a_failed_preparation_settles_to_its_reason
+  ok    task.a_handle_is_delivered_once_its_body_has_returned
+  ok    task.a_key_is_refused_by_another_set_and_after_its_slot_is_reused
+  ok    task.a_minted_key_names_what_it_was_minted_for
   ok    task.a_prepared_body_runs_once_its_task_starts
   ok    task.a_refused_allocation_hands_the_body_back
+  ok    task.a_registered_endpoint_is_delivered_once_its_peer_sends
+  ok    task.a_set_with_nothing_registered_answers_none_without_waiting
+  ok    task.a_signal_is_registered_in_a_wait_set_and_withdrawn
   ok    task.a_started_task_answers_its_handle
+  ok    task.a_taken_endpoint_comes_back_with_its_peer_still_waiting
   ok    task.a_task_started_in_one_call_runs_its_body
   ok    task.a_task_that_cannot_start_answers_the_reason
   ok    task.a_thread_that_cannot_be_made_hands_the_body_back
+  ok    task.a_timer_is_registered_and_withdrawn
+  ok    task.a_value_that_is_ready_now_is_delivered_at_once
+  ok    task.a_value_that_is_writable_at_once_is_delivered
   ok    task.all_runs_sequentially_and_on_threads
+  ok    task.an_offering_endpoint_is_delivered_once_its_peer_chooses
   ok    task.an_owning_task_hands_its_state_back_when_closed
   ok    task.calls_from_two_tasks_run_one_at_a_time
+  ok    task.closing_a_set_answers_what_it_still_holds
   ok    task.closing_answers_every_change_a_call_made
+  ok    task.each_next_delivers_one_of_several_ready_sources
   ok    task.join3_runs_no_more_closures_at_once_than_its_bound
   ok    task.join3_runs_sequentially_and_on_threads
   ok    task.join4_runs_no_more_closures_at_once_than_its_bound
@@ -1590,4 +1611,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1587 passed, 0 failed
+  1608 passed, 0 failed

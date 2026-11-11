@@ -1,0 +1,33 @@
+import std.io
+import std.net
+import std.task
+
+use io.Pollable
+
+// A value whose readiness is a listener's.
+struct Watching {
+    source: io.Source[net.Listener],
+}
+
+impl io.Pollable for Watching {
+    fn readiness(self: Self, _interest: io.Interest) -> io.Readiness[Self] where borrows(self) {
+        let ready: io.Readiness[net.Listener] = .Wait(copy(self.source))
+        ready.within(self)
+    }
+}
+
+// A listener's source names the listener's own descriptor and borrows the
+// listener, so the listener is not closed while a wait set watches the
+// source: closing it would leave the set watching a descriptor nothing owns.
+fn main() -> UInt8 {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let source = match listener.readiness(.Readable) {
+        Now => panic("a listener is never ready at once"),
+        Wait(source) => source,
+    }
+    var waiting: task.WaitSet[Watching] = task.WaitSet.open()
+    let _key = &waiting.readable(Watching { source }, |sink ready| ready).unwrap()
+    listener.close().unwrap()
+    waiting.close().finish().unwrap()
+    0
+}

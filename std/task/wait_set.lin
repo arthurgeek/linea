@@ -1,0 +1,618 @@
+import std.io.core
+import std.mem
+import std.session
+import std.testing
+import std.time
+
+use core.Interest
+use core.IoError
+use core.Pollable
+use core.Readiness
+use core.Signal
+use core.SignalError
+use core.SignalShare
+use core.watch
+use session.Choose
+use session.Offer
+
+// The runtime keeps a wait set's registrations: which sources it watches,
+// which have fired, and in what order. The values registered stay in bytes
+// the set's `held` vector owns.
+extern fn linea_waitset_open() -> UInt64
+
+extern fn linea_waitset_identity(set: UInt64) -> UInt64
+
+extern fn linea_waitset_reserve(set: UInt64) -> UInt64
+
+extern fn linea_waitset_unreserve(set: UInt64, slot: UInt64)
+
+extern fn linea_waitset_received(set: UInt64, slot: UInt64, endpoint: UInt64)
+
+extern fn linea_waitset_returned(set: UInt64, slot: UInt64, handle: UInt64)
+
+extern fn linea_waitset_ready(set: UInt64, slot: UInt64)
+
+extern fn linea_waitset_timer(set: UInt64, slot: UInt64, after_ns: UInt64)
+
+extern fn linea_waitset_signal(set: UInt64, slot: UInt64, signal: UInt8, home: UInt64) -> Int64
+
+extern fn linea_waitset_next(set: UInt64) -> Int64
+
+extern fn linea_waitset_take(set: UInt64, slot: UInt64, generation: UInt64, only_registered: UInt8) -> UInt8
+
+extern fn linea_waitset_withdraw(set: UInt64) -> Int64
+
+extern fn linea_waitset_close(set: UInt64)
+
+// A Registered[T] names one registration of a `T` in one wait set: the set's
+// identity, which no other set is ever given, the slot the registration
+// holds, and the slot's generation when it was made. It owns nothing and
+// borrows nothing, so it can be kept across the `next` that may deliver what
+// it names. Once the registration is delivered, taken or closed, its slot's
+// generation moves on, and `take` answers `.None` for the key; a key of
+// another set answers `.None` too.
+@(opaque, copyable)
+struct Registered[phantom T] {
+    set: UInt64,
+    slot: UInt64,
+    generation: UInt64,
+}
+
+impl[T] Registered[T] {
+    // The key of the registration of a `T` that set `set` holds in `slot`
+    // at `generation`. Only the registration itself mints its key, so a key
+    // names a value of the type it says.
+    internal fn minted(set: UInt64, slot: UInt64, generation: UInt64) -> Registered[T] {
+        .{ set, slot, generation }
+    }
+
+    test fn a_minted_key_names_what_it_was_minted_for() {
+        let key: Registered[UInt64] = Registered.minted(3, 4, 5)
+        testing.assert_eq(key.names(), (UInt64(3), UInt64(4), UInt64(5)), "the key named another registration")?
+        .Ok(())
+    }
+
+    // The set's identity, the slot and the generation the key names.
+    internal fn names(self: Self) -> (UInt64, UInt64, UInt64) {
+        (self.set, self.slot, self.generation)
+    }
+
+    test fn a_copied_key_names_the_same_registration() {
+        let key: Registered[UInt64] = Registered.minted(1, 2, 3)
+        let other = copy(key)
+        testing.assert_eq(other.names(), key.names(), "a copy of a key named another registration")?
+        .Ok(())
+    }
+}
+
+// Unregistered is a registration a set could not make: the value handed
+// back, and why. A descriptor or a signal is watched through the set's
+// kernel queue, which the system may refuse to make or to extend.
+pub struct Unregistered[T] {
+    value: T,
+    reason: IoError,
+}
+
+// The value of one registration, kept in bytes, and the callable that turns
+// it into the set's message when it is delivered.
+struct Held[M] {
+    value: mem.Buffer[mem.SystemAllocator],
+    deliver: mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator]) -> M],
+}
+
+// The runtime answers a reserved slot in the high 32 bits of a word and its
+// generation in the low 32.
+let slot_shift: UInt64 = 4294967296
+
+// A WaitSet[M] waits for the first of several sources, each registered with
+// a function that wraps its value into an `M` once it is ready. `next`
+// delivers one ready source, wrapped. Every source that did not fire stays
+// registered, and `take` hands it back by its key in its own type, so nothing
+// registered is lost on the path not taken. A set is linear: `close` answers
+// every value still registered, wrapped.
+//
+// A set keeps what it holds behind erased callables, so its type cannot say
+// what they reach: it is not `Owned`, `Shareable` or `Isolated`. It stays with
+// the task that opened it, or moves into a task a body starts, and it is
+// never the state of an owning task.
+@(opaque, linear)
+struct WaitSet[M] {
+    set: UInt64,
+    identity: UInt64,
+    held: mem.Vec[Option[Held[M]]],
+}
+
+// What the tests below register: a message for each kind of source.
+enum WaitTestWoke {
+    Sent(Chan[Recv[UInt64, End], ()]),
+    Chose(Chan[Offer[End, End], ()]),
+    Joined(UInt64),
+    Tick(UInt64),
+    Always(WaitTestReady),
+    Stop(SignalShare),
+}
+
+// A value that is always ready, as a reader holding bytes is.
+struct WaitTestReady {
+    tag: UInt64,
+}
+
+impl Pollable for WaitTestReady {
+    fn readiness(_self: Self, _interest: Interest) -> Readiness[Self] where borrows(_self) {
+        .Now
+    }
+}
+
+// Start a task that sends `number` once and closes.
+fn wait_test_sender(number: UInt64) -> Chan[Recv[UInt64, End], ()] {
+    let body = sink [sink number] |sink me: Chan[Send[UInt64, End]]| {
+        me.send(number).close()
+    }
+    prepare(body).unwrap().start().detach()
+}
+
+// Receive what `wait_test_sender` sends and join it.
+fn wait_test_receive(sink chan: Chan[Recv[UInt64, End], ()]) -> UInt64 {
+    let (number, done) = chan.recv()
+    done.close()
+    number
+}
+
+// Whether `woke` is `.None`, settling a message that was delivered instead.
+fn wait_test_nothing(sink woke: Option[WaitTestWoke]) -> Bool {
+    match woke {
+        None => true,
+        Some(delivered) => {
+            let _kind = wait_test_settle(delivered)
+            false
+        },
+    }
+}
+
+// Settle whatever message a test did not expect, and answer a number that
+// names its kind.
+fn wait_test_settle(sink woke: WaitTestWoke) -> UInt64 {
+    match woke {
+        Sent(chan) => wait_test_receive(chan),
+        Chose(chan) => {
+            match chan.offer() {
+                Left(done) => done.close(),
+                Right(done) => done.close(),
+            }
+            1001
+        },
+        Joined(number) => number,
+        Tick(number) => number,
+        Always(ready) => ready.tag,
+        Stop(share) => {
+            share.settle()
+            1004
+        },
+    }
+}
+
+impl[M] WaitSet[M] {
+    // Reserve a slot in the runtime's set and answer it with its generation.
+    fn reserve(inout self: Self) -> (UInt64, UInt64) {
+        let both = linea_waitset_reserve(self.set)
+        (both / slot_shift, both % slot_shift)
+    }
+
+    // Erase `wrap` into the callable that turns the bytes a `T` is kept in
+    // into an `M`.
+    fn wrapping[T, W: Release + fn(sink ready: T) -> M](_self: Self, sink wrap: W) -> mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator]) -> M] where carries(wrap) {
+        mem.Closure.open(
+            [sink wrap] |sink value: mem.Buffer[mem.SystemAllocator]| -> M {
+                wrap(mem.take_value[T](value))
+            },
+        ).unwrap()
+    }
+
+    // Keep `value` in a reserved slot with the callable that delivers it.
+    fn hold[T](inout self: Self, slot: UInt64, sink value: T, sink deliver: mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator]) -> M]) where retains(self: value, deliver) {
+        while self.held.length() <= slot {
+            let empty: Option[Held[M]] = .None
+            &self.held.push(empty).unwrap()
+        }
+        let filled: Option[Held[M]] = .Some(.{ value = mem.keep_value(value), deliver })
+        match mem.exchange(&self.held[slot], filled) {
+            None => {},
+            Some(_) => panic("a wait set reserved a slot it still holds"),
+        }
+    }
+
+    // Take what `slot` holds out of the set.
+    fn release_slot(inout self: Self, slot: UInt64) -> Held[M] where carries(self) {
+        let empty: Option[Held[M]] = .None
+        match mem.exchange(&self.held[slot], empty) {
+            Some(held) => held,
+            None => panic("a wait set answered a slot it does not hold"),
+        }
+    }
+
+    // Take the value in `slot` out of the set, as the set's message.
+    fn deliver_held(inout self: Self, slot: UInt64) -> M where carries(self) {
+        let Held { value, deliver } = &self.release_slot(slot)
+        let message = deliver(value)
+        deliver.release()
+        message
+    }
+
+    // Take the value in `slot` out of the set, in its own type.
+    fn take_held[T](inout self: Self, slot: UInt64) -> T where carries(self) {
+        let Held { value, deliver } = &self.release_slot(slot)
+        deliver.release()
+        mem.take_value[T](value)
+    }
+
+    // Open an empty set. Running out of memory for its record traps.
+    pub fn open() -> WaitSet[M] {
+        let set = linea_waitset_open()
+        if set == 0 {
+            panic("a wait set's record could not be allocated")
+        }
+        .{ set, identity = linea_waitset_identity(set), held = mem.Vec.new() }
+    }
+
+    test fn a_set_with_nothing_registered_answers_none_without_waiting() {
+        var waiting: WaitSet[UInt64] = WaitSet.open()
+        let nothing = match &waiting.next() {
+            None => true,
+            Some(_) => false,
+        }
+        waiting.close().finish().unwrap()
+        testing.assert(nothing, "an empty set delivered something")?
+        .Ok(())
+    }
+
+    // Register an endpoint whose next operation is `recv`: it is ready once
+    // the peer's `send` waits. The peer's send cannot be withdrawn, so the
+    // endpoint stays ready until it receives, whether `next` delivers it,
+    // `take` hands it back or `close` answers it. An endpoint at another
+    // state is not one of these, and is refused.
+    pub fn received[T: Owned, N: Protocol, H, W: Release + fn(sink ready: Chan[Recv[T, N], H]) -> M](inout self: Self, sink chan: Chan[Recv[T, N], H], sink wrap: W) -> Registered[Chan[Recv[T, N], H]] where retains(self: chan, wrap) {
+        let (slot, generation) = &self.reserve()
+        let endpoint = chan.number()
+        let deliver = self.wrapping(wrap)
+        &self.hold(slot, chan, deliver)
+        linea_waitset_received(self.set, slot, endpoint)
+        Registered.minted(self.identity, slot, generation)
+    }
+
+    test fn a_registered_endpoint_is_delivered_once_its_peer_sends() {
+        var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
+        let _key = &waiting.received(wait_test_sender(41), |sink ready| WaitTestWoke.Sent(ready))
+        let number = wait_test_settle(&waiting.next().unwrap())
+        let empty = wait_test_nothing(&waiting.next())
+        waiting.close().finish().unwrap()
+        testing.assert_eq(number, UInt64(41), "the endpoint delivered did not receive what its peer sent")?
+        testing.assert(empty, "a delivered registration was still held")?
+        .Ok(())
+    }
+
+    // Register an endpoint whose next operation is `offer`: it is ready once
+    // the peer's `choose` waits, and stays ready as `received` says.
+    pub fn offered[L: Protocol, R: Protocol, H, W: Release + fn(sink ready: Chan[Offer[L, R], H]) -> M](inout self: Self, sink chan: Chan[Offer[L, R], H], sink wrap: W) -> Registered[Chan[Offer[L, R], H]] where retains(self: chan, wrap) {
+        let (slot, generation) = &self.reserve()
+        let endpoint = chan.number()
+        let deliver = self.wrapping(wrap)
+        &self.hold(slot, chan, deliver)
+        linea_waitset_received(self.set, slot, endpoint)
+        Registered.minted(self.identity, slot, generation)
+    }
+
+    test fn an_offering_endpoint_is_delivered_once_its_peer_chooses() {
+        let body = sink [] |sink me: Chan[Choose[End, End]]| {
+            me.choose_right().close()
+        }
+        var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
+        let choosing: Chan[Offer[End, End], ()] = prepare(body).unwrap().start().detach()
+        let _key = &waiting.offered(choosing, |sink ready| WaitTestWoke.Chose(ready))
+        let kind = wait_test_settle(&waiting.next().unwrap())
+        waiting.close().finish().unwrap()
+        testing.assert_eq(kind, UInt64(1001), "the offering endpoint was not delivered")?
+        .Ok(())
+    }
+
+    // Register a task's handle at its end: it is ready once the task's body
+    // has returned. Ready does not join: `close` on the handle still joins
+    // the task, at once, and releases what its body captured.
+    pub fn returned[F, A: Allocator, W: Release + fn(sink ready: Chan[End, (F, A)]) -> M](inout self: Self, sink handle: Chan[End, (F, A)], sink wrap: W) -> Registered[Chan[End, (F, A)]] where retains(self: handle, wrap) {
+        let (slot, generation) = &self.reserve()
+        let endpoint = handle.number()
+        let deliver = self.wrapping(wrap)
+        &self.hold(slot, handle, deliver)
+        linea_waitset_returned(self.set, slot, endpoint)
+        Registered.minted(self.identity, slot, generation)
+    }
+
+    test fn a_handle_is_delivered_once_its_body_has_returned() {
+        let body = sink [] |sink me: Chan[End]| {
+            me.close()
+        }
+        var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
+        let _key = &waiting.returned(
+            prepare(body).unwrap().start(),
+            |sink done| {
+                done.close()
+                WaitTestWoke.Joined(7)
+            },
+        )
+        let joined = wait_test_settle(&waiting.next().unwrap())
+        waiting.close().finish().unwrap()
+        testing.assert_eq(joined, UInt64(7), "the handle was not delivered")?
+        .Ok(())
+    }
+
+    // Register a timer: `wrap(message)` is delivered once `duration` has
+    // passed on the clock of the task's home, the simulation's inside one.
+    // Taking the timer's key back answers `message` itself.
+    pub fn after[T, W: Release + fn(sink ready: T) -> M](inout self: Self, duration: time.Duration, sink message: T, sink wrap: W) -> Registered[T] where retains(self: message, wrap) {
+        let (slot, generation) = &self.reserve()
+        let deliver = self.wrapping(wrap)
+        &self.hold(slot, message, deliver)
+        linea_waitset_timer(self.set, slot, duration.nanoseconds())
+        Registered.minted(self.identity, slot, generation)
+    }
+
+    test fn a_timer_is_registered_and_withdrawn() {
+        var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
+        let key = &waiting.after(time.Duration.from_seconds(60), UInt64(42), |sink n| WaitTestWoke.Tick(n))
+        let taken = &waiting.take(key).unwrap()
+        waiting.close().finish().unwrap()
+        testing.assert_eq(taken, UInt64(42), "the timer's message did not come back")?
+        .Ok(())
+    }
+
+    // Register a value whose descriptor the set waits on, ready once
+    // `interest` holds of it. A value that knows it is ready already, such as
+    // a reader holding bytes, is ready at once. Readiness is a hint: an
+    // operation on a value `next` delivers may still have to wait.
+    fn polled[T: Pollable, W: Release + fn(sink ready: T) -> M](inout self: Self, sink holder: T, sink wrap: W, interest: Interest) -> Result[Registered[T], Unregistered[T]] where carries(.Err: holder), retains(self: holder, wrap) {
+        let (slot, generation) = &self.reserve()
+        // The source borrows `holder`, so the descriptor is watched before
+        // `holder` moves into the set.
+        let watched: Option[Int64] = match holder.readiness(interest) {
+            Now => .None,
+            Wait(source) => .Some(watch(self.set, slot, source, interest)),
+        }
+        match watched {
+            None => {
+                let deliver = self.wrapping(wrap)
+                &self.hold(slot, holder, deliver)
+                linea_waitset_ready(self.set, slot)
+            },
+            Some(refused) => {
+                if refused != 0 {
+                    linea_waitset_unreserve(self.set, slot)
+                    wrap.release()
+                    return .Err(.{ value = holder, reason = IoError.from_os(.Configure, Int32(0 - refused)) })
+                }
+                let deliver = self.wrapping(wrap)
+                &self.hold(slot, holder, deliver)
+            },
+        }
+        .Ok(Registered.minted(self.identity, slot, generation))
+    }
+
+    // Register a value that is ready once it can be read without waiting: a
+    // listener with a connection to accept, a connection with bytes or its
+    // end to read. A failure hands the value back.
+    pub fn readable[T: Pollable, W: Release + fn(sink ready: T) -> M](inout self: Self, sink holder: T, sink wrap: W) -> Result[Registered[T], Unregistered[T]] where carries(.Err: holder), retains(self: holder, wrap) {
+        &self.polled(holder, wrap, .Readable)
+    }
+
+    test fn a_value_that_is_ready_now_is_delivered_at_once() {
+        var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
+        let _key = &waiting.readable(WaitTestReady { tag = 5 }, |sink ready| WaitTestWoke.Always(ready)).unwrap()
+        let tag = wait_test_settle(&waiting.next().unwrap())
+        waiting.close().finish().unwrap()
+        testing.assert_eq(tag, UInt64(5), "a value ready at once was not delivered")?
+        .Ok(())
+    }
+
+    // Register a value that is ready once it can be written without waiting.
+    // A failure hands the value back.
+    pub fn writable[T: Pollable, W: Release + fn(sink ready: T) -> M](inout self: Self, sink holder: T, sink wrap: W) -> Result[Registered[T], Unregistered[T]] where carries(.Err: holder), retains(self: holder, wrap) {
+        &self.polled(holder, wrap, .Writable)
+    }
+
+    test fn a_value_that_is_writable_at_once_is_delivered() {
+        var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
+        let _key = &waiting.writable(WaitTestReady { tag = 6 }, |sink ready| WaitTestWoke.Always(ready)).unwrap()
+        let tag = wait_test_settle(&waiting.next().unwrap())
+        waiting.close().finish().unwrap()
+        testing.assert_eq(tag, UInt64(6), "a value writable at once was not delivered")?
+        .Ok(())
+    }
+
+    // Register an operating-system signal: ready at the first delivery of
+    // `signal` after this call. The registration holds a share of the
+    // signal's disposition, which `wrap` receives, so while the share lives
+    // the signal no longer takes its saved action (ending the process, for
+    // `Terminate`). A signal the launcher ignores is refused with
+    // `.Ignored`.
+    pub fn signal[W: Release + fn(sink ready: SignalShare) -> M](inout self: Self, signal: Signal, sink wrap: W) -> Result[Registered[SignalShare], SignalError] where retains(self: wrap) {
+        match SignalShare.acquire(signal) {
+            Err(refused) => {
+                wrap.release()
+                .Err(refused)
+            },
+            Ok(share) => match &self.signal_with(share, wrap) {
+                Ok(key) => .Ok(key),
+                Err(failure) => {
+                    let Unregistered { value, reason } = failure
+                    value.settle()
+                    .Err(.Unavailable(reason))
+                },
+            },
+        }
+    }
+
+    test fn a_signal_is_registered_in_a_wait_set_and_withdrawn() {
+        var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
+        let stop = &waiting.signal(.User2, |sink share| WaitTestWoke.Stop(share)).unwrap()
+        let taken = &waiting.take(stop).unwrap()
+        let delivered = taken.delivered()
+        taken.settle()
+        waiting.close().finish().unwrap()
+        testing.assert(!delivered, "an unfired signal said it was delivered")?
+        .Ok(())
+    }
+
+    // Register again with a share already held, such as the one a delivered
+    // message carries, so no moment passes in which the signal would take
+    // its saved action.
+    pub fn signal_with[W: Release + fn(sink ready: SignalShare) -> M](inout self: Self, sink share: SignalShare, sink wrap: W) -> Result[Registered[SignalShare], Unregistered[SignalShare]] where carries(.Err: share), retains(self: wrap) {
+        let (slot, generation) = &self.reserve()
+        let watched = linea_waitset_signal(self.set, slot, share.number(), share.home())
+        if watched != 0 {
+            linea_waitset_unreserve(self.set, slot)
+            wrap.release()
+            return .Err(.{ value = share.undelivered(), reason = IoError.from_os(.Configure, Int32(0 - watched)) })
+        }
+        // The share is marked delivered as it leaves the set through `next`.
+        let deliver = self.wrapping(
+            [sink wrap] |sink held: SignalShare| -> M {
+                wrap(held.delivered_now())
+            },
+        )
+        &self.hold(slot, share.undelivered(), deliver)
+        .Ok(Registered.minted(self.identity, slot, generation))
+    }
+
+    // Wait until a source is ready and deliver it wrapped, the one signalled
+    // earliest when several are. An empty set answers `.None` without
+    // waiting.
+    pub fn next(inout self: Self) -> Option[M] where carries(.Some: self) {
+        let slot = linea_waitset_next(self.set)
+        if slot < 0 {
+            return .None
+        }
+        .Some(&self.deliver_held(UInt64(slot)))
+    }
+
+    test fn each_next_delivers_one_of_several_ready_sources() {
+        var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
+        let _a = &waiting.readable(WaitTestReady { tag = 1 }, |sink ready| WaitTestWoke.Always(ready)).unwrap()
+        let _b = &waiting.readable(WaitTestReady { tag = 2 }, |sink ready| WaitTestWoke.Always(ready)).unwrap()
+        let first = wait_test_settle(&waiting.next().unwrap())
+        let second = wait_test_settle(&waiting.next().unwrap())
+        let empty = wait_test_nothing(&waiting.next())
+        waiting.close().finish().unwrap()
+        testing.assert_eq((first, second), (UInt64(1), UInt64(2)), "the sources were not delivered one each, earliest first")?
+        testing.assert(empty, "a set delivered more than it held")?
+        .Ok(())
+    }
+
+    // Withdraw the registration `key` names and answer its value in its own
+    // type: an endpoint at the state it was registered at, a timer's message
+    // unfired. A key whose registration was delivered, taken or closed, or
+    // that names another set, answers `.None`.
+    pub fn take[T](inout self: Self, key: Registered[T]) -> Option[T] where carries(.Some: self) {
+        &self.withdraw(key, 0)
+    }
+
+    test fn a_taken_endpoint_comes_back_with_its_peer_still_waiting() {
+        var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
+        let key = &waiting.received(wait_test_sender(12), |sink ready| WaitTestWoke.Sent(ready))
+        let chan = &waiting.take(key).unwrap()
+        let again = match &waiting.take(key) {
+            None => true,
+            Some(twice) => wait_test_receive(twice) == 0,
+        }
+        let empty = wait_test_nothing(&waiting.next())
+        waiting.close().finish().unwrap()
+        let number = wait_test_receive(chan)
+        testing.assert_eq(number, UInt64(12), "the endpoint taken back lost its peer's value")?
+        testing.assert(again, "a key was honoured twice")?
+        testing.assert(empty, "a taken registration was delivered")?
+        .Ok(())
+    }
+
+    test fn a_key_is_refused_by_another_set_and_after_its_slot_is_reused() {
+        var one: WaitSet[WaitTestWoke] = WaitSet.open()
+        var other: WaitSet[WaitTestWoke] = WaitSet.open()
+        let far = time.Duration.from_seconds(3600)
+        let first = &one.after(far, UInt64(1), |sink n| WaitTestWoke.Tick(n))
+        let _theirs = &other.after(far, UInt64(2), |sink n| WaitTestWoke.Tick(n))
+        let stolen = &other.take(first).is_none()
+        let taken = &one.take(first).unwrap()
+        let second = &one.after(far, UInt64(3), |sink n| WaitTestWoke.Tick(n))
+        let stale = &one.take(first).is_none()
+        let current = &one.take(second).unwrap()
+        one.close().finish().unwrap()
+        var left = other.close()
+        let theirs = wait_test_settle(&left.pop().unwrap())
+        left.finish().unwrap()
+        testing.assert(stolen, "a key of one set took from another")?
+        testing.assert(stale, "a key reached the registration that reused its slot")?
+        testing.assert_eq((taken, current, theirs), (UInt64(1), UInt64(3), UInt64(2)), "a timer's message did not come back as it went in")?
+        .Ok(())
+    }
+
+    // Withdraw the registration `key` names only while its source has not
+    // fired, answering `.None` once it has: the readiness check and the
+    // withdrawal are one step, so a value is withdrawn exactly when it is not
+    // ready.
+    pub fn take_if_registered[T](inout self: Self, key: Registered[T]) -> Option[T] where carries(.Some: self) {
+        &self.withdraw(key, 1)
+    }
+
+    fn withdraw[T](inout self: Self, key: Registered[T], only_registered: UInt8) -> Option[T] where carries(.Some: self) {
+        let (set, slot, generation) = key.names()
+        if set != self.identity {
+            return .None
+        }
+        if linea_waitset_take(self.set, slot, generation, only_registered) == 0 {
+            return .None
+        }
+        .Some(&self.take_held(slot))
+    }
+
+    // Close the set and answer every value still registered, wrapped, in the
+    // order of their slots.
+    pub fn close(sink self: Self) -> mem.Vec[M, mem.SystemAllocator] where carries(self) {
+        var closing = self
+        var left: mem.Vec[M] = mem.Vec.new()
+        loop {
+            let slot = linea_waitset_withdraw(closing.set)
+            if slot < 0 {
+                break
+            }
+            &left.push(&closing.deliver_held(UInt64(slot))).unwrap()
+        }
+        let WaitSet { set, identity: _, held } = closing
+        linea_waitset_close(set)
+        var holding = held
+        loop {
+            let slot = &holding.pop() else {
+                break
+            }
+            match slot {
+                None => {},
+                Some(_) => panic("a wait set closed with a value it never answered"),
+            }
+        }
+        holding.finish().unwrap()
+        left
+    }
+
+    test fn closing_a_set_answers_what_it_still_holds() {
+        var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
+        let _peer = &waiting.received(wait_test_sender(30), |sink ready| WaitTestWoke.Sent(ready))
+        let _timer = &waiting.after(time.Duration.from_seconds(3600), UInt64(4), |sink n| WaitTestWoke.Tick(n))
+        var left = waiting.close()
+        let count = left.length()
+        var total = UInt64(0)
+        loop {
+            let woke = &left.pop() else {
+                break
+            }
+            total += wait_test_settle(woke)
+        }
+        left.finish().unwrap()
+        testing.assert_eq((count, total), (UInt64(2), UInt64(34)), "closing a set lost or doubled a registration")?
+        .Ok(())
+    }
+}

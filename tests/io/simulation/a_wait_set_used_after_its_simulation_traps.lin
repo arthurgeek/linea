@@ -1,0 +1,20 @@
+import std.io
+import std.task
+import std.time
+
+// A wait set opened inside a simulation waits on the simulation's clock and
+// network. Returned from `run`, it belongs to a loop that is no longer
+// running, so closing it outside traps.
+fn main() -> UInt8 {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let opened = &sim.run(
+        |inout _world| {
+            var waiting: task.WaitSet[UInt64] = task.WaitSet.open()
+            let _tick = &waiting.after(time.Duration.from_seconds(1), UInt64(1), |sink n| n)
+            waiting
+        },
+    )
+    sim.close()
+    opened.close().finish().unwrap()
+    0
+}

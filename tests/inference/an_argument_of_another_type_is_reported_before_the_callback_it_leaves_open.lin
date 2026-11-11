@@ -1,0 +1,38 @@
+import std.session
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+enum Turn {
+    Got(Chan[Send[UInt64, End], ()]),
+}
+
+// The callback's parameter type names `T` and `N`, which only `chan` settles.
+fn received[T: Owned, N: Protocol, H, M, W: Release + fn(sink ready: Chan[Recv[T, N], H]) -> M](sink chan: Chan[Recv[T, N], H], sink wrap: W) -> M where carries(chan, wrap) {
+    let message = wrap(chan)
+    wrap.release()
+    message
+}
+
+fn wrapped(sink ready: Chan[Send[UInt64, End], ()]) -> Turn {
+    Turn.Got(ready)
+}
+
+// An endpoint that sends is passed where one that receives is wanted, so
+// nothing settles `T` and `N`. The argument is what is wrong, and the
+// callback beside it is not reported for the types it was left without.
+fn by_lambda(sink chan: Chan[Send[UInt64, End], ()]) -> Turn {
+    received(chan, |sink ready| Turn.Got(ready))
+}
+
+fn by_name(sink chan: Chan[Send[UInt64, End], ()]) -> Turn {
+    received(chan, wrapped)
+}
+
+fn main() -> UInt8 {
+    let _lambda = by_lambda
+    let _name = by_name
+    0
+}

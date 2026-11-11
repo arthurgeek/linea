@@ -1,0 +1,68 @@
+import std.io
+import std.session
+import std.task
+import std.time
+
+use session.Chan
+use session.End
+
+// Close a handle taken back from the set, which joins its task, and answer
+// whether the set still held it.
+fn joined[F, A: Allocator](sink taken: Option[Chan[End, (F, A)]]) -> Bool {
+    match taken {
+        Some(handle) => {
+            handle.close()
+            true
+        },
+        None => false,
+    }
+}
+
+// Three children work for different lengths of time. The parent waits for
+// whichever returns first, then takes the other two handles back by their
+// keys, each in its own type, and closes them too: a handle that has not
+// returned yet is joined by its `close`.
+fn main() -> Result[UInt8, io.IoError] {
+    let quick = sink [] |sink me: Chan[End]| {
+        me.close()
+    }
+    let slow = sink [] |sink me: Chan[End]| {
+        time.sleep(time.Duration.from_milliseconds(200))
+        me.close()
+    }
+    let slower = sink [] |sink me: Chan[End]| {
+        time.sleep(time.Duration.from_milliseconds(400))
+        me.close()
+    }
+    var waiting: task.WaitSet[UInt64] = task.WaitSet.open()
+    let second = &waiting.returned(
+        task.start(slow).unwrap(),
+        |sink done| {
+            done.close()
+            UInt64(2)
+        },
+    )
+    let first = &waiting.returned(
+        task.start(quick).unwrap(),
+        |sink done| {
+            done.close()
+            UInt64(1)
+        },
+    )
+    let third = &waiting.returned(
+        task.start(slower).unwrap(),
+        |sink done| {
+            done.close()
+            UInt64(3)
+        },
+    )
+    let winner = &waiting.next().unwrap()
+    let first_left = joined(&waiting.take(first))
+    let second_left = joined(&waiting.take(second))
+    let third_left = joined(&waiting.take(third))
+    waiting.close().finish().unwrap()
+    io.println("child {winner} returned first")?
+    io.println("still registered: first {first_left}, second {second_left}, third {third_left}")?
+    io.println("every child joined")?
+    .Ok(0)
+}

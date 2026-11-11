@@ -160,6 +160,10 @@ WRAPS_MODULO_2_64 static void note(struct sim *s, unsigned long what, unsigned l
 
 enum event { event_data = 1, event_end, event_reset, event_op, event_wait, event_listen, event_close };
 
+/* A wait set's wait, which the trace tells apart from an operation's by the
+ * kind it records: one past every operation kind. */
+enum { event_set_wait = 8 };
+
 /* Fold the bytes a delivery carries into the trace, so two runs that
  * deliver different bytes of one length differ. */
 WRAPS_MODULO_2_64 static void note_bytes(struct sim *s, const unsigned char *bytes, size_t len) {
@@ -794,6 +798,52 @@ long linea_sim_clock_read(uint8_t clock, long *seconds, unsigned long *nanosecon
         return 0;
     }
     return -(long)EINVAL;
+}
+
+unsigned long linea_sim_now(void) {
+    struct sim *s = running_sim();
+    lock();
+    const unsigned long now = s->now;
+    unlock();
+    return now;
+}
+
+int linea_sim_ready(int fd, uint8_t writable) {
+    struct sim *s = running_sim();
+    lock();
+    settle(s);
+    const struct entry *e = entry_of(fd);
+    int ready = 0;
+    if (e == NULL) {
+        ready = 1;
+    } else if (e->listening) {
+        for (size_t i = 0; i < e->pending_count && !ready; i++) ready = at(e->pending[i])->established <= s->now;
+    } else if (writable) {
+        const struct entry *peer = at(e->peer);
+        const unsigned long capacity = s->buffer_bytes == 0 ? 1 : s->buffer_bytes;
+        ready = e->reset || e->write_shut || peer == NULL || peer->received_len + peer->inflight_bytes < capacity;
+    } else {
+        ready = e->received_len > 0 || e->ended || e->reset;
+    }
+    unlock();
+    return ready;
+}
+
+unsigned long linea_sim_next_event(void) {
+    struct sim *s = running_sim();
+    lock();
+    settle(s);
+    const unsigned long next = next_event(s);
+    unlock();
+    return next;
+}
+
+void linea_sim_jump(unsigned long instant) {
+    struct sim *s = running_sim();
+    lock();
+    note(s, event_wait, event_set_wait, instant);
+    deliver(s, instant);
+    unlock();
 }
 
 long linea_sim_sleep(unsigned long nanoseconds) {

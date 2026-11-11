@@ -284,6 +284,13 @@ test fn only_a_timed_out_accept_is_timed_out() {
     testing.assert(!timed_out(.Err(.AddressInUse)), "an address in use was timed out")?
 }
 
+// A listener is ready to read once a connection waits to be accepted.
+impl io.Pollable for Listener {
+    fn readiness(self: Self, _interest: io.Interest) -> io.Readiness[Self] where borrows(self) {
+        .Wait(io.source(self, self.fd))
+    }
+}
+
 // Generic code, such as `http.serve`, closes a listener through `io.Close`;
 // this forwards to `Listener.close`.
 impl io.Close for Listener {

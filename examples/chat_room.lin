@@ -1,0 +1,122 @@
+// A chat room whose room is a dispatcher. Each member is a task that says a
+// few lines and then leaves. The room waits on every member at once in one
+// wait set, takes whatever line arrives first, and keeps waiting on the
+// others, so a quiet member never holds up a talkative one.
+import std.io
+import std.mem
+import std.session
+import std.task
+import std.testing
+import std.text
+import std.time
+
+use session.Chan
+use session.Choose
+use session.End
+use session.Offer
+use session.Recv
+use session.Send
+
+// What a member does: say a line and carry on, or leave.
+struct Speaking {}
+
+impl Protocol for Speaking {
+    type Dual = Hearing
+    type Step = Choose[Send[text.String, Speaking], End]
+}
+
+// What the room does with a member at the same moment.
+struct Hearing {}
+
+impl Protocol for Hearing {
+    type Dual = Speaking
+    type Step = Offer[Recv[text.String, Hearing], End]
+}
+
+// The room's end of one member's session, waiting for the member's choice.
+alias Member = Chan[Offer[Recv[text.String, Hearing], End], ()]
+
+// A member whose turn has come: its seat number and its end of the session.
+enum Turn {
+    Spoke(UInt64, Member),
+}
+
+// Say `left` more lines, pausing `pause` before each, then leave. Each line
+// sent answers the endpoint back at `Speaking`, so the member says the next
+// one by calling itself.
+fn speak(sink me: Chan[Speaking], left: UInt64, pause: time.Duration) {
+    if left == 0 {
+        me.enter().choose_right().close()
+        return
+    }
+    time.sleep(pause)
+    speak(me.enter().choose_left().send("hello".to_owned().unwrap()), left - 1, pause)
+}
+
+// Start a member who says `count` lines, pausing `pause` before each, then
+// leaves.
+fn member(count: UInt64, pause: time.Duration) -> Member {
+    let body = sink [sink count, sink pause = copy(pause)] |sink me: Chan[Speaking]| {
+        speak(me, count, pause)
+    }
+    task.start(body).unwrap().detach().enter()
+}
+
+// Seat a member in the room's wait set. The wrap remembers the seat, so the
+// room knows who is speaking when the member's turn is delivered.
+fn seat(inout room: task.WaitSet[Turn], number: UInt64, sink member: Member) {
+    let _key = &room.offered(member, [sink number] |sink ready| Turn.Spoke(number, ready))
+}
+
+// Run the room until every member has left, and answer how many lines each
+// seat said.
+fn run_room(sink first: Member, sink second: Member, sink third: Member) -> mem.Vec[UInt64] {
+    var room: task.WaitSet[Turn] = task.WaitSet.open()
+    var heard: mem.Vec[UInt64] = mem.Vec.filled(3, UInt64(0)).unwrap()
+    seat(&room, 0, first)
+    seat(&room, 1, second)
+    seat(&room, 2, third)
+    // `next` answers `.None` once no member is seated, which ends the loop.
+    loop {
+        let turn = &room.next() else {
+            break
+        }
+        let Spoke(number, member) = turn
+        match member.offer() {
+            Left(saying) => {
+                let (line, staying) = saying.recv()
+                line.release()
+                heard[number] += 1
+                seat(&room, number, staying.enter())
+            },
+            Right(leaving) => leaving.close(),
+        }
+    }
+    room.close().finish().unwrap()
+    heard
+}
+
+test fn the_room_hears_every_line_of_every_member() {
+    defer let heard = run_room(
+        member(3, time.Duration.from_milliseconds(1)),
+        member(2, time.Duration.from_milliseconds(0)),
+        member(4, time.Duration.from_milliseconds(2)),
+    )
+    let lines = (heard[0], heard[1], heard[2])
+    testing.assert_eq(lines, (UInt64(3), UInt64(2), UInt64(4)), "the room lost or doubled a line")?
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let names = ["ada", "grace", "linus"]
+    defer let heard = run_room(
+        member(3, time.Duration.from_milliseconds(30)),
+        member(2, time.Duration.from_milliseconds(10)),
+        member(4, time.Duration.from_milliseconds(20)),
+    )
+    var number = UInt64(0)
+    while number < 3 {
+        io.println("{names[number]} said {heard[number]} lines")?
+        number += 1
+    }
+    .Ok(0)
+}

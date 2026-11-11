@@ -1,0 +1,44 @@
+import std.io
+import std.task
+
+use task.Unregistered
+
+// A share taken inside a simulation is a share of the simulation's signal,
+// which `World.deliver` stands for, and holds none of the process's own
+// disposition. Registered in a set outside the simulation it would keep no
+// handler installed, so the registration traps.
+fn main() -> UInt8 {
+    var waiting: task.WaitSet[io.SignalShare] = task.WaitSet.open()
+    let real = &waiting.signal(.User1, |sink share| share).unwrap()
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let simulated = &sim.run(
+        |inout _world| {
+            var inner: task.WaitSet[io.SignalShare] = task.WaitSet.open()
+            let key = &inner.signal(.User1, |sink share| share).unwrap()
+            let share = &inner.take(key).unwrap()
+            inner.close().finish().unwrap()
+            share
+        },
+    )
+    sim.close()
+    match &waiting.signal_with(simulated, |sink share| share) {
+        Ok(_key) => {},
+        Err(refused) => {
+            let Unregistered { value, reason: _ } = refused
+            value.settle()
+        },
+    }
+    match &waiting.take(real) {
+        Some(share) => share.settle(),
+        None => {},
+    }
+    var left = waiting.close()
+    loop {
+        let share = &left.pop() else {
+            break
+        }
+        share.settle()
+    }
+    left.finish().unwrap()
+    0
+}

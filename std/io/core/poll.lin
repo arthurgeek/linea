@@ -1,0 +1,91 @@
+import std.testing
+
+// Watch descriptor `fd` in the wait set `set`, for the registration in
+// `slot`: readable when `writable` is 0, writable when it is 1. It answers
+// zero, or a negated errno when the set's kernel queue cannot watch it.
+extern fn linea_waitset_descriptor(set: UInt64, slot: UInt64, fd: Int32, writable: UInt8) -> Int64
+
+// Interest says what a wait set waits for of a value: that it can be read
+// without waiting, or written.
+@(copyable, derive(Equatable, Debug))
+pub enum Interest {
+    Readable,
+    Writable,
+}
+
+// A Source[T] is the descriptor a wait set watches for a value of `T`. It
+// borrows that value, so the value is not closed or moved while a copy of
+// its source is kept anywhere, a value registered in a wait set included:
+// a set never watches a descriptor nothing owns. The set watches a duplicate
+// of the descriptor, made when the value is registered and closed when it
+// leaves, so one descriptor registered twice is two watches, and taking one
+// back leaves the other watched.
+@(opaque, copyable)
+struct Source[T] {
+    fd: Int32,
+    holder: borrow T,
+}
+
+// The source of `holder`, whose descriptor is `fd`.
+pub fn source[T](holder: T, fd: Int32) -> Source[T] where borrows(holder) {
+    .{ fd, holder = borrow holder }
+}
+
+test fn a_source_names_the_descriptor_it_was_made_from() {
+    let holder = UInt64(1)
+    let made = source(holder, 7)
+    testing.assert_eq(made.fd, Int32(7), "the source named another descriptor")?
+    .Ok(())
+}
+
+// Readiness[T] is what a value of `T` tells a wait set about itself: `Now`
+// when it already knows the next operation will not wait, as a reader
+// holding bytes does, or `Wait` with the source whose readiness the set
+// waits for.
+@copyable
+pub enum Readiness[T] {
+    Now,
+    Wait(Source[T]),
+}
+
+impl[T] Readiness[T] {
+    // The same readiness, answered for `holder`, a value that holds the one
+    // this readiness came from: a reader over a connection answers the
+    // connection's readiness within itself. The answer borrows `holder` and
+    // keeps what this readiness borrowed, so neither is closed while it is
+    // used.
+    pub fn within[H](self: Self, holder: H) -> Readiness[H] where borrows(holder), carries(self) {
+        match read self {
+            Now => .Now,
+            Wait(inner) => .Wait(.{ fd = inner.fd, holder = borrow holder }),
+        }
+    }
+
+    test fn a_readiness_within_its_holder_watches_the_same_descriptor() {
+        let inner = UInt64(1)
+        let outer = UInt64(2)
+        let ready: Readiness[UInt64] = .Wait(source(inner, 9))
+        let fd = match ready.within(outer) {
+            Now => Int32(0),
+            Wait(held) => held.fd,
+        }
+        testing.assert_eq(fd, Int32(9), "the readiness within its holder named another descriptor")?
+        .Ok(())
+    }
+}
+
+// A Pollable value can be registered in a wait set (`task.WaitSet`'s
+// `readable` and `writable`). Its one method answers what the set should
+// wait for, borrowing the value.
+pub trait Pollable {
+    fn readiness(self: Self, interest: Interest) -> Readiness[Self] where borrows(self)
+}
+
+// Watch `source` in the wait set `set` for the registration in `slot`.
+internal fn watch[T](set: UInt64, slot: UInt64, source: Source[T], interest: Interest) -> Int64 {
+    let writable: UInt8 = match interest {
+        Readable => 0,
+        Writable => 1,
+    }
+    linea_waitset_descriptor(set, slot, source.fd, writable)
+}

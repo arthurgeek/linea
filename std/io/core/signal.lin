@@ -1,0 +1,136 @@
+import std.testing
+
+// The runtime's signal router: take a share of a signal's disposition,
+// answering 0, 1 when the signal is ignored, or a negated errno; and give one
+// back, the last restoring the action the first replaced. A share taken
+// inside a simulation installs nothing.
+extern fn linea_signal_acquire(signal: UInt8) -> Int64
+
+extern fn linea_signal_release(signal: UInt8, home: UInt64)
+
+extern fn linea_io_current() -> UInt64
+
+// Signal names the operating-system signals a wait set can wait for. Every
+// other signal stays the runtime's or the system's: a fault belongs to the
+// runtime's fault handler, a broken pipe to its writes, and `SIGKILL` and
+// `SIGSTOP` cannot be caught.
+@(copyable, derive(Equatable, Debug))
+pub enum Signal {
+    // `SIGTERM`, what a supervisor sends to ask a process to stop.
+    Terminate,
+    // `SIGINT`, what Control-C sends.
+    Interrupt,
+    // `SIGHUP`, sent when a terminal closes, and by convention to reload.
+    Hangup,
+    // `SIGUSR1` and `SIGUSR2`, which mean what a program says they mean.
+    User1,
+    User2,
+}
+
+impl Signal {
+    // The router's number for the signal, in declaration order.
+    internal fn number(self: Self) -> UInt8 {
+        match self {
+            Terminate => 0,
+            Interrupt => 1,
+            Hangup => 2,
+            User1 => 3,
+            User2 => 4,
+        }
+    }
+}
+
+// SignalError says why a signal cannot be waited for: the process was
+// started with it ignored (`nohup` ignores `Hangup`), which a program does not
+// override, or the system refused what the router needs.
+@(copyable, derive(Equatable, Debug))
+pub enum SignalError {
+    Ignored,
+    Unavailable(IoError),
+}
+
+// A SignalShare is one share of a signal's disposition. While any share of a
+// signal lives, the signal is counted for the wait sets that wait for it
+// instead of taking its saved action; once the last is settled, the saved
+// action is back, so a second `Terminate` after a program has stopped
+// waiting ends it as it would have. A wait set's registration holds a share
+// and hands it to the message it delivers, so the program decides when the
+// signal's action returns: by settling the share, or by registering again
+// with it.
+@(opaque, linear)
+struct SignalShare {
+    signal: UInt8,
+    home: UInt64,
+    delivered: Bool,
+}
+
+impl SignalShare {
+    // Take a share of `signal`'s disposition on the task's loop.
+    internal fn acquire(signal: Signal) -> Result[SignalShare, SignalError] {
+        let number = signal.number()
+        let answer = linea_signal_acquire(number)
+        if answer == 1 {
+            return .Err(.Ignored)
+        }
+        if answer < 0 {
+            return .Err(.Unavailable(IoError.from_os(.Configure, Int32(0 - answer))))
+        }
+        .Ok(SignalShare { signal = number, home = linea_io_current(), delivered = false })
+    }
+
+    // The router's number for the share's signal.
+    internal fn number(self: Self) -> UInt8 {
+        self.signal
+    }
+
+    // The loop the share was taken on: 0 for the system, or a simulation's.
+    internal fn home(self: Self) -> UInt64 {
+        self.home
+    }
+
+    // The same share, marked delivered or not.
+    internal fn delivered_now(sink self: Self) -> SignalShare {
+        let SignalShare { signal, home, delivered: _ } = self
+        SignalShare { signal, home, delivered = true }
+    }
+
+    internal fn undelivered(sink self: Self) -> SignalShare {
+        let SignalShare { signal, home, delivered: _ } = self
+        SignalShare { signal, home, delivered = false }
+    }
+
+    // Whether the share came from a delivery of its signal, rather than from
+    // a registration taken back or closed before one.
+    pub fn delivered(self: Self) -> Bool {
+        self.delivered
+    }
+
+    test fn a_share_taken_back_was_not_delivered() {
+        let share = SignalShare.acquire(.User2).unwrap()
+        let delivered = share.delivered()
+        share.settle()
+        testing.assert(!delivered, "a share no delivery made said it was delivered")?
+        .Ok(())
+    }
+
+    // Give the share back. The last share of a signal restores the action the
+    // first replaced.
+    pub fn settle(sink self: Self) {
+        let SignalShare { signal, home, delivered: _ } = self
+        linea_signal_release(signal, home)
+    }
+
+    test fn settling_the_last_share_lets_the_signal_be_shared_again() {
+        let first = SignalShare.acquire(.User1).unwrap()
+        first.settle()
+        let second = SignalShare.acquire(.User1).unwrap()
+        second.settle()
+        .Ok(())
+    }
+}
+
+impl Release for SignalShare {
+    fn release(sink self: Self) {
+        self.settle()
+    }
+}

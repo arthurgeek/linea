@@ -42,6 +42,20 @@ impl[P: Protocol, H] Chan[P, H] {
         .{ endpoint, body = .{} }
     }
 
+    // The number the runtime knows this endpoint by, which a wait set
+    // registers it under.
+    internal fn number(self: Self) -> UInt64 {
+        self.endpoint
+    }
+
+    test fn an_endpoint_answers_the_number_it_was_opened_with() {
+        let asking: Chan[SessionTestAsk] = Chan.opened(9)
+        let number = asking.number()
+        let Chan { endpoint: _, body: _ } = asking
+        testing.assert_eq(number, UInt64(9), "the endpoint answered another number")?
+        .Ok(())
+    }
+
     // Unfold a named protocol one step: the same endpoint, at the protocol
     // its `Step` names. Nothing happens at run time.
     pub fn enter(sink self: Self) -> Chan[P.Step, H] {

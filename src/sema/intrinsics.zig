@@ -180,6 +180,23 @@ pub const RawAccesses = struct {
     take_kept_body: DeclId = .none,
     release_kept_bytes: DeclId = .none,
     task_run_body: DeclId = .none,
+    /// `mem.keep_value` and `mem.take_value`, which move a value into bytes
+    /// whose type no longer names it and back out as the type asked for.
+    /// Only the members of `task.WaitSet` call them, which take a value out
+    /// under the key its registration minted, and the test beside them.
+    keep_value: DeclId = .none,
+    take_value: DeclId = .none,
+    kept_value_test: DeclId = .none,
+    /// `task.WaitSet`, whose `set` names the runtime's registrations and
+    /// whose `held` keeps their values, slot for slot, and `task.Registered`,
+    /// a key: the set, slot and generation of one registration and, as its
+    /// type argument, the type of the value kept there. `Registered.minted`
+    /// builds one, for the registrations a `WaitSet`'s members make.
+    wait_set: DeclId = .none,
+    registered: DeclId = .none,
+    registered_minted: DeclId = .none,
+    registered_minted_test: DeclId = .none,
+    registered_names_test: DeclId = .none,
     /// `mem.Vec`, whose `storage` and `len` are the bytes it owns and how many
     /// of its slots are live, which `slot_place` and its release trust.
     vec: DeclId = .none,
@@ -393,6 +410,14 @@ pub const RawAccesses = struct {
             .take_kept_body = moduleFunction(program, ast, "mem", "take_kept_body"),
             .release_kept_bytes = moduleFunction(program, ast, "mem", "release_kept_bytes"),
             .task_run_body = moduleFunction(program, ast, "task", "run_body"),
+            .keep_value = moduleFunction(program, ast, "mem", "keep_value"),
+            .take_value = moduleFunction(program, ast, "mem", "take_value"),
+            .kept_value_test = testIn(program, ast, "mem", "a_kept_value_comes_back_as_it_went_in"),
+            .wait_set = structIn(program, ast, "task", "WaitSet"),
+            .registered = structIn(program, ast, "task", "Registered"),
+            .registered_minted = memberOf(program, ast, "task", "Registered", "minted"),
+            .registered_minted_test = testIn(program, ast, "task", "a_minted_key_names_what_it_was_minted_for"),
+            .registered_names_test = testIn(program, ast, "task", "a_copied_key_names_the_same_registration"),
             .vec = structIn(program, ast, "mem", "Vec"),
             .kept = structIn(program, ast, "mem", "Kept"),
             .vector_from_buffer = moduleFunction(program, ast, "mem", "vector_from_buffer"),
@@ -620,7 +645,9 @@ pub const RawAccesses = struct {
     /// `Chan`'s where `session.detach` takes one apart; an owner's where
     /// `task.own` builds one and `task.Client.call` reaches its queue; an
     /// arena's where its free functions and its handle's release read it;
-    /// and a `ProbeTag`'s where `probe_tag` builds one.
+    /// a `ProbeTag`'s where `probe_tag` builds one; and a wait set's and a
+    /// key's nowhere else, since the set's number and the key's slot and
+    /// generation say which kept value a call takes and as what type.
     pub const raw_types = [_]RawType{
         .{ .decl = "storage", .also = &.{ "keep_body", "take_kept_body", "release_kept_bytes", "closure_erase", "arena_table_of" } },
         .{ .decl = "buffer", .allocators = true, .also = &(buffer_numbers ++ [_][]const u8{"storage_from_buffer"} ++ backing_buffer_builders) },
@@ -633,6 +660,8 @@ pub const RawAccesses = struct {
         .{ .decl = "owner", .also = &.{ "client_call", "task_own" } },
         .{ .decl = "arena", .also = &.{ "arena_table_of", "arena_give_back", "arena_reserve", "arena_holds", "handle_dispose" } },
         .{ .decl = "probe_tag", .also = &.{"probe_tag_builder"} },
+        .{ .decl = "wait_set" },
+        .{ .decl = "registered" },
     };
 
     /// Whether `owner` is one of the declarations `fields` lists beside the
@@ -661,7 +690,7 @@ pub const RawAccesses = struct {
     /// payload's send and receive, an owning task's call and request, the
     /// release of a vector's elements, the byte vector given back as a
     /// buffer, whose bytes need no settling, and an arena's table of chunks.
-    const slot_users = [_][]const u8{ "keep_body", "take_kept_body", "release_kept_bytes", "closure_erase", "send_payload", "receive_payload", "receive_payload_until", "call_owner", "next_owner_request", "release_from", "vector_into_buffer", "arena_give_back", "arena_reserve", "arena_holds" };
+    const slot_users = [_][]const u8{ "keep_value", "take_value", "keep_body", "take_kept_body", "release_kept_bytes", "closure_erase", "send_payload", "receive_payload", "receive_payload_until", "call_owner", "next_owner_request", "release_from", "vector_into_buffer", "arena_give_back", "arena_reserve", "arena_holds" };
 
     const slots_message = "a slot is taken, put, placed or given up only by `Storage` and `Vec` and the declarations the table names, each of which settles or hands on every value it puts";
     const task_help = "start the task with `task.prepare(body)` and `start()`";
@@ -672,6 +701,7 @@ pub const RawAccesses = struct {
     const queue_help = "call the owning task through a `task.Client`";
     const arena_message = "an arena's bookkeeping trusts the first chunk it is handed, so only the arena's and its handle's own operations call it";
     const arena_help = "use the arena or its handle";
+    const wait_set_help = "register the value in a `task.WaitSet`, which answers its key";
 
     /// The confined declarations and the places each may be named.
     pub const confinements = [_]Confinement{
@@ -696,6 +726,8 @@ pub const RawAccesses = struct {
         .{ .decls = &.{"arena_write"}, .allowed = &.{ "arena_give_back", "arena_reserve" }, .types = &.{"arena"}, .message = arena_message, .help = arena_help },
         .{ .decls = &.{"record_release"}, .allowed = &.{ "release_tag_release", "probe_tag_release" }, .message = "`record_release` writes at the number it is given, so only the declarations the table names call it", .help = "release a `ReleaseTag`" },
         .{ .decls = &.{ "foreign_byte", "foreign_word" }, .allowed = &.{ "copied_in", "foreign_address_test", "foreign_byte_test", "foreign_word_test", "foreign_at_test" }, .types = &.{ "c_text", "c_text_list" }, .message = "C's memory has no extent to check a read against, so only a C view's own operations read it", .help = "read the view through its own operations" },
+        .{ .decls = &.{ "keep_value", "take_value" }, .allowed = &.{"kept_value_test"}, .types = &.{"wait_set"}, .message = "a kept value is trusted to be of the type asked for, so only a `task.WaitSet`'s own members keep one and take it back, under the key its registration minted", .help = wait_set_help },
+        .{ .decls = &.{"registered_minted"}, .allowed = &.{ "registered_minted_test", "registered_names_test" }, .types = &.{"wait_set"}, .message = "a key is trusted to name a value of its type, so only the registrations of a `task.WaitSet` mint one", .help = wait_set_help },
         .{ .decls = &.{"release_from"}, .types = &.{ "vec", "drain" }, .message = "`release_from` trusts the counts it is given, so only a vector's and a drain's own members, which know how many slots are live, call it", .help = "release the vector or the drain itself" },
     };
 

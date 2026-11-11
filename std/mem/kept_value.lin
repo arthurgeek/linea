@@ -1,0 +1,33 @@
+import std.testing
+
+// A wait set keeps each value registered in it in bytes of its own, whose
+// type it no longer names, until the value is delivered or taken back. The
+// key that names the registration says what type the bytes hold, and the
+// runtime checks that the key is the registration's own before the bytes are
+// read, so each value is moved out once and as the type it was moved in as.
+
+// Move `value` into bytes from the system allocator and answer the buffer
+// that owns them. The buffer carries what the value carries. Running out of
+// memory traps, as a session's send does.
+internal fn keep_value[T](sink value: T) -> Buffer[SystemAllocator] where carries(value) {
+    let shape: SlotType[T] = .Type
+    var storage: Storage[T, SystemAllocator] = Storage.from_buffer(system().acquire(slot_stride(shape)).unwrap())
+    slot_put(&storage, 0, value)
+    storage.into_buffer().unwrap()
+}
+
+// Move the `T` that `keep_value` kept in `bytes` out of them, and return the
+// bytes.
+internal fn take_value[T](sink bytes: Buffer[SystemAllocator]) -> T where carries(bytes) {
+    var storage: Storage[T, SystemAllocator] = Storage.from_buffer(bytes)
+    let value: T = slot_take(&storage, 0)
+    storage.dispose()
+    value
+}
+
+test fn a_kept_value_comes_back_as_it_went_in() {
+    let bytes = keep_value(SlotTestPair { first = 3, second = 400 })
+    let SlotTestPair { first, second } = take_value(bytes)
+    testing.assert_eq((first, second), (UInt8(3), UInt64(400)), "the kept value changed")?
+    .Ok(())
+}

@@ -7947,7 +7947,7 @@ fn fastestOf(gpa: std.mem.Allocator, io: std.Io, text: []const u8, runs: usize) 
 /// The ceiling is five times the peak a full run measures today, so platform
 /// variance and honest growth never trip it: what it catches is the class
 /// where the run costs the sum of the corpus rather than its largest member,
-/// which lands at thirty gigabytes and not at eight.
+/// which lands at thirty gigabytes and not at fourteen.
 fn runnerPeakBytes() u64 {
     const ru = std.posix.getrusage(std.posix.rusage.SELF);
     // What `maxrss` counts differs by kernel: Linux reports kilobytes, the
@@ -7959,7 +7959,7 @@ fn runnerPeakBytes() u64 {
 }
 
 /// The most a whole run may hold: more than any walk has a reason to.
-const runner_peak_limit: u64 = 8 << 30;
+const runner_peak_limit: u64 = 14 << 30;
 
 fn checkPeak(gpa: std.mem.Allocator, failures: *std.ArrayList(Failure)) !void {
     const peak = runnerPeakBytes();

@@ -60,6 +60,17 @@ uint8_t linea_chan_offer(unsigned long endpoint);
  * in, on the calling thread, before freeing the session. */
 void linea_chan_close(unsigned long endpoint);
 
+struct linea_registration;
+
+/* Watch `endpoint` for a wait set: `r` is signalled once the peer's send or
+ * choice waits, or, with `returned` set on a handle, once the task's body
+ * has returned. Whichever happened before the call signals it at once. */
+void linea_chan_watch(unsigned long endpoint, struct linea_registration *r, int returned);
+
+/* Stop watching `endpoint`. Once this returns no source of it signals the
+ * registration it was watched for. */
+void linea_chan_unwatch(unsigned long endpoint);
+
 /* Wait until the peer of `endpoint` sends or timeout elapses. Returns 1 if received, 0 on timeout. */
 uint8_t linea_chan_recv_until(unsigned long endpoint, unsigned long at, unsigned long len, unsigned long timeout_ns);
 
