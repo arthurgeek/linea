@@ -99,9 +99,9 @@ The library tests itself.
   ok    collections.update_transforms_a_present_value_and_ignores_a_missing_key
   ok    collections.upsert_constructs_only_missing_entries_and_preserves_resident_keys
   ok    collections.upsert_factory_failure_and_key_mismatch_preserve_contents
-  ok    collections.upsert_inout_leaves_owned_callback_captures_with_the_caller
-  ok    collections.upsert_inout_refusal_returns_owned_callback_captures_untouched
+  ok    collections.upsert_leaves_owned_callback_captures_with_the_caller
   ok    collections.upsert_refusal_precedes_factory_and_occupied_updates_need_no_allocation
+  ok    collections.upsert_refusal_returns_owned_callback_captures_untouched
   ok    collections.upsert_retains_external_values_after_factory_scope_ends
   ok    collections.upsert_returns_an_entry_when_matching_key_and_query_hashes_disagree
   ok    collections.upsert_returns_linear_factory_errors_and_mismatched_entries
@@ -1143,7 +1143,7 @@ The library tests itself.
   ok    mem.filled_repeats_a_value_in_the_system_allocator
   ok    mem.floats_sort_with_a_comparison_that_places_nan
   ok    mem.from_fn_builds_a_vector_in_the_system_allocator
-  ok    mem.from_fn_inout_builds_a_vector_in_the_system_allocator
+  ok    mem.from_fn_lends_an_initializer_the_caller_keeps
   ok    mem.from_fn_takes_an_initializer_that_changes_a_lent_count
   ok    mem.get_borrows_an_element_or_answers_none_past_the_end
   ok    mem.length_counts_the_viewed_elements
@@ -1181,7 +1181,7 @@ The library tests itself.
   ok    mem.sort_orders_text_and_derived_orders
   ok    mem.sorting_allocates_nothing
   ok    mem.sorting_an_empty_or_one_element_vector_compares_nothing
-  ok    mem.split_inout_lends_the_elements_on_each_side_of_the_split
+  ok    mem.split_lends_the_elements_on_each_side_of_the_split
   ok    mem.store_byte_traps_past_the_end
   ok    mem.store_traps_at_a_misaligned_offset
   ok    mem.store_traps_past_the_end
@@ -1209,10 +1209,10 @@ The library tests itself.
   ok    mem.vec_first_insertion_refusal_keeps_empty_storage_and_the_item
   ok    mem.vec_from_fn_builds_its_elements_in_an_arena
   ok    mem.vec_from_fn_constructs_linear_elements
-  ok    mem.vec_from_fn_inout_builds_its_elements_in_an_arena
-  ok    mem.vec_from_fn_inout_preserves_callbacks_on_empty_overflow_and_refusal
-  ok    mem.vec_from_fn_inout_preserves_state_and_constructs_linear_elements
+  ok    mem.vec_from_fn_lends_an_initializer_that_builds_in_an_arena
+  ok    mem.vec_from_fn_preserves_callbacks_on_empty_overflow_and_refusal
   ok    mem.vec_from_fn_preserves_records_borrowed_from_its_callback
+  ok    mem.vec_from_fn_preserves_state_and_constructs_linear_elements
   ok    mem.vec_growth_preserves_floats_booleans_and_unit_elements
   ok    mem.vec_length_tracks_insertions_and_removals
   ok    mem.vec_new_in_starts_empty
@@ -1226,7 +1226,7 @@ The library tests itself.
   ok    mem.vec_release_visits_each_element_once_in_reverse_order
   ok    mem.vec_remove_closes_the_gap_and_preserves_absent_indices
   ok    mem.vec_reserved_insertions_do_not_allocate
-  ok    mem.vec_split_inout_lends_disjoint_halves
+  ok    mem.vec_split_lends_disjoint_halves
   ok    mem.vec_truncate_releases_the_tail_last_first_and_keeps_capacity
   ok    mem.vec_unallocated_byte_storage_has_no_buffer
   ok    mem.windows_yield_each_run_of_consecutive_elements

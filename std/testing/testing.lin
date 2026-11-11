@@ -255,19 +255,13 @@ test fn an_error_is_accepted_and_a_success_is_reported() -> Result[(), Failure] 
 // reportable failure of body: it is a bug in the allocator wrapping it, and
 // panics naming the attempt instead of returning it as an ordinary Failure.
 // Every run's log and allocations come from `backing`; a backing that refuses
-// a log is reported as a Failure. `body` and `is_refusal` are called `inout`,
-// so they may change a place they are lent, and both are dropped at the end.
-pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocator: RefusingAllocator[H]) -> Result[(), E], R: inout fn(error: E) -> Bool](backing: H, sink body: F, sink is_refusal: R) -> Result[UInt64, Failure] where
-    carries(),
-    F: Discardable,
-    R: Discardable
-{
-    var running = body
-    var judging = is_refusal
+// a log is reported as a Failure. `body` and `is_refusal` are lent `inout`,
+// so they may change what they own or a place they are lent.
+pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocator: RefusingAllocator[H]) -> Result[(), E], R: inout fn(error: E) -> Bool](backing: H, inout body: F, inout is_refusal: R) -> Result[UInt64, Failure] where carries() {
     let counting = AllocationLog.open(backing, 0) else |_| {
         return .Err(.{ said = "the backing refused the allocation log", refusal = false })
     }
-    let succeeded = match &running(counting.allocator()) {
+    let succeeded = match &body(counting.allocator()) {
         Ok(_) => true,
         Err(_) => false,
     }
@@ -288,10 +282,10 @@ pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocat
         let log = AllocationLog.open(backing, attempt) else |_| {
             return .Err(.{ said = "the backing refused the allocation log", refusal = false })
         }
-        let outcome = &running(log.allocator())
+        let outcome = &body(log.allocator())
         let accepted = match read outcome {
             Ok(_) => true,
-            Err(error) => &judging(error),
+            Err(error) => &is_refusal(error),
         }
         if !log.all_disposed() {
             core.eprintln("attempt {attempt} of {attempts} left an allocation unsettled")

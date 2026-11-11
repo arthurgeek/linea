@@ -1,0 +1,27 @@
+// A receiver is a parameter, so an `inout` receiver takes a value that is not
+// a place too. `fresh()` is kept in a temporary, `advance` changes it, and the
+// call takes no `&` because no place of the caller's is lent.
+import std.io
+
+use io.IoError
+use io.println
+
+struct Counter {
+    count: UInt64,
+}
+
+impl Counter {
+    fn advance(inout self: Self) -> UInt64 {
+        self.count += 1
+        self.count
+    }
+}
+
+fn fresh() -> Counter {
+    .{ count = 6 }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    println("{fresh().advance()}")?
+    return .Ok(0)
+}

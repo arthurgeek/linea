@@ -1,0 +1,16 @@
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+ --> tests/vec/a_named_initializer_is_lent_with_its_marker.lin:7:36
+  |
+7 |     let small = mem.Vec.from_fn(2, square) else |_| {
+  |                                    ^^^^^^ expected `&` here
+ ::: std/mem/vec.lin
+L |     pub fn from_fn[F: inout fn(index: UInt64) -> T](count: UInt64, inout initializer: F) -> Result[Self, Oom] where carr ...
+  |                                                                          ----------- declared `inout`
+error[S-Mutation]: this argument is mutated, so it is marked `&`
+  --> tests/vec/a_named_initializer_is_lent_with_its_marker.lin:10:36
+   |
+10 |     let large = mem.Vec.from_fn(4, square) else |_| {
+   |                                    ^^^^^^ expected `&` here
+  ::: std/mem/vec.lin
+L  |     pub fn from_fn[F: inout fn(index: UInt64) -> T](count: UInt64, inout initializer: F) -> Result[Self, Oom] where carr ...
+   |                                                                          ----------- declared `inout`

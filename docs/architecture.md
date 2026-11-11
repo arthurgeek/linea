@@ -1146,13 +1146,18 @@ A value's formatting trait is checked as a bound is discharged, so a
 `borrow T` piece forwards to `T` in a generic body as it does elsewhere.
 
 Also owns which values are borrowed temporaries. An argument that is not a
-place, passed to a stable-address `read` parameter, and a borrowed
-interpolation piece that is not a place are recorded, without their
-parentheses, in `Typing.borrowed_temporaries`; a constant is a place and is
-never one
-([ADR 0175](adr/0175-a-borrowed-temporary-lives-until-the-end-of-its-statement.md)).
+place, passed to a stable-address `read` parameter or to an `inout` parameter,
+and a borrowed interpolation piece that is not a place are recorded, without
+their parentheses, in `Typing.borrowed_temporaries`, each with the convention
+it is lent under; a constant is a place and is never one
+([ADR 0175](adr/0175-a-borrowed-temporary-lives-until-the-end-of-its-statement.md),
+[ADR 0267](adr/0267-an-inout-parameter-takes-a-temporary.md)).
 Lowering gives each one a slot, and ownership ends it with its statement; no
-later pass asks again whether a borrowed value is a place.
+later pass asks again whether a borrowed value is a place. A temporary lent
+`inout` owns its value, which `Typing.lentTemporary` answers for the ownership
+builder (the argument is walked as consuming, then yielded where nothing can
+take it, so one that must be settled is [O-Leak]), for lowering (the
+argument's slot address is passed) and for the two reports that name it.
 
 Also owns component requirement validity and discharge. It validates and
 interns every source `TemplateRequirementId` once in the template's lexical

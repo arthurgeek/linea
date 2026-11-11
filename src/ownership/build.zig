@@ -1528,8 +1528,17 @@ const Builder = struct {
             if (!self.ast.refersToBinding(at) or self.placeOperation(id, position) != .consume) return;
             depth = @max(depth, 1);
         } else if (!self.ast.refersToBinding(at)) {
-            try self.expr(at, .reading);
-            try self.emit(self.placeOperation(id, position), .{ .root = .none }, id);
+            // The path is rooted at a value no place names. Taking a part out
+            // of it takes the value: a branch of the root that names a place
+            // gives that place up, as a branch does wherever its construct
+            // sits. Nothing can take what is left of the value, so it is
+            // yielded where it is only observed and owes nothing there.
+            const operation = self.placeOperation(id, position);
+            if (operation == .consume) {
+                try self.expr(at, .consuming);
+                try self.yielded(at, .reading);
+            } else try self.expr(at, .reading);
+            try self.emit(operation, .{ .root = .none }, id);
             return;
         }
 
@@ -1665,8 +1674,18 @@ const Builder = struct {
             // to nobody, so there is nothing here for the graph to hold.
             if (a == ExprId.none) continue;
 
-            if (normalized.argumentConvention(self.typing, i) == .sink) {
+            const convention = normalized.argumentConvention(self.typing, i);
+            if (convention == .sink) {
                 try self.expr(a, .consuming);
+            } else if (convention == .inout and self.typing.lentTemporary(self.ast.withoutGroups(a))) {
+                // The temporary an `inout` parameter is lent owns what the
+                // argument yields, since the callee may write it: a place a
+                // branch of the argument names is moved into it, not
+                // observed. Nothing names the temporary after the call, so
+                // it is then yielded where nothing can take it, and a value
+                // that must be settled is a leak there.
+                try self.expr(a, .consuming);
+                try self.yielded(a, .reading);
             } else {
                 try self.expr(a, .reading);
                 try self.hold(a);

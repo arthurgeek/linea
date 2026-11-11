@@ -1,0 +1,21 @@
+error[O-Leak]: this linear closure is never settled
+  --> tests/temporaries/a_temporary_lent_inout_owes_nothing_when_it_ends.lin:30:28
+   |
+30 |     let number = call_once(inout [sink ticket] || ticket.number)
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this temporary is lent for the call and ends with its statement, where nothing settles it
+   |
+   = help: bind it with `var`, lend it with `&`, and settle it after the call
+error[O-Leak]: this linear `Ticket` is never settled
+  --> tests/temporaries/a_temporary_lent_inout_owes_nothing_when_it_ends.lin:31:11
+   |
+31 |     stamp(issue())
+   |           ^^^^^^^ this temporary is lent for the call and ends with its statement, where nothing settles it
+   |
+   = help: bind it with `var`, lend it with `&`, and settle it after the call
+error[O-Leak]: this linear `Ticket` is never settled
+  --> tests/temporaries/a_temporary_lent_inout_owes_nothing_when_it_ends.lin:32:5
+   |
+32 |     issue().punch()
+   |     ^^^^^^^ this temporary is lent for the call and ends with its statement, where nothing settles it
+   |
+   = help: bind it with `var`, lend it with `&`, and settle it after the call

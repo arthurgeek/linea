@@ -3899,7 +3899,7 @@ test "renaming declines a capture recovery the file alone cannot settle" {
         \\        return 1
         \\    }
         \\    var heavy = [sink seen] |sink weight: UInt64| weight > seen.length()
-        \\    let found = (UInt64(1)..10).any_inout(&heavy)
+        \\    let found = (UInt64(1)..10).any(&heavy)
         \\    let { seen } = heavy.into_captures()
         \\    seen.release()
         \\    if found { 0 } else { 3 }
@@ -3914,12 +3914,12 @@ test "capture renaming includes a library callback's local binders" {
     const source =
         \\fn main() -> UInt8 {
         \\    let number: UInt8 = 7
-        \\    let callback = [number] |sink value: UInt8| -> where borrows(number) {
+        \\    var callback = [number] |sink value: UInt8| -> where borrows(number) {
         \\        let _ = value
         \\        borrow number
         \\    }
         \\    let input: Option[UInt8] = .Some(1)
-        \\    let mapped = input.map(callback).unwrap()
+        \\    let mapped = input.map(&callback).unwrap()
         \\    let second: Option[UInt8] = .Some(2)
         \\    let inline_result = second.map([number] |sink value: UInt8| -> where borrows(number) {
         \\        let _ = value

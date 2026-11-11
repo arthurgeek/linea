@@ -6255,8 +6255,11 @@ pub const Typing = struct {
     /// whose place the result borrows, or an interpolated value that must be
     /// settled and so cannot be held by the literal. Each is evaluated into a
     /// temporary. Lowering gives it a slot and ownership ends it with its
-    /// statement. A constant is a place and is never one.
-    borrowed_temporaries: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// statement. A constant is a place and is never one. The value is how
+    /// the temporary is lent: `.inout` where an `inout` parameter is given
+    /// it, which may write it and so owns what the argument yields, and
+    /// `.read` everywhere else.
+    borrowed_temporaries: std.AutoHashMapUnmanaged(ExprId, Convention) = .empty,
     /// What each value piece of an interpolation literal does with what it
     /// names. A piece the checker refused is absent.
     interpolation_positions: std.AutoHashMapUnmanaged(ExprId, PiecePosition) = .empty,
@@ -8162,6 +8165,13 @@ pub const Typing = struct {
         try typing.refused.put(gpa, ExprId.at(3), {});
         try testing.expect(typing.isRefused(ExprId.at(3)));
         try testing.expect(!typing.isRefused(ExprId.at(4)));
+    }
+
+    /// Whether `value` is an argument that is no place, given to an `inout`
+    /// parameter: it is evaluated into a temporary the parameter is lent,
+    /// which owns it until the end of the statement.
+    pub fn lentTemporary(self: *const Typing, value: ExprId) bool {
+        return self.borrowed_temporaries.get(value) == .inout;
     }
 
     /// What the literal does with a value piece, or null where the checker

@@ -168,14 +168,14 @@ impl[K: Release, V: Release, E: Release] release.Settle for UpsertFailure[K, V, 
 
 test fn settling_an_upsert_mismatch_releases_the_built_entry() {
     defer var values: Map[UInt64, MapBadge] = Map.new()
-    let wrong = |_query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, MapBadge], UInt64] where carries() {
+    var wrong = |_query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, MapBadge], UInt64] where carries() {
         .Ok(.{ key = 3, value = .{ id = 9 } })
     }
-    let failing = |_query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, MapBadge], UInt64] where carries() {
+    var failing = |_query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, MapBadge], UInt64] where carries() {
         .Err(41)
     }
-    let mismatched = &values.upsert(2, wrong, |sink value| value).settled()
-    let failed = &values.upsert(2, failing, |sink value| value).settled()
+    let mismatched = &values.upsert(2, &wrong, |sink value| value).settled()
+    let failed = &values.upsert(2, &failing, |sink value| value).settled()
     testing.assert_eq(mismatched, .Err(.KeyMismatch), "settling a mismatch kept the entry or lost the reason")?
     testing.assert_eq(failed, .Err(.Factory(41)), "settling a factory failure lost its error")?
     // The 64-byte recorder holds the mismatch explanation.
@@ -726,22 +726,19 @@ impl[K: Hash, V, A: Allocator] Map[K, V, A] {
     // Combine a value into an existing key's value, or insert the key on a miss.
     // A hit calls `combine(current, incoming)` once, keeps the resident key,
     // discards the incoming key and allocates nothing. Refusal returns both
-    // inputs and leaves the map unchanged, and `combine` is dropped at the
-    // end. For keys that own storage built from a borrowed query, use
-    // `upsert`, which builds them only on a miss.
-    pub fn merge[F: inout fn(sink current: V, sink incoming: V) -> V where carries(current, incoming)](inout self: Self, sink key: K, sink value: V, sink combine: F) -> Result[(), InsertFailure[K, V]] where
+    // inputs and leaves the map unchanged. For keys that own storage built
+    // from a borrowed query, use `upsert`, which builds them only on a miss.
+    pub fn merge[F: inout fn(sink current: V, sink incoming: V) -> V where carries(current, incoming)](inout self: Self, sink key: K, sink value: V, inout combine: F) -> Result[(), InsertFailure[K, V]] where
         K: Discardable,
-        F: Discardable,
         carries(.Err.key: key),
         carries(.Err.value: value),
         retains(self: key, value, combine)
     {
-        var combining = combine
         let code = key.hash()
         match self.find(key, code, |candidate, query| candidate == query) {
             Some(index) => {
                 let Resident { code: resident_code, entry: Entry { key: stored, value: current } } = &self.take_at(index)
-                &self.restore_at(index, resident_code, .{ key = stored, value = &combining(current, value) })
+                &self.restore_at(index, resident_code, .{ key = stored, value = &combine(current, value) })
                 return .Ok(())
             },
             None => {},
@@ -891,16 +888,11 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
 
     // Transform the value under the key that matches `key` once, keeping its
     // key and allocating no storage. Return whether the key was present.
-    // `transform` is dropped at the end.
-    pub fn update[F: inout fn(sink value: V) -> V](inout self: Self, key: K.Query, sink transform: F) -> Bool where
-        retains(self: transform),
-        F: Discardable
-    {
+    pub fn update[F: inout fn(sink value: V) -> V](inout self: Self, key: K.Query, inout transform: F) -> Bool where retains(self: transform) {
         let index = self.find(key, key.hash(), |candidate, query| candidate.matches(query)) else {
             return false
         }
-        var transforming = transform
-        &self.transform_at(index, &transforming)
+        &self.transform_at(index, &transform)
         true
     }
 
@@ -974,23 +966,6 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
         }
     }
 
-    // Transform the value under `query` when it is present. On a miss, reserve
-    // a bucket first and only then call `make_entry` to build the entry, so an
-    // allocation refusal never runs the factory. Both callbacks are dropped
-    // when it returns. A built entry whose key does not match `query`, or
-    // hashes to another code, is returned whole as `KeyMismatch` for the
-    // caller to settle.
-    pub fn upsert[E, Make: inout fn(query: K.Query, allocator: A) -> Result[Entry[K, V], E] where carries(allocator), Update: inout fn(sink value: V) -> V](inout self: Self, query: K.Query, sink make_entry: Make, sink transform: Update) -> Result[(), UpsertFailure[K, V, E]] where
-        carries(.Err: self.allocator, make_entry),
-        retains(self: self.allocator, make_entry, transform),
-        Make: Discardable,
-        Update: Discardable
-    {
-        var making = make_entry
-        var transforming = transform
-        &self.upsert_inout(query, &making, &transforming)
-    }
-
     test fn upsert_takes_callbacks_that_change_lent_counts() {
         defer var values: Map[UInt64, UInt64] = Map.new()
         var made = UInt64(0)
@@ -1015,14 +990,14 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
 
     test fn upsert_constructs_only_missing_entries_and_preserves_resident_keys() {
         defer var values: Map[CollisionKey, UInt64] = Map.new()
-        let make = |query: CollisionKey, _allocator: mem.SystemAllocator| -> Result[Entry[CollisionKey, UInt64], mem.Oom] where carries() {
+        var make = |query: CollisionKey, _allocator: mem.SystemAllocator| -> Result[Entry[CollisionKey, UInt64], mem.Oom] where carries() {
             .Ok(.{ key = .{ id = query.id, version = 7 }, value = 10 })
         }
-        &values.upsert(.{ id = 1, version = 0 }, make, |sink _value| panic("missing entry was transformed")).unwrap()
-        let refuse = |_query: CollisionKey, _allocator: mem.SystemAllocator| -> Result[Entry[CollisionKey, UInt64], mem.Oom] where carries() {
+        &values.upsert(.{ id = 1, version = 0 }, &make, |sink _value| panic("missing entry was transformed")).unwrap()
+        var refuse = |_query: CollisionKey, _allocator: mem.SystemAllocator| -> Result[Entry[CollisionKey, UInt64], mem.Oom] where carries() {
             panic("occupied entry invoked its factory")
         }
-        &values.upsert(.{ id = 1, version = 99 }, refuse, |sink value| value + 4).unwrap()
+        &values.upsert(.{ id = 1, version = 99 }, &refuse, |sink value| value + 4).unwrap()
         let stored = &values.remove(.{ id = 1, version = 0 }).unwrap()
         testing.assert_eq(stored.key.version, UInt64(7), "update replaced the resident key")?
         testing.assert_eq(stored.value, UInt64(14), "update did not transform the resident value")?
@@ -1045,11 +1020,11 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
                 },
             }
         }
-        let factory = |_query: UInt64, _allocator: mem.Handle| -> Result[Entry[UInt64, UInt64], mem.Oom] where carries() {
+        var factory = |_query: UInt64, _allocator: mem.Handle| -> Result[Entry[UInt64, UInt64], mem.Oom] where carries() {
             panic("factory ran without reserved storage")
         }
-        &values.upsert(0, copy(factory), |sink value| value + 1).unwrap()
-        let refused = &values.upsert(accepted, factory, |sink _value| panic("missing entry invoked update"))
+        &values.upsert(0, &factory, |sink value| value + 1).unwrap()
+        let refused = &values.upsert(accepted, &factory, |sink _value| panic("missing entry invoked update"))
         testing.assert_eq(refused, .Err(.Allocation(.Exhausted)), "full arena did not refuse reservation")?
         testing.assert_eq(values.length(), accepted, "refusal changed the map length")?
         testing.assert_eq(*values.get(0).unwrap(), UInt64(11), "occupied update failed after allocation refusal")?
@@ -1060,11 +1035,11 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
             mem.system(),
             |allocator| -> Result[(), UpsertFailure[UInt64, UInt64, mem.Oom]] {
                 defer var counts: Map[UInt64, UInt64, mem.RefusingAllocator[mem.SystemAllocator]] = Map.new_in(allocator)
-                let first = |query: UInt64, _allocator: mem.RefusingAllocator[mem.SystemAllocator]| -> Result[Entry[UInt64, UInt64], mem.Oom] where carries() {
+                var first = |query: UInt64, _allocator: mem.RefusingAllocator[mem.SystemAllocator]| -> Result[Entry[UInt64, UInt64], mem.Oom] where carries() {
                     .Ok(.{ key = query, value = 1 })
                 }
                 for word in UInt64(0)..30 {
-                    &counts.upsert(word % 17, copy(first), |sink count| count + 1)?
+                    &counts.upsert(word % 17, &first, |sink count| count + 1)?
                 }
                 return .Ok(())
             },
@@ -1077,15 +1052,15 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
     test fn upsert_factory_failure_and_key_mismatch_preserve_contents() {
         defer var values: Map[UInt64, UInt64] = Map.new()
         &values.insert(1, 10).unwrap().release()
-        let failing = |_query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, UInt64], UInt64] where carries() {
+        var failing = |_query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, UInt64], UInt64] where carries() {
             .Err(77)
         }
-        let failed = &values.upsert(2, failing, |sink value| value)
+        let failed = &values.upsert(2, &failing, |sink value| value)
         testing.assert_eq(failed, .Err(.Factory(77)), "factory error was not returned")?
-        let wrong = |_query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, UInt64], UInt64] where carries() {
+        var wrong = |_query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, UInt64], UInt64] where carries() {
             .Ok(.{ key = 3, value = 99 })
         }
-        let mismatched = &values.upsert(2, wrong, |sink value| value)
+        let mismatched = &values.upsert(2, &wrong, |sink value| value)
         testing.assert_eq(mismatched, .Err(.KeyMismatch(.{ key = 3, value = 99 })), "mismatch lost the complete rejected entry")?
         testing.assert_eq(values.length(), UInt64(1), "failed construction inserted an entry")?
         testing.assert_eq(*values.get(1).unwrap(), UInt64(10), "failed construction changed existing content")?
@@ -1093,17 +1068,17 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
 
     test fn upsert_reuses_collision_tombstones_and_accepts_zero_sized_entries() {
         defer var values: Map[CollisionKey, UInt64] = Map.new()
-        let make = |query: CollisionKey, _allocator: mem.SystemAllocator| -> Result[Entry[CollisionKey, UInt64], mem.Oom] where carries() {
+        var make = |query: CollisionKey, _allocator: mem.SystemAllocator| -> Result[Entry[CollisionKey, UInt64], mem.Oom] where carries() {
             .Ok(.{ key = .{ id = query.id, version = 1 }, value = query.id })
         }
         for id in UInt64(0)..40 {
-            &values.upsert(.{ id, version = 0 }, copy(make), |sink value| value + 1).unwrap()
+            &values.upsert(.{ id, version = 0 }, &make, |sink value| value + 1).unwrap()
         }
         for id in UInt64(0)..20 {
             &values.remove(.{ id, version = 0 }).unwrap().release()
         }
         for id in UInt64(20)..60 {
-            &values.upsert(.{ id, version = 0 }, copy(make), |sink value| value + 1).unwrap()
+            &values.upsert(.{ id, version = 0 }, &make, |sink value| value + 1).unwrap()
         }
         for id in UInt64(20)..60 {
             let expected = if id < 40 {
@@ -1115,24 +1090,24 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
         }
         testing.assert_eq(values.length(), UInt64(40), "upsert tombstones changed the live count")?
         defer var zero: Map[ZeroKey, ()] = Map.new()
-        let empty = |_query: ZeroKey, _allocator: mem.SystemAllocator| -> Result[Entry[ZeroKey, ()], mem.Oom] where carries() {
+        var empty = |_query: ZeroKey, _allocator: mem.SystemAllocator| -> Result[Entry[ZeroKey, ()], mem.Oom] where carries() {
             .Ok(.{ key = .{}, value = () })
         }
-        &zero.upsert(.{}, copy(empty), |sink _value| {}).unwrap()
-        &zero.upsert(.{}, empty, |sink _value| {}).unwrap()
+        &zero.upsert(.{}, &empty, |sink _value| {}).unwrap()
+        &zero.upsert(.{}, &empty, |sink _value| {}).unwrap()
         testing.assert_eq(zero.length(), UInt64(1), "zero-sized update inserted twice")?
     }
 
     test fn upsert_transfers_linear_values_without_release() {
         var values: Map[UInt64, MapTicket] = Map.new()
-        let make = |query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, MapTicket], mem.Oom] where carries() {
+        var make = |query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, MapTicket], mem.Oom] where carries() {
             .Ok(.{ key = query, value = .{ id = 10 } })
         }
-        &values.upsert(2, copy(make), |sink value| value).unwrap()
+        &values.upsert(2, &make, |sink value| value).unwrap()
         Map.upsert(
             &values,
             2,
-            make,
+            &make,
             |sink value| {
                 let MapTicket { id } = value
                 let next = MapTicket { id = id + 3 }
@@ -1148,10 +1123,10 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
         let source: UInt64 = 23
         var values: Map[UInt64, borrow UInt64] = Map.new()
         {
-            let make = [source] |query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, borrow UInt64], mem.Oom] where borrows(.Ok: source) {
+            var make = [source] |query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, borrow UInt64], mem.Oom] where borrows(.Ok: source) {
                 .Ok(.{ key = query, value = borrow source })
             }
-            &values.upsert(1, make, |sink value| value).unwrap()
+            &values.upsert(1, &make, |sink value| value).unwrap()
         }
         let removed = &values.remove(1).unwrap()
         values.release()
@@ -1160,19 +1135,19 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
 
     test fn upsert_returns_linear_factory_errors_and_mismatched_entries() {
         var values: Map[UInt64, MapTicket] = Map.new()
-        let wrong = |_query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, MapTicket], MapTicket] where carries() {
+        var wrong = |_query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, MapTicket], MapTicket] where carries() {
             .Ok(.{ key = 3, value = .{ id = 9 } })
         }
-        let recovered = match &values.upsert(2, wrong, |sink value| value) {
+        let recovered = match &values.upsert(2, &wrong, |sink value| value) {
             Err(KeyMismatch(entry)) => settle_ticket(entry),
             Err(Factory(_)) => panic("mismatch became a factory error"),
             Err(Allocation(_)) => panic("system allocation refused"),
             Ok(_) => panic("mismatched key entered the map"),
         }
-        let fail = |_query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, MapTicket], MapTicket] where carries() {
+        var fail = |_query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, MapTicket], MapTicket] where carries() {
             .Err(.{ id = 41 })
         }
-        let reason = match &values.upsert(2, fail, |sink value| value) {
+        let reason = match &values.upsert(2, &fail, |sink value| value) {
             Err(Factory(MapTicket { id })) => id,
             Err(KeyMismatch(_)) => panic("factory error became a mismatch"),
             Err(Allocation(_)) => panic("reserved map attempted allocation"),
@@ -1232,10 +1207,14 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
         testing.assert_eq(values.length(), UInt64(0), "hash mismatch changed map contents")?
     }
 
-    // Insert or update as `upsert` does, with callbacks whose state the caller
-    // keeps, so one factory can serve many calls and its captures can be
-    // recovered afterwards.
-    pub fn upsert_inout[E, Make: inout fn(query: K.Query, allocator: A) -> Result[Entry[K, V], E] where carries(allocator), Update: inout fn(sink value: V) -> V](inout self: Self, query: K.Query, inout make_entry: Make, inout transform: Update) -> Result[(), UpsertFailure[K, V, E]] where
+    // Transform the value under `query` when it is present. On a miss, reserve
+    // a bucket first and only then call `make_entry` to build the entry, so an
+    // allocation refusal never runs the factory. Both callbacks are lent, so
+    // one factory can serve many calls and its captures can be recovered
+    // afterwards. A built entry whose key does not match `query`, or hashes to
+    // another code, is returned whole as `KeyMismatch` for the caller to
+    // settle.
+    pub fn upsert[E, Make: inout fn(query: K.Query, allocator: A) -> Result[Entry[K, V], E] where carries(allocator), Update: inout fn(sink value: V) -> V](inout self: Self, query: K.Query, inout make_entry: Make, inout transform: Update) -> Result[(), UpsertFailure[K, V, E]] where
         carries(.Err: self.allocator, make_entry),
         retains(self: self.allocator, make_entry, transform)
     {
@@ -1260,7 +1239,7 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
         .Ok(())
     }
 
-    test fn upsert_inout_leaves_owned_callback_captures_with_the_caller() {
+    test fn upsert_leaves_owned_callback_captures_with_the_caller() {
         defer var values: Map[UInt64, UInt64] = Map.new()
         let ticket = MapTicket { id = 42 }
         var make = [sink ticket] |query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, UInt64], mem.Oom] where carries() {
@@ -1268,15 +1247,15 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
         }
         let added = MapTicket { id = 3 }
         var transform = [sink added] |sink value: UInt64| value + added.id
-        &values.upsert_inout(1, &make, &transform).unwrap()
-        &values.upsert_inout(1, &make, &transform).unwrap()
+        &values.upsert(1, &make, &transform).unwrap()
+        &values.upsert(1, &make, &transform).unwrap()
         let { ticket: MapTicket { id: factory_id } } = make.into_captures()
         let { added: MapTicket { id: transform_id } } = transform.into_captures()
         testing.assert_eq(factory_id + transform_id, UInt64(45), "upsert consumed callback captures")?
         testing.assert_eq(*values.get(1).unwrap(), UInt64(45), "owned captures were unavailable to callbacks")?
     }
 
-    test fn upsert_inout_refusal_returns_owned_callback_captures_untouched() {
+    test fn upsert_refusal_returns_owned_callback_captures_untouched() {
         let arena = mem.Arena.open(mem.system(), size: 8)
         var values: Map[UInt64, UInt64, mem.Handle] = Map.new_in(arena.handle())
         let ticket = MapTicket { id = 42 }
@@ -1286,7 +1265,7 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
         }
         let added = MapTicket { id = 3 }
         var transform = [sink added] |sink value: UInt64| value + added.id
-        let refused = &values.upsert_inout(1, &make, &transform)
+        let refused = &values.upsert(1, &make, &transform)
         let allocation_failed = match refused { Err(Allocation(_)) => true, _ => false }
         let { ticket: MapTicket { id: factory_id } } = make.into_captures()
         let { added: MapTicket { id: transform_id } } = transform.into_captures()

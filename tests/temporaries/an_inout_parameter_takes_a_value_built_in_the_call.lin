@@ -1,0 +1,27 @@
+// An `inout` parameter takes a value that is not a place: a structure
+// literal, a call's result. The value is kept in a temporary the callee
+// changes, and the temporary ends with the statement.
+import std.io
+
+use io.IoError
+use io.println
+
+struct Counter {
+    count: UInt64,
+}
+
+fn bump(inout counter: Counter) -> UInt64 {
+    counter.count += 1
+    counter.count
+}
+
+fn fresh() -> Counter {
+    .{ count = 10 }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    println("{bump(.{ count = 41 })} {bump(fresh())}")?
+    let twice = bump(fresh()) + bump(fresh())
+    println("{twice}")?
+    return .Ok(0)
+}

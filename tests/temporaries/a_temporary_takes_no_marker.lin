@@ -1,0 +1,18 @@
+// `&` marks a place the caller lends and reads again afterwards. A value
+// built in the call is no place, so it is passed without the marker, and a
+// place is still passed with it.
+struct Counter {
+    count: UInt8,
+}
+
+fn bump(inout counter: Counter) -> UInt8 {
+    counter.count += 1
+    counter.count
+}
+
+fn main() -> UInt8 {
+    var counter: Counter = .{ count = 0 }
+    let first = bump(&Counter { count = 1 })
+    let second = bump(counter)
+    first + second + bump(&counter)
+}

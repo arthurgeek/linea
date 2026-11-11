@@ -1,0 +1,34 @@
+// A temporary is discarded where it ends and runs no cleanup. A closure that
+// owns a ticket, and a ticket itself, must be settled, so neither may be the
+// temporary an `inout` parameter is lent: each is bound to a variable, lent
+// with `&`, and settled afterwards.
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+impl Ticket {
+    fn punch(inout self: Self) {
+        self.number += 1
+    }
+}
+
+fn issue() -> Ticket {
+    .{ number = 1 }
+}
+
+fn call_once[F: inout fn() -> UInt8](inout act: F) -> UInt8 {
+    &act()
+}
+
+fn stamp(inout ticket: Ticket) {
+    ticket.number += 1
+}
+
+fn main() -> UInt8 {
+    let ticket = issue()
+    let number = call_once(inout [sink ticket] || ticket.number)
+    stamp(issue())
+    issue().punch()
+    number
+}

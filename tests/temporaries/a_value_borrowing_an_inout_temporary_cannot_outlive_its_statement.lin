@@ -1,0 +1,28 @@
+// A value that borrows a temporary lent `inout` may be used until the end of
+// the statement, as one borrowing a `read` temporary may. Kept in a binding
+// for a later statement, or returned, it would observe storage that is gone.
+struct Counter {
+    count: Int64,
+}
+
+struct Reading {
+    value: borrow Int64,
+}
+
+fn advance(inout counter: Counter) -> Reading where borrows(.value: counter) {
+    counter.count += 1
+    .{ value = borrow counter.count }
+}
+
+fn within() -> Int64 {
+    *advance(.{ count = 1 }).value
+}
+
+fn leaving() -> Reading {
+    advance(.{ count = 1 })
+}
+
+fn main() -> UInt8 {
+    let kept = advance(.{ count = 41 })
+    UInt8(*kept.value + within() + *leaving().value)
+}

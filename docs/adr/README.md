@@ -80,7 +80,7 @@ true of a different implementation.
 | [0058](0058-a-constant-declaration-is-a-binding-the-definition-covers.md) | A constant declaration is a binding the definition already covers | Superseded by 0059 |
 | [0059](0059-one-table-answers-both-questions-about-a-constant-expression.md) | One table answers both questions about a constant expression | Accepted; supersedes 0058, extends 0020; extended by 0127, 0140 and 0146 |
 | [0024](0024-a-program-is-a-list-of-declarations.md) | A program is a list of declarations | Accepted; supersedes 0019, extended by 0071 |
-| [0025](0025-mutation-through-a-parameter-is-marked.md) | Mutation through a parameter is a convention, marked at the call | Accepted; exclusivity clause superseded by 0053; reference and ABI clauses superseded by 0123 |
+| [0025](0025-mutation-through-a-parameter-is-marked.md) | Mutation through a parameter is a convention, marked at the call | Accepted; exclusivity clause superseded by 0053; reference and ABI clauses superseded by 0123; extended by 0267 |
 | [0040](0040-conditional-control-flow-has-one-form.md) | Conditional control flow has one form | Accepted |
 | [0041](0041-a-newline-ends-a-statement.md) | A newline ends a statement, decided by the token before it | Superseded by 0196; refined by 0151, 0167 and 0190 |
 | [0042](0042-nesting-is-bounded-by-a-stated-number.md) | Nesting is bounded by a stated number | Superseded by 0054 |
@@ -200,9 +200,10 @@ true of a different implementation.
 | [0227](0227-a-program-embeds-a-files-bytes.md) | A program embeds a file's text or bytes, read when it is compiled: `embed` and `embed_bytes` | Accepted; extends 0075, 0096, 0140 and 0178 |
 | [0169](0169-an-interpolation-lays-out-its-value-through-a-format-spec.md) | An interpolation lays out its value through a format spec checked against its type and applied by `std.fmt` | Accepted; extended by 0231 |
 | [0231](0231-a-format-spec-writes-an-integer-in-hexadecimal.md) | A format spec writes an integer in hexadecimal with `x` or `X`, and the library has one hexadecimal alphabet: `text.hex_encoded`, `hex_decode` | Accepted; extends 0169 |
-| [0170](0170-a-marked-postfix-call-lends-its-receiver.md) | A marked postfix call lends its receiver | Accepted; extended by 0195 |
+| [0170](0170-a-marked-postfix-call-lends-its-receiver.md) | A marked postfix call lends its receiver | Accepted; extended by 0195; temporary receiver clause superseded by 0267 |
+| [0267](0267-an-inout-parameter-takes-a-temporary.md) | An `inout` parameter takes a temporary, and each library operation has one form | Accepted; extends 0025 and 0175; supersedes clauses of 0131, 0170 and 0192 |
 | [0195](0195-a-walk-may-borrow-the-iterator-it-advances.md) | A walk may borrow the iterator it advances | Accepted; extends 0170 |
-| [0175](0175-a-borrowed-temporary-lives-until-the-end-of-its-statement.md) | A borrowed temporary lives until the end of its statement, and an interpolation borrows what it renders | Accepted; refines 0123 |
+| [0175](0175-a-borrowed-temporary-lives-until-the-end-of-its-statement.md) | A borrowed temporary lives until the end of its statement, and an interpolation borrows what it renders | Accepted; refines 0123; extended by 0267 |
 | [0246](0246-a-call-holds-what-it-lends-until-it-runs.md) | A call holds what it lends until it runs | Accepted; extends 0034, 0204 and 0228 |
 
 ## Compiler invariants
@@ -290,7 +291,7 @@ ones most likely to be superseded as the compiler grows.
 | [0129](0129-struct-destructuring-may-infer-its-type.md) | Struct destructuring may infer its type | Accepted; extended by 0147, 0201 and 0224 |
 | [0147](0147-a-borrowed-let-pattern-reads-a-stable-place.md) | A borrowed let pattern reads a stable place | Accepted; extends 0129; extended by 0178, 0201 and 0224 |
 | [0130](0130-explicit-captures-use-inline-environments.md) | Explicit captures use inline environments | Accepted; supersedes the capture exclusion in 0105; read-only restriction superseded by 0131; extended by 0173 and 0193 |
-| [0131](0131-closure-invocation-and-capture-ownership-are-independent.md) | Closure invocation and capture ownership are independent | Accepted; supersedes the read-only restriction in 0130; extends 0123 and 0124; extended by 0132, 0158 and 0173; stored inout capture clause superseded by 0193 |
+| [0131](0131-closure-invocation-and-capture-ownership-are-independent.md) | Closure invocation and capture ownership are independent | Accepted; supersedes the read-only restriction in 0130; extends 0123 and 0124; extended by 0132, 0158 and 0173; stored inout capture clause superseded by 0193; `_inout` naming clause superseded by 0267 |
 | [0193](0193-a-closure-may-hold-a-place-lent-inout.md) | A closure may hold a place lent `inout` | Accepted; supersedes the stored inout capture clause of 0131; extends 0123, 0124, 0130 and 0173; writer containment clause superseded by 0255 |
 | [0132](0132-callable-results-separate-types-from-dependencies.md) | Callable results separate types from dependencies | Accepted; supersedes source-clause spelling in 0123; extends 0131; extended by 0144, 0164 and 0173 |
 | [0158](0158-a-function-value-implements-release.md) | A function value implements Release | Accepted; extends 0104 and 0131; extended by 0173 |
@@ -322,7 +323,7 @@ ones most likely to be superseded as the compiler grows.
 | [0198](0198-array-literal-bindings-infer-written-lengths.md) | Array literal bindings infer written lengths | Accepted; extends 0061, 0083 and 0149 |
 | [0166](0166-an-array-compares-through-its-slice-view.md) | An array compares, hashes and prints through its slice view | Accepted; extends 0061 and 0137 |
 | [0172](0172-an-array-reports-its-length.md) | An array reports its length | Accepted; extends 0061, 0083 and 0137 |
-| [0192](0192-iterator-operations-belong-to-every-sequence.md) | Iterator operations belong to every sequence, and every iterator is a sequence | Accepted; builds on 0186 and 0187; refines 0148 and 0152; extended by 0203 and 0245 |
+| [0192](0192-iterator-operations-belong-to-every-sequence.md) | Iterator operations belong to every sequence, and every iterator is a sequence | Accepted; builds on 0186 and 0187; refines 0148 and 0152; extended by 0203 and 0245; `_inout` forms superseded by 0267 |
 | [0204](0204-mir-verification-re-derives-storage-safety.md) | MIR verification re-derives the storage safety ownership promised | Accepted; extends 0049 and 0050; extended by 0246 |
 | [0257](0257-the-driver-keeps-the-checked-standard-library-on-disk.md) | The driver keeps the checked standard library on disk | Accepted |
 

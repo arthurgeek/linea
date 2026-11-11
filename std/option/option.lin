@@ -133,13 +133,6 @@ impl[T] Option[T] {
         testing.assert_eq(number, 7, "Option predicates consumed or changed the payload")?
     }
 
-    // Transform a present value with `transform`; None stays None. The
-    // callback is dropped at the end; `map_inout` borrows one instead.
-    pub fn map[U, F: inout fn(sink value: T) -> U](sink self: Self, sink transform: F) -> Option[U] where carries(.Some: self, transform), F: Discardable {
-        var transforming = transform
-        self.map_inout(&transforming)
-    }
-
     test fn map_takes_a_transform_that_changes_a_lent_count() {
         var calls = UInt8(0)
         let present: Option[UInt8] = .Some(4)
@@ -184,8 +177,8 @@ impl[T] Option[T] {
         testing.assert_eq(observation.number, 17, "mapping lost the record borrowed from its callback")?
     }
 
-    // Map as `map` does, with a transform whose state the caller keeps.
-    pub fn map_inout[U, F: inout fn(sink value: T) -> U](sink self: Self, inout transform: F) -> Option[U] where carries(.Some: self, transform) {
+    // Transform a present value with `transform`; None stays None.
+    pub fn map[U, F: inout fn(sink value: T) -> U](sink self: Self, inout transform: F) -> Option[U] where carries(.Some: self, transform) {
         match self {
             Some(value) => .Some(&transform(value)),
             None => .None,
@@ -200,8 +193,8 @@ impl[T] Option[T] {
         }
         let present: Option[UInt8] = .Some(4)
         let absent: Option[UInt8] = .None
-        let mapped = present.map_inout(&transform)
-        let skipped = absent.map_inout(&transform)
+        let mapped = present.map(&transform)
+        let skipped = absent.map(&transform)
         testing.assert_eq(mapped, Option.Some(UInt64(5)), "mutable Option.map returned the wrong payload")?
         testing.assert(skipped.is_none(), "mutable Option.map changed None")?
         testing.assert_eq(calls, UInt8(1), "mutable Option.map called its callback for None")?
@@ -213,20 +206,13 @@ impl[T] Option[T] {
         }
         let absent: Option[UInt8] = .None
         let present: Option[UInt8] = .Some(2)
-        let skipped = absent.map_inout(&transform)
-        let mapped = present.map_inout(&transform)
+        let skipped = absent.map(&transform)
+        let mapped = present.map(&transform)
         let { token } = transform.into_captures()
         let recovered = match token { Value(number) => number }
         testing.assert(skipped.is_none(), "mutable Option.map invoked a skipped protocol callback")?
         testing.assert_eq(mapped, Option.Some(UInt8(9)), "mutable Option.map could not borrow a read callback")?
         testing.assert_eq(recovered, UInt8(7), "mutable Option.map settled its caller's protocol capture")?
-    }
-
-    // Transform a present value into another Option; None stays None. The
-    // callback is dropped at the end.
-    pub fn and_then[U, F: inout fn(sink value: T) -> Option[U]](sink self: Self, sink transform: F) -> Option[U] where carries(.Some: self, transform), F: Discardable {
-        var transforming = transform
-        self.and_then_inout(&transforming)
     }
 
     test fn and_then_takes_a_transform_that_changes_a_lent_count() {
@@ -270,8 +256,8 @@ impl[T] Option[T] {
         testing.assert_eq(*absent.unwrap_or(borrow other), UInt64(23), "option fallback changed its borrowed payload")?
     }
 
-    // Chain as `and_then` does, with a transform whose state the caller keeps.
-    pub fn and_then_inout[U, F: inout fn(sink value: T) -> Option[U]](sink self: Self, inout transform: F) -> Option[U] where carries(.Some: self, transform) {
+    // Transform a present value into another Option; None stays None.
+    pub fn and_then[U, F: inout fn(sink value: T) -> Option[U]](sink self: Self, inout transform: F) -> Option[U] where carries(.Some: self, transform) {
         match self {
             Some(value) => &transform(value),
             None => .None,
@@ -286,8 +272,8 @@ impl[T] Option[T] {
         }
         let selected: Option[UInt8] = .Some(7)
         let missing: Option[UInt8] = .None
-        let chained = selected.and_then_inout(&chain)
-        let skipped = missing.and_then_inout(&chain)
+        let chained = selected.and_then(&chain)
+        let skipped = missing.and_then(&chain)
         testing.assert_eq(chained, Option.Some(UInt64(7)), "mutable Option.and_then returned the wrong payload")?
         testing.assert(skipped.is_none(), "mutable Option.and_then changed None")?
         testing.assert_eq(calls, UInt8(1), "mutable Option.and_then called its callback for None")?
@@ -342,13 +328,6 @@ impl[T] Option[T] {
         testing.assert_eq(fallback.number, UInt8(9), "an affine fallback was not returned")?
     }
 
-    // Return the present value, or call `fallback` to make one only when there
-    // is none. The callback is dropped at the end.
-    pub fn unwrap_or_else[F: inout fn() -> T](sink self: Self, sink fallback: F) -> T where carries(self, fallback), F: Discardable {
-        var falling_back = fallback
-        self.unwrap_or_else_inout(&falling_back)
-    }
-
     test fn unwrap_or_else_takes_a_fallback_that_changes_a_lent_count() {
         var calls = UInt8(0)
         let absent: Option[UInt8] = .None
@@ -373,9 +352,9 @@ impl[T] Option[T] {
         testing.assert(absent.unwrap_or_else(|| 9) == 9, "unwrap_or_else did not call its fallback for None")?
     }
 
-    // Fall back as `unwrap_or_else` does, with a fallback whose state the
-    // caller keeps.
-    pub fn unwrap_or_else_inout[F: inout fn() -> T](sink self: Self, inout fallback: F) -> T where carries(self, fallback) {
+    // Return the present value, or call `fallback` to make one only when there
+    // is none.
+    pub fn unwrap_or_else[F: inout fn() -> T](sink self: Self, inout fallback: F) -> T where carries(self, fallback) {
         match self {
             Some(value) => value,
             None => &fallback(),
@@ -390,8 +369,8 @@ impl[T] Option[T] {
         }
         let available: Option[UInt8] = .Some(3)
         let empty: Option[UInt8] = .None
-        let original = available.unwrap_or_else_inout(&fallback)
-        let defaulted = empty.unwrap_or_else_inout(&fallback)
+        let original = available.unwrap_or_else(&fallback)
+        let defaulted = empty.unwrap_or_else(&fallback)
         testing.assert_eq(original, UInt8(3), "mutable Option fallback replaced Some")?
         testing.assert_eq(defaulted, UInt8(9), "mutable Option fallback did not handle None")?
         testing.assert_eq(calls, UInt8(1), "mutable Option fallback ran for Some")?

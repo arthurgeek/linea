@@ -26,13 +26,13 @@ fn count_lines_in[A: Allocator](allocator: A, input: Str) -> Result[LineCounts[A
         }
         // `make_entry` runs only for a line not seen before: it copies the
         // line into a key and starts its count at 1.
-        let make_entry = |query: Str, allocator: A| -> Result[collections.Entry[String[A], UInt64], mem.Oom] where carries(.Ok: allocator) {
+        var make_entry = |query: Str, allocator: A| -> Result[collections.Entry[String[A], UInt64], mem.Oom] where carries(.Ok: allocator) {
             .Ok(.{ key = query.to_owned_in(allocator)?, value = 1 })
         }
         // `upsert` adds one to the count of a line it has seen, and inserts a
-        // new entry otherwise. `settled()` releases an entry built under the
+        // new entry otherwise. `&make_entry` lends it the factory. `settled()` releases an entry built under the
         // wrong key and keeps only why the upsert failed.
-        let _ = &counts.upsert(line, make_entry, |sink count| count + 1).settled() else |reason| {
+        let _ = &counts.upsert(line, &make_entry, |sink count| count + 1).settled() else |reason| {
             match reason {
                 Allocation(reason) => return .Err(reason),
                 Factory(reason) => return .Err(reason),

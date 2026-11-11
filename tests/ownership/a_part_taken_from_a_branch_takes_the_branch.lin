@@ -1,0 +1,32 @@
+// A branch sits where its construct sits. Taking a part out of
+// `if first { near } else { far }` takes the shelf each branch names, so
+// neither shelf is used afterwards, and the rest of the shelf taken, which
+// nothing names, must owe nothing.
+import std.mem
+
+struct Shelf {
+    items: mem.Vec[UInt8],
+    spare: mem.Vec[UInt8],
+}
+
+fn shelf() -> Shelf {
+    .{ items = mem.Vec.new(), spare = mem.Vec.new() }
+}
+
+fn main() -> UInt8 {
+    let near = shelf()
+    let far = shelf()
+    let first = true
+    (if first {
+        near
+    } else {
+        far
+    }).items.release()
+    let { items, spare } = near
+    items.release()
+    spare.release()
+    let { items: other, spare: extra } = far
+    other.release()
+    extra.release()
+    0
+}

@@ -2,7 +2,7 @@ import std.mem
 import std.mem.address
 
 // A View is a writable run of `len` elements, starting at `at`, that another
-// value owns, such as one side of a vector `Vec.split_inout` lends. It is
+// value owns, such as one side of a vector `Vec.split` lends. It is
 // neither Copyable nor Owned, so it cannot be sent across tasks or escaped.
 @(opaque)
 struct View[T] {

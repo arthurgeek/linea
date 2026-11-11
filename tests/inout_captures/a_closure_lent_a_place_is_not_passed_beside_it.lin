@@ -1,0 +1,35 @@
+// `observe` reads `total` while it calls `act`, and the closure written in the
+// call is lent `total` to change. One call cannot both read a place and lend
+// it for writing, whichever argument does which.
+struct Tally {
+    count: UInt8,
+}
+
+fn observe[F: inout fn()](total: Tally, inout act: F) -> UInt8 {
+    let before = total.count
+    &act()
+    before + total.count
+}
+
+fn consume[F: sink fn()](total: Tally, sink act: F) -> UInt8 {
+    let before = total.count
+    act()
+    before + total.count
+}
+
+fn main() -> UInt8 {
+    var total: Tally = .{ count = 1 }
+    let lent = observe(
+        total,
+        inout [inout total] || {
+            total.count += 1
+        },
+    )
+    let taken = consume(
+        total,
+        sink [inout total] || {
+            total.count += 1
+        },
+    )
+    lent + taken
+}

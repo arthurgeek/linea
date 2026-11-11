@@ -1,7 +1,8 @@
 # 131. Closure invocation and capture ownership are independent
 
 Status: Accepted — 2026-09-10; stored inout capture clause superseded by
-[0193](0193-a-closure-may-hold-a-place-lent-inout.md). Supersedes the read-only invocation and capture
+[0193](0193-a-closure-may-hold-a-place-lent-inout.md); `_inout` naming clause
+superseded by [0267](0267-an-inout-parameter-takes-a-temporary.md). Supersedes the read-only invocation and capture
 restriction in [0130](0130-explicit-captures-use-inline-environments.md); extends
 [0123](0123-observations-carry-owner-dependencies-through-callable-contracts.md)
 and [0124](0124-copyability-and-settlement-are-independent-capabilities.md).

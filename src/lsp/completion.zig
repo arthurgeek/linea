@@ -1433,19 +1433,31 @@ const Writability = struct {
 ///
 /// The detail names what `Resolution.placeRoot` finds at the root of the
 /// same walk: the local or parameter whose own declaration settles it, or,
-/// where the walk never reaches one, that the receiver is not a place a
-/// caller could bind and mark instead.
+/// where the walk never reaches one, that the receiver is an observation no
+/// write goes through, or a value lent as a temporary.
 fn receiverWritability(gpa: std.mem.Allocator, res: *const Resolution, ast: *const Ast, receiver: ExprId) !Writability {
     if (res.placeIsMutable(ast, receiver)) return .{ .writable = true, .detail = null };
     const root = res.placeRoot(ast, receiver);
-    const detail = if (root == BindingId.none)
-        try gpa.dupe(u8, "mutates its receiver, and a value that is not a place cannot be lent")
+    const detail = if (root == BindingId.none and observed(ast, receiver))
+        try gpa.dupe(u8, "mutates its receiver, which cannot be written here")
+    else if (root == BindingId.none)
+        // A value that is no place is lent as a temporary, so the call is
+        // accepted as written and takes no marker.
+        try gpa.dupe(u8, "mutates its receiver, a temporary that ends with its statement")
     else switch (res.kindOf(root)) {
         .local => try std.fmt.allocPrint(gpa, "mutates its receiver; `{s}` is declared with `let`", .{ast.tokenText(res.declaringToken(root))}),
         .parameter => try std.fmt.allocPrint(gpa, "mutates its receiver; `{s}` is a read-only parameter", .{ast.tokenText(res.declaringToken(root))}),
         else => try gpa.dupe(u8, "mutates its receiver, which cannot be written here"),
     };
     return .{ .writable = false, .detail = detail };
+}
+
+/// Whether a receiver is reached through a dereferenced observation, which
+/// is a place that grants no writes.
+fn observed(ast: *const Ast, receiver: ExprId) bool {
+    var steps = ast.placeSteps(receiver);
+    while (steps.next()) |step| if (ast.exprTag(step) == .dereference) return true;
+    return false;
 }
 
 /// Every operation applicable to the receiver's type, one item per trait that
@@ -2541,12 +2553,12 @@ test "a call's result offers a mutating operation with a note, never a marker" {
     const items = try offeredReading(gpa, &checked, checked.fileNamed("main.lin").?, at, .supported);
     defer free(gpa, items);
 
-    // `made()` is a value, not a place at all -- there is nothing here to
-    // bind a `var` and mark, so the note says that instead.
+    // `made()` is a value, not a place: the operation changes a temporary,
+    // which takes no marker, and the note says what becomes of the change.
     const mutates = try requireItem(items, "increment");
     if (mutates.textEdit) |edit| try testing.expect(!std.mem.startsWith(u8, edit.text_edit.newText, "&"));
     try testing.expectEqualStrings(
-        "mutates its receiver, and a value that is not a place cannot be lent",
+        "mutates its receiver, a temporary that ends with its statement",
         mutates.detail.?,
     );
 }
@@ -2588,13 +2600,13 @@ test "a marker on a chain lends only the receiver at its head" {
     try testing.expectEqualStrings("&counter.increment().value()", value.textEdit.?.text_edit.newText);
 
     // `increment` reads here too, its receiver now the call this chain's own
-    // marker already reached -- not a place a second `&` could lend, so this
-    // is offered with a note rather than a rewrite carrying a second marker.
+    // marker already reached -- not a place a second `&` could lend, so it
+    // changes a temporary and is offered with a note, with no second marker.
     // A written call still keeps the one marker the source already wrote:
     // the receiver's own text is copied forward, `&&` is never written.
     const increment = try requireItem(items, "increment");
     try testing.expectEqualStrings(
-        "mutates its receiver, and a value that is not a place cannot be lent",
+        "mutates its receiver, a temporary that ends with its statement",
         increment.detail.?,
     );
     const rewritten = increment.textEdit.?.text_edit.newText;

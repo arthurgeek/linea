@@ -1,0 +1,17 @@
+error[O-Leak]: this linear `Shelf` is never settled
+  --> tests/ownership/a_part_taken_from_a_branch_takes_the_branch.lin:20:6
+   |
+20 |     (if first {
+   |      ^^^^^^^^^^ nothing can take what this yields
+   |
+   = help: bind it with `let`, or give it to something that takes it
+error[O-Merge]: the paths here disagree about `near`
+  --> tests/ownership/a_part_taken_from_a_branch_takes_the_branch.lin:20:6
+   |
+20 |     (if first {
+   |      ^^^^^^^^^^ consume it on the other path too, or on neither
+error[O-Merge]: the paths here disagree about `far`
+  --> tests/ownership/a_part_taken_from_a_branch_takes_the_branch.lin:20:6
+   |
+20 |     (if first {
+   |      ^^^^^^^^^^ consume it on the other path too, or on neither

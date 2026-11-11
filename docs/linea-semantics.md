@@ -956,7 +956,10 @@ guess which parameter it intended.
 **[S-Default]** A parameter may follow its type with `=` and an expression,
 providing a default when a call omits that argument. `read` and `sink`
 parameters allow defaults: a default is a constant that owes nothing
-([T-Default]). `inout` requires the caller to supply the place. Defaulted
+([T-Default]). An `inout` parameter takes none: a default is a constant, a
+place that cannot be written, and what the callee wrote to an omitted argument
+no caller could read. An argument the caller does write may be a value that is
+not a place ([O-Temporary]). Defaulted
 parameters form a suffix: every parameter after the first default must also have
 one. A default on the wrong convention is diagnosed at its own `=`. A required
 parameter after a default is diagnosed at the nearest earlier `=`. Both errors
@@ -1033,8 +1036,14 @@ diagnosed where it is written, and the parts after it are still read.
 **[S-Field]** A field requires a name and an explicit type; there is no
 initialiser from which to infer one.
 
-**[S-Mutation]** An argument to an `inout` parameter must carry `&`; an
-argument to a `read` parameter must not. `&` marks possible mutation and the
+**[S-Mutation]** A place passed to an `inout` parameter must carry `&`; an
+argument to a `read` or `sink` parameter must not. A value that is not a place,
+such as a closure written in the call, a structure literal or a call's result,
+is passed to an `inout` parameter without `&`: it is lent as a temporary that
+ends with its statement ([O-Temporary]), so no place of the caller's can change
+and there is nothing to mark. `visit(&counting)` lends the caller's `counting`;
+`visit(|x| x > 3)` lends a temporary; `visit(counting)` is refused, so a
+forgotten marker never changes a copy. `&` marks possible mutation and the
 associated exclusivity requirement at the call site. It does not take an
 address or create a reference; the language has no reference values. `&` is
 written in three places: before an argument, before a postfix call whose
@@ -1054,8 +1063,10 @@ marker: `&list.length()` is refused as `&` on a `read` argument is. The marker
 binds to the first call after it, so in `&list.first().push(x)` it marks the
 receiver `list` of `first`, and `push` takes what `first` returned. An `inout`
 receiver that is not a place, such as the result of `fresh()` or of
-`list.first()`, cannot be lent; the value is bound to a `var` first
-([ADR 0170](adr/0170-a-marked-postfix-call-lends-its-receiver.md)).
+`list.first()`, is lent as a temporary like any such argument, and the call
+takes no marker: `fresh().bump()` changes a value that ends with the statement
+([ADR 0170](adr/0170-a-marked-postfix-call-lends-its-receiver.md),
+[ADR 0267](adr/0267-an-inout-parameter-takes-a-temporary.md)).
 
 Mutable callable invocation is `&callback(arguments)`. This marks the
 invocation, not its resulting value as an inout argument: `inspect(&callback())`
@@ -1589,7 +1600,10 @@ bound.
 
 **[N-Aliased]** A place mutated by one argument must not overlap any place
 accessed by another argument, whether that access mutates or only reads it.
-Mutation includes both passing a place with `&` and assigning to it. Places
+Mutation includes passing a place with `&`, assigning to it, and lending it
+`inout` to a closure written in the argument, which the callee may call:
+`observe(total, inout [inout total] || { … })` reads and writes `total` in one
+call. Places
 overlap when they share a root and one path is a prefix of the other; path
 steps are treated as equal whenever they may select the same place. The check
 uses only the arguments at each call site, without inference or lifetimes.
@@ -4049,10 +4063,14 @@ Every iterator is a sequence of itself: the standard library declares
 `Sequence` implementation, which coherence refuses, so the bound `I: Iterator`
 says what walking `I` means: `I.Iter` is `I`.
 
-The library's pipeline operations (`map`, `filter`, `fold`, `zip` and the rest,
-and their `_inout` forms) are provided operations of `Sequence`, so a pipeline
-is written as a chain on what it walks. An operation that takes its callback
-`sink` consumes it, so a named callback is moved by its first use (a second use
+The library's pipeline operations (`map`, `filter`, `fold`, `zip` and the rest)
+are provided operations of `Sequence`, so a pipeline
+is written as a chain on what it walks. An operation that walks at once
+(`fold`, `find`, `any`, `for_each` and the like) takes its callback `inout`: a
+closure written in the call is lent as a temporary ([O-Temporary]), and a named
+callback is lent with `&` and stays with its caller, `xs.fold(0, &add)`. An
+adapter that keeps its callback (`map`, `filter`) takes it
+`sink` and consumes it, so a named callback is moved by its first use (a second use
 is [O-Move]) and a copyable one is passed as `copy(f)` to be used again.
 
 Arrays use direct traversal instead: the array is recognised before `Sequence`
@@ -4915,7 +4933,7 @@ for a buffer, the members of an implementation of `mem.Allocator` for a
 buffer of that allocator, the test allocators and arena handle the table names
 for their backing allocator's buffers, `Storage.from_buffer` and the
 declarations that hand its bytes out as numbers; for a slice,
-`foreign_address`; for a view, `Vec.split_inout`; for a vector, the
+`foreign_address`; for a view, `Vec.split`; for a vector, the
 declarations that make a byte vector from a buffer and take it back; and for a
 kept body, `keep_body` and `task.Slot.start`. A `Storage` literal with no
 buffer, `at = address.nowhere()` and `len = 0` is written anywhere. Everything
@@ -5972,7 +5990,9 @@ A `read` parameter whose place supplies a returned or retained observation
 receives the caller's stable storage address, including for a scalar. A constant
 is a place, so the observation it supplies depends on nothing. An argument that is
 not a place is evaluated into a temporary whose address the parameter receives,
-and the temporary lives until the end of the call's statement ([O-Temporary]). A
+and the temporary lives until the end of the call's statement ([O-Temporary]). An
+`inout` parameter is lent a temporary the same way, whether or not anything
+borrows it. A
 parameter used only by `carries` may receive a temporary descriptor: the returned
 view observes its backing storage, not the descriptor temporary.
 
@@ -6007,13 +6027,17 @@ Every occurrence of a value occupies either a consuming or a reading position.
 Its position determines whether it moves.
 
 **Consuming positions** take the value: the right-hand side of a `let` or plain
-assignment, an argument to a `sink` parameter, a `return` operand, a function's
+assignment, an argument to a `sink` parameter, an argument to an `inout`
+parameter that is not a place ([O-Temporary]), a `return` operand, a function's
 trailing value, a variant payload, a structure field initialiser, a structure
 literal's base, and the scrutinee of a plain `match`.
 
 **Reading positions** observe the value: operator operands, conditions, arguments
-to `read` or `inout` parameters, the scrutinee of `match read`, the initializer of
-`let read`, and the subject of field access. The right-hand side of a compound
+to `read` parameters, places lent to `inout` parameters, the scrutinee of `match read`, the initializer of
+`let read`, and the subject of field access. Where a part is taken out of a
+value no place names, as in `(if first { near } else { far }).items.release()`,
+the subject is consumed: each place a branch names is given up, and what is
+left of the value, which nothing can take, must owe nothing ([O-Leak]). The right-hand side of a compound
 assignment is an operator operand, so `a += b` leaves `b` unchanged just as
 `a = a + b` does.
 
@@ -6413,7 +6437,9 @@ one read outside.
 
 **[O-Temporary]** A value that is borrowed where it is written without being a
 place, such as `log.field("count", 3)`'s `3`, an argument `base + 2` to a
-parameter the result borrows, or an interpolated call whose result must be
+parameter the result borrows, an argument to an `inout` parameter such as the
+closure in `xs.any(|x| x > 3)` or the receiver in `fresh().bump()`, or an
+interpolated call whose result must be
 settled, is evaluated into a temporary. The temporary lives until the end of the
 statement that evaluates it, and a value borrowing it may be used only until
 then: it may be passed, rendered and written within the statement, as in
@@ -6430,6 +6456,15 @@ so `logger.info("done", if ok { log.field("count", 3) } else { log.field("count"
 is accepted. A `break` or a `continue` ends the statements it leaves. A temporary
 is discarded where it ends and runs no cleanup; one that must be settled is
 refused by [O-Leak] as any unsettled result is.
+
+A temporary lent to an `inout` parameter is written by the callee, so it owns
+what its argument yields: the argument is in a consuming position, and a place
+a branch of it names, as in `bump(if first { a } else { b })`, is moved into
+the temporary. What the callee wrote ends with the statement. A temporary that
+must be settled, such as a linear value or a closure that owns one, is
+[O-Leak] at the argument: it is bound to a `var`, lent with `&`, and settled
+after the call. A temporary lent to a `read` parameter is only observed
+([ADR 0267](adr/0267-an-inout-parameter-takes-a-temporary.md)).
 
 A constant is a place, not a temporary: its storage is static, so a value
 borrowing it, such as `log.field("service", SERVICE)`, may be kept or returned

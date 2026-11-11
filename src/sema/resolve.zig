@@ -14211,7 +14211,7 @@ const Resolver = struct {
                 self.ast.exprSpan(id),
                 "expected a name",
                 switch (use) {
-                    .mutated => "`&` marks a binding the call writes to",
+                    .mutated => "`&` lends a place the call writes to, and a value that is not one is passed without it",
                     else => "an assignment names the binding it writes to",
                 },
             );
