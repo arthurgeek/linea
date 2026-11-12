@@ -949,7 +949,7 @@ struct Reply {
 // A handler is a function from a request to an answer. `http.Request` and
 // `http.Response` take their memory from the system allocator, so a handler
 // needs no type parameter for it.
-fn health(request: http.Request) -> Result[http.Response, http.Error] {
+fn health(request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     // The handler takes the request because every answer is built in the
     // memory the request came with: `http.text` puts the body there.
     http.text(request, "ok")
@@ -1046,19 +1046,19 @@ it things from another terminal:
 ```
 $ curl -i http://127.0.0.1:8080/health
 HTTP/1.1 200 OK
-Connection: close
+Content-Length: 2
 Content-Type: text/plain; charset=utf-8
 
 ok
 $ curl -i -X POST -H "Content-Type: application/json" -d '{"text":"hello"}' http://127.0.0.1:8080/echo
 HTTP/1.1 200 OK
-Connection: close
+Content-Length: 16
 Content-Type: application/json
 
 {"echo":"hello"}
 $ curl -i -X POST -H "Content-Type: application/json" -d '{}' http://127.0.0.1:8080/echo
 HTTP/1.1 422 Unprocessable Content
-Connection: close
+Content-Length: 27
 Content-Type: text/plain; charset=utf-8
 
 missing field at $["text"]
@@ -1086,7 +1086,7 @@ fn forecast(city: http.Path[Str], request: http.Request) -> Result[http.Response
 }
 
 // A literal segment wins over `{city}`, so this answers `/forecast/today`.
-fn today(request: http.Request) -> Result[http.Response, http.Error] {
+fn today(request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     http.text(request, "Today is sunny everywhere.\n")
 }
 
@@ -1168,7 +1168,7 @@ Run it with `linea run weather.lin` and ask it things from another terminal:
 ```
 $ curl -i http://127.0.0.1:8080/forecast/lisbon
 HTTP/1.1 200 OK
-Connection: close
+Content-Length: 17
 Content-Type: text/plain; charset=utf-8
 
 Sunny in lisbon.
@@ -1178,7 +1178,7 @@ $ curl http://127.0.0.1:8080/stations/harbour
 {"station":"harbour","celsius":21}
 $ curl -i http://127.0.0.1:8080/stations/a-very-long-station-name
 HTTP/1.1 400 Bad Request
-Connection: close
+Content-Length: 38
 Content-Type: text/plain; charset=utf-8
 
 a station name has at most 12 letters
@@ -1186,14 +1186,14 @@ $ curl http://127.0.0.1:8080/archive/2026/09/25
 archived under 2026/09/25
 $ curl -i -X POST http://127.0.0.1:8080/forecast/lisbon
 HTTP/1.1 405 Method Not Allowed
-Connection: close
+Content-Length: 19
 Allow: GET, HEAD
 Content-Type: text/plain; charset=utf-8
 
 method not allowed
 $ curl -i http://127.0.0.1:8080/radar
 HTTP/1.1 404 Not Found
-Connection: close
+Content-Length: 10
 Content-Type: text/plain; charset=utf-8
 
 not found
@@ -1216,7 +1216,15 @@ The parameters take one of these shapes, and `route` accepts any of them:
   of any state takes it, as `today` and `health` show;
 - up to six **extractors**, the values the handler reads, such as `city`
   ([Extractors](#extractors) lists them);
-- the `request`, always last, because the answer is built in its memory.
+- the `request`, last when extractors precede it, because the answer is built
+  in its memory. The router materializes the body once for those extractors.
+
+A handler without extractors takes the request followed by
+`inout incoming: http.RequestBody`. A raw route takes
+`inout state`, the request, and that exclusive body argument too. Request
+metadata stays copyable; body reads change one stream position and therefore
+need `inout`. Use `_incoming` when a handler does not read the body. The server
+drains unread bytes before serving the next request on that connection.
 
 The handler returns either a response or an error. The extractors are read in
 the order they are written, and the first one that refuses answers the request
@@ -1224,8 +1232,8 @@ with its error, so the handler never runs and the extractors already read are
 released, last first. A handler is lent each extractor, so it reads one but
 does not keep it: a handler that must own what it reads, or must act on a
 refusal, takes the request and calls `request.extract[T]()` itself, and is
-registered with `route_raw`, which takes a function of the state and the
-request.
+registered with `route_raw`, which takes a function of the state, request metadata and an exclusive
+`inout` body.
 
 A handler whose answer may borrow from an extractor as well as from the
 request, such as one that holds a `Str` or an owned `String`, still writes no
@@ -1271,14 +1279,15 @@ import std.mem
 use mem.Lender
 
 // A posted form is answered with 303, so the browser fetches `/` next with a GET.
-fn signed(request: http.Request) -> Result[http.Response, http.Error] {
+fn signed(request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     http.redirect(request, .SeeOther, "/")
 }
 
 fn main() -> Result[UInt8, io.IoError] {
     defer let arena = mem.Arena.open(mem.system(), size: 8192)
     let sent = http.new_request(arena.handle(), "POST", "/sign", "").unwrap()
-    let response = signed(sent.request()).unwrap()
+    defer var incoming = http.RequestBody.from_request(sent.request())
+    let response = signed(sent.request(), &incoming).unwrap()
     let status = response.status()
     io.println("{status.code()} {status.reason()}, Location: {response.header("Location").unwrap()}")?
     .Ok(0)
@@ -1297,7 +1306,7 @@ a handler writes `?` and lets a bad input answer itself.
 ### Every request lives in an arena
 
 [Memory](07-memory.md#one-arena-per-http-request) listed the four steps
-`serve` takes for each request: carve an arena, read the request into it, run
+`serve` takes for each request: carve an arena, read the request head into it, run
 the handler, and rewind the arena. A router can be driven through the same
 steps by hand, without a network, which is also how [Testing](10-testing.md#testing-a-server)
 tests a handler:
@@ -1337,7 +1346,8 @@ fn main() -> Result[UInt8, io.IoError] {
         let sent = http.new_request(arena.handle(), "GET", path, body: "") else |_| {
             return .Ok(1)
         }
-        let response = &router.serve_http(&nothing, sent.request()) else |_| {
+        defer var incoming_1 = http.RequestBody.from_request(sent.request())
+        let response = &router.serve_http(&nothing, sent.request(), &incoming_1) else |_| {
             return .Ok(1)
         }
         // `text()` reads the held body as text.
@@ -1366,7 +1376,7 @@ string ([Text](08-text.md#an-interpolation-is-a-value-not-a-str) explains why
 an interpolation is written this way rather than passed to `append`).
 
 The loop in `main` plays `serve`. `http.new_request` builds a request in the
-arena, and `&router.serve_http(state, request)` runs the router on it, as
+arena, and `&router.serve_http(&state, request, &incoming)` runs the router on it, as
 `serve` does for each connection; `serve_http` belongs to the `http.Handler`
 trait, hence `use http.Handler`. This router has no state, so the loop passes
 `()`, the unit type's one value, from a `var`, because the state is lent
@@ -1544,7 +1554,7 @@ fn write_outlook(days: UInt64, inout body: http.BodyWriter) -> Result[(), http.E
 }
 
 // GET /stats reads the count `record` keeps in the state.
-fn stats(inout ctx: Ctx, request: http.Request) -> Result[http.Response, http.Error] {
+fn stats(inout ctx: Ctx, request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     let readings = ctx.app.call(|inout app: App| app.readings)
     http.text(request, "{readings} readings\n")
 }
@@ -1556,7 +1566,7 @@ fn routes(inout router: http.Router[Ctx], greeting: Str) -> Result[(), http.Rout
     &router.route("GET /stats", stats)?
     // A route can be a closure, registered with `route_raw`. This one captures
     // a copy of `greeting`.
-    &router.route_raw("GET /", [sink greeting = copy(greeting)] |inout _, request| http.text(request, greeting))
+    &router.route_raw("GET /", [sink greeting = copy(greeting)] |inout _, request, inout _incoming| http.text(request, greeting))
 }
 
 fn main() -> UInt8 {
@@ -1606,14 +1616,14 @@ $ curl -X POST -H 'Authorization: Bearer harbour' -H 'Content-Type: application/
 {"station":"harbour","sky":"clear","count":1}
 $ curl -i -X POST -H 'Content-Type: application/json' -d '{"celsius":21,"sky":"clear"}' http://127.0.0.1:8080/readings
 HTTP/1.1 401 Unauthorized
-Connection: close
+Content-Length: 53
 X-Request-Id: 01a0e2f7-c2ac-7e8e-9099-6f031600a35a
 Content-Type: text/plain; charset=utf-8
 
 name the station with `Authorization: Bearer <name>`
 $ curl -i -X POST -H 'X-Request-Id: harbour-check-4' -H 'Authorization: Bearer harbour' -H 'Content-Type: application/json' -d '{"celsius":21}' http://127.0.0.1:8080/readings
 HTTP/1.1 422 Unprocessable Content
-Connection: close
+Content-Length: 26
 X-Request-Id: harbour-check-4
 Content-Type: text/plain; charset=utf-8
 
@@ -1625,7 +1635,7 @@ day 1: sunny
 day 2: sunny
 $ curl -i 'http://127.0.0.1:8080/outlook?days=many'
 HTTP/1.1 400 Bad Request
-Connection: close
+Content-Length: 77
 X-Request-Id: 01a0e2f7-c325-7f29-893b-658c95e60af5
 Content-Type: text/plain; charset=utf-8
 
@@ -1690,8 +1700,11 @@ name points into the request, so it lives as long as the request does. A real se
 trusts the name.
 
 A handler that wants to read an input itself, to log a refusal before
-answering it, say, calls `request.extract[T]()` in its body and registers with
-`route_raw`. `request.extract[http.Path[UInt64]]()` returns the number itself,
+answering it, say, registers with `route_raw`. Metadata extractors use
+`request.extract[T]()` directly. For a body extractor, first call
+`let ready = &incoming.materialize(request)?`, then `ready.extract[T]()`.
+The materialized request views the body cache, which stays alive until the
+response has been written. `request.extract[http.Path[UInt64]]()` returns the number itself,
 where a parameter holds the `Path`, and `?` answers the request with the
 refusal. The [calendar
 export](../../examples/calendar-export/main.lin) does this.
@@ -1944,7 +1957,7 @@ impl http.Extract[mem.SystemAllocator] for Note {
     }
 }
 
-fn health(request: http.Request) -> Result[http.Response, http.Error] {
+fn health(request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     http.text(request, "ok")
 }
 
@@ -1967,7 +1980,8 @@ fn main() -> Result[UInt8, io.IoError] {
     let sent = http.new_request(arena.handle(), "POST", "/echo", body: r#"{"text": "hello"}"#, content_type: "application/json") else |_| {
         return .Ok(1)
     }
-    let response = &router.serve_http(&nothing, sent.request()) else |_| {
+    defer var incoming_2 = http.RequestBody.from_request(sent.request())
+    let response = &router.serve_http(&nothing, sent.request(), &incoming_2) else |_| {
         return .Ok(1)
     }
     io.println(response.text().unwrap())?
@@ -1981,10 +1995,10 @@ hello
 
 `health` and `echo` have no type parameter, and `Note` reads itself, so the router
 reads the body into one before it calls `echo`. The same handler written for any parent is
-`fn health[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]]`:
+`fn health[P: Allocator](inout _: (), request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming)`:
 inside a declaration with its own allocator parameter, a type that leaves the
 allocator to its default is refused with `[T-DefaultedAllocator]`, so a generic
-handler writes `P` in all three
+handler writes `P` in each of them
 ([Memory](07-memory.md#the-allocator-is-part-of-the-type)).
 
 ### Shared state
@@ -2024,13 +2038,66 @@ same function and answers every connection in turn, on the thread that called
 it.
 
 A route can be a closure instead of a named function, registered with
-`route_raw`, which takes a function of the state and the request: `GET /` is
-`[sink greeting = copy(greeting)] |inout _, request| http.text(request, greeting)`.
+`route_raw`, which takes a function of the state, request metadata and an exclusive body: `GET /` is
+`[sink greeting = copy(greeting)] |inout _, request, inout _incoming| http.text(request, greeting)`.
 The router keeps the closure for as long as it lives and calls it for reading,
 so its captures are fixed configuration, such as this greeting; they may hold
 nothing that must be released. A count that changes belongs in the state.
 Because the router keeps a copy of the `greeting` view, `routes` says so with
 `where retains(router: greeting)` ([Borrowing](06-borrowing.md#retains--i-am-putting-it-inside-something-of-yours)).
+
+### Reading an upload without keeping it
+
+A raw handler receives the request metadata and an exclusive body. It can
+implement `io.Reader`'s normal read loop with a fixed buffer, so the upload
+need not fit in the request arena. Each read advances the same body position;
+zero means the declared body has ended, and a truncated upload or a timeout is
+an error. This handler counts the bytes without collecting them:
+
+```linea
+import std.http
+import std.io
+import std.mem
+import std.testing
+
+use io.Reader
+use mem.Lender
+
+fn count[P: Allocator](request: http.Request[P], inout incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(incoming), retains(incoming: incoming) {
+    var buffer = request.allocator().acquire(4096)?
+    var total: UInt64 = 0
+    loop {
+        let got = &incoming.read_some(&buffer, offset: 0, count: 4096)?
+        if got == 0 {
+            break
+        }
+        total += got
+    }
+    http.text(request, "{total} bytes")
+}
+
+test fn an_upload_is_counted_without_collecting_it() {
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "POST", "/count", body: "").unwrap()
+    defer var incoming = http.RequestBody.from_slice("hello".as_bytes(), arena.handle())
+    let response = count(sent.request(), &incoming).unwrap()
+    testing.assert_ok_eq(response.text(), "5 bytes", "the upload length changed")?
+}
+```
+
+```
+ok    an_upload_is_counted_without_collecting_it
+
+1 passed, 0 failed
+```
+
+Register this shape with `route_raw` by adding its leading `inout state`
+parameter. A route that wants the whole body instead calls
+`&incoming.read_all(request)` for bytes or `&incoming.text(request)` for UTF-8
+text. These calls cache the remaining body; bytes already consumed by `read_some`
+are excluded. Repeated calls return the same cached view. `&incoming.materialize(request)` returns request metadata viewing that
+cache, so existing JSON and form extractors can read it. A response may view
+the cached body, so keep `incoming` alive until the response is written.
 
 ### Streaming
 
@@ -2178,9 +2245,9 @@ struct Counted[H] {
 }
 
 impl[P: Allocator, S, H: http.Handler[S, P]] http.Handler[S, P] for Counted[H] {
-    fn serve_http(inout self: Self, inout state: S, request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    fn serve_http(inout self: Self, inout state: S, request: http.Request[P], inout body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] {
         self.served += 1
-        var response = &self.next.serve_http(&state, request)?
+        var response = &self.next.serve_http(&state, request, &body)?
         var count = String.new_in(request.allocator())
         self.served.fmt(&count)?
         &response.set_header("X-Served", count.view())?
@@ -2231,14 +2298,18 @@ every request.
 | `max_form_pairs` | 100 | how many pairs a form body may hold; more is answered 413 |
 | `max_body_bytes` | 1 MiB | the body |
 | `request_arena_bytes` | 48 MiB | the arena each request is served from; it holds the request, what decoding its JSON body reserves, and the response |
-| `read_timeout_ms` | 5000 | how long the whole request, head and body together, may take from the moment the connection is accepted, in milliseconds; a slower one is answered 408 |
+| `read_timeout_ms` | 5000 | how long the whole request, head and body together, may take from its first byte, in milliseconds; a slower one is answered 408 |
+| `idle_timeout_ms` | 15000 | how long a kept-alive connection may wait between requests |
+| `open_connections` | 1024 | the most connections held at once, serving and idle together |
 | `first_byte_timeout_ms` | 500 | how long to wait for the first byte of a request, in milliseconds; an idle connection that sends nothing within this time is closed silently without a 408 |
 | `write_timeout_ms` | 5000 | how long one write may wait, in milliseconds |
 | `connections` | `.None` | how many connections to serve before `serve` returns; `.None` serves until the program ends |
 
 `connections = .Some(n)` is how tests and examples run a server for a fixed
-number of requests. `serve` refuses to start, with `ArenaTooSmall`, when the
-arena could not hold the largest request the other limits allow.
+number of connections. `serve` refuses to start, with `ArenaTooSmall`, when the
+arena cannot hold the bounded request head and server reservations. A streamed
+body may be larger than the arena. Materializing its bytes or decoded form
+fields can still fail when that request's arena has too little room.
 
 ## What `listen_and_serve` and `serve` promise
 
@@ -2249,15 +2320,37 @@ serving task has been joined, and releases it on a failure. So these hold for
 `serve`, and for `listen_and_serve` with the handlers released too:
 
 - It owns the listener it is given and closes it on every exit.
-- It answers one request per connection, on as many tasks at once as its
-  policy allows (`.Threads(128)` unless it is given another), each with a
-  handler of its own; with `policy: .Sequential` it answers one connection at
-  a time.
+- It answers HTTP/1.1 requests in order on a kept-alive connection, on as
+  many serving tasks at once as its policy allows (`.Threads(128)` unless it
+  is given another), each with a handler of its own. Idle connections use
+  registrations rather than tasks; `policy: .Sequential` answers ready
+  connections on the calling thread.
 - A failed connection — a client that disconnects, a malformed request, a
   timeout — is answered or dropped, and never stops the server.
-- It returns only when accepting fails in a way retrying cannot fix, when the
-  listener cannot be closed, when `limits.connections` is reached, or when
-  the arena is too small for the limits you set.
+- It returns when `limits.connections` is reached or a shutdown signal is
+  drained, and reports failures to accept, close the listener or satisfy its
+  memory limits.
+
+### Stopping a server gracefully
+
+TCP serving functions default to `shutdown: .OnSignals`. `SIGTERM` and
+`SIGINT` stop accepting new connections, close idle connections, and let
+requests already in flight or ready finish. Those responses carry
+`Connection: close`. Once every serving task has finished and the listener is
+closed, `serve` returns `.Ok(())`, so the program can finish normally.
+
+The server releases its signal registrations when shutdown begins. A second
+signal during the drain therefore takes the action the process had before
+serving. The ordinary request read and write timeouts still bound slow
+clients during the drain. With `policy: .Sequential`, the current request
+finishes before the dispatcher notices the signal. Its already-framed response
+may advertise keep-alive; the server closes its connection after the response.
+
+An application that handles shutdown itself passes `shutdown: .Manual`; the
+server then leaves `SIGTERM` and `SIGINT` alone. An inherited ignored signal
+stays ignored even under `.OnSignals`. A program may also register either
+signal in its own wait set: one delivery wakes both that registration and the
+server's registration.
 
 ## Running a handler as a CGI program
 
@@ -2454,7 +2547,9 @@ application that runs both ways and stores its entries in SQLite.
 - `io.Simulation` runs a test against a virtual clock and network, so a
   timeout takes no time and a seed repeats the same run.
 - A handler's parameters name what it reads: an optional `inout` state, up to
-  six extractors, and the request last. The router reads each extractor,
+  six extractors, and the request last. A handler without extractors takes
+  an exclusive `inout RequestBody` after the request instead. The router reads
+  each extractor,
   answers the first refusal with its status, and releases what it read.
 - `http.Path`, `http.Query`, `http.Json` and `http.Form` are extractors, and a
   type of your own that implements `http.Extract` is read straight into its
@@ -2464,7 +2559,7 @@ application that runs both ways and stores its entries in SQLite.
   query value or a cookie, and `http.percent_decode` reads it back, refusing
   a malformed `%`.
 - Every request lives in an arena that `serve` rewinds; `http.new_request`
-  and `&router.serve_http(state, request)` drive the same steps by hand.
+  and `&router.serve_http(&state, request, &incoming)` drive the same steps by hand.
 - `listen_and_serve_with` keeps the state in an owning task, gives each
   serving task a client of it, and returns it when serving ends; a route
   reaches it through `call`. `listen_and_serve` serves a service that shares

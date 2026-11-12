@@ -1,7 +1,7 @@
-error[T-Bound]: `H` requires `Endpoint[Counter, SystemAllocator]`, and `fn(sink counter: Counter, read request: Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(request)` does not implement it
+error[T-Bound]: `H` requires `Endpoint[Counter, SystemAllocator]`, and `fn(sink counter: Counter, read request: Request[SystemAllocator], inout _incoming: RequestBody[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(request), borrows(_incoming), retains(_incoming: _incoming)` does not implement it
   --> tests/http/a_function_taking_its_state_by_sink_is_not_registered.lin:16:26
    |
 16 |     let routed = &router.route("GET /", consume)
-   |                          ^^^^^ only the library, which declares `Endpoint[Counter, mem.SystemAllocator]`, may implement it for `fn(sink Counter, read Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2)`; pass a value whose type implements it
+   |                          ^^^^^ only the library, which declares `Endpoint[Counter, mem.SystemAllocator]`, may implement it for `fn(sink Counter, read Request[SystemAllocator], inout RequestBody[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2), borrows(#3), retains(#3: #3)`; pass a value whose type implements it
    |
-   = help: this function's parameters are `(sink, read)`, and `Endpoint` is implemented only for callable types whose parameters are `(read×1..7)`, `(inout, read×1..7)` (`read×N` is N parameters taken by `read`)
+   = help: this function's parameters are `(sink, read, inout)`, and `Endpoint` is implemented only for callable types whose parameters are `(read, inout)`, `(read×2..7)`, `(inout, read, inout)`, `(inout, read×2..7)` (`read×N` is N parameters taken by `read`)

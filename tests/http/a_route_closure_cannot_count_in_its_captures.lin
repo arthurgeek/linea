@@ -7,7 +7,7 @@ fn main() -> UInt8 {
     var router = http.Router.new()
     let _registered = &router.route_raw(
         "GET /hits",
-        [sink hits = UInt64(0)] |inout _, request| {
+        [sink hits = UInt64(0)] |inout _, request, inout _incoming| {
             hits += 1
             http.text(request, "{hits} hits")
         },

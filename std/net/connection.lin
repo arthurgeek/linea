@@ -566,3 +566,56 @@ impl Writer for Connection {
         .Ok(())
     }
 }
+
+// A ConnectionWriter borrows a connected socket for output. It cannot close
+// the socket, and keeps the connection's configured write timeout.
+@(opaque, copyable, derive(Release))
+struct ConnectionWriter {
+    owner: borrow Connection,
+}
+
+impl Connection {
+    // Lend output access while retaining ownership of the connected socket.
+    pub fn writer(self: Self) -> ConnectionWriter where borrows(self) {
+        .{ owner = borrow self }
+    }
+}
+
+impl io.ByteWriter for ConnectionWriter {
+    type Error = io.IoError
+
+    fn pending_bytes(_self: Self) -> UInt64 {
+        0
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        if bytes.length() == 0 {
+            return .Ok(0)
+        }
+        let answer = mem.write_slice_socket(bytes, self.owner.fd, self.owner.write_deadline())
+        if answer < 0 {
+            let error = io.IoError.from_os(.Write, Int32(0 - answer))
+            return .Err(.{ kind = .Underlying, reason = .Some(error), written = 0 })
+        }
+        .Ok(UInt64(answer))
+    }
+
+    fn flush(inout _self: Self) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        .Ok(0)
+    }
+}
+
+test fn a_borrowed_connection_writer_keeps_the_connection_open() {
+    defer var listener = listen(loopback(0)).unwrap()
+    defer var client = connect(listener.local_address().unwrap()).unwrap()
+    let Accepted { connection: server, address: _ } = &listener.accept().unwrap()
+    var writer = server.writer()
+    let written = io.write_all(&writer, "hello".as_bytes()).unwrap()
+    defer var bytes = mem.system().acquire(8).unwrap()
+    let count = &client.read_some(&bytes, offset: 0, count: 8).unwrap()
+    let matched = bytes.as_slice().subspan(start: 0, count: count).unwrap() == "hello".as_bytes()
+    server.close().unwrap()
+    testing.assert_eq(written, UInt64(5), "the borrowed writer changed its output length")?
+    testing.assert(matched, "the borrowed writer did not write to its live connection")?
+    .Ok(())
+}

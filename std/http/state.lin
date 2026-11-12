@@ -30,9 +30,11 @@ test fn with_state_lends_its_state_to_every_request() {
     // `serve` lends a `Stated` nothing, `()`, as this test does.
     var nothing = ()
     let first = new_request(arena.handle(), "GET", "/visit", body: "").unwrap()
-    let _first = &server.serve_http(&nothing, first.request()).unwrap()
+    defer var request_body1 = RequestBody.from_request(first.request())
+    let _first = &server.serve_http(&nothing, first.request(), &request_body1).unwrap()
     let second = new_request(arena.handle(), "GET", "/visit", body: "").unwrap()
-    let answered = &server.serve_http(&nothing, second.request()).unwrap()
+    defer var request_body2 = RequestBody.from_request(second.request())
+    let answered = &server.serve_http(&nothing, second.request(), &request_body2).unwrap()
     testing.assert_ok_eq(answered.text(), "visit 2", "the state was not kept between requests")?
     .Ok(())
 }
@@ -52,7 +54,8 @@ impl[S, H] Stated[S, H] {
         defer let arena = mem.Arena.open(mem.system(), size: 65536)
         var nothing = ()
         let sent = new_request(arena.handle(), "GET", "/visit", body: "").unwrap()
-        let _answered = &server.serve_http(&nothing, sent.request()).unwrap()
+        defer var request_body3 = RequestBody.from_request(sent.request())
+        let _answered = &server.serve_http(&nothing, sent.request(), &request_body3).unwrap()
         testing.assert_eq(before, UInt64(0), "a new state changed")?
         testing.assert_eq(server.state().count, UInt64(1), "the state did not show the visit")?
         .Ok(())
@@ -74,7 +77,8 @@ impl[S, H: Release] Stated[S, H] {
         defer let arena = mem.Arena.open(mem.system(), size: 65536)
         var nothing = ()
         let sent = new_request(arena.handle(), "GET", "/nowhere", body: "").unwrap()
-        let _missing = &server.serve_http(&nothing, sent.request())
+        defer var request_body4 = RequestBody.from_request(sent.request())
+        let _missing = &server.serve_http(&nothing, sent.request(), &request_body4)
         let visits = server.into_state()
         testing.assert_eq(visits.count, UInt64(3), "the state changed")?
         visits.release()
@@ -85,8 +89,8 @@ impl[S, H: Release] Stated[S, H] {
 // A `Stated` answers a request by lending its state to the handler it holds.
 // It takes `()` itself, which is what `serve` lends.
 impl[P: Allocator, S, H: Handler[S, P]] Handler[(), P] for Stated[S, H] {
-    fn serve_http(inout self: Self, inout _state: (), request: Request[P]) -> Result[Response[P], Error[P]] {
-        &self.handler.serve_http(&self.state, request)
+    fn serve_http(inout self: Self, inout _state: (), request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        &self.handler.serve_http(&self.state, request, &body)
     }
 }
 

@@ -1,0 +1,41 @@
+// A buffered connection and its read-ahead are owned by the receiving task.
+// Moving the reader through a session preserves the next unread line.
+import std.io
+import std.mem
+import std.net
+import std.session
+import std.task
+
+use net.Accepted
+use net.Acceptor
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+alias Reading = io.BufferedReader[net.Connection, mem.SystemAllocator]
+
+fn main() -> UInt8 {
+    defer var listener = net.listen(net.loopback(0)).unwrap()
+    defer var client = net.connect(listener.local_address().unwrap()).unwrap()
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    let _written = io.write_all(&client, "head\ntail\n".as_bytes()).unwrap()
+    var reading = io.BufferedReader.open(capacity: 32, reader: connection).unwrap()
+    let head_matches = &reading.read_line_borrowed(max_bytes: 32).unwrap().unwrap() == "head"
+    let worker = sink [] |sink me: Chan[Recv[Reading, Send[Bool, End]]]| {
+        let (received, answering) = me.recv()
+        var reader = received
+        let tail_matches = &reader.read_line_borrowed(max_bytes: 32).unwrap().unwrap() == "tail"
+        reader.abandon().close().unwrap()
+        answering.send(tail_matches).close()
+    }
+    let slot = task.prepare(worker).unwrap()
+    let (tail_matches, done) = slot.start().send(reading).recv()
+    done.close()
+    io.println("head: {head_matches}, tail: {tail_matches}").unwrap()
+    if head_matches && tail_matches {
+        0
+    } else {
+        1
+    }
+}

@@ -6,7 +6,7 @@ import std.mem
 
 use mem.Lender
 
-fn greet[P: Allocator](request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+fn greet[P: Allocator](request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     let name = request.query().unwrap_or("stranger")
     http.text(request, "hello, {name}")
 }
@@ -14,7 +14,9 @@ fn greet[P: Allocator](request: http.Request[P]) -> Result[http.Response[P], htt
 fn main() -> UInt8 {
     let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = http.new_request(arena.handle(), "GET", "/greet?ada", body: "").unwrap()
-    let answered = greet(sent.request())
+    defer let body_arena = mem.Arena.open(mem.system(), size: 4096)
+    defer var incoming_1 = http.RequestBody.from_slice("".as_bytes(), body_arena.handle())
+    let answered = greet(sent.request(), &incoming_1)
     arena.release()
     match answered {
         Ok(response) => {

@@ -318,6 +318,43 @@ impl[W: ByteWriter] BufferedWriter[W, mem.SystemAllocator] {
 }
 
 impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
+    // Buffer output in storage the caller reserved before lending the writer.
+    // This takes both resources without allocating. Zero-length storage is a
+    // programmer error and panics; open_in reports a zero requested capacity.
+    pub fn with_buffer(sink bytes: mem.Buffer[A], sink writer: W) -> Self where carries(.bytes: bytes), carries(.writer: writer) {
+        if bytes.length() == 0 {
+            panic("a buffered writer requires nonempty storage")
+        }
+        .{ writer, bytes, start = 0, length = 0 }
+    }
+
+    test fn a_preallocated_write_buffer_needs_no_further_allocation() {
+        defer let log = mem.AllocationLog.open(mem.system(), 2).unwrap()
+        let bytes = log.allocator().acquire(4).unwrap()
+        let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
+        var writer = BufferedWriter.with_buffer(bytes, output)
+        let accepted = &writer.write_some("tea".as_bytes()).unwrap()
+        let buffered = writer.pending_bytes()
+        let returned = writer.finish().settled().unwrap()
+        testing.assert_eq(accepted, UInt64(3), "a preallocated writer changed its accepted count")?
+        testing.assert_eq(buffered, UInt64(3), "the supplied buffer did not retain pending bytes")?
+        testing.assert_eq(returned.length, UInt64(3), "finishing a preallocated writer lost its output")?
+        testing.assert_eq(returned.bytes[0], UInt8(116), "the writer changed the first output byte")?
+        testing.assert_eq(returned.bytes[1], UInt8(101), "the writer changed the second output byte")?
+        testing.assert_eq(returned.bytes[2], UInt8(97), "the writer changed the final output byte")?
+        testing.assert_eq(log.attempts(), UInt64(1), "wrapping supplied storage attempted another allocation")?
+        testing.assert(log.all_disposed(), "finishing the supplied buffer left its allocation live")?
+        .Ok(())
+    }
+
+    test trap fn a_preallocated_writer_requires_nonempty_storage() -> Result[(), testing.Failure] {
+        let bytes = mem.system().acquire(0).unwrap()
+        let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
+        let writer = BufferedWriter.with_buffer(bytes, output)
+        let _output = writer.abort()
+        .Ok(())
+    }
+
     // Buffer `writer` with `capacity` bytes from `allocator`. A zero capacity or
     // refused storage returns `writer` untouched.
     pub fn open_in(allocator: A, capacity: UInt64, sink writer: W) -> Result[Self, BufferOpenFailure[W]] where carries(.Ok: allocator), carries(.Ok.writer: writer), carries(.Err.resource: writer) {
@@ -326,7 +363,7 @@ impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
         }
         match allocator.acquire(capacity) {
             Err(reason) => .Err(.{ resource = writer, reason = .Allocation(reason) }),
-            Ok(bytes) => .Ok(.{ writer = writer, bytes = bytes, start = 0, length = 0 }),
+            Ok(bytes) => .Ok(BufferedWriter.with_buffer(bytes, writer)),
         }
     }
 

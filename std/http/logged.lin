@@ -32,8 +32,8 @@ derive[H: Release, S: log.Sink + Release, A: Allocator] Release for Logged[H, S,
 
 // `Logged` takes the state its handler takes and passes it on.
 impl[P: Allocator, T, H: Handler[T, P], S: log.Sink, A: Allocator] Handler[T, P] for Logged[H, S, A] {
-    fn serve_http(inout self: Self, inout state: T, request: Request[P]) -> Result[Response[P], Error[P]] {
-        &self.handler.serve_http(&state, request)
+    fn serve_http(inout self: Self, inout state: T, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        &self.handler.serve_http(&state, request, &body)
     }
 }
 
@@ -194,7 +194,7 @@ test fn the_bound_address_is_logged_as_listening() {
 test fn a_logged_router_logs_each_exchange_it_serves() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
-    let found = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\n")
+    let found = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\n\r\n")
     let missing = send(bound, "GET /nowhere HTTP/1.1\r\nHost: loopback\r\n\r\n")
     let malformed = send(bound, "garbage\r\n\r\n")
     let file = log.capture()
@@ -222,7 +222,7 @@ struct Counting {
 }
 
 impl[P: Allocator, T] Handler[T, P] for Counting {
-    fn serve_http(inout _self: Self, inout _state: T, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn serve_http(inout _self: Self, inout _state: T, request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] {
         text(request, "ok")
     }
 }

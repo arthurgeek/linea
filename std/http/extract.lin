@@ -145,12 +145,12 @@ struct Month {
     month: UInt8,
 }
 
-fn month_of[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn month_of[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     let span = request.extract[Path[Month]]()?
     text(request, "{span.year}-{span.month:02}")
 }
 
-fn order_of[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn order_of[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     let id = request.extract[Path[UInt64]]()?
     text(request, "order {id}")
 }
@@ -239,7 +239,7 @@ struct Listing {
     sort: Option[Str],
 }
 
-fn listing_of[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn listing_of[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     let Listing { page, limit, sort } = request.extract[Query[Listing]]()?
     let shown = limit.unwrap_or(10)
     let order = sort.unwrap_or("newest")
@@ -264,7 +264,7 @@ test fn a_query_reads_its_fields_by_name() {
     .Ok(())
 }
 
-fn days_of[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn days_of[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     let span = request.extract[Query[DayRange]]()?
     text(request, "days {span.from} to {span.to}")
 }
@@ -347,7 +347,8 @@ struct Signup {
     age: UInt32,
 }
 
-fn signup_of[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn signup_of[P: Allocator](inout _: (), request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(body), retains(body: body) {
+    let request = &body.materialize(request)?
     let Signup { name, age } = request.extract[Form[Signup]]()?
     text(request, "signed up {name}, {age}")
 }
@@ -360,7 +361,8 @@ fn form_posted(content_type: Str, body: Str) -> String {
     let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = new_request(arena.handle(), "POST", "/signup", body, content_type).unwrap()
     var nothing = ()
-    let described = match &router.serve_http(&nothing, sent.request()) {
+    var incoming1 = RequestBody.from_request(sent.request())
+    let described = match &router.serve_http(&nothing, sent.request(), &incoming1) {
         Ok(response) => {
             let answer = response.text().unwrap()
             fmt.render_owned("200 {answer}").unwrap()
@@ -371,6 +373,7 @@ fn form_posted(content_type: Str, body: Str) -> String {
             fmt.render_owned("{code} {message}").unwrap()
         },
     }
+    incoming1.release()
     arena.release()
     router.release()
     described
@@ -500,7 +503,8 @@ struct Note[A: Allocator] {
     text: String[A],
 }
 
-fn note_of[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn note_of[P: Allocator](inout _: (), request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(body), retains(body: body) {
+    let request = &body.materialize(request)?
     defer let note = request.extract[Json[Note[mem.Handle[P]]]]()?
     text(request, "noted {note.text.view()}")
 }
@@ -514,7 +518,8 @@ fn posted(content_type: Str, body: Str, arena_bytes: UInt64 = 65536) -> String {
     var sent = new_request(arena.handle(), "POST", "/notes", body).unwrap()
     &sent.add_header("Content-Type", content_type).unwrap()
     var nothing = ()
-    let described = match &router.serve_http(&nothing, sent.request()) {
+    var incoming2 = RequestBody.from_request(sent.request())
+    let described = match &router.serve_http(&nothing, sent.request(), &incoming2) {
         Ok(response) => {
             let answer = response.text().unwrap()
             fmt.render_owned("200 {answer}").unwrap()
@@ -525,6 +530,7 @@ fn posted(content_type: Str, body: Str, arena_bytes: UInt64 = 65536) -> String {
             fmt.render_owned("{code} {message}").unwrap()
         },
     }
+    incoming2.release()
     arena.release()
     router.release()
     described
@@ -569,5 +575,29 @@ test fn a_json_body_within_the_default_limits_decodes_in_the_default_arena() {
     testing.assert(echoed.starts_with("200 noted xxx"), "a body of the most text was not decoded")?
     testing.assert_eq(padded.view(), r#"422 unknown field at $["pad"]"#, "a body of the most values was not refused for its field")?
     testing.assert_eq(nested.view(), r#"422 unknown field at $["pad"]"#, "a body of the most objects was not refused for its field")?
+    .Ok(())
+}
+
+// Request metadata and its streamed body are independent inputs.
+test fn json_reads_the_explicit_body_instead_of_the_metadata_payload() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "POST", "/notes", body: "", content_type: "application/json").unwrap()
+    defer var body = RequestBody.from_slice(r#"{"text":"streamed"}"#.as_bytes(), arena.handle())
+    let request = &body.materialize(sent.request()).unwrap()
+    defer let note = request.extract[Json[Note[mem.Handle]]]().unwrap()
+    testing.assert_eq(note.text.view(), "streamed", "JSON ignored the streamed body")?
+    testing.assert_eq(body.remaining_bytes(), UInt64(0), "JSON did not consume the body")?
+    .Ok(())
+}
+
+test fn form_reads_borrowed_fields_from_the_explicit_body() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "POST", "/signup", body: "", content_type: "application/x-www-form-urlencoded").unwrap()
+    defer var body = RequestBody.from_slice("name=Ada+Lovelace&age=36".as_bytes(), arena.handle())
+    let request = &body.materialize(sent.request()).unwrap()
+    let Signup { name, age } = request.extract[Form[Signup]]().unwrap()
+    testing.assert_eq(name, "Ada Lovelace", "the form ignored the streamed body")?
+    testing.assert_eq(age, UInt32(36), "the form changed the numeric field")?
+    testing.assert_eq(body.remaining_bytes(), UInt64(0), "the form did not consume the body")?
     .Ok(())
 }

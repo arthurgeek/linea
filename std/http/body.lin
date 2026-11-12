@@ -1,0 +1,371 @@
+import std.io
+import std.mem
+import std.net
+import std.testing
+
+// The source owns the connection between requests. An in-memory body borrows
+// the bytes supplied by a constructed request or a test.
+enum BodySource {
+    Held(mem.Slice[UInt8]),
+    Reading(io.BufferedReader[net.Connection, mem.SystemAllocator]),
+    Taken,
+}
+
+// Materialized bytes and form fields keep the owners of every view handed to
+// an extractor. They are released only after the response using them ends.
+struct BodyCache[P: Allocator] {
+    payload: Vec[UInt8, mem.Handle[P]],
+    form_text: Vec[UInt8, mem.Handle[P]],
+    form_fields: Option[Vec[Field, mem.Handle[P]]],
+    form_ready: Bool,
+}
+
+derive[P: Allocator] Release for BodyCache[P]
+
+// A RequestBody holds the stream's exclusive read position. Metadata stays a
+// copyable Request; a body is lent inout to the handler and lives until the
+// response and every view of its cached bytes have been written.
+@(opaque, linear)
+struct RequestBody[P: Allocator = mem.SystemAllocator] {
+    source: BodySource,
+    memory: mem.Handle[P],
+    cursor: UInt64,
+    remaining: UInt64,
+    failure: Option[RequestError],
+    limits: Limits,
+    cache: Option[BodyCache[P]],
+}
+
+impl[P: Allocator] RequestBody[P] {
+    // Make an in-memory body over bytes whose owner remains live.
+    pub fn from_slice(bytes: mem.Slice[UInt8], memory: mem.Handle[P]) -> Self where carries(bytes, memory) {
+        .{ source = .Held(copy(bytes)), memory = copy(memory), cursor = 0, remaining = bytes.length(), failure = .None, limits = Limits.default(), cache = .None }
+    }
+
+    // Constructed messages lend their bytes and arena to the explicit body.
+    // Keep the limits used to parse the message when materializing its form.
+    pub fn from_request(request: Request[P], limits: Limits = standard_limits) -> Self where carries(request) {
+        var body = RequestBody.from_slice(request.body(), request.allocator())
+        body.limits = copy(limits)
+        body
+    }
+
+    // Move the buffered connection into a body bounded by its canonical length.
+    fn from_reader(sink reader: io.BufferedReader[net.Connection, mem.SystemAllocator], length: UInt64, limits: Limits, memory: mem.Handle[P]) -> Self where carries(.source: reader), carries(.memory: memory) {
+        let failure: Option[RequestError] = if length > limits.max_body_bytes {
+            .Some(.Status(.ContentTooLarge))
+        } else {
+            .None
+        }
+        .{ source = .Reading(reader), memory = copy(memory), cursor = 0, remaining = length, failure, limits = copy(limits), cache = .None }
+    }
+
+    pub fn remaining_bytes(self: Self) -> UInt64 {
+        self.remaining
+    }
+
+    // A failed body cannot be reused for the next request, even if a handler
+    // catches its error. The first failure remains observable by the drain.
+    fn failed(self: Self) -> Bool {
+        self.failure.is_some()
+    }
+
+    // Keep the connection's output available while response values read the
+    // body's cached input. This view cannot close or move the connection.
+    fn writer(self: Self) -> net.ConnectionWriter where borrows(self) {
+        match read self.source {
+            Reading(reader) => reader.inspect_reader(
+                |connection: net.Connection| -> net.ConnectionWriter where borrows(connection) {
+                    connection.writer()
+                },
+            ),
+            Held(_) => panic("an in-memory body has no connection writer"),
+            Taken => panic("a body no longer owns its connection"),
+        }
+    }
+
+    // Return the connection with all next-request read-ahead intact. Callers
+    // take it only after the response and the unread body have been settled.
+    fn into_reader(sink self: Self) -> Option[io.BufferedReader[net.Connection, mem.SystemAllocator]] where carries(self.source) {
+        let RequestBody { source, memory: _, cursor: _, remaining: _, failure: _, limits: _, cache } = self
+        cache.release()
+        match source {
+            Reading(reader) => .Some(reader),
+            Held(_) => .None,
+            Taken => .None,
+        }
+    }
+
+    // Discard unread body bytes without allocating or crossing its length.
+    fn drain[A: Allocator](inout self: Self, inout scratch: mem.Buffer[A]) -> Result[(), RequestError] where carries() {
+        if scratch.length() == 0 && self.remaining > 0 {
+            return .Err(.Status(.InternalServerError))
+        }
+        let capacity = scratch.length()
+        loop {
+            let count = &self.read_some(&scratch, offset: 0, count: capacity)?
+            if count == 0 {
+                return .Ok(())
+            }
+        }
+    }
+
+    // Materialize the remaining stream once into the request arena. Repeated
+    // materialization reads the cache, and never reads into the next request.
+    fn prepare(inout self: Self) -> Result[(), Error[P]] where carries(), retains(self: self) {
+        if self.cache.is_some() {
+            return .Ok(())
+        }
+        match read self.failure {
+            Some(error) => return .Err(copy(error).into()),
+            None => {},
+        }
+        let length = self.remaining
+        let payload: Vec[UInt8, mem.Handle[P]] = if length == 0 {
+            Vec.new_in(self.memory)
+        } else {
+            var storage = self.memory.acquire(length)?
+            var offset: UInt64 = 0
+            let failure: Option[RequestError] = loop {
+                if offset == length {
+                    break .None
+                }
+                let count = &self.read_some(&storage, offset, length - offset) else |error| {
+                    break .Some(error)
+                }
+                offset += count
+            }
+            match failure {
+                Some(error) => {
+                    storage.release()
+                    return .Err(error.into())
+                },
+                None => {},
+            }
+            mem.vector_from_buffer(storage, length)
+        }
+        self.cache = .Some(.{ payload, form_text = Vec.new_in(self.memory), form_fields = .None, form_ready = false })
+        .Ok(())
+    }
+
+    // Read the complete remaining body, keeping its backing owner in place.
+    pub fn read_all(inout self: Self, _request: Request[P]) -> Result[mem.Slice[UInt8], Error[P]] where borrows(.Ok: self), retains(self: self) {
+        &self.prepare()?
+        match read self.cache {
+            Some(cache) => .Ok(cache.payload.as_slice()),
+            None => panic("a materialized body has no byte owner"),
+        }
+    }
+
+    // Materialize and validate a text body. Invalid UTF-8 is a refused body.
+    pub fn text(inout self: Self, request: Request[P]) -> Result[Str, Error[P]] where borrows(.Ok: self), retains(self: self) {
+        let bytes = &self.read_all(request)?
+        match Str.from_bytes(bytes) {
+            Ok(text) => .Ok(text),
+            Err(_) => .Err(Error.new(.BadRequest)),
+        }
+    }
+
+    fn prepare_form(inout self: Self, is_form: Bool) -> Result[(), Error[P]] where carries(), retains(self: self) {
+        &self.prepare()?
+        let previous = mem.exchange(&self.cache, .None)
+        var cache = previous.unwrap()
+        if !cache.form_ready {
+            let fields = form_of(&cache.form_text, is_form, cache.payload.as_slice(), self.memory, self.limits.max_form_pairs)
+            match fields {
+                Ok(fields) => {
+                    cache.form_fields = fields
+                    cache.form_ready = true
+                },
+                Err(error) => {
+                    self.cache = .Some(cache)
+                    return .Err(error.into())
+                },
+            }
+        }
+        self.cache = .Some(cache)
+        .Ok(())
+    }
+
+    // Freeze the cached payload into a copyable request view for any number
+    // of read-only extractors. The stream is not lent again while those views
+    // are live.
+    pub fn materialize(inout self: Self, request: Request[P]) -> Result[Request[P], Error[P]] where borrows(.Ok: self), carries(.Ok: request), retains(self: self) {
+        let is_form = is_form_content_type(request.header("Content-Type"))
+        &self.prepare_form(is_form)?
+        match read self.cache {
+            Some(cache) => .Ok(Request[P] { payload = cache.payload.as_slice(), body_text = Str.from_bytes(cache.form_text.as_slice()).unwrap(), body_fields = match read cache.form_fields {
+                Some(fields) => .Some(fields.as_slice()),
+                None => .None,
+            }, ..copy(request) }),
+            None => panic("a materialized body has no byte owner"),
+        }
+    }
+}
+
+// Every read temporarily leaves Taken in the source slot, then restores one
+// owner. Replacing a live connection here would lose its close obligation.
+fn put_body_source(inout slot: BodySource, sink next: BodySource) where retains(slot: next) {
+    match mem.exchange(&slot, next) {
+        Taken => {},
+        Held(_) => panic("a body source was restored twice"),
+        Reading(reader) => {
+            let _closed = reader.abandon().close()
+            panic("a body source was restored twice")
+        },
+    }
+}
+
+impl[P: Allocator] io.Reader for RequestBody[P] {
+    type Error = RequestError
+
+    fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, RequestError] where carries() {
+        if offset > buffer.length() || count > buffer.length() - offset {
+            panic("buffer I/O range is out of bounds")
+        }
+        if count == 0 {
+            return .Ok(0)
+        }
+        match read self.failure {
+            Some(error) => return .Err(copy(error)),
+            None => {},
+        }
+        if self.remaining == 0 {
+            return .Ok(0)
+        }
+        let want = if count < self.remaining {
+            count
+        } else {
+            self.remaining
+        }
+        let source = mem.exchange(&self.source, .Taken)
+        let result: Result[UInt64, RequestError] = match source {
+            Held(bytes) => {
+                for i in 0..want {
+                    &buffer.store_byte(offset + i, bytes[self.cursor + i])
+                }
+                put_body_source(&self.source, .Held(bytes))
+                .Ok(want)
+            },
+            Reading(buffered) => {
+                var reader = buffered
+                let got: Result[UInt64, RequestError] = match &reader.read_chunk(&buffer, offset, want) {
+                    Ok(0) => .Err(.Status(.BadRequest)),
+                    Ok(count) => .Ok(count),
+                    Err(Input(failure)) => .Err(.Io(io.IoError { progress = failure.stream_offset + failure.reason.progress, ..copy(failure.reason) })),
+                    Err(error) => .Err(line_failure(error, .InternalServerError)),
+                }
+                put_body_source(&self.source, .Reading(reader))
+                got
+            },
+            Taken => panic("a body read no longer owns its connection"),
+        }
+        match result {
+            Ok(got) => {
+                self.cursor += got
+                self.remaining -= got
+                .Ok(got)
+            },
+            Err(error) => {
+                self.failure = .Some(copy(error))
+                .Err(error)
+            },
+        }
+    }
+}
+
+impl[P: Allocator] Release for RequestBody[P] {
+    fn release(sink self: Self) {
+        let reader = self.into_reader()
+        match reader {
+            Some(reader) => {
+                let _closed = reader.abandon().close()
+            },
+            None => {},
+        }
+    }
+}
+
+// A body is consumed once through one mutable reader. Materializing its bytes
+// keeps their owner alive until every response viewing them has been written.
+test fn a_body_reader_advances_and_stops_at_its_boundary() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    defer var body = RequestBody.from_slice("hello".as_bytes(), arena.handle())
+    defer var bytes = mem.system().acquire(8).unwrap()
+    let first = &body.read_some(&bytes, offset: 1, count: 2).unwrap()
+    let second = &body.read_some(&bytes, offset: 3, count: 5).unwrap()
+    let ended = &body.read_some(&bytes, offset: 0, count: 8).unwrap()
+    testing.assert_eq(first, UInt64(2), "the first read changed length")?
+    testing.assert_eq(second, UInt64(3), "a read crossed the body's boundary")?
+    testing.assert_eq(ended, UInt64(0), "the body read past its boundary")?
+    testing.assert_eq(body.remaining_bytes(), UInt64(0), "body progress was not kept")?
+    testing.assert_eq(bytes.as_slice().subspan(start: 1, count: 5).unwrap(), "hello".as_bytes(), "successive reads repeated or skipped bytes")?
+    .Ok(())
+}
+
+test fn materializing_a_body_keeps_its_bytes_for_repeated_readers() {
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    let sent = new_request(arena.handle(), "POST", "/", body: "").unwrap()
+    defer var body = RequestBody.from_slice("hello".as_bytes(), arena.handle())
+    let first = &body.read_all(sent.request()).unwrap()
+    let first_length = first.length()
+    let second = &body.read_all(sent.request()).unwrap()
+    testing.assert_eq(first_length, UInt64(5), "the materialized body changed length")?
+    testing.assert_eq(second, "hello".as_bytes(), "materialization consumed the cached body")?
+    testing.assert_eq(body.remaining_bytes(), UInt64(0), "materialization left stream bytes unread")?
+    .Ok(())
+}
+
+test fn a_socket_body_preserves_the_next_requests_read_ahead() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    defer var listener = net.listen(net.loopback(0)).unwrap()
+    defer var client = net.connect(listener.local_address().unwrap()).unwrap()
+    let _written = io.write_all(&client, "head\nbodytail\n".as_bytes()).unwrap()
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    var reader = io.BufferedReader.open(capacity: 32, reader: connection).unwrap()
+    let head = &reader.read_line_borrowed(max_bytes: 8).unwrap().unwrap() == "head"
+    var body = RequestBody.from_reader(reader, length: 4, limits: Limits.default(), memory: arena.handle())
+    defer var bytes = mem.system().acquire(8).unwrap()
+    let count = &body.read_some(&bytes, offset: 0, count: 8).unwrap()
+    let bytes_match = bytes.as_slice().subspan(start: 0, count: count).unwrap() == "body".as_bytes()
+    let remaining = body.remaining_bytes()
+    var returned = body.into_reader().unwrap()
+    let tail = &returned.read_line_borrowed(max_bytes: 8).unwrap().unwrap() == "tail"
+    returned.abandon().close().unwrap()
+    testing.assert(head && bytes_match && tail, "reading a body changed the next request's bytes")?
+    testing.assert_eq(count, UInt64(4), "the body read beyond Content-Length")?
+    testing.assert_eq(remaining, UInt64(0), "the body did not remember its read progress")?
+    .Ok(())
+}
+
+test fn a_truncated_socket_body_reports_a_sticky_bad_request() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    defer var listener = net.listen(net.loopback(0)).unwrap()
+    defer var client = net.connect(listener.local_address().unwrap()).unwrap()
+    let _written = io.write_all(&client, "ab".as_bytes()).unwrap()
+    &client.shutdown_write().unwrap()
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    let reader = io.BufferedReader.open(capacity: 8, reader: connection).unwrap()
+    defer var body = RequestBody.from_reader(reader, length: 4, limits: Limits.default(), memory: arena.handle())
+    defer var bytes = mem.system().acquire(8).unwrap()
+    let first = &body.read_some(&bytes, offset: 0, count: 8).unwrap()
+    let ended = &body.read_some(&bytes, offset: 0, count: 8)
+    let repeated = &body.read_some(&bytes, offset: 0, count: 8)
+    testing.assert_eq(first, UInt64(2), "the available prefix changed length")?
+    let expected: Result[UInt64, RequestError] = .Err(.Status(.BadRequest))
+    testing.assert_eq(ended, expected, "a short body was reported as a clean end")?
+    testing.assert_eq(repeated, expected, "a caught truncation was forgotten")?
+    .Ok(())
+}
+
+test fn an_empty_body_materializes_without_arena_headroom() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    // Reservations remain in the arena until its rewind, so consume every
+    // aligned slot before asking to cache an empty body.
+    while arena.handle().acquire(8).is_ok() {}
+    defer var body = RequestBody.from_slice("".as_bytes(), arena.handle())
+    let length = &body.read_all(sent.request()).unwrap().length()
+    testing.assert_eq(length, UInt64(0), "materializing an empty body needed an allocation")?
+    .Ok(())
+}

@@ -35,22 +35,29 @@ let encoded_scalar_bytes: UInt64 = 12
 
 let newest_shown: Int64 = 50
 
-// `http.listen_and_serve` serves on 128 tasks by default, and each one keeps
-// three files open while it answers: its SQLite connection's database and
-// write-ahead log, and the client's socket. The listener, the log's shared
-// memory index and standard input, output and error take five more.
+// Each serving task keeps its own SQLite database and write-ahead log open.
 let serving_tasks: UInt64 = 128
 
-let files_per_task: UInt64 = 3
+// Active and idle clients share this connection budget. An idle client's
+// readiness registration holds a duplicate of its socket descriptor.
+let connection_budget: UInt64 = 128
 
-let files_besides_tasks: UInt64 = 5
+let files_per_task: UInt64 = 2
+
+let files_per_connection: UInt64 = 2
+
+// Standard streams take three descriptors; listener and watch take two;
+// SQLite's shared-memory index takes one; poller and signal wake each take
+// at most two. Rounding those ten up to 32 leaves 22 for inherited files,
+// SQLite temporary files and differences between supported platforms.
+let fixed_files: UInt64 = 32
 
 // The server refuses a body longer than the largest form `sign` accepts, a
 // name and a message at their longest with every scalar four bytes long. A
 // form the page's `maxlength` attributes admit always fits.
 fn limits() -> http.Limits {
     let longest_form = "name=&message=".length() + (longest_name + longest_message) * encoded_scalar_bytes
-    http.Limits { max_body_bytes = longest_form, ..http.Limits.default() }
+    http.Limits { max_body_bytes = longest_form, open_connections = connection_budget, ..http.Limits.default() }
 }
 
 test fn the_longest_non_ascii_signature_fits_the_body_limit() {
@@ -74,7 +81,8 @@ test fn the_longest_non_ascii_signature_fits_the_body_limit() {
     testing.assert_eq(body.length(), limits().max_body_bytes, "the longest signature does not fill the body limit")?
     var longest = http.new_request(arena.handle(), "POST", "/sign", body: body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
     &longest.add_header("Host", "example.test").unwrap()
-    let accepted = &router.serve_http(&app, longest.request()).unwrap()
+    defer var incoming_1 = http.RequestBody.from_request(longest.request())
+    let accepted = &router.serve_http(&app, longest.request(), &incoming_1).unwrap()
     testing.assert_eq(accepted.status(), http.Status.SeeOther, "the longest non-ASCII signature was refused")?
     .Ok(())
 }
@@ -211,7 +219,7 @@ impl Ctx {
     }
 }
 
-fn home(inout ctx: Ctx, request: http.Request) -> Result[http.Response, http.Error] {
+fn home(inout ctx: Ctx, request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     defer let entries = match &ctx.book.newest(newest_shown) {
         Ok(entries) => entries,
         Err(error) => return .Err(unavailable(request, error)),
@@ -224,7 +232,7 @@ fn home(inout ctx: Ctx, request: http.Request) -> Result[http.Response, http.Err
     http.html(request, Page { action = "/sign", name, entries = entries.as_slice() })
 }
 
-fn favicon(inout _ctx: Ctx, request: http.Request) -> Result[http.Response, http.Error] {
+fn favicon(inout _ctx: Ctx, request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     .Ok(http.no_content(request))
 }
 
@@ -282,7 +290,8 @@ test fn signing_redirects_sets_a_cookie_and_renders_on_the_home_page() {
     &post.add_header("Host", "example.test").unwrap()
     &post.add_header("Origin", "http://example.test").unwrap()
     &post.add_header("Sec-Fetch-Site", "same-origin").unwrap()
-    let redirect = &router.serve_http(&app, post.request()).unwrap()
+    defer var incoming_2 = http.RequestBody.from_request(post.request())
+    let redirect = &router.serve_http(&app, post.request(), &incoming_2).unwrap()
     testing.assert_eq(redirect.status(), http.Status.SeeOther, "POST /sign did not answer 303")?
     testing.assert_eq(redirect.header("Location"), Option.Some("/"), "Location header changed")?
     let set_cookie = redirect.header("Set-Cookie").unwrap()
@@ -290,7 +299,8 @@ test fn signing_redirects_sets_a_cookie_and_renders_on_the_home_page() {
 
     var get = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
     &get.add_header("Cookie", cookie_pair).unwrap()
-    let home_page = &router.serve_http(&app, get.request()).unwrap()
+    defer var incoming_3 = http.RequestBody.from_request(get.request())
+    let home_page = &router.serve_http(&app, get.request(), &incoming_3).unwrap()
     testing.assert_eq(home_page.status(), http.Status.Ok, "GET / did not answer 200")?
     testing.assert_eq(home_page.header("Content-Type"), Option.Some("text/html; charset=utf-8"), "Content-Type was not HTML")?
     let html_body = home_page.text().unwrap()
@@ -321,7 +331,8 @@ test fn exact_length_boundaries_are_accepted_and_one_scalar_past_is_refused() {
     var at_limit = http.new_request(arena.handle(), "POST", "/sign", body: ok_body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
     &at_limit.add_header("Host", "example.test").unwrap()
     &at_limit.add_header("Origin", "http://example.test").unwrap()
-    let accepted = &router.serve_http(&app, at_limit.request()).unwrap()
+    defer var incoming_4 = http.RequestBody.from_request(at_limit.request())
+    let accepted = &router.serve_http(&app, at_limit.request(), &incoming_4).unwrap()
     testing.assert_eq(accepted.status(), http.Status.SeeOther, "exact scalar limits were refused")?
 
     // 61 scalars for name and 501 for message: refused with 422.
@@ -338,7 +349,8 @@ test fn exact_length_boundaries_are_accepted_and_one_scalar_past_is_refused() {
     var long_message = http.new_request(arena.handle(), "POST", "/sign", body: over_msg.view(), content_type: "application/x-www-form-urlencoded").unwrap()
     &long_message.add_header("Host", "example.test").unwrap()
     for sent in [empty_name, empty_message, long_name, long_message] {
-        let refused = match &router.serve_http(&app, sent.request()) {
+        defer var incoming_5 = http.RequestBody.from_request(sent.request())
+        let refused = match &router.serve_http(&app, sent.request(), &incoming_5) {
             Ok(_) => return testing.assert(false, "an invalid signature was accepted"),
             Err(error) => error,
         }
@@ -376,7 +388,8 @@ test fn control_and_format_characters_are_refused_and_line_breaks_in_a_message_a
     for read body in refused_bodies {
         var sent = http.new_request(arena.handle(), "POST", "/sign", body: body, content_type: "application/x-www-form-urlencoded").unwrap()
         &sent.add_header("Host", "example.test").unwrap()
-        let refused = match &router.serve_http(&app, sent.request()) {
+        defer var incoming_6 = http.RequestBody.from_request(sent.request())
+        let refused = match &router.serve_http(&app, sent.request(), &incoming_6) {
             Ok(_) => return testing.assert(false, "a control character was accepted"),
             Err(error) => error,
         }
@@ -387,10 +400,12 @@ test fn control_and_format_characters_are_refused_and_line_breaks_in_a_message_a
     // it stores a lone CR.
     var lines = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=one%0D%0Atwo%09three%0Dfour", content_type: "application/x-www-form-urlencoded").unwrap()
     &lines.add_header("Host", "example.test").unwrap()
-    let accepted = &router.serve_http(&app, lines.request()).unwrap()
+    defer var incoming_7 = http.RequestBody.from_request(lines.request())
+    let accepted = &router.serve_http(&app, lines.request(), &incoming_7).unwrap()
     testing.assert_eq(accepted.status(), http.Status.SeeOther, "a message with line breaks and a tab was refused")?
     var get = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    let home_page = &router.serve_http(&app, get.request()).unwrap()
+    defer var incoming_8 = http.RequestBody.from_request(get.request())
+    let home_page = &router.serve_http(&app, get.request(), &incoming_8).unwrap()
     let html_body = home_page.text().unwrap()
     testing.assert(html_body.find("<p>one\ntwo\tthree\nfour</p>").is_some(), "the message did not keep its line breaks as LF and its tab")?
     .Ok(())
@@ -411,7 +426,8 @@ test fn a_line_break_counts_once_towards_the_message_limit() {
     }
     var lines = http.new_request(arena.handle(), "POST", "/sign", body: body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
     &lines.add_header("Host", "example.test").unwrap()
-    let accepted = &router.serve_http(&app, lines.request()).unwrap()
+    defer var incoming_9 = http.RequestBody.from_request(lines.request())
+    let accepted = &router.serve_http(&app, lines.request(), &incoming_9).unwrap()
     testing.assert_eq(accepted.status(), http.Status.SeeOther, "a message of 500 characters with CRLF line breaks was refused")?
     .Ok(())
 }
@@ -468,7 +484,8 @@ test fn origin_and_fetch_site_spoofing_attempts_answer_403() {
     &scheme_mismatch.add_header("Origin", "https://example.test").unwrap()
 
     for sent in [cross_site, same_site_subdomain, cross_site_fetch_only, same_site_fetch_only, cross_site_matching_origin, null_origin, suffix_spoof, path_spoof, port_mismatch, scheme_mismatch] {
-        let refused = match &router.serve_http(&app, sent.request()) {
+        defer var incoming_10 = http.RequestBody.from_request(sent.request())
+        let refused = match &router.serve_http(&app, sent.request(), &incoming_10) {
             Ok(_) => return testing.assert(false, "a forged origin was accepted"),
             Err(error) => error,
         }
@@ -479,7 +496,8 @@ test fn origin_and_fetch_site_spoofing_attempts_answer_403() {
     var matching_origin = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
     &matching_origin.add_header("Host", "example.test").unwrap()
     &matching_origin.add_header("Origin", "HTTP://EXAMPLE.TEST:80").unwrap()
-    let allowed = &router.serve_http(&app, matching_origin.request()).unwrap()
+    defer var incoming_11 = http.RequestBody.from_request(matching_origin.request())
+    let allowed = &router.serve_http(&app, matching_origin.request(), &incoming_11).unwrap()
     testing.assert_eq(allowed.status(), http.Status.SeeOther, "a matching origin with default port was refused")?
     .Ok(())
 }
@@ -491,7 +509,8 @@ test fn favicon_answers_204_no_content() {
     defer let arena = mem.Arena.open(mem.system(), size: 16384)
     var req = http.new_request(arena.handle(), "GET", "/favicon.ico", body: "").unwrap()
     &req.add_header("Host", "example.test").unwrap()
-    let response = &router.serve_http(&app, req.request()).unwrap()
+    defer var incoming_12 = http.RequestBody.from_request(req.request())
+    let response = &router.serve_http(&app, req.request(), &incoming_12).unwrap()
     testing.assert_eq(response.status(), http.Status.NoContent, "favicon status was not 204")?
     testing.assert_ok_eq(response.text(), "", "favicon had a body")?
     .Ok(())
@@ -518,14 +537,16 @@ test fn forwarded_proto_https_is_recognised_for_same_origin() {
     &post.add_header("Sec-Fetch-Site", "same-origin").unwrap()
 
     // Without proxy trust, client-supplied proxy headers are not trusted and 403 is answered.
-    let refused = match &router.serve_http(&app_untrusted, post.request()) {
+    defer var incoming_13 = http.RequestBody.from_request(post.request())
+    let refused = match &router.serve_http(&app_untrusted, post.request(), &incoming_13) {
         Ok(_) => return testing.assert(false, "untrusted forwarded proto was accepted"),
         Err(err) => err,
     }
     testing.assert_eq(refused.status(), http.Status.Forbidden, "untrusted forwarded proto was not refused 403")?
 
     // With explicit proxy trust configured, forwarded https is recognized and 303 is answered.
-    let response = &router.serve_http(&app_trusted, post.request()).unwrap()
+    defer var incoming_14 = http.RequestBody.from_request(post.request())
+    let response = &router.serve_http(&app_trusted, post.request(), &incoming_14).unwrap()
     testing.assert_eq(response.status(), http.Status.SeeOther, "forwarded https was refused when trusted")?
     .Ok(())
 }
@@ -567,7 +588,7 @@ fn main() -> UInt8 {
     // any other storage failure. Stopping here when even the estimate does
     // not fit says why at once, rather than as one task's failure to open
     // its connection.
-    let files_needed = serving_tasks * files_per_task + files_besides_tasks
+    let files_needed = serving_tasks * files_per_task + connection_budget * files_per_connection + fixed_files
     let open_files = process.raise_open_file_limit() else |error| {
         io.eprintln("guest-book: cannot raise the open-file limit: {error}")
         return 1
@@ -600,7 +621,7 @@ fn main() -> UInt8 {
             },
         )
     }
-    let _ = http.listen_and_serve(net.loopback(port), serving, limits: limits()) else |error| {
+    let _ = http.listen_and_serve(net.loopback(port), serving, limits: limits(), policy: .Threads(serving_tasks)) else |error| {
         io.eprintln("guest-book: {error}")
         error.release()
         return 1

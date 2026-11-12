@@ -3,7 +3,6 @@ import std.log
 import std.net
 import std.mem
 import std.testing
-import std.time
 import std.uuid
 
 // `RequestIds` is a middleware that gives every request an id. The id is the
@@ -190,13 +189,13 @@ fn push_stored[A: Allocator](inout stored: Vec[UInt8, A], bytes: mem.Slice[UInt8
 // is given the identified request, and its answer, a response or a refusal,
 // carries the id.
 impl[P: Allocator, S, H: Handler[S, P], A: Allocator] Handler[S, P] for RequestIds[H, A] {
-    fn serve_http(inout self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn serve_http(inout self: Self, inout state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
         self.pending = .None
         let id = identify(&self.buffers, request)?
         self.pending = .Some(copy(id))
         let identified = identified_view(self.buffers, request, id)
         let text = identified.header(request_id_header).unwrap()
-        match &self.handler.serve_http(&state, identified) {
+        match &self.handler.serve_http(&state, identified, &body) {
             Ok(response) => {
                 var answer = response
                 &answer.set_header(request_id_header, text)?
@@ -245,7 +244,7 @@ struct Echoing {
 
 // `Echoing` answers with the id its request carries, or "none".
 impl[P: Allocator, T] Handler[T, P] for Echoing {
-    fn serve_http(inout self: Self, inout _state: T, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn serve_http(inout self: Self, inout _state: T, request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] {
         self.served += 1
         let id = request.header(request_id_header).unwrap_or("none")
         text(request, id)
@@ -258,7 +257,8 @@ test fn a_malformed_id_the_client_sent_is_replaced() {
     var nothing = ()
     var sent = new_request(arena.handle(), "GET", "/a", body: "").unwrap()
     &sent.add_header("X-Request-Id", "1 status=200").unwrap()
-    let answered: Result[Response, Error] = &identifying.serve_http(&nothing, sent.request())
+    defer var request_body1 = RequestBody.from_request(sent.request())
+    let answered: Result[Response, Error] = &identifying.serve_http(&nothing, sent.request(), &request_body1)
     let response = answered.unwrap()
     let id = uuid.Uuid.parse(response.header("X-Request-Id").unwrap())
     testing.assert(id.is_ok(), "the malformed id was not replaced by a UUID")?
@@ -293,7 +293,8 @@ test fn buffers_in_an_arena_last_for_any_number_of_requests() {
     for _ in 0..1000 {
         defer let arena = mem.Arena.open(mem.system(), size: 8192)
         let sent = new_request(arena.handle(), "GET", "/a", body: "").unwrap()
-        let answered: Result[Response, Error] = &identifying.serve_http(&nothing, sent.request())
+        defer var request_body2 = RequestBody.from_request(sent.request())
+        let answered: Result[Response, Error] = &identifying.serve_http(&nothing, sent.request(), &request_body2)
         if answered.is_err() {
             failed += 1
         }
@@ -322,7 +323,7 @@ test fn an_identified_request_keeps_the_rest_of_the_request() {
 test fn an_identified_exchange_is_logged_with_its_id() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
-    let found = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: health-1\r\n\r\n")
+    let found = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\nX-Request-Id: health-1\r\n\r\n")
     let missing = send(bound, "GET /nowhere HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: missing-2\r\n\r\n")
     let file = log.capture()
     let identified = [file] || with_request_ids(logged(file.logger(minimum: .Info), health_router()))
@@ -376,7 +377,7 @@ test fn each_allocation_failure_covers_every_buffer_identifying_grows() -> Resul
 test fn a_malformed_or_unread_client_id_is_never_logged() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
-    let forged = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: 1 status=200\r\n\r\n")
+    let forged = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\nX-Request-Id: 1 status=200\r\n\r\n")
     let file = log.capture()
     let plain = [file] || logged(file.logger(minimum: .Info), health_router())
     let serving1 = serve(listener, plain, limits: serving(1), policy: .Sequential)
@@ -384,7 +385,7 @@ test fn a_malformed_or_unread_client_id_is_never_logged() {
     defer let plain_lines = file.finish()
     let listener2 = net.listen(net.loopback(0)).unwrap()
     let bound2 = listener2.local_address().unwrap()
-    let wrong = send(bound2, "GET /health HTTP/1.1\r\nHost: loopback\r\nx-request-id: 42\r\n\r\n")
+    let wrong = send(bound2, "GET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\nx-request-id: 42\r\n\r\n")
     let file2 = log.capture()
     let misordered = [file2] || logged(file2.logger(minimum: .Info), with_request_ids(health_router()))
     let serving2 = serve(listener2, misordered, limits: serving(1), policy: .Sequential)
@@ -397,7 +398,7 @@ test fn a_malformed_or_unread_client_id_is_never_logged() {
     testing.assert(second.view().find("X-Request-Id: 42").is_some(), "the response lacked its id")?
     let listener3 = net.listen(net.loopback(0)).unwrap()
     let bound3 = listener3.local_address().unwrap()
-    let injected = send(bound3, "GET /health HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: 1 status=500\r\n\r\n")
+    let injected = send(bound3, "GET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\nX-Request-Id: 1 status=500\r\n\r\n")
     let file3 = log.capture()
     let outside = [file3] || with_request_ids(logged(file3.logger(minimum: .Info), health_router()))
     let serving3 = serve(listener3, outside, limits: serving(1), policy: .Sequential)
@@ -434,7 +435,7 @@ struct SelfIdentifying {
 }
 
 impl[P: Allocator, T] Handler[T, P] for SelfIdentifying {
-    fn serve_http(inout self: Self, inout _state: T, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn serve_http(inout self: Self, inout _state: T, request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] {
         self.served += 1
         var answer = text(request, "x")?
         &answer.set_header("X-Request-Id", "mine")?
@@ -447,7 +448,8 @@ test fn a_handlers_own_id_is_replaced() {
     defer var own = with_request_ids(SelfIdentifying { served = 0 })
     var nothing = ()
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    let answered: Result[Response, Error] = &own.serve_http(&nothing, sent.request())
+    defer var request_body3 = RequestBody.from_request(sent.request())
+    let answered: Result[Response, Error] = &own.serve_http(&nothing, sent.request(), &request_body3)
     testing.assert(uuid.Uuid.parse(answered.unwrap().header("X-Request-Id").unwrap()).is_ok(), "the handler's id was kept")?
 }
 
@@ -455,7 +457,7 @@ test fn a_handlers_own_id_is_replaced() {
 // an id, not with the previous request's.
 test fn a_request_the_handler_never_saw_is_logged_without_an_id() {
     var listener = net.listen(net.loopback(0)).unwrap()
-    let first = send(listener.local_address().unwrap(), "GET /health HTTP/1.1\r\nHost: loopback\r\nX-Request-Id: seen\r\n\r\n")
+    let first = send(listener.local_address().unwrap(), "GET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\nX-Request-Id: seen\r\n\r\n")
     var client = net.connect(listener.local_address().unwrap()).unwrap()
     var request = String.new()
     &request.append("POST /health HTTP/1.1\r\nHost: loopback\r\nContent-Length: 8192\r\n").unwrap()
@@ -474,18 +476,18 @@ test fn a_request_the_handler_never_saw_is_logged_without_an_id() {
     request.release()
     let file = log.capture()
     var served = with_request_ids(logged(file.logger(minimum: .Info), health_router()))
-    // The two seconds bound only a broken read: the second request is refused
-    // for want of arena, and under a sanitizer reading it can take longer than
-    // 100 ms, which would answer it 408 instead.
+    // The two seconds bound only a broken read. The second request's head
+    // fits; exhausting the arena after parsing prevents middleware from running.
+    // Its queued body is drained without allocating another body copy.
     let limits = Limits { max_body_bytes = 8192, read_timeout_ms = 2000, ..serving(1) }
     var refusal = mem.system().acquire(request_buffer_bytes).unwrap()
     let Accepted { connection: c1, address: _ } = &listener.accept().unwrap()
     let arena1 = mem.Arena.open(mem.system(), 53256)
-    let _a1 = serve_connection(c1, &served, arena1.handle(), &refusal, limits, time.Instant.now())
+    answer_one(c1, &served, arena1.handle(), &refusal, limits)
     arena1.release()
     let Accepted { connection, address: _ } = &listener.accept().unwrap()
     let arena = mem.Arena.open(mem.system(), 53256)
-    let _answered = serve_connection(connection, &served, arena.handle(), &refusal, limits, time.Instant.now())
+    answer_one(connection, &served, arena.handle(), &refusal, limits, exhaust_after_head: true)
     refusal.release()
     arena.release()
     served.release()
@@ -508,7 +510,8 @@ test fn a_refused_buffer_answers_500_before_the_handler() -> Result[(), testing.
             var identifying = with_request_ids_in(allocator, Echoing { served = 0 })
             var nothing = ()
             let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-            let answered: Result[Response, Error] = &identifying.serve_http(&nothing, sent.request())
+            defer var request_body4 = RequestBody.from_request(sent.request())
+            let answered: Result[Response, Error] = &identifying.serve_http(&nothing, sent.request(), &request_body4)
             let identified = match read answered {
                 Ok(response) => uuid.Uuid.parse(response.header("X-Request-Id").unwrap_or("")).is_ok(),
                 Err(error) => error.status() == Status.InternalServerError,
@@ -535,13 +538,15 @@ test fn each_request_gets_a_time_ordered_uuid() {
     defer var identifying = with_request_ids(Echoing { served = 0 })
     var nothing = ()
     let sent1 = new_request(arena.handle(), "GET", "/a", body: "").unwrap()
-    let first: Result[Response, Error] = &identifying.serve_http(&nothing, sent1.request())
+    defer var request_body5 = RequestBody.from_request(sent1.request())
+    let first: Result[Response, Error] = &identifying.serve_http(&nothing, sent1.request(), &request_body5)
     let first_response = first.unwrap()
     let first_id = uuid.Uuid.parse(first_response.header("X-Request-Id").unwrap()).unwrap()
     testing.assert_eq(first_id.version(), UInt8(7), "the id is not a version 7 UUID")?
     testing.assert_ok_eq(first_response.text(), first_response.header("X-Request-Id").unwrap(), "the handler saw another id")?
     let sent2 = new_request(arena.handle(), "GET", "/b", body: "").unwrap()
-    let second: Result[Response, Error] = &identifying.serve_http(&nothing, sent2.request())
+    defer var request_body6 = RequestBody.from_request(sent2.request())
+    let second: Result[Response, Error] = &identifying.serve_http(&nothing, sent2.request(), &request_body6)
     let second_id = uuid.Uuid.parse(second.unwrap().header("X-Request-Id").unwrap()).unwrap()
     testing.assert(first_id != second_id, "two requests got the same id")?
 }
@@ -552,7 +557,8 @@ test fn a_well_formed_id_the_client_sent_is_kept() {
     var nothing = ()
     var sent = new_request(arena.handle(), "GET", "/a", body: "").unwrap()
     &sent.add_header("X-Request-Id", "trace-41.ab@edge").unwrap()
-    let answered: Result[Response, Error] = &identifying.serve_http(&nothing, sent.request())
+    defer var request_body7 = RequestBody.from_request(sent.request())
+    let answered: Result[Response, Error] = &identifying.serve_http(&nothing, sent.request(), &request_body7)
     let response = answered.unwrap()
     testing.assert_eq(response.header("X-Request-Id"), Option.Some("trace-41.ab@edge"), "the client's id was not kept")?
     testing.assert_ok_eq(response.text(), "trace-41.ab@edge", "the handler did not see the client's id")?

@@ -5,7 +5,7 @@ import std.env
 import std.http
 import std.net
 
-fn hello[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+fn hello[P: Allocator](inout _: (), request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     http.text(request, "hello\n")
 }
 

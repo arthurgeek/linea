@@ -9,7 +9,7 @@ fn main() -> UInt8 {
     let seen: Vec[UInt64, mem.SystemAllocator] = Vec.new()
     let _registered = &router.route_raw(
         "GET /seen",
-        [sink seen] |inout _, request| http.text(request, "{seen.length()} seen"),
+        [sink seen] |inout _, request, inout _incoming| http.text(request, "{seen.length()} seen"),
     )
     router.release()
     0

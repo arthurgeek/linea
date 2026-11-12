@@ -1,0 +1,35 @@
+// A raw handler reads an upload through bounded storage instead of collecting
+// it in the request arena. The body is twice the size of that arena.
+import std.http
+import std.io
+import std.mem
+
+use io.Reader
+use mem.Lender
+
+fn count[P: Allocator](request: http.Request[P], inout incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(incoming), retains(incoming: incoming) {
+    var buffer = request.allocator().acquire(4096)?
+    var total: UInt64 = 0
+    loop {
+        let got = &incoming.read_some(&buffer, offset: 0, count: 4096)?
+        if got == 0 {
+            break
+        }
+        total += got
+    }
+    http.text(request, "{total} bytes")
+}
+
+fn main() -> UInt8 {
+    defer let bytes = Vec.filled(count: 131072, value: UInt8(97)).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "POST", "/count", body: "").unwrap()
+    defer var incoming = http.RequestBody.from_slice(bytes.as_slice(), arena.handle())
+    let response = count(sent.request(), &incoming).unwrap()
+    io.println(response.text().unwrap()).unwrap()
+    if incoming.remaining_bytes() == 0 {
+        0
+    } else {
+        1
+    }
+}

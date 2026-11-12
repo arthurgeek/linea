@@ -52,7 +52,7 @@ An unsupported method answers 405, and an unknown path answers 404.
   not found
   404
   $ { kill -TERM $server; wait $server; } 2>/dev/null; echo "the server stopped with status $?"
-  the server stopped with status 143
+  the server stopped with status 0
 
 When SQLite cannot open the database file, preparing it fails before any
 serving task starts: the sentence is written to standard error and the

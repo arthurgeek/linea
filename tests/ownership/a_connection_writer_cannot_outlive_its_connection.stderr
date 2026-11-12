@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ownership/a_connection_writer_cannot_outlive_its_connection.lin:10:5
+   |
+10 |     connection.close().unwrap()
+   |     ^^^^^^^^^^ keep this place available until the last use of its observation
+11 |     var output = writer
+   |                  ------ the observation is still used here

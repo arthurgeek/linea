@@ -1,0 +1,98 @@
+// A child server for framing, deadline and connection-budget acceptance cases.
+import std.env
+import std.http
+import std.io
+import std.net
+import std.task
+
+use io.Reader
+
+fn reply[P: Allocator](inout _: (), request: http.Request[P], inout body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(body), retains(body: body) {
+    io.println("entered {request.path()}").unwrap()
+    if request.path() == "/prefix" {
+        var bytes = request.allocator().acquire(2)?
+        let got = &body.read_some(&bytes, offset: 0, count: 2)?
+        if got != 2 {
+            return .Err(http.Error.new(.BadRequest))
+        }
+        return http.text(request, Str.from_bytes(bytes.as_slice()).unwrap())
+    }
+    if request.path() == "/whole" || request.path() == "/block" {
+        var bytes = request.allocator().acquire(4096)?
+        var total: UInt64 = 0
+        loop {
+            let got = &body.read_some(&bytes, offset: 0, count: 4096)?
+            if got == 0 {
+                break
+            }
+            total += got
+        }
+        return http.text(request, "read {total}")
+    }
+    http.text(request, "ok")
+}
+
+fn routes() -> http.Router[()] {
+    var router: http.Router[()] = http.Router.new()
+    &router.route_raw("GET /keep", reply).unwrap()
+    &router.route_raw("GET /close", reply).unwrap()
+    &router.route_raw("POST /prefix", reply).unwrap()
+    &router.route_raw("POST /ignore", reply).unwrap()
+    &router.route_raw("POST /whole", reply).unwrap()
+    &router.route_raw("POST /block", reply).unwrap()
+    router
+}
+
+fn main() -> UInt8 {
+    let mode = env.args().at(1) else {
+        return 0
+    }
+    let connections: UInt64 = if mode == "eviction" || mode == "backpressure" {
+        3
+    } else {
+        1
+    }
+    let open: UInt64 = if mode == "eviction" || mode == "backpressure" {
+        2
+    } else {
+        8
+    }
+    let policy: task.Policy = if mode == "backpressure" {
+        .Threads(3)
+    } else if mode == "eviction" {
+        .Threads(1)
+    } else {
+        .Sequential
+    }
+    let timeout: UInt64 = if mode == "deadline" {
+        80
+    } else {
+        2000
+    }
+    let limits = http.Limits {
+        connections = .Some(connections),
+        open_connections = open,
+        first_byte_timeout_ms = 1000,
+        read_timeout_ms = timeout,
+        write_timeout_ms = 2000,
+        idle_timeout_ms = 3000,
+        max_body_bytes = if mode == "streaming" {
+            UInt64(131072)
+        } else {
+            UInt64(8)
+        },
+        request_arena_bytes = 65536,
+        max_line_bytes = 1024,
+        max_headers = 8,
+        ..http.Limits.default(),
+    }
+    let listener = net.listen(net.loopback(0)).unwrap()
+    io.println("ready {listener.local_address().unwrap()}").unwrap()
+    match http.serve(listener, routes, limits: limits, policy: policy, shutdown: .Manual) {
+        Ok(_) => 0,
+        Err(error) => {
+            io.eprintln("{error}")
+            1
+        },
+    }
+}

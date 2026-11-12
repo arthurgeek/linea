@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ownership/a_cached_request_body_view_prevents_another_mutable_read.lin:16:21
+   |
+16 |     let _received = &incoming.read_some(&buffer, offset: 0, count: 8).unwrap()
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+17 |     io.println(Str.from_bytes(cached).unwrap()).unwrap()
+   |                               ------ the observation is still used here

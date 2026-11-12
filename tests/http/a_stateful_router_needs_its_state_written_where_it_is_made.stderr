@@ -1,8 +1,8 @@
-error[T-Mismatch]: expected `fn(inout (), read Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2)`, found `fn(inout App, read Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2)`
+error[T-Mismatch]: expected `fn(inout (), read Request[SystemAllocator], inout RequestBody[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2), borrows(#3), retains(#3: #3)`, found `fn(inout App, read Request[SystemAllocator], inout RequestBody[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2), borrows(#3), retains(#3: #3)`
   --> tests/http/a_stateful_router_needs_its_state_written_where_it_is_made.lin:12:51
    |
 12 |     let counted = &router.route_raw("GET /count", count)
-   |                                                   ^^^^^ expected `fn(inout (), read Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2)`, found `fn(inout App, read Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2)`
+   |                                                   ^^^^^ expected `fn(inout (), read Request[SystemAllocator], inout RequestBody[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2), borrows(#3), retains(#3: #3)`, found `fn(inout App, read Request[SystemAllocator], inout RequestBody[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2), borrows(#3), retains(#3: #3)`
   ::: std/http/router.lin
 L  |     pub fn route_raw[H: Route[S, P] + Release + Discardable](inout self: Self, pattern: Str, sink handler: H) -> Result[ ...
    |                                                                                                   ------- expected because of this parameter

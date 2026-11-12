@@ -29,7 +29,7 @@ let favicon = embed_bytes("favicon.ico")
 // `home` answers the page as HTML. Its `<link rel="icon">` names the icon
 // relative to the page, so it reaches this program wherever the web server
 // mounts it.
-fn home(request: http.Request) -> Result[http.Response, http.Error] {
+fn home(request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     var answer = http.text(request, page)?
     &answer.set_header("Content-Type", "text/html; charset=utf-8")?
     .Ok(answer)
@@ -38,7 +38,7 @@ fn home(request: http.Request) -> Result[http.Response, http.Error] {
 // `icon` answers the icon's bytes. `http.bytes` sends bytes built in the
 // request's arena, so the embedded bytes are copied there once; the copy is
 // freed with the arena after the answer is written.
-fn icon(request: http.Request) -> Result[http.Response, http.Error] {
+fn icon(request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     var body: Vec[UInt8, mem.Handle] = Vec.new_in(request.allocator())
     &body.append_slice(favicon)?
     var answer = http.bytes(request, body)
@@ -60,7 +60,8 @@ test fn the_icon_is_answered_byte_for_byte() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/favicon.ico", body: "").unwrap()
     var nothing = ()
-    let answer = &router.serve_http(&nothing, sent.request()).unwrap()
+    defer var incoming_1 = http.RequestBody.from_request(sent.request())
+    let answer = &router.serve_http(&nothing, sent.request(), &incoming_1).unwrap()
     testing.assert_eq(answer.header("Content-Type"), Option.Some("image/x-icon"), "the icon is not an icon")?
     let body = answer.body().unwrap()
     testing.assert_eq(body.length(), favicon.length(), "the icon lost bytes")?
@@ -74,7 +75,8 @@ test fn the_page_names_the_icon() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
     var nothing = ()
-    let answer = &router.serve_http(&nothing, sent.request()).unwrap()
+    defer var incoming_2 = http.RequestBody.from_request(sent.request())
+    let answer = &router.serve_http(&nothing, sent.request(), &incoming_2).unwrap()
     testing.assert(answer.text().unwrap().find(r#"<link rel="icon" href="favicon.ico""#).is_some(), "the page names no icon")?
 }
 

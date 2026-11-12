@@ -56,7 +56,8 @@ test fn a_first_visit_sets_the_cookie() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/hello/ada", "").unwrap()
     var nothing = ()
-    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    defer var incoming_1 = http.RequestBody.from_request(sent.request())
+    let response = &router.serve_http(&nothing, sent.request(), &incoming_1).unwrap()
     testing.assert_eq(response.header("Content-Type"), Option.Some("text/html; charset=utf-8"), "the content type changed")?
     testing.assert_eq(response.header("Set-Cookie"), Option.Some("visits=1; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly"), "the cookie changed")?
     testing.assert_ok_eq(response.text(), "<h1>Hello, ada!</h1><p>Visit 1.</p>", "the page changed")?
@@ -69,7 +70,8 @@ test fn a_returning_visitor_is_counted() {
     var sent = http.new_request(arena.handle(), "GET", "/hello/ada", "").unwrap()
     &sent.add_header("Cookie", "theme=dark; visits=2").unwrap()
     var nothing = ()
-    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    defer var incoming_2 = http.RequestBody.from_request(sent.request())
+    let response = &router.serve_http(&nothing, sent.request(), &incoming_2).unwrap()
     testing.assert_ok_eq(response.text(), "<h1>Hello, ada!</h1><p>Visit 3.</p>", "the count did not advance")?
     testing.assert_eq(response.header("Set-Cookie"), Option.Some("visits=3; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly"), "the cookie did not advance")?
 }
@@ -81,7 +83,8 @@ test fn a_cookie_that_is_not_a_count_starts_over() {
     var sent = http.new_request(arena.handle(), "GET", "/hello/ada", "").unwrap()
     &sent.add_header("Cookie", "visits=lots").unwrap()
     var nothing = ()
-    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    defer var incoming_3 = http.RequestBody.from_request(sent.request())
+    let response = &router.serve_http(&nothing, sent.request(), &incoming_3).unwrap()
     testing.assert_ok_eq(response.text(), "<h1>Hello, ada!</h1><p>Visit 1.</p>", "a bad cookie was counted")?
 }
 
@@ -92,7 +95,8 @@ test fn the_count_stops_at_its_limit() {
     var sent = http.new_request(arena.handle(), "GET", "/hello/ada", "").unwrap()
     &sent.add_header("Cookie", "visits=4294967295").unwrap()
     var nothing = ()
-    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    defer var incoming_4 = http.RequestBody.from_request(sent.request())
+    let response = &router.serve_http(&nothing, sent.request(), &incoming_4).unwrap()
     testing.assert_ok_eq(response.text(), "<h1>Hello, ada!</h1><p>Visit 1000.</p>", "the count passed its limit")?
 }
 
@@ -102,7 +106,8 @@ test fn a_name_with_markup_is_shown_as_text() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/hello/%3Cscript%3Ealert(%22x%22)%3C%2Fscript%3E", "").unwrap()
     var nothing = ()
-    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    defer var incoming_5 = http.RequestBody.from_request(sent.request())
+    let response = &router.serve_http(&nothing, sent.request(), &incoming_5).unwrap()
     testing.assert_ok_eq(response.text(), "<h1>Hello, &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;!</h1><p>Visit 1.</p>", "the name was not escaped")?
 }
 

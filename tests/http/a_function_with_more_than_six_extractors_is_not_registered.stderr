@@ -4,4 +4,4 @@ error[T-Bound]: `H` requires `Endpoint[(), SystemAllocator]`, and `fn(read a: Wo
 23 |     let routed = &router.route("GET /", crowded)
    |                          ^^^^^ only the library, which declares `Endpoint[(), mem.SystemAllocator]`, may implement it for `fn(read Word, read Word, read Word, read Word, read Word, read Word, read Word, read Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#8)`; pass a value whose type implements it
    |
-   = help: this function's parameters are `(read×8)`, and `Endpoint` is implemented only for callable types whose parameters are `(read×1..7)`, `(inout, read×1..7)` (`read×N` is N parameters taken by `read`)
+   = help: this function's parameters are `(read×8)`, and `Endpoint` is implemented only for callable types whose parameters are `(read, inout)`, `(read×2..7)`, `(inout, read, inout)`, `(inout, read×2..7)` (`read×N` is N parameters taken by `read`)

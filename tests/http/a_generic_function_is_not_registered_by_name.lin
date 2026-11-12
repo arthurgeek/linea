@@ -3,7 +3,7 @@
 // function over `http.Request` needs no parameter.
 import std.http
 
-fn generic[P: Allocator](request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+fn generic[P: Allocator](request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     http.text(request, "x")
 }
 

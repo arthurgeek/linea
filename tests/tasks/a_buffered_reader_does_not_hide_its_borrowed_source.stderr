@@ -1,0 +1,10 @@
+error[T-Bound]: `T` requires `Owned`, and `io.BufferedReader[Bytes, mem.SystemAllocator]` can carry a borrow: it holds a view of storage it does not own
+  --> tests/tasks/a_buffered_reader_does_not_hide_its_borrowed_source.lin:44:40
+   |
+44 |         let (received, answering) = me.recv()
+   |                                        ^^^^ `io.BufferedReader[Bytes, mem.SystemAllocator]` is not `Owned`; pass a value whose type owns everything it holds
+error[T-Bound]: `T` requires `Owned`, and `io.BufferedReader[Bytes, mem.SystemAllocator]` can carry a borrow: it holds a view of storage it does not own
+  --> tests/tasks/a_buffered_reader_does_not_hide_its_borrowed_source.lin:51:42
+   |
+51 |     let (read_line, done) = slot.start().send(reading).recv()
+   |                                          ^^^^ `io.BufferedReader[Bytes, mem.SystemAllocator]` is not `Owned`; pass a value whose type owns everything it holds

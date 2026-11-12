@@ -343,6 +343,7 @@ The library tests itself.
   ok    http.a_bare_lf_ends_a_line
   ok    http.a_body_holds_exactly_its_length
   ok    http.a_body_is_text_only_when_it_is_utf8
+  ok    http.a_body_reader_advances_and_stops_at_its_boundary
   ok    http.a_body_shorter_than_its_length_is_malformed
   ok    http.a_body_that_is_not_json_answers_400
   ok    http.a_body_that_is_not_utf8_answers_400
@@ -352,6 +353,7 @@ The library tests itself.
   ok    http.a_cgi_head_request_is_answered_with_the_head_alone
   ok    http.a_cgi_request_answers_each_limits_status_one_past_the_bound
   ok    http.a_client_reset_before_accept_never_stops_serving_and_the_next_is_served
+  ok    http.a_close_token_in_a_second_connection_header_closes_after_the_response
   ok    http.a_cookie_error_displays_its_reason
   ok    http.a_cookie_is_cleared_with_an_empty_expired_value
   ok    http.a_cookie_is_set_with_the_attributes_given
@@ -384,6 +386,7 @@ The library tests itself.
   ok    http.a_handler_is_made_as_itself_and_a_result_as_what_it_holds
   ok    http.a_handler_one_task_cannot_make_ends_serving_before_anything_is_accepted
   ok    http.a_handlers_own_id_is_replaced
+  ok    http.a_head_is_read_without_waiting_for_its_body
   ok    http.a_head_request_is_answered_with_the_head_alone
   ok    http.a_header_error_displays_its_reason
   ok    http.a_header_is_found_by_its_folded_name
@@ -393,6 +396,7 @@ The library tests itself.
   ok    http.a_held_body_follows_the_head
   ok    http.a_json_body_within_the_default_limits_decodes_in_the_default_arena
   ok    http.a_json_response_holds_its_encoded_value
+  ok    http.a_known_length_frames_a_persistent_response
   ok    http.a_linger_read_waits_no_longer_than_the_read_timeout
   ok    http.a_listen_and_serve_error_displays_its_cause
   ok    http.a_listening_server_announces_the_port_it_bound_before_accepting
@@ -472,11 +476,9 @@ The library tests itself.
   ok    http.a_request_keeps_its_method_token_as_sent
   ok    http.a_request_larger_than_the_arena_is_answered_500
   ok    http.a_request_names_its_method
-  ok    http.a_request_read_after_its_deadline_from_accept_times_out
   ok    http.a_request_split_into_single_bytes_parses_as_one
   ok    http.a_request_that_leaves_no_room_for_the_response_is_answered_500
   ok    http.a_request_the_handler_never_saw_is_logged_without_an_id
-  ok    http.a_request_timed_out_with_input_unread_is_answered_408
   ok    http.a_request_with_a_body_parses
   ok    http.a_request_without_a_cookie_header_has_no_cookies
   ok    http.a_response_body_is_text_only_when_it_is_held_utf8
@@ -499,6 +501,7 @@ The library tests itself.
   ok    http.a_short_header_after_a_long_line_is_answered_in_the_smallest_arena
   ok    http.a_silent_client_times_out_and_the_next_is_served
   ok    http.a_silent_close_is_closed_not_an_error
+  ok    http.a_socket_body_preserves_the_next_requests_read_ahead
   ok    http.a_stated_handler_reads_its_state
   ok    http.a_stateful_function_is_lent_the_state_with_each_count_of_extractors
   ok    http.a_stateful_router_lends_the_state_to_each_route
@@ -519,6 +522,7 @@ The library tests itself.
   ok    http.a_test_request_carries_the_headers_added_to_it
   ok    http.a_text_response_holds_its_rendered_body
   ok    http.a_text_response_past_the_arena_is_refused
+  ok    http.a_truncated_socket_body_reports_a_sticky_bad_request
   ok    http.a_value_may_hold_equals_signs_and_quotes_around_it_are_dropped
   ok    http.a_variable_that_is_not_utf8_is_read_as_its_bytes
   ok    http.a_walk_of_the_headers_shows_one_id
@@ -526,11 +530,14 @@ The library tests itself.
   ok    http.a_wrong_method_is_405_with_allow
   ok    http.add_header_keeps_the_values_a_name_already_has
   ok    http.adding_a_header_keeps_earlier_values
+  ok    http.ambiguous_framing_is_rejected_before_the_body_size
   ok    http.an_announced_server_answers_the_connection_queued_for_it
-  ok    http.an_arena_below_the_body_limit_is_refused_before_serving
+  ok    http.an_arena_below_the_metadata_requirement_is_refused_before_serving
   ok    http.an_arena_too_small_for_the_limits_is_refused
   ok    http.an_arena_too_small_for_the_limits_is_refused_with_a_parent
   ok    http.an_authority_is_a_host_and_an_optional_port
+  ok    http.an_empty_body_materializes_without_arena_headroom
+  ok    http.an_endpoint_receives_the_same_body_through_a_stated_router
   ok    http.an_error_displays_its_status_and_message
   ok    http.an_error_is_answered_with_its_headers
   ok    http.an_error_is_answered_with_its_message
@@ -548,6 +555,7 @@ The library tests itself.
   ok    http.an_id_is_kept_only_when_it_is_short_visible_ascii
   ok    http.an_identified_exchange_is_logged_with_its_id
   ok    http.an_identified_request_keeps_the_rest_of_the_request
+  ok    http.an_idle_keepalive_connection_expires_without_another_response
   ok    http.an_io_error_answers_500
   ok    http.an_origin_displays_in_canonical_form
   ok    http.an_origin_parses_ipv6_with_custom_port
@@ -560,6 +568,7 @@ The library tests itself.
   ok    http.bodyless_statuses_are_recognised
   ok    http.bodyless_statuses_emit_no_content_type_and_no_body
   ok    http.buffers_in_an_arena_last_for_any_number_of_requests
+  ok    http.cgi_reserves_full_body_storage_while_http_streams_it
   ok    http.content_length_alone_frames_the_body
   ok    http.content_length_must_be_digits_and_agree
   ok    http.cookie_decodes_the_percent_encoded_value
@@ -575,10 +584,11 @@ The library tests itself.
   ok    http.each_limit_answers_its_status_at_one_past_the_bound
   ok    http.each_request_gets_a_time_ordered_uuid
   ok    http.each_task_routes_path_parameters_through_its_own_router
-  ok    http.either_unbegun_keeps_a_reason_from_either_share
+  ok    http.every_connection_header_can_request_close
   ok    http.every_connection_is_answered_503_while_the_parent_refuses_the_arena
   ok    http.every_exchange_returns_its_arena_to_the_parent
   ok    http.every_shape_releases_its_extractors_last_first_and_stops_at_a_refusal
+  ok    http.form_reads_borrowed_fields_from_the_explicit_body
   ok    http.get_answers_head
   ok    http.header_compares_names_under_ascii_case_folding
   ok    http.header_lists_held_in_a_vector_release_in_generic_code
@@ -591,9 +601,12 @@ The library tests itself.
   ok    http.into_state_returns_the_state_and_releases_the_handler
   ok    http.json_decodes_the_body_or_names_what_is_wrong
   ok    http.json_is_named_by_its_media_type
+  ok    http.json_reads_the_explicit_body_instead_of_the_metadata_payload
   ok    http.json_refuses_a_body_that_is_not_utf8
   ok    http.limits_beyond_every_arena_are_refused_without_overflowing
   ok    http.listening_in_the_system_allocator_serves_nothing_when_told_to
+  ok    http.materializing_a_body_keeps_its_bytes_for_repeated_readers
+  ok    http.more_idle_connections_than_workers_can_all_make_another_request
   ok    http.no_match_is_404
   ok    http.non_ascii_values_without_escapes_read_as_sent
   ok    http.one_connection_is_served_and_serve_returns
@@ -606,6 +619,8 @@ The library tests itself.
   ok    http.percent_decoding_undoes_percent_encoding
   ok    http.percent_encoded_text_reads_in_an_interpolation
   ok    http.percent_encoding_keeps_only_unreserved_bytes
+  ok    http.pipelined_requests_keep_their_order_on_a_sequential_dispatcher
+  ok    http.pipelined_requests_keep_their_order_with_one_worker
   ok    http.remove_header_drops_every_value_of_a_name
   ok    http.removing_a_header_drops_every_value
   ok    http.request_is_https_checks_forwarded_headers_and_env
@@ -621,6 +636,7 @@ The library tests itself.
   ok    http.set_header_replaces_every_value_of_a_name
   ok    http.setting_a_header_replaces_every_value
   ok    http.status_returns_the_status_the_error_answers_with
+  ok    http.streaming_body_limits_do_not_reserve_the_body_in_the_arena
   ok    http.text_that_does_not_decode_answers_400
   ok    http.the_bound_address_is_logged_as_listening
   ok    http.the_default_arena_holds_every_request_the_default_limits_admit
@@ -637,6 +653,7 @@ The library tests itself.
   ok    http.transfer_encoding_is_not_implemented
   ok    http.transient_accept_failures_are_retried_until_a_connection_is_served
   ok    http.two_tasks_failing_with_owned_reasons_report_one_and_release_the_other
+  ok    http.typed_cgi_endpoints_keep_the_configured_form_limit
   ok    http.unescaping_keeps_bytes_that_are_not_utf8
   ok    http.whitespace_around_pairs_is_tolerated_and_names_match_exactly
   ok    http.with_state_lends_its_state_to_every_request
@@ -658,6 +675,8 @@ The library tests itself.
   ok    io.a_failed_prompt_write_does_not_read_input
   ok    io.a_full_buffer_accepts_new_bytes_only_after_draining_old_bytes
   ok    io.a_long_sleep_inside_a_run_waits_for_nothing
+  ok    io.a_preallocated_write_buffer_needs_no_further_allocation
+  ok    io.a_preallocated_writer_requires_nonempty_storage
   ok    io.a_prompt_finishes_short_writes_and_keeps_input_lookahead
   ok    io.a_prompt_reads_its_response_into_an_arena
   ok    io.a_raw_line_preserves_crlf_without_text_conversion
@@ -683,6 +702,7 @@ The library tests itself.
   ok    io.an_input_failure_can_resume_an_owned_line
   ok    io.an_oversized_line_retains_its_consumed_prefix
   ok    io.buffered_output_retries_only_its_unsent_suffix
+  ok    io.chunk_reads_keep_read_ahead_for_the_next_line
   ok    io.core.a_line_is_the_value_and_the_ending_after_it
   ok    io.core.a_readiness_within_its_holder_watches_the_same_descriptor
   ok    io.core.a_share_taken_back_was_not_delivered
@@ -1237,6 +1257,7 @@ The library tests itself.
   ok    mem.vec_unallocated_byte_storage_has_no_buffer
   ok    mem.windows_yield_each_run_of_consecutive_elements
   ok    net.a_backlog_holds_one_to_4096_connections
+  ok    net.a_borrowed_connection_writer_keeps_the_connection_open
   ok    net.a_client_reports_the_listener_as_its_peer
   ok    net.a_client_that_holds_its_task_holds_up_no_other
   ok    net.a_connect_whose_handshake_ends_at_its_deadline_connects
@@ -1611,4 +1632,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1608 passed, 0 failed
+  1629 passed, 0 failed

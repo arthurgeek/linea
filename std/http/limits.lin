@@ -8,21 +8,24 @@ import std.testing
 // the arena. Timeouts are milliseconds, and zero waits forever.
 // `first_byte_timeout_ms` bounds how long the server waits for the first byte
 // after accepting a connection, so an idle speculative connection is closed
-// without holding the accept loop for the full request timeout. It is
-// measured at the server's first read: a read that starts after it has passed
-// waits at most one millisecond, the shortest wait a socket can be given, and
-// takes whatever bytes arrive by then, and the connection is closed only when
-// none do. A socket does not say when its bytes arrived, so a server that
-// first reads late also answers a client that sent after the timeout had
-// passed, up to the end of that millisecond.
-// `read_timeout_ms` bounds the whole request, head and body together, counted
-// from the moment the connection is accepted, so a client that sends a byte at
-// a time is cut off as surely as a silent one. `write_timeout_ms` bounds each
-// write separately. `request_arena_bytes` is the size of
-// the arena requests are served from: the request is read into it, the
-// handler builds its response in it, and it is rewound once the response is
-// written. `connections` ends serving after that many connections; `.None`
-// serves until the process ends.
+// without occupying a serving task. The dispatcher registers its buffered
+// reader and a timer in the same wait set; readiness takes the connection
+// out of that first-byte wait, and an expired timer closes it if its reader
+// is still registered.
+// `read_timeout_ms` bounds each request, head and body together, counted from
+// when the dispatcher observes its reader ready, before queuing it for a
+// serving task. This is an observed readiness time, not the arrival timestamp
+// of a byte. A client that sends a byte at a time cannot restart the deadline.
+// `write_timeout_ms` bounds each write separately.
+// `idle_timeout_ms` bounds the longest a connection may stay idle between
+// requests. `open_connections` bounds the most connections held at once,
+// serving and idle together. `request_arena_bytes` is the size of the arena
+// requests are served from: it holds the request head, server reservations,
+// the handler's response and any body cache the handler requests. Incremental
+// body reads need not collect the body there. The arena is rewound once the
+// response is written and its body views have been settled.
+// `connections` ends serving after that many connections; `.None` serves until
+// the process ends.
 @copyable
 pub struct Limits {
     max_line_bytes: UInt64,
@@ -34,26 +37,31 @@ pub struct Limits {
     first_byte_timeout_ms: UInt64,
     read_timeout_ms: UInt64,
     write_timeout_ms: UInt64,
+    idle_timeout_ms: UInt64,
+    open_connections: UInt64,
     connections: Option[UInt64],
 }
 
 // The default limits allow 8 KiB lines, 100 headers, 100 query pairs, 100 form
 // pairs, a 1 MiB body, a 48 MiB arena, a 500 ms wait for the first byte and
-// five-second read and write timeouts. The arena holds
-// what a handler makes of a request within the other limits, which is more
-// than the request:
+// five-second read and write timeouts, 15 seconds idle between requests and
+// at most 1024 open connections. The arena holds the request's metadata and
+// whatever its handler materializes, decodes or builds:
 //
-// - Reading the largest request they admit, 101 lines of 8 KiB and a 1 MiB
-//   body sent as a form, reserves up to about 5.2 MiB, as `smallest_arena`
-//   counts it, most of it the head's text growing by doubling and the form's
-//   duplicated text.
+// - Startup admission conservatively budgets the bounded head, header and
+//   query fields, and server reservations. It does not reserve the body or
+//   decoded form fields: a streamed body may exceed the arena's size.
+// - Materializing a body reserves its remaining bytes. A form also needs
+//   decoded text and field storage. These optional allocations can fail even
+//   when startup admission succeeds.
 // - Decoding a JSON body with `http.Json` reserves up to 31 MiB for the
 //   100,000 values `json.decode` admits, about 316 bytes a value, since an
 //   array's storage doubles as it grows and keeps what it outgrew, and about
 //   3 MiB for the text of a body a megabyte long. Both fit in 200 KiB and
 //   1 MiB, so the body limit does not bound them.
-// - The response takes the rest: 48 MiB holds both of those together and
-//   leaves about 8 MiB.
+// - The response shares the arena with that metadata, cache and decoded
+//   data. The 48 MiB default leaves room for common full-body handlers;
+//   `max_body_bytes` alone cannot bound what a handler allocates.
 //
 // The arena's size is a limit, not memory taken up front: it takes a 64 KiB
 // first chunk from the parent when it opens and further chunks, each at least
@@ -72,6 +80,8 @@ let standard_limits: Limits = .{
     first_byte_timeout_ms = 500,
     read_timeout_ms = 5000,
     write_timeout_ms = 5000,
+    idle_timeout_ms = 15000,
+    open_connections = 1024,
     connections = .None,
 }
 
@@ -93,5 +103,8 @@ test fn the_default_limits_bound_lines_headers_and_bodies() {
     testing.assert_eq(limits.max_body_bytes, UInt64(1048576), "the body bound changed")?
     testing.assert_eq(limits.first_byte_timeout_ms, UInt64(500), "the first-byte timeout changed")?
     testing.assert_eq(limits.read_timeout_ms, UInt64(5000), "the read timeout changed")?
+    testing.assert_eq(limits.write_timeout_ms, UInt64(5000), "the write timeout changed")?
+    testing.assert_eq(limits.idle_timeout_ms, UInt64(15000), "the idle timeout changed")?
+    testing.assert_eq(limits.open_connections, UInt64(1024), "the open-connections bound changed")?
     testing.assert(limits.connections.is_none(), "the default limits end serving")?
 }

@@ -17,6 +17,6 @@ as JSON. The server listens until the transcript stops it.
   not found
    404
   $ { kill -TERM $server; wait $server; } 2>/dev/null; echo "the run ended with status $?"
-  the run ended with status 143
+  the run ended with status 0
   $ sed -E 's/127[.]0[.]0[.]1:[0-9]+/127.0.0.1:PORT/g' server.log
   listening on http://127.0.0.1:PORT

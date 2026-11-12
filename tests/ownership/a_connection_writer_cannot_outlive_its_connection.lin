@@ -1,0 +1,14 @@
+// Output borrowed from a connection keeps that connection alive until the
+// borrowed writer's last use.
+import std.io
+import std.net
+
+fn main() -> UInt8 {
+    defer let listener = net.listen(net.loopback(0)).unwrap()
+    let connection = net.connect(listener.local_address().unwrap()).unwrap()
+    let writer = connection.writer()
+    connection.close().unwrap()
+    var output = writer
+    let _written = io.write_all(&output, "hello".as_bytes()).unwrap()
+    0
+}

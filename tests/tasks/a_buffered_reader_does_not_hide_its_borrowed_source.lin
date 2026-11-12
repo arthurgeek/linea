@@ -1,0 +1,58 @@
+// Owning the read-ahead does not make a borrowed source Owned. A buffered
+// reader over a parent's slice cannot be sent through an owning session.
+import std.io
+import std.mem
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+@derive(Release)
+struct Bytes {
+    bytes: mem.Slice[UInt8],
+    position: UInt64,
+}
+
+impl io.Reader for Bytes {
+    type Error = Never
+
+    fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, Never] where carries() {
+        let remaining = self.bytes.length() - self.position
+        let amount = if count < remaining {
+            count
+        } else {
+            remaining
+        }
+        for index in 0..amount {
+            &buffer.store_byte(offset + index, self.bytes[self.position + index])
+        }
+        self.position += amount
+        .Ok(amount)
+    }
+}
+
+alias Reading = io.BufferedReader[Bytes, mem.SystemAllocator]
+
+fn main() -> UInt8 {
+    defer let text = "head\ntail\n".to_owned().unwrap()
+    let source = Bytes { bytes = text.view().as_bytes(), position = 0 }
+    let reading = io.BufferedReader.open(capacity: 32, reader: source).unwrap()
+    let worker = sink [] |sink me: Chan[Recv[Reading, Send[Bool, End]]]| {
+        let (received, answering) = me.recv()
+        var reader = received
+        let read_line = &reader.read_line_borrowed(max_bytes: 32).unwrap().is_some()
+        reader.abandon().release()
+        answering.send(read_line).close()
+    }
+    let slot = task.prepare(worker).unwrap()
+    let (read_line, done) = slot.start().send(reading).recv()
+    done.close()
+    if read_line {
+        0
+    } else {
+        1
+    }
+}

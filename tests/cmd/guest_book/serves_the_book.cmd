@@ -66,7 +66,7 @@ from the cookie, also escaped.
 After three requests the server exits cleanly, closing the database.
 
   $ { kill -TERM $server; wait $server; } 2>/dev/null; echo "the server stopped with status $?"
-  the server stopped with status 143
+  the server stopped with status 0
 
 In SQLite itself the visitor's text is stored as written, and the signed timestamp
 is stored as a 64-bit Unix integer.

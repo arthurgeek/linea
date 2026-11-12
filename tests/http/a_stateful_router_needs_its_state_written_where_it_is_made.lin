@@ -2,7 +2,7 @@ import std.http
 
 struct App { visits: UInt64 }
 
-fn count[P: Allocator](inout app: App, request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+fn count[P: Allocator](inout app: App, request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     app.visits += 1
     http.text(request, "visit")
 }

@@ -22,12 +22,12 @@ import std.testing
 // every type implements by ignoring the events; a middleware implements both
 // traits and passes each call on: `http.logged` is one.
 pub trait Handler[S, P: Allocator] {
-    fn serve_http(inout self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] where borrows(self), carries(request)
+    fn serve_http(inout self: Self, inout state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] where borrows(self), carries(request), borrows(body), retains(body: body)
 }
 
-impl[P: Allocator] Handler[(), P] for fn(request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn serve_http(inout self: Self, inout _state: (), request: Request[P]) -> Result[Response[P], Error[P]] {
-        self(request)
+impl[P: Allocator] Handler[(), P] for fn(request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(body), retains(body: body) {
+    fn serve_http(inout self: Self, inout _state: (), request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        self(request, &body)
     }
 }
 
@@ -100,7 +100,8 @@ test fn a_handler_is_made_as_itself_and_a_result_as_what_it_holds() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     var nothing = ()
     let sent = new_request(arena.handle(), "GET", "/hello", body: "").unwrap()
-    let response = &made.serve_http(&nothing, sent.request()).unwrap()
+    defer var request_body1 = RequestBody.from_request(sent.request())
+    let response = &made.serve_http(&nothing, sent.request(), &request_body1).unwrap()
     testing.assert_ok_eq(response.text(), "hello", "the handler a factory returned was not the one made")?
     let refused = match made_by(refused_router) {
         Ok(router) => {
@@ -113,7 +114,7 @@ test fn a_handler_is_made_as_itself_and_a_result_as_what_it_holds() {
     .Ok(())
 }
 
-fn greeting[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn greeting[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     text(request, "hello")
 }
 
@@ -123,7 +124,8 @@ test fn a_route_returning_a_response_is_registered_and_answers() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     var nothing = ()
     let sent = new_request(arena.handle(), "GET", "/hello", body: "").unwrap()
-    let answered: Result[Response, Error] = &router.serve_http(&nothing, sent.request())
+    defer var request_body2 = RequestBody.from_request(sent.request())
+    let answered: Result[Response, Error] = &router.serve_http(&nothing, sent.request(), &request_body2)
     let response = answered.unwrap()
     testing.assert_ok_eq(response.text(), "hello", "the answer changed")?
     .Ok(())

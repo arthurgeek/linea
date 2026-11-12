@@ -79,7 +79,7 @@ The request sends its own id, which the answer and the log line keep.
 
   $ ask -D - -H 'X-Request-Id: trace-9' -X DELETE "http://127.0.0.1:$port/echo" | tr -d '\r'
   HTTP/1.1 405 Method Not Allowed
-  Connection: close
+  Content-Length: 19
   Allow: POST
   X-Request-Id: trace-9
   Content-Type: text/plain; charset=utf-8

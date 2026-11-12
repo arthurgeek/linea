@@ -7,7 +7,7 @@ use mem.Closure
 
 // A `Route` answers one request: it may change the application's state, and
 // the response it returns may carry what the request holds.
-alias Route[S = (), P: Allocator = mem.SystemAllocator] = fn(inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request)
+alias Route[S = (), P: Allocator = mem.SystemAllocator] = fn(inout state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(body), retains(body: body)
 
 // A `MethodTable` holds the handlers registered at one pattern shape: one per
 // named method, and one for the pattern that names no method. Each is an index
@@ -220,7 +220,7 @@ impl[S, P: Allocator] Router[S, P] {
     // `inout state`, up to six extractors, and the request last. The router
     // reads each extractor from the request before calling it.
     pub fn route[H: Endpoint[S, P] + Release + Discardable](inout self: Self, pattern: Str, sink handler: H) -> Result[(), RouteError] where carries(), retains(self: self, handler) {
-        &self.route_raw(pattern, [sink handler] |inout state, request| handler.call(&state, request))
+        &self.route_raw(pattern, [sink handler] |inout state, request, inout body| handler.call(&state, request, &body))
     }
 
     // Register `handler` for `pattern`. `handler` is any closure or function
@@ -278,7 +278,7 @@ impl[S, P: Allocator] Router[S, P] {
     test fn a_route_closure_reads_what_it_captured() {
         defer var router = Router.new()
         let greeting = "hello"
-        let registered = &router.route_raw("GET /greet", [greeting] |inout _, request| text(request, greeting))
+        let registered = &router.route_raw("GET /greet", [greeting] |inout _, request, inout _body| text(request, greeting))
         defer let received = served(&router, "GET", "/greet")
         testing.assert_ok_eq(registered, (), "registering failed")?
         testing.assert_eq(received.view(), "200 hello", "the captured text was not answered")?
@@ -307,7 +307,7 @@ impl[S, P: Allocator] Router[S, P] {
                 &router.route_raw("/static/", second_handler)?
                 // A closure that captures its text is kept in the router's allocator.
                 let greeting = "hello"
-                &router.route_raw("GET /greet", [greeting] |inout _, request| text(request, greeting))?
+                &router.route_raw("GET /greet", [greeting] |inout _, request, inout _body| text(request, greeting))?
                 return .Ok(())
             },
             RouteError.is_refusal,
@@ -592,14 +592,14 @@ struct MethodName {
 // nothing answers 404, and a path value that is not percent-encoded UTF-8
 // answers 400.
 impl[S, P: Allocator] Handler[S, P] for Router[S, P] {
-    fn serve_http(inout self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn serve_http(inout self: Self, inout state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
         let walked = self.walk(request.method(), request.path())
         match copy(walked.found) {
             Route(index) => {
                 let span = copy(self.patterns[index])
                 let pattern = stored_part(self.paths.view(), span)
                 if pattern.find(r"{").is_none() {
-                    return (self.handlers[index])(&state, request)
+                    return (self.handlers[index])(&state, request, &body)
                 }
                 // The values of the request answered last are dropped, and
                 // their storage is kept for these.
@@ -614,7 +614,7 @@ impl[S, P: Allocator] Handler[S, P] for Router[S, P] {
                 }
                 // Every recorded name and value is UTF-8, so the whole is.
                 let matched = Str.from_bytes(self.matched.as_slice()).unwrap()
-                return (self.handlers[index])(&state, request.routed(matched, self.fields.as_slice()))
+                return (self.handlers[index])(&state, request.routed(matched, self.fields.as_slice()), &body)
             },
             Unmatched => .Err(error(request, .NotFound, "not found")),
             WrongMethod(table) => {
@@ -860,28 +860,28 @@ struct PathValue {
 // `served` describes a 404 this way.
 let not_found: Str = "404 not found"
 
-fn first_handler[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn first_handler[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     text(request, "first")
 }
 
-fn second_handler[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn second_handler[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     text(request, "second")
 }
 
 // Answer `name=` and the path value `name`.
-fn named_value[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn named_value[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     let name = request.path_value("name").unwrap_or("(none)")
     text(request, "name={name}")
 }
 
 // Answer `id=` and the path value `id`.
-fn named_id[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn named_id[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     let id = request.path_value("id").unwrap_or("(none)")
     text(request, "id={id}")
 }
 
 // Answer `rest=` and the path value `rest`.
-fn named_rest[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn named_rest[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     let rest = request.path_value("rest").unwrap_or("(none)")
     text(request, "rest={rest}")
 }
@@ -900,7 +900,8 @@ fn served[P: Allocator](inout router: Router[(), P], method: Str, target: Str) -
 fn served_with[P: Allocator, S](inout router: Router[S, P], inout state: S, method: Str, target: Str) -> String[mem.SystemAllocator] {
     let arena = mem.Arena.open(router.allocator, size: 65536)
     let sent = new_request(arena.handle(), method, target, body: "").unwrap()
-    let described = match &router.serve_http(&state, sent.request()) {
+    var request_body1: RequestBody[P] = RequestBody.from_request(sent.request())
+    let described = match &router.serve_http(&state, sent.request(), &request_body1) {
         Ok(response) => {
             let code = response.status().code()
             let body = response.text().unwrap()
@@ -915,6 +916,7 @@ fn served_with[P: Allocator, S](inout router: Router[S, P], inout state: S, meth
             fmt.render_owned("{code} {message}").unwrap()
         },
     }
+    request_body1.release()
     arena.release()
     described
 }
@@ -926,7 +928,7 @@ struct Visits {
 }
 
 // Count a visit and answer with the count so far.
-fn visit[P: Allocator](inout visits: Visits, request: Request[P]) -> Result[Response[P], Error[P]] {
+fn visit[P: Allocator](inout visits: Visits, request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     visits.count += 1
     text(request, "visit {visits.count}")
 }

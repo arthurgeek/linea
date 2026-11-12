@@ -929,8 +929,10 @@ from one arena:
    default) over the allocator you give it. That size bounds what one request
    may use; the arena takes a 64 KiB first chunk and more only as a request
    needs it.
-2. It reads each request into that arena and hands the handler a
-   `Request`.
+2. It reads each request head into that arena and hands the handler copyable
+   `Request` metadata and an exclusive `RequestBody`. A streaming handler
+   reads through a fixed buffer; JSON and form endpoints materialize the body
+   in the arena before extracting their inputs.
 3. The handler builds its response with `request.allocator()`, a handle to
    the same arena.
 4. Once the response is written, `serve` rewinds the arena for the next

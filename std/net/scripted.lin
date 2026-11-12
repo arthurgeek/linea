@@ -74,3 +74,12 @@ impl io.Close for ScriptedListener {
         }
     }
 }
+
+impl io.Pollable for ScriptedListener {
+    fn readiness(self: Self, interest: io.Interest) -> io.Readiness[Self] where borrows(self) {
+        if self.taken < 4 && self.script[self.taken].is_some() {
+            return .Now
+        }
+        io.Pollable.readiness(self.listener, interest).within(self)
+    }
+}

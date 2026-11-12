@@ -1,0 +1,19 @@
+// A materialized body's bytes observe its cache. Another mutable body read
+// is refused until the last use of that observation.
+import std.http
+import std.io
+import std.mem
+
+use io.Reader
+use mem.Lender
+
+fn main() -> UInt8 {
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "POST", "/", body: "").unwrap()
+    defer var incoming = http.RequestBody.from_slice("hello".as_bytes(), arena.handle())
+    let cached = &incoming.read_all(sent.request()).unwrap()
+    defer var buffer = mem.system().acquire(8).unwrap()
+    let _received = &incoming.read_some(&buffer, offset: 0, count: 8).unwrap()
+    io.println(Str.from_bytes(cached).unwrap()).unwrap()
+    0
+}

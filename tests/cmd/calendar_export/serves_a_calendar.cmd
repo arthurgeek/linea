@@ -26,7 +26,6 @@ produced.
 
   $ curl -s --max-time 30 -I "http://127.0.0.1:$port/calendar/2026" | tr -d '\r' | grep -v '^$'
   HTTP/1.1 200 OK
-  Connection: close
   Content-Type: text/csv; charset=utf-8
 
 A year past 9999 is answered 400 before anything is streamed, and the handler

@@ -1,0 +1,860 @@
+import std.io
+import std.mem
+import std.net
+import std.session
+import std.task
+import std.testing
+import std.time
+
+use task.Unregistered
+use task.Unstarted
+
+// A connection keeps its read-ahead across requests and across serving tasks.
+alias Reading = io.BufferedReader[net.Connection, mem.SystemAllocator]
+
+enum ExchangeRead {
+    Idle(Reading),
+    Closed,
+    Unavailable,
+}
+
+// Signal-driven shutdown is the default; an embedding program may own signals.
+@(copyable, derive(Equatable, Debug))
+pub enum Shutdown {
+    OnSignals,
+    Manual,
+}
+
+test fn pipelined_requests_keep_their_order_on_a_sequential_dispatcher() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let client = send(listener.local_address().unwrap(), "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\nGET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\n\r\n")
+    let served = serve(listener, health_router, limits: serving(1), policy: .Sequential, shutdown: .Manual)
+    defer let answer = read_to_end(client)
+    testing.assert_ok_eq(served, (), "serving pipelined requests failed")?
+    testing.assert_eq(answer.view(), "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nokHTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "pipelined requests were lost or reordered")?
+    .Ok(())
+}
+
+// Workers report that their buffers and handler are ready before any accept.
+struct DispatchServing[phantom E] {}
+
+struct DispatchAccepting[phantom E] {}
+
+impl[E] session.Protocol for DispatchServing[E] {
+    type Dual = DispatchAccepting[E]
+    type Step = session.Offer[session.Recv[DispatchWork, session.Send[DispatchResult, DispatchServing[E]]], session.Send[Result[(), ServeError[E]], session.End]]
+}
+
+impl[E] session.Protocol for DispatchAccepting[E] {
+    type Dual = DispatchServing[E]
+    type Step = session.Choose[session.Send[DispatchWork, session.Recv[DispatchResult, DispatchAccepting[E]]], session.Recv[Result[(), ServeError[E]], session.End]]
+}
+
+enum DispatchWork {
+    Read(Reading, Bool),
+    Retry(net.AcceptRetry),
+}
+
+enum DispatchResult {
+    Answered(ExchangeRead),
+    Observed,
+}
+
+alias DispatchFree[E, F] = session.Chan[DispatchAccepting[E], (F, mem.SystemAllocator)]
+alias DispatchBusy[E, F] = session.Chan[session.Recv[DispatchResult, DispatchAccepting[E]], (F, mem.SystemAllocator)]
+
+enum DispatchWake[L, E, F] {
+    Listener(L),
+    Reader(UInt64, Reading),
+    Expired(UInt64),
+    Worker(DispatchBusy[E, F]),
+    Stop(io.SignalShare),
+    Resume,
+}
+
+@copyable
+struct DispatchIdle {
+    number: UInt64,
+    reader: task.Registered[Reading],
+    timer: Option[task.Registered[UInt64]],
+}
+
+// The dispatcher owns every idle connection; ready work waits without a task.
+struct Dispatch[L, E, F] {
+    waiting: task.WaitSet[DispatchWake[L, E, F]],
+    listener: Option[L],
+    listening: Option[task.Registered[L]],
+    idle: mem.Vec[DispatchIdle],
+    ready: mem.Vec[Reading],
+    free: mem.Vec[DispatchFree[E, F]],
+    busy: UInt64,
+    open: UInt64,
+    accepted: UInt64,
+    serial: UInt64,
+    pause_ms: UInt64,
+    stopped: Bool,
+    terminate: Option[task.Registered[io.SignalShare]],
+    interrupt: Option[task.Registered[io.SignalShare]],
+    failed: Option[ServeError[E]],
+    retry: Option[net.AcceptRetry],
+    backoff: Option[task.Registered[()]],
+}
+
+fn dispatch_close_reader(sink reading: Reading) {
+    close_connection(reading.abandon())
+}
+
+// A refused first chunk is retried for the next request rather than kept empty.
+fn restart_request_arena[P: Allocator](inout arena: mem.Arena[P], parent: P, limits: Limits) where retains(arena: parent) {
+    let fresh = mem.Arena.open(parent, limits.request_arena_bytes)
+    let previous = mem.exchange(&arena, fresh)
+    previous.release()
+}
+
+// A worker's loop owns its handler and request arena for the whole serving run.
+fn dispatch_worker[P: Allocator, R: MadeHandler[P], M: fn() -> R](sink me: session.Chan[session.Send[Result[(), ServeError[R.Error]], DispatchServing[R.Error]]], parent: P, make_handler: M, limits: Limits, stopping: task.Client[Bool]) where R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+    defer var refusal = parent.acquire(request_buffer_bytes) else |reason| {
+        dispatch_failed_worker(me.send(.Err(.Memory(reason))))
+        return
+    }
+    defer var handler = make_handler().made() else |reason| {
+        dispatch_failed_worker(me.send(.Err(.Handler(reason))))
+        return
+    }
+    defer var arena = mem.Arena.open(parent, limits.request_arena_bytes)
+    var next: Option[session.Chan[DispatchServing[R.Error]]] = .Some(me.send(.Ok(())))
+    loop {
+        let current = mem.exchange(&next, .None).unwrap()
+        match current.enter().offer() {
+            Left(job) => {
+                let (work, answer) = job.recv()
+                let result: DispatchResult = match work {
+                    Read(reading, closing) => {
+                        let result = answer_reading(reading, &handler, arena.handle(), &refusal, limits, closing, .Some(copy(stopping)))
+                        match read result {
+                            Unavailable => restart_request_arena(&arena, parent, limits),
+                            _ => &arena.rewind(),
+                        }
+                        .Answered(result)
+                    },
+                    Retry(retry) => {
+                        let event: Event[P] = .AcceptRetried(retry)
+                        &handler.observe(event)
+                        .Observed
+                    },
+                }
+                dispatch_put_worker(&next, answer.send(result))
+            },
+            Right(done) => {
+                done.send(.Ok(())).close()
+                break
+            },
+        }
+    }
+    match next {
+        Some(endpoint) => dispatch_failed_worker(endpoint),
+        None => {},
+    }
+}
+
+fn dispatch_put_worker[E: Owned + Shareable + Release](inout slot: Option[session.Chan[DispatchServing[E]]], sink next: session.Chan[DispatchServing[E]]) {
+    match mem.exchange(&slot, .Some(next)) {
+        Some(previous) => dispatch_failed_worker(previous),
+        None => {},
+    }
+}
+
+// A failed startup still settles the session when the dispatcher cancels it.
+fn dispatch_failed_worker[E: Owned + Shareable + Release](sink me: session.Chan[DispatchServing[E]]) {
+    match me.enter().offer() {
+        Left(job) => {
+            let (work, answer) = job.recv()
+            match work {
+                Read(reading, _) => dispatch_close_reader(reading),
+                Retry(_) => {},
+            }
+            dispatch_failed_worker(answer.send(.Answered(.Closed)))
+        },
+        Right(done) => done.send(.Ok(())).close(),
+    }
+}
+
+fn dispatch_finish_worker[E: Owned + Release, F](sink worker: DispatchFree[E, F]) -> Result[(), ServeError[E]] {
+    let (answer, done) = worker.enter().choose_right().recv()
+    done.close()
+    answer
+}
+
+impl[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F] Dispatch[L, E, F] {
+    fn reserve_tables(inout self: Self, limits: Limits) -> Result[(), mem.Oom] {
+        &self.idle.reserve(limits.open_connections)?
+        &self.ready.reserve(limits.open_connections)?
+        .Ok(())
+    }
+
+    fn fail(inout self: Self, sink reason: ServeError[E]) where retains(self: reason) {
+        match read self.failed {
+            Some(_) => reason.release(),
+            None => mem.exchange(&self.failed, .Some(reason)).release(),
+        }
+    }
+
+    fn put_listener(inout self: Self, sink next: Option[L]) where retains(self: next) {
+        match mem.exchange(&self.listener, next) {
+            Some(previous) => {
+                let _closed = previous.close()
+            },
+            None => {},
+        }
+    }
+
+    fn stop_listener(inout self: Self) where retains(self: self) {
+        match mem.exchange(&self.listening, .None) {
+            Some(key) => {
+                let listener = &self.waiting.take(key)
+                &self.put_listener(listener)
+            },
+            None => {},
+        }
+    }
+
+    // The listener stays registered at capacity so a newcomer can evict idle work.
+    fn watch_listener(inout self: Self, limits: Limits) where retains(self: self) {
+        if self.stopped || self.failed.is_some() || net.reached(limits.connections, self.accepted) || self.listening.is_some() || self.retry.is_some() || self.backoff.is_some() {
+            return
+        }
+        if self.open >= limits.open_connections && self.idle.length() == 0 {
+            return
+        }
+        let listener = mem.exchange(&self.listener, .None) else {
+            return
+        }
+        match &self.waiting.readable(
+            listener,
+            |sink ready| -> DispatchWake[L, E, F] {
+                .Listener(ready)
+            },
+        ) {
+            Ok(key) => self.listening = .Some(key),
+            Err(Unregistered { value, reason }) => {
+                &self.put_listener(.Some(value))
+                &self.fail(.Accept(.Io(reason)))
+            },
+        }
+    }
+
+    fn forget_idle(inout self: Self, number: UInt64) -> Option[DispatchIdle] {
+        for i in 0..self.idle.length() {
+            if self.idle[i].number == number {
+                let entry = &self.idle.remove(i).unwrap()
+                match read entry.timer {
+                    Some(timer) => {
+                        let _withdrawn = &self.waiting.take(timer)
+                    },
+                    None => {},
+                }
+                return .Some(entry)
+            }
+        }
+        .None
+    }
+
+    fn keep_idle(inout self: Self, sink reading: Reading, limits: Limits, first: Bool = false) where retains(self: self, reading) {
+        if self.stopped || self.failed.is_some() {
+            dispatch_close_reader(reading)
+            self.open -= 1
+            return
+        }
+        self.serial += 1
+        let number = self.serial
+        match &self.waiting.readable(
+            reading,
+            [sink number] |sink ready| -> DispatchWake[L, E, F] {
+                .Reader(number, ready)
+            },
+        ) {
+            Ok(reader) => {
+                let timeout = if first {
+                    limits.first_byte_timeout_ms
+                } else {
+                    limits.idle_timeout_ms
+                }
+                let timer: Option[task.Registered[UInt64]] = if timeout == 0 {
+                    .None
+                } else {
+                    .Some(
+                        &self.waiting.after(
+                            time.Duration.from_milliseconds(timeout),
+                            number,
+                            |sink number| -> DispatchWake[L, E, F] {
+                                .Expired(number)
+                            },
+                        ),
+                    )
+                }
+                &self.idle.push(.{ number, reader, timer }).unwrap()
+            },
+            Err(Unregistered { value, reason }) => {
+                dispatch_close_reader(value)
+                self.open -= 1
+                &self.fail(.Accept(.Io(reason)))
+            },
+        }
+    }
+
+    // Only a still-registered reader is evictable, never one already signalled.
+    fn evict_oldest(inout self: Self) -> Bool {
+        for i in 0..self.idle.length() {
+            let entry = copy(self.idle[i])
+            match &self.waiting.take_if_registered(entry.reader) {
+                Some(reader) => {
+                    let _entry = &self.forget_idle(entry.number)
+                    dispatch_close_reader(reader)
+                    self.open -= 1
+                    return true
+                },
+                None => {},
+            }
+        }
+        false
+    }
+
+    // At shutdown the remaining idle registrations are exactly those signalled.
+    fn begin_stop(inout self: Self) where retains(self: self) {
+        self.stopped = true
+        &self.stop_listener()
+        match mem.exchange(&self.terminate, .None) {
+            Some(key) => match &self.waiting.take(key) { Some(share) => share.settle(), None => {} },
+            None => {},
+        }
+        match mem.exchange(&self.interrupt, .None) {
+            Some(key) => match &self.waiting.take(key) { Some(share) => share.settle(), None => {} },
+            None => {},
+        }
+        var i: UInt64 = 0
+        while i < self.idle.length() {
+            let entry = copy(self.idle[i])
+            match &self.waiting.take_if_registered(entry.reader) {
+                Some(reader) => {
+                    let _entry = &self.forget_idle(entry.number)
+                    dispatch_close_reader(reader)
+                    self.open -= 1
+                },
+                None => {
+                    match mem.exchange(&self.idle[i].timer, .None) {
+                        Some(key) => {
+                            let _number = &self.waiting.take(key)
+                        },
+                        None => {},
+                    }
+                    i += 1
+                },
+            }
+        }
+    }
+
+    fn register_signals(inout self: Self, shutdown: Shutdown) {
+        if shutdown == Shutdown.Manual {
+            return
+        }
+        match &self.waiting.signal(
+            .Terminate,
+            |sink share| -> DispatchWake[L, E, F] {
+                .Stop(share)
+            },
+        ) {
+            Ok(key) => self.terminate = .Some(key),
+            Err(Ignored) => {},
+            Err(Unavailable(reason)) => &self.fail(.Accept(.Io(reason))),
+        }
+        match &self.waiting.signal(
+            .Interrupt,
+            |sink share| -> DispatchWake[L, E, F] {
+                .Stop(share)
+            },
+        ) {
+            Ok(key) => self.interrupt = .Some(key),
+            Err(Ignored) => {},
+            Err(Unavailable(reason)) => &self.fail(.Accept(.Io(reason))),
+        }
+    }
+
+    fn submit(inout self: Self, sink worker: DispatchFree[E, F], sink work: DispatchWork) where retains(self: worker, work) {
+        let busy = worker.enter().choose_left().send(work)
+        let _key = &self.waiting.received(
+            busy,
+            |sink ready| -> DispatchWake[L, E, F] {
+                .Worker(ready)
+            },
+        )
+        self.busy += 1
+    }
+}
+
+// The local callback answers work inline only for a sequential dispatcher.
+fn dispatch_run[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F, W: inout fn(sink work: DispatchWork) -> DispatchResult](inout state: Dispatch[L, E, F], inout local: W, limits: Limits, sequential: Bool, stopping: Option[task.Client[Bool]]) -> Bool where retains(state: state) {
+    loop {
+        if state.failed.is_some() && !state.stopped {
+            &state.begin_stop()
+        }
+        // Ready requests have priority over another accept, keeping the queue bounded.
+        while state.ready.length() > 0 && (sequential || state.free.length() > 0) {
+            let reading = &state.ready.remove(0).unwrap()
+            let work: DispatchWork = .Read(reading, state.stopped)
+            if sequential {
+                match &local(work) {
+                    Answered(Idle(reader)) => &state.keep_idle(reader, limits),
+                    Answered(Closed) => state.open -= 1,
+                    Answered(Unavailable) => {
+                        state.open -= 1
+                        return true
+                    },
+                    Observed => panic("a request answered as an accept observation"),
+                }
+            } else {
+                let worker = &state.free.pop().unwrap()
+                &state.submit(worker, work)
+            }
+        }
+        if state.retry.is_some() && (sequential || state.free.length() > 0) {
+            let retry = mem.exchange(&state.retry, .None).unwrap()
+            let pause = copy(retry.pause)
+            if sequential {
+                match &local(.Retry(retry)) {
+                    Observed => {},
+                    Answered(_) => panic("an accept observation answered as a request"),
+                }
+            } else {
+                let worker = &state.free.pop().unwrap()
+                &state.submit(worker, .Retry(retry))
+            }
+            state.backoff = .Some(
+                &state.waiting.after(
+                    pause,
+                    (),
+                    |sink _ready| -> DispatchWake[L, E, F] {
+                        .Resume
+                    },
+                ),
+            )
+        }
+        if state.open == 0 && state.busy == 0 && (state.stopped || net.reached(limits.connections, state.accepted)) {
+            break
+        }
+        &state.watch_listener(limits)
+        let woke = &state.waiting.next() else {
+            break
+        }
+        match woke {
+            Listener(listener) => {
+                state.listening = .None
+                &state.put_listener(.Some(listener))
+                if state.stopped || net.reached(limits.connections, state.accepted) {
+                    continue
+                }
+                if state.open >= limits.open_connections && !&state.evict_oldest() {
+                    // Keep the listener out until readiness or a close changes capacity.
+                    continue
+                }
+                var listener = mem.exchange(&state.listener, .None).unwrap()
+                let attempt = net.accept_attempt(&listener, &state.pause_ms)
+                &state.put_listener(.Some(listener))
+                match attempt {
+                    Connected(Accepted { connection, address: _ }) => {
+                        state.accepted += 1
+                        match Reading.open(capacity: request_buffer_bytes, reader: connection) {
+                            Ok(reading) => {
+                                state.open += 1
+                                &state.keep_idle(reading, limits, first: true)
+                            },
+                            Err(BufferOpenFailure { resource, reason }) => {
+                                close_connection(resource)
+                                let memory = match reason {
+                                    Allocation(reason) => reason,
+                                    ZeroCapacity => panic("the HTTP request buffer has zero capacity"),
+                                }
+                                &state.fail(.Memory(memory))
+                            },
+                        }
+                    },
+                    Retry(retry) => state.retry = .Some(retry),
+                    Failed(reason) => &state.fail(.Accept(reason)),
+                }
+            },
+            Reader(number, reader) => {
+                let _entry = &state.forget_idle(number)
+                var reading = reader
+                let started = time.Instant.now()
+                let configure = [limits, started] |inout connection: net.Connection| {
+                    &connection.set_timeouts(limits.read_timeout_ms, limits.write_timeout_ms)
+                    &connection.set_deadline(started, limits.read_timeout_ms)
+                }
+                &reading.update_reader(configure)
+                &state.ready.push(reading).unwrap()
+            },
+            Expired(number) => {
+                match &state.forget_idle(number) {
+                    Some(entry) => match &state.waiting.take(entry.reader) {
+                        Some(reader) => {
+                            dispatch_close_reader(reader)
+                            state.open -= 1
+                        },
+                        None => {},
+                    },
+                    None => {},
+                }
+            },
+            Worker(worker) => {
+                let (result, free) = worker.recv()
+                state.busy -= 1
+                &state.free.push(free).unwrap()
+                match result {
+                    Answered(Idle(reader)) => &state.keep_idle(reader, limits),
+                    Answered(Closed) => state.open -= 1,
+                    Answered(Unavailable) => state.open -= 1,
+                    Observed => {},
+                }
+            },
+            Resume => state.backoff = .None,
+            Stop(share) => {
+                share.settle()
+                match read stopping {
+                    Some(client) => client.call(|inout stopped: Bool| stopped = true),
+                    None => {},
+                }
+                &state.begin_stop()
+            },
+        }
+    }
+    false
+}
+
+fn dispatch_remember_failure[E: Owned + Release](inout failed: Option[ServeError[E]], sink result: Result[(), ServeError[E]]) {
+    match result {
+        Ok(_) => {},
+        Err(reason) => match read failed {
+            Some(_) => reason.release(),
+            None => mem.exchange(&failed, .Some(reason)).release(),
+        },
+    }
+}
+
+// Withdrawal returns values even when they are signalled; every owner is settled.
+fn dispatch_finish[L: io.Close, E: Owned + Release, F](sink state { waiting, listener, listening: _, idle, ready, free, busy: _, open: _, accepted: _, serial: _, pause_ms: _, stopped: _, terminate: _, interrupt: _, failed, retry: _, backoff: _ }: Dispatch[L, E, F]) -> Result[(), ServeError[E]] where L.CloseError: Into[io.IoError] {
+    var failure = failed
+    var withdrawn = waiting.close().drain()
+    for woke in &withdrawn {
+        match woke {
+            Listener(listener) => {
+                let result: Result[(), ServeError[E]] = match listener.close() {
+                    Ok(_) => .Ok(()),
+                    Err(reason) => .Err(.Close(reason.into())),
+                }
+                dispatch_remember_failure(&failure, result)
+            },
+            Reader(_, reading) => dispatch_close_reader(reading),
+            Expired(_) => {},
+            Resume => {},
+            Stop(share) => share.settle(),
+            Worker(worker) => {
+                let (result, free) = worker.recv()
+                match result {
+                    Answered(Idle(reading)) => dispatch_close_reader(reading),
+                    Answered(Closed) => {},
+                    Answered(Unavailable) => {},
+                    Observed => {},
+                }
+                dispatch_remember_failure(&failure, dispatch_finish_worker(free))
+            },
+        }
+    }
+    withdrawn.finish().unwrap()
+    var readers = ready.drain()
+    for reading in &readers {
+        dispatch_close_reader(reading)
+    }
+    readers.finish().unwrap()
+    var workers = free.drain()
+    for worker in &workers {
+        dispatch_remember_failure(&failure, dispatch_finish_worker(worker))
+    }
+    workers.finish().unwrap()
+    var entries = idle.drain()
+    for _entry in &entries {}
+    entries.finish().unwrap()
+    match listener {
+        Some(listener) => {
+            let result: Result[(), ServeError[E]] = match listener.close() {
+                Ok(_) => .Ok(()),
+                Err(reason) => .Err(.Close(reason.into())),
+            }
+            dispatch_remember_failure(&failure, result)
+        },
+        None => {},
+    }
+    match failure {
+        Some(reason) => .Err(reason),
+        None => .Ok(()),
+    }
+}
+
+fn dispatch_open[L, E, F](sink listener: L) -> Dispatch[L, E, F] where carries(listener) {
+    .{
+        waiting = task.WaitSet.open(),
+        listener = .Some(listener),
+        listening = .None,
+        idle = mem.Vec.new(),
+        ready = mem.Vec.new(),
+        free = mem.Vec.new(),
+        busy = 0,
+        open = 0,
+        accepted = 0,
+        serial = 0,
+        pause_ms = 0,
+        stopped = false,
+        terminate = .None,
+        interrupt = .None,
+        failed = .None,
+        retry = .None,
+        backoff = .None,
+    }
+}
+
+fn dispatch_sequential[L: net.Acceptor + io.Close + io.Pollable, P: Allocator, R: MadeHandler[P], M: fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, announce: Option[net.Address], shutdown: Shutdown) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Release {
+    var state: Dispatch[L, R.Error, ()] = dispatch_open(listener)
+    let _reserved = &state.reserve_tables(limits) else |reason| {
+        &state.fail(.Memory(reason))
+        return dispatch_finish(state)
+    }
+    var refusal = parent.acquire(request_buffer_bytes) else |reason| {
+        &state.fail(.Memory(reason))
+        return dispatch_finish(state)
+    }
+    var handler = make_handler().made() else |reason| {
+        refusal.release()
+        &state.fail(.Handler(reason))
+        return dispatch_finish(state)
+    }
+    var arena = mem.Arena.open(parent, limits.request_arena_bytes)
+    match copy(announce) {
+        Some(address) => {
+            let event: Event[P] = .Listening(address)
+            &handler.observe(event)
+        },
+        None => {},
+    }
+    &state.register_signals(shutdown)
+    loop {
+        let retry = {
+            var local = inout [inout handler, inout arena, inout refusal, limits] |sink work: DispatchWork| -> DispatchResult {
+                match work {
+                    Read(reader, closing) => {
+                        let result = answer_reading(reader, &handler, arena.handle(), &refusal, limits, closing)
+                        match read result {
+                            Unavailable => {},
+                            _ => &arena.rewind(),
+                        }
+                        .Answered(result)
+                    },
+                    Retry(retry) => {
+                        let event: Event[P] = .AcceptRetried(retry)
+                        &handler.observe(event)
+                        .Observed
+                    },
+                }
+            }
+            dispatch_run(&state, &local, limits, true, .None)
+        }
+        if !retry {
+            break
+        }
+        restart_request_arena(&arena, parent, limits)
+    }
+    arena.release()
+    handler.release()
+    refusal.release()
+    dispatch_finish(state)
+}
+
+fn dispatch_serve[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, policy: task.Policy, announce: Option[net.Address], shutdown: Shutdown) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+    let metadata_bytes = smallest_arena(limits)
+    if metadata_bytes == UInt64.max || limits.request_arena_bytes < metadata_bytes {
+        let _closed = listener.close()
+        return .Err(.ArenaTooSmall)
+    }
+    let count = match copy(policy) {
+        Sequential => return dispatch_sequential(listener, parent, make_handler, limits, announce, shutdown),
+        Threads(count) => count,
+    }
+    if count == 0 {
+        let _closed = listener.close()
+        return .Err(.NoWorkers)
+    }
+    let owner = task.own(false) else |failure| {
+        let Unowned { state: _, reason } = failure
+        let _closed = listener.close()
+        return .Err(.Task(reason))
+    }
+    let stopping = owner.client()
+    match copy(announce) {
+        Some(address) => {
+            var announcer = make_handler().made() else |reason| {
+                let _stopped = owner.close()
+                let _closed = listener.close()
+                return .Err(.Handler(reason))
+            }
+            let event: Event[P] = .Listening(address)
+            &announcer.observe(event)
+            announcer.release()
+        },
+        None => {},
+    }
+    let body = sink [sink parent = copy(parent), sink make_handler = copy(make_handler), limits, sink stopping = copy(stopping)] |sink me: session.Chan[session.Send[Result[(), ServeError[R.Error]], DispatchServing[R.Error]]]| {
+        dispatch_worker[P, R, M](me, parent, make_handler, limits, stopping)
+    }
+    let first = task.prepare(copy(body)) else |unstarted| {
+        let Unstarted { body: _, reason } = unstarted
+        let _stopped = owner.close()
+        let _closed = listener.close()
+        return .Err(.Task(reason))
+    }
+    let (started, worker) = first.start().recv()
+    var state = dispatch_open_for(listener, worker)
+    &state.free.push(worker).unwrap()
+    match started {
+        Ok(_) => {},
+        Err(reason) => &state.fail(reason),
+    }
+    match &state.reserve_tables(limits) {
+        Ok(_) => {},
+        Err(reason) => &state.fail(.Memory(reason)),
+    }
+    match &state.free.reserve(count - 1) {
+        Ok(_) => {},
+        Err(reason) => &state.fail(.Memory(reason)),
+    }
+    if state.failed.is_none() {
+        for _ in 1..count {
+            match task.prepare(copy(body)) {
+                Ok(slot) => {
+                    let (started, worker) = slot.start().recv()
+                    &state.free.push(worker).unwrap()
+                    match started {
+                        Ok(_) => {},
+                        Err(reason) => &state.fail(reason),
+                    }
+                },
+                Err(Unstarted { body: _, reason }) => &state.fail(.Task(reason)),
+            }
+            if state.failed.is_some() {
+                break
+            }
+        }
+    }
+    if state.failed.is_none() {
+        &state.register_signals(shutdown)
+        var unreachable_local = |sink work: DispatchWork| -> DispatchResult {
+            match work {
+                Read(reader, _) => dispatch_close_reader(reader),
+                Retry(_) => {},
+            }
+            panic("threaded serving dispatched inline work")
+        }
+        let _finished = dispatch_run(&state, &unreachable_local, limits, false, .Some(stopping))
+    }
+    let served = dispatch_finish(state)
+    let _stopped = owner.close()
+    served
+}
+
+// The endpoint fixes the dispatcher's handle type; it is moved into the free pool next.
+fn dispatch_open_for[L, E, F](sink listener: L, _worker: DispatchFree[E, F]) -> Dispatch[L, E, F] where carries(listener) {
+    dispatch_open(listener)
+}
+
+// A threaded dispatcher preserves pipelining with a single serving task too.
+test fn pipelined_requests_keep_their_order_with_one_worker() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let client = send(listener.local_address().unwrap(), "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\nGET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\n\r\n")
+    let served = serve(listener, health_router, limits: serving(1), policy: .Threads(1), shutdown: .Manual)
+    defer let answer = read_to_end(client)
+    testing.assert_ok_eq(served, (), "serving pipelined requests failed")?
+    testing.assert_eq(answer.view(), "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nokHTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "a worker lost or reordered pipelined requests")?
+    .Ok(())
+}
+
+let dispatch_keepalive_request: Str = "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\n"
+
+let dispatch_keepalive_answer: Str = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok"
+
+// Read one known-length response without waiting for the kept-alive socket to end.
+fn dispatch_read_known(inout client: net.Connection, expected: Str) -> Bool {
+    defer var buffer = mem.system().acquire(expected.length()).unwrap()
+    var offset: UInt64 = 0
+    while offset < expected.length() {
+        let got = &client.read_some(&buffer, offset, expected.length() - offset) else |_| {
+            return false
+        }
+        if got == 0 {
+            return false
+        }
+        offset += got
+    }
+    let found = Str.from_bytes(buffer.as_slice()) else |_| {
+        return false
+    }
+    found == expected
+}
+
+test fn more_idle_connections_than_workers_can_all_make_another_request() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let address = listener.local_address().unwrap()
+    let body = sink [sink listener] |sink me: session.Chan[session.Send[Result[(), ServeError], session.End]]| {
+        me.send(serve(listener, health_router, limits: serving(3), policy: .Threads(1), shutdown: .Manual)).close()
+    }
+    let server = task.prepare(body).unwrap().start()
+    var first = send(address, dispatch_keepalive_request)
+    var second = send(address, dispatch_keepalive_request)
+    var third = send(address, dispatch_keepalive_request)
+    &first.set_timeouts(1000, 1000)
+    &second.set_timeouts(1000, 1000)
+    &third.set_timeouts(1000, 1000)
+    let first_answered = dispatch_read_known(&first, dispatch_keepalive_answer)
+    let second_answered = dispatch_read_known(&second, dispatch_keepalive_answer)
+    let third_answered = dispatch_read_known(&third, dispatch_keepalive_answer)
+    let _first = io.write_all(&first, health_request.as_bytes()).unwrap()
+    let _second = io.write_all(&second, health_request.as_bytes()).unwrap()
+    let _third = io.write_all(&third, health_request.as_bytes()).unwrap()
+    defer let a = read_to_end(first)
+    defer let b = read_to_end(second)
+    defer let c = read_to_end(third)
+    let (served, done) = server.recv()
+    done.close()
+    testing.assert_ok_eq(served, (), "serving three clients on one worker failed")?
+    testing.assert(first_answered && second_answered && third_answered, "idle clients occupied the only serving task")?
+    testing.assert_eq(a.view(), health_answer, "the first idle client could not request again")?
+    testing.assert_eq(b.view(), health_answer, "the second idle client could not request again")?
+    testing.assert_eq(c.view(), health_answer, "the third idle client could not request again")?
+    .Ok(())
+}
+
+test fn a_close_token_in_a_second_connection_header_closes_after_the_response() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let client = send(listener.local_address().unwrap(), "GET /health HTTP/1.1\r\nHost: loopback\r\nConnection: keep-alive\r\nConnection: close\r\n\r\n")
+    let served = serve(listener, health_router, limits: serving(1), policy: .Sequential, shutdown: .Manual)
+    defer let answer = read_to_end(client)
+    testing.assert_ok_eq(served, (), "serving duplicate connection headers failed")?
+    testing.assert_eq(answer.view(), health_answer, "a later close token was ignored")?
+    .Ok(())
+}
+
+test fn an_idle_keepalive_connection_expires_without_another_response() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let client = send(listener.local_address().unwrap(), dispatch_keepalive_request)
+    let limits = Limits { idle_timeout_ms = 5, ..serving(1) }
+    let served = serve(listener, health_router, limits, policy: .Sequential, shutdown: .Manual)
+    defer let answer = read_to_end(client)
+    testing.assert_ok_eq(served, (), "an idle timeout failed serving")?
+    testing.assert_eq(answer.view(), dispatch_keepalive_answer, "an idle connection was answered twice or not answered")?
+    .Ok(())
+}
