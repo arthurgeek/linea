@@ -2298,10 +2298,10 @@ every request.
 | `max_form_pairs` | 100 | how many pairs a form body may hold; more is answered 413 |
 | `max_body_bytes` | 1 MiB | the body |
 | `request_arena_bytes` | 48 MiB | the arena each request is served from; it holds the request, what decoding its JSON body reserves, and the response |
-| `read_timeout_ms` | 5000 | how long the whole request, head and body together, may take from its first byte, in milliseconds; a slower one is answered 408 |
+| `read_timeout_ms` | 5000 | how long the whole request, head and body together, may take from when the dispatcher observes its reader ready, including time waiting for a serving task; a slower one is answered 408 |
 | `idle_timeout_ms` | 15000 | how long a kept-alive connection may wait between requests |
 | `open_connections` | 1024 | the most connections held at once, serving and idle together |
-| `first_byte_timeout_ms` | 500 | how long to wait for the first byte of a request, in milliseconds; an idle connection that sends nothing within this time is closed silently without a 408 |
+| `first_byte_timeout_ms` | 500 | how long a new connection may wait for its first request, in milliseconds; if its reader is still waiting when the timer fires, the connection closes silently without a 408 |
 | `write_timeout_ms` | 5000 | how long one write may wait, in milliseconds |
 | `connections` | `.None` | how many connections to serve before `serve` returns; `.None` serves until the program ends |
 

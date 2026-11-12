@@ -1,8 +1,8 @@
 # 265. Waits go through the runtime's poller, and a loop runs tasks as fibers
 
-Status: Proposed — 2026-11-07. It builds on
+Status: Accepted for phases 1 to 3; Proposed for phases 4 to 7 — 2026-11-12. It builds on
 [0261](0261-an-owning-task-holds-nothing-that-waits.md). Phases 1 to 7 of §13
-state what is built when. Phase 1 is being built: nonblocking sockets with
+state what is built when. Phase 1 is built: nonblocking sockets with
 deadlines, `io.Io`, `io.system()`, `io.current()`, the loop table of §8 and
 the simulation of §12 for one task. In it §1's in-place and simulated backends
 each have one party, the calling thread, so §2's guarantees hold because the
@@ -12,8 +12,15 @@ word. Of §12, printing a failing test's seed is not built yet: a test reads
 of §3 on threads, which every condition-variable wait of `runtime/task.c` goes
 through; the wait set of §4 with its keys and registration protocol; signals
 as a source (§4.5); and §5's three properties in the semantics document.
-Nothing else is built.
-Once built, it would change these sentences of existing records:
+Phase 3 is built: §6's dispatcher and persistent connections on threads,
+streamed request bodies with an explicit `inout RequestBody`, bounded idle and
+open connections, request deadlines before queuing, and §6.1's graceful
+shutdown. `.Threads(128)` remains the default; `.Sequential` serves inline and
+observes shutdown after its current response. Phases 4 to 7 are not built.
+The implemented clauses partially supersede 0154's whole-body, handler and
+one-request-per-connection contracts and 0253 §5's listener-owning task.
+These are the affected sentences of existing records; references to fibers,
+migration and loop execution remain proposed until their phases land:
 
 - [0154](0154-sockets-and-http-follow-go.md),
   that the request is read into the arena before the handler runs, which §6
@@ -916,9 +923,10 @@ the rules marked new.
   since the next request's first byte cannot be found.
 - **New: limits per request.** Every limit applies to each request of a
   connection afresh. `first_byte_timeout_ms` bounds the wait for a
-  connection's first request; `read_timeout_ms` bounds each request from its
-  first byte, where it is counted from the accept today; between requests the
-  connection is idle and `idle_timeout_ms` bounds it.
+  connection's first request; `read_timeout_ms` bounds each request from when
+  the dispatcher observes its reader ready, before queuing it for a serving
+  task. This is observed readiness, not a byte's arrival timestamp. Between
+  requests the connection is idle and `idle_timeout_ms` bounds it.
 
 **Limits and backpressure.** `Limits.connections` keeps its meaning (serving
 ends after that many connections). `Limits` gains `open_connections`, the

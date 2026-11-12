@@ -145,23 +145,32 @@ await run("partial", async (server) => {
 });
 console.log("unread body bytes are drained before the next pipelined request: ok");
 
-await run("streaming", async (server) => {
-  const client = await server.connect();
-  client.write(request("POST", "/whole", { length: 131072, close: true }));
-  await until(() => server.entered("/whole") === 1 || server.exited, "streaming handler entering before body data", server);
-  assert(!server.exited, "the server tried to collect the upload before its handler ran");
-  const chunk = Buffer.alloc(4096, 97);
-  for (let sent = 0; sent < 131072; sent += chunk.length) {
-    await new Promise((resolve, reject) => {
-      client.socket.write(chunk, (error) => error ? reject(error) : resolve());
-    });
-  }
-  const response = await client.response(server);
-  assert.equal(response.status, "HTTP/1.1 200 OK");
-  assert.equal(response.headers.connection, "close");
-  assert.equal(response.body, "read 131072");
-});
-console.log("a 128 KiB network body streams through a 64 KiB request arena: ok");
+const residualCapacities = [];
+for (const length of [100000, 131072]) {
+  await run("streaming", async (server) => {
+    const client = await server.connect();
+    client.write(request("POST", "/whole", { length, close: true }));
+    await until(() => server.entered("/whole") === 1 || server.exited, "streaming handler entering before body data", server);
+    assert(!server.exited, "the server tried to collect the upload before its handler ran");
+    const chunk = Buffer.alloc(4096, 97);
+    for (let sent = 0; sent < length; sent += chunk.length) {
+      await new Promise((resolve, reject) => {
+        client.socket.write(chunk.subarray(0, Math.min(chunk.length, length - sent)), (error) => error ? reject(error) : resolve());
+      });
+    }
+    const response = await client.response(server);
+    assert.equal(response.status, "HTTP/1.1 200 OK");
+    assert.equal(response.headers.connection, "close");
+    assert.equal(response.body, `read ${length}`);
+    await until(() => /arena remaining \d+\n/.test(server.stdout) || server.exited, "arena residual capacity", server);
+    const remaining = /arena remaining (\d+)\n/.exec(server.stdout);
+    assert(remaining, "streaming handler did not report its remaining arena capacity");
+    residualCapacities.push(Number(remaining[1]));
+  });
+}
+assert(residualCapacities.every((remaining) => remaining > 0), "streaming exhausted the request arena");
+assert.equal(residualCapacities[0], residualCapacities[1], "a larger streamed body consumed more arena storage");
+console.log("100000- and 131072-byte network bodies leave identical positive arena capacity: ok");
 
 for (const target of ["/ignore", "/whole"]) {
   await run("oversized", async (server) => {
@@ -191,6 +200,30 @@ await run("deadline", async (server) => {
   }
 });
 console.log("a stalled partial body reaches its request deadline: ok");
+
+await run("queued_deadline", async (server) => {
+  const active = await server.connect();
+  active.write(request("GET", "/hold", { close: true }));
+  await until(() => server.entered("/hold") === 1, "the only worker entering its held handler", server);
+  const queued = await server.connect();
+  queued.write(request("POST", "/ignore", { length: 1 }) + "x");
+  // The dispatcher can observe this reader while its only worker is occupied.
+  // Waiting beyond the read deadline must not turn queued data into silence.
+  await delay(120);
+  assert.equal(active.bytes, "", "the held handler ended before its queued peer expired");
+  assert.equal(server.entered("/ignore"), 0, "the queued request bypassed the occupied worker");
+  const first = await active.response(server);
+  assert.equal(first.status, "HTTP/1.1 200 OK");
+  assert.equal(first.body, "ok");
+  const second = await queued.response(server);
+  assert.equal(second.status, "HTTP/1.1 408 Request Timeout");
+  assert.equal(second.headers.connection, "close");
+  await until(() => queued.closed, "the expired queued reader closing after its refusal", server);
+  assert.equal(queued.error, null, "the queued refusal reset its connection");
+  assert.equal(queued.bytes, "", "an expired queued request produced another response");
+  assert.equal(server.entered("/ignore"), 0, "an expired request reached its handler");
+});
+console.log("a request expiring in the worker queue receives 408 before closing: ok");
 
 await run("eviction", async (server) => {
   const oldest = await server.connect();
@@ -252,17 +285,17 @@ async function http10Closes() {
   console.log("HTTP/1.0 closes even when keep-alive is requested: ok");
 }
 
-async function refusedFraming(headers) {
+async function refusedFraming(headers, status = "400 Bad Request", line = "POST /ignore HTTP/1.1", host = "Host: loopback\r\n") {
   await run("framing", async (server) => {
     const client = await server.connect();
-    client.write("POST /ignore HTTP/1.1\r\nHost: loopback\r\n" + headers + "\r\nabc" + request("GET", "/close", { close: true }));
+    client.write(line + "\r\n" + host + headers + "\r\nabc" + request("GET", "/close", { close: true }));
     // End only the client's write half: the refusal must still arrive before
     // the server closes, without waiting for an artificial linger timeout.
     client.socket.end();
     await until(() => client.closed, "refused connection closing", server);
     const responseCount = (client.bytes.match(/HTTP\/1\.[01] /g) ?? []).length;
     const response = await client.response(server);
-    assert.equal(response.status, "HTTP/1.1 400 Bad Request");
+    assert.equal(response.status, `HTTP/1.1 ${status}`);
     assert.equal(response.headers.connection, "close");
     assert.equal(responseCount, 1, "a refusal answered a second pipelined request");
     assert.equal(client.bytes, "");
@@ -312,3 +345,29 @@ await http10Closes();
 await lengthHeaders();
 await transferEncodingConflict();
 await foldedHeader();
+
+for (const [headers, status, line, host] of [
+  ["", "414 URI Too Long", `GET /${"a".repeat(1024)} HTTP/1.1`],
+  [`X-Long: ${"a".repeat(1024)}\r\n`, "431 Request Header Fields Too Large"],
+  ["X: a\r\n".repeat(8), "431 Request Header Fields Too Large"],
+  ["", "505 HTTP Version Not Supported", "GET /ignore HTTP/2.0"],
+  ["Transfer-Encoding: chunked\r\n", "501 Not Implemented"],
+  ["", "400 Bad Request", "GET  /ignore HTTP/1.1"],
+  ["", "400 Bad Request", "GET /ignore HTTP/no"],
+  ["X : value\r\n", "400 Bad Request"],
+  ["No-Colon\r\n", "400 Bad Request"],
+  [": empty\r\n", "400 Bad Request"],
+  ["X: bare\rcarriage\r\n", "400 Bad Request"],
+  ["\vX: value\r\n", "400 Bad Request"],
+  ["", "400 Bad Request", "GET /ignore HTTP/1.1", ""],
+  ["Host: other\r\n", "400 Bad Request"],
+  ["", "400 Bad Request", "GET /ignore HTTP/1.1", "Host: \r\n"],
+  ["", "400 Bad Request", "GET /ignore HTTP/1.1", "Host: example/path\r\n"],
+  ["", "400 Bad Request", "GET /ignore HTTP/1.1", "Host: user@example\r\n"],
+  ["", "400 Bad Request", "GET /ignore HTTP/1.1", "Host: example:65536\r\n"],
+  ["", "400 Bad Request", "GET /ignore HTTP/1.1", "Host: [1:2:3]\r\n"],
+  ["Content-Length: 18446744073709551616\r\n", "413 Content Too Large"],
+]) {
+  await refusedFraming(headers, status, line, host);
+}
+console.log("request-line, header, Host, version, length and transfer-coding refusals close without pipeline reuse: ok");

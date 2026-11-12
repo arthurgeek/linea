@@ -907,10 +907,10 @@ and a silent client times out in a tenth of a second:
 | `max_form_pairs` | 100 | 413 | the default |
 | `max_body_bytes` | 1048576 (1 MiB) | 413 | 4 to 16384 |
 | `request_arena_bytes` | 50331648 (48 MiB) | `serve` refuses to start below what the other limits need; a request that fills it is 500 | 98304, or the least the other limits need |
-| `read_timeout_ms` | 5000 | 408 once the whole request, head and body, has taken this long from its first byte | 100 |
+| `read_timeout_ms` | 5000 | 408 once the whole request, head and body, has taken this long from observed reader readiness, including time queued for a serving task | 100 |
 | `idle_timeout_ms` | 15000 | closes a connection idle between requests | a short timeout |
 | `open_connections` | 1024 | evicts the longest-idle connection for a newcomer; pauses accepting when every connection is busy or ready | a small bound |
-| `first_byte_timeout_ms` | 500 | closes the connection silently without 408 when no byte has arrived within this duration of accepting it; a first read that starts later waits at most 1 ms and takes the bytes that arrive by then, whenever they were sent | 100 |
+| `first_byte_timeout_ms` | 500 | bounds a new connection's first wait for reader readiness; the dispatcher closes it silently if its timer fires while the reader is still registered | 100 |
 | `write_timeout_ms` | 5000 | one write waits no longer; a stalled write fails and the exchange ends | the default |
 | `connections` | `.None`: serve until stopped | `serve` returns | `.Some(n)` for the n connections a test sends |
 

@@ -453,43 +453,68 @@ impl Connection {
         deadline_after(time.Instant.now().monotonic_nanoseconds(), self.write_ms)
     }
 
+    // Owning and borrowed writers use the same timeout and error policy.
+    fn write_bytes(self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        if bytes.length() == 0 {
+            return .Ok(0)
+        }
+        let answer = mem.write_slice_socket(bytes, self.fd, self.write_deadline())
+        if answer < 0 {
+            let error = io.IoError.from_os(.Write, Int32(0 - answer))
+            return .Err(.{ kind = .Underlying, reason = .Some(error), written = 0 })
+        }
+        .Ok(UInt64(answer))
+    }
+
     test fn a_write_times_out_when_the_peer_reads_nothing() {
         // The network holds 4 KiB each way, so a peer that never reads lets
         // the first write send 4 KiB and leaves the second nowhere to put
         // bytes, and it ends at its deadline.
-        let network = io.Network { buffer_bytes = 4096, ..io.Network.default() }
-        var sim = io.Simulation.open(seed: 1, network: network).unwrap()
-        let (first, expired, waited) = &sim.run(
-            |inout _world| {
-                var listener = listen(loopback(80)).unwrap()
-                var client = connect(loopback(80)).unwrap()
-                let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
-                var server = accepted
-                &server.set_timeouts(read_ms: 0, write_ms: 50)
-                defer var bytes = mem.system().acquire(65536).unwrap()
-                let first = match &server.write_some(bytes.as_slice()) {
-                    Ok(count) => count,
-                    Err(_) => 0,
-                }
-                let started = time.Instant.now()
-                let expired = match &server.write_some(bytes.as_slice()) {
-                    Ok(_) => false,
-                    Err(WriteFailure { kind: _, reason: reason, written: _ }) => match reason {
-                        Some(error) => match read error.category { TimedOut => true, _ => false },
-                        None => false,
-                    },
-                }
-                let waited = started.elapsed()
-                client.close().unwrap()
-                server.close().unwrap()
-                listener.close().unwrap()
-                (first, expired, waited)
-            },
-        )
-        sim.close()
-        testing.assert_eq(first, UInt64(4096), "the first write did not fill the network")?
-        testing.assert(expired, "a write to a peer that reads nothing did not time out")?
-        testing.assert_eq(waited, time.Duration.from_milliseconds(50), "the write waited other than its 50 ms")?
+        for borrowed in [false, true] {
+            let network = io.Network { buffer_bytes = 4096, ..io.Network.default() }
+            var sim = io.Simulation.open(seed: 1, network: network).unwrap()
+            let (first, expired, waited) = &sim.run(
+                [borrowed] |inout _world| {
+                    var listener = listen(loopback(80)).unwrap()
+                    var client = connect(loopback(80)).unwrap()
+                    let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+                    var server = accepted
+                    &server.set_timeouts(read_ms: 0, write_ms: 50)
+                    defer var bytes = mem.system().acquire(65536).unwrap()
+                    let first = match if borrowed {
+                        var writer = server.writer()
+                        &writer.write_some(bytes.as_slice())
+                    } else {
+                        &server.write_some(bytes.as_slice())
+                    } {
+                        Ok(count) => count,
+                        Err(_) => 0,
+                    }
+                    let started = time.Instant.now()
+                    let expired = match if borrowed {
+                        var writer = server.writer()
+                        &writer.write_some(bytes.as_slice())
+                    } else {
+                        &server.write_some(bytes.as_slice())
+                    } {
+                        Ok(_) => false,
+                        Err(WriteFailure { kind: _, reason: reason, written: _ }) => match reason {
+                            Some(error) => match read error.category { TimedOut => true, _ => false },
+                            None => false,
+                        },
+                    }
+                    let waited = started.elapsed()
+                    client.close().unwrap()
+                    server.close().unwrap()
+                    listener.close().unwrap()
+                    (first, expired, waited)
+                },
+            )
+            sim.close()
+            testing.assert_eq(first, UInt64(4096), "the first write did not fill the network")?
+            testing.assert(expired, "a write to a peer that reads nothing did not time out")?
+            testing.assert_eq(waited, time.Duration.from_milliseconds(50), "the write waited other than its 50 ms")?
+        }
     }
 }
 
@@ -542,15 +567,7 @@ impl io.ByteWriter for Connection {
     }
 
     fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
-        if bytes.length() == 0 {
-            return .Ok(0)
-        }
-        let answer = mem.write_slice_socket(bytes, self.fd, self.write_deadline())
-        if answer < 0 {
-            let error = io.IoError.from_os(.Write, Int32(0 - answer))
-            return .Err(.{ kind = .Underlying, reason = .Some(error), written = 0 })
-        }
-        .Ok(UInt64(answer))
+        self.write_bytes(bytes)
     }
 
     fn flush(inout _self: Self) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
@@ -589,15 +606,7 @@ impl io.ByteWriter for ConnectionWriter {
     }
 
     fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
-        if bytes.length() == 0 {
-            return .Ok(0)
-        }
-        let answer = mem.write_slice_socket(bytes, self.owner.fd, self.owner.write_deadline())
-        if answer < 0 {
-            let error = io.IoError.from_os(.Write, Int32(0 - answer))
-            return .Err(.{ kind = .Underlying, reason = .Some(error), written = 0 })
-        }
-        .Ok(UInt64(answer))
+        self.owner.write_bytes(bytes)
     }
 
     fn flush(inout _self: Self) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {

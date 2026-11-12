@@ -4,11 +4,16 @@ import std.http
 import std.io
 import std.net
 import std.task
+import std.time
 
 use io.Reader
 
 fn reply[P: Allocator](inout _: (), request: http.Request[P], inout body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(body), retains(body: body) {
     io.println("entered {request.path()}").unwrap()
+    if request.path() == "/hold" {
+        time.sleep(time.Duration.from_milliseconds(350))
+        return http.text(request, "ok")
+    }
     if request.path() == "/prefix" {
         var bytes = request.allocator().acquire(2)?
         let got = &body.read_some(&bytes, offset: 0, count: 2)?
@@ -27,13 +32,36 @@ fn reply[P: Allocator](inout _: (), request: http.Request[P], inout body: http.R
             }
             total += got
         }
-        return http.text(request, "read {total}")
+        let response = http.text(request, "read {total}")?
+        if total >= 100000 {
+            // Equal-width upload lengths keep the parsed head and response
+            // allocations equal. Exhaust the arena only after building the
+            // response, so remaining capacity measures the upload's storage.
+            var remaining: UInt64 = 0
+            loop {
+                let unused = request.allocator().acquire(4096) else |_| {
+                    break
+                }
+                unused.release()
+                remaining += 4096
+            }
+            loop {
+                let unused = request.allocator().acquire(8) else |_| {
+                    break
+                }
+                unused.release()
+                remaining += 8
+            }
+            io.println("arena remaining {remaining}").unwrap()
+        }
+        return .Ok(response)
     }
     http.text(request, "ok")
 }
 
 fn routes() -> http.Router[()] {
     var router: http.Router[()] = http.Router.new()
+    &router.route_raw("GET /hold", reply).unwrap()
     &router.route_raw("GET /keep", reply).unwrap()
     &router.route_raw("GET /close", reply).unwrap()
     &router.route_raw("POST /prefix", reply).unwrap()
@@ -49,6 +77,8 @@ fn main() -> UInt8 {
     }
     let connections: UInt64 = if mode == "eviction" || mode == "backpressure" {
         3
+    } else if mode == "queued_deadline" {
+        2
     } else {
         1
     }
@@ -59,12 +89,12 @@ fn main() -> UInt8 {
     }
     let policy: task.Policy = if mode == "backpressure" {
         .Threads(3)
-    } else if mode == "eviction" {
+    } else if mode == "eviction" || mode == "queued_deadline" {
         .Threads(1)
     } else {
         .Sequential
     }
-    let timeout: UInt64 = if mode == "deadline" {
+    let timeout: UInt64 = if mode == "deadline" || mode == "queued_deadline" {
         80
     } else {
         2000

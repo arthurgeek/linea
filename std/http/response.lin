@@ -777,9 +777,10 @@ enum WriteError[P: Allocator] {
     Stream(Error[P]),
 }
 
-// Write a handler's `response` to `body`: the status line, `Connection:
-// close`, the headers in order, a plain-text `Content-Type` when they name
-// none, and the body. For a HEAD request the head is written alone.
+// Write a handler's response with the connection framing chosen by the server,
+// the headers in order, a plain-text Content-Type when they name none, and the
+// body. An unknown-length streamed body closes its connection; a HEAD request
+// writes only the head and may keep its connection without a length.
 fn write_response[P: Allocator](inout body: BodyWriter[P], sink response { answer, headers, content }: Response[P], head_only: Bool) -> Result[(), WriteError[P]] where carries(.Err: body, response), retains(body: response) {
     let framing: Framing = match read body.framing {
         KeepAlive(_) => if head_only || answer.is_bodyless() {
