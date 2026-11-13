@@ -1,6 +1,6 @@
 # 265. Waits go through the runtime's poller, and a loop runs tasks as fibers
 
-Status: Accepted for phases 1 to 3; Proposed for phases 4 to 7 — 2026-11-12. It builds on
+Status: Accepted for phases 1 to 4; Proposed for phases 5 to 7 — 2026-11-13. It builds on
 [0261](0261-an-owning-task-holds-nothing-that-waits.md). Phases 1 to 7 of §13
 state what is built when. Phase 1 is built: nonblocking sockets with
 deadlines, `io.Io`, `io.system()`, `io.current()`, the loop table of §8 and
@@ -16,11 +16,19 @@ Phase 3 is built: §6's dispatcher and persistent connections on threads,
 streamed request bodies with an explicit `inout RequestBody`, bounded idle and
 open connections, request deadlines before queuing, and §6.1's graceful
 shutdown. `.Threads(128)` remains the default; `.Sequential` serves inline and
-observes shutdown after its current response. Phases 4 to 7 are not built.
+observes shutdown after its current response. Phase 4 is built: ABI-preserving
+context switches and guarded stacks, tasks pinned to explicit carriers,
+carrier-owned socket and timer waits, fiber-aware sessions and wait sets,
+`io.Loop.open(carriers:)`, `env.available_parallelism()` and task, owner and
+HTTP `on:` arguments. `io.inherited` resolves the default execution choice
+when a task is prepared; `io.current()` captures it when called. Simulation
+tasks are fibers on the calling thread, scheduled from the seed. Foreign calls
+still run on the carrier, and a live foreign frame prevents a fiber switch.
+Phases 5 to 7 are not built.
 The implemented clauses partially supersede 0154's whole-body, handler and
 one-request-per-connection contracts and 0253 §5's listener-owning task.
-These are the affected sentences of existing records; references to fibers,
-migration and loop execution remain proposed until their phases land:
+These are the affected sentences of existing records; references to migration,
+blocking-call offload and io_uring remain proposed until their phases land:
 
 - [0154](0154-sockets-and-http-follow-go.md),
   that the request is read into the arena before the handler runs, which §6
@@ -31,7 +39,9 @@ migration and loop execution remain proposed until their phases land:
 - 0250 §10, "the join is `pthread_join`", which §3 replaces: a handle's
   `close` parks until the task's thread has marked its body finished under
   the record's lock, which is the edge the close promises, and `pthread_join`
-  then only reclaims the thread;
+  then only reclaims a system task's thread. From phase 4 a fiber task instead
+  publishes its finished state after switching to its carrier's scheduler
+  stack, and the join reclaims the fiber's stack;
 - 0250 §9, whose theorem §5 restates as three separate properties, and whose
   list of blocking operations §1, §4 and §7 add to, each with the argument §9
   asks of a later record;
