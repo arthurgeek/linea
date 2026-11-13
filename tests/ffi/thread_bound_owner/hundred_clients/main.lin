@@ -1,0 +1,66 @@
+import confined
+import std.io
+import std.task
+import std.session
+import std.time
+
+use session.Chan
+use session.End
+
+fn launch(client: confined.Client, on: io.Io, remaining: UInt64) {
+    if remaining == 0 {
+        return
+    }
+    let handle = task.prepare(
+        sink [sink client = copy(client)] |sink me: Chan[End]| {
+            confined.arrive()
+            while !confined.started() {
+                time.sleep(time.Duration.from_milliseconds(1))
+            }
+            if client.value() == 0 {
+                panic("wrong operation result")
+            }
+            me.close()
+        },
+        on: on,
+    ).unwrap().start()
+    launch(client, on, remaining - 1)
+    handle.close()
+}
+
+fn main() -> UInt8 {
+    let active = confined.open()
+    let execution = io.Loop.open(carriers: 1).unwrap()
+    confined.block_first()
+    let progress = task.prepare(
+        sink [] |sink me: Chan[End]| {
+            if io.current() == io.system() {
+                panic("progress probe must be a fiber")
+            }
+            while confined.arrivals() != 100 {
+                time.sleep(time.Duration.from_milliseconds(1))
+            }
+            confined.start_all()
+            while !confined.blocked() {
+                time.sleep(time.Duration.from_milliseconds(1))
+            }
+            confined.unblock()
+            me.close()
+        },
+        on: execution,
+    ).unwrap().start()
+    launch(active.client(), execution, 100)
+    progress.close()
+    let closing = match active.shutdown() {
+        Ok(_) => panic("first native close must fail"),
+        Err(closing) => closing,
+    }
+    match closing.retry() {
+        Ok(_) => (),
+        Err(_) => panic("cleanup retry failed"),
+    }
+    if !confined.balanced() {
+        panic("native accounting did not balance")
+    }
+    0
+}

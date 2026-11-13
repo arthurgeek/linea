@@ -1,0 +1,13 @@
+import confined
+import control
+
+fn main() -> UInt8 {
+    control.fail_forever()
+    let active = confined.open()
+    let closing = match active.shutdown() { Err(closing) => closing, Ok(_) => panic("unexpected settlement") }
+    let closing = match closing.retry() { Err(closing) => closing, Ok(_) => panic("unexpected settlement") }
+    match closing.retry() {
+        Err(_closing) => panic("EXPLICIT_TERMINAL_POLICY_NO_NORMAL_SETTLEMENT"),
+        Ok(_) => panic("unexpected settlement"),
+    }
+}

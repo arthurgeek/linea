@@ -1,0 +1,34 @@
+import cheap
+import std.task
+import std.io
+import std.session
+
+use session.Chan
+use session.End
+
+fn main() -> UInt8 {
+    for value in UInt64(0)..UInt64(10000) {
+        let expected = if value == 1234 {
+            Int64(-77)
+        } else {
+            Int64(value)
+        }
+        if cheap.value(value) != expected {
+            panic("ordinary native result/error changed")
+        }
+    }
+    task.prepare(
+        sink [] |sink me: Chan[End]| {
+            if io.current() != io.system() {
+                panic("wrong blocking execution context")
+            }
+            cheap.blocking()
+            me.close()
+        },
+        on: io.system(),
+    ).unwrap().start().close()
+    if cheap.value(41) != 41 {
+        panic("cheap call moved after blocking call")
+    }
+    0
+}

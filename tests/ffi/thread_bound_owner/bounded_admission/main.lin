@@ -1,0 +1,69 @@
+import work
+import std.task
+import std.mem
+import std.io
+import std.session
+
+use session.Chan
+use session.End
+use task.Unstarted
+
+fn batch[F: Owned + sink fn(sink me: Chan[End]), Factory: Owned + fn() -> F](remaining: UInt64, refuse_last: Bool, factory: Factory) -> Result[(), Unstarted[F]] {
+    if remaining == 0 {
+        return .Ok(())
+    }
+    let bytes = if refuse_last && remaining == 1 {
+        UInt64(4611686018427387904)
+    } else {
+        task.default_stack_bytes
+    }
+    let slot = match task.prepare_in(mem.system(), factory(), stack: bytes, on: io.system()) {
+        Ok(slot) => slot,
+        Err(failure) => return .Err(failure),
+    }
+    let handle = slot.start()
+    let admitted = batch[F, Factory](remaining - 1, refuse_last, factory)
+    handle.close()
+    admitted
+}
+
+fn main() -> UInt8 {
+    work.begin()
+    let factory = || sink [sink request = UInt64(41)] |sink me: Chan[End]| {
+        if io.current() != io.system() {
+            panic("blocking work ran on a carrier")
+        }
+        work.run(request)
+        me.close()
+    }
+    for _ in 0..4 {
+        match batch(3, false, factory) {
+            Ok(_) => (),
+            Err(failure) => {
+                let Unstarted { body: _body, reason: _ } = failure
+                panic("batch unexpectedly refused")
+            },
+        }
+    }
+    let returned = match batch(3, true, factory) {
+        Ok(_) => panic("impossible stack was admitted"),
+        Err(failure) => {
+            let Unstarted { body, reason } = failure
+            match reason { Thread => (), Allocation => panic("wrong preparation error") }
+            body
+        },
+    }
+    task.prepare(returned, on: io.system()).unwrap().start().close()
+    let cancelled = task.prepare(
+        sink [] |sink me: Chan[End]| {
+            work.run(99)
+            me.close()
+        },
+        on: io.system(),
+    ).unwrap()
+    let _unstarted = cancelled.cancel()
+    if !work.balanced() {
+        panic("batch leaked a task or lost/repeated rejected work")
+    }
+    0
+}

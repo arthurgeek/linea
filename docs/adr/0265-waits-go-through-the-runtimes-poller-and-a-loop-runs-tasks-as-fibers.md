@@ -1,6 +1,8 @@
 # 265. Waits go through the runtime's poller, and a loop runs tasks as fibers
 
-Status: Accepted for phases 1 to 4; Proposed for phases 5 to 7 — 2026-11-13. It builds on
+Status: Phases 1 to 4 accepted and built; phase 5 architectural direction
+accepted, local lifecycle validation demonstrated and implementation
+acceptance still pending; phases 6 and 7 proposed — 2026-11-13. It builds on
 [0261](0261-an-owning-task-holds-nothing-that-waits.md). Phases 1 to 7 of §13
 state what is built when. Phase 1 is built: nonblocking sockets with
 deadlines, `io.Io`, `io.system()`, `io.current()`, the loop table of §8 and
@@ -24,11 +26,18 @@ HTTP `on:` arguments. `io.inherited` resolves the default execution choice
 when a task is prepared; `io.current()` captures it when called. Simulation
 tasks are fibers on the calling thread, scheduled from the seed. Foreign calls
 still run on the carrier, and a live foreign frame prevents a fiber switch.
-Phases 5 to 7 are not built.
+Phases 5 to 7 are not built. Phase 5's architectural direction is accepted;
+its wrapper has local validation evidence (§9.5), while implementation
+acceptance remains pending. The proposed manifest
+booleans, automatic offload, persistent fiber leases and borrowed callback
+mode are withdrawn. Section 9 uses explicit system-thread tasks and resource
+ownership. Agreement on that direction is not implementation acceptance or
+approval of a new API. A validation-only spike using existing APIs is
+authorized; compiler, runtime and public standard-library changes are not.
 The implemented clauses partially supersede 0154's whole-body, handler and
 one-request-per-connection contracts and 0253 §5's listener-owning task.
 These are the affected sentences of existing records; references to migration,
-blocking-call offload and io_uring remain proposed until their phases land:
+explicit blocking execution and io_uring remain proposed until their phases land:
 
 - [0154](0154-sockets-and-http-follow-go.md),
   that the request is read into the arena before the handler runs, which §6
@@ -89,8 +98,8 @@ What is new here: the operation and its state machine (§1, §2), the fiber's
 scheduling state (§3), the wait set, its keys and its registration protocol
 (§4), operating-system signals as a source (§4.5), the theorem split into three properties (§5), the dispatcher and its
 HTTP/1.1 policy (§6), pinned fibers and the migration invariant (§7), the loop
-and `Io` (§8), blocking and thread-affine foreign calls and callback mode
-(§9), a simulated `Io` (§12), and the phases (§13).
+and `Io` (§8), explicit execution of blocking foreign work and confinement of
+foreign resources (§9), a simulated `Io` (§12), and the phases (§13).
 
 ## Context
 
@@ -245,8 +254,10 @@ handles short reads and writes, `EAGAIN` and `EWOULDBLOCK`, `EINTR`, `EINPROGRES
 and `SO_ERROR` for `connect`, a peer's reset and half-close, and the macOS
 differences the runtime already handles (`SO_NOSIGPIPE`, `getpeername`'s
 `EINVAL` after a reset). A regular file is never polled (`epoll_ctl` refuses
-regular files), so under kqueue and epoll a file operation is a call into a
-module that blocks (§9); io_uring performs it directly.
+regular files), so under kqueue and epoll a synchronous file operation can
+hold its carrier. Explicit system-thread tasks avoid that carrier stall
+(§9); a completion backend may instead perform supported operations
+asynchronously (io_uring, phase 7).
 
 ### 2. An operation has one terminal result
 
@@ -711,8 +722,8 @@ let stop = &waiting.signal(.Terminate, |share| Woke.Stop(share))?   // refused w
   signal it: deliveries are not queued for registrations to come.
 - **Masking.** The runtime blocks none of these signals on any thread and
   changes no thread's mask for them. A delivery lands on whichever thread the
-  kernel chooses that does not block it (a carrier, a task's thread, a pool
-  thread, a host thread), and the handler is the same on every one. Every
+  kernel chooses that does not block it (a carrier, a task's thread or a
+  host thread), and the handler is the same on every one. Every
   thread the runtime makes has an alternate signal stack, so on those threads
   the handler runs there, beside the fault handler, which it never interrupts
   in a way that matters: it touches only the router's count and descriptor.
@@ -1049,28 +1060,23 @@ pinned fibers are measured.
 
 **The migration invariant** (phase 6): *a fiber may migrate only at a
 suspension point where no active frame depends on the identity or the
-thread-local state of its current carrier.* The runtime tracks it with two
-fields per fiber, and a third property belongs to each call, not to the fiber:
+thread-local state of its current carrier.* This remains a requirement for a
+future design, not a property established by a module annotation.
 
-- `foreign_depth`, temporary: incremented and decremented by the code the
-  compiler generates around every `extern` call and every callback entry
-  ([T-ExternCallback]). Above zero, C frames are live below the fiber's
-  current frame.
-- `thread_affine`, persistent: set by the fiber's first call into a module
-  that declares itself thread-affine (§9) and kept until the fiber ends,
-  because such a library keeps state on the thread between calls (a lock taken
-  in one call and released in another, an error queue read by a later call).
-  A call into any other granted module leaves it clear.
-- *blocking*, per call: whether the call is offloaded to a pool thread (§9).
-  It decides where one call runs and leaves no mark on the fiber.
+`foreign_depth` is incremented and decremented around foreign execution and
+callback entry ([T-ExternCallback]). Above zero, a park does not switch even
+on the same carrier: C frames below may hold a thread-local lock that another
+fiber on that carrier would wait for. The runtime calls Linea code only at a
+task's entry and its release; a runtime operation that adds a user hook must
+account for its foreign frames too.
 
-A fiber is migratable at a park exactly when `foreign_depth` is zero and
-`thread_affine` is clear. Independently of migration, a park reached with
-`foreign_depth` above zero does not switch even on its own carrier: it blocks
-the thread, because the C frames below may hold a lock that the next fiber on
-the same carrier would wait for. The runtime calls Linea code only at a task's
-entry and its release; no runtime function runs a user hook in the middle of
-its work, and one that is added must count as a foreign frame.
+Zero foreign depth does not prove migration safe: foreign state may outlive
+the call that created it. Phase 5 does not add a persistent fiber-affinity
+bit or infer an OS-thread contract from a module. A thread-bound resource
+stays in an explicitly selected system-thread task (§9). Before phase 6 can
+move other fibers, its design must explain which thread-local dependencies
+can cross suspension points and how unsafe migration is prevented. Until
+that contract is agreed and verified, fibers remain pinned.
 
 **The context switch** saves and restores what each ABI requires: the
 callee-saved general registers, `d8` to `d15` on aarch64, the frame pointer,
@@ -1112,14 +1118,16 @@ guards, and none implies another:
 | --- | --- |
 | One owner at a time | linear and affine types |
 | Several tasks reading at once | `Shareable`, and a C handle's `@shareable` (0260) |
-| A C object used on the thread that made it | `thread_affine` (§9) and the wrapper's discipline |
+| A C object used on the thread that made it | an explicit system-thread owner and the wrapper's lifecycle contract (§9) |
 | A C object outliving every use | ownership and the wrapper's promise (0260) |
 | A wrapper's C calls being correct | the module granted `extern` |
 
 So a `@shareable` handle is never permission to move a thread-affine object
 to another carrier, and a handle that is not `Shareable` never pins its fiber:
-it may still move to another thread, one owner at a time. Migration (phase 6)
-reads `foreign_depth` and `thread_affine` alone.
+it may still move to another thread, one owner at a time. The wrapper must
+keep an affine resource inside its thread-bound owner; ownership alone does
+not check the native library's thread-identity requirement. Migration remains
+subject to the unresolved invariant above.
 
 **[T-ThreadStart].** The runtime's fiber start is marked like
 `linea_task_start` and may be named only inside `task.Slot.start`, so a fiber
@@ -1145,11 +1153,11 @@ a loop that has ended` instead of reaching freed carriers, and a scoped loop
   `mem.system()` is (0095).
 - `io.Loop.open(carriers: n)` makes a loop and answers its `Io`, or why it
   could not (a thread, a mapping or the poller refused). A loop is `n`
-  carriers, each with its own poller, deadline heap and run queue, and from
-  phase 5 a pool for modules that block (§9). It lasts until the process exits; while it has
-  no fiber its threads wait and run nothing. Each loop keeps its carriers,
-  pollers and pool until exit, so a program opens its loops once; opening
-  loops repeatedly is a resource leak by design in these phases.
+  carriers, each with its own poller, deadline heap and run queue. It lasts
+  until the process exits; while it has no fiber its threads wait and run
+  nothing. Each loop keeps its carriers and pollers until exit, so a program
+  opens its loops once; opening loops repeatedly is a resource leak by
+  design in these phases.
 - **`carriers:` is always written** and must be positive; it is a resource
   size and is never derived silently. `env.available_parallelism()` answers
   the processors this process may run on, for a program that wants a count
@@ -1189,8 +1197,9 @@ linear ownership access.
   another carrier (the move rule below).
 - **Caveat.** A poller chosen by the task does not make every descriptor
   operation nonblocking. A regular file cannot be polled, and foreign
-  libraries and other blocking calls still need the blocking pool (§9), or a
-  backend that completes them (io_uring, phase 7).
+  libraries and other blocking calls need explicit system-thread execution
+  to avoid holding a carrier (§9), or a backend that completes them
+  asynchronously (io_uring, phase 7).
 
 **Decision: process-lifetime loops initially**.
 Loops remain alive until process exit in the first implementation. This is an
@@ -1202,11 +1211,11 @@ handles and other loop-bound resources alone, and the stable loop identities
 above keep the runtime from assuming that a loop never ends. Embedding Linea
 in a host process and reclaiming a loop's resources are acknowledged
 limitations of the initial implementation. A loop that is never closed is the
-simplest shape that is sound now. Its carriers run only fibers that `Slot.start` started and their
-handles join, and a pool thread runs only calls a fiber is parked in, so
-nothing on them outlives the lends it reads, which is what [T-ThreadStart]
-protects. At exit every task has been joined, since `main` returns only after
-its handles are closed, so no operation is pending and the loop's threads are
+simplest shape that is sound now. Its carriers run only fibers that
+`Slot.start` started, and their handles join. Explicit system-thread tasks
+use the same joined start boundary, so neither execution choice bypasses
+the lends that [T-ThreadStart] protects. At exit every task has been joined,
+since `main` returns only after its handles are closed, so no operation is pending and the loop's threads are
 idle.
 
 **A descriptor moves between tasks or loops only when no registration or
@@ -1271,135 +1280,354 @@ Two shapes of `loop.close()` were weighed for these phases:
   end. A task that closes a loop while holding a handle of a fiber on it waits
   on itself, which the language promises cannot happen. Rejected.
 
-### 9. Foreign calls that block or keep thread state
+### 9. Blocking foreign work uses explicit execution boundaries
 
-A granted module may declare two independent properties in its manifest,
-beside `"extern"`:
+**Phase 5 architectural direction accepted; local validation recorded in
+§9.5, implementation acceptance pending.** A foreign call executes on
+the OS thread that makes it. On a fiber that is its carrier, so a blocking
+foreign call can delay every fiber on that carrier. Linea does not infer
+whether arbitrary C code blocks or relies on thread-local state, and does
+not silently move a call to another thread.
 
-- `"blocking": true`: its calls may wait on the world (a file, a lock, the
-  network) for long enough that a carrier must not make them;
-- `"thread_affine": true`: it keeps state on the calling thread between calls
-  (a lock taken by one call and released by another, a thread-local error
-  queue), so every call from one fiber must reach the same thread.
+No new `linea.json` keys are introduced. Build and link metadata keep their
+existing responsibilities. Blocking behavior is execution policy; native
+thread identity is a resource and execution-context contract. Neither is an
+unsafe capability or a substitute for foreign-call authorization. This phase
+does not extend ADR 0270 or introduce a `Send` or `ThreadSafe` capability.
+**Implementation language.** The execution and ownership contracts in this
+section do not depend on C. References elsewhere in this record to C files,
+pthreads and native fault handlers describe the current implementation and
+its verification, not a permanent requirement to author the scheduler or
+executor in C. The proposed ADR 0270 migration must preserve these contracts
+when moving Linea-owned runtime implementations into Linea, with the required
+platform bindings. That migration is not part of phase 5.
 
-The runtime's own file, `fsync` and name-lookup functions are marked blocking,
-and none affine, in `runtime_symbols.zig`, so one added later is covered by the
-table. [M-Blocking] refuses either key without `"extern"`. SQLite keeps its
-error state per connection rather than per thread, so the guest book's wrapper
-declares `"blocking"` alone; a TLS library
-with a thread-local error queue declares both.
+Before adding any compiler rule, annotation, runtime state or public API,
+a proposal must identify the closest existing mechanism, a concrete program
+it cannot express or verify, and the exact missing invariant.
 
-| Module declares | From a thread | From a fiber |
-| --- | --- | --- |
-| neither | an ordinary call | on the carrier; it holds the carrier for as long as it runs |
-| `blocking` | an ordinary call | on a **temporary lease**: a pool thread taken for this call and returned when it returns |
-| `thread_affine` | an ordinary call | on the carrier, and the fiber becomes `thread_affine`, so it never migrates |
-| both | an ordinary call | on a **persistent lease**: the fiber's first call takes a pool thread that serves every later call of an affine module from that fiber, until the fiber ends |
+#### 9.1 Reuse system-thread tasks
 
-So ten thousand fibers that each made one blocking call hold no thread after
-their calls return; only fibers of a thread-affine library that also blocks
-keep one, which the library's own contract demands.
+The existing `on: io.system()` selects an OS thread for a task. A fiber can
+prepare and start such a task, communicate with it through its session, and
+join it. Waiting on that task uses the existing fiber park protocol, leaving
+the carrier available to unrelated fibers. The foreign operation itself
+executes in place on the system task's thread, using ordinary C ABI lowering.
+There is no separate foreign-call pool, typed offload trampoline, implicit
+thread creation at an `extern` call, or special callback task identity.
 
-**The call crosses through a typed trampoline.** For each `extern` signature of
-a module that blocks the compiler generates a C-ABI trampoline and a context
-record:
+A short-lived task is suitable for occasional independent blocking work. A
+long-lived owning task can reuse a thread and serialize operations on state.
+Both choices have costs: task preparation creates an OS thread and stack;
+an owner adds a request/response boundary and serves one job at a time.
+Cheap foreign operations can stay direct. A wrapper can group a sequence of
+cheap and blocking operations into one owner job when they must share native
+thread-local state. Calls in the same module need not choose the same policy.
 
-```c
-struct linea_call { void (*invoke)(void *context); void *context; struct linea_park park; };
-```
+A task body must satisfy the existing capture, lending and joined-handle
+rules. An owning task's state and jobs retain the existing `Owned` and
+`Isolated` requirements, and a job's result remains `Owned`. Explicit
+execution is not a way to submit a body after its borrows end or to bypass
+[T-ThreadStart]. No task-start permission or owner-job bound is relaxed.
 
-The context, in the fiber's frame, holds the arguments as the callee takes them
-and a slot for its result; `invoke` loads them, calls the callee with the
-platform's calling convention, and stores the result. The pool only runs
-`invoke(context)`, so floating-point arguments, structures, more than eight
-arguments and hidden result pointers are the compiler's ordinary call
-lowering. The fiber's frame and every buffer the call was lent stay put while
-it is parked, so ownership sees an ordinary call that holds what it lends
-until it returns ([0246](0246-a-call-holds-what-it-lends-until-it-runs.md)).
+Synchronous file operations and standard-stream operations remain direct
+when called directly from a fiber. A wrapper that promises to avoid carrier
+stalls must explicitly perform its blocking work on the system substrate.
+This draft does not claim that all filesystem or database calls become
+nonblocking merely because the application selected a loop.
 
-**The pool grows.** It adds a thread whenever a call needs one and none is
-idle, and keeps a bounded number idle. With a fixed bound, a fiber reading a
-FIFO would hold the only thread while the fiber writing it queued behind, and a
-SQLite statement waiting on a lock would hold it while the commit releasing the
-lock queued: waits that threads finish and a bounded pool would not. The
-threads in use are bounded by the calls in progress plus the persistent
-leases.
+#### 9.2 Thread identity follows a resource's owner
 
-**Decision: when a pool thread cannot be made, phase 5 traps**. The pool reuses idle threads and makes one only when
-none is idle, never one per call. A standard-library operation whose
-signature can say so answers a recoverable error: the runtime's own blocking
-functions answer an `io.IoError` of category `ResourceExhausted` from `fs`
-and name lookup, as they answer a refused descriptor. A call into a user
-module traps with `linea: the blocking pool could not start a thread`, a
-resource-exhaustion report, and only when the runtime cannot obtain a thread
-to run it on, never because the foreign function answered an ordinary error.
-The call never falls back to running on the carrier, where it could hold up
-the fiber it waits for. Recoverable exhaustion is what a production service
-wants, and it is a supported future direction: a manifest extension that lets
-a user module declare a recoverable pool-acquisition error, delivered through
-the wrapper and leaving the C ABI unchanged. It is deferred, not rejected.
+A foreign resource requiring one OS thread must be created, used, have its
+thread-local errors retrieved, and be destroyed on that thread. Starting an
+owner with an already-created affine resource is insufficient: moving it to
+a dedicated thread cannot repair the resource's original thread identity.
+This is already the wrapper obligation described in ADR 0260; phase 5 must
+show how to fulfill it with the existing execution choices.
 
-What deadlock freedom means here is scoped by §5: the pool adds no edge to the
-session graph, and it relies on external progress, that a foreign call
-returns. A call that never returns stops its fiber and every join above it.
-The pool runs no Linea body of its own. A pool thread runs only `invoke` for a
-call whose fiber is parked holding the call's lends, and the callbacks C makes
-during that call (§9.1), so it is outside the worker pool 0253 §3 rejected,
-which ran a body after the lends it read had ended. Its threads are started by
-the runtime's pool, not by a [T-ThreadStart] symbol, because they never run a
-body that outlives its caller. A call
-cannot be cut short at a deadline, since C holds the arguments; a deadline is
-checked before the call and after it returns. A program that keeps its
-database in an owning task, as 0253 §4 teaches, makes its calls from one task.
-CPU work goes through `task.Policy`, not the pool.
+The initial mechanism to evaluate is the existing
+`task.own(state, on: io.system())`, with a wrapper that:
 
-The standard streams are not on the pool: `io.print` from a fiber writes
-directly, and a write to a full pipe or a stopped terminal holds its carrier
-until the reader takes the bytes. A module that blocks without declaring it
-holds its carrier for as long as the call takes, which every fiber pinned to
-that carrier waits out. The runtime counts carrier stalls, the time a carrier
-spends inside a foreign call made on it, and reports them in its diagnostics;
-it does not move fibers away (Alternatives, the monitor).
+1. Starts the owner with empty state, such as `Option[Resource].None`.
+2. Creates the resource in an owner job, storing it in that state and
+   returning only an owned success or failure value.
+3. Performs operations through client jobs, keeping the resource and any
+   thread-local sequence inside the owner. Clients may move between tasks;
+   the raw native resource does not.
+4. Stops admission and joins every task using its shared clients before
+   settlement. A final job through a remaining local client removes and
+   destroys the resource on the owner's thread, leaving the state empty. The
+   local client's borrow then ends, and the wrapper closes and joins the
+   owner. No job may recreate or use the resource after settlement.
 
-#### 9.1 A callback runs as its caller
+`Owner.close()` returns its state to the caller. Releasing an ordinary owner
+closes it and releases that returned state on the releasing task. Neither
+operation promises native destruction on the owner's thread. The wrapper
+must settle the foreign resource in the owner before either path runs,
+including after initialization or operation errors. If native destruction
+can fail while leaving a live resource, its wrapper must keep that state on
+the owner and report the failure without closing the owner or transferring
+the resource to the caller. Client borrows prevent closing an owner too early;
+they do not prevent a later job from accessing already-settled state. The
+wrapper must establish the shutdown order above. If this lifecycle cannot
+be expressed safely and clearly with existing jobs, a minimal initialization
+or settlement API needs its own concrete counterexample and review before
+implementation. This draft adds no such API.
 
-When C, during a call made on a pool thread, calls a Linea callback
-([T-ExternCallback]), the callback runs in **callback mode**:
+ADR 0255 already makes `Client[S]` shareable for every state an owner can
+hold: containment follows stored values, not phantom generic arguments. A
+client's borrow still keeps its owner alive. No `Client` shareability rule or
+`Isolated` restriction changes here.
 
-- **Task identity.** It runs as the calling fiber, borrowed. The pool thread's
-  current-task pointer names the fiber's task for the length of the foreign
-  call, so a runtime operation the callback makes (a session operation, a
-  `start`, an allocation in the checking archive) is the calling task's.
-- **The fiber cannot resume** until the foreign call returns: its scheduling
-  state stays Parked (§3), and the only unparker of the call's park is the
-  trampoline's return. No code of the fiber runs on two threads at once, since
-  the fiber's own frames are suspended below the foreign call and the
-  callback's frames run above it on the pool thread.
-- **Stack and faults.** The callback runs on the pool thread's own stack,
-  which is mapped as a task thread's is, with guard pages and an alternate
-  signal stack; while a thread serves a lease the fault record names that
-  stack, so an overflow in a callback is reported as on any thread.
-- **What it may touch.** What [T-ExternCallback] already allows: the callback
-  is a plain function and holds nothing, and it reaches the caller's values
-  only through the context the `extern` call lent, which the fiber cannot
-  touch while it is parked in the call. It may perform session operations on
-  endpoints in that context and start tasks, all as the calling task: the
-  edges are the task's own, so §5's argument holds with the callback standing
-  for the task. A task it starts is joined before its handle leaves the
-  context, as anywhere.
-- **Nested waits.** `foreign_depth` is above zero, so a wait in the callback
-  never switches: it parks the pool thread on a condition variable, with
-  operations performed in place, as on a task's own thread. A blocking call
-  made from the callback runs in place on that thread.
-- **Contract.** The guarantee covers foreign code that keeps the contract
-  [T-ExternCallback] states: a callback with a context is called during the
-  call, on the calling thread. A callback without a context, which C may keep
-  and call later from a thread of its own, runs on that thread as it does now
-  and is never in callback mode.
+Three contracts remain distinct:
 
-The same mode applies to a callback during a call on a carrier, with the
-carrier in place of the pool thread: the fiber is the running code, so nothing
-is borrowed, and `foreign_depth` keeps any wait from switching.
+| Contract | Execution boundary |
+| --- | --- |
+| Object affinity | create, operate on and destroy the object in one system-thread owner |
+| Thread-local sequence | keep the related calls together in one job on that thread |
+| A particular external or event-loop thread | requires an explicit integration contract; a newly created owner thread is not that thread |
+
+Ownership prevents conflicting access and escaping borrows; it does not
+infer a native library's thread contract or prohibit every transfer of an
+owned raw handle. The safe wrapper must keep that handle private and expose
+operations rather than an API that extracts it. It must also keep the raw
+`Owner` and unrestricted `Client.call` private: an arbitrary caller-supplied
+job could otherwise extract an owned resource or alter its lifecycle. Public
+client operations must preserve confinement and the admission/shutdown
+contract. A general compiler-enforced thread-transfer restriction is
+separate work. Phase 5 demonstrates a library pattern whose guarantee is
+limited to the reviewed wrapper and its public operations. It does not prove
+that all foreign handles in accepted Linea programs preserve thread affinity.
+
+**Lifecycle authority and the validation gap.** The intended public wrapper
+has linear authority for these transitions:
+
+| State | Public authority and transition |
+| --- | --- |
+| Uninitialized | owns an empty system-thread owner; initialization activates the resource, or reports failure after settling partial state; failed cleanup instead returns closing authority |
+| Active | lends restricted clients for resource operations; no caller receives the raw owner, raw client or resource |
+| Closing | owns shutdown authority after the active wrapper is consumed; permits settlement or retry, not normal operations or reinitialization |
+| Closed | settlement succeeded on the native owner thread and the empty owner was joined; no active client authority remains |
+
+These describe a contract to demonstrate with ordinary Linea types, not new
+language states or an approved new standard-library API. In particular,
+clients borrowing the active wrapper must prevent its consumption. The
+application must stop creating clients and join tasks using them before
+consuming that wrapper into closing authority. Shutdown therefore requires
+quiescence; it does not initiate cancellation or stop outstanding native
+calls. The order is: stop admission through the application's protocol, join
+client-using tasks, consume the active wrapper, settle on the owner thread,
+and close the empty owner. A design that instead asks
+shutdown itself to quiesce outstanding clients must show who owns those task
+handles and how their borrows permit that operation; this draft does not
+assume the existing API can do it.
+
+If destruction reports failure while retaining a live native object, the
+error must return linear closing authority with the resource still confined
+to its owner. The caller may retry settlement; it cannot resume normal
+operations, discard the live owner, or have an ordinary release destroy the
+resource on the caller's thread. This rule applies only to a native API whose
+failure contract actually preserves the object; a destructor that consumes
+the object despite an error needs a different wrapper transition. Native
+failures must be modeled rather than assumed interchangeable.
+
+There are three outcomes: successful settlement; recoverable failure that
+retains closing authority for retry; and unrecoverable native failure. Each
+wrapper must define a terminal policy for the last outcome. If no native
+contract permits successful settlement, retaining the authority may prevent
+the scope from completing indefinitely. That is an honest limitation, not a
+guarantee of eventual cleanup. An application may instead explicitly choose
+process termination, without claiming normal settlement or destructor
+execution; another terminal action is valid only if that native API defines
+it and preserves its thread and ownership contract. There is no generic
+`force_close` or implicit discard of a live foreign resource.
+
+Initialization failure closes the owner only if its state is empty: no
+resource was created, or cleanup succeeded. If initialization partially
+creates a resource and then both initialization and native cleanup fail, the
+wrapper must report the initialization error together with closing authority
+and the cleanup error. The live resource stays on the owner for retry. The
+wrapper must not lose the first error, close nonempty state, return active
+authority, or claim that all initialization failures leave an empty owner.
+
+The first validation scenario must show that closing authority owns the
+actual `Owner`, can survive failed destruction without invoking its ordinary
+`Release`, and can submit another settlement job on the same thread. It must
+never call `Owner.close()` while live native state remains. Validate this
+before building the hundred-client demonstration.
+
+The original lifecycle proposal was unverified. The local spike in §9.5 now
+demonstrates a compiling wrapper, limited to that compiler, platform and
+mock-resource contract. Implementation acceptance still requires review of
+the evidence and permanent regression coverage. The validation artifact must
+use the actual Linea compiler and existing APIs to show a mock affine native resource and
+the complete public wrapper: creation and initialization failure, operation
+and operation failure, a failed destructor retaining the resource, combined
+initialization/cleanup failure, successful retry, quiescence, settlement and
+joining. It must show how an
+`Option[Resource]` containing a linear value is replaced without dropping,
+copying or transferring a live resource. Negative cases must refuse shutdown
+while borrowed clients remain usable, use of consumed active authority, and
+normal operations through closing authority. The shared hundred-fiber case
+must use the public restricted client, including its borrow dependency on
+the active wrapper, rather than the raw `Client`. Separate external-module
+compile-failure cases must attempt to extract the resource, access the raw
+client and submit an arbitrary owner job through the public API. No new owner API is justified
+unless that demonstration exposes an exact missing invariant.
+
+These are validation requirements, with the local evidence and its limits
+recorded separately in §9.5. The authorized validation-only spike may create
+examples and fixtures using existing APIs; it may not change
+the compiler, runtime or public standard library. Passing validation can
+justify documentation and regression coverage; failure identifies a missing
+invariant for further design review, not rejection of the accepted explicit
+execution architecture or permission to introduce an API.
+
+#### 9.3 Resource limits, failure and progress
+
+Task preparation and owner creation already return recoverable errors when
+their execution resources cannot be acquired, returning the unstarted body
+or unowned state as their API specifies. A wrapper must propagate those
+errors. Failure never silently falls back to executing blocking work on a
+carrier, and this phase adds no default trap for user FFI resource exhaustion.
+The native operation's own error remains distinct from preparation failure.
+
+Explicit tasks do not impose a global thread bound: a program starting ten
+thousand system tasks may still exhaust resources. The application chooses
+how many tasks or owners to prepare and how it admits further work. A single
+owner bounds its executing foreign jobs to one; that does not provide a
+bounded client queue or a recoverable `Client.call` admission failure.
+
+**A bounded baseline example is required.** Before phase 5 implementation is accepted,
+the demonstration must include an existing-API task/session pattern with an
+explicit positive limit `N`: prepare at most `N` system-task slots, start
+only those successfully prepared, join the batch before preparing another,
+and keep remaining work at the producer rather than in an unbounded request
+queue. A preparation refusal must return the error and any unstarted body,
+and the example must join previously started tasks and settle prepared slots
+before returning. It must never execute the refused job inline on a carrier.
+This bounds the example's prepared or running system tasks and their stacks;
+it is not a global runtime limit or a latency guarantee. A nonreturning job
+occupies its slot and prevents that batch from completing. This is a minimal
+correctness baseline, not the preferred production scheduling policy: one
+slow task delays admission even when the other slots have finished. A later
+capacity-refilling design could use existing `WaitSet.returned` notifications,
+but needs its own admission, resource and progress contract.
+
+The standard-library example must demonstrate this pattern rather than
+invent an executor API. Existing bounded task combinators can inform it, but
+their behavior must be checked: `task.Policy` does not itself select the
+system substrate, and a combinator that unwraps preparation failure does not
+establish recoverable admission. The proof must exercise its bound and its
+error cleanup with the actual compiler and APIs (§13).
+
+A reusable blocking executor is deferred. Before one is proposed, measurements
+must justify it and its design must specify the concurrency limit, queue
+capacity, admission and shutdown policies, recoverable submission failure,
+and ownership of queued jobs. A bounded executor can deadlock if a running
+call waits for another call queued behind it. An unbounded executor can
+exhaust threads and stacks. Neither policy is a universal default, and
+neither may bypass the existing task-lifetime guarantees.
+
+A foreign call may never return. Its system task then remains occupied, its
+owner cannot serve subsequent jobs, and joining or closing it waits. Other
+fibers can still progress; the enclosing structured scope cannot complete.
+A deadline does not cancel C, release memory still lent to it, or reclaim its
+thread. A test for this case must use an externally bounded subprocess;
+passing it must not be described as cancellation support. Native locks and
+foreign callbacks retain their external progress obligations under §5.
+
+#### 9.4 Callbacks retain the existing FFI contract
+
+A synchronous foreign callback runs on the native calling thread, subject to
+[T-ExternCallback]'s existing ownership, lifetime and same-thread contract.
+A callback on a system-task thread runs there, not as a suspended application
+fiber. A callback during a direct carrier call cannot switch the fiber while
+foreign frames are live. Existing foreign-frame tracking remains necessary.
+
+Ordinary computation in a callback adds no task-wait edge. A callback that
+performs a permitted blocking task or session operation has the same native
+reentrancy and external-progress obligations as its foreign caller. For
+example, waiting for work that can complete only after the foreign function
+returns creates a cycle that changing schedulers cannot resolve. Running on
+a system task does not grant additional deadlock freedom or exempt an owner
+job from `Isolated`. This phase does not expand which callback operations the
+existing checker accepts.
+
+A required regression must invoke a synchronous callback during a foreign
+call on an explicit system task. It must check the same OS thread and system
+Io execution context, permitted access to still-live lent context storage,
+and completion before the native call and its task can finish. It must not
+claim a new runtime task-identity mechanism or infer general reentrancy safety
+from that successful case.
+
+Phase 5 adds no borrowed task identity, cross-thread callback mode, deferred
+callback support or permission for arbitrary callback-side session/task
+operations. Existing `Isolated` constraints on owner jobs remain in force.
+Any extension of callback reentrancy must separately specify nested calls,
+task-local state, access to lent storage, waits, scheduler interactions and
+progress before it is implemented.
+
+#### 9.5 Local validation evidence and remaining acceptance
+
+A validation-only spike dated 2026-11-13 uses the preserved phase 4 compiler
+at `a1d6d7ce407cabfec9072a733c440f8e67ef4f3b` and its checked runtime archive.
+Its source and report are in the accompanying design workspace at
+`linea-design/spikes/2026-11-13-owner-validation/`. The report is `README.md`;
+`results.json` records commands and actual/expected outcomes,
+`provenance.json` records compiler/archive hashes and tool versions, and
+`source-hashes.json` records fixture inputs. This is an external validation
+artifact, not an installed example or a new public standard-library API.
+
+All 44 recorded checks pass on macOS arm64: 18 O0/O2 checked-storage builds,
+14 ordinary executions, two expected externally terminated nonreturning-call
+cases, two expected terminal-policy aborts, seven compile refusals, and one
+strict C99 native-source check. This satisfies local feasibility, not
+permanent-regression or cross-platform acceptance. Expected timeouts and aborts are not normal
+successful exits or evidence of cancellation and cleanup.
+
+The first scenario retains the real owner through failed destruction and
+retries on its original thread. The complete examples also cover combined
+initialization/cleanup errors, native operation errors, one hundred restricted
+fiber clients, borrowed active authority, opaque API refusals, bounded batches
+that return and retry rejected owned work, ordinary synchronous callbacks,
+unrelated-fiber progress during native blocking, and cheap/direct versus
+explicitly threaded calls in one foreign library. No compiler, runtime or
+public standard-library changes were needed for these examples. The checked
+lifecycle uses whole-value replacement of the linear option, including
+explicit settlement of its old `None` value; it does not assume that a direct
+overwrite of that value is permitted. The helper stays private to the
+wrapper: `carries(slot)` preserves dependencies of the previous value in the
+result, while `retains(slot: next)` states that the replacement remains in
+the lent slot. Even `None` must be settled because the whole
+`Option[Resource]` has linear ownership. This is no new public exchange API.
+
+Independent read-only review found two evidence gaps: an early bounded example
+discarded the rejected body instead of returning it, and an early cheap-call
+example did not show a mixed library. Both were corrected and re-reviewed;
+the corrected cases pass. No missing owner API emerged from this spike.
+
+This establishes local feasibility of the demonstrated library pattern. It
+does not establish general foreign thread-transfer safety, performance,
+production admission/shutdown policy, Linux or sanitizer coverage, every
+allocation-failure path, or implementation acceptance. Native failure paths
+are deterministic mocks; thread preparation refusal uses an impossible stack.
+The positive wrapper and negative public-API cases need permanent regression
+coverage together. Their local integration is in
+[`tests/ffi/thread_bound_owner`](../../tests/ffi/thread_bound_owner/README.md)
+and [`tests/cmd/foreign_owner`](../../tests/cmd/foreign_owner/). It adds the
+private wrapper, eight runtime cases including 24 lifecycle stress cycles,
+seven compile-refusal transcripts and two bounded subprocess transcripts.
+These enter the normal Linux x86-64 sanitizer corpus lanes, and the fiber
+job explicitly runs both test directories on Linux x86-64 and arm64. No new
+runtime path is involved; lane inclusion is not a claim that those lanes
+have run. The one hundred-client execution is one observed schedule,
+not an exhaustive shutdown-interleaving proof; retain the static refusals and
+retain the repeated create/use/settle case with varied client completion orders.
+The impossible-stack test covers the public refusal path, not all native
+allocation, thread creation or owner-start failure points. Later targeted
+fault injection can extend that coverage without changing the API. Phase 5 remains unbuilt and no new API,
+executor, metadata or callback mode is authorized by these results.
 
 ### 10. Timeouts without cancellation
 
@@ -1445,9 +1673,9 @@ runs out is answered under §1's tie rules. Two alternatives were weighed:
 | §4.5 signals | nothing | `io.Signal`, `io.SignalError`, `io.SignalShare`, `WaitSet.signal` and `signal_with`, the runtime's signal router |
 | §5 properties | the semantics document's deadlock clause restated as §5's three properties, with the wait set | — |
 | §6 HTTP | nothing | dispatcher, the policy's new rules, `Limits.open_connections` and `idle_timeout_ms`, eviction, `shutdown:` and graceful shutdown |
-| §7 fibers | [T-ThreadStart] names the fiber start; the extern call and callback lowering maintains `foreign_depth` and, for an affine module, `thread_affine` | switch, carriers, the fiber's scheduling state, fault record, sanitizer hooks |
+| §7 fibers | [T-ThreadStart] names the fiber start; the extern call and callback lowering maintains `foreign_depth`; migration needs a separate thread-local dependency contract | switch, carriers, the fiber's scheduling state, fault record, sanitizer hooks |
 | §8 loop | nothing new: `Io` is an ordinary copyable type | `io.Io` as a stable loop identity, `io.current()`, `io.Loop`, the `on:` arguments, `env.available_parallelism()` |
-| §9 foreign calls | [M-Blocking] for the `blocking` and `thread_affine` keys; trampolines generated for the externs of a module that blocks; the symbol table marks the runtime's blocking functions | the pool, temporary and persistent leases, callback mode |
+| §9 foreign calls | no new rule: existing capture, ownership, `Isolated`, callback and [T-ThreadStart] contracts apply | explicit system-thread tasks and owners; no automatic pool or fiber-affinity flag |
 | §12 simulation | nothing | `io.Simulation`, the simulated backend, virtual clock and network |
 
 Each rule lands in `docs/linea-semantics.md` with the phase that builds it,
@@ -1637,35 +1865,62 @@ in. Phase 1 does not wait for the questions later phases raise.
    fiber annotations; a fiber polling a peer on its own carrier with
    `recv_until(time.Duration.from_milliseconds(0))` lets the peer run, and a hot buffered read does not switch.
    Foreign calls from fibers run on the carrier in this phase.
-5. **Foreign calls from fibers** (§9). `feat(ffi): offload blocking calls and keep thread-affine ones on one thread`.
-   *Proves* that SQLite and files run from fibers without holding a carrier,
-   through typed trampolines, and that a thread-affine library keeps its
-   thread. *Tests:* the guest book on a loop with SQLite declared
-   `"blocking"`, each serving fiber owning its own connection (ADR 0259): SQLite in multi-thread mode lets a connection's
-   calls run on any one thread at a time, and a connection owned by one fiber
-   never has two calls running at once;
-   a FIFO read and write between two fibers; ten thousand fibers
-   that each make one blocking call holding no pool thread afterwards; a C
-   library that checks its thread identity across calls, declared
-   `"thread_affine"`; a callback during a pool call that performs a session
-   operation and starts and joins a task (callback mode); a trampoline per
-   argument class (floats, a structure, a hidden result pointer, more than
-   eight arguments); [M-Blocking]'s refusals; a refused pool thread answering
-   `ResourceExhausted` from `fs`, and trapping with `linea: the blocking pool
-   could not start a thread` for a user module, while an ordinary error the
-   foreign function answers reaches the caller with no trap.
-6. **Migration and scheduling** (§7's invariant), only after phase 4's
-   measurements. `feat(runtime): steal runnable fibers between carriers`.
-   *Proves* the migration invariant: a fiber with `foreign_depth` above zero
-   or `thread_affine` set never moves. A monitor arrives only with a measured
-   benefit.
+5. **Explicit blocking foreign execution** (§9): architectural direction
+   accepted; local feasibility demonstrated in §9.5, implementation acceptance pending.
+   This is a library-pattern proposal using existing tasks and owners, not a
+   compiler-wide thread-affinity guarantee. The local evidence in §9.5
+   demonstrates its mock lifecycle; architectural agreement and that spike
+   do not approve a new API or mark implementation accepted.
+
+   **Three separate milestones:**
+
+   | Milestone | Status |
+   | --- | --- |
+   | Architecture approved | complete: explicit system-thread execution and resource ownership; no new compiler/runtime mechanism |
+   | Existing-API local feasibility | complete for the tested macOS arm64 configuration in §9.5, with source, logs and provenance retained |
+   | Permanent regression and cross-platform validation | pending overall: permanent fixtures are integrated locally; existing Linux/sanitizer execution remains to be recorded |
+
+   The original compiling-demonstration gate is satisfied for that tested
+   configuration. The remaining work does not reopen the architecture. It
+   makes the evidence permanent, adds varied-schedule lifecycle stress, and
+   exercises the existing Linux ABI and sanitizer lanes. A failed new case
+   must identify its exact missing invariant before any API extension is
+   proposed. The observation requirements remain:
+
+   | Case | Required observation |
+   | --- | --- |
+   | Create/use/destroy | native thread checks agree across the wrapper's entire resource lifecycle |
+   | One hundred fiber clients | public restricted clients are shareable across fibers and retain their borrow of active authority; they reach one owner containing an unshareable native handle while unrelated fibers progress |
+   | Public encapsulation | external-module compile-failure cases cannot extract the resource or raw client, submit an arbitrary job, or consume the active wrapper while those restricted clients remain usable |
+   | Failed initialization | no-resource or successfully cleaned-up state closes empty; cleanup executes on the creating thread and never loses a partial resource |
+   | Initialization and cleanup both fail | both errors are reported with linear closing authority; the live partial resource remains on the owner for retry, without exposing active operations |
+   | Operation failure | the wrapper returns the native error and keeps state in the condition promised by that native API |
+   | Failed destruction, first scenario | closing authority retains the actual owner without ordinary release or nonempty `Owner.close`; the error is reported and a later settlement job retries on the same thread |
+   | Permanent destruction failure | the documented terminal policy is observed; retained authority does not promise termination, and any process-exit case runs in a bounded subprocess |
+   | Shutdown with outstanding clients | a negative case refuses consumption while client borrows remain; the successful case joins users first, consumes active authority and permits no later resource job |
+   | Consumed or closing authority | normal operations and reinitialization are unavailable after shutdown begins; neither authority nor resource can be silently discarded |
+   | Nonreturning foreign call | an externally bounded subprocess observes unrelated-fiber progress while the owning system task and its join remain blocked; no cancellation is claimed |
+   | Thread preparation refusal | a recoverable error returns without invoking the job on a carrier; started tasks are joined and unstarted bodies/slots are settled |
+   | Synchronous callback | the existing same-thread, system-task execution context and lent-stack lifetime contract holds; no added deadlock-freedom claim |
+   | Bounded admission | the example never exceeds explicit `N` prepared/running system tasks, retains excess work at the producer, and cleans up a partially admitted batch after refusal |
+   | Mixed foreign library | cheap direct calls create no hidden threads; explicit blocking jobs use only their chosen system tasks and preserve ordinary ABI and native-error behavior |
+
+   This evidence validates the demonstrated wrapper and admission pattern.
+   It does not validate arbitrary owned-handle transfers, bounded owner-queue
+   admission, a reusable executor, or all foreign callbacks. Their absence
+   must remain visible in documentation and measurements.
+6. **Migration and scheduling**, deferred pending §7's thread-local dependency
+   contract and phase 4's measurements. No module flag or zero foreign depth
+   alone proves migration safe. Fibers remain pinned until a separate design
+   establishes and tests that invariant. A monitor requires measured benefit.
 7. **io_uring** on Linux (§1, §2). `feat(runtime): perform operations through io_uring on Linux`.
    *Proves* that a completion backend is a backend. *Tests:* the cancelling
    phase (no completion after `TimedOut` touches the buffer; a read or an
    accept that completes during cancellation answers its result); slot
    generations against events queued across a disarm; an explicit fallback to
-   the readiness path or the pool for an operation the kernel does not support,
-   chosen by probing the kernel once.
+   the readiness path or explicit system-thread execution for an operation the
+   kernel does not support, with completion and failure semantics specified
+   before implementation and kernel support probed once.
 
 **Measurement plan.** Each phase from 2 measures, against the previous phase
 and against thread per connection, with p50, p95 and p99 latency, throughput,
@@ -1675,7 +1930,9 @@ CPU, resident and virtual memory, context switches and wakeups:
 - ten thousand connections with periodic traffic (wakeups and scheduling);
 - mixed CPU and I/O work (fairness and utilisation);
 - session-heavy pipelines (rendezvous and switch cost);
-- many short calls into a blocking module (pool handoff);
+- direct cheap foreign calls, short-lived system tasks and repeated owner
+  jobs (thread preparation and request/response costs), with explicit resource
+  budgets and no build load during timings;
 - deadlines under load (timeout latency and tails);
 - high connection churn (registration and cleanup);
 - many clients on one listener (whether the single dispatcher is a
@@ -1698,10 +1955,11 @@ these numbers or not built.
   runtime's, and a program cannot write one in Linea.
 - A loop cannot be closed in these phases: its threads live until exit, idle
   when unused. A scoped loop is the direction (§8.2).
-- A foreign call that blocks in a module not declared blocking holds its
-  carrier for as long as it takes.
+- A foreign call made directly from a fiber holds its carrier for as long
+  as it takes. Explicit system-thread execution is the caller or wrapper's
+  choice; a module manifest does not change it.
 - The runtime grows a poller per carrier, a wait set, a context switch, a
-  scheduler and a pool, each with C tests, and sanitizer integration for
+  scheduler, each with native tests, and sanitizer integration for
   switches. The switch must be right on three targets.
 
 ## Alternatives considered
@@ -1795,26 +2053,33 @@ set.
 `error.Canceled`, the linear-types note's proposal). Rejected by decision #14:
 the canceller is a token every blocking call must honour.
 
-**A module-wide `"blocking"` flag that also meant thread affinity, with a
-lease kept for the fiber's life.** Ten thousand fibers that each made one
-blocking call would keep ten thousand threads. Blocking and affinity are
-different obligations (§9).
+**Module-wide `"blocking"` and `"thread_affine"` flags.** Rejected in this
+proposed phase 5 revision. A module can mix cheap calls and blocking operations.
+Offloading every call adds scheduling cost and can change native thread-local
+semantics. A fiber-local affinity bit cannot preserve an object's creation
+thread after the object moves, and a persistent pool lease cannot repair
+calls already made on another thread. Use explicit task execution and
+resource confinement first (§9).
 
-**A fixed-size blocking pool, or one that runs Linea closures.** A fixed size
-deadlocks on a FIFO or a lock whose releasing call queues behind its waiting
-call (§9). A pool that runs closures lets a job hold an endpoint or a client
-and wait on a task while it holds a thread.
+**A new blocking pool as the first mechanism.** Deferred. An unbounded pool
+risks resource exhaustion; a bounded pool risks dependencies on queued calls.
+Existing system-thread tasks and owners provide a baseline without another
+scheduler or task-start exception. A later executor needs explicit resource,
+admission and lifetime contracts supported by measurements (§9.3).
 
-**Eight integer arguments per pool call.** Not a C calling convention:
-floating-point and vector arguments, structures by value, more than eight
-arguments, variadics and hidden result pointers would each need a special
-case. A trampoline per signature is the compiler's ordinary call lowering.
+**Per-function automatic offload.** Deferred. It is more precise than module
+flags but still changes native execution threads and needs a callback and
+thread-local contract. Establish explicit execution first; metadata can be
+considered later if a concrete usability problem justifies it.
 
-**A monitor that moves fibers off a stalled carrier** every 20 µs. Fifty
-thousand wakeups a second for a problem that declaring a module as blocking
-avoids, on a timer the system may not honour at that resolution, and it
-cannot help a carrier held by computation. Deferred to phase 6 and built only
-with a measured benefit; carriers' stalls are counted instead.
+**Callbacks borrowing a parked fiber's identity.** Deferred. Keeping the
+fiber's stack alive does not establish reentrancy, task-local state or
+progress guarantees for code on another native stack. Phase 5 retains the
+existing synchronous callback contract (§9.4).
+
+**A monitor that moves fibers off a stalled carrier** every 20 µs. Deferred
+to the migration design and built only with measured benefit. It cannot
+repair arbitrary native thread affinity or make a nonreturning C call return.
 
 **Growable or segmented fiber stacks.** Excluded by *Builds on*.
 
@@ -1828,6 +2093,12 @@ What this record still leaves open:
 2. **Scoped loops** (§8.2): the contracts of `on:`, `http.serve` and the
    combinators for an `Io` that borrows its loop. Its own record, when a
    program needs a loop to end.
-3. **Recoverable pool exhaustion for user modules** (§9): the manifest form
-   and how a wrapper delivers the error.
-4. **`SIGCHLD` as a source**, with the process record that would own a child.
+3. **Owner lifecycle ergonomics in real libraries** (§9.2): local
+   expressibility is demonstrated. Does a concrete production wrapper expose
+   an ergonomic problem or missing contract that existing jobs cannot address?
+   A new API requires that counterexample, not the former feasibility question.
+4. **A reusable blocking executor** (§9.3): whether measurements justify one
+   and what resource, admission and lifetime contracts it requires.
+5. **Migration safety** (§7): which thread-local dependencies may survive a
+   suspension point and how the migration invariant can be enforced.
+6. **`SIGCHLD` as a source**, with the process record that would own a child.

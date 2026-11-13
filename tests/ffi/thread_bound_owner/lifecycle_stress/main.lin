@@ -1,0 +1,76 @@
+import confined
+import std.io
+import std.task
+import std.session
+import std.time
+
+use session.Chan
+use session.End
+use session.Send
+
+fn launch(client: confined.Client, on: io.Io, remaining: UInt64, round: UInt64) -> UInt64 {
+    if remaining == 0 {
+        return 0
+    }
+    let handle = task.prepare(
+        sink [sink client = copy(client), sink id = remaining, sink round] |sink me: Chan[Send[UInt64, End]]| {
+            confined.arrive()
+            while !confined.started() {
+                time.sleep(time.Duration.from_milliseconds(1))
+            }
+            time.sleep(time.Duration.from_milliseconds((id + round) % 4))
+            let answer = client.value()
+            while !confined.can_finish(id, round) {
+                time.sleep(time.Duration.from_milliseconds(1))
+            }
+            confined.finish()
+            me.send(answer).close()
+        },
+        on: on,
+    ).unwrap().start()
+    let rest = launch(client, on, remaining - 1, round)
+    let (answer, done) = handle.recv()
+    done.close()
+    rest + answer
+}
+
+fn cycle(execution: io.Io, round: UInt64) {
+    confined.reset_cycle()
+    let active = confined.open()
+    confined.block_first()
+    let progress = task.prepare(
+        sink [] |sink me: Chan[End]| {
+            while confined.arrivals() != 12 {
+                time.sleep(time.Duration.from_milliseconds(1))
+            }
+            confined.start_all()
+            while !confined.blocked() {
+                time.sleep(time.Duration.from_milliseconds(1))
+            }
+            confined.unblock()
+            me.close()
+        },
+        on: execution,
+    ).unwrap().start()
+    let total = launch(active.client(), execution, 12, round)
+    progress.close()
+    let closing = match active.shutdown() {
+        Ok(_) => panic("first native close must fail"),
+        Err(closing) => closing,
+    }
+    match closing.retry() { Ok(_) => (), Err(_closing) => panic("cleanup retry failed") }
+    if total != 78 {
+        panic("client results were lost or repeated")
+    }
+}
+
+fn main() -> UInt8 {
+    let execution = io.Loop.open(carriers: 1).unwrap()
+    for round in UInt64(0)..UInt64(24) {
+        cycle(execution, round)
+    }
+    if !confined.balanced() {
+        panic("stress cycles leaked native resources")
+    }
+    0
+}

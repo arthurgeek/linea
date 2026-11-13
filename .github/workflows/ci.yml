@@ -943,6 +943,11 @@ jobs:
           nix develop --command zig build conformance -Drelease -- tests/fibers_foreign
           nix develop --command zig build conformance -Drelease -- tests/io/simulation
 
+      - name: Thread-bound foreign owners and restricted clients
+        run: |
+          nix develop --command zig build conformance -Drelease -- tests/ffi/thread_bound_owner
+          nix develop --command zig build conformance -Drelease -- tests/cmd/foreign_owner
+
   # Every run and attempt of a lane saves its cache under a key of its own,
   # and a cache stays until the repository's 10 GB are spent and the least
   # recently used go: main's, the only ones a new pull request can restore.
