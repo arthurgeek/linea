@@ -614,7 +614,7 @@ import std.testing
 // A router whose tables and answers come from the log's allocator.
 alias Routes = http.Router[(), testing.SharedRefusingAllocator[mem.SystemAllocator]]
 
-fn hello[P: mem.Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+fn hello[P: mem.Allocator](inout _: (), request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     http.text(request, "hello")
 }
 
@@ -674,7 +674,8 @@ test fn a_reading_is_recorded_and_counted() {
     var sent = http.new_request(arena.handle(), "POST", "/readings", body: r#"{"celsius":21,"sky":"clear"}"#, content_type: "application/json").unwrap()
     &sent.add_header("Authorization", "Bearer harbour").unwrap()
     var app = quiet()
-    let response = &router.serve_http(&app, sent.request()).unwrap()
+    defer var incoming_1 = http.RequestBody.from_request(sent.request())
+    let response = &router.serve_http(&app, sent.request(), &incoming_1).unwrap()
     testing.assert_ok_eq(response.text(), r#"{"station":"harbour","sky":"clear","count":1}"#, "the answer changed")?
     testing.assert_eq(app.readings, 1, "the reading was not counted")?
 }
@@ -686,7 +687,8 @@ test fn a_reading_without_a_station_is_refused() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "POST", "/readings", body: r#"{"celsius":21,"sky":"clear"}"#, content_type: "application/json").unwrap()
     var app = quiet()
-    let refused = match &router.serve_http(&app, sent.request()) {
+    defer var incoming_2 = http.RequestBody.from_request(sent.request())
+    let refused = match &router.serve_http(&app, sent.request(), &incoming_2) {
         Ok(_) => return testing.assert(false, "a reading without a station was accepted"),
         Err(error) => error,
     }
@@ -702,7 +704,8 @@ test fn the_outlook_streams_one_line_a_day() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/outlook?days=2", body: "").unwrap()
     var app = quiet()
-    let body = &router.serve_http(&app, sent.request()).unwrap().recorded_body().unwrap()
+    defer var incoming_3 = http.RequestBody.from_request(sent.request())
+    let body = &router.serve_http(&app, sent.request(), &incoming_3).unwrap().recorded_body().unwrap()
     testing.assert_eq(Str.from_bytes(body.as_slice()).unwrap(), "day 1: sunny\nday 2: sunny\n", "the outlook changed")?
 }
 
@@ -713,7 +716,8 @@ test fn the_root_answers_with_the_greeting() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
     var app = quiet()
-    let response = &router.serve_http(&app, sent.request()).unwrap()
+    defer var incoming_4 = http.RequestBody.from_request(sent.request())
+    let response = &router.serve_http(&app, sent.request(), &incoming_4).unwrap()
     testing.assert_ok_eq(response.text(), "Weather stations report here.\n", "the greeting changed")?
 }
 ```
@@ -733,7 +737,7 @@ A few things to notice:
   errors, so the lines the handlers log do not clutter the test report.
 - `&sent.add_header(name, value)` adds a header to a built request, and
   `content_type:` sets its `Content-Type`.
-- `&router.serve_http(&app, request)` runs the router as `serve` does: it reads
+- `&router.serve_http(&app, request, &incoming)` runs the router as `serve` does: it reads
   the extractors `record` names and calls it, and the test then reads
   `app.readings` to see what it changed.
 - `response.text()` reads a held body as text, and answers an error instead

@@ -26,13 +26,13 @@ impl[H] Counted[H] {
 }
 
 impl[P: Allocator, H: http.Handler[App, P]] http.Handler[App, P] for Counted[H] {
-    fn serve_http(inout self: Self, inout state: App, request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    fn serve_http(inout self: Self, inout state: App, request: http.Request[P], inout body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] {
         state.requests += 1
-        &self.next.serve_http(&state, request)
+        &self.next.serve_http(&state, request, &body)
     }
 }
 
-fn number[P: Allocator](inout app: App, request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+fn number[P: Allocator](inout app: App, request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     http.text(request, "request {app.requests}")
 }
 
@@ -44,7 +44,8 @@ fn main() -> UInt8 {
     var nothing = {}
     for _ in UInt64(0)..2 {
         let sent = http.new_request(arena.handle(), "GET", "/number", body: "").unwrap()
-        match &server.serve_http(&nothing, sent.request()) {
+        defer var incoming_1 = http.RequestBody.from_request(sent.request())
+        match &server.serve_http(&nothing, sent.request(), &incoming_1) {
             Ok(response) => io.println(response.text().unwrap()).unwrap(),
             Err(_) => io.println("refused").unwrap(),
         }

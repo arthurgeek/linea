@@ -118,7 +118,7 @@ test fn an_arena_too_small_for_the_limits_is_refused() {
 // answered 503 and `handler` is told so.
 pub fn serve_cgi_in[P: Allocator, H: Handler[S, P] + Observer + Release, S: Release = ()](parent: P, sink handler: H, sink state: S = (), limits: Limits = standard_limits) -> Result[S, CgiError] where carries(state, handler) {
     var server = with_state(state, handler)
-    let needed = smallest_arena(limits)
+    let needed = smallest_cgi_arena(limits)
     if needed == UInt64.max || limits.request_arena_bytes < needed {
         server.release()
         return .Err(.ArenaTooSmall)
@@ -173,9 +173,9 @@ impl CgiOutput for StandardOutput {
             Standard(buffered) => {
                 let _standard = buffered.abort()
             },
-            Connection(buffered) => {
-                let _closed = buffered.abort().close()
-                panic("a CGI answer was written to a connection")
+            Borrowed(buffered) => {
+                let _writer = buffered.abort()
+                panic("a CGI answer borrowed a connection")
             },
             Recorded(_) => panic("a CGI answer was recorded"),
             Taken => panic("a CGI answer's output was not put back"),
@@ -564,7 +564,8 @@ fn answer_cgi[V: CgiVariables, R: io.Reader + Discardable, D: CgiOutput, H: Hand
     var body: BodyWriter[P] = .{ output = unanswered, answering = copy(request), failure = .None, in_body = false, body_bytes = 0, framing = .Cgi }
     var nothing = ()
     let started = time.Instant.now()
-    let answered: Answered = match &handler.serve_http(&nothing, request) {
+    defer var incoming: RequestBody[P] = RequestBody.from_request(request, limits: limits)
+    let answered: Answered = match &handler.serve_http(&nothing, request, &incoming) {
         Ok(response) => {
             let status = response.status()
             let written = write_response(&body, response, head_only)
@@ -658,13 +659,13 @@ impl CgiOutput for Recording {
     fn settle[P: Allocator](inout self: Self, sink output: Output[P]) {
         match output {
             Recorded(bytes) => &self.text.append(Str.from_bytes(bytes.as_slice()).unwrap()).unwrap(),
-            Connection(buffered) => {
-                let _closed = buffered.abort().close()
-                panic("a test's answer was written to a connection")
-            },
             Standard(buffered) => {
                 let _standard = buffered.abort()
                 panic("a test's answer was written to standard output")
+            },
+            Borrowed(buffered) => {
+                let _writer = buffered.abort()
+                panic("a test's answer borrowed a connection")
             },
             Taken => panic("a test's answer was not put back"),
         }
@@ -708,7 +709,7 @@ fn cgi_router() -> Router[()] {
     router
 }
 
-fn greet[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn greet[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     let name = request.path_value("name").unwrap_or("nobody")
     let mood = match request.query_params() {
         Some(params) => params.get("mood").unwrap_or(.None).unwrap_or("well"),
@@ -717,12 +718,12 @@ fn greet[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], 
     text(request, "hello {name}, {mood}")
 }
 
-fn agent[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn agent[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     let agent = request.header("user-agent").unwrap_or("unknown")
     text(request, agent)
 }
 
-fn post_note[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn post_note[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     let note = match request.form_params() {
         Some(params) => params.get("note").unwrap_or(.None).unwrap_or(""),
         None => return .Err(error(request, .UnsupportedMediaType, "send the note as a form")),
@@ -732,13 +733,13 @@ fn post_note[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[
     .Ok(response)
 }
 
-fn echo[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn echo[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     text(request, request.path())
 }
 
 // `moved` tries to set the CGI status as a header, which only the answer's
 // status may set.
-fn moved[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+fn moved[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
     var response = text(request, "moved")?
     &response.set_header("Status", "302 Found")?
     .Ok(response)
@@ -1001,4 +1002,49 @@ test fn a_missing_request_method_answers_nothing() {
     testing.assert_eq(answer.outcome, .Err(.NotCgi), "variables without a method were answered")?
     testing.assert_eq(answer.written.view(), "", "a process without a request wrote an answer")?
     .Ok(())
+}
+
+// CGI receives a complete input body. Its admission budget includes both the
+// parsed message and the cached views typed endpoint extraction may request.
+fn smallest_cgi_arena(limits: Limits) -> UInt64 {
+    let body = added(limits.max_body_bytes, 8)
+    let forms = multiplied(limits.max_form_pairs, field_bytes)
+    added(smallest_arena(limits), added(multiplied(body, 4), multiplied(forms, 2)))
+}
+
+test fn cgi_reserves_full_body_storage_while_http_streams_it() {
+    let limits = Limits { max_body_bytes = UInt64.max, ..Limits.default() }
+    testing.assert_eq(smallest_cgi_arena(limits), UInt64.max, "CGI admitted a body no arena could materialize")?
+    testing.assert(smallest_arena(limits) < UInt64.max, "HTTP reserved a streamed body eagerly")
+}
+
+// A typed endpoint must keep the same form policy as the CGI parser.
+@derive(Release)
+struct CgiPairCount {
+    count: UInt64,
+}
+
+impl[P: Allocator] Extract[P] for CgiPairCount {
+    fn extract(request: Request[P]) -> Result[Self, Error[P]] {
+        .Ok(.{ count = request.form_params().unwrap().count() })
+    }
+}
+
+fn counted_cgi_form(pairs: CgiPairCount, request: Request) -> Result[Response, Error] where carries(request) {
+    text(request, "{pairs.count} pairs")
+}
+
+test fn typed_cgi_endpoints_keep_the_configured_form_limit() {
+    defer var input = String.new()
+    for _ in 0..100 {
+        &input.append("x=1&").unwrap()
+    }
+    &input.append("x=1").unwrap()
+    let variables = [given("REQUEST_METHOD", "POST"), given("PATH_INFO", "/count"), given("CONTENT_TYPE", "application/x-www-form-urlencoded"), given("CONTENT_LENGTH", "403")]
+    var router: Router[()] = Router.new()
+    &router.route("POST /count", counted_cgi_form).unwrap()
+    defer let answer = cgi_exchange(variables.as_slice(), input.view(), &router, limits: Limits { max_form_pairs = 101, ..Limits.default() })
+    router.release()
+    testing.assert(answer.written.view().starts_with("Status: 200 OK\r\n"), "a permitted CGI form was refused by typed extraction")?
+    testing.assert(answer.written.view().ends_with("101 pairs"), "the typed endpoint did not receive every permitted form pair")
 }

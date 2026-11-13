@@ -1,8 +1,8 @@
 # 265. Waits go through the runtime's poller, and a loop runs tasks as fibers
 
-Status: Proposed — 2026-11-07. It builds on
+Status: Accepted for phases 1 to 3; Proposed for phases 4 to 7 — 2026-11-12. It builds on
 [0261](0261-an-owning-task-holds-nothing-that-waits.md). Phases 1 to 7 of §13
-state what is built when. Phase 1 is being built: nonblocking sockets with
+state what is built when. Phase 1 is built: nonblocking sockets with
 deadlines, `io.Io`, `io.system()`, `io.current()`, the loop table of §8 and
 the simulation of §12 for one task. In it §1's in-place and simulated backends
 each have one party, the calling thread, so §2's guarantees hold because the
@@ -12,8 +12,15 @@ word. Of §12, printing a failing test's seed is not built yet: a test reads
 of §3 on threads, which every condition-variable wait of `runtime/task.c` goes
 through; the wait set of §4 with its keys and registration protocol; signals
 as a source (§4.5); and §5's three properties in the semantics document.
-Nothing else is built.
-Once built, it would change these sentences of existing records:
+Phase 3 is built: §6's dispatcher and persistent connections on threads,
+streamed request bodies with an explicit `inout RequestBody`, bounded idle and
+open connections, request deadlines before queuing, and §6.1's graceful
+shutdown. `.Threads(128)` remains the default; `.Sequential` serves inline and
+observes shutdown after its current response. Phases 4 to 7 are not built.
+The implemented clauses partially supersede 0154's whole-body, handler and
+one-request-per-connection contracts and 0253 §5's listener-owning task.
+These are the affected sentences of existing records; references to fibers,
+migration and loop execution remain proposed until their phases land:
 
 - [0154](0154-sockets-and-http-follow-go.md),
   that the request is read into the arena before the handler runs, which §6
@@ -896,20 +903,30 @@ the rules marked new.
 - **New: a request body is read as a stream.** Today the server reads the
   whole body into the request arena before the handler runs, so an upload is
   bounded by memory and `request_arena_bytes` must hold `max_body_bytes`. From
-  phase 3 a handler reads the body through a reader the request carries,
-  bounded by `Content-Length` and `max_body_bytes`; each read waits through
+  phase 3 a raw handler receives an explicit `inout RequestBody[P]` beside
+  its copyable `Request[P]` metadata. The body exclusively owns its buffered
+  input position and is bounded by `Content-Length` and `max_body_bytes`;
+  each read waits through
   the loop's poller as any other read does, so a slow upload parks its fiber
   instead of holding a thread. Reading the whole body into the arena stays
-  one call for the handlers that want it, and is what the request extractors
-  (forms, JSON) do. A body the handler leaves unread is drained, within
+  one call for the handlers that want it: `body.materialize(request)` caches
+  the remaining bytes and form fields in the request arena and returns an
+  immutable request view. Repeated materialization reuses that cache; after
+  incremental reads it contains only the unread remainder. Typed endpoints
+  materialize once before their extractors (forms, JSON) run, so several
+  extractors can read the same view without lending the stream mutably again.
+  A response may observe the cached body until it is written. Output uses a
+  writer borrowing the connection; only after that writer and the response
+  are settled is the input drained or returned to the dispatcher. A body the handler leaves unread is drained, within
   `max_body_bytes` and `read_timeout_ms`, before the connection's next
   request; past either bound the connection is closed after the response,
   since the next request's first byte cannot be found.
 - **New: limits per request.** Every limit applies to each request of a
   connection afresh. `first_byte_timeout_ms` bounds the wait for a
-  connection's first request; `read_timeout_ms` bounds each request from its
-  first byte, where it is counted from the accept today; between requests the
-  connection is idle and `idle_timeout_ms` bounds it.
+  connection's first request; `read_timeout_ms` bounds each request from when
+  the dispatcher observes its reader ready, before queuing it for a serving
+  task. This is observed readiness, not a byte's arrival timestamp. Between
+  requests the connection is idle and `idle_timeout_ms` bounds it.
 
 **Limits and backpressure.** `Limits.connections` keeps its meaning (serving
 ends after that many connections). `Limits` gains `open_connections`, the
@@ -1000,7 +1017,10 @@ computes forever holds the drain as it holds any request.
 - **`.Sequential`.** The dispatcher is the serving thread. A signal is a source
   in the same set; the dispatcher sees it at its next `next`, after it has
   answered the request it is serving, then drains as above. A long request
-  delays the reaction by its own length.
+  delays the reaction by its own length. Its current response is framed
+  before the dispatcher observes the signal and may therefore advertise
+  persistence; the connection is closed after that response. Ready requests
+  served after the signal is observed carry `Connection: close` as above.
 - **Embedding.** In a host process the registrations chain to a handler the
   host installed (§4.5); a host that owns its signals passes `.Manual`.
 - **Phases.** The signal source is phase 2; `serve`'s use of it is phase 3.

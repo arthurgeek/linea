@@ -562,7 +562,8 @@ fn env_https_is_set() -> Option[Bool] {
 }
 
 // A handler reads the request through this view. It views the text, decoded
-// query and body `serve` read for this exchange and the path values its
+// query for this exchange and, after body materialization, its payload,
+// together with the path values its
 // router matched, and it holds a handle to the exchange's arena. It is copied
 // freely and holds nothing to release. What it views lives until the
 // response has been written, so a handler may return views of it, and values
@@ -636,6 +637,28 @@ impl[P: Allocator] Request[P] {
     // Return whether this request was made with HTTP/1.1 (otherwise HTTP/1.0).
     pub fn is_http_11(self: Self) -> Bool {
         self.is_http_11
+    }
+
+    // HTTP/1.0 and any Connection: close token end the connection.
+    pub fn closes_connection(self: Self) -> Bool {
+        if !self.is_http_11 {
+            return true
+        }
+        for field in copy(self.header_fields) {
+            if !stored_part(self.head, field.name).equals_ascii_folded("Connection") {
+                continue
+            }
+            let value = stored_part(self.head, field.value)
+            let parts = value.split(",") else |_| {
+                continue
+            }
+            for part in parts {
+                if part.trim_ascii().equals_ascii_folded("close") {
+                    return true
+                }
+            }
+        }
+        false
     }
 
     // Return the request HTTP version string: "HTTP/1.1" or "HTTP/1.0".
@@ -853,8 +876,8 @@ impl[P: Allocator] Request[P] {
         .Ok(())
     }
 
-    // `body` returns the body's bytes, exactly as many as `Content-Length`
-    // gave.
+    // Return the bytes of a constructed or materialized request. Raw serving
+    // handlers read their explicit RequestBody, or materialize it first.
     pub fn body(self: Self) -> mem.Slice[UInt8] where carries(self) {
         copy(self.payload)
     }
@@ -1029,4 +1052,12 @@ impl[P: Allocator] Request[P] {
         testing.assert_eq(no_host.request().origin(false), .Err(OriginError.InvalidAuthority), "missing host header succeeded")?
         .Ok(())
     }
+}
+
+test fn every_connection_header_can_request_close() {
+    defer let arena = mem.Arena.open(mem.system(), 4096)
+    var message = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &message.add_header("Connection", "keep-alive").unwrap()
+    &message.add_header("connection", "upgrade, CLOSE").unwrap()
+    testing.assert(message.request().closes_connection(), "a later close token was ignored")
 }

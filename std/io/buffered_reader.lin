@@ -125,10 +125,10 @@ pub struct DiscardProgress {
 struct BufferedReader[R: Reader, A: Allocator = mem.SystemAllocator] {
     reader: R,
     allocator: A,
-    ahead: mem.Buffer[A],
+    ahead: Vec[UInt8, A],
     cursor: UInt64,
     available: UInt64,
-    record: Option[mem.Buffer[A]],
+    record: Option[Vec[UInt8, A]],
     length: UInt64,
     position: UInt64,
     record_start: UInt64,
@@ -200,7 +200,7 @@ impl[R: Reader] BufferedReader[R, mem.SystemAllocator] {
 
     // Read exactly count bytes into storage from the system allocator, under
     // the limits of `read_exact_in`.
-    pub fn read_exact(inout self: Self, count: UInt64, max_bytes: UInt64) -> Result[Vec[UInt8, mem.SystemAllocator], ExactError[R.Error]] where carries(.Err.Input.reason: self.reader) {
+    pub fn read_exact(inout self: Self, count: UInt64, max_bytes: UInt64) -> Result[Vec[UInt8, mem.SystemAllocator], ExactError[R.Error]] where carries(.Err.Input.reason: self.reader), retains(self.ahead: self.ahead, self.allocator) {
         &self.read_exact_in(mem.system(), count, max_bytes)
     }
 
@@ -350,6 +350,64 @@ impl[R: Reader + Pollable, A: Allocator] Pollable for BufferedReader[R, A] {
 }
 
 impl[R: Reader, A: Allocator] BufferedReader[R, A] {
+    // Read a bounded chunk without discarding bytes already read ahead for a
+    // following record. Failed line recovery must be settled first.
+    pub fn read_chunk[B: Allocator](inout self: Self, inout buffer: mem.Buffer[B], offset: UInt64, count: UInt64) -> Result[UInt64, LineError[R.Error]] where carries(.Err.Input.reason: self.reader), retains(self.ahead: self.ahead, self.allocator) {
+        if offset > buffer.length() || count > buffer.length() - offset {
+            panic("buffer I/O range is out of bounds")
+        }
+        if count == 0 {
+            return .Ok(0)
+        }
+        if self.blocked {
+            return .Err(.RecoveryRequired)
+        }
+        let first = &self.peek()? else {
+            return .Ok(0)
+        }
+        let _first = first
+        let available = self.available - self.cursor
+        let take = if count < available {
+            count
+        } else {
+            available
+        }
+        if take > UInt64.max - self.position {
+            return .Err(.PositionOverflow)
+        }
+        for i in 0..take {
+            &buffer.store_byte(offset + i, self.ahead[self.cursor + i])
+        }
+        self.cursor += take
+        self.position += take
+        .Ok(take)
+    }
+
+    // Observe the underlying reader without moving its read-ahead storage.
+    // An answer viewing the reader remains bounded by this reader's lifetime.
+    pub fn inspect_reader[T, F: fn(reader: R) -> T where borrows(reader)](self: Self, inspect: F) -> T where borrows(self), carries(inspect) {
+        inspect(self.reader)
+    }
+
+    // Configure the source while preserving all bytes already buffered.
+    pub fn update_reader[F: fn(inout reader: R)](inout self: Self, update: F) {
+        update(&self.reader)
+    }
+
+    test fn chunk_reads_keep_read_ahead_for_the_next_line() {
+        let source = FragmentReader { bytes = "head\nbodytail\n".as_bytes(), position = 0, step = 32, fail_at = UInt64.max }
+        var reader = BufferedReader.open_in(mem.system(), capacity: 32, reader: source).unwrap()
+        defer var target = mem.system().acquire(8).unwrap()
+        let head = &reader.read_line_borrowed(max_bytes: 8).unwrap().unwrap() == "head"
+        let count = &reader.read_chunk(&target, offset: 2, count: 4).unwrap()
+        let body = target.as_slice().subspan(start: 2, count: 4).unwrap() == "body".as_bytes()
+        let tail = &reader.read_line_borrowed(max_bytes: 8).unwrap().unwrap() == "tail"
+        let _source = reader.abandon()
+        testing.assert(head && body && tail, "a chunk read lost bytes held for the next line")?
+        testing.assert_eq(count, UInt64(4), "a chunk read crossed its boundary")?
+        .Ok(())
+    }
+
     // Read from `reader` through a read-ahead buffer of `capacity` bytes from
     // `allocator`. A zero capacity or refused storage returns `reader`.
     pub fn open_in(allocator: A, capacity: UInt64, sink reader: R) -> Result[Self, BufferOpenFailure[R]] where carries(.Ok: allocator), carries(.Ok.reader: reader), carries(.Err.resource: reader) {
@@ -361,7 +419,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
             Ok(ahead) => .Ok(.{
                 reader = reader,
                 allocator = copy(allocator),
-                ahead = ahead,
+                ahead = mem.vector_from_buffer(ahead, capacity),
                 cursor = 0,
                 available = 0,
                 record = .None,
@@ -495,7 +553,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Read one line of at most `max_bytes` payload bytes and borrow it as text
     // without its LF or CRLF; the view lasts until the next call. EOF returns
     // None.
-    pub fn read_line_borrowed(inout self: Self, max_bytes: UInt64) -> Result[Option[Str], LineError[R.Error]] where borrows(.Ok: self), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
+    pub fn read_line_borrowed(inout self: Self, max_bytes: UInt64) -> Result[Option[Str], LineError[R.Error]] where borrows(.Ok: self), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator), retains(self.ahead: self.ahead, self.allocator) {
         if self.blocked {
             return .Err(.RecoveryRequired)
         }
@@ -606,7 +664,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     }
 
     // Read one line as `read_line_borrowed` does and return it as owned text.
-    pub fn read_line(inout self: Self, max_bytes: UInt64) -> Result[Option[String[A]], LineError[R.Error]] where carries(.Ok: self.record, self.allocator), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
+    pub fn read_line(inout self: Self, max_bytes: UInt64) -> Result[Option[String[A]], LineError[R.Error]] where carries(.Ok: self.record, self.allocator), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator), retains(self.ahead: self.ahead, self.allocator) {
         if self.blocked {
             return .Err(.RecoveryRequired)
         }
@@ -729,7 +787,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
 
     // Read one line of at most `max_bytes` bytes, terminator included, and
     // borrow its bytes without checking UTF-8.
-    pub fn read_raw_line_borrowed(inout self: Self, max_bytes: UInt64) -> Result[Option[mem.Slice[UInt8]], LineError[R.Error]] where borrows(.Ok: self), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
+    pub fn read_raw_line_borrowed(inout self: Self, max_bytes: UInt64) -> Result[Option[mem.Slice[UInt8]], LineError[R.Error]] where borrows(.Ok: self), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator), retains(self.ahead: self.ahead, self.allocator) {
         if self.blocked {
             return .Err(.RecoveryRequired)
         }
@@ -789,7 +847,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
 
     // Read one raw line as `read_raw_line_borrowed` does and return its bytes
     // as an owned vector.
-    pub fn read_raw_line(inout self: Self, max_bytes: UInt64) -> Result[Option[Vec[UInt8, A]], LineError[R.Error]] where carries(.Ok: self.record, self.allocator), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
+    pub fn read_raw_line(inout self: Self, max_bytes: UInt64) -> Result[Option[Vec[UInt8, A]], LineError[R.Error]] where carries(.Ok: self.record, self.allocator), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator), retains(self.ahead: self.ahead, self.allocator) {
         if self.blocked {
             return .Err(.RecoveryRequired)
         }
@@ -877,7 +935,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // stream position. A stream that ends first reports how many bytes it
     // held. Unlike a line, an exact read touches no pending record, so it
     // never itself blocks recovery. The bytes are allocated from `allocator`.
-    pub fn read_exact_in(inout self: Self, allocator: A, count: UInt64, max_bytes: UInt64) -> Result[Vec[UInt8, A], ExactError[R.Error]] where carries(.Ok: allocator), carries(.Err.Input.reason: self.reader) {
+    pub fn read_exact_in(inout self: Self, allocator: A, count: UInt64, max_bytes: UInt64) -> Result[Vec[UInt8, A], ExactError[R.Error]] where carries(.Ok: allocator), carries(.Err.Input.reason: self.reader), retains(self.ahead: self.ahead, self.allocator) {
         if count > max_bytes {
             return .Err(.Limit)
         }
@@ -894,7 +952,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
         var held: UInt64 = 0
         while held < count && self.cursor < self.available {
-            let byte = self.ahead.load_byte(self.cursor)
+            let byte = self.ahead[self.cursor]
             match &bytes.push(byte) {
                 Ok(_) => {},
                 Err(_) => panic("read_exact push exceeded its reserved capacity"),
@@ -984,12 +1042,14 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         if !self.blocked {
             return .None
         }
-        let empty: Option[mem.Buffer[A]] = .None
+        let empty: Option[Vec[UInt8, A]] = .None
         match replace_pending_buffer(&self.record, empty) {
             None => .None,
-            Some(buffer) => {
+            Some(storage) => {
+                var bytes = storage
                 self.resume_blocked = true
-                return .Some(mem.vector_from_buffer(buffer, self.length))
+                &bytes.truncate(self.length)
+                return .Some(bytes)
             },
         }
     }
@@ -1074,7 +1134,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // bytes.
     // The budget counts newly consumed bytes. A delimiter already consumed by
     // the failed read needs no budget and never causes another input operation.
-    pub fn discard_pending(inout self: Self, max_bytes: UInt64) -> Result[DiscardProgress, LineError[R.Error]] where carries(.Err.Input.reason: self.reader) {
+    pub fn discard_pending(inout self: Self, max_bytes: UInt64) -> Result[DiscardProgress, LineError[R.Error]] where carries(.Err.Input.reason: self.reader), retains(self.ahead: self.ahead, self.allocator) {
         if !self.blocked {
             return .Ok(.{ discarded = 0, boundary = true })
         }
@@ -1147,7 +1207,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // Continue a text line whose read failed before the line ended, keeping the
     // prefix already collected, and borrow it as text. Resuming is unavailable
     // once part of the line was taken or discarded.
-    pub fn resume_line_borrowed(inout self: Self, max_bytes: UInt64) -> Result[Option[Str], LineError[R.Error]] where borrows(.Ok: self), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
+    pub fn resume_line_borrowed(inout self: Self, max_bytes: UInt64) -> Result[Option[Str], LineError[R.Error]] where borrows(.Ok: self), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator), retains(self.ahead: self.ahead, self.allocator) {
         if !self.can_resume(false) {
             return .Err(.ResumeUnavailable)
         }
@@ -1304,7 +1364,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
 
     // Resume a failed text line as `resume_line_borrowed` does and return it as
     // owned text.
-    pub fn resume_line(inout self: Self, max_bytes: UInt64) -> Result[Option[String[A]], LineError[R.Error]] where carries(.Ok: self.record, self.allocator), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
+    pub fn resume_line(inout self: Self, max_bytes: UInt64) -> Result[Option[String[A]], LineError[R.Error]] where carries(.Ok: self.record, self.allocator), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator), retains(self.ahead: self.ahead, self.allocator) {
         if !self.can_resume(false) {
             return .Err(.ResumeUnavailable)
         }
@@ -1409,7 +1469,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
 
     // Continue a raw line whose read failed before the line ended, keeping the
     // prefix already collected, and borrow its bytes.
-    pub fn resume_raw_line_borrowed(inout self: Self, max_bytes: UInt64) -> Result[Option[mem.Slice[UInt8]], LineError[R.Error]] where borrows(.Ok: self), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
+    pub fn resume_raw_line_borrowed(inout self: Self, max_bytes: UInt64) -> Result[Option[mem.Slice[UInt8]], LineError[R.Error]] where borrows(.Ok: self), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator), retains(self.ahead: self.ahead, self.allocator) {
         if !self.can_resume(true) {
             return .Err(.ResumeUnavailable)
         }
@@ -1516,7 +1576,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     }
 
     // Resume a failed raw line and return its bytes as an owned vector.
-    pub fn resume_raw_line(inout self: Self, max_bytes: UInt64) -> Result[Option[Vec[UInt8, A]], LineError[R.Error]] where carries(.Ok: self.record, self.allocator), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
+    pub fn resume_raw_line(inout self: Self, max_bytes: UInt64) -> Result[Option[Vec[UInt8, A]], LineError[R.Error]] where carries(.Ok: self.record, self.allocator), carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator), retains(self.ahead: self.ahead, self.allocator) {
         if !self.can_resume(true) {
             return .Err(.ResumeUnavailable)
         }
@@ -1630,9 +1690,10 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
 
     // Move the record out as a vector of its first `length` bytes.
     fn take_bytes(inout self: Self, length: UInt64) -> Vec[UInt8, A] where carries(self.record) {
-        let empty: Option[mem.Buffer[A]] = .None
-        let buffer = replace_pending_buffer(&self.record, empty).unwrap()
-        mem.vector_from_buffer(buffer, length)
+        let empty: Option[Vec[UInt8, A]] = .None
+        var bytes = replace_pending_buffer(&self.record, empty).unwrap()
+        &bytes.truncate(length)
+        bytes
     }
 
     // Forget the record, so the next line starts fresh.
@@ -1652,7 +1713,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
             None => false,
         }
         if oversized {
-            let empty: Option[mem.Buffer[A]] = .None
+            let empty: Option[Vec[UInt8, A]] = .None
             let previous = replace_pending_buffer(&self.record, empty)
             previous.release()
         }
@@ -1666,18 +1727,12 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
 
     // Looking ahead never advances the logical stream position. Allocation can
     // fail before consuming a byte without losing it from the read-ahead buffer.
-    fn peek(inout self: Self) -> Result[Option[UInt8], LineError[R.Error]] where carries(.Err.Input.reason: self.reader) {
+    fn peek(inout self: Self) -> Result[Option[UInt8], LineError[R.Error]] where carries(.Err.Input.reason: self.reader), retains(self.ahead: self.ahead, self.allocator) {
         if self.cursor == self.available {
             if self.eof {
                 return .Ok(.None)
             }
-            let capacity = self.ahead.length()
-            let count = &self.reader.read_some(&self.ahead, offset: 0, count: capacity) else |error| {
-                return .Err(.Input(.{ reason = error, stream_offset = self.position }))
-            }
-            if count > capacity {
-                return .Err(.InvalidProgress)
-            }
+            let count = refill_ahead(&self.reader, &self.ahead, self.allocator, self.position)?
             self.cursor = 0
             self.available = count
             if count == 0 {
@@ -1685,7 +1740,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
                 return .Ok(.None)
             }
         }
-        .Ok(.Some(self.ahead.load_byte(self.cursor)))
+        .Ok(.Some(self.ahead[self.cursor]))
     }
 
     // Grow geometrically up to the explicit record bound. Allocate and copy
@@ -1723,12 +1778,12 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         match read self.record {
             Some(previous) => {
                 for index in 0..self.length {
-                    &next.store_byte(index, previous.load_byte(index))
+                    &next.store_byte(index, previous[index])
                 }
             },
             None => {},
         }
-        let replacement: Option[mem.Buffer[A]] = .Some(next)
+        let replacement: Option[Vec[UInt8, A]] = .Some(mem.vector_from_buffer(next, capacity))
         let previous = replace_pending_buffer(&self.record, replacement)
         previous.release()
         .Ok(())
@@ -1763,7 +1818,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
 
     // Collect bytes into the record until the line ends or the input does.
     // Return false at EOF when nothing was collected.
-    fn fill(inout self: Self, max_bytes: UInt64) -> Result[Bool, LineError[R.Error]] where carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator) {
+    fn fill(inout self: Self, max_bytes: UInt64) -> Result[Bool, LineError[R.Error]] where carries(.Err.Input.reason: self.reader), retains(self.record: self.allocator), retains(self.ahead: self.ahead, self.allocator) {
         let bound = record_storage_bound(max_bytes, self.raw)
         let capacity = match read self.record {
             Some(bytes) => bytes.length(),
@@ -1830,7 +1885,9 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         match String.from_bytes(bytes) {
             Ok(line) => return .Ok(.Some(line)),
             Err(Utf8Failure { bytes: bytes, error: error }) => {
-                let replacement = mem.vector_into_buffer(bytes)
+                let buffer = mem.vector_into_buffer(bytes).unwrap()
+                let capacity = buffer.length()
+                let replacement: Option[Vec[UInt8, A]] = .Some(mem.vector_from_buffer(buffer, capacity))
                 let empty = replace_pending_buffer(&self.record, replacement)
                 empty.release()
                 self.blocked = true
@@ -1872,16 +1929,37 @@ fn exact_error_from_peek[E](sink error: LineError[E]) -> ExactError[E] {
     }
 }
 
+// The input error can observe only its reader. Replacing the ahead storage
+// preserves its allocator dependencies without retaining any reader or record
+// observations in that buffer.
+fn refill_ahead[R: Reader, A: Allocator](inout reader: R, inout ahead: Vec[UInt8, A], allocator: A, position: UInt64) -> Result[UInt64, LineError[R.Error]] where carries(.Err.Input.reason: reader), retains(ahead: ahead, allocator) {
+    let capacity = ahead.length()
+    let empty: Vec[UInt8, A] = Vec.new_in(allocator)
+    let current = mem.exchange(&ahead, empty)
+    var buffer = mem.vector_into_buffer(current).unwrap()
+    let outcome = &reader.read_some(&buffer, offset: 0, count: capacity)
+    let restored = mem.vector_from_buffer(buffer, capacity)
+    let previous = mem.exchange(&ahead, restored)
+    previous.release()
+    let count = outcome else |error| {
+        return .Err(.Input(.{ reason = error, stream_offset = position }))
+    }
+    if count > capacity {
+        return .Err(.InvalidProgress)
+    }
+    .Ok(count)
+}
+
 // Replace the complete optional owner and return its previous contents.
-fn replace_pending_buffer[A: Allocator](inout storage: Option[mem.Buffer[A]], sink next: Option[mem.Buffer[A]]) -> Option[mem.Buffer[A]] where carries(storage), retains(storage: next) {
+fn replace_pending_buffer[A: Allocator](inout storage: Option[Vec[UInt8, A]], sink next: Option[Vec[UInt8, A]]) -> Option[Vec[UInt8, A]] where carries(storage), retains(storage: next) {
     let previous = storage
     storage = next
     previous
 }
 
 // Store `byte` at `offset` in the record.
-fn store_pending_byte[A: Allocator](inout storage: Option[mem.Buffer[A]], offset: UInt64, byte: UInt8) {
+fn store_pending_byte[A: Allocator](inout storage: Option[Vec[UInt8, A]], offset: UInt64, byte: UInt8) {
     var bytes = storage.unwrap()
-    &bytes.store_byte(offset, byte)
+    bytes[offset] = byte
     storage = .Some(bytes)
 }

@@ -5,7 +5,7 @@ struct Visitor {
     name: Str,
 }
 
-fn greet[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+fn greet[P: Allocator](inout _: (), request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     let visitor = request.extract[Visitor]()?
     http.text(request, "hello {visitor.name}")
 }

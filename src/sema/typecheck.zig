@@ -23098,7 +23098,10 @@ const Checker = struct {
         const descriptor = &self.closure_descriptors[closure_type.closure.index()];
         const signature_ty = try self.builder.closureSignature(closure_type);
         const signature = self.builder.get(signature_ty).callable;
-        const params = self.builder.callableParams(signature);
+        // Checking an argument can intern more callable signatures and move
+        // the builder's parameter storage before a later argument reads it.
+        const params = try self.gpa.dupe(types_mod.CallableParam, self.builder.callableParams(signature));
+        defer self.gpa.free(params);
         const source_params = self.ast.lambda(descriptor.expr).params;
         const call = self.ast.call(id);
         const target: types_mod.CallTarget = .{ .closure = closure_type.closure };
@@ -23184,7 +23187,10 @@ const Checker = struct {
         const diagnostics_before = self.sink.error_count;
         const call = self.ast.call(id);
         const signature = self.builder.get(signature_ty).callable;
-        const params = self.builder.callableParams(signature);
+        // Checking an argument can intern more callable signatures and move
+        // the builder's parameter storage before a later argument reads it.
+        const params = try self.gpa.dupe(types_mod.CallableParam, self.builder.callableParams(signature));
+        defer self.gpa.free(params);
         const owner: CallParameters = if (self.calleeLabels(call.callee)) |labels|
             if (labels.len == params.len)
                 .{ .labelled = .{ .signature = signature_ty, .params = labels } }
@@ -43254,4 +43260,55 @@ fn runtimeScalarName(scalar: runtime_symbols.Scalar) []const u8 {
 test "a runtime scalar is spelled as the Linea type written for it" {
     try testing.expectEqualStrings("UInt64", runtimeScalarName(.u64));
     try testing.expectEqualStrings("()", runtimeScalarName(.unit));
+}
+
+test "call argument checking preserves callable parameters across nested signature growth" {
+    const gpa = testing.allocator;
+    for ([_]bool{ false, true }) |structural| {
+        var text: std.ArrayList(u8) = .empty;
+        defer text.deinit(gpa);
+        if (structural) {
+            try text.appendSlice(gpa, "fn invoke(callback: fn(first: fn() -> UInt8, second: UInt8) -> UInt8) -> UInt8 {\n callback(");
+        } else {
+            try text.appendSlice(gpa, "fn main() -> UInt8 {\n let callback = |first: fn() -> UInt8, second: UInt8| -> UInt8 { first() + second }\n callback(");
+        }
+        try text.appendSlice(gpa, "|| {\n");
+        for (0..512) |i| {
+            const line = try std.fmt.allocPrint(gpa, "let _nested_{d} = |_value: [UInt8; {d}]| -> UInt8 {{ 0 }}\n", .{ i, i + 1 });
+            defer gpa.free(line);
+            try text.appendSlice(gpa, line);
+        }
+        try text.appendSlice(gpa, "3\n}, 7)\n}\n");
+        if (structural) try text.appendSlice(gpa, "fn main() -> UInt8 { invoke(|first: fn() -> UInt8, second: UInt8| -> UInt8 { first() + second }) }\n");
+
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        defer arena.deinit();
+        var sink = Sink.init(arena.allocator());
+        var interner: Interner = .empty;
+        defer interner.deinit(gpa);
+        const source: Source = .{ .path = "callable-growth.lin", .text = text.items };
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+        defer ast.deinit(gpa);
+        var res = try resolveTree(gpa, &ast, &sink);
+        defer res.deinit(gpa);
+        var typing = try typecheckTree(gpa, &res, &sink);
+        defer typing.deinit(gpa);
+
+        try testing.expectEqual(@as(u32, 0), sink.error_count);
+        var found = false;
+        for (typing.calls) |call| {
+            if (call.args.len != 2) continue;
+            found = true;
+            try testing.expectEqual(TypeId.u8, typing.exprType(call.at));
+            const signature = typing.get(call.signature).callable;
+            try testing.expectEqual(TypeId.u8, typing.callableParams(signature)[1].ty);
+            if (structural) {
+                try testing.expect(call.target == .indirect);
+            } else {
+                try testing.expect(call.target == .closure);
+            }
+        }
+        try testing.expect(found);
+    }
 }

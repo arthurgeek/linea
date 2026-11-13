@@ -7,7 +7,7 @@ struct Counter {
     count: UInt64,
 }
 
-fn consume(sink counter: Counter, request: http.Request) -> Result[http.Response, http.Error] {
+fn consume(sink counter: Counter, request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     http.text(request, "{counter.count}")
 }
 

@@ -5,6 +5,10 @@ Complements [0250](0250-tasks-are-structured-through-linear-sessions.md) and
 extends [0154](0154-sockets-and-http-follow-go.md) (`http.serve`). The clause
 of §4 that bounds a job `Owned` alone is superseded by
 [0261](0261-an-owning-task-holds-nothing-that-waits.md).
+The listener-owning task in §5 is superseded by the implemented phase 3 of
+[0265](0265-waits-go-through-the-runtimes-poller-and-a-loop-runs-tasks-as-fibers.md) §6:
+a dispatcher owns idle connection readers and passes ready requests to bounded
+serving tasks. The default policy remains `.Threads(128)`.
 
 ## Context
 

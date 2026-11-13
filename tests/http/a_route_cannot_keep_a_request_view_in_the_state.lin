@@ -8,7 +8,7 @@ struct App {
     last: Str,
 }
 
-fn remember[P: Allocator](inout app: App, request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] where carries(request) {
+fn remember[P: Allocator](inout app: App, request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     app.last = request.path()
     http.text(request, "ok")
 }

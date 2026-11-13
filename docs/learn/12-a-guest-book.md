@@ -453,7 +453,7 @@ call to another task in between:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
-fn home(inout ctx: Ctx, request: http.Request) -> Result[http.Response, http.Error] {
+fn home(inout ctx: Ctx, request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     defer let entries = match &ctx.book.newest(newest_shown) {
         Ok(entries) => entries,
         Err(error) => return .Err(unavailable(request, error)),
@@ -648,41 +648,67 @@ fn main() -> UInt8 {
 
 ```text
 error[T-Bound]: `R.Error` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
-    --> routes_from_a_file.lin:9:18
-     |
-9    |     let _ = http.listen_and_serve(net.loopback(8080), routes) else |_| {
-     |                  ^^^^^^^^^^^^^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds
-    ::: std/http/serve.lin
-1117 | ... ler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
-     |                                                                 ------- required by this `where` clause
+   --> routes_from_a_file.lin:9:18
+    |
+9   |     let _ = http.listen_and_serve(net.loopback(8080), routes) else |_| {
+    |                  ^^^^^^^^^^^^^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds
+   ::: std/http/serve.lin
+923 | ... ler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
+    |                                                                 ------- required by this `where` clause
 ```
 
 An enum of its own reasons, declared `@derive(Release)` (and `Display`, so
 `main` can print it), or an owned `String`, is accepted.
 
-### Room for a connection on every task
+### Room for serving tasks and kept-alive connections
 
-Each connection keeps two files open, the database and its write-ahead log,
-and each task also holds the socket of the client it answers. A process may
-hold only so many files at once: a soft limit, which it may raise itself up
-to a hard limit the system sets. A macOS shell starts a program with a soft
-limit of 256, fewer than 128 tasks need, so the guest book counts what it
-needs:
+Each serving task keeps two SQLite files open: the database and its write-ahead
+log. Active and idle clients share a separate budget of 128 connections,
+set by `limits().open_connections`. Every client owns a socket, and an idle
+client's readiness registration holds a duplicate descriptor. The serving
+policy uses the same `serving_tasks` constant as the file estimate.
+
+A process has a soft open-file limit, which it may raise up to its hard limit.
+A macOS shell starts a program with a soft limit of 256, so the guest book
+counts the worker files, connection descriptors and fixed runtime allowance
+before serving:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
-// `http.listen_and_serve` serves on 128 tasks by default, and each one keeps
-// three files open while it answers: its SQLite connection's database and
-// write-ahead log, and the client's socket. The listener, the log's shared
-// memory index and standard input, output and error take five more.
+// Each serving task keeps its own SQLite database and write-ahead log open.
 let serving_tasks: UInt64 = 128
 
-let files_per_task: UInt64 = 3
+// Active and idle clients share this connection budget. An idle client's
+// readiness registration holds a duplicate of its socket descriptor.
+let connection_budget: UInt64 = 128
 
-let files_besides_tasks: UInt64 = 5
+let files_per_task: UInt64 = 2
+
+let files_per_connection: UInt64 = 2
+
+// Standard streams take three descriptors; listener and watch take two;
+// SQLite's shared-memory index takes one; poller and signal wake each take
+// at most two. Rounding those ten up to 32 leaves 22 for inherited files,
+// SQLite temporary files and differences between supported platforms.
+let fixed_files: UInt64 = 32
 ```
 
-and, in `main`, raises its own limit with `process.raise_open_file_limit`
+The allowance follows the runtime's descriptor ownership. The poller uses at
+most two descriptors: an epoll queue and user event on Linux, or one kqueue on
+macOS. The process-wide signal wake uses one eventfd on Linux or a two-ended
+pipe on macOS; the signal registrations share that wake. Standard input,
+output and error, the listener and its watch duplicate, and SQLite's shared
+memory index take six more. Counting the larger allowance for each platform
+component gives ten fixed descriptors, and the budget reserves another 22.
+
+| Use | Conservative allowance |
+| --- | --- |
+| 128 serving tasks, two SQLite files each | 256 |
+| 128 client sockets, with one readiness duplicate each | 256 |
+| Fixed runtime descriptors and spare room | 32 |
+| Total | 544 |
+
+In `main`, the program raises its own limit with `process.raise_open_file_limit`
 before it serves:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
@@ -696,7 +722,7 @@ before it serves:
     // any other storage failure. Stopping here when even the estimate does
     // not fit says why at once, rather than as one task's failure to open
     // its connection.
-    let files_needed = serving_tasks * files_per_task + files_besides_tasks
+    let files_needed = serving_tasks * files_per_task + connection_budget * files_per_connection + fixed_files
     let open_files = process.raise_open_file_limit() else |error| {
         io.eprintln("guest-book: cannot raise the open-file limit: {error}")
         return 1
@@ -715,7 +741,7 @@ open:
 
 <!-- guide: unchecked output from tests/cmd/guest_book/serves_under_a_low_open_file_limit.cmd -->
 ```text
-guest-book: serving needs 389 open files, and this process may open 200; raise the hard limit with `ulimit -H -n`
+guest-book: serving needs 544 open files, and this process may open 200; raise the hard limit with `ulimit -H -n`
 ```
 
 Rust's standard library has no such call; a Rust server raises the limit
@@ -723,10 +749,10 @@ through the `libc` crate's `setrlimit`, or asks its users to run `ulimit -n`.
 
 The limit belongs to the whole process, so only a program raises it; a
 library that did would change what every other part of the program may
-open. And 389 is an estimate, not a promise: SQLite may open a temporary
-file for a large query, so a request can still fail for want of a
-descriptor while the server runs. The guest book answers that as it answers
-any storage failure, with a 500, and what guarantees that serving starts
+open. The 544-file estimate includes spare room, but inherited descriptors and
+SQLite temporary files can still exhaust that room while the server runs. The
+guest book answers that as it answers any storage failure, with a 500, and
+what guarantees that serving starts
 only once every task's connection is open is that nothing is accepted until
 each task has made its handler.
 
@@ -834,8 +860,8 @@ fn sign(inout ctx: Ctx, form: http.Form[Signature], request: http.Request) -> Re
 
 ## Running it
 
-The server reads a whole body before `sign` runs, so the body limit must admit
-every form the page can send. `limits` derives it from the field limits: a
+The form extractor materializes the body before `sign` runs, so the body limit
+must admit every form the page can send. `limits` derives it from the field limits: a
 browser writes each byte of a non-ASCII character as `%XX`, and a character is
 at most four bytes of UTF-8, so the longest form is `name=&message=` and 560
 characters of 12 bytes each, 6734 bytes. A line break counts as one character
@@ -850,7 +876,7 @@ page produces is that large:
 // form the page's `maxlength` attributes admit always fits.
 fn limits() -> http.Limits {
     let longest_form = "name=&message=".length() + (longest_name + longest_message) * encoded_scalar_bytes
-    http.Limits { max_body_bytes = longest_form, ..http.Limits.default() }
+    http.Limits { max_body_bytes = longest_form, open_connections = connection_budget, ..http.Limits.default() }
 }
 ```
 
@@ -910,7 +936,7 @@ fn main() -> UInt8 {
     // any other storage failure. Stopping here when even the estimate does
     // not fit says why at once, rather than as one task's failure to open
     // its connection.
-    let files_needed = serving_tasks * files_per_task + files_besides_tasks
+    let files_needed = serving_tasks * files_per_task + connection_budget * files_per_connection + fixed_files
     let open_files = process.raise_open_file_limit() else |error| {
         io.eprintln("guest-book: cannot raise the open-file limit: {error}")
         return 1
@@ -943,7 +969,7 @@ fn main() -> UInt8 {
             },
         )
     }
-    let _ = http.listen_and_serve(net.loopback(port), serving, limits: limits()) else |error| {
+    let _ = http.listen_and_serve(net.loopback(port), serving, limits: limits(), policy: .Threads(serving_tasks)) else |error| {
         io.eprintln("guest-book: {error}")
         error.release()
         return 1

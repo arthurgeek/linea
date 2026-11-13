@@ -15,6 +15,11 @@ Its arena-memory clause, that `serve` acquires the arena's whole slab of
 `limits.request_arena_bytes` once (the "5 MiB by default" it states) and that
 a rewind keeps the slab, zeroing what an exchange used, is superseded by
 [0263](0263-an-arena-grows-in-chunks-up-to-its-size-and-a-rewind-returns-them.md).
+Its whole-body-before-handler, handler signature and one-request-per-connection
+clauses are superseded by the implemented phase 3 of
+[0265](0265-waits-go-through-the-runtimes-poller-and-a-loop-runs-tasks-as-fibers.md) §6:
+raw handlers receive an exclusive body reader beside the request metadata, and
+the server preserves framed persistent connections through a dispatcher.
 
 ## Context
 

@@ -7,7 +7,7 @@ struct Counter {
     count: UInt64,
 }
 
-fn count(inout counter: Counter, request: http.Request) -> Result[http.Response, http.Error] {
+fn count(inout counter: Counter, request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     counter.count += 1
     http.text(request, "{counter.count}")
 }

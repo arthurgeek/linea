@@ -34,7 +34,7 @@ struct Reply {
 // A handler is a function from a request to an answer. `http.Request` and
 // `http.Response` take their memory from the system allocator, so a handler
 // needs no type parameter for it.
-fn health(request: http.Request) -> Result[http.Response, http.Error] {
+fn health(request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     // The handler takes the request because every answer is built in the
     // memory the request came with: `http.text` puts the body there.
     http.text(request, "ok")
@@ -74,7 +74,8 @@ test fn health_answers_ok() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/health", "").unwrap()
     var nothing = ()
-    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    defer var incoming_1 = http.RequestBody.from_request(sent.request())
+    let response = &router.serve_http(&nothing, sent.request(), &incoming_1).unwrap()
     testing.assert_ok_eq(response.text(), "ok", "the health answer changed")?
 }
 
@@ -85,7 +86,8 @@ test fn echo_answers_the_text_it_was_sent() {
     var sent = http.new_request(arena.handle(), "POST", "/echo", r#"{"text":"hello"}"#).unwrap()
     &sent.add_header("Content-Type", "application/json").unwrap()
     var nothing = ()
-    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    defer var incoming_2 = http.RequestBody.from_request(sent.request())
+    let response = &router.serve_http(&nothing, sent.request(), &incoming_2).unwrap()
     testing.assert_eq(response.header("Content-Type"), Option.Some("application/json"), "the content type changed")?
     testing.assert_ok_eq(response.text(), r#"{"echo":"hello"}"#, "the echo changed")?
 }
@@ -97,7 +99,8 @@ test fn echo_refuses_a_body_without_text() {
     var sent = http.new_request(arena.handle(), "POST", "/echo", r"{}").unwrap()
     &sent.add_header("Content-Type", "application/json").unwrap()
     var nothing = ()
-    let refused = match &router.serve_http(&nothing, sent.request()) {
+    defer var incoming_3 = http.RequestBody.from_request(sent.request())
+    let refused = match &router.serve_http(&nothing, sent.request(), &incoming_3) {
         Ok(_) => return testing.assert(false, "a message without text was answered"),
         Err(error) => error,
     }

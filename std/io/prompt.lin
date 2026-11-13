@@ -121,7 +121,7 @@ impl ByteWriter for PromptTestWriter {
 
 // Write `message` to `writer`, flush it, then read one line of at most
 // `max_bytes` bytes from `reader`. Input `reader` already buffered is kept.
-pub fn prompt_with[R: Reader, A: Allocator, W: ByteWriter](inout reader: BufferedReader[R, A], inout writer: W, message: Str, max_bytes: UInt64) -> Result[Option[String[A]], PromptError[R.Error, W.Error]] where carries(.Ok: reader.record, reader.allocator), carries(.Err.Read.Input.reason: reader.reader), carries(.Err.Write: writer), carries(.Err.Flush: writer), retains(reader.record: reader.allocator) {
+pub fn prompt_with[R: Reader, A: Allocator, W: ByteWriter](inout reader: BufferedReader[R, A], inout writer: W, message: Str, max_bytes: UInt64) -> Result[Option[String[A]], PromptError[R.Error, W.Error]] where carries(.Ok: reader.record, reader.allocator), carries(.Err.Read.Input.reason: reader.reader), carries(.Err.Write: writer), carries(.Err.Flush: writer), retains(reader.record: reader.allocator), retains(reader: reader) {
     match write_all(&writer, message.as_bytes()) {
         Err(failure) => return .Err(.Write(failure)),
         Ok(_) => {},
@@ -300,7 +300,7 @@ test fn each_allocation_failure_covers_every_growth_step_of_a_prompt() -> Result
 
 // `prompt` writes `message` to standard error and reads the response from
 // `reader`, keeping any standard-input read-ahead it already holds.
-pub fn prompt[A: Allocator](inout reader: BufferedReader[Descriptor, A], message: Str, max_bytes: UInt64) -> Result[Option[String[A]], PromptError[IoError, IoError]] where carries(.Ok: reader.record, reader.allocator), retains(reader.record: reader.allocator) {
+pub fn prompt[A: Allocator](inout reader: BufferedReader[Descriptor, A], message: Str, max_bytes: UInt64) -> Result[Option[String[A]], PromptError[IoError, IoError]] where carries(.Ok: reader.record, reader.allocator), retains(reader.record: reader.allocator), retains(reader: reader) {
     var writer = stderr()
     prompt_with(&reader, &writer, message, max_bytes)
 }

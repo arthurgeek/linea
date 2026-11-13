@@ -16,7 +16,7 @@ impl Release for Unread {
 }
 
 impl[P: Allocator] Handler[(), P] for Result[http.Router[(), P], Unread] {
-    fn serve_http(inout _self: Self, inout _state: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    fn serve_http(inout _self: Self, inout _state: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] {
         http.text(request, "ok")
     }
 }

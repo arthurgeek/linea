@@ -1,8 +1,8 @@
-// The request is the last parameter of every endpoint, because the answer is
-// built in its arena. A function without one has no `Endpoint`.
+// Every endpoint takes request metadata before its exclusive body, because
+// the answer is built in the request arena. A function without one has no `Endpoint`.
 import std.http
 
-fn greet() -> Result[http.Response, http.Error] {
+fn greet(inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] {
     .Err(http.Error.new(.NotFound))
 }
 

@@ -3,7 +3,7 @@ import std.mem
 
 // A streamed body is kept in the request's arena and dropped with it, so it
 // cannot own a vector from the system allocator, which must be released.
-fn report[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+fn report[P: Allocator](inout _: (), request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     let lines: Vec[UInt64, mem.SystemAllocator] = Vec.new()
     http.stream(
         request,

@@ -1,0 +1,27 @@
+// Materializing a body freezes one cached request view. Read-only extractors
+// can use that same view repeatedly without lending the stream again.
+import std.http
+import std.io
+import std.mem
+
+use mem.Lender
+
+@derive(http.Params, Release)
+struct Name {
+    name: Str,
+}
+
+fn main() -> UInt8 {
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "POST", "/?name=Grace", body: "name=Ada", content_type: "application/x-www-form-urlencoded").unwrap()
+    defer var incoming = http.RequestBody.from_request(sent.request())
+    let ready = &incoming.materialize(sent.request()).unwrap()
+    let query = ready.extract[http.Query[Name]]().unwrap()
+    let first = ready.extract[http.Form[Name]]().unwrap()
+    let second = ready.extract[http.Form[Name]]().unwrap()
+    io.println("{query.name}: {first.name}, {second.name}").unwrap()
+    query.release()
+    first.release()
+    second.release()
+    0
+}

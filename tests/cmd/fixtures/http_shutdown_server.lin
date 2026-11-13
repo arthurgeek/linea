@@ -1,0 +1,97 @@
+// A shutdown fixture whose handler waits for a client-controlled body byte.
+// Only the child process owns these signal registrations and sockets.
+import std.env
+import std.http
+import std.io
+import std.net
+import std.session
+import std.task
+
+use io.Reader
+use session.Chan
+use session.End
+use session.Send
+
+@derive(Release)
+struct Handler {}
+
+impl[P: Allocator] http.Handler[(), P] for Handler {
+    fn serve_http(inout _self: Self, inout _state: (), request: http.Request[P], inout body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] {
+        io.println("entered {request.path()}").unwrap()
+        if request.path() == "/hold" {
+            var byte = request.allocator().acquire(1)?
+            loop {
+                let got = &body.read_some(&byte, offset: 0, count: 1)?
+                if got == 0 {
+                    break
+                }
+            }
+        }
+        http.text(request, "ok")
+    }
+}
+
+fn handler() -> Handler {
+    .{}
+}
+
+// An application's registration wakes beside the server's registration.
+fn with_own_signal(sink listener: net.Listener, limits: http.Limits) -> UInt8 {
+    let worker = sink [] |sink me: Chan[Send[(), Send[Bool, End]]]| {
+        var waiting: task.WaitSet[io.SignalShare] = task.WaitSet.open()
+        let _stop = &waiting.signal(.Terminate, |sink share| share).unwrap()
+        let answering = me.send(())
+        let share = &waiting.next().unwrap()
+        let observed = share.delivered()
+        share.settle()
+        waiting.close().release()
+        answering.send(observed).close()
+    }
+    let slot = task.prepare(worker).unwrap()
+    let (_ready, report) = slot.start().recv()
+    http.serve(listener, handler, limits: limits, policy: .Threads(2)).unwrap()
+    let (observed, done) = report.recv()
+    done.close()
+    io.println("own-signal {observed}").unwrap()
+    io.println("finished").unwrap()
+    if observed {
+        0
+    } else {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    let mode = env.args().at(1) else {
+        return 0
+    }
+    let policy: task.Policy = if mode == "sequential" {
+        .Sequential
+    } else if mode == "queued" {
+        .Threads(1)
+    } else {
+        .Threads(2)
+    }
+    let shutdown: http.Shutdown = if mode == "manual" {
+        .Manual
+    } else {
+        .OnSignals
+    }
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let address = listener.local_address().unwrap()
+    io.println("ready {address}").unwrap()
+    let limits = http.Limits { read_timeout_ms = 10000, write_timeout_ms = 5000, idle_timeout_ms = 10000, ..http.Limits.default() }
+    if mode == "own" {
+        return with_own_signal(listener, limits)
+    }
+    match http.serve(listener, handler, limits: limits, policy: policy, shutdown: shutdown) {
+        Ok(_) => {
+            io.println("finished").unwrap()
+            0
+        },
+        Err(error) => {
+            io.eprintln("{error}")
+            1
+        },
+    }
+}

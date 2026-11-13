@@ -15,7 +15,7 @@ import std.testing
 import std.time
 
 // `use` brings a trait's operations into scope: `Handler` lets a test call
-// `&router.serve_http(&app, request)`, and `ByteWriter` lets `count_down`
+// `&router.serve_http(&app, request, &incoming)`, and `ByteWriter` lets `count_down`
 // call `&body.flush()`. `Writer` is in the prelude, so `&body.write_str(text)`
 // needs no `use`.
 use http.Handler
@@ -66,7 +66,8 @@ test fn a_count_out_of_range_is_refused_before_streaming() {
     var app = quiet()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let long = http.new_request(arena.handle(), "GET", "/countdown/11", body: "").unwrap()
-    let refused = match &router.serve_http(&app, long.request()) {
+    defer var incoming_1 = http.RequestBody.from_request(long.request())
+    let refused = match &router.serve_http(&app, long.request(), &incoming_1) {
         Ok(_) => return testing.assert(false, "a count past 10 was accepted"),
         Err(error) => error,
     }
@@ -83,7 +84,8 @@ test fn a_countdown_ends_with_liftoff() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/countdown/1", body: "").unwrap()
     let started = time.Instant.now()
-    let body = &router.serve_http(&app, sent.request()).unwrap().recorded_body().unwrap()
+    defer var incoming_2 = http.RequestBody.from_request(sent.request())
+    let body = &router.serve_http(&app, sent.request(), &incoming_2).unwrap().recorded_body().unwrap()
     let took = started.elapsed()
     testing.assert_eq(Str.from_bytes(body.as_slice()).unwrap(), "T-1\nliftoff\n", "the countdown changed")?
     testing.assert(took >= time.Duration.from_seconds(1), "the countdown did not pause for a second")?

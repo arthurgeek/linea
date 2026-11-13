@@ -14,7 +14,7 @@ struct App {
     seen: Vec[UInt64, mem.SystemAllocator],
 }
 
-fn count[P: Allocator](inout app: App, request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+fn count[P: Allocator](inout app: App, request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     app.visits += 1
     let _pushed = &app.seen.push(app.visits)
     http.text(request, "visit {app.visits}")
@@ -28,10 +28,12 @@ fn answer[H: http.Handler[(), mem.SystemAllocator]](inout server: H, target: Str
     let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", target, body: "").unwrap()
     var nothing = {}
-    match &server.serve_http(&nothing, sent.request()) {
+    var incoming_1 = http.RequestBody.from_request(sent.request())
+    match &server.serve_http(&nothing, sent.request(), &incoming_1) {
         Ok(response) => io.println(response.text().unwrap()).unwrap(),
         Err(_) => io.println("refused").unwrap(),
     }
+    incoming_1.release()
     arena.release()
 }
 
@@ -40,7 +42,7 @@ fn main() -> UInt8 {
     let counted = &router.route_raw("GET /count", count)
     // A route that only reads the state takes it `inout` like every route,
     // and a lambda passes it on to `visits`, which reads it.
-    let listed = &router.route_raw("GET /seen", |inout app, request| visits(app, request))
+    let listed = &router.route_raw("GET /seen", |inout app, request, inout _incoming| visits(app, request))
     var server = http.with_state(App { visits = 0, seen = Vec.new() }, router)
     answer(&server, "/count")
     answer(&server, "/count")

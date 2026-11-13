@@ -37,7 +37,7 @@ impl[P: Allocator] http.Extract[P] for Paging {
     }
 }
 
-fn list[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+fn list[P: Allocator](inout _: (), request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     let Paging { page, per_page } = request.extract[Paging]()?
     http.text(request, "page {page}, {per_page} a page")
 }
@@ -46,10 +46,12 @@ fn answer(inout router: http.Router[(), mem.SystemAllocator], target: Str) {
     let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", target, body: "").unwrap()
     var nothing = {}
-    match &router.serve_http(&nothing, sent.request()) {
+    var incoming_1 = http.RequestBody.from_request(sent.request())
+    match &router.serve_http(&nothing, sent.request(), &incoming_1) {
         Ok(response) => io.println(response.text().unwrap()).unwrap(),
         Err(error) => io.println("{error}").unwrap(),
     }
+    incoming_1.release()
     arena.release()
 }
 

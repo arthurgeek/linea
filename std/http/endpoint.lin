@@ -6,8 +6,9 @@ import std.testing
 // An `Endpoint` is a named function the router calls with what it asks for. Its
 // parameters name its inputs: an optional leading `inout state`, then up to six
 // extractors, each a type that implements `Extract` and `Release`, then the
-// `request` the answer is built in. The router reads each extractor from the
-// request in parameter order, and the first one that refuses answers the
+// `request` the answer is built in. With no extractors it also takes an
+// `inout body`; extracted endpoints receive a materialized request. The router
+// reads each extractor from the request in parameter order, and the first one that refuses answers the
 // request with its error; the extractors already read are released, last
 // first, on every exit. A function with no `inout state` is stateless and is
 // registered on a router of any state.
@@ -21,19 +22,20 @@ import std.testing
 // Each shape is one implementation, because a callable type is implemented for
 // by its parameters' conventions and count.
 pub trait Endpoint[S, P: Allocator] {
-    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]]
+    fn call(self: Self, inout state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(body), retains(body: body)
 }
 
 // A stateless function with 0 extractors.
-impl[S, P: Allocator] Endpoint[S, P] for fn(request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
-        self(request)
+impl[S, P: Allocator] Endpoint[S, P] for fn(request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(body), retains(body: body) {
+    fn call(self: Self, inout _state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        self(request, &body)
     }
 }
 
 // A stateless function with 1 extractor.
 impl[S, P: Allocator, A: Extract[P] + Release] Endpoint[S, P] for fn(a: A, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn call(self: Self, inout _state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        let request = &body.materialize(request)?
         defer let a = A.extract(request)?
         self(a, request)
     }
@@ -41,7 +43,8 @@ impl[S, P: Allocator, A: Extract[P] + Release] Endpoint[S, P] for fn(a: A, reque
 
 // A stateless function with 2 extractors.
 impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release] Endpoint[S, P] for fn(a: A, b: B, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn call(self: Self, inout _state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        let request = &body.materialize(request)?
         defer let a = A.extract(request)?
         defer let b = B.extract(request)?
         self(a, b, request)
@@ -50,7 +53,8 @@ impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release] Endpoint
 
 // A stateless function with 3 extractors.
 impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release] Endpoint[S, P] for fn(a: A, b: B, c: C, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn call(self: Self, inout _state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        let request = &body.materialize(request)?
         defer let a = A.extract(request)?
         defer let b = B.extract(request)?
         defer let c = C.extract(request)?
@@ -60,7 +64,8 @@ impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extra
 
 // A stateless function with 4 extractors.
 impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release, D: Extract[P] + Release] Endpoint[S, P] for fn(a: A, b: B, c: C, d: D, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn call(self: Self, inout _state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        let request = &body.materialize(request)?
         defer let a = A.extract(request)?
         defer let b = B.extract(request)?
         defer let c = C.extract(request)?
@@ -71,7 +76,8 @@ impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extra
 
 // A stateless function with 5 extractors.
 impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release, D: Extract[P] + Release, E: Extract[P] + Release] Endpoint[S, P] for fn(a: A, b: B, c: C, d: D, e: E, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn call(self: Self, inout _state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        let request = &body.materialize(request)?
         defer let a = A.extract(request)?
         defer let b = B.extract(request)?
         defer let c = C.extract(request)?
@@ -83,7 +89,8 @@ impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extra
 
 // A stateless function with 6 extractors.
 impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release, D: Extract[P] + Release, E: Extract[P] + Release, F: Extract[P] + Release] Endpoint[S, P] for fn(a: A, b: B, c: C, d: D, e: E, f: F, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn call(self: Self, inout _state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        let request = &body.materialize(request)?
         defer let a = A.extract(request)?
         defer let b = B.extract(request)?
         defer let c = C.extract(request)?
@@ -95,15 +102,16 @@ impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extra
 }
 
 // A stateful function with 0 extractors.
-impl[S, P: Allocator] Endpoint[S, P] for fn(inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
-        self(&state, request)
+impl[S, P: Allocator] Endpoint[S, P] for fn(inout state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(body), retains(body: body) {
+    fn call(self: Self, inout state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        self(&state, request, &body)
     }
 }
 
 // A stateful function with 1 extractor.
 impl[S, P: Allocator, A: Extract[P] + Release] Endpoint[S, P] for fn(inout state: S, a: A, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn call(self: Self, inout state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        let request = &body.materialize(request)?
         defer let a = A.extract(request)?
         self(&state, a, request)
     }
@@ -111,7 +119,8 @@ impl[S, P: Allocator, A: Extract[P] + Release] Endpoint[S, P] for fn(inout state
 
 // A stateful function with 2 extractors.
 impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release] Endpoint[S, P] for fn(inout state: S, a: A, b: B, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn call(self: Self, inout state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        let request = &body.materialize(request)?
         defer let a = A.extract(request)?
         defer let b = B.extract(request)?
         self(&state, a, b, request)
@@ -120,7 +129,8 @@ impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release] Endpoint
 
 // A stateful function with 3 extractors.
 impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release] Endpoint[S, P] for fn(inout state: S, a: A, b: B, c: C, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn call(self: Self, inout state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        let request = &body.materialize(request)?
         defer let a = A.extract(request)?
         defer let b = B.extract(request)?
         defer let c = C.extract(request)?
@@ -130,7 +140,8 @@ impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extra
 
 // A stateful function with 4 extractors.
 impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release, D: Extract[P] + Release] Endpoint[S, P] for fn(inout state: S, a: A, b: B, c: C, d: D, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn call(self: Self, inout state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        let request = &body.materialize(request)?
         defer let a = A.extract(request)?
         defer let b = B.extract(request)?
         defer let c = C.extract(request)?
@@ -141,7 +152,8 @@ impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extra
 
 // A stateful function with 5 extractors.
 impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release, D: Extract[P] + Release, E: Extract[P] + Release] Endpoint[S, P] for fn(inout state: S, a: A, b: B, c: C, d: D, e: E, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn call(self: Self, inout state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        let request = &body.materialize(request)?
         defer let a = A.extract(request)?
         defer let b = B.extract(request)?
         defer let c = C.extract(request)?
@@ -153,7 +165,8 @@ impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extra
 
 // A stateful function with 6 extractors.
 impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release, D: Extract[P] + Release, E: Extract[P] + Release, F: Extract[P] + Release] Endpoint[S, P] for fn(inout state: S, a: A, b: B, c: C, d: D, e: E, f: F, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
-    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+    fn call(self: Self, inout state: S, request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] {
+        let request = &body.materialize(request)?
         defer let a = A.extract(request)?
         defer let b = B.extract(request)?
         defer let c = C.extract(request)?
@@ -202,7 +215,8 @@ fn served_headed[S](inout router: Router[S], inout state: S, target: Str, header
         &sent.add_header(headers[at], headers[at + 1]).unwrap()
         at += 2
     }
-    let described = match &router.serve_http(&state, sent.request()) {
+    var request_body1 = RequestBody.from_request(sent.request())
+    let described = match &router.serve_http(&state, sent.request(), &request_body1) {
         Ok(response) => {
             let code = response.status().code()
             let body = response.text().unwrap()
@@ -214,11 +228,12 @@ fn served_headed[S](inout router: Router[S], inout state: S, target: Str, header
             fmt.render_owned("{code} {message}").unwrap()
         },
     }
+    request_body1.release()
     arena.release()
     described
 }
 
-fn stateless_0(request: ProbeRequest) -> ProbeAnswer {
+fn stateless_0(request: ProbeRequest, inout _body: RequestBody) -> ProbeAnswer where carries(request), borrows(_body), retains(_body: _body) {
     text(request, "0:")
 }
 
@@ -246,7 +261,7 @@ fn stateless_6(a: Word, b: Word, c: Word, d: Word, e: Word, f: Word, request: Pr
     text(request, "6:{a.text}{b.text}{c.text}{d.text}{e.text}{f.text}")
 }
 
-fn stateful_0(inout calls_seen: CallCount, request: ProbeRequest) -> ProbeAnswer {
+fn stateful_0(inout calls_seen: CallCount, request: ProbeRequest, inout _body: RequestBody) -> ProbeAnswer where carries(request), borrows(_body), retains(_body: _body) {
     calls_seen.calls += 1
     text(request, "0:{calls_seen.calls}")
 }
@@ -672,11 +687,32 @@ test fn the_library_extractors_and_a_type_that_reads_itself_are_arguments() {
     var sent = new_request(arena.handle(), "POST", "/orders/7?page=2", body: r#"{"quantity":3}"#).unwrap()
     &sent.add_header("Content-Type", "application/json").unwrap()
     var nothing = ()
-    let described = match &router.serve_http(&nothing, sent.request()) {
+    var request_body2 = RequestBody.from_request(sent.request())
+    let described = match &router.serve_http(&nothing, sent.request(), &request_body2) {
         Ok(response) => response.text().unwrap() == "order 7 page 2 of 3",
         Err(_) => false,
     }
+    request_body2.release()
     arena.release()
     testing.assert(described, "a path, a query and a body were not read into the arguments")?
+    .Ok(())
+}
+
+fn echo_stream(request: ProbeRequest, inout body: RequestBody) -> ProbeAnswer where carries(request), borrows(body), retains(body: body) {
+    let input = &body.text(request)?
+    text(request, input)
+}
+
+test fn an_endpoint_receives_the_same_body_through_a_stated_router() {
+    var router = Router.new()
+    &router.route("POST /echo", echo_stream).unwrap()
+    defer var handler = with_state((), router)
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = new_request(arena.handle(), "POST", "/echo", body: "").unwrap()
+    defer var body = RequestBody.from_slice("streamed".as_bytes(), arena.handle())
+    var state = ()
+    let response = &handler.serve_http(&state, sent.request(), &body).unwrap()
+    testing.assert_ok_eq(response.text(), "streamed", "the endpoint did not receive the body")?
+    testing.assert_eq(body.remaining_bytes(), UInt64(0), "the endpoint read a separate body")?
     .Ok(())
 }

@@ -96,15 +96,31 @@ struct RequestLine {
     is_http_11: Bool,
 }
 
+// A `ParsedHead` holds a request's head read from the input: the request line,
+// headers and the canonical body length.
+struct ParsedHead[P: Allocator = mem.SystemAllocator] {
+    head: String[mem.Handle[P]],
+    line: RequestLine,
+    header_fields: Vec[Field, mem.Handle[P]],
+    length: Option[UInt64],
+}
+
+// Read one request head into `memory`: the request line and headers up to an
+// empty line, bounded by `limits`.
+fn read_request_head[R: io.Reader, A: Allocator, P: Allocator](inout reader: io.BufferedReader[R, A], memory: mem.Handle[P], limits: Limits) -> Result[ParsedHead[P], RequestError] where R.Error: Into[io.IoError], carries(.Ok: memory), retains(reader: reader) {
+    var head = String.new_in(memory)
+    let line = read_request_line(&reader, &head, limits)?
+    var header_fields: Vec[Field, mem.Handle[P]] = Vec.new_in(memory)
+    let length = read_headers(&reader, &head, &header_fields, line.is_http_11, limits)?
+    .Ok(.{ head, line, header_fields, length })
+}
+
 // Read one request into `memory`: the request line, headers up to an empty
 // line, and a body of exactly `Content-Length` bytes, each bounded by
 // `limits`. A line ends in CRLF or a bare LF. Every refusal names the status
 // that answers it; an input failure is `Io`, so a read timeout answers 408.
 fn read_request[R: io.Reader, P: Allocator](inout reader: io.BufferedReader[R, mem.Handle[P]], memory: mem.Handle[P], limits: Limits) -> Result[Message[P], RequestError] where R.Error: Into[io.IoError], carries(.Ok: memory), retains(reader: reader) {
-    var head = String.new_in(memory)
-    let line = read_request_line(&reader, &head, limits)?
-    var header_fields: Vec[Field, mem.Handle[P]] = Vec.new_in(memory)
-    let length = read_headers(&reader, &head, &header_fields, line.is_http_11, limits)?
+    let ParsedHead { head, line, header_fields, length } = read_request_head(&reader, memory, limits)?
     let payload = read_body(&reader, memory, length, limits)?
     assembled(memory, head, line, header_fields, payload, limits)
 }
@@ -191,16 +207,16 @@ test fn each_limit_answers_its_status_at_one_past_the_bound() {
 test fn a_read_timeout_answers_408() {
     let timeout = io.IoError { operation = .Read, category = .TimedOut, code = .None, progress = 0 }
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let silent = Fragments { bytes = "".as_bytes(), position = 0, step = 4, failure = .Some(copy(timeout)) }
-    var idle_reader = io.BufferedReader.open_in(arena.handle(), capacity: 16, reader: silent).unwrap()
-    let idle_outcome = read_request(&idle_reader, arena.handle(), Limits.default())
-    let _silent = idle_reader.abandon()
-    let idle_error = match idle_outcome {
-        Ok(_) => return testing.assert(false, "an idle connection that timed out was accepted"),
+    let unstarted = Fragments { bytes = "".as_bytes(), position = 0, step = 4, failure = .Some(copy(timeout)) }
+    var queued_reader = io.BufferedReader.open_in(arena.handle(), capacity: 16, reader: unstarted).unwrap()
+    let queued_outcome = read_request(&queued_reader, arena.handle(), Limits.default())
+    let _unstarted = queued_reader.abandon()
+    let queued_error = match queued_outcome {
+        Ok(_) => return testing.assert(false, "an unread request that timed out was accepted"),
         Err(error) => error,
     }
-    testing.assert_eq(idle_error, RequestError.Closed, "a timeout before the first byte was not Closed")?
-    testing.assert_eq(idle_error.status(), .None, "a timeout before the first byte was answered")?
+    testing.assert_eq(queued_error, RequestError.Io(copy(timeout)), "a timeout before the first read lost its cause")?
+    testing.assert_eq(queued_error.status(), Option.Some(Status.RequestTimeout), "an unread request timeout did not answer 408")?
     let input = "GET / HTTP/1.1\r\n"
     let source = Fragments { bytes = input.as_bytes(), position = 0, step = 4, failure = .Some(copy(timeout)) }
     var reader = io.BufferedReader.open_in(arena.handle(), capacity: 16, reader: source).unwrap()
@@ -237,6 +253,7 @@ test fn content_length_must_be_digits_and_agree() {
     testing.assert_ok_eq(body, "hello", "agreeing lengths lost the body")?
     // Twenty-one digits exceed UInt64, so the length is past every limit.
     testing.assert_eq(refusal("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 100000000000000000000\r\n\r\n", 6, Limits.default()), Option.Some(RequestError.Status(.ContentTooLarge)), "an overflowing length")?
+    testing.assert_eq(refusal("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 20\r\n\r\n", 6, Limits { max_body_bytes = 16, ..Limits.default() }), Option.Some(RequestError.Status(.ContentTooLarge)), "a length past max_body_bytes")?
     .Ok(())
 }
 
@@ -316,7 +333,7 @@ test fn http_11_host_header_is_strictly_enforced() {
 // `read_request_line` reads `METHOD SP target SP version` and splits it on
 // single spaces into exactly three parts. A connection that ends before the
 // line's first byte is `Closed`.
-fn read_request_line[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], inout stored: String[A], limits: Limits) -> Result[RequestLine, RequestError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
+fn read_request_line[R: io.Reader, A: Allocator, B: Allocator](inout reader: io.BufferedReader[R, A], inout stored: String[B], limits: Limits) -> Result[RequestLine, RequestError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
     let line_read = &reader.read_raw_line_borrowed(limits.max_line_bytes) else |error| {
         return .Err(line_failure(error, .UriTooLong))
     }
@@ -412,7 +429,7 @@ fn body_length(tally: HeaderTally) -> Result[Option[UInt64], RequestError] {
 // Read `name: value` lines up to an empty line and answer the body's length:
 // `.None` when no `Content-Length` was sent. An HTTP/1.1 request requires
 // exactly one `Host` header; an HTTP/1.0 request permits zero or one.
-fn read_headers[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], inout stored: String[A], inout header_fields: Vec[Field, A], is_http_11: Bool, limits: Limits) -> Result[Option[UInt64], RequestError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
+fn read_headers[R: io.Reader, A: Allocator, B: Allocator](inout reader: io.BufferedReader[R, A], inout stored: String[B], inout header_fields: Vec[Field, B], is_http_11: Bool, limits: Limits) -> Result[Option[UInt64], RequestError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
     var tally = no_headers
     loop {
         let line_read = &reader.read_raw_line_borrowed(limits.max_line_bytes) else |error| {
@@ -434,11 +451,18 @@ fn read_headers[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A
     if is_http_11 && tally.host_count != 1 {
         return .Err(.Status(.BadRequest))
     }
-    body_length(tally)
+    let length = body_length(tally)?
+    match read length {
+        Some(count) => if count > limits.max_body_bytes {
+            return .Err(.Status(.ContentTooLarge))
+        },
+        None => {},
+    }
+    .Ok(length)
 }
 
 // Refuse a length that is not decimal digits or disagrees with an earlier one.
-// A length too large for UInt64 exceeds every body limit.
+// A length too large for UInt64 or past `limits.max_body_bytes` exceeds the body limit.
 fn content_length(value: Str, earlier: Option[UInt64]) -> Result[UInt64, RequestError] {
     if value.length() == 0 {
         return .Err(.Status(.BadRequest))
@@ -465,7 +489,7 @@ fn content_length(value: Str, earlier: Option[UInt64]) -> Result[UInt64, Request
 
 // Read a body of exactly `length` bytes, or none when no length was sent. A
 // length past the limit answers 413, and a connection that ends early 400.
-fn read_body[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], allocator: A, length: Option[UInt64], limits: Limits) -> Result[Vec[UInt8, A], RequestError] where R.Error: Into[io.IoError], carries(.Ok: allocator) {
+fn read_body[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], allocator: A, length: Option[UInt64], limits: Limits) -> Result[Vec[UInt8, A], RequestError] where R.Error: Into[io.IoError], carries(.Ok: allocator), retains(reader: reader) {
     let count = match read length {
         Some(count) => count,
         None => return .Ok(Vec.new_in(allocator)),
@@ -500,13 +524,10 @@ fn line_failure[E: Into[io.IoError]](sink error: io.LineError[E], limit_status: 
 
 // A failed read of the connection is `Io`, holding the connection's own error
 // with `progress` counting every byte of the request read before it failed.
-// A read that timed out before the first byte arrived is `Closed`, as a
-// connection the client closed before sending a byte is.
+// A ready request may expire in the worker queue before its first read. Only
+// the dispatcher can distinguish first-byte silence from that request timeout.
 fn input_failure[E: Into[io.IoError]](sink failure { reason, stream_offset }: InputFailure[E]) -> RequestError {
     let error: io.IoError = reason.into()
-    if stream_offset == 0 && error.progress == 0 && error.category == .TimedOut {
-        return .Closed
-    }
     .Io(io.IoError { progress = stream_offset + error.progress, ..error })
 }
 
@@ -681,4 +702,21 @@ fn refusal(input: Str, step: UInt64, limits: Limits) -> Option[RequestError] {
     }
     arena.release()
     refused
+}
+
+test fn a_head_is_read_without_waiting_for_its_body() {
+    defer let arena = mem.Arena.open(mem.system(), 8192)
+    let input = "POST /upload HTTP/1.1\r\nHost: a\r\nContent-Length: 5000\r\n\r\n"
+    let source = Fragments { bytes = input.as_bytes(), position = 0, step = 7, failure = .None }
+    var reader = io.BufferedReader.open(capacity: 16, reader: source).unwrap()
+    let head = read_request_head(&reader, arena.handle(), Limits.default()).unwrap()
+    let _source = reader.abandon()
+    testing.assert_eq(head.length, Option.Some(UInt64(5000)), "head parsing read the body")?
+    .Ok(())
+}
+
+test fn ambiguous_framing_is_rejected_before_the_body_size() {
+    let limits = Limits { max_body_bytes = 4, ..Limits.default() }
+    let input = "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n"
+    testing.assert_eq(refusal(input, 6, limits), Option.Some(RequestError.Status(.BadRequest)), "ambiguous framing was classified as a body limit")
 }

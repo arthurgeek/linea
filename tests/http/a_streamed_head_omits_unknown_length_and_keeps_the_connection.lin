@@ -1,0 +1,37 @@
+import std.http
+import std.io
+import std.net
+import std.testing
+
+@derive(Release)
+struct Handler {}
+
+fn produce[P: Allocator](inout body: http.BodyWriter[P]) -> Result[(), http.Error[P]] {
+    "nonempty stream".fmt(&body)?
+    .Ok(())
+}
+
+impl[P: Allocator] http.Handler[(), P] for Handler {
+    fn serve_http(inout _self: Self, inout _state: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] {
+        http.stream(request, produce)
+    }
+}
+
+fn handler() -> Handler {
+    .{}
+}
+
+fn main() -> UInt8 {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    var client = net.connect(listener.local_address().unwrap()).unwrap()
+    let wire = "HEAD / HTTP/1.1\r\nHost: loopback\r\n\r\nGET / HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\n\r\n"
+    let _sent = io.write_all(&client, wire.as_bytes()).unwrap()
+    let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
+    http.serve(listener, handler, limits, policy: .Sequential, shutdown: .Manual).unwrap()
+    defer let text = io.read_text(&client, max_bytes: 4096).unwrap()
+    client.close().unwrap()
+    let expected = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nnonempty stream"
+    testing.assert_eq(text.view(), expected, "the streamed HEAD did not preserve its following GET").unwrap()
+    io.println("streamed HEAD has no length").unwrap()
+    0
+}

@@ -20,7 +20,7 @@ import std.testing
 import std.uuid
 
 // `use` brings a trait's operations into scope, so a test can call
-// `&router.serve_http(&ctx, request)` on a router directly.
+// `&router.serve_http(&ctx, request, &incoming)` on a router directly.
 use http.Handler
 use mem.Lender
 
@@ -168,13 +168,13 @@ struct Stats {
 
 // `stats` reads the count `echo` keeps in the shared state. The call answers
 // the count, a copy the owning task hands back.
-fn stats(inout ctx: Ctx, request: http.Request) -> Result[http.Response, http.Error] {
+fn stats(inout ctx: Ctx, request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     let echoed = ctx.app.call(|inout app: App| app.echoed)
     http.json(request, Stats { echoed })
 }
 
 // `health` does not use the state, so it does not ask for it.
-fn health(request: http.Request) -> Result[http.Response, http.Error] {
+fn health(request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     http.text(request, "ok")
 }
 
@@ -225,7 +225,8 @@ test fn echo_answers_the_caller_with_their_text() {
     let sent = sent_by(arena.handle(), "Bearer ada", r#"{"text":"hello"}"#)
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    let response = &router.serve_http(&ctx, sent.request()).unwrap()
+    defer var incoming_1 = http.RequestBody.from_request(sent.request())
+    let response = &router.serve_http(&ctx, sent.request(), &incoming_1).unwrap()
     testing.assert_eq(response.header("Content-Type"), Option.Some("application/json"), "the content type changed")?
     testing.assert_ok_eq(response.text(), r#"{"to":"ada","echo":"hello"}"#, "the echo changed")?
     testing.assert_eq(ctx.app.call(|inout app: App| app.echoed), 1, "the echo was not counted")?
@@ -242,10 +243,12 @@ test fn echo_reads_the_caller_from_a_bearer_header() {
     let unnamed = sent_by(arena.handle(), "Bearer ", r#"{"text":"hi"}"#)
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    let answered = &router.serve_http(&ctx, folded.request()).unwrap()
+    defer var incoming_2 = http.RequestBody.from_request(folded.request())
+    let answered = &router.serve_http(&ctx, folded.request(), &incoming_2).unwrap()
     testing.assert_ok_eq(answered.text(), r#"{"to":"alan","echo":"hi"}"#, "a folded scheme was not read")?
     for sent in [basic, unnamed] {
-        let refused = match &router.serve_http(&ctx, sent.request()) {
+        defer var incoming_3 = http.RequestBody.from_request(sent.request())
+        let refused = match &router.serve_http(&ctx, sent.request(), &incoming_3) {
             Ok(_) => return testing.assert(false, "a request naming no caller was answered"),
             Err(error) => error,
         }
@@ -261,7 +264,8 @@ test fn echo_refuses_a_body_that_is_not_json() {
     let sent = sent_by(arena.handle(), "Bearer ada", "hello")
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    let refused = match &router.serve_http(&ctx, sent.request()) {
+    defer var incoming_4 = http.RequestBody.from_request(sent.request())
+    let refused = match &router.serve_http(&ctx, sent.request(), &incoming_4) {
         Ok(_) => return testing.assert(false, "a body that is not JSON was accepted"),
         Err(error) => error,
     }
@@ -279,14 +283,16 @@ test fn echo_names_the_field_a_message_gets_wrong() {
     let untold = sent_by(arena.handle(), "Bearer ada", r"{}")
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    let missing = match &router.serve_http(&ctx, untold.request()) {
+    defer var incoming_5 = http.RequestBody.from_request(untold.request())
+    let missing = match &router.serve_http(&ctx, untold.request(), &incoming_5) {
         Ok(_) => return testing.assert(false, "a message without text was accepted"),
         Err(error) => error,
     }
     testing.assert_eq(missing.status(), http.Status.UnprocessableContent, "the status changed")?
     testing.assert_eq(missing.message(), Option.Some(r#"missing field at $["text"]"#), "the missing field changed")?
     let counted = sent_by(arena.handle(), "Bearer ada", r#"{"text":3}"#)
-    let wrong = match &router.serve_http(&ctx, counted.request()) {
+    defer var incoming_6 = http.RequestBody.from_request(counted.request())
+    let wrong = match &router.serve_http(&ctx, counted.request(), &incoming_6) {
         Ok(_) => return testing.assert(false, "a number was accepted as text"),
         Err(error) => error,
     }
@@ -308,7 +314,8 @@ test fn echo_answers_500_when_the_arena_cannot_hold_the_message() {
     let sent = sent_by(arena.handle(), "Bearer ada", body.view())
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    let refused = match &router.serve_http(&ctx, sent.request()) {
+    defer var incoming_7 = http.RequestBody.from_request(sent.request())
+    let refused = match &router.serve_http(&ctx, sent.request(), &incoming_7) {
         Ok(_) => return testing.assert(false, "a message the arena could not hold was answered"),
         Err(error) => error,
     }
@@ -339,7 +346,8 @@ test fn echo_answers_the_largest_messages_the_default_limits_allow() {
     var ctx = quiet(shared.client())
     defer let arena = mem.Arena.open(mem.system(), size: limits.request_arena_bytes)
     let long = sent_by(arena.handle(), "Bearer ada", text.view())
-    let answered = match &router.serve_http(&ctx, long.request()) {
+    defer var incoming_8 = http.RequestBody.from_request(long.request())
+    let answered = match &router.serve_http(&ctx, long.request(), &incoming_8) {
         Ok(response) => response,
         Err(error) => {
             return testing.assert_eq(error.status(), http.Status.Ok, "the longest message was refused")
@@ -349,7 +357,8 @@ test fn echo_answers_the_largest_messages_the_default_limits_allow() {
     // Each request is served from an arena of its own.
     defer let second = mem.Arena.open(mem.system(), size: limits.request_arena_bytes)
     let padded = sent_by(second.handle(), "Bearer ada", values.view())
-    let refused = match &router.serve_http(&ctx, padded.request()) {
+    defer var incoming_9 = http.RequestBody.from_request(padded.request())
+    let refused = match &router.serve_http(&ctx, padded.request(), &incoming_9) {
         Ok(_) => return testing.assert(false, "a document with an unknown field was accepted"),
         Err(error) => error,
     }
@@ -368,10 +377,12 @@ test fn each_response_carries_its_request_id() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     var traced = http.new_request(arena.handle(), "GET", "/health", body: "").unwrap()
     &traced.add_header("X-Request-Id", "checkout-7").unwrap()
-    let traced_answer = &identified.serve_http(&ctx, traced.request()).unwrap()
+    defer var incoming_10 = http.RequestBody.from_request(traced.request())
+    let traced_answer = &identified.serve_http(&ctx, traced.request(), &incoming_10).unwrap()
     testing.assert_eq(traced_answer.header("X-Request-Id"), Option.Some("checkout-7"), "the client's id was not kept")?
     let fresh = http.new_request(arena.handle(), "GET", "/health", body: "").unwrap()
-    let fresh_answer = &identified.serve_http(&ctx, fresh.request()).unwrap()
+    defer var incoming_11 = http.RequestBody.from_request(fresh.request())
+    let fresh_answer = &identified.serve_http(&ctx, fresh.request(), &incoming_11).unwrap()
     let made = uuid.Uuid.parse(fresh_answer.header("X-Request-Id").unwrap())
     testing.assert(made.is_ok(), "a request with no id was not given a UUID")?
 }
@@ -385,7 +396,8 @@ test fn greet_escapes_the_name_as_a_json_string() {
     var ctx = quiet(shared.client())
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/greet/say%22hi%22", body: "").unwrap()
-    let response = &router.serve_http(&ctx, sent.request()).unwrap()
+    defer var incoming_12 = http.RequestBody.from_request(sent.request())
+    let response = &router.serve_http(&ctx, sent.request(), &incoming_12).unwrap()
     testing.assert_ok_eq(response.text(), r#"{"hello":"say\"hi\""}"#, "the greeting changed")?
 }
 
@@ -398,10 +410,12 @@ test fn signup_reads_a_form_by_field_name() {
     var ctx = quiet(shared.client())
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "POST", "/signup", body: "name=Ada+L%C3%B3pez&age=30", content_type: "application/x-www-form-urlencoded").unwrap()
-    let response = &router.serve_http(&ctx, sent.request()).unwrap()
+    defer var incoming_13 = http.RequestBody.from_request(sent.request())
+    let response = &router.serve_http(&ctx, sent.request(), &incoming_13).unwrap()
     testing.assert_ok_eq(response.text(), r#"{"signed_up":"Ada López","age":30}"#, "the signup changed")?
     let json_sent = http.new_request(arena.handle(), "POST", "/signup", body: r#"{"name":"Ada"}"#, content_type: "application/json").unwrap()
-    let refused = match &router.serve_http(&ctx, json_sent.request()) {
+    defer var incoming_14 = http.RequestBody.from_request(json_sent.request())
+    let refused = match &router.serve_http(&ctx, json_sent.request(), &incoming_14) {
         Ok(_) => return testing.assert(false, "a JSON body was read as a form"),
         Err(error) => error,
     }
@@ -418,10 +432,12 @@ test fn stats_counts_the_messages_echoed() {
     var nothing = ()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let message = sent_by(arena.handle(), "Bearer ada", r#"{"text":"hello"}"#)
-    let echoed = &server.serve_http(&nothing, message.request()).unwrap()
+    defer var incoming_15 = http.RequestBody.from_request(message.request())
+    let echoed = &server.serve_http(&nothing, message.request(), &incoming_15).unwrap()
     testing.assert_ok_eq(echoed.text(), r#"{"to":"ada","echo":"hello"}"#, "the echo changed")?
     let asked = http.new_request(arena.handle(), "GET", "/stats", body: "").unwrap()
-    let stats = &server.serve_http(&nothing, asked.request()).unwrap()
+    defer var incoming_16 = http.RequestBody.from_request(asked.request())
+    let stats = &server.serve_http(&nothing, asked.request(), &incoming_16).unwrap()
     testing.assert_ok_eq(stats.text(), r#"{"echoed":1}"#, "the stats changed")?
     testing.assert_eq(server.state().app.call(|inout app: App| app.echoed), 1, "the state did not keep the count")?
 }

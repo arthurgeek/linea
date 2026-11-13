@@ -466,9 +466,9 @@ impl[P: Allocator] Response[P] {
         let BodyWriter { output, answering: _, failure: _, in_body: _, body_bytes: _, framing: _ } = body
         let bytes = match output {
             Recorded(bytes) => bytes,
-            Connection(writer) => {
-                let _closed = writer.abort().close()
-                panic("a recording wrote to a connection")
+            Borrowed(writer) => {
+                let _writer = writer.abort()
+                panic("a recording wrote to a borrowed connection")
             },
             Standard(_) => panic("a recording wrote to standard output"),
             Taken => panic("a body's output was not put back"),
@@ -516,6 +516,8 @@ struct BodyWriter[P: Allocator = mem.SystemAllocator] {
 @copyable
 enum Framing {
     Http,
+    KeepAlive(UInt64),
+    Head,
     Cgi,
 }
 
@@ -524,7 +526,7 @@ enum Framing {
 // request's arena. A write takes the output out, leaving `Taken` in its place,
 // and puts it back through `put_output`.
 enum Output[P: Allocator] {
-    Connection(io.BufferedWriter[net.Connection, mem.Handle[P]]),
+    Borrowed(io.BufferedWriter[net.ConnectionWriter, mem.Handle[P]]),
     Standard(io.BufferedWriter[io.Descriptor, mem.Handle[P]]),
     Recorded(Vec[UInt8, mem.Handle[P]]),
     Taken,
@@ -536,8 +538,8 @@ enum Output[P: Allocator] {
 fn put_output[P: Allocator](inout slot: Output[P], sink next: Output[P]) where retains(slot: next) {
     match mem.exchange(&slot, next) {
         Taken => {},
-        Connection(writer) => {
-            let _closed = writer.abort().close()
+        Borrowed(writer) => {
+            let _writer = writer.abort()
             panic("a body's output was put back twice")
         },
         Standard(_) => panic("a body's output was put back twice"),
@@ -552,7 +554,7 @@ impl[P: Allocator] io.ByteWriter for Output[P] {
 
     fn pending_bytes(self: Self) -> UInt64 {
         match read self {
-            Connection(writer) => writer.pending_bytes(),
+            Borrowed(writer) => writer.pending_bytes(),
             Standard(writer) => writer.pending_bytes(),
             Recorded(_) => 0,
             Taken => 0,
@@ -561,10 +563,10 @@ impl[P: Allocator] io.ByteWriter for Output[P] {
 
     fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, WriteFailure[io.IoError]] where carries() {
         match mem.exchange(&self, .Taken) {
-            Connection(buffered) => {
+            Borrowed(buffered) => {
                 var writer = buffered
                 let written = &writer.write_some(bytes)
-                put_output(&self, .Connection(writer))
+                put_output(&self, .Borrowed(writer))
                 written
             },
             Standard(buffered) => {
@@ -585,10 +587,10 @@ impl[P: Allocator] io.ByteWriter for Output[P] {
 
     fn flush(inout self: Self) -> Result[UInt64, WriteFailure[io.IoError]] where carries() {
         match mem.exchange(&self, .Taken) {
-            Connection(buffered) => {
+            Borrowed(buffered) => {
                 var writer = buffered
                 let flushed = &writer.flush()
-                put_output(&self, .Connection(writer))
+                put_output(&self, .Borrowed(writer))
                 flushed
             },
             Standard(buffered) => {
@@ -618,35 +620,42 @@ impl[P: Allocator] BodyWriter[P] {
         .Ok(())
     }
 
-    // Buffer the writing of a response to `connection`, which answers
-    // `request`, in the request's arena. A refused buffer returns the
-    // connection.
-    fn open(sink connection: net.Connection, request: Request[P]) -> Result[BodyWriter[P], io.BufferOpenFailure[net.Connection]] where carries(.Ok: request), carries(.Err.resource: connection) {
-        let output = io.BufferedWriter.open_in(request.allocator(), capacity: response_buffer_bytes, writer: connection)?
-        .Ok(.{ output = .Connection(output), answering = copy(request), failure = .None, in_body = false, body_bytes = 0, framing = .Http })
+    // Buffer a response without taking ownership of the input connection.
+    fn open_borrowed(sink bytes: mem.Buffer[mem.Handle[P]], sink writer: net.ConnectionWriter, request: Request[P], keep_alive: Bool) -> BodyWriter[P] where carries(bytes, writer, request) {
+        let output = io.BufferedWriter.with_buffer(bytes, writer)
+        let framing: Framing = if keep_alive {
+            .KeepAlive(0)
+        } else {
+            .Http
+        }
+        .{ output = .Borrowed(output), answering = copy(request), failure = .None, in_body = false, body_bytes = 0, framing }
     }
 
-    // Send what is buffered and return the connection, which the caller
-    // closes. A write that failed earlier is reported rather than repeated.
-    fn finish(sink self: Self) -> Result[net.Connection, ResponseFailure] {
-        let BodyWriter { output: target, answering: _, failure, in_body: _, body_bytes: _, framing: _ } = self
-        let output = connection_of(target)
+    fn finish_borrowed(sink self: Self) -> Result[(), io.IoError] {
+        let BodyWriter { output, answering: _, failure, in_body: _, body_bytes: _, framing: _ } = self
+        let writer = borrowed_of(output)
         match failure {
-            Some(error) => .Err(.{ connection = output.abort(), error }),
-            None => match output.finish() {
-                Ok(connection) => .Ok(connection),
+            Some(error) => {
+                let _writer = writer.abort()
+                .Err(error)
+            },
+            None => match writer.finish() {
+                Ok(_) => .Ok(()),
                 Err(FinishFailure { writer, failure }) => {
-                    return .Err(.{ connection = writer.abort(), error = failure.into() })
+                    let _writer = writer.abort()
+                    .Err(failure.into())
                 },
             },
         }
     }
 
-    // Drop what is buffered and return the connection, which the caller
-    // resets so the client sees the body was cut short.
-    fn abandon(sink self: Self) -> net.Connection {
+    fn abandon_borrowed(sink self: Self) {
         let BodyWriter { output, answering: _, failure: _, in_body: _, body_bytes: _, framing: _ } = self
-        connection_of(output).abort()
+        let _writer = borrowed_of(output).abort()
+    }
+
+    fn keeps_alive(self: Self) -> Bool {
+        match read self.framing { KeepAlive(_) => true, Head => true, _ => false }
     }
 
     // Record a failed write; every later write reports the same error.
@@ -655,14 +664,11 @@ impl[P: Allocator] BodyWriter[P] {
     }
 }
 
-// `connection_of` returns the buffered connection a body is written to; only
-// `serve` finishes or abandons a body this way, and its bodies write to a
-// connection.
-fn connection_of[P: Allocator](sink output: Output[P]) -> io.BufferedWriter[net.Connection, mem.Handle[P]] where carries(output) {
+fn borrowed_of[P: Allocator](sink output: Output[P]) -> io.BufferedWriter[net.ConnectionWriter, mem.Handle[P]] where carries(output) {
     match output {
-        Connection(writer) => writer,
-        Standard(_) => panic("a CGI body has no connection"),
-        Recorded(_) => panic("a recorded body has no connection"),
+        Borrowed(writer) => writer,
+        Standard(_) => panic("a CGI body is not borrowed"),
+        Recorded(_) => panic("a recorded body is not borrowed"),
         Taken => panic("a body's output was not put back"),
     }
 }
@@ -675,14 +681,6 @@ fn record[P: Allocator](inout recorded: Vec[UInt8, mem.Handle[P]], bytes: mem.Sl
         return .Err(.{ kind = .Underlying, reason = .Some(exhausted), written = 0 })
     }
     .Ok(bytes.length())
-}
-
-// A `ResponseFailure` hands back a connection whose response could not be
-// delivered, which is still owed a close.
-@linear
-struct ResponseFailure {
-    connection: net.Connection,
-    error: io.IoError,
 }
 
 impl[P: Allocator] io.ByteWriter for BodyWriter[P] {
@@ -747,21 +745,17 @@ test fn a_failed_write_is_reported_by_every_later_write() {
     &server.shutdown_write().unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 16384)
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var body = BodyWriter.open(server, sent.request()).unwrap()
+    let reserved = sent.request().allocator().acquire(response_buffer_bytes).unwrap()
+    var body = BodyWriter.open_borrowed(reserved, server.writer(), sent.request(), keep_alive: false)
     // A chunk larger than the buffer is sent before the write returns.
     defer let chunk = Vec.filled(response_buffer_bytes + 1, UInt8(120)).unwrap()
     let failed = &body.write_str(Str.from_bytes(chunk.as_slice()).unwrap())
     let later = &body.write_str("y")
-    let reported: Option[io.IoError] = match body.finish() {
-        Ok(connection) => {
-            connection.close().unwrap()
-            Option.None
-        },
-        Err(ResponseFailure { connection, error }) => {
-            let _closed = connection.close()
-            Option.Some(error)
-        },
+    let reported: Option[io.IoError] = match body.finish_borrowed() {
+        Ok(_) => .None,
+        Err(error) => .Some(error),
     }
+    let _closed = server.close()
     client.close().unwrap()
     listener.close().unwrap()
     // EPIPE is 32 on Linux and macOS alike. The first write filled the
@@ -783,11 +777,29 @@ enum WriteError[P: Allocator] {
     Stream(Error[P]),
 }
 
-// Write a handler's `response` to `body`: the status line, `Connection:
-// close`, the headers in order, a plain-text `Content-Type` when they name
-// none, and the body. For a HEAD request the head is written alone.
+// Write a handler's response with the connection framing chosen by the server,
+// the headers in order, a plain-text Content-Type when they name none, and the
+// body. An unknown-length streamed body closes its connection; a HEAD request
+// writes only the head and may keep its connection without a length.
 fn write_response[P: Allocator](inout body: BodyWriter[P], sink response { answer, headers, content }: Response[P], head_only: Bool) -> Result[(), WriteError[P]] where carries(.Err: body, response), retains(body: response) {
-    let framing = body.framing
+    let framing: Framing = match read body.framing {
+        KeepAlive(_) => if head_only || answer.is_bodyless() {
+            match read content {
+                Held(bytes) => .KeepAlive(bytes.length()),
+                Streamed(_) => if head_only {
+                    .Head
+                } else {
+                    .KeepAlive(0)
+                },
+            }
+        } else {
+            match read content { Held(bytes) => .KeepAlive(bytes.length()), Streamed(_) => .Http }
+        },
+        Http => .Http,
+        Head => .Head,
+        Cgi => .Cgi,
+    }
+    body.framing = copy(framing)
     let _written = write_head(&body, answer, headers, framing) else |failure| {
         return .Err(.Io(failure.into()))
     }
@@ -872,10 +884,11 @@ test fn a_streamed_body_may_exceed_the_arena() {
     // The message and the 4 KiB buffer fill most of this 8 KiB arena.
     let arena = mem.Arena.open(mem.system(), size: 8192)
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var body = BodyWriter.open(connection, sent.request()).unwrap()
+    let reserved = sent.request().allocator().acquire(response_buffer_bytes).unwrap()
+    var body = BodyWriter.open_borrowed(reserved, connection.writer(), sent.request(), keep_alive: false)
     let streamed = write_response(&body, stream(sent.request(), a_thousand_lines).unwrap(), head_only: false).is_ok()
-    let server = body.finish().unwrap()
-    server.close().unwrap()
+    body.finish_borrowed().unwrap()
+    connection.close().unwrap()
     arena.release()
     var reader = client
     let bytes = io.read_all(&reader, max_bytes: 65536).unwrap()
@@ -901,7 +914,12 @@ test fn a_stream_that_fails_stops_where_it_stands() {
 // with a newline as a plain-text body. For a HEAD request the head is written
 // alone.
 fn write_error[P: Allocator](inout body: BodyWriter[P], error: Error[P], head_only: Bool) -> Result[(), WriteError[P]] where carries() {
-    let framing = body.framing
+    let framing: Framing = match read body.framing {
+        KeepAlive(_) => .KeepAlive(error.message().unwrap_or(error.status().reason()).length() + 1),
+        Http => .Http,
+        Head => .Head,
+        Cgi => .Cgi,
+    }
     let head = match read error.headers {
         Some(headers) => write_head(&body, error.status(), headers, framing),
         None => {
@@ -950,6 +968,8 @@ fn write_head[W: io.ByteWriter, A: Allocator](inout writer: W, status: Status, h
     var written: UInt64 = 0
     match read framing {
         Http => put(&writer, &written, "HTTP/1.1 ")?,
+        KeepAlive(_) => put(&writer, &written, "HTTP/1.1 ")?,
+        Head => put(&writer, &written, "HTTP/1.1 ")?,
         Cgi => put(&writer, &written, "Status: ")?,
     }
     let code = status.code()
@@ -960,6 +980,15 @@ fn write_head[W: io.ByteWriter, A: Allocator](inout writer: W, status: Status, h
     put(&writer, &written, status.reason())?
     match read framing {
         Http => put(&writer, &written, "\r\nConnection: close\r\n")?,
+        KeepAlive(length) => {
+            put(&writer, &written, "\r\n")?
+            if !status.is_bodyless() {
+                put(&writer, &written, "Content-Length: ")?
+                put_number(&writer, &written, length)?
+                put(&writer, &written, "\r\n")?
+            }
+        },
+        Head => put(&writer, &written, "\r\n")?,
         Cgi => put(&writer, &written, "\r\n")?,
     }
     for header in headers.fields.as_slice() {
@@ -1152,14 +1181,15 @@ fn exchanged(method: Method, answer: Reply) -> String {
         "GET"
     }
     let sent = new_request(arena.handle(), token, answer.target, body: "").unwrap()
-    var body = BodyWriter.open(connection, sent.request()).unwrap()
+    let reserved = sent.request().allocator().acquire(response_buffer_bytes).unwrap()
+    var body = BodyWriter.open_borrowed(reserved, connection.writer(), sent.request(), keep_alive: false)
     let head_only = method == Method.Head
     let _wrote = match answered(sent.request(), answer) {
         Ok(response) => write_response(&body, response, head_only),
         Err(error) => write_error(&body, error, head_only),
     }
-    let server = body.finish().unwrap()
-    server.close().unwrap()
+    body.finish_borrowed().unwrap()
+    connection.close().unwrap()
     arena.release()
     let received = read_to_end(client)
     listener.close().unwrap()
@@ -1185,4 +1215,46 @@ fn read_or_reset(sink connection: net.Connection) -> String {
         Ok(text) => text,
         Err(_) => "reset".to_owned().unwrap(),
     }
+}
+
+test fn a_known_length_frames_a_persistent_response() {
+    defer let arena = mem.Arena.open(mem.system(), 8192)
+    let message = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    let request = message.request()
+    var body: BodyWriter = .{ output = .Recorded(Vec.new_in(arena.handle())), answering = copy(request), failure = .None, in_body = false, body_bytes = 0, framing = .KeepAlive(0) }
+    let written = write_response(&body, text(request, "message").unwrap(), false).is_ok()
+    let BodyWriter { output, answering: _, failure: _, in_body: _, body_bytes: _, framing: _ } = body
+    let framed = match read output {
+        Recorded(bytes) => bytes.as_slice() == "HTTP/1.1 200 OK\r\nContent-Length: 7\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nmessage".as_bytes(),
+        _ => false,
+    }
+    match output {
+        Recorded(_) => {},
+        Borrowed(writer) => {
+            let _writer = writer.abort()
+        },
+        Standard(writer) => {
+            let _writer = writer.abort()
+        },
+        Taken => {},
+    }
+    testing.assert(written && framed, "a persistent response has no canonical body length")
+}
+
+// Decimal framing uses bounded stack storage, so sending a reserved response
+// needs no additional allocation after its handler has run.
+fn put_number[W: io.ByteWriter](inout writer: W, inout written: UInt64, number: UInt64) -> Result[(), WriteFailure[W.Error]] where carries(.Err: writer) {
+    var digits = [UInt8(0), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    var first: UInt64 = 20
+    var rest = number
+    loop {
+        first -= 1
+        digits[first] = UInt8(48) + UInt8(rest % 10)
+        rest /= 10
+        if rest == 0 {
+            break
+        }
+    }
+    let text = Str.from_bytes(digits.as_slice().subspan(start: first, count: 20 - first).unwrap()).unwrap()
+    put(&writer, &written, text)
 }

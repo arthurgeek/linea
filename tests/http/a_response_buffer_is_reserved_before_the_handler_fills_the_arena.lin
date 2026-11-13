@@ -1,0 +1,40 @@
+import std.http
+import std.io
+import std.net
+import std.testing
+
+@derive(Release)
+struct Prepared {}
+
+impl[P: Allocator] http.Handler[(), P] for Prepared {
+    fn serve_http(inout _self: Self, inout _state: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] {
+        let response = http.text(request, "ready")?
+        loop {
+            let bytes = request.allocator().acquire(4096) else |_| {
+                break
+            }
+            bytes.release()
+        }
+        .Ok(response)
+    }
+}
+
+fn handler() -> Prepared {
+    .{}
+}
+
+fn main() -> UInt8 {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    var client = net.connect(listener.local_address().unwrap()).unwrap()
+    let _sent = io.write_all(&client, "GET / HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\n\r\n".as_bytes()).unwrap()
+    let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
+    http.serve(listener, handler, limits, policy: .Sequential, shutdown: .Manual).unwrap()
+    defer let answer = io.read_text(&client, max_bytes: 4096).unwrap()
+    client.close().unwrap()
+    if !answer.view().starts_with("HTTP/1.1 200 OK") {
+        io.eprintln(answer.view())
+    }
+    testing.assert(answer.view().starts_with("HTTP/1.1 200 OK") && answer.view().ends_with("ready"), "a completed response lost its reserved output buffer").unwrap()
+    io.println("prepared response delivered").unwrap()
+    0
+}

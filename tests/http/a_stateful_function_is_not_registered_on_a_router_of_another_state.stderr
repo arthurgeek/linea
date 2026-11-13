@@ -1,7 +1,7 @@
-error[T-Bound]: `H` requires `Endpoint[(), SystemAllocator]`, and `fn(inout counter: Counter, read request: Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(request)` does not implement it
+error[T-Bound]: `H` requires `Endpoint[(), SystemAllocator]`, and `fn(inout counter: Counter, read request: Request[SystemAllocator], inout _incoming: RequestBody[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(request), borrows(_incoming), retains(_incoming: _incoming)` does not implement it
   --> tests/http/a_stateful_function_is_not_registered_on_a_router_of_another_state.lin:17:26
    |
 17 |     let routed = &router.route("GET /", count)
-   |                          ^^^^^ only the library, which declares `Endpoint[(), mem.SystemAllocator]`, may implement it for `fn(inout Counter, read Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2)`; pass a value whose type implements it
+   |                          ^^^^^ only the library, which declares `Endpoint[(), mem.SystemAllocator]`, may implement it for `fn(inout Counter, read Request[SystemAllocator], inout RequestBody[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2), borrows(#3), retains(#3: #3)`; pass a value whose type implements it
    |
    = help: the implementation takes `S` from the function as `Counter`, and the bound asks for `()`
