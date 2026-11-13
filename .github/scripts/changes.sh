@@ -15,7 +15,8 @@
 #                                          runs that had finished before it
 #
 # A lane is one of check, sanitize-address, sanitize-thread, optimised-unit,
-# optimised-corpus, optimised-soundness, sweep and fuzz-mir. Its decision is
+# optimised-corpus, optimised-soundness, sweep, fuzz-mir, fibers-x86_64 and
+# fibers-aarch64. Its decision is
 #
 #   run      the lane runs, and `merge-ready` requires it to pass;
 #   inherit  a commit of this history passed the lane against the same base,
@@ -61,7 +62,7 @@
 # decided by the base diff alone.
 set -u -o pipefail
 
-lanes="check sanitize-address sanitize-thread optimised-unit optimised-corpus optimised-soundness sweep fuzz-mir"
+lanes="check sanitize-address sanitize-thread optimised-unit optimised-corpus optimised-soundness sweep fuzz-mir fibers-x86_64 fibers-aarch64"
 gated_docs='^docs/learn/.*\.md$|^docs/adr/.*\.md$|^docs/linea-semantics\.md$'
 mir_paths='^src/(mir|ownership|sema)/|^src/driver/loader\.zig$|^src/conformance/(generate|storage)\.zig$'
 # How many commits of the history are searched for a green one, newest first.
@@ -78,6 +79,8 @@ check_name() {
   case "$1" in
     sanitize-address) echo "sanitize (address)" ;;
     sanitize-thread) echo "sanitize (thread)" ;;
+    fibers-x86_64) echo "fibers (ubuntu-24.04)" ;;
+    fibers-aarch64) echo "fibers (ubuntu-24.04-arm)" ;;
     optimised-*) echo "optimised (${1#optimised-})" ;;
     *) echo "$1" ;;
   esac
@@ -234,17 +237,17 @@ ci() {
     echo "the check runs could not be read: each lane is decided as if no commit had passed it"
   fi
 
-  local sanitize=skip exclude=""
+  local sanitize=skip exclude="" fibers=skip fibers_exclude="" runner
   for lane in $lanes; do
     case "$EVENT:$lane" in
       pull_request:*) ;;
-      push:check) ;;
+      push:check|push:fibers-*) ;;
       push:*) decision=skip ;;
       *:fuzz-mir) decision=skip ;;
       *) decision=run ;;
     esac
     case "$EVENT:$lane" in
-      pull_request:*|push:check)
+      pull_request:*|push:check|push:fibers-*)
         green=$(awk -v l="$lane" '$1 == l { print $2 }' "$greens")
         assumed=$(awk -v l="$lane" '$1 == l && $3 == "assumed" { print "; no base recorded there, assumed the same" }' "$greens")
         if [ -n "$green" ] && git -c core.quotePath=false diff --no-renames --name-only "$green" "$head" > "$tmp/since-$lane"; then
@@ -265,6 +268,18 @@ ci() {
           exclude="$exclude${exclude:+,}{\"sanitizer\":\"${lane#sanitize-}\"}"
         fi
         ;;
+      fibers-*)
+        if [ "$decision" = run ]; then
+          fibers=run
+        else
+          [ "$fibers" = run ] || fibers=$decision
+          case "$lane" in
+            fibers-x86_64) runner=ubuntu-24.04 ;;
+            fibers-aarch64) runner=ubuntu-24.04-arm ;;
+          esac
+          fibers_exclude="$fibers_exclude${fibers_exclude:+,}{\"runner\":\"$runner\"}"
+        fi
+        ;;
       *) echo "$lane=$decision" >> "$out" ;;
     esac
   done
@@ -280,6 +295,8 @@ ci() {
   {
     echo "sanitize=$sanitize"
     echo "sanitize-exclude=[$exclude]"
+    echo "fibers=$fibers"
+    echo "fibers-exclude=[$fibers_exclude]"
   } >> "$out"
   rm -rf "$tmp"
 }

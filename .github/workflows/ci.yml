@@ -60,6 +60,8 @@ jobs:
       check: ${{ steps.lanes.outputs.check }}
       sanitize: ${{ steps.lanes.outputs.sanitize }}
       sanitize-exclude: ${{ steps.lanes.outputs.sanitize-exclude }}
+      fibers: ${{ steps.lanes.outputs.fibers }}
+      fibers-exclude: ${{ steps.lanes.outputs.fibers-exclude }}
       optimised-unit: ${{ steps.lanes.outputs.optimised-unit }}
       optimised-corpus: ${{ steps.lanes.outputs.optimised-corpus }}
       optimised-soundness: ${{ steps.lanes.outputs.optimised-soundness }}
@@ -913,9 +915,10 @@ jobs:
 
   # Context ABI and parked-stack safety must execute on both Linux ABIs;
   # compiling the other architecture cannot exercise its saved registers.
-  # This lane always runs, so an inherited x86 check cannot hide an ARM failure.
+  # Each ABI inherits only its own successful check against the same tested base.
   fibers:
-    if: ${{ !github.event.pull_request.draft }}
+    needs: changes
+    if: ${{ needs.changes.outputs.fibers == 'run' && !github.event.pull_request.draft }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -924,6 +927,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        exclude: ${{ fromJSON(needs.changes.outputs.fibers-exclude) }}
     steps:
       - uses: actions/checkout@v7
 
@@ -1001,7 +1005,7 @@ jobs:
   # - on a pull request, `check`, `sanitize`, `optimised-unit`,
   #   `optimised-corpus`, `optimised-soundness` and `fuzz-mir`, each where
   #   `changes` said `run`; a draft runs nothing and is not ready;
-  # - on a push to main, `check` where `changes` said `run`;
+  # - on a push to main, `check` and the fiber ABIs where `changes` said `run`;
   # - on a manual or scheduled run, `check`, `sanitize` and the three
   #   optimised lanes, which `changes` always runs there, and `fuzz`.
   #
@@ -1020,6 +1024,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           DRAFT: ${{ github.event.pull_request.draft || false }}
           CHANGES: ${{ needs.changes.result }}
+          WANT_FIBERS: ${{ needs.changes.outputs.fibers }}
           WANT_CHECK: ${{ needs.changes.outputs.check }}
           WANT_SANITIZE: ${{ needs.changes.outputs.sanitize }}
           WANT_OPTIMISED_UNIT: ${{ needs.changes.outputs.optimised-unit }}
@@ -1035,7 +1040,7 @@ jobs:
           FUZZ_MIR: ${{ needs.fuzz-mir.result }}
           FIBERS: ${{ needs.fibers.result }}
         run: |
-          echo "changes: $CHANGES (check=$WANT_CHECK, sanitize=$WANT_SANITIZE, optimised-unit=$WANT_OPTIMISED_UNIT, optimised-corpus=$WANT_OPTIMISED_CORPUS, optimised-soundness=$WANT_OPTIMISED_SOUNDNESS, fuzz-mir=$WANT_FUZZ_MIR)"
+          echo "changes: $CHANGES (fibers=$WANT_FIBERS, check=$WANT_CHECK, sanitize=$WANT_SANITIZE, optimised-unit=$WANT_OPTIMISED_UNIT, optimised-corpus=$WANT_OPTIMISED_CORPUS, optimised-soundness=$WANT_OPTIMISED_SOUNDNESS, fuzz-mir=$WANT_FUZZ_MIR)"
           echo "check: $CHECK, sanitize: $SANITIZE, optimised-unit: $OPTIMISED_UNIT, optimised-corpus: $OPTIMISED_CORPUS, optimised-soundness: $OPTIMISED_SOUNDNESS, fuzz: $FUZZ, fuzz-mir: $FUZZ_MIR"
           if [ "$CHANGES" != success ]; then
             echo "which lanes the change needs is unknown, so no lane can be judged"
@@ -1071,7 +1076,7 @@ jobs:
                 status=1 ;;
             esac
           }
-          judge fibers run "$FIBERS"
+          judge fibers "$WANT_FIBERS" "$FIBERS"
           judge check "$WANT_CHECK" "$CHECK"
           judge sanitize "$WANT_SANITIZE" "$SANITIZE"
           judge optimised-unit "$WANT_OPTIMISED_UNIT" "$OPTIMISED_UNIT"

@@ -493,6 +493,7 @@ test "CI lanes run on the decision changes makes for each of them" {
     // the whole line, so a condition dropped from it fails here.
     const merge_ready = try workflowJob(workflow, "merge-ready");
     const lanes = [_]struct { job: []const u8, @"if": []const u8 }{
+        .{ .job = "fibers", .@"if" = "${{ needs.changes.outputs.fibers == 'run' && !github.event.pull_request.draft }}" },
         .{ .job = "check", .@"if" = "${{ needs.changes.outputs.check == 'run' && !github.event.pull_request.draft }}" },
         .{ .job = "sanitize", .@"if" = "${{ needs.changes.outputs.sanitize == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}" },
         .{ .job = "optimised-unit", .@"if" = "${{ needs.changes.outputs.optimised-unit == 'run' && github.event_name != 'push' && !github.event.pull_request.draft }}" },
@@ -508,6 +509,8 @@ test "CI lanes run on the decision changes makes for each of them" {
         const condition = source.between(try workflowJob(workflow, lane.job), "\n    if: ", "\n") orelse return error.MissingCondition;
         try testing.expectEqualStrings(lane.@"if", condition);
     }
+    // Inherited entries are left out of each matrix independently.
+    try testing.expect(std.mem.indexOf(u8, try workflowJob(workflow, "fibers"), "        exclude: ${{ fromJSON(needs.changes.outputs.fibers-exclude) }}\n") != null);
     // A sanitizer the script finds inherited is left out of the matrix.
     try testing.expect(std.mem.indexOf(u8, try workflowJob(workflow, "sanitize"), "        exclude: ${{ fromJSON(needs.changes.outputs.sanitize-exclude) }}\n") != null);
     // `merge-ready` waits for every lane it judges, so each result it reads
@@ -533,6 +536,7 @@ test "CI lanes run on the decision changes makes for each of them" {
         \\          EVENT: ${{ github.event_name }}
         \\          DRAFT: ${{ github.event.pull_request.draft || false }}
         \\          CHANGES: ${{ needs.changes.result }}
+        \\          WANT_FIBERS: ${{ needs.changes.outputs.fibers }}
         \\          WANT_CHECK: ${{ needs.changes.outputs.check }}
         \\          WANT_SANITIZE: ${{ needs.changes.outputs.sanitize }}
         \\          WANT_OPTIMISED_UNIT: ${{ needs.changes.outputs.optimised-unit }}
@@ -548,7 +552,7 @@ test "CI lanes run on the decision changes makes for each of them" {
         \\          FUZZ_MIR: ${{ needs.fuzz-mir.result }}
         \\          FIBERS: ${{ needs.fibers.result }}
         \\        run: |
-        \\          echo "changes: $CHANGES (check=$WANT_CHECK, sanitize=$WANT_SANITIZE, optimised-unit=$WANT_OPTIMISED_UNIT, optimised-corpus=$WANT_OPTIMISED_CORPUS, optimised-soundness=$WANT_OPTIMISED_SOUNDNESS, fuzz-mir=$WANT_FUZZ_MIR)"
+        \\          echo "changes: $CHANGES (fibers=$WANT_FIBERS, check=$WANT_CHECK, sanitize=$WANT_SANITIZE, optimised-unit=$WANT_OPTIMISED_UNIT, optimised-corpus=$WANT_OPTIMISED_CORPUS, optimised-soundness=$WANT_OPTIMISED_SOUNDNESS, fuzz-mir=$WANT_FUZZ_MIR)"
         \\          echo "check: $CHECK, sanitize: $SANITIZE, optimised-unit: $OPTIMISED_UNIT, optimised-corpus: $OPTIMISED_CORPUS, optimised-soundness: $OPTIMISED_SOUNDNESS, fuzz: $FUZZ, fuzz-mir: $FUZZ_MIR"
         \\          if [ "$CHANGES" != success ]; then
         \\            echo "which lanes the change needs is unknown, so no lane can be judged"
@@ -584,7 +588,7 @@ test "CI lanes run on the decision changes makes for each of them" {
         \\                status=1 ;;
         \\            esac
         \\          }
-        \\          judge fibers run "$FIBERS"
+        \\          judge fibers "$WANT_FIBERS" "$FIBERS"
         \\          judge check "$WANT_CHECK" "$CHECK"
         \\          judge sanitize "$WANT_SANITIZE" "$SANITIZE"
         \\          judge optimised-unit "$WANT_OPTIMISED_UNIT" "$OPTIMISED_UNIT"
@@ -646,7 +650,7 @@ fn expectDecision(want: []const u8, lane: []const u8, since_green: ?[]const u8, 
     }
 }
 
-const ci_lanes = [_][]const u8{ "check", "sanitize-address", "sanitize-thread", "optimised-unit", "optimised-corpus", "optimised-soundness", "sweep", "fuzz-mir" };
+const ci_lanes = [_][]const u8{ "check", "sanitize-address", "sanitize-thread", "optimised-unit", "optimised-corpus", "optimised-soundness", "sweep", "fuzz-mir", "fibers-x86_64", "fibers-aarch64" };
 
 test "a lane inherits a green commit across Markdown no gate reads" {
     for (ci_lanes) |lane| {

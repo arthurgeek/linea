@@ -253,13 +253,16 @@ the `fuzz-slow:` tests.
 CI runs on GitHub's hosted runners, from `.github/workflows/ci.yml`. The
 `fibers` lane executes context, task, socket and clock tests, the 10,000-connection
 check, and focused execution and callback programs on Linux x86-64 and aarch64
-outside draft pull requests; `merge-ready` requires both runs. A pull
+outside draft pull requests. Each ABI reuses only its own successful result
+against the same tested base when its inputs have not changed; `merge-ready`
+requires every ABI selected to run to pass. A pull
 request merges into `main` once `merge-ready`, the one required status, is
 green on its final commit. A draft pull request runs nothing. A ready pull
 request runs `check`, `sanitize`, the three optimised lanes, `sweep` and,
 when the change touches `src/mir`, `src/ownership`, `src/sema` (which holds
 the type tables), `src/driver/loader.zig` or the program generator,
-`fuzz-mir`, which fuzzes the MIR verifier. A push to `main` runs `check`. A
+`fuzz-mir`, which fuzzes the MIR verifier. A push to `main` runs `check` and
+the fiber ABIs where their decisions require execution. A
 manual run and the weekly schedule run every lane and `fuzz`, which runs
 every `fuzz:` target and keeps the inputs each clean search reached for the
 next. The optimised lanes are three jobs on three runners, side by side:
