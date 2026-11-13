@@ -13,6 +13,8 @@ module {
   llvm.mlir.global internal constant @linea_file0("tests/library/a_library_granted_extern_declares_one/main.lin\00") : !llvm.array<61 x i8>
   llvm.mlir.global internal constant @linea_file1("std/time/time.lin\00") : !llvm.array<18 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_foreign_enter()
+  func.func private @linea_foreign_leave()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_clock_sleep(i64) -> i64
@@ -27,7 +29,9 @@ module {
     func.return %v1 : i64 loc("tests/library/a_library_granted_extern_declares_one/main.lin":4:5)
   }
   func.func @pause(%p0: i64) -> i64 {
+    func.call @linea_foreign_enter() : () -> ()
     %answer = func.call @"lin.;pause"(%p0) : (i64) -> i64
+    func.call @linea_foreign_leave() : () -> ()
     func.return %answer : i64
   }
 }

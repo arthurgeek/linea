@@ -170,7 +170,7 @@ pub const DeclaredBy = union(enum) {
     granted,
     /// The standard library's `module` alone. The runtime trusts every call of
     /// such a symbol with a number only that module's types keep: an
-    /// allocation, a descriptor, a parked thread, a call queue or an endpoint
+    /// allocation, a descriptor, a prepared task, a call queue or an endpoint
     /// that a linear value owns, the address of bytes a buffer or a slice
     /// holds, or the address of typed bytes `address.raw` gives. A symbol lowering replaces
     /// is held here too, since only that module's declaration is replaced.
@@ -201,9 +201,9 @@ pub const Signature = struct {
     declared_by: DeclaredBy,
     /// Control never returns from a call to it.
     noreturn: bool = false,
-    /// The runtime calls back into Linea code on a thread it creates, so a
+    /// The runtime calls back into Linea code in a task it starts, so a
     /// body handed to it runs while its caller goes on ([T-ThreadStart]).
-    starts_thread: bool = false,
+    starts_task: bool = false,
 };
 
 fn p(scalar: Scalar) Parameter {
@@ -534,7 +534,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_owner_done", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } } },
     .{ .symbol = "linea_owner_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } } },
     .{ .symbol = "linea_owner_free", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } } },
-    .{ .symbol = "linea_task_start", .parameters = &.{ p(.u64), cb(&.{ .u64, .u64, .u64 }, .unit, 1), cb(&.{ .u64, .u64 }, .unit, 0), typed_bytes, p(.u64), typed_bytes }, .result = .u64, .starts_thread = true, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`start` on a `task.Slot`" } } },
+    .{ .symbol = "linea_task_start", .parameters = &.{ p(.u64), cb(&.{ .u64, .u64, .u64 }, .unit, 1), cb(&.{ .u64, .u64 }, .unit, 0), typed_bytes, p(.u64), typed_bytes }, .result = .u64, .starts_task = true, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`start` on a `task.Slot`" } } },
     .{ .symbol = "linea_task_cancel", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`cancel` on a `task.Slot`" } } },
     .{ .symbol = "linea_chan_send", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`send` on a `session.Chan`" } } },
     .{ .symbol = "linea_chan_recv", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`recv` on a `session.Chan`" } } },
@@ -592,7 +592,7 @@ test "a runtime function is found by its whole symbol" {
         // module's types keep.
         // A symbol taking or answering an allocation, a descriptor or the
         // address of bytes is trusted with a number a value must own.
-        const confined = signature.provider == .lowering or signature.starts_thread or signature.answers != .none or
+        const confined = signature.provider == .lowering or signature.starts_task or signature.answers != .none or
             for (signature.parameters) |parameter| {
                 if (parameter.address or parameter.callback != null or parameter.held != .none) break true;
             } else false;

@@ -3,8 +3,8 @@ import std.io
 import std.testing
 
 // An owning task holds one value, its state, and runs calls against it one at
-// a time on its own thread. Other tasks reach the state only through a
-// `Client`, so the state is never touched by two threads, and no lock guards
+// a time on its selected Io. Other tasks reach the state only through a
+// `Client`, so the state is never touched by two tasks, and no lock guards
 // it. A call returns once the owning task has run it, so everything the
 // caller did before the call happens before the call runs, and the call
 // happens before it returns.
@@ -17,7 +17,7 @@ extern fn linea_owner_close(queue: UInt64)
 
 extern fn linea_owner_free(queue: UInt64)
 
-// What an owning task's thread runs: it receives its state and its call
+// What an owning task runs: it receives its state and its call
 // queue, runs each call against the state until the queue closes, and sends
 // the state back.
 fn run_owner[S: Owned + Isolated](sink me: Chan[Recv[(S, UInt64), Send[S, End]]]) {
@@ -52,10 +52,10 @@ pub struct Unowned[S] {
 }
 
 // Start a task that owns `state`. It fails when the task's call queue, its
-// thread or its stack cannot be made, and hands the state back then.
+// execution resources or stack cannot be made, and hands the state back then.
 pub fn own[S: Owned + Isolated](sink state: S, on: io.Io = io.inherited) -> Result[Owner[S], Unowned[S]] {
     // `linea_owner_open` answers zero where the queue's record cannot be
-    // allocated, before any thread exists.
+    // allocated, before its execution is prepared.
     let queue = linea_owner_open()
     if queue == 0 {
         return .Err(.{ state, reason = .Allocation })
@@ -157,9 +157,9 @@ test fn releasing_a_client_leaves_its_owner_serving() {
 }
 
 impl[S: Owned + Isolated] Client[S] {
-    // Run `job` against the owner's state on the owner's thread, and answer
+    // Run `job` against the owner's state in the owning task, and answer
     // what it answers. Calls from every client run one at a time, in the
-    // order they reach the owner. `job` moves to another thread, so what it
+    // order they reach the owner. `job` moves to the owning task, so what it
     // captures must be owned: it cannot hold a client, whose call could wait
     // on the task running it.
     pub fn call[R: Owned, F: Owned + Isolated + Release + fn(inout state: S) -> R](self: Self, sink job: F) -> R {

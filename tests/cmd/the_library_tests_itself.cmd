@@ -187,6 +187,7 @@ The library tests itself.
   ok    env.an_entry_splits_at_its_first_equals_sign
   ok    env.args_start_with_the_executable_path
   ok    env.at_reads_an_argument_as_text_and_refuses_an_index_past_the_end
+  ok    env.available_parallelism_is_positive
   ok    env.every_entry_has_a_name
   ok    env.every_variable_has_a_name_and_no_equals_sign_in_it
   ok    env.raw_arguments_preserve_existing_storage_and_missing_indices
@@ -675,6 +676,7 @@ The library tests itself.
   ok    io.a_failed_prompt_write_does_not_read_input
   ok    io.a_full_buffer_accepts_new_bytes_only_after_draining_old_bytes
   ok    io.a_long_sleep_inside_a_run_waits_for_nothing
+  ok    io.a_loop_requires_a_positive_carrier_count
   ok    io.a_preallocated_write_buffer_needs_no_further_allocation
   ok    io.a_preallocated_writer_requires_nonempty_storage
   ok    io.a_prompt_finishes_short_writes_and_keeps_input_lookahead
@@ -746,6 +748,7 @@ The library tests itself.
   ok    io.each_allocation_failure_covers_every_growth_step_of_an_owned_raw_line
   ok    io.each_allocation_failure_covers_opening_a_reader
   ok    io.finishing_after_an_underlying_flush_failure_does_not_repeat_bytes
+  ok    io.inherited_resolves_in_the_task_that_uses_it
   ok    io.invalid_owned_text_restores_the_complete_raw_record
   ok    io.line_errors_display_their_reason
   ok    io.milliseconds_too_many_to_count_saturate
@@ -783,6 +786,7 @@ The library tests itself.
   ok    io.the_default_network_delivers_whole_writes_after_a_millisecond
   ok    io.the_io_inside_a_run_is_its_simulation
   ok    io.the_system_is_not_simulated
+  ok    io.the_system_runtime_identity_is_zero
   ok    io.three_buffered_layers_count_each_delivered_byte_once
   ok    io.whole_input_accepts_short_reads_and_an_exact_limit
   ok    io.whole_input_errors_display_their_reason
@@ -1632,4 +1636,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1629 passed, 0 failed
+  1633 passed, 0 failed

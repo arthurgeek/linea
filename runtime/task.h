@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-/* A task is a thread with one session to the task that started it. A task
+/* A task runs on a thread or pinned fiber, with one session to its creator. A task
  * and an endpoint are named by an unsigned long the runtime hands out. Each
  * session holds one slot, so a send returns only once its peer has taken
  * the value, and a choice is a send of its branch number.
@@ -11,31 +11,32 @@
  * Happens-before: everything the creator did before `linea_task_start` is
  * visible to the body; everything a task did before a send is visible to its
  * peer once the matching receive returns; everything the body did is visible
- * once `linea_chan_close` on the handle returns. Each edge is a release and
- * an acquire of the lock of the session's park (`park.h`). */
+ * once `linea_chan_close` on the handle returns. The start latch or carrier
+ * queue publishes the body. Session and close edges use the lock of the
+ * session's park (`park.h`). */
 
-/* What a started task's thread calls: the task's own endpoint, then the
+/* What a started task calls: the task's own endpoint, then the
  * address and length of the bytes its body is kept in. */
 typedef void (*linea_task_entry)(unsigned long endpoint, unsigned long at, unsigned long len);
 
-/* What the thread that joins a task calls with the address `linea_task_start`
+/* What the task that joins another calls with the address `linea_task_start`
  * was given for it and the bytes' length, to release those bytes. */
 typedef void (*linea_task_release)(unsigned long at, unsigned long len);
 
-/* Create a thread with a stack of `stack_bytes`, parked on a start latch
- * before it runs any code. The result is the task, or a negated errno when
- * its record, its stack or its thread cannot be made; a failure leaves
- * nothing behind. */
+/* Prepare a task with a stack of `stack_bytes`, without running its body.
+ * Identity zero selects a system thread; a loop selects a pinned fiber.
+ * The result is the task or a negated errno. A failure leaves no record,
+ * stack or execution resource behind. */
 long linea_task_prepare_on(unsigned long stack_bytes, unsigned long identity);
 
-/* Release a parked task's latch: its thread calls `entry` with `at` and
- * `len`, and returns, and the thread that joins it calls `release` with
+/* Make a prepared task runnable: it calls `entry` with `at` and `len`,
+ * and returns, and the task that joins it calls `release` with
  * `release_at` and `len`. The call cannot fail. The result is the creator's
  * endpoint, the task's handle. */
 unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
                                unsigned long len, unsigned long release_at);
 
-/* Release a parked task's latch with nothing to run, join its thread and
+/* Cancel prepared execution without running its body and
  * free what `linea_task_prepare_on` made. */
 void linea_task_cancel(unsigned long task);
 
@@ -56,8 +57,8 @@ uint8_t linea_chan_offer(unsigned long endpoint);
 
 /* Finish one end of a session at its end state. The task's own end returns
  * at once. The handle's returns only once the body has returned and the
- * thread has been joined, and it then releases the bytes the body was kept
- * in, on the calling thread, before freeing the session. */
+ * execution has retired, and it then releases the bytes the body was kept
+ * in, in the calling task, before freeing the session. */
 void linea_chan_close(unsigned long endpoint);
 
 struct linea_registration;

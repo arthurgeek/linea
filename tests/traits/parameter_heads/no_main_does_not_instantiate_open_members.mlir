@@ -12,6 +12,8 @@ module {
   }
   llvm.mlir.global internal constant @linea_file0("tests/traits/parameter_heads/no_main_does_not_instantiate_open_members/main.lin\00") : !llvm.array<80 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_foreign_enter()
+  func.func private @linea_foreign_leave()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;retain"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -38,8 +40,10 @@ module {
     func.return %v0 : i64 loc("tests/traits/parameter_heads/no_main_does_not_instantiate_open_members/main.lin":7:9)
   }
   func.func @retain(%p0: i8 {llvm.zeroext}) -> (i8 {llvm.zeroext}) {
+    func.call @linea_foreign_enter() : () -> ()
     %w0 = arith.extui %p0 : i8 to i64
     %answer = func.call @"lin.;retain"(%w0) : (i64) -> i64
+    func.call @linea_foreign_leave() : () -> ()
     %narrow = arith.trunci %answer : i64 to i8
     func.return %narrow : i8
   }

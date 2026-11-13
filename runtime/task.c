@@ -1,9 +1,9 @@
-/* A task's thread and the rendezvous channel of its session.
+/* A task's execution and the rendezvous channel of its session.
  *
- * Each task is one operating-system thread, created parked by
- * `linea_task_prepare_on` and released by `linea_task_start`. A task and its
- * creator share one record, which holds the thread, the bytes its stack and
- * its alternate signal stack occupy, and the session's one slot. The slot is
+ * A prepared task runs on a system thread or a pinned fiber. Its creator
+ * shares one record with it, holding execution resources and the session's
+ * one slot. A system task owns its mapped stack and alternate signal stack;
+ * a fiber owns its guarded stack through the carrier scheduler. The slot is
  * guarded by the record's mutex and goes from empty to full to empty: a
  * sender fills it and waits until the receiver has copied the bytes and
  * emptied it, so a send returns only once its peer holds the value.
@@ -11,18 +11,17 @@
  * The creator's endpoint is the record's address and the task's own endpoint
  * is that address with its lowest bit set, which an allocation's alignment
  * leaves clear. The record is freed by the creator's `linea_chan_close`, after
- * the join, or by `linea_task_cancel`; the task's own end never frees it,
- * since the creator's close waits for the thread to end.
+ * the join, or by `linea_task_cancel`; the task's own end never frees it.
+ * The creator's close waits for the body and its execution to finish.
  *
  * Every wait is a park on the record's park (`park.h`), and every change to
  * the record's state is made with the park's lock held and followed by an
- * unpark, so a lock release by one thread and its acquire by the other order
- * everything either did before. The thread reads the body only after it
- * observes the start under the lock, which orders what the creator did
- * before the start, and the handle's close parks until the thread has
- * marked the body finished under the lock, which orders everything the body
- * did before the close returns; `pthread_join` then reclaims the thread. */
-
+ * unpark, so a lock release and its later acquire order the bodies' accesses.
+ * A system task reads its body after acquiring the start latch's lock; a
+ * fiber reads it after its carrier acquires the published queue entry.
+ * Close parks until the body is marked finished under the record's lock.
+ * A fiber publishes completion from the scheduler stack after its final
+ * switch; `pthread_join` reclaims a system task's thread after its body ends. */
 #define _GNU_SOURCE
 #define _DARWIN_C_SOURCE
 #include <errno.h>
@@ -93,7 +92,7 @@ struct task {
     int state;
     int begin_error;
 
-    /* What `linea_task_start` hands the thread, read once it has started. */
+    /* What `linea_task_start` hands the task, read once it has started. */
     linea_task_entry entry;
     linea_task_release release;
     unsigned long at;
@@ -147,7 +146,7 @@ static unsigned long round_up(unsigned long n, unsigned long to) {
     return (n + to - 1) / to * to;
 }
 
-/* Frees what `linea_task_prepare_on` made, once no thread uses it. */
+/* Frees what `linea_task_prepare_on` made, once no execution uses it. */
 static void destroy(struct task *t) {
     if (t->fiber != NULL) {
         linea_fiber_destroy(t->fiber);
@@ -184,7 +183,7 @@ static void *run(void *arg) {
     return 0;
 }
 
-/* Park until the thread has finished, then reclaim it. */
+/* Park until the body has finished, then join a system thread if present. */
 static void join(struct task *t) {
     linea_park_lock(&t->park);
     while (t->state != finished) (void)linea_park(&t->park, 0);
