@@ -2,16 +2,8 @@ import std.mem
 import std.testing
 import std.time
 
-// The runtime answers the identity of the loop the calling thread runs on, 0
-// for the system; makes a loop the thread's and answers the one it replaced;
-// and says whether a loop is a simulation. A loop that has ended traps.
-extern fn linea_loop_open(carriers: UInt64) -> Int64
-
-extern fn linea_io_current() -> UInt64
-
+// Make this simulation the calling task's Io and restore its previous Io.
 extern fn linea_io_switch(identity: UInt64) -> UInt64
-
-extern fn linea_io_is_simulated(identity: UInt64) -> UInt8
 
 // The runtime opens a simulation from a seed and the bounds of its network,
 // answering its identity or 0 when it cannot; advances its clock; reports
@@ -30,101 +22,22 @@ extern fn linea_signal_deliver_simulated(home: UInt64, signal: UInt8)
 
 let nanoseconds_per_millisecond: UInt64 = 1000000
 
-// An Io names what a task's waits run on: the system, where each operation
-// waits on the kernel, a fiber loop, or a simulation with a virtual
-// clock and network. A concrete Io can be copied anywhere; using it checks
-// that its loop has not ended. The inherited selector defers that choice
-// until a task is prepared.
-@(opaque, copyable, derive(Equatable, Debug))
-struct Io {
-    identity: UInt64,
+test fn inherited_resolves_in_the_task_that_uses_it() {
+    var sim = Simulation.open(seed: 1).unwrap()
+    let captured = current()
+    let (selected, simulated) = &sim.run(|inout _world| (inherited.runtime_identity(), inherited.is_simulated()))
+    sim.close()
+    testing.assert_eq(captured, system(), "capturing the current Io changed it later")?
+    testing.assert(selected != captured.runtime_identity(), "inherited captured the caller's earlier Io")?
+    testing.assert(simulated, "inherited did not resolve the simulation")?
 }
 
-// Select the starting task's Io when execution is prepared. Unlike current(),
-// which captures a concrete loop now, this constant resolves when it is used.
-// It is the default for task and server execution arguments.
-pub let inherited = Io { identity = UInt64.max }
-
-// Open a process-lifetime loop with an explicit positive carrier count.
-@opaque
-struct Loop {}
-
-impl Loop {
-    // Each task keeps its stack while its carrier runs another ready task.
-    // The loop keeps its resources until the process exits.
-    pub fn open(carriers: UInt64) -> Result[Io, IoError] {
-        let identity = linea_loop_open(carriers)
-        if identity < 0 {
-            return .Err(IoError.from_os(.Open, Int32(-identity)))
-        }
-        .Ok(Io { identity = UInt64(identity) })
-    }
-
-    test fn a_loop_requires_a_positive_carrier_count() {
-        let refused = match Loop.open(carriers: 0) {
-            Ok(_) => false,
-            Err(error) => error.category == IoCategory.InvalidInput,
-        }
-        testing.assert(refused, "a loop accepted zero carriers")?
-    }
-}
-
-// The system: the Io of every task that is a thread of its own.
-pub fn system() -> Io {
-    Io { identity = 0 }
-}
-
-test fn the_system_is_not_simulated() {
-    testing.assert(!system().is_simulated(), "the system was a simulation")?
-}
-
-// The Io the calling task runs on: the simulation inside `Simulation.run`,
-// the loop inside a fiber, and the system for a task on its own thread.
-pub fn current() -> Io {
-    Io { identity = linea_io_current() }
-}
-
-test fn a_task_runs_on_the_system_outside_a_simulation() {
-    testing.assert_eq(current(), system(), "a task outside a simulation did not run on the system")?
-}
-
-impl Io {
-    // Resolve an inherited selection and answer the stable runtime identity.
-    internal fn runtime_identity(self: Self) -> UInt64 {
-        if self.identity == UInt64.max {
-            linea_io_current()
-        } else {
-            self.identity
-        }
-    }
-
-    test fn the_system_runtime_identity_is_zero() {
-        testing.assert_eq(system().runtime_identity(), UInt64(0), "the system identity changed")?
-    }
-
-    test fn inherited_resolves_in_the_task_that_uses_it() {
-        var sim = Simulation.open(seed: 1).unwrap()
-        let captured = current()
-        let (selected, simulated) = &sim.run(|inout _world| (inherited.runtime_identity(), inherited.is_simulated()))
-        sim.close()
-        testing.assert_eq(captured, system(), "capturing the current Io changed it later")?
-        testing.assert(selected != captured.runtime_identity(), "inherited captured the caller's earlier Io")?
-        testing.assert(simulated, "inherited did not resolve the simulation")?
-    }
-
-    // Whether this Io is a simulation. Asking about the Io of a simulation
-    // that has been closed traps.
-    pub fn is_simulated(self: Self) -> Bool {
-        linea_io_is_simulated(self.runtime_identity()) != 0
-    }
-
-    test fn the_io_inside_a_run_is_its_simulation() {
-        var sim = Simulation.open(seed: 1).unwrap()
-        let (inside, simulated) = &sim.run(|inout _world| (current(), current().is_simulated()))
-        sim.close()
-        testing.assert(inside != system(), "the Io inside a run was the system")?
-        testing.assert(simulated, "the Io inside a run was not a simulation")?
-    }
+test fn the_io_inside_a_run_is_its_simulation() {
+    var sim = Simulation.open(seed: 1).unwrap()
+    let (inside, simulated) = &sim.run(|inout _world| (current(), current().is_simulated()))
+    sim.close()
+    testing.assert(inside != system(), "the Io inside a run was the system")?
+    testing.assert(simulated, "the Io inside a run was not a simulation")?
 }
 
 // A Network bounds the choices a simulation's network makes from its seed.

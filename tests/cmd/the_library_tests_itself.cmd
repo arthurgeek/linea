@@ -676,7 +676,6 @@ The library tests itself.
   ok    io.a_failed_prompt_write_does_not_read_input
   ok    io.a_full_buffer_accepts_new_bytes_only_after_draining_old_bytes
   ok    io.a_long_sleep_inside_a_run_waits_for_nothing
-  ok    io.a_loop_requires_a_positive_carrier_count
   ok    io.a_preallocated_write_buffer_needs_no_further_allocation
   ok    io.a_preallocated_writer_requires_nonempty_storage
   ok    io.a_prompt_finishes_short_writes_and_keeps_input_lookahead
@@ -691,7 +690,6 @@ The library tests itself.
   ok    io.a_simulation_opens_with_the_default_network_or_the_one_given
   ok    io.a_simulation_that_has_done_nothing_has_a_fixed_fingerprint
   ok    io.a_smaller_line_limit_releases_excess_record_capacity
-  ok    io.a_task_runs_on_the_system_outside_a_simulation
   ok    io.a_writer_buffers_from_the_system_allocator
   ok    io.abandon_returns_the_reader_and_drops_its_read_ahead
   ok    io.abort_drops_pending_bytes_and_returns_the_writer
@@ -706,9 +704,11 @@ The library tests itself.
   ok    io.buffered_output_retries_only_its_unsent_suffix
   ok    io.chunk_reads_keep_read_ahead_for_the_next_line
   ok    io.core.a_line_is_the_value_and_the_ending_after_it
+  ok    io.core.a_loop_requires_a_positive_carrier_count
   ok    io.core.a_readiness_within_its_holder_watches_the_same_descriptor
   ok    io.core.a_share_taken_back_was_not_delivered
   ok    io.core.a_source_names_the_descriptor_it_was_made_from
+  ok    io.core.a_task_runs_on_the_system_outside_a_simulation
   ok    io.core.a_value_that_prints_while_it_is_printed_is_printed
   ok    io.core.a_write_to_a_descriptor_the_process_lacks_reports_why
   ok    io.core.an_empty_descriptor_read_does_not_access_the_descriptor
@@ -731,6 +731,8 @@ The library tests itself.
   ok    io.core.standard_error_is_descriptor_two
   ok    io.core.standard_input_is_descriptor_zero
   ok    io.core.standard_output_is_descriptor_one
+  ok    io.core.the_system_is_not_simulated
+  ok    io.core.the_system_runtime_identity_is_zero
   ok    io.core.write_all_preserves_the_prefix_across_short_writes
   ok    io.core.write_all_rejects_zero_progress_and_skips_empty_inputs
   ok    io.core.write_all_reports_progress_before_an_underlying_failure
@@ -785,8 +787,6 @@ The library tests itself.
   ok    io.text_lines_strip_only_their_terminators
   ok    io.the_default_network_delivers_whole_writes_after_a_millisecond
   ok    io.the_io_inside_a_run_is_its_simulation
-  ok    io.the_system_is_not_simulated
-  ok    io.the_system_runtime_identity_is_zero
   ok    io.three_buffered_layers_count_each_delivered_byte_once
   ok    io.whole_input_accepts_short_reads_and_an_exact_limit
   ok    io.whole_input_errors_display_their_reason

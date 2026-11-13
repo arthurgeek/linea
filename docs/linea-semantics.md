@@ -6424,15 +6424,19 @@ last until process exit. Starting and preparing tasks, owning tasks and HTTP
 serving wrappers take an `on:` Io. Its constant default, `io.inherited`, is
 resolved to the starting task's current concrete Io when execution is prepared;
 `io.current()` instead captures that concrete Io when called. `io.system()`
-selects a separate thread. HTTP `.Sequential` dispatches inline on the caller's
-Io; `on:` selects newly started workers and owning tasks. Blocking regular-file
+selects a separate thread. HTTP dispatch runs on the caller's Io; `on:`
+selects newly started workers and owning tasks. To run the dispatcher on a
+loop too, start the calling task on that loop. Blocking regular-file
 and foreign calls still hold a fiber's carrier.
 
 A simulation's virtual time moves when its body advances it or its tasks wait.
 Its tasks run as fibers on one carrier, with scheduling and network choices
 drawn from its seed, so a run is repeated exactly by the same seed. `run` lends
 the simulation to its body, so no other run enters it meanwhile; child tasks
-started inside it inherit that simulation and must be joined before returning.
+started inside it inherit that simulation and must be joined during a run
+before the simulation is closed. Pending children may remain between runs on
+the same operating-system thread; moving a simulation with live tasks to another
+thread traps.
 The uses that would make a run depend on the machine each stop the program: an operation on a simulated
 descriptor outside a run of its simulation (`linea: a simulated descriptor
 was used outside its simulation`), an operation other than closing on a real
@@ -6444,8 +6448,8 @@ a run (`linea: a wait set was used on a loop other than the one it was opened
 on`), an `io.SignalShare` registered in a set of another loop than the one it
 was taken on (`linea: a signal's share was registered on a loop other than
 the one it was taken on`), and a wait with no
-deadline that nothing in the simulation can end (`linea: a simulation's one
-task waits forever`). An `Io` that names a simulation which has been closed
+deadline that nothing in the simulation can end (`linea: all simulation
+tasks wait forever`). An `Io` that names a simulation which has been closed
 stops the program where it is used (`linea: an Io names a loop that has
 ended`). A simulated descriptor closed outside a run is closed at its
 simulation's next operation, in the order the program closed it; one closed

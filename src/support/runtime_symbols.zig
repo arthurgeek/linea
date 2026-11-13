@@ -435,7 +435,8 @@ const net_close = heldBy("net", "`close` on a `net.Connection` or a `net.Listene
 // A loop's identity is a number an `io.Io` keeps, and a simulation's one a
 // linear `io.Simulation` keeps; switching the thread's loop is what
 // `Simulation.run` does around its body.
-const io_loop = heldBy("io", "`io.current`, `io.Io` and `Simulation.run`");
+const io_loop = heldBy("io", "`Simulation.run`");
+const io_execution = heldBy("core", "`io.current`, `io.Io` and `io.Loop.open`");
 // A wait set's number names registrations whose values the set's own vector
 // keeps, so a call naming a set or a slot it does not hold would deliver or
 // take a value that is not there.
@@ -495,9 +496,9 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_net_reset", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection },
     .{ .symbol = "linea_net_close", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_close },
     // The loop table and the simulations in it.
-    .{ .symbol = "linea_io_current", .parameters = &.{}, .result = .u64, .declared_by = .granted },
+    .{ .symbol = "linea_io_current", .parameters = &.{}, .result = .u64, .declared_by = io_execution },
     .{ .symbol = "linea_io_switch", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_loop },
-    .{ .symbol = "linea_io_is_simulated", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = io_loop },
+    .{ .symbol = "linea_io_is_simulated", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = io_execution },
     .{ .symbol = "linea_sim_open", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64), p(.u64), p(.u8), p(.u64) }, .result = .u64, .declared_by = io_simulation },
     .{ .symbol = "linea_sim_advance", .parameters = &.{ p(.u64), p(.u64) }, .result = .unit, .declared_by = io_simulation },
     .{ .symbol = "linea_sim_fingerprint", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_simulation },
@@ -525,7 +526,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_signal_deliver_simulated", .parameters = &.{ p(.u64), p(.u8) }, .result = .unit, .declared_by = io_simulation },
     // A task's thread and the rendezvous channel of its session.
     .{ .symbol = "linea_available_parallelism", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "env", .reached_through = "`env.available_parallelism`" } } },
-    .{ .symbol = "linea_loop_open", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = .{ .library = .{ .module = "io", .reached_through = "`io.Loop.open`" } } },
+    .{ .symbol = "linea_loop_open", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = io_execution },
     .{ .symbol = "linea_task_prepare_on", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.prepare` and `task.prepare_in`" } } },
     .{ .symbol = "linea_owner_open", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } } },
     .{ .symbol = "linea_owner_call", .parameters = &.{ p(.u64), typed_bytes, p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`call` on a `task.Client`" } } },

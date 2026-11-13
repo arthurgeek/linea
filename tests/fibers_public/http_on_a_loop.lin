@@ -1,0 +1,74 @@
+import std.http
+import std.io
+import std.net
+import std.session
+import std.task
+import std.time
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+alias Reply = Chan[Recv[Bool, End]]
+
+enum Wake {
+    Answer(Reply),
+    TimedOut,
+}
+
+fn answer(request: http.Request, inout incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(incoming), retains(incoming: incoming) {
+    let payload = &incoming.text(request)?
+    let place = if io.current() == io.system() {
+        "system"
+    } else {
+        "loop"
+    }
+    http.text(request, "{place}:{payload}")
+}
+
+fn exchange(address: net.Address, home: io.Io) -> Bool {
+    var client = net.connect(address).unwrap()
+    &client.set_timeouts(read_ms: 5000, write_ms: 5000)
+    let request = "POST /echo HTTP/1.1\r\nHost: loopback\r\nContent-Length: 4\r\nConnection: close\r\n\r\nping"
+    let _sent = io.write_all(&client, request.as_bytes()).unwrap()
+    defer let received = io.read_text(&client, max_bytes: 4096).unwrap()
+    client.close().unwrap()
+    io.current() == home && received.view().starts_with("HTTP/1.1 200 OK\r\n") && received.view().ends_with("loop:ping")
+}
+
+fn main() -> UInt8 {
+    let home = io.Loop.open(carriers: 1).unwrap()
+    let server = sink [home] |sink me: Chan[Send[Bool, End]]| {
+        let listener = net.listen(net.loopback(0)).unwrap()
+        let address = listener.local_address().unwrap()
+        let client_body = sink [sink address, sink home = copy(home)] |sink peer: Chan[Send[Bool, End]]| {
+            peer.send(exchange(address, home)).close()
+        }
+        let client = task.start(client_body).unwrap().detach()
+        let limits = http.Limits { connections = .Some(1), first_byte_timeout_ms = 5000, read_timeout_ms = 5000, write_timeout_ms = 5000, ..http.Limits.default() }
+        http.serve(listener, || answer, limits: limits, policy: .Threads(2), shutdown: .Manual).unwrap()
+        var waiting: task.WaitSet[Wake] = task.WaitSet.open()
+        let _reply = &waiting.received(client, |sink ready| Wake.Answer(ready))
+        let timer = &waiting.after(time.Duration.from_seconds(5), (), |sink _late| Wake.TimedOut)
+        let correct = match &waiting.next() {
+            Some(Answer(reply)) => {
+                let _unfired = &waiting.take(timer)
+                let (correct, done) = reply.recv()
+                done.close()
+                correct
+            },
+            Some(TimedOut) => panic("the HTTP client did not return on the shared carrier"),
+            None => panic("the client and its timeout were registered"),
+        }
+        waiting.close().finish().unwrap()
+        me.send(correct && io.current() == home).close()
+    }
+    let (correct, done) = task.start(server, on: home).unwrap().recv()
+    done.close()
+    if correct {
+        0
+    } else {
+        1
+    }
+}

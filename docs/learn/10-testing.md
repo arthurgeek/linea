@@ -760,7 +760,8 @@ server](../../examples/countdown-server/main.lin) test every handler this way.
 with scheduling choices drawn from the seed. Their session sends, receives,
 joins and wait sets compose with virtual timers and sockets, so a test can
 exercise several tasks without depending on kernel thread timing. Join every
-child before the run returns and close the simulation after it. The
+child during a run before closing the simulation. Pending children can remain
+between runs on the same operating-system thread. The
 [networking chapter](09-networking.md#testing-a-timeout-without-waiting) shows
 opening a simulation and configuring its network; use another seed to explore
 another repeatable execution. Real sockets cannot be used inside a run, and

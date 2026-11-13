@@ -1,5 +1,5 @@
 import std.mem
-import std.io
+import std.io.core
 import std.testing
 
 // An owning task holds one value, its state, and runs calls against it one at
@@ -53,7 +53,7 @@ pub struct Unowned[S] {
 
 // Start a task that owns `state`. It fails when the task's call queue, its
 // execution resources or stack cannot be made, and hands the state back then.
-pub fn own[S: Owned + Isolated](sink state: S, on: io.Io = io.inherited) -> Result[Owner[S], Unowned[S]] {
+pub fn own[S: Owned + Isolated](sink state: S, on: core.Io = core.inherited) -> Result[Owner[S], Unowned[S]] {
     // `linea_owner_open` answers zero where the queue's record cannot be
     // allocated, before its execution is prepared.
     let queue = linea_owner_open()
