@@ -365,8 +365,8 @@ pub const RawAccesses = struct {
     /// `task.Unstarted`, the failure of a preparation, which holds the body.
     task_unstarted: DeclId = .none,
     /// `task.Slot.start`, the one function that may call a runtime symbol
-    /// that starts a thread ([T-ThreadStart]): the handle it answers carries
-    /// the body's dependencies until the thread is joined.
+    /// that starts a task ([T-ThreadStart]): the handle it answers carries
+    /// the body's dependencies until the task is joined.
     task_slot_start: DeclId = .none,
     /// `ffi.Bytes`, `ffi.CText` and `ffi.CTextList`: copyable newtypes over a
     /// C address whose dependencies originate at the value, as a
@@ -641,7 +641,7 @@ pub const RawAccesses = struct {
     /// take it back on a backing allocator's behalf; a view's where
     /// `Vec.split` lends its two sides; a vector's where a byte vector
     /// is made from a buffer and taken back; a kept body's where
-    /// `task.Slot.start` hands its addresses to the thread it starts; a
+    /// `task.Slot.start` hands its addresses to the task it starts; a
     /// `Chan`'s where `session.detach` takes one apart; an owner's where
     /// `task.own` builds one and `task.Client.call` reaches its queue; an
     /// arena's where its free functions and its handle's release read it;
@@ -709,10 +709,10 @@ pub const RawAccesses = struct {
         .{ .decls = &.{"closure_entry"}, .allowed = &.{"closure_erase"}, .message = "a closure's entry is made only where `Closure.erase` erases a callable", .help = closure_help },
         .{ .decls = &.{"closure_settle"}, .allowed = &.{"closure_erase"}, .message = "a closure's release is made only where `Closure.erase` erases a callable", .help = closure_help },
         .{ .decls = &.{"closure_size"}, .allowed = &.{"closure_erase"}, .message = "a closure's size is read only where `Closure.erase` erases a callable", .help = closure_help },
-        .{ .decls = &.{"keep_body"}, .allowed = &.{"task_slot_start"}, .message = "a task's body is kept in bytes only by `task.Slot.start`, which hands the addresses to the thread it starts", .help = task_help },
-        .{ .decls = &.{"release_kept_bytes"}, .allowed = &.{"task_slot_start"}, .message = "a kept task body's bytes are released only by the thread `task.Slot.start` starts", .help = task_help },
-        .{ .decls = &.{"take_kept_body"}, .allowed = &.{"task_run_body"}, .message = "a kept task body is taken only by the thread `task.Slot.start` starts", .help = task_help },
-        .{ .decls = &.{"task_run_body"}, .allowed = &.{"task_slot_start"}, .message = "a task's entry is handed only to the thread `task.Slot.start` starts, with the addresses `keep_body` answered", .help = task_help },
+        .{ .decls = &.{"keep_body"}, .allowed = &.{"task_slot_start"}, .message = "a task's body is kept in bytes only by `task.Slot.start`, which hands the addresses to the task it starts", .help = task_help },
+        .{ .decls = &.{"release_kept_bytes"}, .allowed = &.{"task_slot_start"}, .message = "a kept task body's bytes are released only through `task.Slot.start`'s release callback", .help = task_help },
+        .{ .decls = &.{"take_kept_body"}, .allowed = &.{"task_run_body"}, .message = "a kept task body is taken only by the task `task.Slot.start` starts", .help = task_help },
+        .{ .decls = &.{"task_run_body"}, .allowed = &.{"task_slot_start"}, .message = "a task's entry is handed only to the task `task.Slot.start` starts, with the addresses `keep_body` answered", .help = task_help },
         .{ .decls = &.{ "take", "put", "place", "span", "storage_dispose", "storage_into_buffer" }, .allowed = &slot_users, .types = &.{ "storage", "vec", "drain" }, .message = slots_message, .help = "use the vector's or the storage's own operations" },
         .{ .decls = &.{"number_address"}, .allowed = &.{ "foreign_at", "record_release" }, .message = "`number_address` makes an address of any number, so only the declarations the table names, each reading memory C or a test log handed over, call it", .help = "reach bytes through an address made from what owns them" },
         .{ .decls = &.{"foreign_at"}, .allowed = &.{"foreign_at_test"}, .types = &.{ "c_text", "c_text_list" }, .message = "`foreign_at` makes an address of the number a C view holds, so only that view's own members call it, under a contract tying the address to the view", .help = "read the view through its own operations" },

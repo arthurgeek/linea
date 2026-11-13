@@ -7,7 +7,7 @@ extern fn linea_owner_open() -> UInt64
 
 extern fn linea_owner_free(queue: UInt64)
 
-extern fn linea_task_prepare(stack_bytes: UInt64) -> Int64
+extern fn linea_task_prepare_on(stack_bytes: UInt64, identity: UInt64) -> Int64
 
 extern fn linea_chan_close(endpoint: UInt64)
 
@@ -15,7 +15,7 @@ fn main() -> UInt8 {
     let queue = linea_owner_open()
     linea_owner_free(queue)
     linea_owner_free(queue)
-    let _parked = linea_task_prepare(65536)
+    let _parked = linea_task_prepare_on(65536, 0)
     linea_chan_close(12345)
     0
 }

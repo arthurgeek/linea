@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "loop.h"
+#include "fiber.h"
 
 #include "pipe_signal.h"
 
@@ -12,6 +13,7 @@ enum { slots_per_page = 64, page_count = 1024 };
 
 struct slot {
     uint32_t generation;
+    uint8_t kind;
     int in_use;
     /* How many threads have this loop as their own. */
     unsigned long runs;
@@ -61,7 +63,7 @@ static struct slot *slot_at(unsigned long index) {
     return &pages[index / slots_per_page][index % slots_per_page];
 }
 
-unsigned long linea_loop_claim(void *state) {
+unsigned long linea_loop_claim_kind(void *state, uint8_t kind) {
     lock();
     unsigned long index;
     if (first_free != 0) {
@@ -82,10 +84,15 @@ unsigned long linea_loop_claim(void *state) {
     s->in_use = 1;
     s->runs = 0;
     s->state = state;
+    s->kind = kind;
     s->next_free = 0;
     const unsigned long identity = ((index + 1) << 32) | s->generation;
     unlock();
     return identity;
+}
+
+unsigned long linea_loop_claim(void *state) {
+    return linea_loop_claim_kind(state, LINEA_LOOP_SIMULATION);
 }
 
 /* The slot `identity` names while its loop lasts, or null. Called locked. */
@@ -137,7 +144,13 @@ static void count_run(unsigned long identity, int entering) {
     if (identity == 0) return;
     lock();
     struct slot *s = live_slot(identity);
-    if (s != NULL) s->runs = entering ? s->runs + 1 : s->runs - 1;
+    if (s != NULL) {
+        if (entering && s->kind == LINEA_LOOP_SIMULATION && s->runs != 0) {
+            unlock();
+            fail("linea: a simulation runs on more than one thread\n");
+        }
+        s->runs = entering ? s->runs + 1 : s->runs - 1;
+    }
     unlock();
 }
 
@@ -152,6 +165,7 @@ unsigned long linea_loop_runs(unsigned long identity) {
 unsigned long linea_io_switch(unsigned long identity) {
     void *state = identity == 0 ? NULL : linea_loop_find(identity);
     const unsigned long previous = linea_io_current();
+    linea_fiber_sim_switch(previous, identity);
     count_run(previous, 0);
     count_run(identity, 1);
     if (pthread_setspecific(identity_key, (void *)(uintptr_t)identity) != 0 || pthread_setspecific(state_key, state) != 0) {
@@ -160,8 +174,16 @@ unsigned long linea_io_switch(unsigned long identity) {
     return previous;
 }
 
+uint8_t linea_loop_kind(unsigned long identity) {
+    if (identity == 0) return LINEA_LOOP_SYSTEM;
+    lock();
+    const struct slot *s = live_slot(identity);
+    const uint8_t kind = s == NULL ? LINEA_LOOP_SYSTEM : s->kind;
+    unlock();
+    if (s == NULL) fail("linea: an Io names a loop that has ended\n");
+    return kind;
+}
+
 uint8_t linea_io_is_simulated(unsigned long identity) {
-    if (identity == 0) return 0;
-    (void)linea_loop_find(identity);
-    return 1;
+    return (uint8_t)(linea_loop_kind(identity) == LINEA_LOOP_SIMULATION);
 }

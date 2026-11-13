@@ -1,0 +1,5 @@
+import boundary
+
+fn main() -> UInt8 {
+    boundary.check()
+}

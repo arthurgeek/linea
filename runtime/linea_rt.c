@@ -92,11 +92,15 @@ static void fail(const char *message) {
 struct thread_record {
     unsigned long guard_low;
     unsigned long guard_high;
+    unsigned long other_low;
+    unsigned long other_high;
+    unsigned active;
+    unsigned entering;
 };
 
 /* Bytes the record takes from the bottom of an alternate signal stack, a
  * multiple of the 16 bytes a stack is aligned to. */
-enum { thread_record_bytes = 32 };
+enum { thread_record_bytes = 64 };
 typedef char linea_thread_record_fits[(sizeof(struct thread_record) <= thread_record_bytes) ? 1 : -1];
 
 static pthread_key_t thread_record_key;
@@ -500,7 +504,11 @@ static void on_fault(int signal, siginfo_t *info, void *context) {
     const int saved_errno = errno;
     const unsigned long address = (unsigned long)info->si_addr;
     const struct thread_record *record = pthread_getspecific(thread_record_key);
-    if (record != 0 && address >= record->guard_low && address < record->guard_high) fail(overflow_report);
+    if (record != 0) {
+        const unsigned active = __atomic_load_n(&record->active, __ATOMIC_ACQUIRE);
+        if (((active & 1U) != 0 && address >= record->guard_low && address < record->guard_high) ||
+            ((active & 2U) != 0 && address >= record->other_low && address < record->other_high)) fail(overflow_report);
+    }
 #if LINEA_CHECK_STORAGE
     storage_fault(address);
 #endif
@@ -552,6 +560,10 @@ int linea_thread_begin(unsigned long at, unsigned long bytes, unsigned long low,
     struct thread_record *record = (struct thread_record *)at;
     record->guard_low = low;
     record->guard_high = high;
+    record->other_low = 0;
+    record->other_high = 0;
+    record->active = 1;
+    record->entering = 1;
     const int recorded = pthread_setspecific(thread_record_key, record);
     if (recorded != 0) return recorded;
     stack_t alternate;
@@ -564,6 +576,41 @@ int linea_thread_begin(unsigned long at, unsigned long bytes, unsigned long low,
         return refused;
     }
     return 0;
+}
+
+void linea_thread_guard_bounds(unsigned long *low, unsigned long *high) {
+    struct thread_record *record = pthread_getspecific(thread_record_key);
+    if (record == NULL) fail("linea: a carrier has no fault record\n");
+    const unsigned active = __atomic_load_n(&record->active, __ATOMIC_ACQUIRE);
+    if (active == 1) { *low = record->guard_low; *high = record->guard_high; }
+    else if (active == 2) { *low = record->other_low; *high = record->other_high; }
+    else fail("linea: a carrier inspected its guard during a switch\n");
+}
+
+/* Publish the entering guard before moving the stack pointer. The old
+ * range stays active until the entering context commits the switch. */
+void linea_thread_guard_prepare(unsigned long low, unsigned long high) {
+    struct thread_record *record = pthread_getspecific(thread_record_key);
+    if (record == NULL) fail("linea: a switching carrier has no fault record\n");
+    const unsigned active = __atomic_load_n(&record->active, __ATOMIC_ACQUIRE);
+    if (active == 1) {
+        record->other_low = low;
+        record->other_high = high;
+        record->entering = 2;
+    } else if (active == 2) {
+        record->guard_low = low;
+        record->guard_high = high;
+        record->entering = 1;
+    } else {
+        fail("linea: a carrier began a second switch before finishing its first\n");
+    }
+    __atomic_store_n(&record->active, 3, __ATOMIC_RELEASE);
+}
+
+void linea_thread_guard_commit(void) {
+    struct thread_record *record = pthread_getspecific(thread_record_key);
+    if (record == NULL) fail("linea: a switching carrier has no fault record\n");
+    __atomic_store_n(&record->active, record->entering, __ATOMIC_RELEASE);
 }
 
 /* Removes the calling thread's alternate signal stack and its record, so

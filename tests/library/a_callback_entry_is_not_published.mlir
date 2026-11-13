@@ -12,6 +12,8 @@ module {
   }
   llvm.mlir.global internal constant @linea_file0("tests/library/a_callback_entry_is_not_published/main.lin\00") : !llvm.array<57 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_foreign_enter()
+  func.func private @linea_foreign_leave()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @visit(!llvm.ptr, !llvm.ptr) -> i32
@@ -27,7 +29,9 @@ module {
     llvm.store %v3, %s0 : i64, !llvm.ptr loc("tests/library/a_callback_entry_is_not_published/main.lin":15:17)
     %fa5 = func.constant @"lcb.;add" : (!llvm.ptr, i32) -> i32 loc("tests/library/a_callback_entry_is_not_published/main.lin":16:25)
     %v5 = builtin.unrealized_conversion_cast %fa5 : (!llvm.ptr, i32) -> i32 to !llvm.ptr loc("tests/library/a_callback_entry_is_not_published/main.lin":16:25)
+    func.call @linea_foreign_enter() : () -> ()
     %vr7 = func.call @visit(%v5, %s0) : (!llvm.ptr, !llvm.ptr) -> i32 loc("tests/library/a_callback_entry_is_not_published/main.lin":16:19)
+    func.call @linea_foreign_leave() : () -> ()
     %v7 = arith.extsi %vr7 : i32 to i64 loc("tests/library/a_callback_entry_is_not_published/main.lin":16:19)
     %sw8 = arith.trunci %v7 : i64 to i32 loc("tests/library/a_callback_entry_is_not_published/main.lin":16:5)
     llvm.store %sw8, %s1 : i32, !llvm.ptr loc("tests/library/a_callback_entry_is_not_published/main.lin":16:5)
@@ -75,12 +79,16 @@ module {
     func.return %v10 : i64 loc("tests/library/a_callback_entry_is_not_published/main.lin":11:5)
   }
   func.func @visited() -> i64 {
+    func.call @linea_foreign_enter() : () -> ()
     %answer = func.call @"lin.;visited"() : () -> i64
+    func.call @linea_foreign_leave() : () -> ()
     func.return %answer : i64
   }
   func.func private @"lcb.;add"(%p0: !llvm.ptr, %p1: i32) -> i32 attributes {llvm.linkage = #llvm.linkage<internal>} {
+    func.call @linea_foreign_enter() : () -> ()
     %w1 = arith.extsi %p1 : i32 to i64
     %answer = func.call @"lin.;add"(%p0, %w1) : (!llvm.ptr, i64) -> i64
+    func.call @linea_foreign_leave() : () -> ()
     %narrow = arith.trunci %answer : i64 to i32
     func.return %narrow : i32
   }

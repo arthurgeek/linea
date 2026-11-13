@@ -4890,14 +4890,14 @@ signature agrees with every other declaration of the symbol, so
 ([ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md),
 [ADR 0255](adr/0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md)).
 
-**[T-ThreadStart]** A runtime function that runs Linea code on a thread of its
-own, `linea_task_start`, may be named, as a callee or as a value, only inside
+**[T-ThreadStart]** A runtime function that runs Linea code as a separate task,
+on a thread or as a fiber, `linea_task_start`, may be named, as a callee or as a value, only inside
 `task.Slot.start`. A body handed to such a function keeps running after the
 call returns, and `Slot.start` alone answers a handle that carries what the
-body captured until `close` joins the thread, so the body's reads and lends
+body captured until `close` joins the task, so the body's reads and lends
 last as long as it runs ([O-Cross]). Anywhere else they would end while the
 body still ran, so no other function of the standard library's `task`, which
-alone declares the symbol ([T-ExternRuntime]), can start a thread with it, and
+alone declares the symbol ([T-ExternRuntime]), can start a task with it, and
 no library can offer an unjoined or detached task. The rule reads the symbol a
 declaration names, so a declaration [T-ExternRuntime] refuses is held to it
 too
@@ -6355,7 +6355,7 @@ request's text in its state.
 
 **[O-Cross]** A value crosses a task boundary as a capture of the body that
 `task.start`, `task.start_in`, `task.prepare` or `task.prepare_in` takes for a
-new task. The task runs on another
+new task. The task may run on another
 thread while its creator runs on, so what the body carries is used by both at
 once until `close` joins the task. Every observation the body carries must
 observe a `Shareable` place: a `read` capture's own observation of its source,
@@ -6400,11 +6400,11 @@ owner, as the standard library's `ReleaseTag` observes the `ReleaseLog` it
 writes, so the bound and this rule see the write
 ([ADR 0250](adr/0250-tasks-are-structured-through-linear-sessions.md) §5).
 
-A task runs on its own operating-system thread. `start` orders everything
-its creator did before it before everything the body does; a `send` returns
+A task runs on its own operating-system thread or as a fiber pinned to a
+carrier of its selected loop. `start` orders everything its creator did before it before everything the body does; a `send` returns
 once the other end has received the value, and orders everything the sender
 did before it before everything the receiver does after the `recv`; `close`
-on the handle returns once the body has returned and its thread has been
+on the handle returns once the body has returned and the task has been
 joined, and orders everything the body did before everything after the
 `close`. With [O-Borrow], [O-Cross] and the `Owned` payload bound, every
 other location is reached by one task between two of these points, or only
@@ -6415,28 +6415,41 @@ frame larger than a page as it grows, so an overflow on any thread, `main`
 included, stops the program with `linea: a stack overflowed`.
 
 A task's waits run on an `io.Io`: the system, where an operation waits on the
-kernel, or a simulation, inside `io.Simulation.run`, where the clocks are
-virtual and sockets are entries of the simulation's own table
+kernel; a loop opened by `io.Loop.open(carriers: n)`, where a fiber's waits
+let its carrier run other ready fibers; or a simulation, inside
+`io.Simulation.run`, where the clocks are virtual and sockets are entries of the simulation's own table
 ([ADR 0265](adr/0265-waits-go-through-the-runtimes-poller-and-a-loop-runs-tasks-as-fibers.md)
-§8, §12). A simulation's virtual time moves only when its body advances it
-or waits, and every choice its network makes is drawn from its seed, so a run
-is repeated exactly by the same seed. `run` lends the simulation to its body,
-so no two tasks run one simulation at once. The uses that would make a run
-depend on the machine each stop the program: an operation on a simulated
+§8, §12). A loop's carrier count is explicit and positive, and its resources
+last until process exit. Starting and preparing tasks, owning tasks and HTTP
+serving wrappers take an `on:` Io. Its constant default, `io.inherited`, is
+resolved to the starting task's current concrete Io when execution is prepared;
+`io.current()` instead captures that concrete Io when called. `io.system()`
+selects a separate thread. HTTP dispatch runs on the caller's Io; `on:`
+selects newly started workers and owning tasks. To run the dispatcher on a
+loop too, start the calling task on that loop. Blocking regular-file
+and foreign calls still hold a fiber's carrier.
+
+A simulation's virtual time moves when its body advances it or its tasks wait.
+Its tasks run as fibers on one carrier, with scheduling and network choices
+drawn from its seed, so a run is repeated exactly by the same seed. `run` lends
+the simulation to its body, so no other run enters it meanwhile; child tasks
+started inside it inherit that simulation and must be joined during a run
+before the simulation is closed. Pending children may remain between runs on
+the same operating-system thread; moving a simulation with live tasks to another
+thread traps.
+The uses that would make a run depend on the machine each stop the program: an operation on a simulated
 descriptor outside a run of its simulation (`linea: a simulated descriptor
 was used outside its simulation`), an operation other than closing on a real
 socket inside one (`linea: a real socket was used inside a simulation`),
-starting a task inside one, or waiting there on another task's session or
-owner, whose thread the kernel schedules (`linea: a simulation runs one task
-until fibers`), advancing a simulation's world while another simulation runs
+advancing a simulation's world while another simulation runs
 (`linea: a simulation's world was used outside its run`), a `task.WaitSet`
 used on another loop than the one it was opened on, such as one returned from
 a run (`linea: a wait set was used on a loop other than the one it was opened
 on`), an `io.SignalShare` registered in a set of another loop than the one it
 was taken on (`linea: a signal's share was registered on a loop other than
 the one it was taken on`), and a wait with no
-deadline that nothing in the simulation can end (`linea: a simulation's one
-task waits forever`). An `Io` that names a simulation which has been closed
+deadline that nothing in the simulation can end (`linea: all simulation
+tasks wait forever`). An `Io` that names a simulation which has been closed
 stops the program where it is used (`linea: an Io names a loop that has
 ended`). A simulated descriptor closed outside a run is closed at its
 simulation's next operation, in the order the program closed it; one closed
@@ -6475,8 +6488,10 @@ apart
    job, and it is never a payload, so it stays with the task that opened it or
    moves into the body of a task that task starts.
 2. *Scheduler progress.* A task whose operation can complete eventually runs.
-   Every task is an operating-system thread, which the system is assumed to
-   schedule fairly.
+   The system is assumed to schedule thread tasks and carrier threads fairly.
+   A pinned fiber yields its carrier at a wait; a computation that never waits
+   can prevent another fiber on that carrier from running. No time budget or
+   preemption is promised.
 3. *External progress.* A descriptor's event, a timer's expiry, a signal and
    a foreign call arrive or return as the world's own contracts say, and no
    sooner.
@@ -6485,7 +6500,9 @@ From 1 and 2, no set of tasks waits only on each other forever. Nothing is
 promised of 3: a task waiting on a socket, or in a wait set whose every source
 is of the world, waits as long as the world takes, and the tasks that wait for
 it wait with it. Inside a simulation a wait that nothing in the simulation can
-end stops the program (`linea: a simulation's one task waits forever`).
+end stops the program (`linea: all simulation tasks wait forever`). A wait
+inside a live foreign frame cannot switch tasks; an impossible wait there
+stops with `linea: a simulation's one task waits forever`.
 
 A wait set delivers each registration at most once: a value registered leaves
 the set by exactly one of `next`, `take`, `take_if_registered` or `close`, and

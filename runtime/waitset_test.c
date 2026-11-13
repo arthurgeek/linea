@@ -82,7 +82,7 @@ static void return_at_once(unsigned long endpoint, unsigned long at, unsigned lo
 }
 
 static unsigned long started(linea_task_entry body) {
-    const long task = linea_task_prepare(1UL << 18);
+    const long task = linea_task_prepare_on(1UL << 18, 0);
     assert(task > 0);
     return linea_task_start((unsigned long)task, body, release_nothing, 0, 0, 0);
 }

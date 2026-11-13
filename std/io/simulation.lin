@@ -2,14 +2,8 @@ import std.mem
 import std.testing
 import std.time
 
-// The runtime answers the identity of the loop the calling thread runs on, 0
-// for the system; makes a loop the thread's and answers the one it replaced;
-// and says whether a loop is a simulation. A loop that has ended traps.
-extern fn linea_io_current() -> UInt64
-
+// Make this simulation the calling task's Io and restore its previous Io.
 extern fn linea_io_switch(identity: UInt64) -> UInt64
-
-extern fn linea_io_is_simulated(identity: UInt64) -> UInt8
 
 // The runtime opens a simulation from a seed and the bounds of its network,
 // answering its identity or 0 when it cannot; advances its clock; reports
@@ -28,48 +22,22 @@ extern fn linea_signal_deliver_simulated(home: UInt64, signal: UInt8)
 
 let nanoseconds_per_millisecond: UInt64 = 1000000
 
-// An Io names what a task's waits run on: the system, where each operation
-// waits on the kernel, or a simulation, where the waits run on a virtual
-// clock and network. It is a number naming a loop, so it can be copied
-// anywhere, and every use checks that the loop it names has not ended.
-@(opaque, copyable, derive(Equatable, Debug))
-struct Io {
-    identity: UInt64,
+test fn inherited_resolves_in_the_task_that_uses_it() {
+    var sim = Simulation.open(seed: 1).unwrap()
+    let captured = current()
+    let (selected, simulated) = &sim.run(|inout _world| (inherited.runtime_identity(), inherited.is_simulated()))
+    sim.close()
+    testing.assert_eq(captured, system(), "capturing the current Io changed it later")?
+    testing.assert(selected != captured.runtime_identity(), "inherited captured the caller's earlier Io")?
+    testing.assert(simulated, "inherited did not resolve the simulation")?
 }
 
-// The system: the Io of every task that is a thread of its own.
-pub fn system() -> Io {
-    Io { identity = 0 }
-}
-
-test fn the_system_is_not_simulated() {
-    testing.assert(!system().is_simulated(), "the system was a simulation")?
-}
-
-// The Io the calling task runs on: the simulation inside `Simulation.run`,
-// and the system everywhere else.
-pub fn current() -> Io {
-    Io { identity = linea_io_current() }
-}
-
-test fn a_task_runs_on_the_system_outside_a_simulation() {
-    testing.assert_eq(current(), system(), "a task outside a simulation did not run on the system")?
-}
-
-impl Io {
-    // Whether this Io is a simulation. Asking about the Io of a simulation
-    // that has been closed traps.
-    pub fn is_simulated(self: Self) -> Bool {
-        linea_io_is_simulated(self.identity) != 0
-    }
-
-    test fn the_io_inside_a_run_is_its_simulation() {
-        var sim = Simulation.open(seed: 1).unwrap()
-        let (inside, simulated) = &sim.run(|inout _world| (current(), current().is_simulated()))
-        sim.close()
-        testing.assert(inside != system(), "the Io inside a run was the system")?
-        testing.assert(simulated, "the Io inside a run was not a simulation")?
-    }
+test fn the_io_inside_a_run_is_its_simulation() {
+    var sim = Simulation.open(seed: 1).unwrap()
+    let (inside, simulated) = &sim.run(|inout _world| (current(), current().is_simulated()))
+    sim.close()
+    testing.assert(inside != system(), "the Io inside a run was the system")?
+    testing.assert(simulated, "the Io inside a run was not a simulation")?
 }
 
 // A Network bounds the choices a simulation's network makes from its seed.
@@ -169,15 +137,16 @@ impl Simulation {
         testing.assert_eq(plain_ms, slow_ms, "two simulations started their clocks at different instants")?
     }
 
-    // Run `body` as the simulation's one task and answer what it answers.
+    // Run `body` on the simulation's calling thread and answer what it answers.
     // The simulation is lent to the run, so no other task runs it meanwhile.
     // While it runs, `io.current()` is the simulation, `time.Instant.now()`
-    // reads the virtual clock, `time.sleep` moves it, and `net.listen` and
+    // reads the virtual clock, tasks started here inherit the simulation, and
+    // `net.listen` and
     // `net.connect` make simulated descriptors, on which no system call is
-    // made. A wait moves the clock straight to its next event, so a deadline
+    // made. Runnable tasks run before a wait moves the clock to its next event,
+    // so a deadline
     // a minute away passes at once. A simulated descriptor used outside a run
-    // of its simulation, a real socket used inside one, a task started inside
-    // one, a wait on another task's session, and a wait with no deadline that
+    // of its simulation, a real socket used inside one, and a wait with no deadline that
     // nothing can end all trap, since none could be repeated from the seed.
     // A simulated descriptor closed between runs is closed at the next
     // operation of its simulation. An instant read inside a run is on the

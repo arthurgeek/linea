@@ -170,7 +170,7 @@ pub const DeclaredBy = union(enum) {
     granted,
     /// The standard library's `module` alone. The runtime trusts every call of
     /// such a symbol with a number only that module's types keep: an
-    /// allocation, a descriptor, a parked thread, a call queue or an endpoint
+    /// allocation, a descriptor, a prepared task, a call queue or an endpoint
     /// that a linear value owns, the address of bytes a buffer or a slice
     /// holds, or the address of typed bytes `address.raw` gives. A symbol lowering replaces
     /// is held here too, since only that module's declaration is replaced.
@@ -201,9 +201,9 @@ pub const Signature = struct {
     declared_by: DeclaredBy,
     /// Control never returns from a call to it.
     noreturn: bool = false,
-    /// The runtime calls back into Linea code on a thread it creates, so a
+    /// The runtime calls back into Linea code in a task it starts, so a
     /// body handed to it runs while its caller goes on ([T-ThreadStart]).
-    starts_thread: bool = false,
+    starts_task: bool = false,
 };
 
 fn p(scalar: Scalar) Parameter {
@@ -296,6 +296,13 @@ pub const thread_end_signature: Signature = .{
     .result = .unit,
 };
 
+pub const foreign_enter = "linea_foreign_enter";
+pub const foreign_leave = "linea_foreign_leave";
+pub const foreign_depth = "linea_foreign_depth";
+pub const foreign_enter_signature: Signature = .{ .symbol = foreign_enter, .declared_by = .compiler, .parameters = &.{}, .result = .unit };
+pub const foreign_leave_signature: Signature = .{ .symbol = foreign_leave, .declared_by = .compiler, .parameters = &.{}, .result = .unit };
+pub const foreign_depth_signature: Signature = .{ .symbol = foreign_depth, .declared_by = .compiler, .parameters = &.{}, .result = .u64 };
+
 /// The signature of every float-math operation, in the operation's own order.
 pub const math_functions = math: {
     const operations = std.enums.values(@import("float_math.zig").Operation);
@@ -320,6 +327,34 @@ pub const math_functions = math: {
 /// declaration names them; they are owned so that no `export` takes their
 /// names.
 pub const internal_functions = [_]Signature{
+    .{ .symbol = "linea_fiber_sim_create", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .ptr },
+    .{ .symbol = "linea_fiber_sim_switch", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_fiber_sim_destroy", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_fiber_sim_step", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .i32 },
+    .{ .symbol = "linea_fiber_sim_park", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.u64) }, .result = .i32 },
+    .{ .symbol = "linea_sim_carrier", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .ptr },
+    .{ .symbol = "linea_sim_choice", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .u64 },
+    .{ .symbol = "linea_sim_attempt", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .i64 },
+    foreign_enter_signature,
+    foreign_leave_signature,
+    foreign_depth_signature,
+    .{ .symbol = "linea_fiber_perform", .declared_by = .compiler, .parameters = &.{ p(.ptr), cb(&.{.ptr}, .i64, 0) }, .result = .i64 },
+    .{ .symbol = "linea_fiber_wait_descriptor", .declared_by = .compiler, .parameters = &.{ p(.i32), p(.u8), p(.u64) }, .result = .i64 },
+    .{ .symbol = "linea_fiber_sleep", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .i64 },
+    .{ .symbol = "linea_context_init", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.ptr), p(.u64), cb(&.{.ptr}, .unit, 0), p(.ptr) }, .result = .unit },
+    .{ .symbol = "linea_context_switch", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.ptr) }, .result = .unit },
+    .{ .symbol = "linea_thread_guard_bounds", .declared_by = .compiler, .parameters = &.{ .{ .scalar = .u64, .passing = .inout }, .{ .scalar = .u64, .passing = .inout } }, .result = .unit },
+    .{ .symbol = "linea_thread_guard_prepare", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_thread_guard_commit", .declared_by = .compiler, .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_fiber_create", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64), cb(&.{.ptr}, .unit, 0), cb(&.{.ptr}, .unit, 0), p(.ptr), .{ .scalar = .i32, .passing = .inout } }, .result = .ptr },
+    .{ .symbol = "linea_fiber_start", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_fiber_destroy", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_fiber_active", .declared_by = .compiler, .parameters = &.{}, .result = .i32 },
+    .{ .symbol = "linea_fiber_park", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.u64) }, .result = .i32 },
+    .{ .symbol = "linea_fiber_unpark", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_fiber_yield", .declared_by = .compiler, .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_loop_claim_kind", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.u8) }, .result = .u64 },
+    .{ .symbol = "linea_loop_kind", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .u8 },
     .{ .symbol = "linea_park_init", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .i32 },
     .{ .symbol = "linea_park_destroy", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
     .{ .symbol = "linea_park_lock", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
@@ -400,7 +435,8 @@ const net_close = heldBy("net", "`close` on a `net.Connection` or a `net.Listene
 // A loop's identity is a number an `io.Io` keeps, and a simulation's one a
 // linear `io.Simulation` keeps; switching the thread's loop is what
 // `Simulation.run` does around its body.
-const io_loop = heldBy("io", "`io.current`, `io.Io` and `Simulation.run`");
+const io_loop = heldBy("io", "`Simulation.run`");
+const io_execution = heldBy("core", "`io.current`, `io.Io` and `io.Loop.open`");
 // A wait set's number names registrations whose values the set's own vector
 // keeps, so a call naming a set or a slot it does not hold would deliver or
 // take a value that is not there.
@@ -460,9 +496,9 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_net_reset", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection },
     .{ .symbol = "linea_net_close", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_close },
     // The loop table and the simulations in it.
-    .{ .symbol = "linea_io_current", .parameters = &.{}, .result = .u64, .declared_by = .granted },
+    .{ .symbol = "linea_io_current", .parameters = &.{}, .result = .u64, .declared_by = io_execution },
     .{ .symbol = "linea_io_switch", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_loop },
-    .{ .symbol = "linea_io_is_simulated", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = io_loop },
+    .{ .symbol = "linea_io_is_simulated", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = io_execution },
     .{ .symbol = "linea_sim_open", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64), p(.u64), p(.u8), p(.u64) }, .result = .u64, .declared_by = io_simulation },
     .{ .symbol = "linea_sim_advance", .parameters = &.{ p(.u64), p(.u64) }, .result = .unit, .declared_by = io_simulation },
     .{ .symbol = "linea_sim_fingerprint", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_simulation },
@@ -489,7 +525,9 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_signal_release", .parameters = &.{ p(.u8), p(.u64) }, .result = .unit, .declared_by = io_signal },
     .{ .symbol = "linea_signal_deliver_simulated", .parameters = &.{ p(.u64), p(.u8) }, .result = .unit, .declared_by = io_simulation },
     // A task's thread and the rendezvous channel of its session.
-    .{ .symbol = "linea_task_prepare", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.prepare` and `task.prepare_in`" } } },
+    .{ .symbol = "linea_available_parallelism", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "env", .reached_through = "`env.available_parallelism`" } } },
+    .{ .symbol = "linea_loop_open", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = io_execution },
+    .{ .symbol = "linea_task_prepare_on", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.prepare` and `task.prepare_in`" } } },
     .{ .symbol = "linea_owner_open", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } } },
     .{ .symbol = "linea_owner_call", .parameters = &.{ p(.u64), typed_bytes, p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`call` on a `task.Client`" } } },
     .{ .symbol = "linea_owner_next", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .u8, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`task.own`" } } },
@@ -497,7 +535,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_owner_done", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } } },
     .{ .symbol = "linea_owner_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } } },
     .{ .symbol = "linea_owner_free", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } } },
-    .{ .symbol = "linea_task_start", .parameters = &.{ p(.u64), cb(&.{ .u64, .u64, .u64 }, .unit, 1), cb(&.{ .u64, .u64 }, .unit, 0), typed_bytes, p(.u64), typed_bytes }, .result = .u64, .starts_thread = true, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`start` on a `task.Slot`" } } },
+    .{ .symbol = "linea_task_start", .parameters = &.{ p(.u64), cb(&.{ .u64, .u64, .u64 }, .unit, 1), cb(&.{ .u64, .u64 }, .unit, 0), typed_bytes, p(.u64), typed_bytes }, .result = .u64, .starts_task = true, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`start` on a `task.Slot`" } } },
     .{ .symbol = "linea_task_cancel", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`cancel` on a `task.Slot`" } } },
     .{ .symbol = "linea_chan_send", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`send` on a `session.Chan`" } } },
     .{ .symbol = "linea_chan_recv", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`recv` on a `session.Chan`" } } },
@@ -555,7 +593,7 @@ test "a runtime function is found by its whole symbol" {
         // module's types keep.
         // A symbol taking or answering an allocation, a descriptor or the
         // address of bytes is trusted with a number a value must own.
-        const confined = signature.provider == .lowering or signature.starts_thread or signature.answers != .none or
+        const confined = signature.provider == .lowering or signature.starts_task or signature.answers != .none or
             for (signature.parameters) |parameter| {
                 if (parameter.address or parameter.callback != null or parameter.held != .none) break true;
             } else false;

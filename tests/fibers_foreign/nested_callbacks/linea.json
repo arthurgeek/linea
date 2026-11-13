@@ -1,0 +1,1 @@
+{ "extern": ["boundary"], "native": ["boundary/boundary.c"] }

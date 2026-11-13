@@ -108,7 +108,7 @@ static int make_wake(void) {
 
 long linea_signal_acquire(uint8_t signal) {
     check(signal);
-    if (linea_io_current() != 0) return 0;
+    if (linea_io_is_simulated(linea_io_current()) != 0) return 0;
     lock();
     int error = make_wake();
     if (error != 0) {
@@ -145,7 +145,7 @@ long linea_signal_acquire(uint8_t signal) {
 
 void linea_signal_release(uint8_t signal, unsigned long loop) {
     check(signal);
-    if (loop != 0) return;
+    if (linea_io_is_simulated(loop) != 0) return;
     lock();
     if (shares[signal] == 0) fail("linea: a signal's share was released twice\n");
     shares[signal] -= 1;
@@ -167,6 +167,7 @@ void linea_signal_watch(struct linea_signal_watch *watch, struct linea_registrat
     lock();
     watch->registration = r;
     watch->loop = loop;
+    watch->simulated = linea_io_is_simulated(loop) != 0;
     watch->signal = signal;
     watch->recorded = __atomic_load_n(&counts[signal], __ATOMIC_SEQ_CST);
     watch->previous = 0;
@@ -197,14 +198,14 @@ void linea_signal_drain(void) {
     unsigned long now[linea_signal_kinds];
     for (int i = 0; i < linea_signal_kinds; i += 1) now[i] = __atomic_load_n(&counts[i], __ATOMIC_SEQ_CST);
     for (struct linea_signal_watch *w = watches; w != 0; w = w->next) {
-        if (w->loop == 0 && now[w->signal] != w->recorded) linea_registration_signal(w->registration);
+        if (!w->simulated && now[w->signal] != w->recorded) linea_registration_signal(w->registration);
     }
     unlock();
 }
 
 void linea_signal_deliver_simulated(unsigned long loop, uint8_t signal) {
     check(signal);
-    if (loop == 0 || linea_io_current() != loop) fail("linea: a simulation's world was used outside its run\n");
+    if (!linea_io_is_simulated(loop) || linea_io_current() != loop) fail("linea: a simulation's world was used outside its run\n");
     lock();
     for (struct linea_signal_watch *w = watches; w != 0; w = w->next) {
         if (w->loop == loop && w->signal == signal) linea_registration_signal(w->registration);

@@ -322,6 +322,15 @@ jobs:
             outcomes-${{ github.job }}-${{ matrix.sanitizer }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-
             outcomes-${{ github.job }}-${{ matrix.sanitizer }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
 
+      # Catch stack-switch and native lifetime failures before the longer
+      # instrumented corpus walk.
+      - name: Runtime C tests under ${{ matrix.sanitizer }}
+        # The runtime's own C tests, built by `cc` with the sanitizer's
+        # runtime linked, so the C the corpus reaches only through programs is
+        # also driven directly: the task tests' threads, sessions and
+        # concurrent allocation included.
+        run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-clock test-native-runtime test-native-task -Dsanitize=${{ matrix.sanitizer }}
+
       # The conformance suite's recorded outcomes live outside Zig's build
       # cache: their own key covers the emitted IR, runtime, commands and Nix
       # tool stamps, and the lane-specific cache above persists them explicitly.
@@ -343,13 +352,6 @@ jobs:
         run: |
           dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/linea-cache"
           if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
-
-      - name: Runtime C tests under ${{ matrix.sanitizer }}
-        # The runtime's own C tests, built by `cc` with the sanitizer's
-        # runtime linked, so the C the corpus reaches only through programs is
-        # also driven directly: the task tests' threads, sessions and
-        # concurrent allocation included.
-        run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-clock test-native-runtime test-native-task -Dsanitize=${{ matrix.sanitizer }}
 
       - name: Save program outcomes
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
@@ -909,6 +911,38 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # Context ABI and parked-stack safety must execute on both Linux ABIs;
+  # compiling the other architecture cannot exercise its saved registers.
+  # This lane always runs, so an inherited x86 check cannot hide an ARM failure.
+  fibers:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Contexts, parks, socket waits and fault recovery
+        run: nix develop --command zig build test-native-task test-native-fiber-scale test-native-net test-native-clock -Drelease
+
+      - name: Public execution APIs and foreign callbacks
+        run: |
+          nix develop --command zig build conformance -Drelease -- tests/fibers_public
+          nix develop --command zig build conformance -Drelease -- tests/fibers_foreign
+          nix develop --command zig build conformance -Drelease -- tests/io/simulation
+
   # Every run and attempt of a lane saves its cache under a key of its own,
   # and a cache stays until the repository's 10 GB are spent and the least
   # recently used go: main's, the only ones a new pull request can restore.
@@ -970,7 +1004,7 @@ jobs:
   # it was skipped. `sweep` reads a clock, so it reports on its own and is not
   # read here.
   merge-ready:
-    needs: [changes, check, sanitize, optimised-unit, optimised-corpus, optimised-soundness, fuzz, fuzz-mir]
+    needs: [changes, check, sanitize, optimised-unit, optimised-corpus, optimised-soundness, fuzz, fuzz-mir, fibers]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -994,6 +1028,7 @@ jobs:
           OPTIMISED_SOUNDNESS: ${{ needs.optimised-soundness.result }}
           FUZZ: ${{ needs.fuzz.result }}
           FUZZ_MIR: ${{ needs.fuzz-mir.result }}
+          FIBERS: ${{ needs.fibers.result }}
         run: |
           echo "changes: $CHANGES (check=$WANT_CHECK, sanitize=$WANT_SANITIZE, optimised-unit=$WANT_OPTIMISED_UNIT, optimised-corpus=$WANT_OPTIMISED_CORPUS, optimised-soundness=$WANT_OPTIMISED_SOUNDNESS, fuzz-mir=$WANT_FUZZ_MIR)"
           echo "check: $CHECK, sanitize: $SANITIZE, optimised-unit: $OPTIMISED_UNIT, optimised-corpus: $OPTIMISED_CORPUS, optimised-soundness: $OPTIMISED_SOUNDNESS, fuzz: $FUZZ, fuzz-mir: $FUZZ_MIR"
@@ -1001,7 +1036,7 @@ jobs:
             echo "which lanes the change needs is unknown, so no lane can be judged"
             exit 1
           fi
-          case " $CHECK $SANITIZE $OPTIMISED_UNIT $OPTIMISED_CORPUS $OPTIMISED_SOUNDNESS $FUZZ $FUZZ_MIR " in
+          case " $CHECK $SANITIZE $OPTIMISED_UNIT $OPTIMISED_CORPUS $OPTIMISED_SOUNDNESS $FUZZ $FUZZ_MIR $FIBERS " in
             *" failure "*|*" cancelled "*)
               echo "a lane failed or was cancelled"
               exit 1 ;;
@@ -1031,6 +1066,7 @@ jobs:
                 status=1 ;;
             esac
           }
+          judge fibers run "$FIBERS"
           judge check "$WANT_CHECK" "$CHECK"
           judge sanitize "$WANT_SANITIZE" "$SANITIZE"
           judge optimised-unit "$WANT_OPTIMISED_UNIT" "$OPTIMISED_UNIT"

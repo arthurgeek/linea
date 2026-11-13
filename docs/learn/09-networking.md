@@ -896,10 +896,13 @@ same virtual instants.
 A simulation stops the program rather than let a run depend on the machine:
 a simulated socket used outside a run of its simulation stops with `linea: a
 simulated descriptor was used outside its simulation`, a real socket used
-inside `run` with `linea: a real socket was used inside a simulation`, and a
-task started inside `run`, or a wait there on another task's session, with
-`linea: a simulation runs one task until fibers`, since the kernel would decide
-when its thread runs. Rust's
+inside `run` with `linea: a real socket was used inside a simulation`.
+Tasks started inside `run` inherit its simulated Io and run as fibers on its
+one carrier; the seed chooses their scheduling as well as network events.
+They can exchange session messages and wait on one another without a real
+thread deciding the order. Join them during a run before closing the
+simulation. Pending children can remain between runs on the same
+operating-system thread. Rust's
 `tokio::time::pause` and JavaScript's fake timers stop the clock the same way,
 though neither simulates the network.
 
@@ -2034,8 +2037,15 @@ final count, and the program releases it. A service that shares nothing calls
 `http.listen_and_serve` with a function that builds each task's handler, as
 the first server does. Either one serves one connection at a time when it is
 given `policy: .Sequential`: a single serving task builds one handler with the
-same function and answers every connection in turn, on the thread that called
-it.
+same function and answers every connection in turn, on the caller's Io.
+All serving wrappers accept `on:` to select where new workers and owning tasks
+start. For example, open `io.Loop.open(carriers: 2)` once and pass its Io as
+`on:` to `listen_and_serve` to run its workers as fibers. The default
+`.Threads(128)` still limits concurrent workers. The dispatcher stays on the
+calling task's Io with either policy; to put it on a loop too, start the
+calling task on that loop. `.Sequential` keeps its
+handler and dispatcher inline on the caller's Io; passing `on:` changes only
+any owning tasks that are started.
 
 A route can be a closure instead of a named function, registered with
 `route_raw`, which takes a function of the state, request metadata and an exclusive body: `GET /` is
@@ -2324,7 +2334,7 @@ serving task has been joined, and releases it on a failure. So these hold for
   many serving tasks at once as its policy allows (`.Threads(128)` unless it
   is given another), each with a handler of its own. Idle connections use
   registrations rather than tasks; `policy: .Sequential` answers ready
-  connections on the calling thread.
+  connections on the caller's Io.
 - A failed connection — a client that disconnects, a malformed request, a
   timeout — is answered or dropped, and never stops the server.
 - It returns when `limits.connections` is reached or a shutdown signal is

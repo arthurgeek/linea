@@ -1,4 +1,5 @@
 import std.mem
+import std.io.core
 import std.mem.address
 import std.release
 import std.session
@@ -20,14 +21,14 @@ use address.Address
 pub let default_stack_bytes: UInt64 = 2097152
 
 // PrepareError says which step of preparing a task failed: acquiring the
-// bytes the body is kept in, or creating the task's thread.
+// bytes the body is kept in, or preparing its execution and stack.
 @(copyable, derive(Equatable, Equivalent, Display, Debug, Release))
 pub enum PrepareError {
     Allocation,
     Thread,
 }
 
-// A Slot is a prepared task: its thread exists, parked before running
+// A Slot is a prepared task: its execution is reserved before running
 // anything, the bytes its body will be kept in are acquired, and it holds the
 // body. Holding the body, it carries everything the body captured, so a place
 // the body reads cannot be written, nor a place it holds lent `inout`
@@ -82,22 +83,21 @@ test fn a_failed_preparation_settles_to_its_reason() {
     testing.assert_eq(reason, PrepareError.Thread, "settling lost the reason")?
 }
 
-// Create a thread parked with a stack of `stack_bytes`, and answer the task,
-// or a negative number when the thread could not be created.
-extern fn linea_task_prepare(stack_bytes: UInt64) -> Int64
+// Reserve execution on `identity` with a stack of `stack_bytes`, and answer
+// the task or a negative number when preparation fails.
+extern fn linea_task_prepare_on(stack_bytes: UInt64, identity: UInt64) -> Int64
 
-// Release a parked thread with nothing to run, and join it.
+// Release a prepared task with nothing to run.
 extern fn linea_task_cancel(task: UInt64)
 
-// Let the parked thread of `task` run: it calls `entry` with the task's end
-// of the session, `at` and `len`, the address and length of the bytes its
-// body is kept in, and the thread that closes the handle calls `release` with
-// `release_at`, the address of the buffer kept after the body, and `len` once
-// the task has been joined. The runtime calls both after this call returns,
-// and neither after the join. It answers the creator's endpoint.
+// Start the prepared task: `entry` receives its session end and the address
+// and length of its body. It may run before this call returns. Closing the
+// creator's handle waits for the body to finish, then calls `release` with
+// `release_at`, the buffer kept after the body, and `len`. No callback remains
+// when that close returns. This call answers the creator's endpoint.
 extern fn linea_task_start(task: UInt64, entry: fn(endpoint: UInt64, at: UInt64, len: UInt64), release: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, release_at: UInt64) -> UInt64
 
-// What a task's thread runs: move the body out of the bytes at `at`, which
+// What a task runs: move the body out of the bytes at `at`, which
 // name its type, and call it with the task's end of the session.
 fn run_body[P: Protocol, F: sink fn(sink me: Chan[P])](endpoint: UInt64, at: Address[F], _len: UInt64) {
     let body: F = mem.take_kept_body(at)
@@ -107,8 +107,8 @@ fn run_body[P: Protocol, F: sink fn(sink me: Chan[P])](endpoint: UInt64, at: Add
 // Prepare a task whose body is `body`, with a stack of `default_stack_bytes`
 // and its bytes from the system allocator. `prepare_in` says what preparing
 // does.
-pub fn prepare[P: Protocol, F: sink fn(sink me: Chan[P])](sink body: F) -> Result[Slot[P, F, mem.SystemAllocator], Unstarted[F]] where carries(.Ok: body), carries(.Err: body) {
-    prepare_in(mem.system(), body, stack: default_stack_bytes)
+pub fn prepare[P: Protocol, F: sink fn(sink me: Chan[P])](sink body: F, on: core.Io = core.inherited) -> Result[Slot[P, F, mem.SystemAllocator], Unstarted[F]] where carries(.Ok: body), carries(.Err: body) {
+    prepare_in(mem.system(), body, default_stack_bytes, on)
 }
 
 test fn a_prepared_body_runs_once_its_task_starts() {
@@ -126,11 +126,11 @@ test fn a_prepared_body_runs_once_its_task_starts() {
 // that can fail, and answers a slot holding the body. A failure hands the
 // body back in `Unstarted`, beside the reason. The slot carries the
 // allocator, since the task keeps its bytes until it is joined.
-pub fn prepare_in[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator](allocator: A, sink body: F, stack: UInt64) -> Result[Slot[P, F, A], Unstarted[F]] where carries(.Ok: body, allocator), carries(.Err: body) {
+pub fn prepare_in[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator](allocator: A, sink body: F, stack: UInt64, on: core.Io = core.inherited) -> Result[Slot[P, F, A], Unstarted[F]] where carries(.Ok: body, allocator), carries(.Err: body) {
     let storage = allocator.acquire(mem.kept_bytes(body, allocator)) else |_| {
         return .Err(.{ body, reason = .Allocation })
     }
-    let task = linea_task_prepare(stack)
+    let task = linea_task_prepare_on(stack, on.runtime_identity())
     if task < 0 {
         storage.release()
         return .Err(.{ body, reason = .Thread })
@@ -186,8 +186,8 @@ test fn a_thread_that_cannot_be_made_hands_the_body_back() {
 // Prepare and start a task in one call, with a stack of `default_stack_bytes`
 // and its bytes from the system allocator, and answer its handle.
 // `start_in` says what starting does.
-pub fn start[P: Protocol, F: Discardable + sink fn(sink me: Chan[P])](sink body: F) -> Result[Chan[P.Dual, (F, mem.SystemAllocator)], PrepareError] where carries(.Ok: body) {
-    start_in(mem.system(), body, stack: default_stack_bytes)
+pub fn start[P: Protocol, F: Discardable + sink fn(sink me: Chan[P])](sink body: F, on: core.Io = core.inherited) -> Result[Chan[P.Dual, (F, mem.SystemAllocator)], PrepareError] where carries(.Ok: body) {
+    start_in(mem.system(), body, default_stack_bytes, on)
 }
 
 test fn a_task_started_in_one_call_runs_its_body() {
@@ -205,8 +205,8 @@ test fn a_task_started_in_one_call_runs_its_body() {
 // answers the reason, which is why the body must be Discardable: it owns
 // nothing a drop would lose. A body that owns something linear is prepared
 // with `prepare_in`, whose failure hands it back.
-pub fn start_in[P: Protocol, F: Discardable + sink fn(sink me: Chan[P]), A: Allocator](allocator: A, sink body: F, stack: UInt64) -> Result[Chan[P.Dual, (F, A)], PrepareError] where carries(.Ok: body, allocator) {
-    let slot = prepare_in(allocator, body, stack).settled()?
+pub fn start_in[P: Protocol, F: Discardable + sink fn(sink me: Chan[P]), A: Allocator](allocator: A, sink body: F, stack: UInt64, on: core.Io = core.inherited) -> Result[Chan[P.Dual, (F, A)], PrepareError] where carries(.Ok: body, allocator) {
+    let slot = prepare_in(allocator, body, stack, on).settled()?
     .Ok(slot.start())
 }
 
@@ -225,7 +225,7 @@ test fn a_task_that_cannot_start_answers_the_reason() {
 }
 
 impl[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator] Slot[P, F, A] {
-    // Start the task: move the body into it and let its thread run. Starting
+    // Start the task: move the body into it and let it run. Starting
     // cannot fail. It answers the task's handle, the creator's end of the
     // session whose other end the body receives as `me`. The handle's `(F, A)`
     // makes it carry every dependency the body captured and the allocator its
@@ -250,9 +250,9 @@ impl[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator] Slot[P, F, A] {
         testing.assert_eq(answer, 21, "the handle did not receive what the body sent")?
     }
 
-    // Settle a slot that will not be started: release its parked thread with
-    // nothing to run, join it, release the bytes the body would have been
-    // kept in, and answer the body.
+    // Settle a slot that will not be started: release its prepared execution
+    // resources and the bytes the body would have been kept in, then answer
+    // the body without running it.
     pub fn cancel(sink self: Self) -> F where carries(self.body) {
         let Slot { task, storage, body } = self
         linea_task_cancel(task)
@@ -285,9 +285,9 @@ impl[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator] Slot[P, F, A] {
 }
 
 // Policy selects the execution strategy for independent value-producing computations.
-// `.Sequential` executes inline on the caller's stack with zero thread overhead and
-// complete determinism; `.Threads(max)` executes across dedicated worker threads
-// bounded by `max`.
+// `.Sequential` executes inline on the caller's stack with no task start and
+// complete determinism; `.Threads(max)` allows at most `max` worker tasks
+// on the current Io.
 @(copyable, derive(Equatable, Equivalent, Display, Debug))
 pub enum Policy {
     Sequential,
@@ -302,7 +302,7 @@ pub fn join[T1: Owned, T2: Owned, F1: Owned + Discardable + sink fn() -> T1, F2:
         Sequential => (f1(), f2()),
         Threads(max) => {
             if max == 0 {
-                panic("task.join: policy thread limit cannot be 0")
+                panic("task.join: policy task limit cannot be 0")
             }
             if max == 1 {
                 return (f1(), f2())
@@ -340,7 +340,7 @@ pub fn join3[T1: Owned, T2: Owned, T3: Owned, F1: Owned + Discardable + sink fn(
         Sequential => (f1(), f2(), f3()),
         Threads(max) => {
             if max == 0 {
-                panic("task.join3: policy thread limit cannot be 0")
+                panic("task.join3: policy task limit cannot be 0")
             }
             if max == 1 {
                 return (f1(), f2(), f3())
@@ -407,7 +407,7 @@ pub fn join4[T1: Owned, T2: Owned, T3: Owned, T4: Owned, F1: Owned + Discardable
         Sequential => (f1(), f2(), f3(), f4()),
         Threads(max) => {
             if max == 0 {
-                panic("task.join4: policy thread limit cannot be 0")
+                panic("task.join4: policy task limit cannot be 0")
             }
             if max == 1 {
                 return (f1(), f2(), f3(), f4())
@@ -486,7 +486,7 @@ pub fn all[T: Owned, F: Owned + Discardable + fn() -> T](sink policy: Policy, si
         },
         Threads(max) => {
             if max == 0 {
-                panic("task.all: policy thread limit cannot be 0")
+                panic("task.all: policy task limit cannot be 0")
             }
             if max == 1 {
                 var results: mem.Vec[T, mem.SystemAllocator] = mem.Vec.new()
@@ -594,7 +594,7 @@ pub fn map[T: Owned, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: T
         },
         Threads(max) => {
             if max == 0 {
-                panic("task.map: policy thread limit cannot be 0")
+                panic("task.map: policy task limit cannot be 0")
             }
             if max == 1 {
                 var results: mem.Vec[R, mem.SystemAllocator] = mem.Vec.new()
@@ -742,7 +742,7 @@ pub fn map_results[T: Owned, R: Owned, E: Owned, F: Owned + Copyable + Shareable
         },
         Threads(max) => {
             if max == 0 {
-                panic("task.map: policy thread limit cannot be 0")
+                panic("task.map: policy task limit cannot be 0")
             }
             if max == 1 {
                 var results: mem.Vec[Result[R, E], mem.SystemAllocator] = mem.Vec.new()

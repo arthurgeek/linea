@@ -12,6 +12,8 @@ module {
   }
   llvm.mlir.global internal constant @linea_file0("tests/library/the_four_modifiers_are_two_questions/main.lin\00") : !llvm.array<60 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_foreign_enter()
+  func.func private @linea_foreign_leave()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;published"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -165,14 +167,18 @@ module {
     func.return %v3 : i64 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":2:5)
   }
   func.func @published(%p0: i32) -> i32 {
+    func.call @linea_foreign_enter() : () -> ()
     %w0 = arith.extsi %p0 : i32 to i64
     %answer = func.call @"lin.;published"(%w0) : (i64) -> i64
+    func.call @linea_foreign_leave() : () -> ()
     %narrow = arith.trunci %answer : i64 to i32
     func.return %narrow : i32
   }
   func.func @both(%p0: i32) -> i32 {
+    func.call @linea_foreign_enter() : () -> ()
     %w0 = arith.extsi %p0 : i32 to i64
     %answer = func.call @"lin.;both"(%w0) : (i64) -> i64
+    func.call @linea_foreign_leave() : () -> ()
     %narrow = arith.trunci %answer : i64 to i32
     func.return %narrow : i32
   }

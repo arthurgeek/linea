@@ -211,9 +211,15 @@ const NativeTests = struct {
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     sanitize: Sanitize,
+    install_step: ?*std.Build.Step = null,
 
     /// One C file of a test and the flags it is compiled with.
-    const Source = struct { file: []const u8, flags: []const []const u8 };
+    const Source = struct {
+        file: []const u8,
+        flags: []const []const u8,
+        // Runtime implementation files this fixture includes to interpose calls.
+        includes: []const []const u8 = &.{},
+    };
 
     /// Builds the test `name` from `sources` and runs it as part of `step`.
     /// With no sanitizer selected, Zig compiles and links it. A sanitizer's
@@ -225,10 +231,28 @@ const NativeTests = struct {
     fn add(self: NativeTests, step: *std.Build.Step, name: []const u8, sources: []const Source) void {
         const b = self.b;
         const linux = self.target.result.os.tag == .linux;
+        var linked: std.ArrayList(Source) = .empty;
+        linked.appendSlice(b.allocator, sources) catch @panic("OOM");
+        var has_execution = false;
+        var execution_flags = sources[0].flags;
+        for (sources) |input| {
+            if (std.mem.eql(u8, input.file, "runtime/loop.c")) execution_flags = input.flags;
+            if (std.mem.eql(u8, input.file, "runtime/loop.c") or std.mem.eql(u8, input.file, "runtime/park.c")) has_execution = true;
+        }
+        if (has_execution) for ([_][]const u8{ "runtime/fiber.c", "runtime/context.c", "runtime/foreign.c", "runtime/park.c", "runtime/loop.c", "runtime/linea_rt.c" }) |file| {
+            var found = false;
+            for (linked.items) |input| {
+                if (std.mem.eql(u8, input.file, file)) found = true;
+                for (input.includes) |included| if (std.mem.eql(u8, included, file)) {
+                    found = true;
+                };
+            }
+            if (!found) linked.append(b.allocator, .{ .file = file, .flags = execution_flags }) catch @panic("OOM");
+        };
         if (self.sanitize.flag()) |sanitizer| {
             const san_arg = b.fmt("-fsanitize={s}", .{sanitizer});
             const link = b.addSystemCommand(&.{ "cc", san_arg, "-fsanitize=undefined", "-fno-sanitize-recover=all", "-g" });
-            for (sources) |input| {
+            for (linked.items) |input| {
                 const compile = b.addSystemCommand(&.{ "cc", "-c", "-g", "-O1", san_arg, "-fsanitize=undefined", "-fno-sanitize-recover=all" });
                 compile.addPrefixedDirectoryArg("-I", b.path("runtime"));
                 compile.addArgs(input.flags);
@@ -253,9 +277,13 @@ const NativeTests = struct {
         }
         const module = b.createModule(.{ .target = self.target, .optimize = self.optimize, .link_libc = true });
         module.addIncludePath(b.path("runtime"));
-        for (sources) |input| module.addCSourceFile(.{ .file = b.path(input.file), .flags = input.flags });
+        for (linked.items) |input| module.addCSourceFile(.{ .file = b.path(input.file), .flags = input.flags });
         if (linux) module.linkSystemLibrary("m", .{});
-        step.dependOn(&b.addRunArtifact(b.addExecutable(.{ .name = name, .root_module = module })).step);
+        const executable = b.addExecutable(.{ .name = name, .root_module = module });
+        if (self.install_step) |install_step| {
+            install_step.dependOn(&b.addInstallArtifact(executable, .{}).step);
+        }
+        step.dependOn(&b.addRunArtifact(executable).step);
     }
 };
 
@@ -1782,6 +1810,160 @@ pub fn build(b: *std.Build) void {
     });
 
     const native_task_step = b.step("test-native-task", "Check native task threads, rendezvous sessions, joins, stack overflow reports and concurrent allocation");
+    native.add(native_task_step, "native-fiber-tests", &.{
+        .{ .file = "runtime/net.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/fiber_test.c", .flags = runtime_flags.items },
+    });
+    native.add(native_task_step, "native-fiber-failure-tests", &.{
+        .{ .file = "runtime/net.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/fiber_failure_test.c", .flags = runtime_flags.items, .includes = &.{"runtime/fiber.c"} },
+    });
+    native.add(native_task_step, "native-sim-cancel-tests", &.{
+        .{ .file = "runtime/net.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim_cancel_test.c", .flags = runtime_flags.items, .includes = &.{"runtime/fiber.c"} },
+    });
+    native.add(native_task_step, "native-foreign-tests", &.{
+        .{ .file = "runtime/foreign_test.c", .flags = runtime_flags.items },
+    });
+    native.add(native_task_step, "native-parallelism-tests", &.{
+        .{ .file = "runtime/parallelism_test.c", .flags = runtime_flags.items },
+    });
+    var fiber_race_flags: std.ArrayList([]const u8) = .empty;
+    fiber_race_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    fiber_race_flags.append(b.allocator, "-DLINEA_FIBER_PAUSES=1") catch @panic("OOM");
+    native.add(native_task_step, "native-fiber-race-tests", &.{
+        .{ .file = "runtime/fiber.c", .flags = fiber_race_flags.items },
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/fiber_race_test.c", .flags = fiber_race_flags.items },
+    });
+    const native_fiber_scale_step = b.step("test-native-fiber-scale", "Check 10000 TCP connections parked on two carriers with bounded OS threads");
+    // Zig's Darwin launcher caps its descendants at OPEN_MAX (10,240).
+    // Build separately so a shell can run the acceptance binary with its own
+    // descriptor limit; Linux can use the normal build-and-run step.
+    var scale_native = native;
+    scale_native.install_step = b.step("build-native-fiber-scale", "Install the 10000-connection test for execution outside Zig on Darwin");
+    scale_native.add(native_fiber_scale_step, "native-fiber-scale-tests", &.{
+        .{ .file = "runtime/net.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/fiber.c", .flags = fiber_race_flags.items },
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/fiber_scale_test.c", .flags = fiber_race_flags.items },
+    });
+    native.add(native_task_step, "native-fiber-fault-tests", &.{
+        .{ .file = "runtime/fiber.c", .flags = fiber_race_flags.items },
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/fiber_fault_test.c", .flags = fiber_race_flags.items },
+    });
+    native.add(native_task_step, "native-sim-fiber-tests", &.{
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/net.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim_fiber_test.c", .flags = runtime_flags.items },
+    });
+    native.add(native_task_step, "native-sim-waitset-tests", &.{
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/net.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim_waitset_test.c", .flags = runtime_flags.items },
+    });
+    native.add(native_task_step, "native-sim-foreign-tests", &.{
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/net.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim_foreign_test.c", .flags = runtime_flags.items },
+    });
+    const native_context_step = b.step("test-native-context", "Compare ABI context switches with ucontext at every optimisation level");
+    // glibc fortification requires optimisation. Nix's wrapper appends its
+    // define after user flags, so undefine it before headers only in the O0
+    // oracle/candidate builds. Optimised and production builds retain it.
+    const unoptimized_context = b.addWriteFiles().add("context-unoptimized.h", "#undef _FORTIFY_SOURCE\n");
+    for ([_][]const u8{ "0", "1", "2", "3", "s", "z" }) |level| {
+        inline for (.{ false, true }) |reference| {
+            const compile = b.addSystemCommand(&.{ "cc", "-std=c99", "-pedantic", "-Wall", "-Wextra", "-Werror", "-Wconversion", "-Wsign-conversion", "-Wshadow", "-Wundef", "-Wno-deprecated-declarations", "-fno-omit-frame-pointer" });
+            compile.addArg(b.fmt("-O{s}", .{level}));
+            if (std.mem.eql(u8, level, "0")) {
+                compile.addArg("-include");
+                compile.addFileArg(unoptimized_context);
+            }
+            if (reference) compile.addArg("-DLINEA_CONTEXT_REFERENCE=1");
+            compile.addFileArg(b.path("runtime/context_test.c"));
+            if (!reference) compile.addFileArg(b.path("runtime/context.c"));
+            compile.addArg("-o");
+            const binary = compile.addOutputFileArg(b.fmt("context-{s}-{s}", .{ if (reference) "reference" else "candidate", level }));
+            if (target.result.os.tag == .linux) compile.addArg("-lm");
+            const run = std.Build.Step.Run.create(b, "check context ABI");
+            run.addFileArg(binary);
+            native_context_step.dependOn(&run.step);
+        }
+    }
+    native_task_step.dependOn(native_context_step);
     var refused_task_flags: std.ArrayList([]const u8) = .empty;
     refused_task_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
     refused_task_flags.appendSlice(b.allocator, &.{
@@ -1841,6 +2023,7 @@ pub fn build(b: *std.Build) void {
     // checkout and not a failure on the first run on the other.
     for ([_]struct { os: []const u8, query: std.Target.Query }{
         .{ .os = "linux", .query = .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .gnu } },
+        .{ .os = "linux_arm", .query = .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .gnu } },
         .{ .os = "macos", .query = .{ .cpu_arch = .aarch64, .os_tag = .macos } },
     }) |platform| {
         const platform_target = b.resolveTargetQuery(platform.query);
@@ -1861,6 +2044,10 @@ pub fn build(b: *std.Build) void {
             .{ .name = "waitset", .file = "runtime/waitset.c", .flags = runtime_flags.items },
             .{ .name = "signals", .file = "runtime/signals.c", .flags = runtime_flags.items },
             .{ .name = "loop", .file = "runtime/loop.c", .flags = runtime_flags.items },
+            .{ .name = "fiber", .file = "runtime/fiber.c", .flags = runtime_flags.items },
+            .{ .name = "foreign", .file = "runtime/foreign.c", .flags = runtime_flags.items },
+            .{ .name = "parallelism", .file = "runtime/parallelism.c", .flags = runtime_flags.items },
+            .{ .name = "context", .file = "runtime/context.c", .flags = runtime_flags.items },
             .{ .name = "sim", .file = "runtime/sim.c", .flags = runtime_flags.items },
         }) |input| {
             const name = b.fmt("{s}_{s}", .{ input.name, platform.os });
@@ -1889,6 +2076,17 @@ pub fn build(b: *std.Build) void {
             "task_test",
             "task_fault_test",
             "waitset_test",
+            "fiber_test",
+            "fiber_race_test",
+            "fiber_scale_test",
+            "fiber_fault_test",
+            "fiber_failure_test",
+            "sim_fiber_test",
+            "sim_cancel_test",
+            "sim_waitset_test",
+            "sim_foreign_test",
+            "foreign_test",
+            "parallelism_test",
         }) |test_name| {
             const file = b.path(b.fmt("runtime/{s}.c", .{test_name}));
             native_runtime_step.dependOn(&runtimeObject(b, platform_target, b.fmt("{s}_{s}", .{ test_name, platform.os }), file, runtime_flags.items).step);
@@ -1958,6 +2156,10 @@ pub fn build(b: *std.Build) void {
         .{ .name = "waitset", .file = b.path("runtime/waitset.c"), .flags = runtime_flags.items },
         .{ .name = "signals", .file = b.path("runtime/signals.c"), .flags = runtime_flags.items },
         .{ .name = "loop", .file = b.path("runtime/loop.c"), .flags = runtime_flags.items },
+        .{ .name = "fiber", .file = b.path("runtime/fiber.c"), .flags = runtime_flags.items },
+        .{ .name = "foreign", .file = b.path("runtime/foreign.c"), .flags = runtime_flags.items },
+        .{ .name = "parallelism", .file = b.path("runtime/parallelism.c"), .flags = runtime_flags.items },
+        .{ .name = "context", .file = b.path("runtime/context.c"), .flags = runtime_flags.items },
         .{ .name = "sim", .file = b.path("runtime/sim.c"), .flags = runtime_flags.items },
         .{ .name = "linea_float", .file = float_c, .flags = float_flags.items },
         .{ .name = "math", .file = b.path("runtime/math.c"), .flags = math_flags.items },

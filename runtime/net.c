@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "net.h"
+#include "fiber.h"
 
 #include "clock.h"
 #include "io.h"
@@ -236,7 +237,11 @@ static long perform_in_place(struct linea_op *op) {
  * traps where its descriptor belongs to the other side. */
 static long linea_io_perform(struct linea_op *op) {
     const int simulated = op->kind == LINEA_OP_CONNECT ? linea_sim_running() : linea_sim_takes(op->fd);
-    return simulated ? linea_sim_perform(op) : perform_in_place(op);
+    if (simulated) return linea_sim_perform(op);
+    if (!linea_fiber_active()) return perform_in_place(op);
+    const long result = linea_fiber_perform(op, attempt);
+    if (op->kind == LINEA_OP_CONNECT && result < 0 && op->fd >= 0) close(op->fd);
+    return result;
 }
 
 long linea_net_accept(int listener, unsigned long deadline_ns) {

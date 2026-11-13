@@ -264,6 +264,16 @@ pub fn emit(
     // module does not hold, where an assembler would have left an unknown
     // symbol for the linker.
     try declareOwned(w, runtime_symbols.set_args_signature);
+    for (module.functions, 0..) |_, i| {
+        const id = FunctionId.at(@intCast(i));
+        if (module.exportedNameOf(id) != null or
+            (module.isExternal(id) and runtime_symbols.signatureOf(module.nameOf(id)) == null))
+        {
+            try declareOwned(w, runtime_symbols.foreign_enter_signature);
+            try declareOwned(w, runtime_symbols.foreign_leave_signature);
+            break;
+        }
+    }
     // `noreturn` states interprocedurally what every call site already says
     // locally with `llvm.unreachable`: the trap does not come back. Without
     // it the optimiser must plan a continuation after every trap call it
@@ -344,19 +354,22 @@ pub fn emit(
 
     // One C-callable entry per function passed to C as a callback, found in
     // one scan of the instructions.
-    const called_back = try gpa.alloc(bool, module.functions.len);
+    const called_back = try gpa.alloc(u2, module.functions.len);
     defer gpa.free(called_back);
-    @memset(called_back, false);
+    @memset(called_back, 0);
     for (module.functions, 0..) |*f, i| {
         if (module.isExternal(FunctionId.at(@intCast(i)))) continue;
         for (0..f.insts.len) |at| {
             const inst = InstId.at(@intCast(at));
-            if (f.tagOf(inst) == .foreign_function_addr) called_back[f.functionOf(inst).index()] = true;
+            if (f.tagOf(inst) == .foreign_function_addr) {
+                const mask: u2 = if (runtimeCallback(module, f, inst)) 2 else 1;
+                called_back[f.functionOf(inst).index()] |= mask;
+            }
         }
     }
     for (module.functions, called_back, 0..) |*f, wanted, i| {
-        if (!wanted) continue;
-        try emitForeignEntry(w, module, f, FunctionId.at(@intCast(i)), .called_back, options.sanitize);
+        if (wanted & 1 != 0) try emitForeignEntry(w, module, f, FunctionId.at(@intCast(i)), .called_back, options.sanitize);
+        if (wanted & 2 != 0) try emitForeignEntry(w, module, f, FunctionId.at(@intCast(i)), .runtime_called_back, options.sanitize);
     }
 
     try w.writeAll("}\n");
@@ -601,12 +614,37 @@ fn writeForeignExtension(w: *std.Io.Writer, module: *const Module, ty: TypeId) s
 const ForeignEntry = union(enum) {
     exported: []const u8,
     called_back,
+    runtime_called_back,
 };
 
+/// Runtime entry and release callbacks start a task without a user C frame.
+/// The verifier confines each callback address to direct extern arguments.
+fn runtimeCallback(module: *const Module, mir: *const Mir, address: InstId) bool {
+    var used = false;
+    for (0..mir.insts.len) |i| {
+        const inst = InstId.at(@intCast(i));
+        if (mir.tagOf(inst) != .call and mir.tagOf(inst) != .call_noreturn) continue;
+        const call = mir.callOf(inst);
+        for (call.args) |argument| {
+            if (argument != address) continue;
+            used = true;
+            if (!module.isExternal(call.func) or runtime_symbols.signatureOf(module.nameOf(call.func)) == null) return false;
+        }
+    }
+    return used;
+}
+
+fn writeForeignGuard(w: *std.Io.Writer, enter: bool) std.Io.Writer.Error!void {
+    const signature = if (enter) runtime_symbols.foreign_enter_signature else runtime_symbols.foreign_leave_signature;
+    try w.print("    func.call @{s}()", .{signature.symbol});
+    try writeOwnedCallType(w, signature);
+    try w.writeByte('\n');
+}
+
 /// Writes the name of a callback's C-callable entry.
-fn writeCalledBackName(w: *std.Io.Writer, module: *const Module, id: FunctionId) std.Io.Writer.Error!void {
+fn writeCalledBackName(w: *std.Io.Writer, module: *const Module, id: FunctionId, trusted: bool) std.Io.Writer.Error!void {
     try w.writeByte('@');
-    try writeSymbolName(w, module.nameOf(id), symbol_names.callback_prefix);
+    try writeSymbolName(w, module.nameOf(id), if (trusted) symbol_names.defined_prefix ++ "runtime_callback." else symbol_names.callback_prefix);
 }
 
 /// The function type of a body's C-callable entry, as `func.constant` names it.
@@ -617,7 +655,7 @@ fn writeForeignEntryType(w: *std.Io.Writer, module: *const Module, mir: *const M
         try w.writeAll(if (module.arrivesByAddress(mir, i)) "!llvm.ptr" else foreignTypeOf(module, mir.locals[i]));
     }
     try w.writeAll(") -> ");
-    if (mir.return_type == .unit) try w.writeAll("()") else try w.writeAll(foreignTypeOf(module, mir.return_type));
+    if (mir.return_type == .unit or mir.return_type == .never) try w.writeAll("()") else try w.writeAll(foreignTypeOf(module, mir.return_type));
 }
 
 /// A C-callable entry to a body: the symbol the outside world links against
@@ -646,7 +684,7 @@ fn emitForeignEntry(
 ) std.Io.Writer.Error!void {
     // What the thunk itself answers: the declared type, or nothing where that
     // is Unit, because a C function returning void sets no register.
-    const answers = mir.return_type != .unit;
+    const answers = mir.return_type != .unit and mir.return_type != .never;
 
     // What the *body* answers, which is a separate question and asked of the
     // one routine every other site asks. A function answering Unit still
@@ -657,9 +695,9 @@ fn emitForeignEntry(
 
     switch (entry) {
         .exported => |name| try w.print("  func.func @{s}(", .{name}),
-        .called_back => {
+        .called_back, .runtime_called_back => {
             try w.writeAll("  func.func private ");
-            try writeCalledBackName(w, module, id);
+            try writeCalledBackName(w, module, id, entry == .runtime_called_back);
             try w.writeAll("(");
         },
     }
@@ -680,18 +718,20 @@ fn emitForeignEntry(
     }
     // A callback's entry is reached only through the address the program
     // hands C, so the object publishes no symbol for it, as for a body.
-    if (entry == .called_back or sanitize != null) {
+    if (entry != .exported or sanitize != null or mir.return_type == .never) {
         try w.writeAll(" attributes {");
-        if (entry == .called_back) try w.writeAll("llvm.linkage = #llvm.linkage<internal>");
-        if (sanitize != null) {
-            if (entry == .called_back) try w.writeAll(", ");
+        if (entry != .exported) try w.writeAll("llvm.linkage = #llvm.linkage<internal>");
+        if (sanitize != null or mir.return_type == .never) {
+            if (entry != .exported) try w.writeAll(", ");
             try w.writeAll("passthrough = [");
-            try writeSanitizeEntry(w, sanitize, false);
+            if (mir.return_type == .never) try w.writeAll("\"noreturn\"");
+            try writeSanitizeEntry(w, sanitize, mir.return_type == .never);
             try w.writeAll("]");
         }
         try w.writeAll("}");
     }
     try w.writeAll(" {\n");
+    if (entry != .runtime_called_back) try writeForeignGuard(w, true);
 
     // A value narrower than the convention arrives narrow and is widened the
     // way a load of one is: what the bits mean is the declared type's
@@ -752,6 +792,12 @@ fn emitForeignEntry(
     }
     try w.writeAll(") -> ");
     if (callee_answers) |t| try w.print("{s}\n", .{t}) else try w.writeAll("()\n");
+
+    if (mir.return_type == .never) {
+        try w.writeAll("    llvm.unreachable\n  }\n");
+        return;
+    }
+    if (entry != .runtime_called_back) try writeForeignGuard(w, false);
 
     // A body that answers a width the thunk does not is answering Unit: the
     // value is bound and left, because nothing crosses.
@@ -1377,7 +1423,7 @@ const FunctionEmitter = struct {
                 const target = mir.functionOf(id);
                 const body = self.module.functionOf(target);
                 try self.w.print("    %fa{d} = func.constant ", .{n});
-                try writeCalledBackName(self.w, self.module, target);
+                try writeCalledBackName(self.w, self.module, target, runtimeCallback(self.module, mir, id));
                 try self.w.writeAll(" : ");
                 try writeForeignEntryType(self.w, self.module, body);
                 try self.here(span);
@@ -1492,6 +1538,7 @@ const FunctionEmitter = struct {
         const n = id.index();
         const span = mir.spanOf(id);
         const external = module.isExternal(c.func);
+        const foreign_frame = external and runtime_symbols.signatureOf(module.nameOf(c.func)) == null;
         const indirect = module.returnsIndirectly(c.func);
         const ty = if (is_noreturn) TypeId.never else mir.typeOf(id);
 
@@ -1513,6 +1560,7 @@ const FunctionEmitter = struct {
             try self.here(span);
         };
 
+        if (foreign_frame) try writeForeignGuard(w, true);
         if (is_noreturn or indirect or (external and ty == .unit)) {
             try w.writeAll("    func.call @");
         } else if (widens) {
@@ -1545,6 +1593,8 @@ const FunctionEmitter = struct {
             try w.writeAll("()");
         }
         try self.here(span);
+
+        if (foreign_frame and !is_noreturn) try writeForeignGuard(w, false);
 
         if (c.func == module.zeroed_allocator) try self.zeroedAllocation(id, c.args[0]);
 
@@ -3240,6 +3290,85 @@ test "allocator zero facts require the exact library producer" {
             var rejected = Sink.init(gpa);
             try testing.expect(!try verify(gpa, &bad, &rejected));
             try testing.expect(rejected.hasErrors());
+        }
+    }
+}
+
+test "foreign frame guards balance calls and C entries while runtime callbacks stay switchable" {
+    const gpa = testing.allocator;
+    var types = try types_mod.Typing.Builder.init(gpa);
+    defer types.deinit();
+    const layouts = try gpa.alloc(types_mod.Layout, types.pool.items.len);
+    defer gpa.free(layouts);
+    @memset(layouts, .{ .size = 8, .alignment = 8 });
+    var representations = try mir_mod.deriveRepresentations(gpa, &types.view(), layouts);
+    defer representations.deinit(gpa);
+    const source: source_mod.Source = .{ .path = "foreign.lin", .text = "foreign_call()" };
+    var map = try SourceMap.init(gpa, &source);
+    defer map.deinit();
+    for ([_]TypeId{ .unit, .u8, .f64, .never }) |ty| {
+        var builder = Mir.Builder.init(gpa);
+        defer builder.deinit();
+        builder.return_type = ty;
+        const block = try builder.addBlock();
+        const address = try builder.addForeignFunctionAddr(block, .unit, Span.empty, .at(1));
+        const call = try builder.addCall(block, .value, ty, Span.empty, .at(0), &.{address});
+        _ = try builder.setTerminator(block, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = call } });
+        var mir = try builder.finish(block, .from(0));
+        defer mir.deinit(gpa);
+        // The call has no typed parameters; its callback argument is only read
+        // by the boundary classifier below, then removed for call emission.
+        var functions = [_]Mir{ mir, mir };
+        var names = [_][]const u8{ "foreign_call", "target" };
+        const module: Module = .{
+            .functions = &functions,
+            .external = &.{ true, false },
+            .bytes = &.{},
+            .names = &names,
+            .origins = &.{},
+            .types = types.view(),
+            .representations = representations,
+            .layouts = layouts,
+            .entry = .none,
+        };
+        try testing.expect(!runtimeCallback(&module, &mir, address));
+        names[0] = "linea_task_start";
+        try testing.expect(runtimeCallback(&module, &mir, address));
+        // The same target reached through another user extern requires a
+        // distinct guarded thunk, even when the runtime also calls it.
+        names[0] = "foreign_call";
+        @constCast(mir.extra)[0] = .at(0);
+        for ([_]bool{ false, true }) |trusted| {
+            names[0] = if (trusted) "linea_available_parallelism" else "foreign_call";
+            var out: std.Io.Writer.Allocating = .init(gpa);
+            defer out.deinit();
+            var emitter: FunctionEmitter = .{
+                .link_symbols = &names,
+                .w = &out.writer,
+                .mir = &mir,
+                .module = &module,
+                .map = &map,
+                .path = source.path,
+                .indirect = false,
+            };
+            try emitter.call(call, ty == .never);
+            try testing.expectEqual(@as(usize, if (trusted) 0 else 1), std.mem.count(u8, out.written(), "func.call @linea_foreign_enter()"));
+            try testing.expectEqual(@as(usize, if (trusted or ty == .never) 0 else 1), std.mem.count(u8, out.written(), "func.call @linea_foreign_leave()"));
+            if (ty == .never) try testing.expect(std.mem.indexOf(u8, out.written(), "llvm.unreachable") != null);
+        }
+        for ([_]ForeignEntry{ .{ .exported = "published" }, .called_back, .runtime_called_back }) |entry| {
+            var out: std.Io.Writer.Allocating = .init(gpa);
+            defer out.deinit();
+            try emitForeignEntry(&out.writer, &module, &mir, .at(1), entry, null);
+            try testing.expectEqual(@as(usize, if (entry == .runtime_called_back) 0 else 1), std.mem.count(u8, out.written(), "func.call @linea_foreign_enter()"));
+            try testing.expectEqual(@as(usize, if (entry == .runtime_called_back or ty == .never) 0 else 1), std.mem.count(u8, out.written(), "func.call @linea_foreign_leave()"));
+            if (ty == .never) {
+                try testing.expect(std.mem.indexOf(u8, out.written(), "passthrough = [\"noreturn\"]") != null);
+                try testing.expect(std.mem.indexOf(u8, out.written(), "llvm.unreachable") != null);
+                try testing.expect(std.mem.indexOf(u8, out.written(), "func.return") == null);
+            } else if (ty == .u8) {
+                try testing.expect(std.mem.indexOf(u8, out.written(), "arith.trunci %answer") != null);
+            }
         }
     }
 }

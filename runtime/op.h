@@ -5,7 +5,7 @@
  * count, a descriptor, zero, or a negated errno. The operation's bytes stay
  * lent by the caller until the backend answers. `sleep` waits for its
  * deadline and touches no descriptor. */
-enum linea_op_kind { LINEA_OP_ACCEPT, LINEA_OP_CONNECT, LINEA_OP_READ, LINEA_OP_WRITE, LINEA_OP_SLEEP };
+enum linea_op_kind { LINEA_OP_ACCEPT, LINEA_OP_CONNECT, LINEA_OP_READ, LINEA_OP_WRITE, LINEA_OP_SLEEP, LINEA_OP_READABLE, LINEA_OP_WRITABLE, LINEA_OP_WAITSET };
 
 struct linea_op {
     enum linea_op_kind kind;

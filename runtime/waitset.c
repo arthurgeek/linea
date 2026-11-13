@@ -1,9 +1,11 @@
 #define _GNU_SOURCE
 #define _DARWIN_C_SOURCE
 #include "waitset.h"
+#include "fiber.h"
 
 #include "loop.h"
 #include "park.h"
+#include "op.h"
 #include "pipe_signal.h"
 #include "signals.h"
 #include "sim.h"
@@ -61,6 +63,7 @@ struct waitset {
     struct linea_park park;
     unsigned long identity;
     unsigned long loop;
+    int simulated;
 
     /* Slots, in pages that live as long as the set, so a source holding a
      * registration's address always finds it. Owner only. */
@@ -119,7 +122,7 @@ static unsigned long cookie_of(const struct linea_registration *r) {
 
 /* Monotonic now on the set's loop: the simulation's clock inside one. */
 static unsigned long now_on(const struct waitset *s) {
-    if (s->loop != 0) return linea_sim_now();
+    if (s->simulated) return linea_sim_now();
     struct timespec now;
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) fail("linea: clock_gettime failed\n");
     return (unsigned long)now.tv_sec * 1000000000UL + (unsigned long)now.tv_nsec;
@@ -238,6 +241,7 @@ unsigned long linea_waitset_open(void) {
     if (identity == ULONG_MAX) fail("linea: every wait set identity has been issued\n");
     s->identity = identity;
     s->loop = linea_io_current();
+    s->simulated = linea_io_is_simulated(s->loop) != 0;
     s->kernel = -1;
     s->user_event = -1;
     return (unsigned long)s;
@@ -309,13 +313,8 @@ static void publish(struct linea_registration *r, uint8_t kind) {
     r->set->held += 1;
 }
 
-static void no_tasks_inside(const struct waitset *s) {
-    if (s->loop != 0) fail("linea: a simulation runs one task until fibers\n");
-}
-
 void linea_waitset_received(unsigned long set, unsigned long slot, unsigned long endpoint) {
     struct waitset *s = set_of(set);
-    no_tasks_inside(s);
     struct linea_registration *r = reserved_slot(s, slot);
     r->endpoint = endpoint;
     publish(r, endpoint_source);
@@ -324,7 +323,6 @@ void linea_waitset_received(unsigned long set, unsigned long slot, unsigned long
 
 void linea_waitset_returned(unsigned long set, unsigned long slot, unsigned long handle) {
     struct waitset *s = set_of(set);
-    no_tasks_inside(s);
     if ((handle & 1UL) != 0) fail("linea: only a task's handle can wait for its body to return\n");
     struct linea_registration *r = reserved_slot(s, slot);
     r->endpoint = handle;
@@ -458,7 +456,7 @@ long linea_waitset_signal(unsigned long set, unsigned long slot, uint8_t signal,
     struct waitset *s = set_of(set);
     if (home != s->loop) fail("linea: a signal's share was registered on a loop other than the one it was taken on\n");
     struct linea_registration *r = reserved_slot(s, slot);
-    if (s->loop == 0 && !s->watching_router) {
+    if (!s->simulated && !s->watching_router) {
         const int wake = linea_signal_wake_descriptor();
         if (wake < 0) fail("linea: a signal was registered with no share of it\n");
         int error = ensure_kernel(s);
@@ -483,7 +481,7 @@ static void disarm(struct waitset *s, struct linea_registration *r) {
     case descriptor_source:
         /* A one-shot registration that fired is gone already; removing it
          * again answers ENOENT. The duplicate is the registration's own. */
-        if (s->loop == 0) {
+        if (!s->simulated) {
             (void)arm(s, r->fd, r->writable, 0, 0, 1);
             close(r->fd);
         }
@@ -584,7 +582,7 @@ static int wait_in_kernel(struct waitset *s, unsigned long deadline, int poll_on
  * report; then the timers past their deadline. A descriptor ready at the
  * instant a timer expires is therefore signalled before the timer. */
 static void observe(struct waitset *s) {
-    if (s->loop != 0) {
+    if (s->simulated) {
         for (uint32_t i = 0; i < s->made; i += 1) {
             struct linea_registration *r = slot_at(s, i);
             if (r->kind == descriptor_source && load_state(r) == registered && linea_sim_ready(r->fd, r->writable)) {
@@ -599,13 +597,27 @@ static void observe(struct waitset *s) {
     expire(s, now_on(s));
 }
 
-/* Inside a simulation nothing is signalled: move the clock to the next
- * arrival on its network or the nearest timer. */
+/* The simulation's scheduler retries this predicate after runnable work
+ * and virtual deliveries, so a set watches several simulated descriptors
+ * without advancing time while a peer can still run. */
+static long simulated_set_ready(struct linea_op *operation) {
+    struct waitset *s = (struct waitset *)operation->at;
+    observe(s);
+    linea_park_lock(&s->park);
+    const int ready = s->first_signalled != NULL;
+    linea_park_unlock(&s->park);
+    return ready ? 0 : -(long)EAGAIN;
+}
+
 static void wait_in_simulation(struct waitset *s) {
-    unsigned long next = linea_sim_next_event();
-    if (s->heap_len > 0 && (next == 0 || s->heap[0]->deadline < next)) next = s->heap[0]->deadline;
-    if (next == 0) fail("linea: a simulation's one task waits forever\n");
-    linea_sim_jump(next);
+    const unsigned long deadline = s->heap_len == 0 ? 0 : s->heap[0]->deadline;
+    if (linea_fiber_active()) {
+        struct linea_op operation = { LINEA_OP_WAITSET, -1, (unsigned long)s, 0, 0, deadline };
+        const long result = linea_fiber_perform(&operation, simulated_set_ready);
+        if (result != 0 && result != -(long)ETIMEDOUT) fail("linea: a simulated wait set could not be awaited\n");
+    } else if (!linea_fiber_sim_step(deadline)) {
+        fail("linea: all simulation tasks wait forever\n");
+    }
 }
 
 long linea_waitset_next(unsigned long set) {
@@ -625,12 +637,17 @@ long linea_waitset_next(unsigned long set) {
         }
         linea_waitset_pause(linea_pause_next_before_wait);
         const unsigned long deadline = s->heap_len > 0 ? s->heap[0]->deadline : 0;
-        if (s->loop != 0) {
+        if (s->simulated) {
             linea_park_unlock(&s->park);
             wait_in_simulation(s);
         } else if (s->kernel >= 0) {
             linea_park_unlock(&s->park);
-            (void)wait_in_kernel(s, deadline, 0);
+            if (linea_fiber_active()) {
+                const long result = linea_fiber_wait_descriptor(s->kernel, 0, deadline);
+                if (result < 0 && result != -(long)ETIMEDOUT) fail("linea: a wait set's queue could not be awaited\n");
+            } else {
+                (void)wait_in_kernel(s, deadline, 0);
+            }
         } else {
             (void)linea_park(&s->park, deadline);
             linea_park_unlock(&s->park);

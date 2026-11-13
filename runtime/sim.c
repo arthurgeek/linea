@@ -1,5 +1,7 @@
 #define _GNU_SOURCE
 #include "sim.h"
+#include "foreign.h"
+#include "fiber.h"
 
 #include "clock.h"
 #include "loop.h"
@@ -66,6 +68,7 @@ struct entry {
 
 struct sim {
     unsigned long identity;
+    void *carrier;
     uint64_t rng;
     unsigned long now;
     unsigned long latency_ns, jitter_ns, chunk_bytes, buffer_bytes, reset_one_in;
@@ -550,6 +553,22 @@ static long attempt(struct sim *s, struct linea_op *op) {
     return attempt_write(s, e, op);
 }
 
+static long finish_operation(struct sim *s, struct linea_op *op, long answer) {
+    if (op->kind == LINEA_OP_CONNECT && answer < 0 && op->fd != -1) {
+        close_end(s, index_of(op->fd), 0);
+        op->fd = -1;
+    }
+    if (op->kind == LINEA_OP_SLEEP) answer = 0;
+    /* A descriptor's number depends on what other simulations hold, so the
+     * trace names a descriptor by its place in this one: the one operated
+     * on, and the one an accept or a connect made. */
+    const struct entry *operand = op->kind == LINEA_OP_CONNECT ? NULL : entry_of(op->fd);
+    const int made = (op->kind == LINEA_OP_ACCEPT || op->kind == LINEA_OP_CONNECT) && answer >= 0;
+    note(s, event_op * 8 + (unsigned long)op->kind, operand == NULL ? ULONG_MAX : operand->number,
+         made ? entries[index_of((int)answer)]->number : traced_answer(answer));
+    return answer;
+}
+
 /* Perform `op` on `s`, as the in-place backend does on the kernel: the
  * deadline is checked once on entry; an attempt that would wait jumps the
  * clock to the next event or to the deadline, whichever is first; and an
@@ -573,19 +592,7 @@ static long perform(struct sim *s, struct linea_op *op) {
             deliver(s, next);
         }
     }
-    if (op->kind == LINEA_OP_CONNECT && answer < 0 && op->fd != -1) {
-        close_end(s, index_of(op->fd), 0);
-        op->fd = -1;
-    }
-    if (op->kind == LINEA_OP_SLEEP) answer = 0;
-    /* A descriptor's number depends on what other simulations hold, so the
-     * trace names a descriptor by its place in this one: the one operated
-     * on, and the one an accept or a connect made. */
-    const struct entry *operand = op->kind == LINEA_OP_CONNECT ? NULL : entry_of(op->fd);
-    const int made = (op->kind == LINEA_OP_ACCEPT || op->kind == LINEA_OP_CONNECT) && answer >= 0;
-    note(s, event_op * 8 + (unsigned long)op->kind, operand == NULL ? ULONG_MAX : operand->number,
-         made ? entries[index_of((int)answer)]->number : traced_answer(answer));
-    return answer;
+    return finish_operation(s, op, answer);
 }
 
 unsigned long linea_sim_open(unsigned long seed, unsigned long latency_ns, unsigned long jitter_ns,
@@ -607,6 +614,8 @@ unsigned long linea_sim_open(unsigned long seed, unsigned long latency_ns, unsig
     s->identity = linea_loop_claim(s);
     unlock();
     if (s->identity == 0) { free(s); return 0; }
+    s->carrier = linea_fiber_sim_create(s->identity);
+    if (s->carrier == NULL) { linea_loop_retire(s->identity); free(s); return 0; }
     return s->identity;
 }
 
@@ -637,6 +646,8 @@ unsigned long linea_sim_fingerprint(unsigned long identity) {
  * a descriptor outside every simulation, until what owns it releases it. */
 void linea_sim_close(unsigned long identity) {
     struct sim *s = linea_loop_find(identity);
+    if (linea_loop_runs(identity) != 0) fail("linea: a running simulation was closed\n");
+    linea_fiber_sim_destroy(s->carrier);
     lock();
     size_t m = 0;
     while (m < s->member_count) {
@@ -661,7 +672,7 @@ void linea_sim_close(unsigned long identity) {
 }
 
 int linea_sim_takes(int fd) {
-    struct sim *running = linea_loop_running();
+    struct sim *running = linea_sim_running() ? linea_loop_running() : NULL;
     if (fd >= LINEA_SIM_FIRST_DESCRIPTOR) {
         lock();
         const struct entry *e = entry_of(fd);
@@ -675,16 +686,54 @@ int linea_sim_takes(int fd) {
 }
 
 static struct sim *running_sim(void) {
-    struct sim *s = linea_loop_running();
+    struct sim *s = linea_sim_running() ? linea_loop_running() : NULL;
     if (s == NULL) outside();
     return s;
 }
 
-long linea_sim_perform(struct linea_op *op) {
+long linea_sim_attempt(struct linea_op *op) {
     struct sim *s = running_sim();
     lock();
     settle(s);
-    const long answer = perform(s, op);
+    long answer;
+    if (op->kind == LINEA_OP_READABLE || op->kind == LINEA_OP_WRITABLE) {
+        unlock();
+        return linea_sim_ready(op->fd, (uint8_t)(op->kind == LINEA_OP_WRITABLE)) ? 0 : -(long)EAGAIN;
+    }
+    answer = attempt(s, op);
+    unlock();
+    return answer;
+}
+
+long linea_sim_perform(struct linea_op *op) {
+    if (linea_foreign_depth() != 0) {
+        struct sim *s = running_sim();
+        lock();
+        settle(s);
+        const long answer = perform(s, op);
+        unlock();
+        return answer;
+    }
+    if (linea_fiber_active()) {
+        long answer = linea_fiber_perform(op, linea_sim_attempt);
+        lock();
+        answer = finish_operation(running_sim(), op, answer);
+        unlock();
+        return answer;
+    }
+    if (op->deadline_ns != 0 && linea_sim_now() >= op->deadline_ns) return op->kind == LINEA_OP_SLEEP ? 0 : -(long)ETIMEDOUT;
+    long answer;
+    for (;;) {
+        answer = linea_sim_attempt(op);
+        if (answer != -(long)EAGAIN) break;
+        if (op->deadline_ns != 0 && linea_sim_now() >= op->deadline_ns) {
+            answer = op->kind == LINEA_OP_SLEEP ? 0 : -(long)ETIMEDOUT;
+            break;
+        }
+        if (!linea_fiber_sim_step(op->deadline_ns)) fail("linea: all simulation tasks wait forever\n");
+    }
+    lock();
+    answer = finish_operation(running_sim(), op, answer);
     unlock();
     return answer;
 }
@@ -757,7 +806,7 @@ long linea_sim_reset(int fd) {
 }
 
 long linea_sim_release(int fd) {
-    struct sim *running = linea_loop_running();
+    struct sim *running = linea_sim_running() ? linea_loop_running() : NULL;
     lock();
     struct entry *e = entry_of(fd);
     if (e == NULL) { unlock(); return -(long)EBADF; }
@@ -847,7 +896,23 @@ void linea_sim_jump(unsigned long instant) {
 }
 
 long linea_sim_sleep(unsigned long nanoseconds) {
+    if (linea_fiber_active()) return linea_fiber_sleep(nanoseconds);
+    if (nanoseconds == 0) return 0;
+    struct linea_op op = { LINEA_OP_SLEEP, -1, 0, 0, 0, add_saturating(linea_sim_now(), nanoseconds) };
+    return linea_sim_perform(&op);
+}
+
+void *linea_sim_carrier(unsigned long identity) {
+    if (linea_loop_kind(identity) != LINEA_LOOP_SIMULATION) fail("linea: an Io is not a simulation\n");
+    struct sim *s = linea_loop_find(identity);
+    return s->carrier;
+}
+
+unsigned long linea_sim_choice(unsigned long bound) {
     struct sim *s = running_sim();
-    linea_sim_advance(s->identity, nanoseconds);
-    return 0;
+    lock();
+    unsigned long choice = up_to(s, bound - 1);
+    note(s, event_wait, bound, choice);
+    unlock();
+    return choice;
 }

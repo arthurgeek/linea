@@ -1,6 +1,9 @@
 #define _GNU_SOURCE
 #define _DARWIN_C_SOURCE
 #include "park.h"
+#include "fiber.h"
+#include "sim.h"
+#include "foreign.h"
 
 #include "pipe_signal.h"
 
@@ -24,6 +27,7 @@ static void must(int status) {
 }
 
 int linea_park_init(struct linea_park *p) {
+    p->fibers = 0;
     int status = pthread_mutex_init(&p->lock, 0);
     if (status != 0) return status;
 #if defined(__APPLE__)
@@ -57,6 +61,7 @@ void linea_park_unlock(struct linea_park *p) {
 }
 
 void linea_unpark(struct linea_park *p) {
+    linea_fiber_unpark(p);
     must(pthread_cond_broadcast(&p->changed));
 }
 
@@ -78,6 +83,10 @@ static int nanoseconds_of(struct timespec now, unsigned long *total) {
 unsigned long linea_park_deadline_after(unsigned long after_ns) {
     unsigned long now;
     unsigned long deadline;
+    if (linea_sim_running()) {
+        now = linea_sim_now();
+        return __builtin_add_overflow(now, after_ns, &deadline) ? 0 : (deadline == 0 ? 1 : deadline);
+    }
     if (!nanoseconds_of(monotonic_now(), &now) || __builtin_add_overflow(now, after_ns, &deadline)) return 0;
     /* 0 means no deadline, so a deadline at the clock's first nanosecond is
      * named by its second. */
@@ -85,6 +94,8 @@ unsigned long linea_park_deadline_after(unsigned long after_ns) {
 }
 
 int linea_park(struct linea_park *p, unsigned long deadline_ns) {
+    if (linea_fiber_active()) return linea_fiber_park(p, deadline_ns);
+    if (linea_sim_running() && linea_foreign_depth() == 0) return linea_fiber_sim_park(p, deadline_ns);
     if (deadline_ns == 0) {
         must(pthread_cond_wait(&p->changed, &p->lock));
         return 0;

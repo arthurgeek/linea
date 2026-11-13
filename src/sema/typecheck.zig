@@ -1736,7 +1736,7 @@ fn typecheckInternal(
     z_bodies.end();
 
     try c.settleExternSymbols();
-    try c.checkThreadStarts();
+    try c.checkTaskStarts();
 
     try c.resolveAllOpen();
 
@@ -20896,23 +20896,23 @@ const Checker = struct {
     }
 
     /// Refuses every expression naming a runtime function that starts a
-    /// thread, as a callee or as a value, outside `task.Slot.start`
-    /// ([T-ThreadStart]). The body such a function hands to its thread keeps
+    /// task, as a callee or as a value, outside `task.Slot.start`
+    /// ([T-ThreadStart]). The body such a function hands to its task keeps
     /// running after the call returns, and only `Slot.start`'s handle carries
-    /// what that body captured until the thread is joined; anywhere else the
+    /// what that body captured until the task is joined; anywhere else the
     /// body's lends and observations would end while it still runs. The
     /// declarations are found by the symbol they name, so a module's own
     /// `extern` of the symbol is refused as the library's would be. One walk
     /// over the expressions, each asked one lookup in the few declarations
     /// found.
-    fn checkThreadStarts(self: *Checker) std.mem.Allocator.Error!void {
+    fn checkTaskStarts(self: *Checker) std.mem.Allocator.Error!void {
         var starters: std.ArrayList(node.DeclId) = .empty;
         defer starters.deinit(self.gpa);
         for (0..self.ast.declCount()) |i| {
             const d = node.DeclId.at(@intCast(i));
             if (!self.ast.declIsExtern(d)) continue;
             const signature = runtime_symbols.signatureOf(self.ast.tokenText(self.ast.declName(d))) orelse continue;
-            if (signature.starts_thread) try starters.append(self.gpa, d);
+            if (signature.starts_task) try starters.append(self.gpa, d);
         }
         if (starters.items.len == 0) return;
         for (0..self.ast.exprCount()) |i| {
@@ -20925,7 +20925,7 @@ const Checker = struct {
             _ = self.report(
                 .t_thread_start,
                 id,
-                "`{s}` runs Linea code on a thread of its own, and only `task.Slot.start` may hand it a body",
+                "`{s}` runs Linea code as a task, and only `task.Slot.start` may hand it a body",
                 .{self.ast.tokenText(self.ast.declName(d))},
                 "start the task with `task.prepare(body)` and `start()`, whose handle keeps what the body captured until `close` joins it",
             );
@@ -20959,7 +20959,7 @@ const Checker = struct {
         // declaration of a lowered symbol and no other, so every other one has
         // nothing to link against. The runtime trusts each call of any other
         // confined symbol with a number only that module's types keep, so
-        // another declaration could free a queue twice, leave a parked thread
+        // another declaration could free a queue twice, leave a prepared task
         // unjoined or hand the runtime an address that names no type.
         switch (expected.declared_by) {
             .library => |home| if (!(library and self.program.libraryDeclIn(home.module, name) == d)) {

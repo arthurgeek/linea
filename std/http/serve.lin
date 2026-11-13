@@ -132,8 +132,8 @@ test fn a_serve_error_displays_its_cause() {
 // `Accept`. Serving ends with `Ok` after `limits.connections` connections, and
 // never ends when that is `.None`. Every task is joined and the listener is
 // closed on every exit.
-pub fn serve[L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Isolated, R: MadeHandler[mem.SystemAllocator], M: Shareable + Copyable + fn() -> R](sink listener: L, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
-    serve_made(listener, mem.system(), make_handler, limits, policy, .None, shutdown)
+pub fn serve[L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Isolated, R: MadeHandler[mem.SystemAllocator], M: Shareable + Copyable + fn() -> R](sink listener: L, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
+    serve_made(listener, mem.system(), make_handler, limits, policy, .None, shutdown, on)
 }
 
 test fn serving_answers_each_client_on_its_own_task() {
@@ -440,8 +440,8 @@ test fn limits_beyond_every_arena_are_refused_without_overflowing() {
 // `serve_in` serves as `serve` does, carving each task's arenas, and the
 // buffer a refused request is discarded into, from `parent`, which every task
 // reads, so it must be `Shareable`.
-pub fn serve_in[P: Allocator + Shareable, L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Isolated, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](parent: P, sink listener: L, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
-    serve_made(listener, parent, make_handler, limits, policy, .None, shutdown)
+pub fn serve_in[P: Allocator + Shareable, L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Isolated, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](parent: P, sink listener: L, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+    serve_made(listener, parent, make_handler, limits, policy, .None, shutdown, on)
 }
 
 test fn serving_in_the_system_allocator_answers_a_request() {
@@ -649,7 +649,7 @@ test fn a_parent_that_refuses_the_discard_buffer_ends_serving_before_accepting()
 }
 
 // The caller owns the dispatcher; idle connections occupy registrations, not tasks.
-fn serve_made[L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Isolated, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, policy: task.Policy, announce: Option[net.Address], shutdown: Shutdown = .OnSignals) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+fn serve_made[L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Isolated, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, policy: task.Policy, announce: Option[net.Address], shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
     if limits.open_connections == 0 {
         let _closed = listener.close()
         return .Err(.NoConnections)
@@ -659,7 +659,7 @@ fn serve_made[L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Iso
         let _closed = listener.close()
         return .Err(.ArenaTooSmall)
     }
-    dispatch_serve(listener, parent, make_handler, limits, policy, announce, shutdown)
+    dispatch_serve(listener, parent, make_handler, limits, policy, announce, shutdown, on)
 }
 
 // Each serving task takes its discard buffer from the parent before it serves
@@ -920,8 +920,8 @@ test fn a_listen_and_serve_error_displays_its_cause() {
 // task starts, so a factory that cannot make one is asked once and serving
 // ends with `Serve(.Handler(E))`. A program that opens its own listener calls
 // `serve`.
-pub fn listen_and_serve[R: MadeHandler[mem.SystemAllocator], M: Shareable + Copyable + fn() -> R](address: net.Address, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals) -> Result[(), ListenAndServeError[R.Error]] where R.Handler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
-    listen_and_serve_in(mem.system(), address, make_handler, limits, policy, shutdown)
+pub fn listen_and_serve[R: MadeHandler[mem.SystemAllocator], M: Shareable + Copyable + fn() -> R](address: net.Address, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ListenAndServeError[R.Error]] where R.Handler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
+    listen_and_serve_in(mem.system(), address, make_handler, limits, policy, shutdown, on)
 }
 
 test fn a_listening_server_answers_on_every_task_it_serves_with() {
@@ -988,12 +988,12 @@ test fn serving_that_cannot_begin_announces_nothing() {
 // `listen_and_serve_in` listens and serves as `listen_and_serve` does, carving
 // each task's memory from `parent`, which every task reads, so it must be
 // `Shareable`.
-pub fn listen_and_serve_in[P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](parent: P, address: net.Address, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals) -> Result[(), ListenAndServeError[R.Error]] where R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+pub fn listen_and_serve_in[P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](parent: P, address: net.Address, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ListenAndServeError[R.Error]] where R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
     let listener = net.listen(address, backlog: net.Backlog(1024)) else |error| {
         return .Err(.Listen(error))
     }
     let bound = listener.local_address()
-    serve_opened(listener, bound, parent, make_handler, limits, policy, shutdown)
+    serve_opened(listener, bound, parent, make_handler, limits, policy, shutdown, on)
 }
 
 test fn listening_in_the_system_allocator_serves_nothing_when_told_to() {
@@ -1012,14 +1012,14 @@ test fn listening_in_the_system_allocator_serves_nothing_when_told_to() {
 // joined, the owning task is closed and the state is returned, so a program
 // reads what its routes changed and releases it. The state is released on
 // every failure.
-pub fn listen_and_serve_with[S: Owned + Isolated + Release, R: MadeHandler[mem.SystemAllocator], M: Shareable + Copyable + fn(client: task.Client[S]) -> R where carries(client)](address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals) -> Result[S, ListenAndServeError[R.Error]] where R.Handler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
-    listen_and_serve_with_in(mem.system(), address, make_handler, state, limits, policy, shutdown)
+pub fn listen_and_serve_with[S: Owned + Isolated + Release, R: MadeHandler[mem.SystemAllocator], M: Shareable + Copyable + fn(client: task.Client[S]) -> R where carries(client)](address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[S, ListenAndServeError[R.Error]] where R.Handler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
+    listen_and_serve_with_in(mem.system(), address, make_handler, state, limits, policy, shutdown, on)
 }
 
 // `listen_and_serve_with_in` listens and serves as `listen_and_serve_with`
 // does, carving each task's memory from `parent`.
-pub fn listen_and_serve_with_in[P: Allocator + Shareable, S: Owned + Isolated + Release, R: MadeHandler[P], M: Shareable + Copyable + fn(client: task.Client[S]) -> R where carries(client)](parent: P, address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals) -> Result[S, ListenAndServeError[R.Error]] where R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
-    let owner = match task.own(state) {
+pub fn listen_and_serve_with_in[P: Allocator + Shareable, S: Owned + Isolated + Release, R: MadeHandler[P], M: Shareable + Copyable + fn(client: task.Client[S]) -> R where carries(client)](parent: P, address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[S, ListenAndServeError[R.Error]] where R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+    let owner = match task.own(state, on) {
         Ok(owner) => owner,
         Err(Unowned { state: kept, reason }) => {
             kept.release()
@@ -1028,7 +1028,7 @@ pub fn listen_and_serve_with_in[P: Allocator + Shareable, S: Owned + Isolated + 
     }
     let client = owner.client()
     let made = [sink make_handler = copy(make_handler), sink client] || -> R where carries(client, make_handler) make_handler(client)
-    let served = listen_and_serve_in(parent, address, made, limits, policy, shutdown)
+    let served = listen_and_serve_in(parent, address, made, limits, policy, shutdown, on)
     let state = owner.close()
     match served {
         Ok(_) => .Ok(state),
@@ -1053,12 +1053,12 @@ test fn the_state_comes_back_when_serving_with_it_ends() {
 // `listen_and_serve`, with handlers `make_handler` builds. A bound address
 // that could not be read is a `Listen` failure; the listener is closed, and a
 // failure to close it is dropped in favour of the reported one.
-fn serve_opened[L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Isolated, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, sink bound: Result[net.Address, net.NetError], parent: P, make_handler: M, limits: Limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals) -> Result[(), ListenAndServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+fn serve_opened[L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Isolated, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, sink bound: Result[net.Address, net.NetError], parent: P, make_handler: M, limits: Limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ListenAndServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
     let address = bound else |error| {
         let _closed = listener.close()
         return .Err(.Listen(error))
     }
-    match serve_made(listener, parent, make_handler, limits, policy, .Some(address), shutdown) {
+    match serve_made(listener, parent, make_handler, limits, policy, .Some(address), shutdown, on) {
         Ok(_) => .Ok(()),
         Err(error) => .Err(.Serve(error)),
     }
