@@ -322,6 +322,15 @@ jobs:
             outcomes-${{ github.job }}-${{ matrix.sanitizer }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-
             outcomes-${{ github.job }}-${{ matrix.sanitizer }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
 
+      # Catch stack-switch and native lifetime failures before the longer
+      # instrumented corpus walk.
+      - name: Runtime C tests under ${{ matrix.sanitizer }}
+        # The runtime's own C tests, built by `cc` with the sanitizer's
+        # runtime linked, so the C the corpus reaches only through programs is
+        # also driven directly: the task tests' threads, sessions and
+        # concurrent allocation included.
+        run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-clock test-native-runtime test-native-task -Dsanitize=${{ matrix.sanitizer }}
+
       # The conformance suite's recorded outcomes live outside Zig's build
       # cache: their own key covers the emitted IR, runtime, commands and Nix
       # tool stamps, and the lane-specific cache above persists them explicitly.
@@ -343,13 +352,6 @@ jobs:
         run: |
           dir="${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/linea-cache"
           if [ -d "$dir" ]; then ls -t "$dir" | grep -E '^checked-std-[0-9a-f]{64}$' | tail -n +65 | sed "s|^|$dir/|" | xargs -r rm -f; fi
-
-      - name: Runtime C tests under ${{ matrix.sanitizer }}
-        # The runtime's own C tests, built by `cc` with the sanitizer's
-        # runtime linked, so the C the corpus reaches only through programs is
-        # also driven directly: the task tests' threads, sessions and
-        # concurrent allocation included.
-        run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-clock test-native-runtime test-native-task -Dsanitize=${{ matrix.sanitizer }}
 
       - name: Save program outcomes
         if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}

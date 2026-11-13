@@ -1118,12 +1118,15 @@ is joined by `close` as a thread is.
 ### 8. A loop lasts until exit for now, and `Io` names it
 
 `io.Io` is a concrete copyable value the runtime hands out. It holds no
-borrow, so it is `Owned` and `Shareable`. Its representation is a **stable
+borrow, so it is `Owned` and `Shareable`. A concrete `Io` is a **stable
 loop identity**: an index into the runtime's loop table and the slot's
 generation, never a pointer, and every use looks the loop up and checks the
 generation. A loop's lookup cannot fail while loops last until exit; a
 simulation's can from phase 1, since a simulation ends (§12), which is why the
-check exists from the first phase. A stale `Io` traps with `linea: an Io names
+check exists from the first phase. `io.inherited` is a reserved selector rather
+than a concrete loop identity: it resolves to the calling task's Io when a task
+is prepared. This constant supplies defaults without changing [T-Default];
+`io.current()` captures a concrete identity immediately. A stale `Io` traps with `linea: an Io names
 a loop that has ended` instead of reaching freed carriers, and a scoped loop
 (§8.2) can come later without changing the public model.
 
@@ -1132,8 +1135,8 @@ a loop that has ended` instead of reaching freed carriers, and a scoped loop
   `mem.system()` is (0095).
 - `io.Loop.open(carriers: n)` makes a loop and answers its `Io`, or why it
   could not (a thread, a mapping or the poller refused). A loop is `n`
-  carriers, each with its own poller, deadline heap and run queue, and a pool
-  for modules that block (§9). It lasts until the process exits; while it has
+  carriers, each with its own poller, deadline heap and run queue, and from
+  phase 5 a pool for modules that block (§9). It lasts until the process exits; while it has
   no fiber its threads wait and run nothing. Each loop keeps its carriers,
   pollers and pool until exit, so a program opens its loops once; opening
   loops repeatedly is a resource leak by design in these phases.
@@ -1151,7 +1154,7 @@ a loop that has ended` instead of reaching freed carriers, and a scoped loop
 `Io` is passed where tasks are started, as an allocator is passed where memory
 is taken: `task.start(body, on: loop)`, `task.prepare_in(allocator, body,
 stack:, on: loop)`, and `http.serve(..., on: loop)`. Each defaults to
-`io.current()`, the `Io` the starting task runs on: the system for every task
+`io.inherited`, which selects the `Io` the starting task runs on: the system for every task
 that is a thread, so every existing call keeps its meaning; the loop for a
 fiber, so a fiber's children and a server started from a fiber stay on its
 loop; the simulation inside `Simulation.run` (§12). A server written for

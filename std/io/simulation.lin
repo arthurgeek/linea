@@ -32,8 +32,9 @@ let nanoseconds_per_millisecond: UInt64 = 1000000
 
 // An Io names what a task's waits run on: the system, where each operation
 // waits on the kernel, a fiber loop, or a simulation with a virtual
-// clock and network. It is a number naming a loop, so it can be copied
-// anywhere, and every use checks that the loop it names has not ended.
+// clock and network. A concrete Io can be copied anywhere; using it checks
+// that its loop has not ended. The inherited selector defers that choice
+// until a task is prepared.
 @(opaque, copyable, derive(Equatable, Debug))
 struct Io {
     identity: UInt64,

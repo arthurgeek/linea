@@ -13,7 +13,7 @@ const runtime_symbols = @import("runtime_symbols");
 test "runtime archive members have stable names and separate linkage" {
     const archive = @embedFile("runtime_archive");
     try testing.expect(std.mem.startsWith(u8, archive, "!<arch>\n"));
-    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "clock.o", "task.o", "park.o", "waitset.o", "signals.o", "loop.o", "sim.o", "linea_float.o", "math.o" };
+    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "clock.o", "task.o", "park.o", "waitset.o", "signals.o", "loop.o", "fiber.o", "foreign.o", "parallelism.o", "context.o", "sim.o", "linea_float.o", "math.o" };
     var member: usize = 0;
     var offset: usize = 8;
     var long_names: []const u8 = "";
@@ -126,6 +126,22 @@ fn workflowJob(workflow: []const u8, name: []const u8) ![]const u8 {
         job_end = @min(line_end + 1, workflow.len);
     }
     return workflow[job_start..job_end];
+}
+
+test "CI keeps native sanitizer tests in their matrix job before the corpus" {
+    const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(workflow);
+    const check = try workflowJob(workflow, "check");
+    const sanitize = try workflowJob(workflow, "sanitize");
+    const native = "- name: Runtime C tests under ${{ matrix.sanitizer }}";
+    try testing.expect(std.mem.indexOf(u8, check, native) == null);
+    const native_at = std.mem.indexOf(u8, sanitize, native) orelse return error.NoNativeSanitizerStep;
+    const corpus_at = std.mem.indexOf(u8, sanitize, "- name: Conformance suite under ${{ matrix.sanitizer }}") orelse return error.NoSanitizedCorpusStep;
+    try testing.expect(native_at < corpus_at);
+    try testing.expectEqualStrings(
+        "run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-clock test-native-runtime test-native-task -Dsanitize=${{ matrix.sanitizer }}",
+        try onlyLineWith(sanitize, "zig build test-native-math "),
+    );
 }
 
 test "CI runs the unit tests named slow in a lane every pull request requires" {

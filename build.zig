@@ -1927,10 +1927,18 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/sim_foreign_test.c", .flags = runtime_flags.items },
     });
     const native_context_step = b.step("test-native-context", "Compare ABI context switches with ucontext at every optimisation level");
+    // glibc fortification requires optimisation. Nix's wrapper appends its
+    // define after user flags, so undefine it before headers only in the O0
+    // oracle/candidate builds. Optimised and production builds retain it.
+    const unoptimized_context = b.addWriteFiles().add("context-unoptimized.h", "#undef _FORTIFY_SOURCE\n");
     for ([_][]const u8{ "0", "1", "2", "3", "s", "z" }) |level| {
         inline for (.{ false, true }) |reference| {
             const compile = b.addSystemCommand(&.{ "cc", "-std=c99", "-pedantic", "-Wall", "-Wextra", "-Werror", "-Wconversion", "-Wsign-conversion", "-Wshadow", "-Wundef", "-Wno-deprecated-declarations", "-fno-omit-frame-pointer" });
             compile.addArg(b.fmt("-O{s}", .{level}));
+            if (std.mem.eql(u8, level, "0")) {
+                compile.addArg("-include");
+                compile.addFileArg(unoptimized_context);
+            }
             if (reference) compile.addArg("-DLINEA_CONTEXT_REFERENCE=1");
             compile.addFileArg(b.path("runtime/context_test.c"));
             if (!reference) compile.addFileArg(b.path("runtime/context.c"));
