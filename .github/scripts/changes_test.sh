@@ -73,11 +73,16 @@ E=$(commit AGENTS.md docs-alone)
 git checkout -q --detach "$B"
 git merge -q --no-ff -m merge-alone "$E"
 merge_alone=$(git rev-parse HEAD)
+git checkout -q --detach "$D"
+H=$(commit runtime/task.c changed-code)
+git checkout -q --detach "$B"
+git merge -q --no-ff -m merge-code "$H"
+merge_code=$(git rev-parse HEAD)
 git checkout -q main
 P1=$(commit src/other.zig pushed-code)
 P2=$(commit README.md pushed-docs)
 
-lanes=(check "sanitize (address)" "sanitize (thread)" "optimised (unit)" "optimised (corpus)" "optimised (soundness)" sweep fuzz-mir)
+lanes=(check "sanitize (address)" "sanitize (thread)" "optimised (unit)" "optimised (corpus)" "optimised (soundness)" sweep fuzz-mir "fibers (ubuntu-24.04)" "fibers (ubuntu-24.04-arm)")
 
 # Records at commit $1 a run, suite $2, whose `changes` run $3 recorded the
 # annotations given after it, and in which every lane passed except those
@@ -133,6 +138,7 @@ expect_lanes() {
   expect optimised-soundness "$3"
   expect sweep "$4"
   expect fuzz-mir "$5"
+  expect fibers "${6:-$3}"
 }
 
 # Every lane passed at C against the base the run at D tests: D changed
@@ -142,12 +148,51 @@ record "$C" 1 10 "pull_request $B"
 run_pr "a green commit against the same base" "$D" "$merge"
 expect_lanes inherit inherit inherit inherit inherit
 expect sanitize-exclude '[{"sanitizer":"address"},{"sanitizer":"thread"}]'
+expect fibers-exclude '[{"runner":"ubuntu-24.04"},{"runner":"ubuntu-24.04-arm"}]'
 grep -q "^::notice title=tested base::pull_request $B$" "$work/log" ||
   { echo "$case_name: no tested base annotation for $B"; failures=$((failures + 1)); }
 # One suite is read once, however many lanes passed in it.
 calls=$(cat "$FAKE/calls" 2>/dev/null | wc -l | tr -d ' ')
 [ "$calls" -eq 1 ] ||
   { echo "$case_name: read the suite's annotations $calls times"; failures=$((failures + 1)); }
+
+# A ready-for-review event with the same head and base reuses both ABI runs.
+reset
+record "$D" 1 10 "pull_request $B"
+run_pr "the same head becomes ready again" "$D" "$merge"
+expect fibers inherit
+expect fibers-exclude '[{"runner":"ubuntu-24.04"},{"runner":"ubuntu-24.04-arm"}]'
+
+# A pass on one ABI never substitutes for a failed or missing other ABI.
+for failed in 'fibers (ubuntu-24.04)' 'fibers (ubuntu-24.04-arm)'; do
+  reset
+  FAILED="$failed" record "$D" 1 10 "pull_request $B"
+  run_pr "only $failed failed" "$D" "$merge"
+  expect fibers run
+  if [ "$failed" = 'fibers (ubuntu-24.04)' ]; then
+    expect fibers-exclude '[{"runner":"ubuntu-24.04-arm"}]'
+  else
+    expect fibers-exclude '[{"runner":"ubuntu-24.04"}]'
+  fi
+done
+for conclusion in missing cancelled pending skipped; do
+  reset
+  record "$D" 1 10 "pull_request $B"
+  awk -F '\t' -v OFS='\t' -v c="$conclusion" '
+    $2 == "fibers (ubuntu-24.04-arm)" { if (c == "missing") next; $3 = c }
+    { print }
+  ' "$FAKE/runs-$D" > "$work/modified-runs"
+  mv "$work/modified-runs" "$FAKE/runs-$D"
+  run_pr "ARM evidence is $conclusion" "$D" "$merge"
+  expect fibers run
+  expect fibers-exclude '[{"runner":"ubuntu-24.04"}]'
+done
+
+reset
+record "$C" 1 10 "pull_request $B"
+run_pr "code changed after both ABIs passed" "$H" "$merge_code"
+expect fibers run
+expect fibers-exclude '[]'
 
 # The lane that failed at C reruns; the rest inherit.
 reset
@@ -238,24 +283,61 @@ expect_lanes skip skip skip skip skip
 reset
 record "$P1" 1 10 "push $P1"
 run "a push after a green commit" EVENT=push GITHUB_SHA="$P2"
-expect_lanes inherit skip skip skip skip
+expect_lanes inherit skip skip skip skip inherit
 reset
 FAILED="check" record "$P1" 1 10 "push $P1"
 run "a push after a red commit" EVENT=push GITHUB_SHA="$P2"
-expect_lanes run skip skip skip skip
+expect_lanes run skip skip skip skip inherit
 reset
 record "$P1" 1 10 "schedule $P1"
 run "a push after a scheduled run" EVENT=push GITHUB_SHA="$P2"
-expect_lanes run skip skip skip skip
+expect_lanes run skip skip skip skip run
 touch "$FAKE/fail"
 run "a push with the API failing" EVENT=push GITHUB_SHA="$P2"
-expect_lanes run skip skip skip skip
+expect_lanes run skip skip skip skip run
 
 # A scheduled or manual run runs every lane but `fuzz-mir`, which `fuzz`
 # covers there.
 reset
 run "a scheduled run" EVENT=schedule GITHUB_SHA="$P2"
 expect_lanes run run run run skip
+expect fibers-exclude '[]'
+run "a manual run" EVENT=workflow_dispatch GITHUB_SHA="$P2"
+expect fibers run
+expect fibers-exclude '[]'
+
+# Execute the workflow's actual merge gate with controlled job results.
+# An inherited fiber matrix must be skipped; a partially rerun one must pass.
+awk '
+  /^  merge-ready:/ { job = 1; next }
+  job && /^  [^ ]/ { exit }
+  job && /^        run: \|$/ { body = 1; next }
+  body && /^          / { sub(/^          /, ""); print; next }
+  body { exit }
+' "$(dirname "$script")/../workflows/ci.yml" > "$work/gate"
+gate() {
+  local name=$1 want=$2 got=0
+  shift 2
+  env EVENT=pull_request DRAFT=false CHANGES=success \
+    WANT_CHECK=inherit WANT_SANITIZE=inherit WANT_OPTIMISED_UNIT=inherit \
+    WANT_OPTIMISED_CORPUS=inherit WANT_OPTIMISED_SOUNDNESS=inherit WANT_FUZZ_MIR=inherit \
+    CHECK=skipped SANITIZE=skipped OPTIMISED_UNIT=skipped OPTIMISED_CORPUS=skipped \
+    OPTIMISED_SOUNDNESS=skipped FUZZ=skipped FUZZ_MIR=skipped \
+    "$@" bash "$work/gate" > "$work/gate-log" 2>&1 || got=$?
+  if [ "$got" != "$want" ]; then
+    echo "$name: gate wanted exit $want, got $got"
+    cat "$work/gate-log"
+    failures=$((failures + 1))
+  fi
+}
+gate 'both ABI passes inherited' 0 WANT_FIBERS=inherit FIBERS=skipped
+gate 'one or both ABIs rerun successfully' 0 WANT_FIBERS=run FIBERS=success
+gate 'required ABI failed' 1 WANT_FIBERS=run FIBERS=failure
+gate 'required ABI cancelled' 1 WANT_FIBERS=run FIBERS=cancelled
+gate 'required ABI skipped' 1 WANT_FIBERS=run FIBERS=skipped
+gate 'inherited ABI unexpectedly ran' 1 WANT_FIBERS=inherit FIBERS=success
+gate 'missing fiber decision' 1 WANT_FIBERS= FIBERS=skipped
+gate 'draft cannot merge' 1 WANT_FIBERS=inherit FIBERS=skipped DRAFT=true
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures mismatches"
