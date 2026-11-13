@@ -867,7 +867,7 @@ struct linea_fiber *linea_fiber_create(unsigned long identity, unsigned long sta
     }
     if (kind == LINEA_LOOP_SIMULATION) {
         f->home = linea_sim_carrier(identity);
-        f->home->live += 1;
+        __atomic_fetch_add(&f->home->live, 1UL, __ATOMIC_ACQ_REL);
     } else {
     struct fiber_loop *loop = linea_loop_find(identity);
     must(pthread_mutex_lock(&loop->startup_lock));
@@ -897,12 +897,16 @@ void linea_fiber_start(struct linea_fiber *f) {
 }
 
 void linea_fiber_destroy(struct linea_fiber *f) {
-    if (f->home->simulation != 0) f->home->live -= 1;
+    struct carrier *home = f->home;
+    const int simulated = home->simulation != 0;
 #if __has_feature(thread_sanitizer)
     __tsan_destroy_fiber(f->tsan_fiber);
 #endif
     if (munmap(f->mapping, f->mapping_bytes) != 0) fail("linea: a fiber's stack could not be unmapped\n");
     free(f);
+    /* Prepared tasks can be canceled from a system thread. Keep their home
+     * alive until stack and sanitizer cleanup no longer need it. */
+    if (simulated) __atomic_fetch_sub(&home->live, 1UL, __ATOMIC_ACQ_REL);
 }
 
 void *linea_fiber_sim_create(unsigned long identity) {
@@ -929,7 +933,7 @@ void linea_fiber_sim_switch(unsigned long previous, unsigned long identity) {
             }
             if (ancestor->simulation == 0) break;
         }
-        if (next->live != 0 && !pthread_equal(next->thread, pthread_self())) fail("linea: a simulation with live tasks moved between threads\n");
+        if (__atomic_load_n(&next->live, __ATOMIC_ACQUIRE) != 0 && !pthread_equal(next->thread, pthread_self())) fail("linea: a simulation with live tasks moved between threads\n");
         next->thread = pthread_self();
         next->previous = current_carrier();
 #if defined(__APPLE__)
@@ -960,7 +964,7 @@ void linea_fiber_sim_switch(unsigned long previous, unsigned long identity) {
 
 void linea_fiber_sim_destroy(void *carrier) {
     struct carrier *c = carrier;
-    if (c->live != 0) fail("linea: a simulation ended with live tasks\n");
+    if (__atomic_load_n(&c->live, __ATOMIC_ACQUIRE) != 0) fail("linea: a simulation ended with live tasks\n");
     free_carrier(c);
     free(c);
 }

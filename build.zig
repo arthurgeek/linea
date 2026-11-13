@@ -1836,6 +1836,19 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
         .{ .file = "runtime/fiber_failure_test.c", .flags = runtime_flags.items, .includes = &.{"runtime/fiber.c"} },
     });
+    native.add(native_task_step, "native-sim-cancel-tests", &.{
+        .{ .file = "runtime/net.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim_cancel_test.c", .flags = runtime_flags.items, .includes = &.{"runtime/fiber.c"} },
+    });
     native.add(native_task_step, "native-foreign-tests", &.{
         .{ .file = "runtime/foreign_test.c", .flags = runtime_flags.items },
     });
@@ -2069,6 +2082,7 @@ pub fn build(b: *std.Build) void {
             "fiber_fault_test",
             "fiber_failure_test",
             "sim_fiber_test",
+            "sim_cancel_test",
             "sim_waitset_test",
             "sim_foreign_test",
             "foreign_test",
