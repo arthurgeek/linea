@@ -584,10 +584,14 @@ fn loadInputs(
     // A dependency's modules take its own manifest's grant, which its
     // consumer consented to or the dependency was refused.
     for (l.modules.items[prefix_modules..], l.routes.items[prefix_modules..]) |*m, route| {
-        if (m.root == .primary) m.externs = declared.grants(route, if (m.library) library.dependency_name else "");
+        if (m.root == .primary) {
+            m.externs = declared.grants(route, if (m.library) library.dependency_name else "");
+            m.foreign_policy = if (m.externs) declared.foreign_policy else .{};
+        }
         if (m.root.isDependency()) {
             const held = l.graph.items[m.root.index()];
             m.externs = grantedTo(held.externs, route, held.name);
+            m.foreign_policy = if (m.externs) held.foreign_policy else .{};
         }
     }
     const roots = try l.rootFacts();
@@ -1484,6 +1488,7 @@ pub const Declared = struct {
     /// spelled as an import inside the root names it, with `.` for the root
     /// module. Owned; `deinit` releases it.
     externs: []const []const u8 = &.{},
+    foreign_policy: @import("../support/foreign_execution.zig").Policy = .{},
     /// The C sources a build compiles beside the program, as the manifest
     /// writes them: relative to the manifest's directory. Owned.
     native: []const []const u8 = &.{},
@@ -1625,6 +1630,11 @@ fn declaredFrom(gpa: std.mem.Allocator, written: Written) !Declared {
     var declared: Declared = .{ .kind = kind, .standard = standard };
     errdefer declared.deinit(gpa);
     declared.externs = try stringsOf(gpa, written.@"extern", spellsModule, error.ManifestExternNotModules);
+    if ((written.blocking != .absent or written.thread_affine != .absent) and declared.externs.len == 0) return error.ManifestBlockingWithoutExtern;
+    declared.foreign_policy = .{
+        .blocking = try foreignProperty(written.blocking),
+        .thread_affine = try foreignProperty(written.thread_affine),
+    };
     declared.native = try stringsOf(gpa, written.native, namesSource, error.ManifestNativeNotSource);
     declared.link = try stringsOf(gpa, written.link, namesLibrary, error.ManifestLinkNotLibrary);
     declared.headers = try stringsOf(gpa, written.headers, namesHeader, error.ManifestHeaderNotHeader);
@@ -1634,10 +1644,49 @@ fn declaredFrom(gpa: std.mem.Allocator, written: Written) !Declared {
     return declared;
 }
 
+fn foreignProperty(property: ForeignProperty) error{ManifestBlockingNotBoolean}!bool {
+    return switch (property) {
+        .absent => false,
+        .value => |value| switch (value) {
+            .bool => |enabled| enabled,
+            else => error.ManifestBlockingNotBoolean,
+        },
+    };
+}
+
+/// Preserve an explicit JSON null so it is refused rather than treated as an
+/// omitted property by the JSON parser's optional-value handling.
+const ForeignProperty = union(enum) {
+    absent,
+    value: std.json.Value,
+
+    pub fn jsonParse(gpa: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !ForeignProperty {
+        return .{ .value = try std.json.innerParse(std.json.Value, gpa, source, options) };
+    }
+};
+
 fn declaredFromText(gpa: std.mem.Allocator, text: []const u8) !Declared {
     const parsed = try std.json.parseFromSlice(Written, gpa, text, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
     return declaredFrom(gpa, parsed.value);
+}
+
+test "foreign execution manifest properties require an extern grant" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    try testing.expectError(error.ManifestBlockingWithoutExtern, declaredFromText(gpa, "{ \"blocking\": true }"));
+    try testing.expectError(error.ManifestBlockingWithoutExtern, declaredFromText(gpa, "{ \"thread_affine\": false }"));
+    try testing.expectError(error.ManifestBlockingWithoutExtern, declaredFromText(gpa, "{ \"extern\": [], \"blocking\": false }"));
+}
+
+test "foreign execution manifest properties are booleans" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    try testing.expectError(error.ManifestBlockingNotBoolean, declaredFromText(gpa, "{ \"extern\": [\".\"], \"blocking\": 1 }"));
+    try testing.expectError(error.ManifestBlockingNotBoolean, declaredFromText(gpa, "{ \"extern\": [\".\"], \"thread_affine\": \"true\" }"));
+    try testing.expectError(error.ManifestBlockingNotBoolean, declaredFromText(gpa, "{\"extern\":[\".\"],\"blocking\":null}"));
 }
 
 test "a manifest declares a library's name and the modules it grants extern" {
@@ -1775,6 +1824,8 @@ const Written = struct {
     /// module spellings. Read as a JSON value so that a grant of any other
     /// shape is refused by name rather than as text that is not JSON.
     @"extern": ?std.json.Value = null,
+    blocking: ForeignProperty = .absent,
+    thread_affine: ForeignProperty = .absent,
     /// C sources to compile beside the program, relative to the manifest.
     native: ?std.json.Value = null,
     /// C libraries to link, by the name `cc` takes after `-l`.
@@ -1793,6 +1844,29 @@ pub fn joinedDir(gpa: std.mem.Allocator, base: []const u8, path: []const u8) std
     if (path.len > 0 and path[0] == '/') return std.fs.path.resolvePosix(gpa, &.{path});
     if (base.len == 0) return std.fs.path.resolvePosix(gpa, &.{path});
     return std.fs.path.resolvePosix(gpa, &.{ base, path });
+}
+
+test "foreign execution grants stay within their own modules and dependency roots" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var table: FileTable = .empty;
+    var sink = Sink.init(a);
+    var interner: Interner = .empty;
+    const program = try loadFromMemory(a, &table, &sink, &interner, "app", &.{
+        .{ .path = "app/linea.json", .text = "{\"extern\":[\"native\"],\"blocking\":true,\"dependencies\":{\"bound\":{\"path\":\"bound\",\"extern\":true}}}" },
+        .{ .path = "app/main.lin", .text = "import native\nimport plain\nimport bound\n" },
+        .{ .path = "app/native/native.lin", .text = "" },
+        .{ .path = "app/plain/plain.lin", .text = "" },
+        .{ .path = "app/bound/linea.json", .text = "{\"kind\":\"library\",\"name\":\"bound\",\"extern\":[\".\"],\"thread_affine\":true}" },
+        .{ .path = "app/bound/bound.lin", .text = "" },
+    }, .program, false, .borrow);
+    try testing.expectEqual(@as(u32, 0), sink.error_count);
+    try testing.expectEqual(@as(usize, 4), program.modules.len);
+    for (program.modules) |module| {
+        try testing.expectEqual(std.mem.eql(u8, module.name, "native"), module.foreign_policy.blocking);
+        try testing.expectEqual(std.mem.eql(u8, module.name, "bound"), module.foreign_policy.thread_affine);
+    }
 }
 
 test "a dependency's C is built once from its own directory, and its libraries keep each manifest's order" {
@@ -2228,6 +2302,7 @@ const Loader = struct {
         /// joined to its manifest's directory, and the libraries it links,
         /// owned by the scratch arena the graph is read into.
         externs: []const []const u8 = &.{},
+        foreign_policy: @import("../support/foreign_execution.zig").Policy = .{},
         native: []const []const u8 = &.{},
         link: []const []const u8 = &.{},
         /// The headers its manifest names, as an include spells each.
@@ -2270,6 +2345,7 @@ const Loader = struct {
                 .root = module.root,
                 .library = true,
                 .externs = module.externs,
+                .foreign_policy = module.foreign_policy,
             });
             self.routes.appendAssumeCapacity(copied_route);
             self.library_dirs.putAssumeCapacity(dir, .from(i));
@@ -2403,6 +2479,7 @@ const Loader = struct {
             m.root = standard_root;
             m.library = true;
             m.externs = declared.grants(route, library.dependency_name);
+            m.foreign_policy = if (m.externs) declared.foreign_policy else .{};
         }
     }
 
@@ -3353,6 +3430,14 @@ const Loader = struct {
                 try self.reportManifest(manifest_path, text, entry.path_at, "correct the library's manifest", "the {s} in `{s}` grants `extern` to something that is not a list of its modules", .{ manifest_name, entry.path.? }, &.{});
                 return true;
             },
+            error.ManifestBlockingWithoutExtern, error.ManifestBlockingNotBoolean => {
+                const reason = if (err == error.ManifestBlockingWithoutExtern)
+                    "blocking and thread_affine require a nonempty extern grant"
+                else
+                    "blocking and thread_affine must be booleans";
+                try self.reportManifestCode(.m_blocking, manifest_path, text, entry.path_at, "correct the library's execution properties", "the {s} in `{s}` is invalid: {s}", .{ manifest_name, entry.path.?, reason }, &.{});
+                return true;
+            },
             error.ManifestNativeNotSource, error.ManifestLinkNotLibrary, error.ManifestHeaderNotHeader, error.ManifestLinksWithoutExtern => {
                 try self.reportManifest(manifest_path, text, entry.path_at, "correct the library's manifest", "the {s} in `{s}` names C it cannot build or link", .{ manifest_name, entry.path.? }, &.{});
                 return true;
@@ -3412,6 +3497,7 @@ const Loader = struct {
             .manifest_dir = dir,
             .source_dir = source_dir,
             .externs = parsed.declared.externs,
+            .foreign_policy = parsed.declared.foreign_policy,
             .native = native,
             .link = parsed.declared.link,
             .headers = parsed.declared.headers,
@@ -3492,6 +3578,20 @@ const Loader = struct {
         args: anytype,
         notes: []const []const u8,
     ) LoadError!void {
+        return self.reportManifestCode(.m_dependency, manifest_path, text, at, label, fmt, args, notes);
+    }
+
+    fn reportManifestCode(
+        self: *Loader,
+        code: @import("../diagnostics/diagnostic.zig").Code,
+        manifest_path: []const u8,
+        text: []const u8,
+        at: Span,
+        label: []const u8,
+        comptime fmt: []const u8,
+        args: anytype,
+        notes: []const []const u8,
+    ) LoadError!void {
         const file = self.manifest_files.get(manifest_path) orelse blk: {
             const storage = switch (self.input) {
                 .memory => |ownership| switch (ownership) {
@@ -3513,7 +3613,7 @@ const Loader = struct {
         labels[0] = .{ .file = file, .span = at, .message = label, .style = .primary };
         try self.sink.add(.{
             .severity = .err,
-            .code = .m_dependency,
+            .code = code,
             .message = try std.fmt.allocPrint(self.sink.arena, fmt, args),
             .labels = labels,
             .notes = try self.sink.arena.dupe([]const u8, notes),

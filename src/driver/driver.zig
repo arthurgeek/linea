@@ -649,6 +649,15 @@ pub fn run(process: std.process.Init) !u8 {
     else
         loadFromDisk(gpa, io, &table, &sink, &interner, file_path, purpose, true);
     var program = loaded catch |e| {
+        if (e == error.ManifestBlockingWithoutExtern or e == error.ManifestBlockingNotBoolean) {
+            const code = @import("../diagnostics/diagnostic.zig").Code.m_blocking;
+            const reason = if (e == error.ManifestBlockingWithoutExtern)
+                "blocking and thread_affine require a nonempty extern grant"
+            else
+                "blocking and thread_affine must be booleans";
+            try stderr_w.print("error[{s}]: {s}\n  correct the execution properties in the linea.json for '{s}'\n", .{ code.ruleName(), reason, file_path });
+            return exit_usage;
+        }
         // A manifest that was read and says what its root cannot be is not a
         // read failure, so it is said on its own.
         if (e == error.ManifestNamesTheLibrary) {

@@ -2091,6 +2091,13 @@ outside it: only a module trusted with C can vouch that C lets two threads
 read an object at once
 ([ADR 0260](adr/0260-a-handle-to-a-c-object-is-not-shareable-unless-its-wrapper-vouches.md)).
 
+**[M-Blocking]** A manifest's `"blocking"` and `"thread_affine"` properties
+are booleans and require a nonempty `"extern"` grant, even when false. They
+describe the native calls of the modules listed in that grant; they do not
+grant other modules or change a dependency's own execution properties.
+`blocking` says a call may wait on the world; `thread_affine` says native
+state must stay on one operating-system thread between calls.
+
 **[M-Foreign]** Only a module its root's manifest grants `extern` may use
 `std.ffi`: import it, call any function or method `std.ffi` declares, or take
 one as a value, whatever `std.ffi` value it is handed. A trait's operation

@@ -151,6 +151,8 @@ pub const Code = enum {
     m_opaque,
     /// An `extern` declaration in a module its root's manifest does not grant.
     m_extern,
+    /// Native execution properties are not booleans or have no extern grant.
+    m_blocking,
     /// `std.ffi` imported by a module its root does not grant, or one of its
     /// types named in what a granted module publishes.
     m_foreign,
@@ -469,6 +471,7 @@ pub const Code = enum {
             .m_standard => "M-Standard",
             .m_opaque => "M-Opaque",
             .m_extern => "M-Extern",
+            .m_blocking => "M-Blocking",
             .m_foreign => "M-Foreign",
             .m_export => "M-Export",
             .o_universe => "O-Universe",

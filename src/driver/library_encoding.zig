@@ -30,7 +30,7 @@ const Expressions = std.MultiArrayList(Expr).Slice;
 /// Raised when the entry's header or the encoding's rules change while the
 /// encoded types stay as they are. A change to an encoded type changes the
 /// compiler's image, and so the entry's key, by itself.
-pub const format_version: u32 = 1;
+pub const format_version: u32 = 2;
 
 /// The parts of a `CheckedLibrary` that are data, in the order they are
 /// written.

@@ -337,6 +337,16 @@ pub fn lower(
     // Defined here, whatever else is not: this pass wrote its body.
     if (dispatches) external[external.len - 1] = false;
 
+    const ForeignPolicy = @import("../support/foreign_execution.zig").Policy;
+    const foreign_policies = try gpa.alloc(ForeignPolicy, external.len);
+    errdefer gpa.free(foreign_policies);
+    @memset(foreign_policies, .{});
+    for (instances.instances, 0..) |instance, i| {
+        if (!external[i]) continue;
+        const decl = instance.key.body.declaration;
+        foreign_policies[i] = program.get(program.moduleOf(decl)).foreign_policy;
+    }
+
     // What something outside may reach, which only a library has any of. A
     // program's every caller is in this module, so nothing in one is marked and
     // the backend emits it exactly as before.
@@ -432,6 +442,7 @@ pub fn lower(
         .statics = statics,
         .names = names,
         .external = external,
+        .foreign_policies = foreign_policies,
         .exported_as = exported,
         .origins = came_from,
         .types = pool,
@@ -6391,6 +6402,42 @@ fn lowerSourceAs(gpa: std.mem.Allocator, text: []const u8, prelude: enum { no_pr
     var disposals = try checkOwnershipTree(gpa, &resolved, &typing, &sink);
     defer disposals.deinit(gpa);
     return (try lowerTree(gpa, &resolved, &typing, &disposals, &sink, .program)) orelse error.SourceRejected;
+}
+
+test "foreign execution policy survives checking expansion and lowering" {
+    const program_mod = @import("../syntax/program.zig");
+    const Policy = @import("../support/foreign_execution.zig").Policy;
+    for ([_]Policy{ .{}, .{ .blocking = true }, .{ .thread_affine = true }, .{ .blocking = true, .thread_affine = true } }) |policy| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        const source: Source = .{ .path = "native.lin", .text = "extern fn native_value() -> UInt8\nfn main() -> UInt8 { native_value() }" };
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        const ast = try parse(gpa, &source, .from(0), tokens, &sink);
+        var modules = [_]program_mod.Module{.{
+            .name = "",
+            .dir = ".",
+            .files = &.{.from(0)},
+            .decls = .{ .start = 0, .end = ast.declCount() },
+            .imports = &.{},
+            .externs = true,
+            .foreign_policy = policy,
+        }};
+        const program: program_mod.Program = .{ .modules = &modules, .ast = ast };
+        var resolved = try resolve_mod.resolve(gpa, &program, &interner, &sink, .program);
+        var typing = try @import("../sema/typecheck.zig").typecheck(gpa, &resolved.expanded, &resolved.resolution, &sink);
+        var disposals = try @import("../ownership/check.zig").check(gpa, gpa, &resolved.expanded, &resolved.resolution, &typing, &sink);
+        try testing.expectEqual(@as(u32, 0), sink.error_count);
+        const module = (try lowerProgram(gpa, &resolved.expanded, &resolved.resolution, &typing, &disposals, &sink, .program)).?;
+        var found = false;
+        for (module.external, module.foreign_policies) |external, actual| {
+            if (external) found = true;
+            try testing.expectEqualDeep(if (external) policy else Policy{}, actual);
+        }
+        try testing.expect(found);
+    }
 }
 
 test "a tuple literal writes each component through its field address" {

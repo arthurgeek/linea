@@ -101,6 +101,8 @@ pub const Module = struct {
     /// manifest grants ([M-Extern]). Recorded by the loader, which read the
     /// manifest.
     externs: bool = false,
+    /// Native execution requirements of this module's manifest grant.
+    foreign_policy: @import("../support/foreign_execution.zig").Policy = .{},
     /// Whether an `import` can name this module: every directory name on the
     /// path from its root is an identifier, and the first is not `std`, which
     /// names the standard library wherever it appears. A module beneath a

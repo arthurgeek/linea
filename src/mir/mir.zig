@@ -639,6 +639,8 @@ pub const Module = struct {
     /// the names rather than asked of the tree, because the backend has no
     /// tree.
     external: []const bool,
+    /// Native execution requirements, indexed by the same function identity.
+    foreign_policies: []const @import("../support/foreign_execution.zig").Policy = &.{},
     /// The canonical zeroed allocator, retained as an ordinary nullable call.
     zeroed_allocator: FunctionId = .none,
     /// What each of them is published as, or an empty name where nothing
@@ -970,6 +972,7 @@ pub const Module = struct {
         for (self.names) |n| gpa.free(n);
         gpa.free(self.names);
         gpa.free(self.external);
+        gpa.free(self.foreign_policies);
         // The published names too, for the reason the symbols above are freed:
         // lowering spells each one and hands it over. An unexported function
         // holds an empty name, which was never allocated.
