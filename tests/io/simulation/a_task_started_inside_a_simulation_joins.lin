@@ -2,8 +2,6 @@ import std.io
 import std.session
 import std.task
 
-// A simulation runs one task: a second one would be a thread the kernel
-// schedules, which no seed could reproduce.
 fn main() -> UInt8 {
     var sim = io.Simulation.open(seed: 1).unwrap()
     &sim.run(

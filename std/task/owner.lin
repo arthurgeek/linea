@@ -1,4 +1,5 @@
 import std.mem
+import std.io
 import std.testing
 
 // An owning task holds one value, its state, and runs calls against it one at
@@ -52,7 +53,7 @@ pub struct Unowned[S] {
 
 // Start a task that owns `state`. It fails when the task's call queue, its
 // thread or its stack cannot be made, and hands the state back then.
-pub fn own[S: Owned + Isolated](sink state: S) -> Result[Owner[S], Unowned[S]] {
+pub fn own[S: Owned + Isolated](sink state: S, on: io.Io = io.inherited) -> Result[Owner[S], Unowned[S]] {
     // `linea_owner_open` answers zero where the queue's record cannot be
     // allocated, before any thread exists.
     let queue = linea_owner_open()
@@ -62,7 +63,7 @@ pub fn own[S: Owned + Isolated](sink state: S) -> Result[Owner[S], Unowned[S]] {
     // The body captures nothing, so its handle carries no dependency and is
     // detached to a type `Owner` can name; it is still joined by `close`.
     let body = sink [] |sink me: Chan[Recv[(S, UInt64), Send[S, End]]]| run_owner[S](me)
-    match prepare(body) {
+    match prepare(body, on) {
         Ok(slot) => {
             let handle = slot.start().detach().send((state, queue))
             .Ok(.{ queue, handle })

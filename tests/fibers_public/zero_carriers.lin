@@ -1,0 +1,12 @@
+import std.io
+
+fn main() -> UInt8 {
+    match io.Loop.open(carriers: 0) {
+        Ok(_) => 1,
+        Err(error) => if error.category == io.IoCategory.InvalidInput {
+            0
+        } else {
+            2
+        },
+    }
+}

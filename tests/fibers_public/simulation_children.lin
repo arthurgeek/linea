@@ -1,0 +1,27 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Send
+
+fn main() -> UInt8 {
+    var simulation = io.Simulation.open(seed: 42).unwrap()
+    let inherited = &simulation.run(
+        |inout _world| {
+            let body = sink [] |sink me: Chan[Send[io.Io, End]]| {
+                me.send(io.current()).close()
+            }
+            let (home, done) = task.start(body).unwrap().recv()
+            done.close()
+            home == io.current() && home.is_simulated()
+        },
+    )
+    simulation.close()
+    if inherited {
+        0
+    } else {
+        1
+    }
+}

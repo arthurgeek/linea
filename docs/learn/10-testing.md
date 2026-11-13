@@ -753,6 +753,19 @@ No socket is opened, so these tests run anywhere, quickly. The [JSON echo
 server](../../examples/http-json-echo/main.lin) and the [countdown
 server](../../examples/countdown-server/main.lin) test every handler this way.
 
+## Repeating task schedules in a simulation
+
+`io.Simulation` provides a virtual clock and network, and tasks started inside
+`&sim.run(...)` inherit its simulated Io. They are fibers on one carrier,
+with scheduling choices drawn from the seed. Their session sends, receives,
+joins and wait sets compose with virtual timers and sockets, so a test can
+exercise several tasks without depending on kernel thread timing. Join every
+child before the run returns and close the simulation after it. The
+[networking chapter](09-networking.md#testing-a-timeout-without-waiting) shows
+opening a simulation and configuring its network; use another seed to explore
+another repeatable execution. Real sockets cannot be used inside a run, and
+simulated sockets cannot be used outside their simulation.
+
 ## Running tests
 
 `linea test <path>` takes a file or a project directory; given a directory, it

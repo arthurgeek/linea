@@ -10,6 +10,10 @@
  * no longer matches and is refused rather than read. Slots live in pages
  * that are never freed. The only loops so far are simulations. */
 
+enum linea_loop_kind { LINEA_LOOP_SYSTEM, LINEA_LOOP_SIMULATION, LINEA_LOOP_FIBERS };
+unsigned long linea_loop_claim_kind(void *state, uint8_t kind);
+uint8_t linea_loop_kind(unsigned long identity);
+
 /* Take a slot for `state` and answer its identity, or 0 when no slot can be
  * had: the table's pages cannot be allocated, or every slot is in use or
  * retired. */

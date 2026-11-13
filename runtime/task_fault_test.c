@@ -148,7 +148,7 @@ static void release(unsigned long at, unsigned long len) {
 static void nothing_is_left_and_the_body_still_runs(long refused, long expected) {
     assert(refused == expected);
     assert(maps == unmaps && creates == joins && ran == 0);
-    const long task = linea_task_prepare(1UL << 16);
+    const long task = linea_task_prepare_on(1UL << 16, 0);
     assert(task > 0);
     linea_chan_close(linea_task_start((unsigned long)task, entry, release, 0, 0, 0));
     assert(ran == 1 && released == 1 && maps == unmaps && creates == joins);
@@ -182,7 +182,7 @@ static void release_nothing(unsigned long at, unsigned long len) {
 /* A timed receive whose timeout ends after the last time a deadline can name
  * waits without a deadline, and still takes what the peer sends. */
 static void a_receive_timeout_past_the_last_time_waits_without_a_deadline(void) {
-    const long task = linea_task_prepare(1UL << 16);
+    const long task = linea_task_prepare_on(1UL << 16, 0);
     assert(task > 0);
     const unsigned long session = linea_task_start((unsigned long)task, send_once_awaited, release_nothing, 0, 0, 0);
     make_the_clock_late(latest_time);
@@ -208,7 +208,7 @@ static void send_after_a_tenth(unsigned long endpoint, unsigned long at, unsigne
 /* A timed receive measures its timeout on the monotonic clock, so setting
  * the wall clock back neither ends the wait early nor makes it longer. */
 static void a_receive_timeout_does_not_read_the_wall_clock(void) {
-    const long task = linea_task_prepare(1UL << 16);
+    const long task = linea_task_prepare_on(1UL << 16, 0);
     assert(task > 0);
     __atomic_store_n(&wall_is_set_back, 1, __ATOMIC_SEQ_CST);
     const unsigned long session = linea_task_start((unsigned long)task, send_after_a_tenth, release_nothing, 0, 0, 0);
@@ -222,7 +222,7 @@ static void a_receive_timeout_does_not_read_the_wall_clock(void) {
 /* A timed receive whose peer sends after the timeout answers 0 once the
  * timeout has passed, and the payload is still received afterwards. */
 static void a_receive_from_a_late_peer_times_out(void) {
-    const long task = linea_task_prepare(1UL << 16);
+    const long task = linea_task_prepare_on(1UL << 16, 0);
     assert(task > 0);
     const unsigned long session = linea_task_start((unsigned long)task, send_after_a_tenth, release_nothing, 0, 0, 0);
     struct timespec before, after;
@@ -257,32 +257,32 @@ int main(void) {
     a_refused_owner_queue_answers_zero();
 
     refuse_record = 1;
-    long refused = linea_task_prepare(1UL << 16);
+    long refused = linea_task_prepare_on(1UL << 16, 0);
     refuse_record = 0;
     nothing_is_left_and_the_body_still_runs(refused, -ENOMEM);
 
     /* The first mapping is the stack, the second the signal stack. */
     for (unsigned long which = 1; which <= 2; which += 1) {
         refuse_map = attempted_maps + which;
-        refused = linea_task_prepare(1UL << 16);
+        refused = linea_task_prepare_on(1UL << 16, 0);
         refuse_map = 0;
         nothing_is_left_and_the_body_still_runs(refused, -ENOMEM);
     }
 
     refuse_create = 1;
-    refused = linea_task_prepare(1UL << 16);
+    refused = linea_task_prepare_on(1UL << 16, 0);
     refuse_create = 0;
     nothing_is_left_and_the_body_still_runs(refused, -EAGAIN);
 
     /* The thread installs its signal stack before it parks; a refusal there
      * ends the thread, and prepare joins it and reports the refusal. */
     refuse_signal_stack = 1;
-    refused = linea_task_prepare(1UL << 16);
+    refused = linea_task_prepare_on(1UL << 16, 0);
     refuse_signal_stack = 0;
     nothing_is_left_and_the_body_still_runs(refused, -ENOMEM);
 
     /* A cancelled task is joined and unmapped. */
-    const long task = linea_task_prepare(1UL << 16);
+    const long task = linea_task_prepare_on(1UL << 16, 0);
     assert(task > 0);
     linea_task_cancel((unsigned long)task);
     assert(maps == unmaps && creates == joins && ran == 0 && released == 0);

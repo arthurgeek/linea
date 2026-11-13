@@ -296,6 +296,13 @@ pub const thread_end_signature: Signature = .{
     .result = .unit,
 };
 
+pub const foreign_enter = "linea_foreign_enter";
+pub const foreign_leave = "linea_foreign_leave";
+pub const foreign_depth = "linea_foreign_depth";
+pub const foreign_enter_signature: Signature = .{ .symbol = foreign_enter, .declared_by = .compiler, .parameters = &.{}, .result = .unit };
+pub const foreign_leave_signature: Signature = .{ .symbol = foreign_leave, .declared_by = .compiler, .parameters = &.{}, .result = .unit };
+pub const foreign_depth_signature: Signature = .{ .symbol = foreign_depth, .declared_by = .compiler, .parameters = &.{}, .result = .u64 };
+
 /// The signature of every float-math operation, in the operation's own order.
 pub const math_functions = math: {
     const operations = std.enums.values(@import("float_math.zig").Operation);
@@ -320,6 +327,34 @@ pub const math_functions = math: {
 /// declaration names them; they are owned so that no `export` takes their
 /// names.
 pub const internal_functions = [_]Signature{
+    .{ .symbol = "linea_fiber_sim_create", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .ptr },
+    .{ .symbol = "linea_fiber_sim_switch", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_fiber_sim_destroy", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_fiber_sim_step", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .i32 },
+    .{ .symbol = "linea_fiber_sim_park", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.u64) }, .result = .i32 },
+    .{ .symbol = "linea_sim_carrier", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .ptr },
+    .{ .symbol = "linea_sim_choice", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .u64 },
+    .{ .symbol = "linea_sim_attempt", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .i64 },
+    foreign_enter_signature,
+    foreign_leave_signature,
+    foreign_depth_signature,
+    .{ .symbol = "linea_fiber_perform", .declared_by = .compiler, .parameters = &.{ p(.ptr), cb(&.{.ptr}, .i64, 0) }, .result = .i64 },
+    .{ .symbol = "linea_fiber_wait_descriptor", .declared_by = .compiler, .parameters = &.{ p(.i32), p(.u8), p(.u64) }, .result = .i64 },
+    .{ .symbol = "linea_fiber_sleep", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .i64 },
+    .{ .symbol = "linea_context_init", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.ptr), p(.u64), cb(&.{.ptr}, .unit, 0), p(.ptr) }, .result = .unit },
+    .{ .symbol = "linea_context_switch", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.ptr) }, .result = .unit },
+    .{ .symbol = "linea_thread_guard_bounds", .declared_by = .compiler, .parameters = &.{ .{ .scalar = .u64, .passing = .inout }, .{ .scalar = .u64, .passing = .inout } }, .result = .unit },
+    .{ .symbol = "linea_thread_guard_prepare", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_thread_guard_commit", .declared_by = .compiler, .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_fiber_create", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64), cb(&.{.ptr}, .unit, 0), cb(&.{.ptr}, .unit, 0), p(.ptr), .{ .scalar = .i32, .passing = .inout } }, .result = .ptr },
+    .{ .symbol = "linea_fiber_start", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_fiber_destroy", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_fiber_active", .declared_by = .compiler, .parameters = &.{}, .result = .i32 },
+    .{ .symbol = "linea_fiber_park", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.u64) }, .result = .i32 },
+    .{ .symbol = "linea_fiber_unpark", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_fiber_yield", .declared_by = .compiler, .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_loop_claim_kind", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.u8) }, .result = .u64 },
+    .{ .symbol = "linea_loop_kind", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .u8 },
     .{ .symbol = "linea_park_init", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .i32 },
     .{ .symbol = "linea_park_destroy", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
     .{ .symbol = "linea_park_lock", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
@@ -489,7 +524,9 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_signal_release", .parameters = &.{ p(.u8), p(.u64) }, .result = .unit, .declared_by = io_signal },
     .{ .symbol = "linea_signal_deliver_simulated", .parameters = &.{ p(.u64), p(.u8) }, .result = .unit, .declared_by = io_simulation },
     // A task's thread and the rendezvous channel of its session.
-    .{ .symbol = "linea_task_prepare", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.prepare` and `task.prepare_in`" } } },
+    .{ .symbol = "linea_available_parallelism", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "env", .reached_through = "`env.available_parallelism`" } } },
+    .{ .symbol = "linea_loop_open", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = .{ .library = .{ .module = "io", .reached_through = "`io.Loop.open`" } } },
+    .{ .symbol = "linea_task_prepare_on", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.prepare` and `task.prepare_in`" } } },
     .{ .symbol = "linea_owner_open", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } } },
     .{ .symbol = "linea_owner_call", .parameters = &.{ p(.u64), typed_bytes, p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`call` on a `task.Client`" } } },
     .{ .symbol = "linea_owner_next", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .u8, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`task.own`" } } },

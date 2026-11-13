@@ -457,57 +457,65 @@ pub const Observation = enum {
             .task_read =>
             \\let view = owner.as_slice()
             \\let body = sink [view] |sink me: session.Chan[session.Send[UInt64, session.End]]| {
+            \\    require_fiber()
             \\    me.send(view[0]).close()
             \\}
-            \\let seen = task.prepare(body).unwrap().start()
+            \\let seen = task.prepare(body, on: execution).unwrap().start()
             ,
             .task_inout =>
             \\let body = sink [inout owner] |sink me: session.Chan[session.Send[UInt64, session.End]]| {
+            \\    require_fiber()
             \\    &owner.push(7).unwrap()
             \\    me.send(owner.length()).close()
             \\}
-            \\let seen = task.prepare(body).unwrap().start()
+            \\let seen = task.prepare(body, on: execution).unwrap().start()
             ,
             .task_map_read =>
             \\let view = owner.get(2).unwrap()
             \\let body = sink [view] |sink me: session.Chan[session.Send[UInt64, session.End]]| {
+            \\    require_fiber()
             \\    me.send(*view).close()
             \\}
-            \\let seen = task.prepare(body).unwrap().start()
+            \\let seen = task.prepare(body, on: execution).unwrap().start()
             ,
             .task_scalar_read =>
             \\let body = sink [read owner] |sink me: session.Chan[session.Send[UInt64, session.End]]| {
+            \\    require_fiber()
             \\    me.send(owner).close()
             \\}
-            \\let seen = task.prepare(body).unwrap().start()
+            \\let seen = task.prepare(body, on: execution).unwrap().start()
             ,
             .task_scalar_inout =>
             \\let body = sink [inout owner] |sink me: session.Chan[session.Send[UInt64, session.End]]| {
+            \\    require_fiber()
             \\    owner += 1
             \\    me.send(owner).close()
             \\}
-            \\let seen = task.prepare(body).unwrap().start()
+            \\let seen = task.prepare(body, on: execution).unwrap().start()
             ,
             .task_started_read =>
             \\let view = owner.as_slice()
             \\let body = sink [view] |sink me: session.Chan[session.Send[UInt64, session.End]]| {
+            \\    require_fiber()
             \\    me.send(view[0]).close()
             \\}
-            \\let seen = task.start(body).unwrap()
+            \\let seen = task.start(body, on: execution).unwrap()
             ,
             .task_started_in_inout =>
             \\let body = sink [inout owner] |sink me: session.Chan[session.Send[UInt64, session.End]]| {
+            \\    require_fiber()
             \\    &owner.push(7).unwrap()
             \\    me.send(owner.length()).close()
             \\}
-            \\let seen = task.start_in(mem.system(), body, stack: task.default_stack_bytes).unwrap()
+            \\let seen = task.start_in(mem.system(), body, stack: task.default_stack_bytes, on: execution).unwrap()
             ,
             .task_prepared_in_scalar_inout =>
             \\let body = sink [inout owner] |sink me: session.Chan[session.Send[UInt64, session.End]]| {
+            \\    require_fiber()
             \\    owner += 1
             \\    me.send(owner).close()
             \\}
-            \\let seen = task.prepare_in(mem.system(), body, stack: task.default_stack_bytes).unwrap().start()
+            \\let seen = task.prepare_in(mem.system(), body, stack: task.default_stack_bytes, on: execution).unwrap().start()
             ,
             .stored_scalar_inout =>
             \\let seen = stored(inout [inout owner] || {
@@ -1000,8 +1008,15 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
         // names the system allocator.
         if (observation == .task_prepared_in_scalar_inout) try w.raw("import std.mem\n\n");
         try w.raw(
+            \\import std.io
             \\import std.session
             \\import std.task
+            \\
+            \\fn require_fiber() {
+            \\    if io.current() == io.system() {
+            \\        panic("the soundness task ran on a thread")
+            \\    }
+            \\}
             \\
             \\fn joined[H](sink handle: session.Chan[session.Recv[UInt64, session.End], H]) -> UInt64 {
             \\    let (value, done) = handle.recv()
@@ -1041,6 +1056,7 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
     );
     try w.raw("fn main() -> UInt8 {\n");
     try w.line(1, "var total: UInt64 = 0");
+    if (observation.task()) try w.line(1, "let execution = io.Loop.open(carriers: 1).unwrap()");
     switch (storage) {
         .vec => {
             try w.line(1, "var owner: Vec[UInt64, mem.SystemAllocator] = Vec.new()");

@@ -497,7 +497,7 @@ test "CI lanes run on the decision changes makes for each of them" {
     // `merge-ready` waits for every lane it judges, so each result it reads
     // is the job's own.
     try testing.expectEqualStrings(
-        "needs: [changes, check, sanitize, optimised-unit, optimised-corpus, optimised-soundness, fuzz, fuzz-mir]",
+        "needs: [changes, check, sanitize, optimised-unit, optimised-corpus, optimised-soundness, fuzz, fuzz-mir, fibers]",
         try onlyLineWith(merge_ready, "    needs: ["),
     );
     // A lane inherits through the check run of the job that runs it, which
@@ -530,6 +530,7 @@ test "CI lanes run on the decision changes makes for each of them" {
         \\          OPTIMISED_SOUNDNESS: ${{ needs.optimised-soundness.result }}
         \\          FUZZ: ${{ needs.fuzz.result }}
         \\          FUZZ_MIR: ${{ needs.fuzz-mir.result }}
+        \\          FIBERS: ${{ needs.fibers.result }}
         \\        run: |
         \\          echo "changes: $CHANGES (check=$WANT_CHECK, sanitize=$WANT_SANITIZE, optimised-unit=$WANT_OPTIMISED_UNIT, optimised-corpus=$WANT_OPTIMISED_CORPUS, optimised-soundness=$WANT_OPTIMISED_SOUNDNESS, fuzz-mir=$WANT_FUZZ_MIR)"
         \\          echo "check: $CHECK, sanitize: $SANITIZE, optimised-unit: $OPTIMISED_UNIT, optimised-corpus: $OPTIMISED_CORPUS, optimised-soundness: $OPTIMISED_SOUNDNESS, fuzz: $FUZZ, fuzz-mir: $FUZZ_MIR"
@@ -537,7 +538,7 @@ test "CI lanes run on the decision changes makes for each of them" {
         \\            echo "which lanes the change needs is unknown, so no lane can be judged"
         \\            exit 1
         \\          fi
-        \\          case " $CHECK $SANITIZE $OPTIMISED_UNIT $OPTIMISED_CORPUS $OPTIMISED_SOUNDNESS $FUZZ $FUZZ_MIR " in
+        \\          case " $CHECK $SANITIZE $OPTIMISED_UNIT $OPTIMISED_CORPUS $OPTIMISED_SOUNDNESS $FUZZ $FUZZ_MIR $FIBERS " in
         \\            *" failure "*|*" cancelled "*)
         \\              echo "a lane failed or was cancelled"
         \\              exit 1 ;;
@@ -567,6 +568,7 @@ test "CI lanes run on the decision changes makes for each of them" {
         \\                status=1 ;;
         \\            esac
         \\          }
+        \\          judge fibers run "$FIBERS"
         \\          judge check "$WANT_CHECK" "$CHECK"
         \\          judge sanitize "$WANT_SANITIZE" "$SANITIZE"
         \\          judge optimised-unit "$WANT_OPTIMISED_UNIT" "$OPTIMISED_UNIT"
@@ -2126,21 +2128,21 @@ fn callbackTypedefs(gpa: std.mem.Allocator, written: []const u8, out: *Typedefs)
         var pieces = std.mem.splitScalar(u8, line[open + 1 .. close], ',');
         while (pieces.next()) |piece| {
             const trimmed = std.mem.trim(u8, piece, " \t");
-            // A callback's parameters are words the runtime passes by value; a
-            // pointer is a shape the table cannot name, so the typedef is
-            // left unread and every declaration naming it is reported.
-            if (std.mem.indexOfScalar(u8, trimmed, '*') != null) {
+            // Callback shapes encode scalar values, including opaque runtime
+            // pointers. Inout scalars cannot be represented in this shape.
+            const cut = std.mem.lastIndexOfAny(u8, trimmed, " *") orelse {
+                readable = false;
+                break;
+            };
+            const spelled = if (trimmed[cut] == '*') trimmed[0 .. cut + 1] else trimmed[0..cut];
+            const parameter = scalarOf(spelled, out) orelse {
+                readable = false;
+                break;
+            };
+            if (parameter.passing != .read) {
                 readable = false;
                 break;
             }
-            const cut = std.mem.lastIndexOfScalar(u8, trimmed, ' ') orelse {
-                readable = false;
-                break;
-            };
-            const parameter = scalarOf(trimmed[0..cut], out) orelse {
-                readable = false;
-                break;
-            };
             try parameters.append(gpa, parameter.scalar);
         }
         if (!readable) continue;
@@ -2157,6 +2159,7 @@ test "a callback typedef is read into the shape a table parameter names" {
     var typedefs: Typedefs = .empty;
     try callbackTypedefs(gpa,
         \\typedef void (*linea_task_release)(unsigned long at, unsigned long len);
+        \\typedef void (*linea_opaque)(void *argument);
         \\typedef size_t (*linea_unreadable)(unsigned long at);
         \\typedef void (*linea_by_pointer)(unsigned long at, unsigned long *len);
     , &typedefs);
@@ -2165,6 +2168,8 @@ test "a callback typedef is read into the shape a table parameter names" {
     const three: runtime_symbols.Callback = .{ .parameters = &.{ .u64, .u64, .u64 }, .result = .unit };
     try testing.expect(runtime_symbols.sameParameter(release, .{ .scalar = .callback, .callback = &two }));
     try testing.expect(!runtime_symbols.sameParameter(release, .{ .scalar = .callback, .callback = &three }));
+    const opaque_shape: runtime_symbols.Callback = .{ .parameters = &.{.ptr}, .result = .unit };
+    try testing.expect(runtime_symbols.sameParameter(scalarOf("linea_opaque", &typedefs).?, .{ .scalar = .callback, .callback = &opaque_shape }));
     try testing.expect(scalarOf("linea_unreadable", &typedefs) == null);
     try testing.expect(scalarOf("linea_by_pointer", &typedefs) == null);
 }
@@ -2195,6 +2200,7 @@ fn scalarOf(written: []const u8, typedefs: *const Typedefs) ?runtime_symbols.Par
         .{ "*i64", .{ .scalar = .i64, .passing = .inout } },
         .{ "unsigned long *", .{ .scalar = .u64, .passing = .inout } },
         .{ "long *", .{ .scalar = .i64, .passing = .inout } },
+        .{ "int *", .{ .scalar = .i32, .passing = .inout } },
     };
     for (spellings) |s| if (std.mem.eql(u8, s[0], t)) return s[1];
     // A pointer to a record of the runtime's own, such as `struct linea_op *`.

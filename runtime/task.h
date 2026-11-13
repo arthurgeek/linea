@@ -26,7 +26,7 @@ typedef void (*linea_task_release)(unsigned long at, unsigned long len);
  * before it runs any code. The result is the task, or a negated errno when
  * its record, its stack or its thread cannot be made; a failure leaves
  * nothing behind. */
-long linea_task_prepare(unsigned long stack_bytes);
+long linea_task_prepare_on(unsigned long stack_bytes, unsigned long identity);
 
 /* Release a parked task's latch: its thread calls `entry` with `at` and
  * `len`, and returns, and the thread that joins it calls `release` with
@@ -36,7 +36,7 @@ unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea
                                unsigned long len, unsigned long release_at);
 
 /* Release a parked task's latch with nothing to run, join its thread and
- * free what `linea_task_prepare` made. */
+ * free what `linea_task_prepare_on` made. */
 void linea_task_cancel(unsigned long task);
 
 /* Hand the `len` bytes at `at` to the peer of `endpoint`, and return once

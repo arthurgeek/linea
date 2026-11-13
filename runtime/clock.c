@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "clock.h"
+#include "fiber.h"
 #include "sim.h"
 
 #include <errno.h>
@@ -24,6 +25,7 @@ long linea_clock_read(uint8_t clock, long *seconds, unsigned long *nanoseconds) 
 
 long linea_clock_sleep(unsigned long nanoseconds) {
     if (linea_sim_running()) return linea_sim_sleep(nanoseconds);
+    if (linea_fiber_active()) return linea_fiber_sleep(nanoseconds);
     struct timespec deadline;
     if (clock_gettime(CLOCK_MONOTONIC, &deadline) != 0) return -(long)errno;
     /* A duration of at most 2^64 - 1 nanoseconds is under 585 years, so the

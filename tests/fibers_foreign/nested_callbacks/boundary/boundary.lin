@@ -1,0 +1,32 @@
+struct Context { visits: UInt64 }
+
+extern fn boundary_depth() -> UInt64
+
+extern fn boundary_run(visit: fn(inout context: Context) -> UInt8, inout context: Context) -> UInt8
+
+fn visit(inout context: Context) -> UInt8 {
+    context.visits += 1
+    if boundary_depth() == 3 {
+        37
+    } else {
+        1
+    }
+}
+
+pub fn check() -> UInt8 {
+    if boundary_depth() != 1 {
+        return 2
+    }
+    var context = Context { visits = 0 }
+    let result = boundary_run(visit, &context)
+    if result != 37 {
+        return 3
+    }
+    if context.visits != 2 {
+        return 4
+    }
+    if boundary_depth() != 1 {
+        return 5
+    }
+    0
+}

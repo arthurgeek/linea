@@ -15,8 +15,9 @@
  * simulation (`linea_io_switch` made it the thread's loop), its clock reads
  * and sleeps and its socket operations are answered here, and no system call
  * is made for them. Virtual time moves only when the program advances it or
- * when the simulation's one task waits, which jumps it to the next event: a
- * delivery, a handshake, or the wait's deadline.
+ * when all its tasks are parked, which jumps it to the next event: a
+ * delivery, a handshake, or a wait's deadline. Tasks share one carrier on
+ * the calling thread, and runnable fibers are selected from the seed.
  *
  * A simulated descriptor is an entry of a table the runtime keeps for every
  * simulation, numbered from `LINEA_SIM_FIRST_DESCRIPTOR`. Its number is
@@ -30,8 +31,8 @@
  * since it would wait on the kernel against a virtual clock.
  *
  * Every entry and every simulation is guarded by one lock, held across each
- * whole call, so a descriptor released on another thread never meets an
- * operation in progress. */
+ * nonblocking attempt, with the lock released before a fiber switches, so
+ * a descriptor released on another thread never meets an operation in progress. */
 
 /* Open a simulation and answer its identity, or 0 when it cannot be
  * allocated or no loop slot is free. Latencies are nanoseconds. Each chunk of
@@ -56,7 +57,7 @@ void linea_sim_close(unsigned long identity);
 
 /* Whether the calling thread runs a simulation. */
 static inline int linea_sim_running(void) {
-    return linea_loop_running() != 0;
+    return linea_io_is_simulated(linea_io_current()) != 0;
 }
 
 /* Whether the simulation answers an operation on `fd`. It traps for a
@@ -94,5 +95,9 @@ unsigned long linea_sim_next_event(void);
 void linea_sim_jump(unsigned long instant);
 /* Wait `nanoseconds` on the running simulation's clock. */
 long linea_sim_sleep(unsigned long nanoseconds);
+
+void *linea_sim_carrier(unsigned long identity);
+unsigned long linea_sim_choice(unsigned long bound);
+long linea_sim_attempt(struct linea_op *operation);
 
 #endif

@@ -47,6 +47,7 @@ struct linea_signal_watch {
     unsigned long recorded;
     uint8_t signal;
     uint8_t listed;
+    uint8_t simulated;
 };
 
 /* The descriptor the router writes a byte to on each delivery; -1 before the

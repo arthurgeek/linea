@@ -1,7 +1,7 @@
 # Tasks and sessions
 
 Until now every program in this guide did one thing at a time. A **task**
-lets a program do several: it runs a closure on a thread of its own while the
+lets a program do several: it runs a closure alongside its creator while the
 code that started it carries on. Tasks talk to each other through
 **sessions**, typed channels whose type says what is sent next and by whom.
 
@@ -34,9 +34,9 @@ Where Linea differs:
    [colouring](https://journal.stuffwithstuff.com/2015/02/01/what-color-is-your-function/).
    No function is `async`, nothing is awaited, and any function may block or
    start a task (see [No colouring](#no-colouring)).
-2. Tasks are operating-system threads, heavier than JavaScript promises or
-   Rust futures, and a task that blocks on I/O holds its thread while it
-   waits (see [Threads, not futures](#threads-not-futures)).
+2. A task runs on its own operating-system thread by default, or as a fiber
+   on an explicitly opened loop. Socket and session waits on a loop let other
+   fibers run (see [Threads and fibers](#threads-and-fibers)).
 3. Programs have no data races and need no locks. A value two tasks read
    must be
    [`Shareable`](06-borrowing.md#shareable--a-value-many-readers-may-read-at-once),
@@ -54,7 +54,7 @@ The rest of the chapter takes these one at a time.
 
 ## Starting a task
 
-`task.start(body)` runs `body` on a thread of its own and answers the task's
+From `main`, `task.start(body)` runs `body` on a thread of its own and answers the task's
 **handle**. Starting needs a thread and a stack, which the system may refuse,
 so it answers a `Result`, and `?` hands a `task.PrepareError` on:
 
@@ -222,11 +222,11 @@ error[T-Bound]: `F` requires `Discardable`, because a value of it may be dropped
 ```
 
 That form has two steps. `task.prepare(body)` takes the body and does
-everything that can fail: it allocates what the task needs and creates its
-thread, parked, so it runs nothing yet. It answers a linear `Slot` holding
+everything that can fail: it allocates what the task needs and reserves its
+execution, so it runs nothing yet. It answers a linear `Slot` holding
 the body. On failure it answers `task.Unstarted`, which hands the body back
 beside the reason, so nothing the body owns is lost. `slot.start()` lets the
-thread run and cannot fail, and `slot.cancel()` joins the parked thread and
+task run and cannot fail, and `slot.cancel()` releases its reserved execution and
 gives the body back:
 
 `ticket.lin`:
@@ -627,15 +627,80 @@ fn main() -> Result[UInt8, io.IoError] {
 answer: 42
 ```
 
-## Threads, not futures
+## Threads and fibers
 
-Each task is an operating-system thread, as a Rust `std::thread::spawn`
-thread is. A task costs a thread and its stack, more than a promise or a
-future, so a program starts tasks for work worth a thread, not for every
-small step. A task that reads a socket or a file blocks its thread until the
-read completes, while the other tasks run on. Stackful lightweight tasks
-could replace threads later behind the same API, with only the `stack:`
-argument touching it; they do not exist today.
+A task started on `io.system()` runs on its own operating-system thread, as
+Rust's `std::thread::spawn` does. A task started on an `io.Loop` runs as a
+**fiber**: it keeps its own stack, but shares a carrier thread with other
+fibers. A socket, timer or session wait lets the carrier run another ready
+fiber. Each fiber stays on the carrier that first runs it. A computation that
+never waits keeps that carrier; regular files and blocking foreign calls also
+hold it while they run.
+
+Open a loop once and state its carrier count. This loop has one carrier, yet
+the task uses the same session operations as a task on its own thread:
+
+`fiber_answer.lin`:
+
+```linea
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Send
+
+fn main() -> Result[UInt8, io.IoError] {
+    let home = io.Loop.open(carriers: 1)?
+    let body = sink [] |sink me: Chan[Send[UInt64, End]]| {
+        me.send(42).close()
+    }
+    let (answer, done) = task.start(body, on: home).unwrap().recv()
+    done.close()
+    io.println("answer: {answer}")?
+    .Ok(0)
+}
+```
+
+```
+answer: 42
+```
+
+The loop keeps its carriers until the process exits, even after its last task
+returns. Zero carriers is an error. To choose a count from the process's
+available processors, use an explicit resource count:
+
+`available_carriers.lin`:
+
+```linea
+import std.env
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+fn main() -> Result[UInt8, io.IoError] {
+    let home = io.Loop.open(carriers: env.available_parallelism())?
+    let body = sink [] |sink me: Chan[End]| me.close()
+    task.start(body, on: home).unwrap().close()
+    .Ok(0)
+}
+```
+
+`available_parallelism()` returns at least one and reads the count again on
+every call. On Linux it counts the process's affinity mask, lowered by a
+cgroup v2 CPU quota rounded up; on macOS it reads the active processor count.
+
+`task.start`, `start_in`, `prepare`, `prepare_in` and `own` all accept `on:`.
+When it is omitted, the constant `io.inherited` resolves to the starting task's
+current Io when execution is prepared. A fiber's children therefore stay on
+its loop. `io.current()` captures the concrete Io now, so it can be kept and
+passed later; `on: io.system()` explicitly starts a thread. The constant
+default selects execution at use time without changing how parameter defaults
+are evaluated.
 
 ## What may cross to a task
 
@@ -1456,7 +1521,7 @@ an **owning task** that holds it, and a `task.Client` reaches it: the client's
 call at a time, and answers what the closure answers. No other task touches
 the state, so there is nothing to lock.
 
-An owning task runs every call on its own thread, one at a time, which is
+An owning task runs every call on its selected Io, one at a time, which is
 what a C object that is not safe for two threads needs. Some C libraries ask
 more: that one thread create, use and destroy each object. A value made by
 `main` and moved into `task.own` was created on `main`'s thread, so for such

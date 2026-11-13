@@ -676,7 +676,7 @@ fn dispatch_sequential[L: net.Acceptor + io.Close + io.Pollable, P: Allocator, R
     dispatch_finish(state)
 }
 
-fn dispatch_serve[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, policy: task.Policy, announce: Option[net.Address], shutdown: Shutdown) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+fn dispatch_serve[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, policy: task.Policy, announce: Option[net.Address], shutdown: Shutdown, on: io.Io) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
     let metadata_bytes = smallest_arena(limits)
     if metadata_bytes == UInt64.max || limits.request_arena_bytes < metadata_bytes {
         let _closed = listener.close()
@@ -690,7 +690,7 @@ fn dispatch_serve[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Share
         let _closed = listener.close()
         return .Err(.NoWorkers)
     }
-    let owner = task.own(false) else |failure| {
+    let owner = task.own(false, on) else |failure| {
         let Unowned { state: _, reason } = failure
         let _closed = listener.close()
         return .Err(.Task(reason))
@@ -712,7 +712,7 @@ fn dispatch_serve[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Share
     let body = sink [sink parent = copy(parent), sink make_handler = copy(make_handler), limits, sink stopping = copy(stopping)] |sink me: session.Chan[session.Send[Result[(), ServeError[R.Error]], DispatchServing[R.Error]]]| {
         dispatch_worker[P, R, M](me, parent, make_handler, limits, stopping)
     }
-    let first = task.prepare(copy(body)) else |unstarted| {
+    let first = task.prepare(copy(body), on) else |unstarted| {
         let Unstarted { body: _, reason } = unstarted
         let _stopped = owner.close()
         let _closed = listener.close()
@@ -735,7 +735,7 @@ fn dispatch_serve[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Share
     }
     if state.failed.is_none() {
         for _ in 1..count {
-            match task.prepare(copy(body)) {
+            match task.prepare(copy(body), on) {
                 Ok(slot) => {
                     let (started, worker) = slot.start().recv()
                     &state.free.push(worker).unwrap()

@@ -1,4 +1,5 @@
 import std.mem
+import std.io
 import std.mem.address
 import std.release
 import std.session
@@ -20,14 +21,14 @@ use address.Address
 pub let default_stack_bytes: UInt64 = 2097152
 
 // PrepareError says which step of preparing a task failed: acquiring the
-// bytes the body is kept in, or creating the task's thread.
+// bytes the body is kept in, or preparing its execution and stack.
 @(copyable, derive(Equatable, Equivalent, Display, Debug, Release))
 pub enum PrepareError {
     Allocation,
     Thread,
 }
 
-// A Slot is a prepared task: its thread exists, parked before running
+// A Slot is a prepared task: its execution is reserved before running
 // anything, the bytes its body will be kept in are acquired, and it holds the
 // body. Holding the body, it carries everything the body captured, so a place
 // the body reads cannot be written, nor a place it holds lent `inout`
@@ -82,11 +83,11 @@ test fn a_failed_preparation_settles_to_its_reason() {
     testing.assert_eq(reason, PrepareError.Thread, "settling lost the reason")?
 }
 
-// Create a thread parked with a stack of `stack_bytes`, and answer the task,
-// or a negative number when the thread could not be created.
-extern fn linea_task_prepare(stack_bytes: UInt64) -> Int64
+// Reserve execution on `identity` with a stack of `stack_bytes`, and answer
+// the task or a negative number when preparation fails.
+extern fn linea_task_prepare_on(stack_bytes: UInt64, identity: UInt64) -> Int64
 
-// Release a parked thread with nothing to run, and join it.
+// Release a prepared task with nothing to run.
 extern fn linea_task_cancel(task: UInt64)
 
 // Let the parked thread of `task` run: it calls `entry` with the task's end
@@ -107,8 +108,8 @@ fn run_body[P: Protocol, F: sink fn(sink me: Chan[P])](endpoint: UInt64, at: Add
 // Prepare a task whose body is `body`, with a stack of `default_stack_bytes`
 // and its bytes from the system allocator. `prepare_in` says what preparing
 // does.
-pub fn prepare[P: Protocol, F: sink fn(sink me: Chan[P])](sink body: F) -> Result[Slot[P, F, mem.SystemAllocator], Unstarted[F]] where carries(.Ok: body), carries(.Err: body) {
-    prepare_in(mem.system(), body, stack: default_stack_bytes)
+pub fn prepare[P: Protocol, F: sink fn(sink me: Chan[P])](sink body: F, on: io.Io = io.inherited) -> Result[Slot[P, F, mem.SystemAllocator], Unstarted[F]] where carries(.Ok: body), carries(.Err: body) {
+    prepare_in(mem.system(), body, default_stack_bytes, on)
 }
 
 test fn a_prepared_body_runs_once_its_task_starts() {
@@ -126,11 +127,11 @@ test fn a_prepared_body_runs_once_its_task_starts() {
 // that can fail, and answers a slot holding the body. A failure hands the
 // body back in `Unstarted`, beside the reason. The slot carries the
 // allocator, since the task keeps its bytes until it is joined.
-pub fn prepare_in[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator](allocator: A, sink body: F, stack: UInt64) -> Result[Slot[P, F, A], Unstarted[F]] where carries(.Ok: body, allocator), carries(.Err: body) {
+pub fn prepare_in[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator](allocator: A, sink body: F, stack: UInt64, on: io.Io = io.inherited) -> Result[Slot[P, F, A], Unstarted[F]] where carries(.Ok: body, allocator), carries(.Err: body) {
     let storage = allocator.acquire(mem.kept_bytes(body, allocator)) else |_| {
         return .Err(.{ body, reason = .Allocation })
     }
-    let task = linea_task_prepare(stack)
+    let task = linea_task_prepare_on(stack, on.runtime_identity())
     if task < 0 {
         storage.release()
         return .Err(.{ body, reason = .Thread })
@@ -186,8 +187,8 @@ test fn a_thread_that_cannot_be_made_hands_the_body_back() {
 // Prepare and start a task in one call, with a stack of `default_stack_bytes`
 // and its bytes from the system allocator, and answer its handle.
 // `start_in` says what starting does.
-pub fn start[P: Protocol, F: Discardable + sink fn(sink me: Chan[P])](sink body: F) -> Result[Chan[P.Dual, (F, mem.SystemAllocator)], PrepareError] where carries(.Ok: body) {
-    start_in(mem.system(), body, stack: default_stack_bytes)
+pub fn start[P: Protocol, F: Discardable + sink fn(sink me: Chan[P])](sink body: F, on: io.Io = io.inherited) -> Result[Chan[P.Dual, (F, mem.SystemAllocator)], PrepareError] where carries(.Ok: body) {
+    start_in(mem.system(), body, default_stack_bytes, on)
 }
 
 test fn a_task_started_in_one_call_runs_its_body() {
@@ -205,8 +206,8 @@ test fn a_task_started_in_one_call_runs_its_body() {
 // answers the reason, which is why the body must be Discardable: it owns
 // nothing a drop would lose. A body that owns something linear is prepared
 // with `prepare_in`, whose failure hands it back.
-pub fn start_in[P: Protocol, F: Discardable + sink fn(sink me: Chan[P]), A: Allocator](allocator: A, sink body: F, stack: UInt64) -> Result[Chan[P.Dual, (F, A)], PrepareError] where carries(.Ok: body, allocator) {
-    let slot = prepare_in(allocator, body, stack).settled()?
+pub fn start_in[P: Protocol, F: Discardable + sink fn(sink me: Chan[P]), A: Allocator](allocator: A, sink body: F, stack: UInt64, on: io.Io = io.inherited) -> Result[Chan[P.Dual, (F, A)], PrepareError] where carries(.Ok: body, allocator) {
+    let slot = prepare_in(allocator, body, stack, on).settled()?
     .Ok(slot.start())
 }
 

@@ -1,0 +1,37 @@
+import std.io
+import std.mem
+import std.task
+import std.session
+
+use session.Chan
+use session.Send
+use session.End
+
+fn identity(sink me: Chan[Send[io.Io, End]]) {
+    me.send(io.current()).close()
+}
+
+fn main() -> UInt8 {
+    let home = io.Loop.open(carriers: 1).unwrap()
+    let captured = io.current()
+    let body = sink [home, captured] |sink me: Chan[Send[Bool, End]]| {
+        let (inherited, child_done) = task.start(sink [] |sink me: Chan[Send[io.Io, End]]| identity(me)).unwrap().recv()
+        child_done.close()
+        let (system, system_done) = task.prepare_in(mem.system(), sink [] |sink me: Chan[Send[io.Io, End]]| identity(me), stack: task.default_stack_bytes, on: io.system()).unwrap().start().recv()
+        system_done.close()
+        let (captured_home, captured_done) = task.prepare(sink [] |sink me: Chan[Send[io.Io, End]]| identity(me), on: captured).unwrap().start().recv()
+        captured_done.close()
+        let (selected_home, selected_done) = task.start(sink [] |sink me: Chan[Send[io.Io, End]]| identity(me), on: io.inherited).unwrap().recv()
+        selected_done.close()
+        let owner = task.own(UInt64(7), on: home).unwrap()
+        let kept = owner.close()
+        me.send(io.current() == home && inherited == home && system == io.system() && captured_home == io.system() && selected_home == home && kept == 7).close()
+    }
+    let (correct, done) = task.start_in(mem.system(), body, stack: task.default_stack_bytes, on: home).unwrap().recv()
+    done.close()
+    if correct {
+        0
+    } else {
+        1
+    }
+}

@@ -126,7 +126,7 @@ static void release(unsigned long at, unsigned long len) {
 }
 
 static unsigned long started(struct body *b, unsigned long stack) {
-    const long task = linea_task_prepare(stack);
+    const long task = linea_task_prepare_on(stack, 0);
     assert(task > 0);
     return linea_task_start((unsigned long)task, entry, release, (unsigned long)b, sizeof *b, (unsigned long)b);
 }
@@ -145,7 +145,7 @@ static void close_joins_after_the_body_returns(void) {
 /* A prepared task runs nothing until it is started. */
 static void a_body_never_runs_before_start(void) {
     struct body b = {.kind = counts};
-    const long task = linea_task_prepare(1UL << 20);
+    const long task = linea_task_prepare_on(1UL << 20, 0);
     assert(task > 0);
     sleep_ms(50);
     assert(b.ran == 0);
@@ -158,7 +158,7 @@ static void a_body_never_runs_before_start(void) {
  * anything, and the cancel returns once it is joined. */
 static void cancel_settles_the_parked_thread(void) {
     for (int i = 0; i < 200; i += 1) {
-        const long task = linea_task_prepare(1UL << 16);
+        const long task = linea_task_prepare_on(1UL << 16, 0);
         assert(task > 0);
         linea_task_cancel((unsigned long)task);
     }
@@ -243,7 +243,7 @@ static void tasks_allocate_at_once(void) {
 static void *canceller_thread(void *arg) {
     (void)arg;
     for (int i = 0; i < 100; i += 1) {
-        long task = linea_task_prepare(1UL << 18);
+        long task = linea_task_prepare_on(1UL << 18, 0);
         assert(task > 0);
         linea_task_cancel((unsigned long)task);
     }
@@ -323,7 +323,7 @@ static void the_fault_handler_runs_on_the_signal_stack(void) {
 /* A stack size nothing can map is refused, and the refusal leaves nothing
  * behind to settle. */
 static void an_impossible_stack_is_refused(void) {
-    assert(linea_task_prepare(1UL << 62) < 0);
+    assert(linea_task_prepare_on(1UL << 62, 0) < 0);
 }
 
 /* Each caller adds one to the owner's total `calls_each` times. The owner

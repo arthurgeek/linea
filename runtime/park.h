@@ -17,9 +17,12 @@
  * return without one, so a parker checks its condition again each time it
  * returns. The lock's release by one party and its acquire by the other
  * order everything either did before. */
+struct linea_fiber_waiter;
+
 struct linea_park {
     pthread_mutex_t lock;
     pthread_cond_t changed;
+    struct linea_fiber_waiter *fibers;
 };
 
 /* Initialise a park, answering zero or the errno that kept its lock or its

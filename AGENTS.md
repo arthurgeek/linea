@@ -250,7 +250,10 @@ A filter matches a test's qualified name (`loader.test.slow: …`), so
 `-Dtest-filter=test.slow:` selects them alone, where `slow:` would also select
 the `fuzz-slow:` tests.
 
-CI runs on GitHub's hosted runners, from `.github/workflows/ci.yml`. A pull
+CI runs on GitHub's hosted runners, from `.github/workflows/ci.yml`. The
+`fibers` lane executes context, task, socket and clock tests, the 10,000-connection
+check, and focused execution and callback programs on Linux x86-64 and aarch64
+outside draft pull requests; `merge-ready` requires both runs. A pull
 request merges into `main` once `merge-ready`, the one required status, is
 green on its final commit. A draft pull request runs nothing. A ready pull
 request runs `check`, `sanitize`, the three optimised lanes, `sweep` and,

@@ -1,1 +1,1 @@
-{ "kind": "library", "name": "std", "extern": ["fmt", "fs", "io", "io.core", "mem", "net", "process", "scalar", "session", "task", "time"] }
+{ "kind": "library", "name": "std", "extern": ["env", "fmt", "fs", "io", "io.core", "mem", "net", "process", "scalar", "session", "task", "time"] }

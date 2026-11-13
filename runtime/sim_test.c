@@ -396,7 +396,7 @@ static void accept_on_a_real_listener_inside(void) {
 }
 
 static void start_a_task_inside(void) {
-    const long task = linea_task_prepare(1UL << 16);
+    const long task = linea_task_prepare_on(1UL << 16, 0);
     assert(task > 0);
     (void)linea_io_switch(plain(ms));
     (void)linea_task_start((unsigned long)task, NULL, NULL, 0, 0, 0);
@@ -411,7 +411,7 @@ static void read_with_nothing_on_the_way(void) {
 
 /* A simulated descriptor names nothing outside its simulation, so using it
  * there traps, while releasing it forgets it. A real socket used inside
- * traps; so does a second task, and a wait for what can never arrive. */
+ * traps; so does a real-thread task, and a wait for what can never arrive. */
 static void each_side_traps_on_the_others_descriptors(void) {
     const unsigned long sim = plain(ms);
     (void)linea_io_switch(sim);
@@ -425,8 +425,8 @@ static void each_side_traps_on_the_others_descriptors(void) {
     assert(linea_net_close((int)p.server) == 0);
     assert(linea_net_close((int)p.listener) == 0);
     traps_with(accept_on_a_real_listener_inside, "linea: a real socket was used inside a simulation\n");
-    traps_with(start_a_task_inside, "linea: a simulation runs one task until fibers\n");
-    traps_with(read_with_nothing_on_the_way, "linea: a simulation's one task waits forever\n");
+    traps_with(start_a_task_inside, "linea: a session crosses a simulation's boundary\n");
+    traps_with(read_with_nothing_on_the_way, "linea: all simulation tasks wait forever\n");
 }
 
 /* The fingerprint digests the bytes delivered, not only how many. */
@@ -510,7 +510,7 @@ static void release_on_another_thread_during_a_run(void) {
 static unsigned long other_world;
 
 static void receive_from_a_task_inside(void) {
-    const long task = linea_task_prepare(1UL << 16);
+    const long task = linea_task_prepare_on(1UL << 16, 0);
     assert(task > 0);
     (void)linea_io_switch(plain(ms));
     unsigned long word = 0;
@@ -523,9 +523,9 @@ static void advance_another_simulation_inside(void) {
     linea_sim_advance(other_world, ms);
 }
 
-/* A run waits on no other task, and its world moves only its own clock. */
+/* A run waits on no real task, and its world moves only its own clock. */
 static void a_session_wait_and_a_foreign_world_trap_inside(void) {
-    traps_with(receive_from_a_task_inside, "linea: a simulation runs one task until fibers\n");
+    traps_with(receive_from_a_task_inside, "linea: a session crosses a simulation's boundary\n");
     traps_with(advance_another_simulation_inside, "linea: a simulation's world was used outside its run\n");
     traps_with(release_on_another_thread_during_a_run, "linea: a simulated descriptor was used outside its simulation\n");
 }

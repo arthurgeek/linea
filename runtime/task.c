@@ -1,7 +1,7 @@
 /* A task's thread and the rendezvous channel of its session.
  *
  * Each task is one operating-system thread, created parked by
- * `linea_task_prepare` and released by `linea_task_start`. A task and its
+ * `linea_task_prepare_on` and released by `linea_task_start`. A task and its
  * creator share one record, which holds the thread, the bytes its stack and
  * its alternate signal stack occupy, and the session's one slot. The slot is
  * guarded by the record's mutex and goes from empty to full to empty: a
@@ -35,6 +35,7 @@
 #include <unistd.h>
 
 #include "loop.h"
+#include "fiber.h"
 #include "park.h"
 #include "pipe_signal.h"
 #include "task.h"
@@ -87,6 +88,8 @@ enum { beginning, failed, parked, started, cancelled, finished };
 struct task {
     struct linea_park park;
     pthread_t thread;
+    struct linea_fiber *fiber;
+    unsigned long loop;
     int state;
     int begin_error;
 
@@ -127,12 +130,13 @@ static void fail(const char *message) {
     abort();
 }
 
-/* Threads the kernel schedules cannot be ordered by a seed, so a
- * simulation admits only the task running it: starting another task, or
- * waiting on one through a session or an owner's queue, traps while a
- * simulation is the thread's loop. */
-static void alone(void) {
-    if (linea_io_current() != 0) fail("linea: a simulation runs one task until fibers\n");
+/* A simulation cannot acquire a scheduling dependency on the real world
+ * or on another seed. Real loops and thread tasks may communicate freely. */
+static void execution_context(unsigned long home) {
+    const unsigned long current = linea_io_current();
+    const int simulated = linea_io_is_simulated(home) != 0;
+    const int inside = linea_io_is_simulated(current) != 0;
+    if ((simulated || inside) && home != current) fail("linea: a session crosses a simulation's boundary\n");
 }
 
 static struct task *task_of(unsigned long endpoint) {
@@ -143,9 +147,11 @@ static unsigned long round_up(unsigned long n, unsigned long to) {
     return (n + to - 1) / to * to;
 }
 
-/* Frees what `linea_task_prepare` made, once no thread uses it. */
+/* Frees what `linea_task_prepare_on` made, once no thread uses it. */
 static void destroy(struct task *t) {
-    if (munmap(t->stack, t->stack_mapping) != 0 || munmap(t->signal_stack, signal_stack_bytes) != 0) {
+    if (t->fiber != NULL) {
+        linea_fiber_destroy(t->fiber);
+    } else if (munmap(t->stack, t->stack_mapping) != 0 || munmap(t->signal_stack, signal_stack_bytes) != 0) {
         fail("linea: a task's stack could not be unmapped\n");
     }
     linea_park_destroy(&t->park);
@@ -183,10 +189,10 @@ static void join(struct task *t) {
     linea_park_lock(&t->park);
     while (t->state != finished) (void)linea_park(&t->park, 0);
     linea_park_unlock(&t->park);
-    if (pthread_join(t->thread, 0) != 0) fail("linea: a task's thread could not be joined\n");
+    if (t->fiber == NULL && pthread_join(t->thread, 0) != 0) fail("linea: a task's thread could not be joined\n");
 }
 
-long linea_task_prepare(unsigned long stack_bytes) {
+static long prepare_thread(unsigned long stack_bytes) {
     if (stack_bytes > largest_stack) return -ENOMEM;
     const long page = sysconf(_SC_PAGESIZE);
     if (page <= 0) return -EINVAL;
@@ -246,10 +252,43 @@ unmap_stack:
     return -(long)status;
 }
 
+static void run_fiber_body(void *argument) {
+    struct task *t = argument;
+    t->entry((unsigned long)t | 1UL, t->at, t->len);
+}
+
+/* Only the scheduler calls this, after it has left the finished stack. The
+ * last unlock can release a joiner which immediately destroys the task. */
+static void fiber_body_finished(void *argument) {
+    struct task *t = argument;
+    linea_park_lock(&t->park);
+    t->state = finished;
+    linea_unpark(&t->park);
+    if (t->watching[0] != 0 && t->watching_return) linea_registration_signal(t->watching[0]);
+    linea_park_unlock(&t->park);
+}
+
+long linea_task_prepare_on(unsigned long stack_bytes, unsigned long identity) {
+    if (identity == 0) return prepare_thread(stack_bytes);
+    struct task *t = calloc(1, sizeof *t);
+    if (t == NULL) return -(long)ENOMEM;
+    int error = linea_park_init(&t->park);
+    if (error != 0) { free(t); return -(long)error; }
+    t->fiber = linea_fiber_create(identity, stack_bytes, run_fiber_body, fiber_body_finished, t, &error);
+    if (t->fiber == NULL) {
+        linea_park_destroy(&t->park);
+        free(t);
+        return -(long)error;
+    }
+    t->state = parked;
+    t->loop = identity;
+    return (long)t;
+}
+
 unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
                                unsigned long len, unsigned long release_at) {
-    alone();
     struct task *t = task_of(task);
+    execution_context(t->loop);
     linea_park_lock(&t->park);
     t->entry = entry;
     t->release = release;
@@ -259,11 +298,13 @@ unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea
     t->state = started;
     linea_unpark(&t->park);
     linea_park_unlock(&t->park);
+    if (t->fiber != NULL) linea_fiber_start(t->fiber);
     return task;
 }
 
 void linea_task_cancel(unsigned long task) {
     struct task *t = task_of(task);
+    if (t->fiber != NULL) { destroy(t); return; }
     linea_park_lock(&t->park);
     t->state = cancelled;
     linea_unpark(&t->park);
@@ -273,8 +314,8 @@ void linea_task_cancel(unsigned long task) {
 }
 
 void linea_chan_send(unsigned long endpoint, unsigned long at, unsigned long len) {
-    alone();
     struct task *t = task_of(endpoint);
+    execution_context(t->loop);
     linea_storage_extent(at, len);
     linea_park_lock(&t->park);
     while (t->full) (void)linea_park(&t->park, 0);
@@ -306,8 +347,8 @@ static void take_slot(struct task *t, unsigned long at, unsigned long len) {
 }
 
 void linea_chan_recv(unsigned long endpoint, unsigned long at, unsigned long len) {
-    alone();
     struct task *t = task_of(endpoint);
+    execution_context(t->loop);
     linea_storage_extent(at, len);
     linea_park_lock(&t->park);
     while (!t->full || t->from == endpoint) (void)linea_park(&t->park, 0);
@@ -316,13 +357,11 @@ void linea_chan_recv(unsigned long endpoint, unsigned long at, unsigned long len
 }
 
 void linea_chan_choose(unsigned long endpoint, uint8_t branch) {
-    alone();
     uint8_t sent = branch;
     linea_chan_send(endpoint, (unsigned long)&sent, 1);
 }
 
 uint8_t linea_chan_offer(unsigned long endpoint) {
-    alone();
     uint8_t chosen = 0;
     linea_chan_recv(endpoint, (unsigned long)&chosen, 1);
     if (chosen > 1) fail("linea: a session's peer chose a branch that does not exist\n");
@@ -331,6 +370,7 @@ uint8_t linea_chan_offer(unsigned long endpoint) {
 
 void linea_chan_watch(unsigned long endpoint, struct linea_registration *r, int returned) {
     struct task *t = task_of(endpoint);
+    execution_context(t->loop);
     const unsigned long side = endpoint & 1UL;
     linea_park_lock(&t->park);
     if (t->watching[side] != 0) fail("linea: an endpoint was registered twice\n");
@@ -344,6 +384,7 @@ void linea_chan_watch(unsigned long endpoint, struct linea_registration *r, int 
 
 void linea_chan_unwatch(unsigned long endpoint) {
     struct task *t = task_of(endpoint);
+    execution_context(t->loop);
     linea_park_lock(&t->park);
     t->watching[endpoint & 1UL] = 0;
     if ((endpoint & 1UL) == 0) t->watching_return = 0;
@@ -351,7 +392,7 @@ void linea_chan_unwatch(unsigned long endpoint) {
 }
 
 void linea_chan_close(unsigned long endpoint) {
-    alone();
+    execution_context(task_of(endpoint)->loop);
     /* The task's own end has nothing to wait for: the creator's close waits
      * for the thread itself. */
     if ((endpoint & 1UL) != 0) return;
@@ -369,6 +410,7 @@ void linea_chan_close(unsigned long endpoint) {
  * runs, and a later caller cannot take a slot that is still being served. */
 struct owner_queue {
     struct linea_park park;
+    unsigned long loop;
     int closed;
     int full;
     unsigned long at;
@@ -386,13 +428,14 @@ unsigned long linea_owner_open(void) {
         free(q);
         return 0;
     }
+    q->loop = linea_io_current();
     return (unsigned long)q;
 }
 
 void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len, unsigned long answer_at,
                       unsigned long answer_len) {
-    alone();
     struct owner_queue *q = (struct owner_queue *)queue;
+    execution_context(q->loop);
     linea_storage_extent(at, len);
     linea_storage_extent(answer_at, answer_len);
     linea_park_lock(&q->park);
@@ -412,6 +455,7 @@ void linea_owner_call(unsigned long queue, unsigned long at, unsigned long len, 
 
 uint8_t linea_owner_next(unsigned long queue, unsigned long at, unsigned long len) {
     struct owner_queue *q = (struct owner_queue *)queue;
+    execution_context(q->loop);
     linea_storage_extent(at, len);
     linea_park_lock(&q->park);
     while (!q->full && !q->closed) (void)linea_park(&q->park, 0);
@@ -427,6 +471,7 @@ uint8_t linea_owner_next(unsigned long queue, unsigned long at, unsigned long le
 
 void linea_owner_answer(unsigned long queue, unsigned long at, unsigned long len) {
     struct owner_queue *q = (struct owner_queue *)queue;
+    execution_context(q->loop);
     linea_storage_extent(at, len);
     linea_park_lock(&q->park);
     if (!q->full || q->answered) fail("linea: an owning task answered a call it was not serving\n");
@@ -438,6 +483,7 @@ void linea_owner_answer(unsigned long queue, unsigned long at, unsigned long len
 
 void linea_owner_done(unsigned long queue) {
     struct owner_queue *q = (struct owner_queue *)queue;
+    execution_context(q->loop);
     linea_park_lock(&q->park);
     if (!q->answered) fail("linea: an owning task finished a call it did not answer\n");
     q->answered = 0;
@@ -449,8 +495,8 @@ void linea_owner_done(unsigned long queue) {
 }
 
 void linea_owner_close(unsigned long queue) {
-    alone();
     struct owner_queue *q = (struct owner_queue *)queue;
+    execution_context(q->loop);
     linea_park_lock(&q->park);
     q->closed = 1;
     linea_unpark(&q->park);
@@ -464,8 +510,8 @@ void linea_owner_free(unsigned long queue) {
 }
 
 uint8_t linea_chan_recv_until(unsigned long endpoint, unsigned long at, unsigned long len, unsigned long timeout_ns) {
-    alone();
     struct task *t = task_of(endpoint);
+    execution_context(t->loop);
     linea_storage_extent(at, len);
     /* A deadline past what the clock can count is none: no clock reaches
      * it, so the receive waits until the peer sends. */
