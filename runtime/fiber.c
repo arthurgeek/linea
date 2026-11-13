@@ -711,6 +711,10 @@ static void run_fiber(struct carrier *c, struct linea_fiber *f) {
     if (!__atomic_compare_exchange_n(&f->state, &expected, running, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
         fail("linea: a carrier dequeued a fiber that was not runnable\n");
     }
+#if __has_feature(thread_sanitizer)
+    /* A prepared task may be canceled without ever executing. */
+    if (f->tsan_fiber == NULL) f->tsan_fiber = __tsan_create_fiber(0);
+#endif
     c->executing = f;
     linea_thread_guard_prepare((unsigned long)f->mapping, (unsigned long)f->mapping + guard_bytes);
     linea_fiber_pause(linea_fiber_entering);
@@ -880,9 +884,6 @@ struct linea_fiber *linea_fiber_create(unsigned long identity, unsigned long sta
     f->entry = entry; f->finished = ended; f->argument = argument;
     f->timer_index = no_timer;
     f->state = parked;
-#if __has_feature(thread_sanitizer)
-    f->tsan_fiber = __tsan_create_fiber(0);
-#endif
     linea_context_init(&f->context, f->stack, usable, fiber_entry, f);
     *error = 0;
     return f;
@@ -900,7 +901,7 @@ void linea_fiber_destroy(struct linea_fiber *f) {
     struct carrier *home = f->home;
     const int simulated = home->simulation != 0;
 #if __has_feature(thread_sanitizer)
-    __tsan_destroy_fiber(f->tsan_fiber);
+    if (f->tsan_fiber != NULL) __tsan_destroy_fiber(f->tsan_fiber);
 #endif
     if (munmap(f->mapping, f->mapping_bytes) != 0) fail("linea: a fiber's stack could not be unmapped\n");
     free(f);
