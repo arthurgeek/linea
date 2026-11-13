@@ -1,0 +1,35 @@
+import confined
+import std.io
+import std.task
+import std.session
+import std.time
+
+use session.Chan
+use session.End
+
+fn main() -> UInt8 {
+    let active = confined.open()
+    confined.block_first()
+    let execution = io.Loop.open(carriers: 1).unwrap()
+    let waiting = task.prepare(
+        sink [sink client = active.client()] |sink me: Chan[End]| {
+            let _answer = client.value()
+            me.close()
+        },
+        on: execution,
+    ).unwrap().start()
+    let progress = task.prepare(
+        sink [] |sink me: Chan[End]| {
+            while !confined.blocked() {
+                time.sleep(time.Duration.from_milliseconds(1))
+            }
+            io.println("UNRELATED_FIBER_PROGRESS").unwrap()
+            me.close()
+        },
+        on: execution,
+    ).unwrap().start()
+    progress.close()
+    io.println("JOIN_ATTEMPT").unwrap()
+    waiting.close()
+    panic("FORBIDDEN_JOIN_RETURNED")
+}

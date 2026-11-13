@@ -1,0 +1,59 @@
+import confined
+
+fn expect_creation(reason: confined.OpenError) {
+    match read reason { Creation => (), _ => panic("wrong creation error") }
+}
+
+fn expect_initialization(reason: confined.OpenError) {
+    match read reason { Initialization => (), _ => panic("wrong initialization error") }
+}
+
+fn main() -> UInt8 {
+    match confined.try_open(1) {
+        Ok(_active) => panic("creation should fail"),
+        Err(failure) => match failure {
+            Empty(reason) => expect_creation(reason),
+            Closing(_, _, _closing) => panic("unexpected closing authority"),
+        },
+    }
+    let closing = match confined.try_open(2) {
+        Ok(_active) => panic("initialization should fail"),
+        Err(failure) => match failure {
+            Closing(reason, code, closing) => {
+                expect_initialization(reason)
+                if code != 1 {
+                    panic("lost cleanup error")
+                }
+                closing
+            },
+            Empty(_) => panic("lost combined failure"),
+        },
+    }
+    match closing.retry() { Ok(_) => (), Err(_closing) => panic("partial cleanup retry failed") }
+    match confined.try_open(3) {
+        Ok(_active) => panic("initialization should fail after allocation"),
+        Err(failure) => match failure {
+            Empty(reason) => expect_initialization(reason),
+            Closing(_, _, _closing) => panic("successful cleanup left authority"),
+        },
+    }
+    let active = confined.open()
+    match active.client().try_value(true) {
+        Err(code) => if code != 77 {
+            panic("lost native operation error")
+        },
+        Ok(_) => panic("native operation should fail"),
+    }
+    match active.client().try_value(false) {
+        Ok(value) => if value != 1 {
+            panic("operation error changed live state")
+        },
+        Err(_) => panic("recovered operation failed"),
+    }
+    let closing = match active.shutdown() { Err(closing) => closing, Ok(_) => panic("close should fail once") }
+    match closing.retry() { Ok(_) => (), Err(_closing) => panic("final retry failed") }
+    if !confined.balanced() {
+        panic("initialization failure leaked native state")
+    }
+    0
+}

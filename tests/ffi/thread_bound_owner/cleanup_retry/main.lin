@@ -1,0 +1,20 @@
+import confined
+
+fn main() -> UInt8 {
+    let active = confined.open()
+    if active.client().value() != 1 {
+        panic("wrong operation result")
+    }
+    let closing = match active.shutdown() {
+        Ok(_) => panic("mock close should fail once"),
+        Err(closing) => closing,
+    }
+    match closing.retry() {
+        Ok(_) => (),
+        Err(_) => panic("retry should settle on the owner thread"),
+    }
+    if !confined.balanced() {
+        panic("native resource accounting is unbalanced")
+    }
+    0
+}

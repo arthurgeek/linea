@@ -1,0 +1,12 @@
+import confined
+
+fn main() -> UInt8 {
+    let active = confined.open()
+    let client = active.client()
+    let _raw = copy(client.raw)
+    match active.shutdown() {
+        Ok(_) => (),
+        Err(closing) => match closing.retry() { Ok(_) => (), Err(_closing) => panic("retry failed") },
+    }
+    0
+}

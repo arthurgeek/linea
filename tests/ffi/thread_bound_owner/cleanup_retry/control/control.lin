@@ -1,0 +1,5 @@
+extern fn mock_fail_forever()
+
+pub fn fail_forever() {
+    mock_fail_forever()
+}

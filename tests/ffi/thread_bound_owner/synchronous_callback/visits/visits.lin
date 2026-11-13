@@ -1,0 +1,23 @@
+import std.io
+
+struct Context { total: UInt64 }
+
+extern fn visits_same_thread() -> Int32
+
+extern fn visits_each(visit: fn(inout context: Context, value: Int32) -> Int32, inout context: Context) -> Int32
+
+fn accumulate(inout context: Context, value: Int32) -> Int32 {
+    if io.current() != io.system() || visits_same_thread() == 0 {
+        panic("callback lost system task context")
+    }
+    context.total += UInt64(value)
+    value
+}
+
+pub fn run() -> UInt64 {
+    var context = Context { total = 0 }
+    if visits_each(accumulate, &context) != 42 {
+        panic("callback ABI result mismatch")
+    }
+    context.total
+}

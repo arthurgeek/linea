@@ -1,0 +1,15 @@
+import cheap
+
+fn main() -> UInt8 {
+    for value in UInt64(0)..UInt64(10000) {
+        let expected = if value == 1234 {
+            Int64(-77)
+        } else {
+            Int64(value)
+        }
+        if cheap.value(value) != expected {
+            panic("ordinary native result/error changed")
+        }
+    }
+    0
+}

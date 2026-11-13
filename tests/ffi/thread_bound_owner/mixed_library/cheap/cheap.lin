@@ -1,0 +1,11 @@
+extern fn cheap_value(value: UInt64) -> Int64
+
+pub fn value(value: UInt64) -> Int64 {
+    cheap_value(value)
+}
+
+extern fn cheap_blocking()
+
+pub fn blocking() {
+    cheap_blocking()
+}

@@ -1,0 +1,173 @@
+import std.task
+import std.io
+
+@(opaque, linear)
+type Handle = UInt64
+
+extern fn mock_open() -> UInt64
+
+extern fn mock_read(read handle: Handle) -> UInt64
+
+extern fn mock_close(inout handle: Handle) -> UInt8
+
+extern fn mock_balanced() -> UInt8
+
+@(opaque, linear)
+struct Resource { handle: Handle }
+
+// Move the previous linear option out while installing its replacement.
+// carries preserves the old value's dependencies; retains keeps next in slot.
+// Even an old None is matched and settled because Option[Resource] is linear.
+fn exchange(inout slot: Option[Resource], sink next: Option[Resource]) -> Option[Resource] where carries(slot), retains(slot: next) {
+    let previous = slot
+    slot = next
+    previous
+}
+
+fn settle(inout slot: Option[Resource]) -> Bool {
+    match exchange(&slot, .None) {
+        None => true,
+        Some(resource) => {
+            var held = resource
+            if mock_close(&held.handle) != 0 {
+                match exchange(&slot, .Some(held)) {
+                    None => false,
+                    Some(_) => panic("cleanup overwrote live state"),
+                }
+            } else {
+                let Resource { handle } = held
+                let Handle(raw) = handle
+                if raw != 0 {
+                    panic("native close retained a handle after success")
+                }
+                true
+            }
+        },
+    }
+}
+
+@(opaque, linear)
+struct Active { owner: task.Owner[Option[Resource]] }
+
+@(opaque, linear)
+struct Closing { owner: task.Owner[Option[Resource]] }
+
+@(opaque, copyable)
+struct Client { raw: task.Client[Option[Resource]] }
+
+pub fn open() -> Active {
+    let empty: Option[Resource] = .None
+    let owner = task.own(empty, on: io.system()).unwrap()
+    owner.client().call(
+        |inout state: Option[Resource]| {
+            match exchange(&state, .Some(Resource { handle = Handle(mock_open()) })) {
+                None => (),
+                Some(_) => panic("initialization ran twice"),
+            }
+        },
+    )
+    .{ owner }
+}
+
+impl Active {
+    pub fn client(self: Self) -> Client where borrows(self) {
+        .{ raw = self.owner.client() }
+    }
+
+    pub fn shutdown(sink self: Self) -> Result[(), Closing] {
+        let Active { owner } = self
+        Closing { owner }.retry()
+    }
+}
+
+impl Client {
+    pub fn value(self: Self) -> UInt64 {
+        self.raw.call(
+            |inout state: Option[Resource]| {
+                match read state {
+                    Some(resource) => mock_read(resource.handle),
+                    None => panic("operation after settlement"),
+                }
+            },
+        )
+    }
+}
+
+impl Closing {
+    pub fn retry(sink self: Self) -> Result[(), Closing] {
+        let Closing { owner } = self
+        let done = owner.client().call(|inout state: Option[Resource]| settle(&state))
+        if !done {
+            return .Err(.{ owner })
+        }
+        match owner.close() {
+            None => (),
+            Some(_) => panic("closed a nonempty owner"),
+        }
+        .Ok(())
+    }
+}
+
+pub fn balanced() -> Bool {
+    mock_balanced() != 0
+}
+
+extern fn mock_block_first()
+
+extern fn mock_blocked() -> UInt8
+
+extern fn mock_unblock()
+
+pub fn block_first() {
+    mock_block_first()
+}
+
+pub fn blocked() -> Bool {
+    mock_blocked() != 0
+}
+
+pub fn unblock() {
+    mock_unblock()
+}
+
+extern fn mock_arrive()
+
+extern fn mock_arrivals() -> UInt64
+
+extern fn mock_start_all()
+
+extern fn mock_started() -> UInt8
+
+pub fn arrive() {
+    mock_arrive()
+}
+
+pub fn arrivals() -> UInt64 {
+    mock_arrivals()
+}
+
+pub fn start_all() {
+    mock_start_all()
+}
+
+pub fn started() -> Bool {
+    mock_started() != 0
+}
+
+extern fn mock_reset_cycle()
+
+extern fn mock_can_finish(id: UInt64, round: UInt64) -> UInt8
+
+extern fn mock_finish()
+
+pub fn reset_cycle() {
+    mock_reset_cycle()
+}
+
+pub fn can_finish(id: UInt64, round: UInt64) -> Bool {
+    mock_can_finish(id, round) != 0
+}
+
+pub fn finish() {
+    mock_finish()
+}

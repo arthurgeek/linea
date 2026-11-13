@@ -1,0 +1,5 @@
+extern fn cheap_value(value: UInt64) -> Int64
+
+pub fn value(value: UInt64) -> Int64 {
+    cheap_value(value)
+}

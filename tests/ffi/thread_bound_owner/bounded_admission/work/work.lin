@@ -1,0 +1,17 @@
+extern fn work_begin()
+
+extern fn work_run(request: UInt64)
+
+extern fn work_balanced() -> UInt8
+
+pub fn begin() {
+    work_begin()
+}
+
+pub fn run(request: UInt64) {
+    work_run(request)
+}
+
+pub fn balanced() -> Bool {
+    work_balanced() != 0
+}

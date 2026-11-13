@@ -1,0 +1,10 @@
+import confined
+
+fn main() -> UInt8 {
+    let active = confined.open()
+    let client = active.client()
+    let result = active.shutdown()
+    let value = client.value()
+    match result { Ok(_) => (), Err(_) => panic("failed close") }
+    UInt8(value)
+}

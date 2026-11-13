@@ -1,0 +1,31 @@
+import visits
+import std.task
+import std.io
+import std.session
+
+use session.Chan
+use session.End
+use session.Send
+
+fn main() -> UInt8 {
+    let execution = io.Loop.open(carriers: 1).unwrap()
+    let fiber = task.prepare(
+        sink [] |sink me: Chan[End]| {
+            let native = task.prepare(
+                sink [] |sink me: Chan[Send[UInt64, End]]| {
+                    me.send(visits.run()).close()
+                },
+                on: io.system(),
+            ).unwrap().start()
+            let (answer, done) = native.recv()
+            done.close()
+            if answer != 42 {
+                panic("callback lost lent stack state")
+            }
+            me.close()
+        },
+        on: execution,
+    ).unwrap().start()
+    fiber.close()
+    0
+}
