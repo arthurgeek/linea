@@ -439,6 +439,7 @@ The library tests itself.
   ok    http.a_path_value_decodes_escapes_after_matching
   ok    http.a_path_value_is_found_by_its_exact_name
   ok    http.a_pattern_ending_in_a_slash_matches_that_path_alone
+  ok    http.a_pattern_has_one_capture_for_each_named_segment
   ok    http.a_pattern_splits_into_its_method_and_path
   ok    http.a_percent_error_displays_its_reason
   ok    http.a_policy_of_no_threads_is_refused_and_closes_the_listener
@@ -1636,4 +1637,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1633 passed, 0 failed
+  1634 passed, 0 failed
