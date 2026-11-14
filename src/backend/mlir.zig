@@ -361,10 +361,13 @@ pub fn emit(
     @memset(called_back, 0);
     for (module.functions, 0..) |*f, i| {
         if (module.isExternal(FunctionId.at(@intCast(i)))) continue;
+        const callbacks = try runtimeCallbacks(gpa, module, f);
+        defer gpa.free(callbacks);
+        if (callbacks.len == 0) continue;
         for (0..f.insts.len) |at| {
             const inst = InstId.at(@intCast(at));
             if (f.tagOf(inst) == .foreign_function_addr) {
-                const mask: u2 = if (runtimeCallback(module, f, inst)) 2 else 1;
+                const mask: u2 = if (isRuntimeCallback(callbacks, inst)) 2 else 1;
                 called_back[f.functionOf(inst).index()] |= mask;
             }
         }
@@ -624,21 +627,47 @@ const ForeignEntry = union(enum) {
     runtime_called_back,
 };
 
-/// Runtime entry and release callbacks start a task without a user C frame.
-/// The verifier confines each callback address to direct extern arguments.
-fn runtimeCallback(module: *const Module, mir: *const Mir, address: InstId) bool {
-    var used = false;
+/// For each instruction of one function, whether it is a callback address
+/// every use of which hands it to the runtime. Runtime entry and release
+/// callbacks start a task without a user C frame; an address a user's C
+/// function receives, even once, is called from one. The verifier confines
+/// each callback address to direct extern arguments, so its uses are the
+/// call arguments that name it.
+///
+/// Empty for a function that takes no callback address. The caller frees it.
+///
+/// **Bound:** one walk over the function's instructions and the arguments
+/// of its calls, and one flag per instruction of that function.
+fn runtimeCallbacks(gpa: std.mem.Allocator, module: *const Module, mir: *const Mir) std.mem.Allocator.Error![]bool {
+    const takes_one = for (0..mir.insts.len) |i| {
+        if (mir.tagOf(InstId.at(@intCast(i))) == .foreign_function_addr) break true;
+    } else false;
+    if (!takes_one) return &.{};
+
+    // What each instruction's uses as a call argument say so far.
+    const Use = enum(u8) { unused, runtime, user };
+    const uses = try gpa.alloc(Use, mir.insts.len);
+    defer gpa.free(uses);
+    @memset(uses, .unused);
     for (0..mir.insts.len) |i| {
         const inst = InstId.at(@intCast(i));
         if (mir.tagOf(inst) != .call and mir.tagOf(inst) != .call_noreturn) continue;
         const call = mir.callOf(inst);
+        const runtime = module.isExternal(call.func) and runtime_symbols.signatureOf(module.nameOf(call.func)) != null;
         for (call.args) |argument| {
-            if (argument != address) continue;
-            used = true;
-            if (!module.isExternal(call.func) or runtime_symbols.signatureOf(module.nameOf(call.func)) == null) return false;
+            const at = &uses[argument.index()];
+            if (!runtime) at.* = .user else if (at.* == .unused) at.* = .runtime;
         }
     }
-    return used;
+
+    const answers = try gpa.alloc(bool, mir.insts.len);
+    for (answers, uses) |*answer, use| answer.* = use == .runtime;
+    return answers;
+}
+
+/// Whether the callback address `address` is one the runtime alone receives.
+fn isRuntimeCallback(callbacks: []const bool, address: InstId) bool {
+    return callbacks.len != 0 and callbacks[address.index()];
 }
 
 fn writeForeignGuard(w: *std.Io.Writer, enter: bool) std.Io.Writer.Error!void {
@@ -1085,6 +1114,8 @@ fn emitFunction(
     // owns, handed in as a leading pointer. Asked of the module because the
     // call sites ask the same routine, so the two sides cannot disagree.
     const indirect = module.returnsIndirectly(id);
+    const runtime_callbacks = try runtimeCallbacks(gpa, module, mir);
+    defer gpa.free(runtime_callbacks);
     var e: FunctionEmitter = .{
         .w = w,
         .mir = mir,
@@ -1094,6 +1125,7 @@ fn emitFunction(
         .module = module,
         .indirect = indirect,
         .link_symbols = link_symbols,
+        .runtime_callbacks = runtime_callbacks,
     };
 
     try w.writeAll("  func.func private @");
@@ -1307,6 +1339,9 @@ const FunctionEmitter = struct {
     /// The symbol each function it calls or takes the address of is linked
     /// under, by `FunctionId`, from `linkSymbols`.
     link_symbols: []const []const u8,
+    /// Which of this function's callback addresses the runtime alone
+    /// receives, from `runtimeCallbacks`.
+    runtime_callbacks: []const bool = &.{},
     /// The terminal call writes directly to this function's caller-owned result.
     return_call: InstId = .none,
     /// Names the temporaries a check expands into, and the trap blocks it
@@ -1676,7 +1711,7 @@ const FunctionEmitter = struct {
                 const target = mir.functionOf(id);
                 const body = self.module.functionOf(target);
                 try self.w.print("    %fa{d} = func.constant ", .{n});
-                try writeCalledBackName(self.w, self.module, target, runtimeCallback(self.module, mir, id));
+                try writeCalledBackName(self.w, self.module, target, isRuntimeCallback(self.runtime_callbacks, id));
                 try self.w.writeAll(" : ");
                 try writeForeignEntryType(self.w, self.module, body);
                 try self.here(span);
@@ -3656,9 +3691,17 @@ test "foreign frame guards balance calls and C entries while runtime callbacks s
             .layouts = layouts,
             .entry = .none,
         };
-        try testing.expect(!runtimeCallback(&module, &mir, address));
+        {
+            const callbacks = try runtimeCallbacks(gpa, &module, &mir);
+            defer gpa.free(callbacks);
+            try testing.expect(!isRuntimeCallback(callbacks, address));
+        }
         names[0] = "linea_task_start";
-        try testing.expect(runtimeCallback(&module, &mir, address));
+        {
+            const callbacks = try runtimeCallbacks(gpa, &module, &mir);
+            defer gpa.free(callbacks);
+            try testing.expect(isRuntimeCallback(callbacks, address));
+        }
         // The same target reached through another user extern requires a
         // distinct guarded thunk, even when the runtime also calls it.
         names[0] = "foreign_call";

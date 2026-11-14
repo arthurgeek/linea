@@ -1,0 +1,33 @@
+// A callable type is its conventions, its parameter types, its result and
+// what its contracts say of each position. The names its parameters are
+// written with belong to whatever declares the call, so a bound written
+// twice with other names is one bound, and its item is read through it. A
+// contract names a parameter, and two contracts naming the parameters at the
+// same positions are the same contract.
+trait Give[phantom F] {
+    type Item
+}
+
+struct Counter {}
+
+impl Give[fn(read count: UInt8) -> UInt8] for Counter {
+    type Item = UInt8
+}
+
+struct Keeper {}
+
+impl Give[fn(first: Str, second: Str) -> Str where borrows(second)] for Keeper {
+    type Item = UInt8
+}
+
+fn renamed[T: Give[fn(read a: UInt8) -> UInt8] + Give[fn(read b: UInt8) -> UInt8]](_giver: T, sink item: T.Item) -> T.Item where carries(item) {
+    item
+}
+
+fn kept[T: Give[fn(x: Str, y: Str) -> Str where borrows(y)] + Give[fn(left: Str, right: Str) -> Str where borrows(right)]](_giver: T, sink item: T.Item) -> T.Item where carries(item) {
+    item
+}
+
+fn main() -> UInt8 {
+    renamed(Counter {}, 3) + kept(Keeper {}, 4)
+}

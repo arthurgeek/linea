@@ -181,7 +181,7 @@ fn cut(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
 /// count helps, and its edits never overlap. A fix breaking either is the
 /// compiler's mistake, not the program's.
 fn boundFixes(arena: std.mem.Allocator, fixes: []const Fix, notes: usize) ![]const Fix {
-    for (fixes) |fix| assertHolds(fix, notes);
+    for (fixes) |fix| try assertHolds(arena, fix, notes);
     const within = struct {
         fn check(fix: Fix) bool {
             for (fix.edits) |e| if (e.text.len > max_text_bytes) return false;
@@ -201,14 +201,34 @@ fn boundFixes(arena: std.mem.Allocator, fixes: []const Fix, notes: usize) ![]con
 /// one byte overlap too: which is written first is a choice the fix did not
 /// make.
 ///
-/// **Bound:** the square of the fix's edits, a handful.
-fn assertHolds(fix: Fix, notes: usize) void {
+/// The edits are compared in the order they sit in their files, so each is
+/// held against the one after it: an edit that reached a later one would
+/// reach the next one first. The fix's own order is left as it was built.
+///
+/// **Bound:** sorting the fix's edits. A fix that wraps every `return` of a
+/// function has as many edits as the function has returns.
+fn assertHolds(arena: std.mem.Allocator, fix: Fix, notes: usize) !void {
+    if (!std.debug.runtime_safety) return;
     if (fix.note) |at| std.debug.assert(at < notes);
-    for (fix.edits, 0..) |a, i| for (fix.edits[i + 1 ..]) |b| {
+    if (fix.edits.len < 2) return;
+
+    const order = try arena.alloc(u32, fix.edits.len);
+    for (order, 0..) |*at, i| at.* = @intCast(i);
+    std.mem.sort(u32, order, fix.edits, struct {
+        fn before(edits: []const Edit, a: u32, b: u32) bool {
+            const x = edits[a];
+            const y = edits[b];
+            if (x.file != y.file) return @intFromEnum(x.file) < @intFromEnum(y.file);
+            return x.span.start < y.span.start;
+        }
+    }.before);
+    for (order[0 .. order.len - 1], order[1..]) |first, second| {
+        const a = fix.edits[first];
+        const b = fix.edits[second];
         if (a.file != b.file) continue;
-        const overlap = a.span.start == b.span.start or (a.span.start < b.span.end and b.span.start < a.span.end);
+        const overlap = a.span.start == b.span.start or b.span.start < a.span.end;
         std.debug.assert(!overlap);
-    };
+    }
 }
 
 /// The labels, with every message within the bound.
@@ -418,6 +438,32 @@ test "a fix with an edit over the bound is dropped whole, and its help kept" {
     try testing.expectEqual(@as(usize, 1), d.fixes.len);
     try testing.expectEqual(@as(?u32, 0), d.fixes[0].note);
     try testing.expectEqual(@as(usize, 2), d.notes.len);
+}
+
+test "a fix of many edits is kept, in the order it was built, when none overlaps" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // Built last edit first and across two files, so the order the edits
+    // sit in their files is not the order the fix lists them.
+    const count = 4000;
+    const edits = try gpa.alloc(Edit, count);
+    for (edits, 0..) |*edit, i| {
+        const at: u32 = @intCast((count - 1 - i) * 4);
+        edit.* = .{ .file = .from(@intCast(i % 2)), .span = .{ .start = at, .end = at + 2 }, .text = "x" };
+    }
+    var sink = Sink.init(gpa);
+    try sink.add(.{
+        .severity = .err,
+        .message = "many",
+        .notes = &.{"change every one"},
+        .fixes = &.{.{ .kind = .where_clause, .note = 0, .edits = edits }},
+    });
+    const kept = sink.items()[0].fixes[0].edits;
+    try testing.expectEqual(@as(usize, count), kept.len);
+    try testing.expectEqual(@as(u32, (count - 1) * 4), kept[0].span.start);
+    try testing.expectEqual(@as(u32, 0), kept[count - 1].span.start);
 }
 
 test "a revised diagnostic is cut as an added one is, and keeps the totals" {

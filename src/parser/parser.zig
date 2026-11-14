@@ -1,6 +1,7 @@
 const std = @import("std");
 const cloneColumns = @import("../support/columns.zig").cloneExact;
 const tracy = @import("../support/tracy.zig");
+const name_case = @import("../support/name_case.zig");
 const testing = std.testing;
 
 const Span = @import("../support/span.zig").Span;
@@ -2227,7 +2228,7 @@ const Parser = struct {
 
             const ty = self.cursor.current();
             if (self.cursor.at(.identifier) or self.cursor.at(.l_bracket) or
-                self.cursor.at(.keyword_fn) or self.cursor.at(.keyword_borrow) or self.cursor.at(.l_paren))
+                self.startsCallableType() or self.cursor.at(.keyword_borrow) or self.cursor.at(.l_paren))
             {
                 // Positional, so no name -- what a variant carries is reached
                 // by matching rather than by naming.
@@ -2719,15 +2720,21 @@ const Parser = struct {
     /// `-> Result[(), E]` are results that hold a unit, not unit itself.
     fn refuseWrittenUnit(self: *Parser, arrow: TokenId, label: []const u8, help: []const u8, before_where: ?[]const u8) !bool {
         // `()` inside any number of grouping parentheses, `(())` included:
-        // every `(` before the first `)`, then as many `)`.
+        // every `(` before the first `)`, then as many `)`. Read once
+        // through a copy of the cursor, which becomes the cursor only when
+        // the whole shape is there.
+        var probe = self.cursor;
         var opens: u32 = 0;
-        while (self.cursor.peekAt(opens) == .l_paren) opens += 1;
+        while (probe.at(.l_paren)) : (opens += 1) _ = probe.advance();
         if (opens == 0) return false;
-        for (0..opens) |i| if (self.cursor.peekAt(opens + @as(u32, @intCast(i))) != .r_paren) return false;
+        var close = probe.current();
+        for (0..opens) |_| {
+            if (!probe.at(.r_paren)) return false;
+            close = probe.advance();
+        }
         // A lambda writing contracts keeps its arrow before `where`.
-        const said = if (before_where != null and self.cursor.peekAt(2 * opens) == .keyword_where) before_where.? else help;
-        for (0..2 * opens - 1) |_| _ = self.cursor.advance();
-        const close = self.cursor.advance();
+        const said = if (before_where != null and probe.at(.keyword_where)) before_where.? else help;
+        self.cursor = probe;
         const labels = try self.sink.arena.alloc(Label, 1);
         labels[0] = .{
             .file = self.file,
@@ -2792,6 +2799,31 @@ const Parser = struct {
         }
     }
 
+    test "a unit result grouped many times over is refused once" {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+
+        const depth = 20_000;
+        var text: std.ArrayList(u8) = .empty;
+        try text.appendSlice(gpa, "fn f() -> ");
+        try text.appendNTimes(gpa, '(', depth);
+        try text.appendNTimes(gpa, ')', depth);
+        try text.appendSlice(gpa, " {}\n");
+        try testing.expectEqualSlices(?Code, &.{.s_unit_result}, try codesOf(gpa, text.items));
+
+        // One `)` too few is no unit, and the parentheses are read as the
+        // type they open.
+        text.clearRetainingCapacity();
+        try text.appendSlice(gpa, "fn f() -> ");
+        try text.appendNTimes(gpa, '(', 3);
+        try text.appendNTimes(gpa, ')', 2);
+        try text.appendSlice(gpa, " {}\n");
+        const codes = try codesOf(gpa, text.items);
+        try testing.expect(codes.len != 0);
+        try testing.expect(codes[0] != .s_unit_result);
+    }
+
     test "a projection still writes the type of the place it names" {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
@@ -2828,7 +2860,7 @@ const Parser = struct {
                 // point is not refused a second time by [S-Entry].
                 if (main) returns = .{ .at = arrow, .name = .none };
             } else if (self.cursor.at(.identifier) or self.cursor.at(.l_bracket) or
-                self.cursor.at(.l_paren) or self.cursor.at(.keyword_fn) or self.cursor.at(.keyword_borrow))
+                self.cursor.at(.l_paren) or self.startsCallableType() or self.cursor.at(.keyword_borrow))
             {
                 // Which type the name reaches is a question about names, so the
                 // parser records what was written and the checker answers it.
@@ -4008,7 +4040,7 @@ const Parser = struct {
         if (!self.cursor.at(.identifier) or self.cursor.peekAt(1) != .l_paren) return false;
         const name = self.cursor.current();
         const text = self.cursor.textOf(name);
-        if (text.len == 0 or !std.ascii.isUpper(text[0])) return false;
+        if (name_case.of(text) != .capital) return false;
         const bracket = self.cursor.ahead(1) orelse return false;
         return self.cursor.spanAt(bracket).start > self.cursor.spanAt(name).end;
     }
@@ -4019,7 +4051,7 @@ const Parser = struct {
         if (self.cursor.at(.l_paren) or self.cursor.at(.l_brace)) return true;
         if (!self.cursor.at(.identifier)) return false;
         const text = self.cursor.textOf(self.cursor.current());
-        if (text.len == 0 or !std.ascii.isUpper(text[0])) return false;
+        if (name_case.of(text) != .capital) return false;
         return switch (self.cursor.peekAt(1)) {
             .l_paren, .l_brace => true,
             else => false,

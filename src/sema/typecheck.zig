@@ -2830,21 +2830,16 @@ pub const Settlers = struct {
     /// value of `t`, in the order `Reach.each` yields them: the type's own
     /// first, then the traits'. How many were found, up to `out.len`.
     ///
-    /// Costs `Reach.each` over one type -- its own operations and the traits
-    /// the module can see -- and a comparison of names among those.
+    /// **Bound:** `Reach.each` over one type -- its own operations and the
+    /// traits the module can see -- and one table of the names among those.
     pub fn operations(self: Settlers, gpa: std.mem.Allocator, t: TypeId, out: []node.DeclId) std.mem.Allocator.Error!usize {
         var applicable: std.ArrayList(Applicable) = .empty;
         defer applicable.deinit(gpa);
         try self.reach.each(gpa, t, &applicable);
+        try keepReached(gpa, self.ast, &applicable);
         var found: usize = 0;
         for (applicable.items) |a| {
             if (found == out.len) break;
-            const name = self.ast.tokenName(self.ast.declName(a.sig));
-            var runs: NameReach = .{};
-            for (applicable.items) |other| {
-                if (self.ast.tokenName(self.ast.declName(other.sig)) == name) runs.note(other);
-            }
-            if (!runs.reaches(a)) continue;
             if (!self.settles(t, a.sig)) continue;
             out[found] = a.sig;
             found += 1;
@@ -5709,7 +5704,8 @@ fn memberNotAValue(kind: resolve_mod.Kind) ?NotAValue {
     };
 }
 
-/// An expression that leaves, and where it is written.
+/// An expression a `defer` may not hold, and where it is written: one that
+/// leaves, or what a `defer` written inside it schedules.
 const Leave = struct {
     /// The index of its first token, which is what orders these and what a
     /// containing extent is compared against.
@@ -5718,6 +5714,8 @@ const Leave = struct {
     /// How it is named in the message, so the search answers with the word as
     /// well as the place.
     what: []const u8,
+    /// Whether this is a `defer` rather than an expression that leaves.
+    schedules: bool = false,
 };
 
 /// A traversal and the implementation that declares it.
@@ -10444,9 +10442,9 @@ const Checker = struct {
         const allocator = self.allocator_decl orelse return false;
         const parameters = self.ast.declTypeParams(decl);
         const omitted = for (parameters[written..], written..) |parameter, i| {
-            if (self.isBoundedBy(parameter, allocator)) break i;
+            if (try self.isAllocatorParameter(decl, parameter, allocator)) break i;
         } else return false;
-        const declared = self.allocatorParameterOf(owner, allocator) orelse {
+        const declared = try self.allocatorParameterOf(owner, allocator) orelse {
             // A call takes its type's or its function's default wherever it
             // is written; only a written type is held to a library's rule.
             if (callee != ExprId.none) return false;
@@ -10631,7 +10629,7 @@ const Checker = struct {
         const allocator = self.allocator_decl orelse return;
         for (self.ast.declTypeParams(d)) |parameter| {
             if (!parameter.default.wasWritten()) continue;
-            if (!self.isAllocatorParameter(d, parameter, allocator)) continue;
+            if (!try self.isAllocatorParameter(d, parameter, allocator)) continue;
             if (!try self.publicLibrarySignature(d, parameter.name)) return;
             if (self.refusedBefore(parameter.default.at)) continue;
             try self.noteRefused(parameter.default.at);
@@ -10648,13 +10646,13 @@ const Checker = struct {
 
     /// Whether a type parameter of `owner` is bounded by `Allocator`, where it
     /// is declared or in `owner`'s `where` clause.
-    fn isAllocatorParameter(self: *const Checker, owner: node.DeclId, parameter: node.TypeParam, allocator: node.DeclId) bool {
-        if (self.isBoundedBy(parameter, allocator)) return true;
+    fn isAllocatorParameter(self: *const Checker, owner: node.DeclId, parameter: node.TypeParam, allocator: node.DeclId) std.mem.Allocator.Error!bool {
+        if (try self.boundsReach(self.ast.boundsOf(parameter), allocator)) return true;
         for (self.ast.declWherePredicates(owner)) |predicate| {
             const subject = predicate.subject;
             if (subject.kind != .named or subject.args.len() != 0 or subject.name == TokenId.none) continue;
             if (self.ast.tokenName(subject.name) != self.ast.tokenName(parameter.name)) continue;
-            if (self.boundsReach(self.ast.boundsIn(predicate.bounds), allocator, 0)) return true;
+            if (try self.boundsReach(self.ast.boundsIn(predicate.bounds), allocator)) return true;
         }
         return false;
     }
@@ -10808,7 +10806,7 @@ const Checker = struct {
     fn takeDefault(self: *Checker, call: ExprId, decl: node.DeclId, index: usize) std.mem.Allocator.Error!TypeId {
         const parameters = self.ast.declTypeParams(decl);
         if (self.allocator_decl) |allocator| {
-            if (self.isBoundedBy(parameters[index], allocator)) {
+            if (try self.isAllocatorParameter(decl, parameters[index], allocator)) {
                 // A type's default is blamed on the type the call names, a
                 // function's on the whole path that names the function.
                 const callee: ExprId = if (self.ast.declTag(decl) == .function) self.ast.withoutGroups(self.ast.call(call).callee) else .none;
@@ -10856,30 +10854,34 @@ const Checker = struct {
         return null;
     }
 
-    /// Whether a parameter is bounded by the library's `Allocator`, written on
-    /// the parameter.
-    fn isBoundedBy(self: *const Checker, parameter: node.TypeParam, allocator: node.DeclId) bool {
-        return self.boundsReach(self.ast.boundsOf(parameter), allocator, 0);
-    }
-
-    /// Whether a run of bounds names `Allocator` or a trait that requires it.
+    /// Whether a run of bounds names `Allocator` or a trait that requires it,
+    /// directly or through any chain of required traits.
     ///
-    /// **Bound:** the supertrait chain of each bound, cut at a fixed depth
-    /// because a trait cannot require itself.
-    fn boundsReach(self: *const Checker, bounds: []const node.TraitBound, allocator: node.DeclId, depth: u32) bool {
-        for (bounds) |bound| {
-            if (bound.kind != .named) continue;
-            const trait = traitAt(self.ast, self.res, bound.named.name) orelse continue;
-            if (trait == allocator) return true;
-            if (depth < 8 and self.boundsReach(self.ast.declBounds(trait), allocator, depth + 1)) return true;
+    /// **Bound:** each trait the bounds reach is visited once.
+    fn boundsReach(self: *const Checker, bounds: []const node.TraitBound, allocator: node.DeclId) std.mem.Allocator.Error!bool {
+        var seen: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty;
+        defer seen.deinit(self.gpa);
+        var pending: std.ArrayList(node.DeclId) = .empty;
+        defer pending.deinit(self.gpa);
+
+        var run = bounds;
+        while (true) {
+            for (run) |bound| {
+                if (bound.kind != .named) continue;
+                const trait = traitAt(self.ast, self.res, bound.named.name) orelse continue;
+                if (trait == allocator) return true;
+                if ((try seen.getOrPut(self.gpa, trait)).found_existing) continue;
+                try pending.append(self.gpa, trait);
+            }
+            const next = pending.pop() orelse return false;
+            run = self.ast.declBounds(next);
         }
-        return false;
     }
 
     /// The name of the first parameter bounded by `Allocator` that `owner`
     /// declares, on itself or on the implementation or trait it is a member
     /// of: bounded where it is declared or in a trailing `where` clause.
-    fn allocatorParameterOf(self: *const Checker, owner: node.DeclId, allocator: node.DeclId) ?TokenId {
+    fn allocatorParameterOf(self: *const Checker, owner: node.DeclId, allocator: node.DeclId) std.mem.Allocator.Error!?TokenId {
         const scopes = [_]node.DeclId{
             owner,
             self.implEnclosing(owner) orelse node.DeclId.none,
@@ -10888,7 +10890,7 @@ const Checker = struct {
         for (scopes) |scope| {
             if (scope == node.DeclId.none) continue;
             for (self.ast.declTypeParams(scope)) |parameter| {
-                if (self.isAllocatorParameter(scope, parameter, allocator)) return parameter.name;
+                if (try self.isAllocatorParameter(scope, parameter, allocator)) return parameter.name;
             }
         }
         return null;
@@ -16318,12 +16320,19 @@ const Checker = struct {
         const found = self.leaves.items[lo];
         if (found.at >= extent.end.index()) return false;
 
-        _ = self.report(
+        const label = try std.fmt.allocPrint(self.sink.arena, "{s} inside a `defer`", .{found.what});
+        _ = if (found.schedules) self.report(
+            .s_defer,
+            found.id,
+            "a `defer` runs while its scope is ending, so what it schedules may not schedule as well",
+            .{},
+            label,
+        ) else self.report(
             .s_defer,
             found.id,
             "a `defer` runs where control leaves, so what it schedules may not leave as well",
             .{},
-            try std.fmt.allocPrint(self.sink.arena, "{s} inside a `defer`", .{found.what}),
+            label,
         );
         return true;
     }
@@ -16354,11 +16363,41 @@ const Checker = struct {
             });
         }
 
+        // A `defer` inside a deferred expression would be placed while the
+        // outer schedule is being placed, which the ownership builder,
+        // instance discovery and lowering each decline to do.
+        for (0..self.ast.stmtCount()) |i| {
+            const s = StmtId.at(@intCast(i));
+            const what: []const u8 = switch (self.ast.stmtTag(s)) {
+                .defer_stmt => "`defer`",
+                .defer_release => "`defer let`",
+                else => continue,
+            };
+            const scheduled = self.ast.stmtData(s).init;
+            if (scheduled == ExprId.none) continue;
+            try self.leaves.append(self.gpa, .{
+                .at = self.ast.stmtTokens(s).start.index(),
+                .id = scheduled,
+                .what = what,
+                .schedules = true,
+            });
+        }
+
         std.mem.sort(Leave, self.leaves.items, {}, struct {
             fn before(_: void, a: Leave, b: Leave) bool {
                 return a.at < b.at;
             }
         }.before);
+    }
+
+    /// Records that a call lends the place `value` to an `inout` parameter.
+    ///
+    /// A lend is a write the callee may make, so it asks of a projection
+    /// exactly what an assignment asks. Every call that takes a marked
+    /// argument records it here, whatever is called: a declared function, a
+    /// callable value or a closure.
+    fn lendsWritably(self: *Checker, value: ExprId) std.mem.Allocator.Error!void {
+        try self.written.append(self.gpa, .{ .at = value, .refused = "this place cannot be lent" });
     }
 
     fn checkForEffect(self: *Checker, s: StmtId) !void {
@@ -18874,7 +18913,12 @@ const Checker = struct {
         const walked = try self.check(f.callee, null);
         if (walked == .never) {
             try self.bindWalked(f.args[0], .never, null);
+            // The body is a loop's body whether or not the walk starts, so a
+            // `break` or `continue` in it answers to this loop. What it would
+            // carry out is dropped with the frame: the head never completes.
+            try self.loops.append(self.gpa, .{ .settled = null, .broke = false });
             _ = try self.check(f.args[1], null);
+            _ = self.loops.pop();
             return self.expect(id, .never, expected);
         }
 
@@ -23138,6 +23182,7 @@ const Checker = struct {
             });
             if (marked) {
                 _ = self.record(arg.*, found);
+                try self.lendsWritably(value);
             } else if (params[i].convention == .inout and !try self.lendsTemporary(value, found)) {
                 if (self.readOnlyPlace(value)) {
                     _ = self.report(.s_mutation, arg.*, "this argument is mutated, and this place cannot be written", .{}, "pass a copy of it to change a temporary");
@@ -23224,7 +23269,7 @@ const Checker = struct {
             });
             if (marked) {
                 _ = self.record(arg, found);
-                try self.written.append(self.gpa, .{ .at = value, .refused = "this place cannot be lent" });
+                try self.lendsWritably(value);
             } else if (param.convention == .inout and !try self.lendsTemporary(value, found)) {
                 if (self.readOnlyPlace(value)) {
                     _ = self.report(.s_mutation, arg, "this argument is mutated, and this place cannot be written", .{}, "pass a copy of it to change a temporary");
@@ -24120,7 +24165,7 @@ const Checker = struct {
             differing = i;
         }
         const at = differing orelse return null;
-        if (!self.isAllocatorParameter(want.decl, parameters[at], allocator)) return self.allocatorMismatchNote(wanted[at], had[at]);
+        if (!try self.isAllocatorParameter(want.decl, parameters[at], allocator)) return self.allocatorMismatchNote(wanted[at], had[at]);
         // An argument that is no allocator was refused for its bound, and
         // the two do not differ in allocator.
         if (!try self.answersTrait(wanted[at], allocator) or !try self.answersTrait(had[at], allocator)) return null;
@@ -24836,9 +24881,7 @@ const Checker = struct {
             // The marker is not an operation: it has the type of the place it
             // marks, so nothing below it sees a distinct kind of value.
             if (written_mark) _ = self.record(a, at);
-            // A lend is a write the callee may make, so it asks of a
-            // projection exactly what an assignment asks.
-            if (marked) try self.written.append(self.gpa, .{ .at = value, .refused = "this place cannot be lent" });
+            if (marked) try self.lendsWritably(value);
             if (p.convention == .inout and !marked and !unmarked_place and !try self.lendsTemporary(a, at)) {
                 arguments_valid = false;
                 try self.reportUnmarkedPlace(a, if (receiver) named else null, declared);
@@ -25463,6 +25506,29 @@ const Checker = struct {
         return at;
     }
 
+    /// The mutation of `other` made while the place `place` is evaluated: in
+    /// an index along its path, or in the value its path starts from. A name
+    /// or a field step computes nothing, so a path over a binding is asked
+    /// only about its indexes, and `o.z` is not held against `o.inner`.
+    ///
+    /// **Bound:** the steps of the path, each index walked once.
+    fn placeEvaluationMutation(
+        self: *const Checker,
+        place: ExprId,
+        other: ExprId,
+        any: bool,
+        except: BindingId,
+    ) ExprId {
+        var steps = self.ast.placeSteps(place);
+        while (steps.next()) |step| {
+            if (self.ast.exprTag(step) != .index) continue;
+            const found = self.sharedMutation(self.ast.binary(step).rhs, other, any, except);
+            if (found != ExprId.none) return found;
+        }
+        if (self.ast.refersToBinding(steps.at)) return ExprId.none;
+        return self.sharedMutation(steps.at, other, any, except);
+    }
+
     fn sharedMutation(
         self: *const Checker,
         within: ExprId,
@@ -25473,10 +25539,12 @@ const Checker = struct {
         if (within == ExprId.none) return ExprId.none;
         const tag = self.ast.exprTag(within);
 
-        // A mark's operand is a place, and a place holds no further mutation.
+        // A mark's operand is a place: lending it writes it, and evaluating
+        // it runs whatever its path computes.
         if (tag == .marked) {
             const place = self.ast.unaryOperand(within);
-            return if (self.namesPlace(other, place, any, except)) within else ExprId.none;
+            if (self.namesPlace(other, place, any, except)) return within;
+            return self.placeEvaluationMutation(place, other, any, except);
         }
 
         if (tag == .call) {
@@ -25495,12 +25563,15 @@ const Checker = struct {
             };
         }
 
-        // An assignment's left side is the place it writes, and holds no
-        // mutation of its own; its right side is an ordinary expression and
-        // may hold one.
-        if (tag == .assign) {
+        // An assignment's left side is the place it writes, whether it is
+        // written `=` or with an operator; evaluating that place runs
+        // whatever its path computes, and its right side is an ordinary
+        // expression.
+        if (tag == .assign or tag.compounds() != null) {
             const p = self.ast.binary(within);
             if (self.namesPlace(other, p.lhs, any, except)) return within;
+            const evaluated = self.placeEvaluationMutation(p.lhs, other, any, except);
+            if (evaluated != ExprId.none) return evaluated;
             return self.sharedMutation(p.rhs, other, any, except);
         }
 
@@ -27219,110 +27290,116 @@ const Checker = struct {
     fn checkArrayLiteral(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
         const c = self.ast.call(id);
 
-        // With nothing expected, the elements say what this is. Unlike a
+        if (Expected.typeOf(expected)) |want| {
+            if (want == .poison) {
+                // Nothing known about the array says what an element must be, so
+                // each is checked on its own under the same unknown context:
+                // what is wrong inside one is still reported, and nothing is held
+                // against a type nobody knows.
+                for (c.args) |a| _ = try self.check(a, expected);
+                return self.record(id, .poison);
+            }
+            switch (self.builder.view().get(want)) {
+                .array => |arr| {
+                    self.builder.setConstruction(id, want);
+                    var diverges = false;
+                    for (c.args) |a| {
+                        // An element answers to whatever gave the array its type, so a
+                        // mismatch points where that was written.
+                        const found = try self.check(a, .{ .ty = arr.element, .reason = expected.?.reason, .at = expected.?.at, .inference = expected.?.inference });
+                        if (found == .never) diverges = true;
+                    }
+
+                    if (c.args.len != arr.count) return self.report(
+                        .t_array_length,
+                        id,
+                        "an array's length is part of its type, so a literal has as many elements as the type says",
+                        .{},
+                        try std.fmt.allocPrint(
+                            self.sink.arena,
+                            "this has {d}, and the type says {d}",
+                            .{ c.args.len, arr.count },
+                        ),
+                    );
+                    if (diverges) return self.expect(id, .never, expected);
+
+                    return self.record(id, want);
+                },
+                else => {},
+            }
+        }
+
+        // With no array expected, the elements say what this is. Unlike a
         // braced literal -- where many types have an `x: Int64` and only the
         // context can say which was meant -- an array's type is its element's
         // and its count, and both are written here. `let xs = [1, 2, 3]` reads
-        // like `let x = 1`, which is how most of a program is written.
-        const want = Expected.typeOf(expected) orelse {
-            if (c.args.len == 0) return self.report(
+        // like `let x = 1`, which is how most of a program is written. An
+        // expected type that is not an array chooses nothing about the
+        // literal: the array is built from its elements and then compared
+        // with what was expected, like any other value.
+        if (c.args.len == 0) {
+            // A settled type that is not an array already disagrees with the
+            // literal, whatever it would have held.
+            if (expected) |want| if (want.inference == null) {
+                const wanted = try self.typeName(want.ty);
+                return self.report(
+                    .t_mismatch,
+                    id,
+                    "expected `{s}`, found an empty array",
+                    .{wanted},
+                    "an array literal builds an array",
+                );
+            };
+            return self.report(
                 .t_infer,
                 id,
                 "an empty array has no element to say what it holds",
                 .{},
                 "give the binding a type, or name one",
             );
+        }
 
-            // From the first element that is not a bare literal. A literal
-            // takes the type its context asks for -- that is what makes
-            // `let x: UInt8 = 42` work -- and here its context is its
-            // siblings. Reading the type off whichever element came first
-            // made `[2, n]` and `[n, 2]` different verdicts about one array.
-            var settles: usize = 0;
+        // From the first element that is not a bare literal. A literal
+        // takes the type its context asks for -- that is what makes
+        // `let x: UInt8 = 42` work -- and here its context is its
+        // siblings. Reading the type off whichever element came first
+        // made `[2, n]` and `[n, 2]` different verdicts about one array.
+        var settles: usize = 0;
+        for (c.args, 0..) |a, i| {
+            if (self.ast.exprTag(a) != .int_literal) {
+                settles = i;
+                break;
+            }
+        }
+
+        const element = try self.check(c.args[settles], null);
+        if (element == .poison) {
             for (c.args, 0..) |a, i| {
-                if (self.ast.exprTag(a) != .int_literal) {
-                    settles = i;
-                    break;
-                }
+                if (i != settles) _ = try self.check(a, null);
             }
-
-            const element = try self.check(c.args[settles], null);
-            if (element == .poison) {
-                for (c.args, 0..) |a, i| {
-                    if (i != settles) _ = try self.check(a, null);
-                }
-                return self.record(id, .poison);
-            }
-            if (element == .never) {
-                for (c.args, 0..) |a, i| {
-                    if (i != settles) _ = try self.check(a, null);
-                }
-                return self.expect(id, .never, expected);
-            }
-
-            // Checked here and not below: the shared path takes an expected
-            // type, and running both reported every element's mismatch twice.
-            var diverges = false;
-            for (c.args, 0..) |a, i| {
-                if (i == settles) continue;
-                const found = try self.check(a, .{
-                    .ty = element,
-                    .reason = .element,
-                    .at = self.locOf(c.args[settles]),
-                });
-                if (found == .never) diverges = true;
-            }
-            const of = try self.builder.arrayOf(element, @intCast(c.args.len));
-            self.builder.setConstruction(id, of);
-            if (diverges) return self.expect(id, .never, expected);
-            return self.record(id, of);
-        };
-        if (want == .poison) {
-            // Nothing known about the array says what an element must be, so
-            // each is checked on its own under the same unknown context:
-            // what is wrong inside one is still reported, and nothing is held
-            // against a type nobody knows.
-            for (c.args) |a| _ = try self.check(a, expected);
             return self.record(id, .poison);
         }
-
-        const arr = switch (self.builder.view().get(want)) {
-            .array => |a| blk: {
-                self.builder.setConstruction(id, want);
-                break :blk a;
-            },
-            else => {
-                var diverges = false;
-                for (c.args) |a| {
-                    if (try self.check(a, null) == .never) diverges = true;
-                }
-                if (diverges) return self.expect(id, .never, expected);
-                return self.expect(id, want, expected);
-            },
-        };
-
-        var diverges = false;
-        for (c.args) |a| {
-            // An element answers to whatever gave the array its type, so a
-            // mismatch points where that was written.
-            const found = try self.check(a, .{ .ty = arr.element, .reason = expected.?.reason, .at = expected.?.at, .inference = expected.?.inference });
-            if (found == .never) diverges = true;
+        if (element == .never) {
+            for (c.args, 0..) |a, i| {
+                if (i != settles) _ = try self.check(a, null);
+            }
+            return self.expect(id, .never, expected);
         }
 
-        if (c.args.len != arr.count) return self.report(
-            .t_array_length,
-            id,
-            "an array's length is part of its type, so a literal has as many elements as the type says",
-            .{},
-            try std.fmt.allocPrint(
-                self.sink.arena,
-                "this has {d}, and the type says {d}",
-                .{ c.args.len, arr.count },
-            ),
-        );
+        var diverges = false;
+        for (c.args, 0..) |a, i| {
+            if (i == settles) continue;
+            const found = try self.check(a, .{
+                .ty = element,
+                .reason = .element,
+                .at = self.locOf(c.args[settles]),
+            });
+            if (found == .never) diverges = true;
+        }
+        const of = try self.builder.arrayOf(element, @intCast(c.args.len));
+        self.builder.setConstruction(id, of);
         if (diverges) return self.expect(id, .never, expected);
-
-        return self.record(id, want);
+        return self.expect(id, of, expected);
     }
 
     /// `(a, b)`: a construction of the prelude's tuple declaration of that
@@ -32775,7 +32852,7 @@ const Checker = struct {
             const d = node.DeclId.at(@intCast(i));
             const own = self.ast.declBounds(d);
             if (own.len > 0) {
-                try self.reportCapabilityDemand(own, self.ast.declName(d));
+                try self.reportCapabilityDemand(own, self.ast.declName(d), .here);
                 for ([_]Containment{ .owned, .shareable, .isolated }) |which| {
                     if (containmentBound(self.ast, self.res, own, which)) |bound| try self.sink.addErrorFmt(
                         .t_bound,
@@ -32787,8 +32864,15 @@ const Checker = struct {
                     );
                 }
             }
-            for (self.ast.declTypeParams(d), 0..) |p, k| {
-                try self.reportCapabilityDemand(self.parameterBounds(d, k), p.name);
+            for (self.constraints.ofDeclaration(d)) |constraint| {
+                // `promiseWritten` records the `Owned`, `Shareable` and
+                // `Isolated` promises a written subject is given, across
+                // every clause naming it, and refuses a repeated one there.
+                try self.reportCapabilityDemand(
+                    self.constraints.requirementsOf(constraint),
+                    constraint.named,
+                    if (constraint.subject == .written) .where_promised else .here,
+                );
             }
         }
     }
@@ -32897,10 +32981,14 @@ const Checker = struct {
 
     /// Rejects repeated or redundant capability bounds, preserving the trait
     /// bounds that also provide operations.
+    ///
+    /// `containment` says where a repeated `Owned`, `Shareable` or `Isolated`
+    /// is refused: here, or where the subject's promises are recorded.
     fn reportCapabilityDemand(
         self: *Checker,
         bounds: []const node.TraitBound,
         named: TokenId,
+        containment: enum { here, where_promised },
     ) std.mem.Allocator.Error!void {
         const through = try self.traitsBounding(null, bounds);
         defer types_mod.freeBoundTraits(self.gpa, through);
@@ -32910,29 +32998,31 @@ const Checker = struct {
         // and a bound on that list is a token that is there.
         const at = if (named != .none) named else bounds[0].named.name;
 
-        for ([_]Containment{ .owned, .shareable, .isolated }) |which| {
-            const first = containmentBound(self.ast, self.res, bounds, which) orelse continue;
-            for (bounds) |bound| {
-                if (bound.kind != .named or bound.named.name == first) continue;
-                if (resolve_mod.boundNames(self.ast, bound.named.name, traitAt(self.ast, self.res, bound.named.name)) != containmentNamed(which)) continue;
-                return self.sink.addErrorFmt(
-                    .t_bound,
-                    self.ast.fileOf(at),
-                    self.ast.tokenSpan(at),
-                    "drop one of the two bounds",
-                    "`{s}` is bounded `{s}` twice",
-                    .{ self.ast.tokenText(at), which.spelled() },
-                );
-            }
-            if (integerDemandedBy(self.ast, self.res, bounds, through)) {
-                return self.sink.addErrorFmt(
-                    .t_bound,
-                    self.ast.fileOf(at),
-                    self.ast.tokenSpan(at),
-                    try std.fmt.allocPrint(self.sink.arena, "drop the redundant {s} bound", .{which.spelled()}),
-                    "Integer already includes {s}",
-                    .{which.spelled()},
-                );
+        if (containment == .here) {
+            for ([_]Containment{ .owned, .shareable, .isolated }) |which| {
+                const first = containmentBound(self.ast, self.res, bounds, which) orelse continue;
+                for (bounds) |bound| {
+                    if (bound.kind != .named or bound.named.name == first) continue;
+                    if (resolve_mod.boundNames(self.ast, bound.named.name, traitAt(self.ast, self.res, bound.named.name)) != containmentNamed(which)) continue;
+                    return self.sink.addErrorFmt(
+                        .t_bound,
+                        self.ast.fileOf(at),
+                        self.ast.tokenSpan(at),
+                        "drop one of the two bounds",
+                        "`{s}` is bounded `{s}` twice",
+                        .{ self.ast.tokenText(at), which.spelled() },
+                    );
+                }
+                if (integerDemandedBy(self.ast, self.res, bounds, through)) {
+                    return self.sink.addErrorFmt(
+                        .t_bound,
+                        self.ast.fileOf(at),
+                        self.ast.tokenSpan(at),
+                        try std.fmt.allocPrint(self.sink.arena, "drop the redundant {s} bound", .{which.spelled()}),
+                        "Integer already includes {s}",
+                        .{which.spelled()},
+                    );
+                }
             }
         }
 
@@ -32994,14 +33084,17 @@ const Checker = struct {
     /// resolver's, asked while `b.args` is still in hand, and a name nothing
     /// declares is refused as an unknown trait rather than as a count.
     ///
-    /// **Bound:** one visit per declaration and per type parameter it
-    /// declares, and one lookup per bound each carries.
+    /// Every subject a declaration bounds is asked: each type parameter, and
+    /// each written type its `where` clause bounds.
+    ///
+    /// **Bound:** one visit per declaration and per subject it bounds, and
+    /// one lookup per bound each carries.
     fn reportBoundArity(self: *Checker) std.mem.Allocator.Error!void {
         for (0..self.ast.declCount()) |i| {
             const d = node.DeclId.at(@intCast(i));
             try self.reportBoundArityOf(self.ast.declBounds(d));
-            for (self.ast.declTypeParams(d), 0..) |_, k| {
-                try self.reportBoundArityOf(self.parameterBounds(d, k));
+            for (self.constraints.ofDeclaration(d)) |constraint| {
+                try self.reportBoundArityOf(self.constraints.requirementsOf(constraint));
             }
         }
     }
