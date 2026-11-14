@@ -4762,7 +4762,7 @@ fn answerChainModule(gpa: std.mem.Allocator, shape: AnswerChain, links: u32, ord
 /// Checks `text` on the stack the compiler's passes run on, and returns the
 /// codes of the errors it was refused with.
 fn refusalCodes(gpa: std.mem.Allocator, text: []const u8) ![]const diagnostic.Code {
-    return compiler_stack.run(refusalCodesHere, .{ gpa, text });
+    return try compiler_stack.run(refusalCodesHere, .{ gpa, text });
 }
 
 fn refusalCodesHere(gpa: std.mem.Allocator, text: []const u8) ![]const diagnostic.Code {
@@ -16416,7 +16416,7 @@ test "slow: a walk that selects nothing, or cannot run its transcripts, fails" {
 }
 
 pub fn main(init: std.process.Init) !u8 {
-    return compiler_stack.run(runInit, .{init});
+    return try compiler_stack.run(runInit, .{init});
 }
 
 fn runInit(init: std.process.Init) !u8 {
