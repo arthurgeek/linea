@@ -11500,15 +11500,19 @@ const Resolver = struct {
         }
     };
 
+    /// An alias whose named type is being asked about, and the alias that
+    /// led to it, so a chain that returns to one of its own aliases is seen.
+    const AliasOnPath = struct { decl: node.DeclId, outer: ?*const AliasOnPath };
+
     /// Whether every name a written type reaches settled: a name nothing
     /// declares, an alias whose own type fails, and an alias that reaches itself
-    /// have each been reported where they are written.
+    /// have each been reported where they are written. A chain of aliases of
+    /// any length settles when it ends at a type.
     ///
-    /// **Bound:** the written type's own nodes, and each alias it names once
-    /// per level up to `alias_depth`.
-    fn writtenSettled(self: *const Resolver, ref: node.TypeRef, depth: u32) bool {
-        const alias_depth = 32;
-        if (depth > alias_depth) return false;
+    /// **Bound:** the written type's own nodes, and each alias on a chain
+    /// once per time the chain is followed; a chain is compared against the
+    /// aliases already on it, so one of n aliases costs n squared at most.
+    fn writtenSettled(self: *const Resolver, ref: node.TypeRef, path: ?*const AliasOnPath) bool {
         const ast = &self.program.ast;
         const x = ast.withoutTypeGroups(ref);
         switch (x.kind) {
@@ -11516,13 +11520,20 @@ const Resolver = struct {
                 const binding = self.writtenBinding(x.name);
                 if (binding == BindingId.none) return false;
                 const held = self.bindings.items[binding.index()];
-                if (held.kind == .type_alias and !self.writtenSettled(ast.declReturnRef(held.decl), depth + 1)) return false;
+                if (held.kind == .type_alias) {
+                    var on_path = path;
+                    while (on_path) |alias| : (on_path = alias.outer) {
+                        if (alias.decl == held.decl) return false;
+                    }
+                    const next: AliasOnPath = .{ .decl = held.decl, .outer = path };
+                    if (!self.writtenSettled(ast.declReturnRef(held.decl), &next)) return false;
+                }
             },
-            .selection => if (!self.writtenSettled(ast.selectionBase(x), depth)) return false,
+            .selection => if (!self.writtenSettled(ast.selectionBase(x), path)) return false,
             .callable, .array, .tuple, .borrow, .grouped => {},
         }
         for (ast.typeArgs(x.args)) |argument| {
-            if (!self.writtenSettled(argument, depth)) return false;
+            if (!self.writtenSettled(argument, path)) return false;
         }
         return true;
     }
@@ -11582,10 +11593,10 @@ const Resolver = struct {
                 // A source or a payload that failed to resolve has its own
                 // report; a missing variant would say the same mistake twice.
                 var settled = true;
-                for (written_arguments) |argument| settled = settled and self.writtenSettled(argument, 0);
+                for (written_arguments) |argument| settled = settled and self.writtenSettled(argument, null);
                 for (variants) |variant| {
                     const fields = ast.variantFields(variant);
-                    if (fields.len == 1) settled = settled and self.writtenSettled(fields[0].written, 0);
+                    if (fields.len == 1) settled = settled and self.writtenSettled(fields[0].written, null);
                 }
                 if (!settled) return false;
                 const source_text = ast.writtenText(if (written_arguments.len == 1) written_arguments[0] else wrapped);

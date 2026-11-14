@@ -1,0 +1,14 @@
+error[T-Derive]: no variant of `Near` wraps exactly `UInt8`
+  --> tests/derive_from/a_payload_behind_a_long_alias_chain_is_still_the_wrong_type.lin:48:9
+   |
+48 | @derive(From[UInt8])
+   |         ^^^^^^^^^^^ no variant wraps this source
+   |
+   = help: a variant wraps a source when its only field has the source's type; `Near` has `Wrong(Step0)`
+error[T-Derive]: no variant of `Deep` wraps exactly `UInt8`
+  --> tests/derive_from/a_payload_behind_a_long_alias_chain_is_still_the_wrong_type.lin:53:9
+   |
+53 | @derive(From[UInt8])
+   |         ^^^^^^^^^^^ no variant wraps this source
+   |
+   = help: a variant wraps a source when its only field has the source's type; `Deep` has `Wrong(Step40)`
