@@ -1,0 +1,8 @@
+// [M-Import]. A `pub use` passes on a declaration of another module. One that
+// names something its module does not declare is reported where it is
+// written, once, however many re-exports pass its name on.
+import north
+
+fn main() -> UInt8 {
+    north.value()
+}

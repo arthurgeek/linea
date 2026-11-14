@@ -7107,9 +7107,10 @@ const Resolver = struct {
     /// that names another already among them is a ring: it reaches no
     /// declaration, and is reported once, where the ring closes.
     ///
-    /// **Bound:** each re-export is resolved once, since a resolved one is
-    /// bound to a declaration and followed no further; a chain of n compares
-    /// each against those before it.
+    /// **Bound:** each re-export is resolved once: a resolved one is bound to
+    /// a declaration and followed no further, and one found to reach nothing
+    /// is marked and not resolved again. A chain of n compares each against
+    /// those before it.
     fn reexportFollowing(
         self: *Resolver,
         d: DeclId,
@@ -7128,11 +7129,15 @@ const Resolver = struct {
         // mistake, and the same rule, as an import naming a module nothing
         // names through.
         if (here) |h| {
+            // One a re-export elsewhere led to and found to reach nothing was
+            // reported then.
+            if (h.unresolved) return;
             h.reexported = true;
             if (reachForVisibility(self.ast.declVisibility(d)) == .public) h.exempt = true;
         }
 
         const elements = self.pathOf(d) orelse {
+            if (here) |h| h.unresolved = true;
             return self.sink.addErrorFmt(
                 .m_import,
                 self.ast.fileOf(self.ast.declName(d)),
@@ -7183,6 +7188,7 @@ const Resolver = struct {
 
             if (!reachableFrom(self.program, held.reach, holding, self.current)) {
                 held.used = true;
+                if (here) |h| h.unresolved = true;
                 try self.reportUnreachable(elements[1], holding, held.reach);
                 return;
             }
