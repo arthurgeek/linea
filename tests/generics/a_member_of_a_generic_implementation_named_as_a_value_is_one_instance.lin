@@ -1,0 +1,33 @@
+// A member of a generic implementation named as a value inside that
+// implementation is named at the type the implementation was given, so it
+// reaches the instance already being built.
+struct Holder[T] {
+    held: T,
+}
+
+impl[T: Copyable] Holder[T] {
+    fn peek(self: Holder[T], again: Bool) -> UInt8 {
+        let next = Holder.peek
+        if again {
+            next(self, false)
+        } else {
+            3
+        }
+    }
+}
+
+fn visit[T: Copyable](holder: Holder[T], f: fn(h: Holder[T], again: Bool) -> UInt8) -> UInt8 {
+    f(holder, false)
+}
+
+impl[T: Copyable] Holder[T] {
+    fn through_a_callback(self: Holder[T]) -> UInt8 {
+        visit(self, Holder.peek)
+    }
+}
+
+fn main() -> UInt8 {
+    let holder: Holder[UInt8] = .{ held = 1 }
+    let other: Holder[Bool] = .{ held = true }
+    holder.peek(true) + other.through_a_callback()
+}

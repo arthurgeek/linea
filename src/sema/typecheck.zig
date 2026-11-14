@@ -33651,6 +33651,33 @@ const Checker = struct {
         );
     }
 
+    /// What a member of a generic inherent implementation, named as a value,
+    /// gives the implementation's own parameters: the arguments a call of the
+    /// member records, read back from the receiver type the value was
+    /// selected for. Empty for any other value, and where the receiver does
+    /// not say them all.
+    fn valueHeadArguments(self: *Checker, member: node.DeclId, implementation: ?types_mod.CallImpl) std.mem.Allocator.Error![]const TypeId {
+        const selected = implementation orelse return &.{};
+        if (selected.trait != types_mod.Implementation.no_trait) return &.{};
+        const head = self.headParametersOf(member);
+        if (head == node.DeclId.none) return &.{};
+        const row = self.rowFor(head) orelse return &.{};
+        const count = self.ast.declTypeParams(head).len;
+        if (count == 0) return &.{};
+
+        const found = try self.gpa.alloc(TypeId, count);
+        errdefer self.gpa.free(found);
+        @memset(found, .poison);
+        var clash: ?Clash = null;
+        const receiver = try self.builder.resolveOpen(selected.self_ty, &self.open_types);
+        const settled = try self.settle(row.ty, receiver, head, found, &clash);
+        if (!settled or std.mem.indexOfScalar(TypeId, found, .poison) != null) {
+            self.gpa.free(found);
+            return &.{};
+        }
+        return found;
+    }
+
     /// Refuse recurring type arguments whose structural height is unbounded.
     /// Only constructor-growing calls need a bounded-reentry query.
     fn checkPolyRec(self: *Checker) std.mem.Allocator.Error!void {
@@ -33661,7 +33688,10 @@ const Checker = struct {
         // below see one kind of edge.
         const written_calls = self.calls.items.len;
         defer {
-            for (self.calls.items[written_calls..]) |named| self.call_of[named.at.index()] = no_call;
+            for (self.calls.items[written_calls..]) |named| {
+                self.call_of[named.at.index()] = no_call;
+                if (named.selection.impl_args.len > 0) self.gpa.free(named.selection.impl_args);
+            }
             self.calls.shrinkRetainingCapacity(written_calls);
         }
         for (self.function_values.items) |value| {
@@ -33670,13 +33700,15 @@ const Checker = struct {
                 .closure, .constructor => continue,
             };
             if (self.call_of[value.at.index()] != no_call) continue;
+            const impl_args = try self.valueHeadArguments(target, value.implementation);
+            errdefer if (impl_args.len > 0) self.gpa.free(impl_args);
             const index: u32 = @intCast(self.calls.items.len);
             try self.calls.append(self.gpa, .{
                 .at = value.at,
                 .target = .{ .declared = target },
                 .signature = value.signature,
                 .args = &.{},
-                .selection = .{ .own_args = value.type_args, .implementation = value.implementation },
+                .selection = .{ .own_args = value.type_args, .implementation = value.implementation, .impl_args = impl_args },
             });
             self.call_of[value.at.index()] = index;
         }

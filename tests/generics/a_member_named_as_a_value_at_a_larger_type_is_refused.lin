@@ -1,0 +1,27 @@
+// [T-PolyRec]. A member of a generic implementation named as a value and
+// called at a larger receiver builds a larger instance on every round, as
+// calling it there does.
+@copyable
+struct Wrap[phantom T] {}
+
+struct Holder[T] {
+    held: T,
+    count: UInt8,
+}
+
+impl[T: Copyable] Holder[T] {
+    fn peek(self: Holder[T], again: Bool) -> UInt8 {
+        let next = Holder.peek
+        let deeper: Holder[Wrap[T]] = .{ held = Wrap[T] {}, count = self.count }
+        if again {
+            next(deeper, true)
+        } else {
+            3
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let holder: Holder[UInt8] = .{ held = 1, count = 2 }
+    holder.peek(true)
+}
