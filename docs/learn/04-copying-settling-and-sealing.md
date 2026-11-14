@@ -1337,6 +1337,54 @@ the first thing cleaned up.
 If you know Go, this is the difference to watch: Go's `defer` runs when the
 function returns, and Linea's when the enclosing *block* ends.
 
+### A `defer` cannot hold another `defer`
+
+A deferred expression runs while its block is ending, so there is no later
+moment in that block left to schedule for. Writing a `defer` inside one is an
+error:
+
+`closing.lin`:
+```linea
+import std.io
+
+fn main() -> UInt8 {
+    defer {
+        defer io.eprintln("Lights off.")
+        io.eprintln("Doors locked.")
+    }
+    0
+}
+```
+
+```
+error[S-Defer]: a `defer` runs while its scope is ending, so what it schedules may not schedule as well
+ --> closing.lin:5:15
+  |
+5 |         defer io.eprintln("Lights off.")
+  |               ^^^^^^^^^^^^^^^^^^^^^^^^^^ `defer` inside a `defer`
+```
+
+Two `defer`s in the same block do the job. They run in reverse, so the one
+written first runs last:
+
+```linea
+import std.io
+
+fn main() -> UInt8 {
+    defer io.eprintln("Lights off.")
+    defer io.eprintln("Doors locked.")
+    0
+}
+```
+
+```
+Doors locked.
+Lights off.
+```
+
+A function the deferred expression calls is a block of its own and may use
+`defer` freely.
+
 ### A `defer` and a move
 
 A `defer` that settles a value, such as `defer note.release()`, runs only on
