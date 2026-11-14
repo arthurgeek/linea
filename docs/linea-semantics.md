@@ -4481,7 +4481,10 @@ the second consumes it first, and the first schedule never runs.
 
 **[S-Defer]** A `defer` must contain an expression that does not leave the scope.
 `return`, `break`, `continue` and `?` cannot transfer control out of a deferred
-expression during scope exit. An empty `defer` is also rejected.
+expression during scope exit. A deferred expression may not hold a `defer`,
+`defer let` or `defer var` either: it runs while its scope is ending, and
+nothing written inside it schedules. A function it calls is a scope of its own
+and may schedule. An empty `defer` is also rejected.
 
 Deferred expressions run at every enclosing scope exit, last scheduled first. The
 compiler selects their execution sites and verifies that the written schedule
