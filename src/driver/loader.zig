@@ -2,6 +2,7 @@ const std = @import("std");
 const slow_tests = @import("../support/slow_tests.zig");
 const loader_mod = @This();
 const module_route = @import("../support/module_route.zig");
+const manifest_source = @import("../support/manifest_source.zig");
 const tracy = @import("../support/tracy.zig");
 const symbol_names = @import("../support/symbol.zig");
 const isIdentifier = @import("../lexer/lexer.zig").isIdentifier;
@@ -872,6 +873,9 @@ fn loadFromDiskWith(
     // A command line says which it means and is believed. Bounded by the
     // directory the compiler was run in, so a manifest further up names
     // somebody else's program and not this one.
+    // `rootOf` reads the manifest that marks the root, strictly: one that
+    // will not parse, or says what a root cannot be, stops the command here
+    // and is not read from disk again.
     const found = try rootOf(gpa, io, entry, .as_named, "");
     defer found.deinit(gpa);
     const given = found.entry;
@@ -879,14 +883,6 @@ fn loadFromDiskWith(
     if (std.mem.endsWith(u8, given, ".lin")) {
         const named = try std.Io.Dir.cwd().openFile(io, given, .{});
         named.close(io);
-    }
-
-    // Read strictly here, because the person who ran the command is there to
-    // be told: a manifest that will not parse, or says what a root cannot be,
-    // stops the command rather than loading the root as something else.
-    if (found.manifest) |path| {
-        const manifest = try readManifest(gpa, io, dirOf(path));
-        if (manifest) |m| freeManifest(gpa, m);
     }
 
     const paths = try pathsOfRoot(gpa, io, found);
@@ -1722,8 +1718,9 @@ fn parseManifest(gpa: std.mem.Allocator, text: []const u8) !Manifest {
     errdefer declared.deinit(gpa);
     // A `source` leaving the directory holding the manifest is refused here,
     // for a root and for a library alike: the one check either takes.
-    if (parsed.value.source) |named| if (named.len > 0 and !try sourceStaysInside(gpa, named)) return error.ManifestSourceLeavesRoot;
-    const source: ?[]const u8 = if (parsed.value.source) |named| (if (named.len == 0) null else try gpa.dupe(u8, named)) else null;
+    const written = manifest_source.named(parsed.value.source);
+    if (written) |named| if (!try manifest_source.staysInside(gpa, named)) return error.ManifestSourceLeavesRoot;
+    const source: ?[]const u8 = if (written) |named| try gpa.dupe(u8, named) else null;
     errdefer if (source) |named| gpa.free(named);
     const name: ?[]const u8 = if (parsed.value.name) |named| try gpa.dupe(u8, named) else null;
     return .{ .source = source, .name = name, .declared = declared };
@@ -1740,27 +1737,6 @@ fn freeManifest(gpa: std.mem.Allocator, manifest: Manifest) void {
 fn librarySourceDir(gpa: std.mem.Allocator, dir: []const u8, source: ?[]const u8) std.mem.Allocator.Error![]const u8 {
     const named = source orelse return dir;
     return joinedDir(gpa, dir, named);
-}
-
-/// Whether a manifest's `source`, read from the directory holding the
-/// manifest, names a directory inside that one. Decided by spelling, so a
-/// root read from disk and one read from memory agree: an absolute path, and
-/// one whose `..` climbs past the directory, name another directory's files.
-pub fn sourceStaysInside(gpa: std.mem.Allocator, source: []const u8) std.mem.Allocator.Error!bool {
-    if (source.len > 0 and source[0] == '/') return false;
-    const resolved = try std.fs.path.resolvePosix(gpa, &.{source});
-    defer gpa.free(resolved);
-    return !(std.mem.eql(u8, resolved, "..") or std.mem.startsWith(u8, resolved, "../"));
-}
-
-test "a manifest's source stays inside the directory holding it" {
-    const gpa = testing.allocator;
-    try testing.expect(try sourceStaysInside(gpa, "src"));
-    try testing.expect(try sourceStaysInside(gpa, "./src/"));
-    try testing.expect(try sourceStaysInside(gpa, "src/../lib"));
-    try testing.expect(!try sourceStaysInside(gpa, "../elsewhere/src"));
-    try testing.expect(!try sourceStaysInside(gpa, "src/../../x"));
-    try testing.expect(!try sourceStaysInside(gpa, "/tmp"));
 }
 
 /// The keys a manifest may write. Unknown ones are ignored, so a manifest may
