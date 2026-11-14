@@ -504,6 +504,10 @@ static void a_listener_is_refused_once_every_dynamic_port_is_held(void) {
         given[port] = 1;
     }
     assert(linea_net_listen(loopback(0), 1) == -(long)EADDRINUSE);
+    /* A connection takes a dynamic port for its own end, so with none left
+     * it is refused too, though a listener is there to take it. */
+    const unsigned listening = (unsigned)(linea_net_local_address((int)listeners[0]) & 0xffff);
+    assert(linea_net_connect(loopback(listening), 0) == -(long)EADDRNOTAVAIL);
     const unsigned freed = (unsigned)(linea_net_local_address((int)listeners[7]) & 0xffff);
     assert(linea_net_close((int)listeners[7]) == 0);
     listeners[7] = linea_net_listen(loopback(0), 1);
