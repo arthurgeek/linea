@@ -314,6 +314,35 @@ test "a tuple implementation symbol names its complete head" {
     return error.TestExpectedEqual;
 }
 
+test "a callable implementation symbol names its complete head" {
+    const gpa = testing.allocator;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text =
+        \\trait Marker {}
+        \\
+        \\impl Marker for fn(_x: UInt8) -> Option[UInt8] {}
+        \\
+        \\impl Marker for fn(_x: UInt8) -> borrow Option[UInt8] {}
+        \\
+        \\fn main() -> UInt8 { 0 }
+        \\
+    }}, "main.lin");
+    defer checked.deinit();
+
+    const found = try forFile(gpa, &checked, checked.fileNamed("main.lin").?, .@"utf-16");
+    defer free(gpa, found);
+
+    // The result's own arguments are part of the head, behind a `borrow` as
+    // much as written bare.
+    var seen: usize = 0;
+    for (found) |symbol| {
+        if (symbol.kind != .Object) continue;
+        const want = if (seen == 0) "fn(_x: UInt8) -> Option[UInt8]" else "fn(_x: UInt8) -> borrow Option[UInt8]";
+        try testing.expectEqualStrings(want, symbol.name);
+        seen += 1;
+    }
+    try testing.expectEqual(@as(usize, 2), seen);
+}
+
 test "a derive symbol selects the name its head applies, as an implementation's does" {
     const gpa = testing.allocator;
     var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text =

@@ -264,8 +264,6 @@ pub const RawAccesses = struct {
     send_payload: DeclId = .none,
     receive_payload: DeclId = .none,
     receive_payload_until: DeclId = .none,
-    /// `session.detach`, the free declaration that names a `Chan`'s fields.
-    session_detach: DeclId = .none,
     /// `call_owner` and `next_owner_request`, which trust that a queue holds
     /// jobs for the state asked for: `task.Client.call` and `task.run_owner`.
     call_owner: DeclId = .none,
@@ -451,7 +449,6 @@ pub const RawAccesses = struct {
             .send_payload = moduleFunction(program, ast, "mem", "send_payload"),
             .receive_payload = moduleFunction(program, ast, "mem", "receive_payload"),
             .receive_payload_until = moduleFunction(program, ast, "mem", "receive_payload_until"),
-            .session_detach = moduleFunction(program, ast, "session", "detach"),
             .call_owner = moduleFunction(program, ast, "mem", "call_owner"),
             .next_owner_request = moduleFunction(program, ast, "mem", "next_owner_request"),
             .client_call = memberOf(program, ast, "task", "Client", "call"),
@@ -641,9 +638,8 @@ pub const RawAccesses = struct {
     /// take it back on a backing allocator's behalf; a view's where
     /// `Vec.split` lends its two sides; a vector's where a byte vector
     /// is made from a buffer and taken back; a kept body's where
-    /// `task.Slot.start` hands its addresses to the task it starts; a
-    /// `Chan`'s where `session.detach` takes one apart; an owner's where
-    /// `task.own` builds one and `task.Client.call` reaches its queue; an
+    /// `task.Slot.start` hands its addresses to the task it starts; an
+    /// owner's where `task.own` builds one and `task.Client.call` reaches its queue; an
     /// arena's where its free functions and its handle's release read it;
     /// a `ProbeTag`'s where `probe_tag` builds one; and a wait set's and a
     /// key's nowhere else, since the set's number and the key's slot and
@@ -656,7 +652,7 @@ pub const RawAccesses = struct {
         .{ .decl = "closure" },
         .{ .decl = "vec", .also = &.{ "vector_from_buffer", "vector_into_buffer" } },
         .{ .decl = "kept", .also = &.{ "keep_body", "task_slot_start" } },
-        .{ .decl = "endpoint", .also = &.{"session_detach"} },
+        .{ .decl = "endpoint" },
         .{ .decl = "owner", .also = &.{ "client_call", "task_own" } },
         .{ .decl = "arena", .also = &.{ "arena_table_of", "arena_give_back", "arena_reserve", "arena_holds", "handle_dispose" } },
         .{ .decl = "probe_tag", .also = &.{"probe_tag_builder"} },
