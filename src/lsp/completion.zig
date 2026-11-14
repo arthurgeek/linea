@@ -471,10 +471,33 @@ fn declaredBy(ast: *const Ast, res: *const Resolution, b: BindingId, file: FileI
     if (ast.tokenSpan(declared).start >= offset) return false;
     const statement = res.stmtOf(b);
     if (statement == .none) return true;
+    return endedBefore(ast, statement, file, offset);
+}
+
+/// Whether statement `statement` has ended before `offset`, so that what is
+/// written there begins another. Asked of the statement and not of its
+/// initialiser, because an initialiser not yet written, or one the parser
+/// recovered from, has no extent that holds the cursor.
+fn endedBefore(ast: *const Ast, statement: node.StmtId, file: FileId, offset: u32) bool {
+    const extent = ast.stmtSpan(statement);
+    if (offset <= extent.end) return false;
+
+    // Something written past the statement begins the next one.
+    var before = positions.tokenBefore(ast, file, offset);
+    while (before != .none and ast.tokenTag(before).isTrivia() and ast.tokenSpan(before).start >= extent.end) {
+        if (before.index() == 0) break;
+        before = TokenId.at(before.index() - 1);
+    }
+    if (before != .none and ast.tokenSpan(before).start >= extent.end) return true;
+
+    // Nothing is: the cursor is still in the statement on its own line, and
+    // on a later one unless the statement is whole, since a line break after
+    // `=` or an operator continues it.
     const init = ast.stmtData(statement).init;
-    if (init == .none) return true;
-    const extent = ast.exprSpan(init);
-    return !(extent.start <= offset and offset <= extent.end);
+    if (init == .none or ast.exprTag(init) == .err) return false;
+    if (ast.exprSpan(init).end != extent.end) return false;
+    const source = ast.partOfFile(file).?.source;
+    return std.mem.indexOfScalar(u8, source[extent.end..offset], '\n') != null;
 }
 
 /// Where a cursor sits inside a declaration attribute. A derive entry takes no
@@ -2458,6 +2481,30 @@ test "a local is offered from the statement after the one that declares it" {
     try testing.expectError(error.TestExpectedCompletion, requireItem(before, "late"));
     // A binding is not in scope inside the expression that initialises it.
     try testing.expectError(error.TestExpectedCompletion, requireItem(before, "_before"));
+
+    // An initialiser not yet written, or left unfinished, is still the
+    // statement's: its own name is not offered, and an earlier binding of the
+    // same name is the one described.
+    inline for (.{
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = |\n    2\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = |\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool =| x\n    2\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: UInt8 = x + |\n}\n",
+    }) |marked| {
+        const at = comptime std.mem.indexOfScalar(u8, marked, '|').?;
+        const unfinished = marked[0..at] ++ marked[at + 1 ..];
+        var partial = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = unfinished }}, "main.lin");
+        defer partial.deinit();
+        const offered = try offeredReading(gpa, &partial, partial.fileNamed("main.lin").?, at, .unsupported);
+        defer free(gpa, offered);
+        try testing.expectEqualStrings("UInt8", (try requireItem(offered, "x")).detail.?);
+    }
+
+    // On the line after a whole statement, its local is offered.
+    const next_line = std.mem.indexOf(u8, text, "    let late").?;
+    const below = try offeredReading(gpa, &checked, file, next_line, .unsupported);
+    defer free(gpa, below);
+    try testing.expectEqualStrings("Bool", (try requireItem(below, "x")).detail.?);
 
     // Past both, the name is the second, and the later local is offered.
     const last = std.mem.indexOf(u8, text, "if x").? + "if ".len;
