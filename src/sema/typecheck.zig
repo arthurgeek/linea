@@ -16391,6 +16391,16 @@ const Checker = struct {
         }.before);
     }
 
+    /// Records that a call lends the place `value` to an `inout` parameter.
+    ///
+    /// A lend is a write the callee may make, so it asks of a projection
+    /// exactly what an assignment asks. Every call that takes a marked
+    /// argument records it here, whatever is called: a declared function, a
+    /// callable value or a closure.
+    fn lendsWritably(self: *Checker, value: ExprId) std.mem.Allocator.Error!void {
+        try self.written.append(self.gpa, .{ .at = value, .refused = "this place cannot be lent" });
+    }
+
     fn checkForEffect(self: *Checker, s: StmtId) !void {
         {
             const e = self.ast.stmtData(s).init;
@@ -23173,6 +23183,7 @@ const Checker = struct {
             });
             if (marked) {
                 _ = self.record(arg.*, found);
+                try self.lendsWritably(value);
             } else if (params[i].convention == .inout and !try self.lendsTemporary(value, found)) {
                 if (self.readOnlyPlace(value)) {
                     _ = self.report(.s_mutation, arg.*, "this argument is mutated, and this place cannot be written", .{}, "pass a copy of it to change a temporary");
@@ -23259,7 +23270,7 @@ const Checker = struct {
             });
             if (marked) {
                 _ = self.record(arg, found);
-                try self.written.append(self.gpa, .{ .at = value, .refused = "this place cannot be lent" });
+                try self.lendsWritably(value);
             } else if (param.convention == .inout and !try self.lendsTemporary(value, found)) {
                 if (self.readOnlyPlace(value)) {
                     _ = self.report(.s_mutation, arg, "this argument is mutated, and this place cannot be written", .{}, "pass a copy of it to change a temporary");
@@ -24871,9 +24882,7 @@ const Checker = struct {
             // The marker is not an operation: it has the type of the place it
             // marks, so nothing below it sees a distinct kind of value.
             if (written_mark) _ = self.record(a, at);
-            // A lend is a write the callee may make, so it asks of a
-            // projection exactly what an assignment asks.
-            if (marked) try self.written.append(self.gpa, .{ .at = value, .refused = "this place cannot be lent" });
+            if (marked) try self.lendsWritably(value);
             if (p.convention == .inout and !marked and !unmarked_place and !try self.lendsTemporary(a, at)) {
                 arguments_valid = false;
                 try self.reportUnmarkedPlace(a, if (receiver) named else null, declared);
