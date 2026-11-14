@@ -19930,7 +19930,13 @@ fn signalOf(text: []const u8) []const u8 {
     const body = std.mem.trimEnd(u8, text, "\n");
     const start = if (std.mem.lastIndexOfScalar(u8, body, '\n')) |nl| nl + 1 else 0;
     const last = body[start..];
-    return if (std.mem.startsWith(u8, last, signal_note)) last else "";
+    // The note and a number, and nothing after it: a line of the program's
+    // own that only begins like the note is the program's text.
+    if (!std.mem.startsWith(u8, last, signal_note)) return "";
+    const number = last[signal_note.len..];
+    if (number.len == 0) return "";
+    for (number) |digit| if (!std.ascii.isDigit(digit)) return "";
+    return last;
 }
 
 /// Whether two runs ended the same way: with the same status, or both
@@ -19996,6 +20002,10 @@ test "two runs end alike only with one status, one abort or one signal" {
     try testing.expect(sameEnding("trap\nstopped by signal 11\n", "trap\nsaid first\nstopped by signal 11\n"));
     try testing.expectEqualStrings("stopped by signal 11", signalOf("trap\nsaid first\nstopped by signal 11\n"));
     try testing.expectEqualStrings("", signalOf("exit 3\n"));
+    // Text the program left unterminated before the runtime's own report
+    // begins like the note and is not one.
+    try testing.expectEqualStrings("", signalOf("trap\nstopped by signal 9linea: index out of bounds at a.lin:3:5\n"));
+    try testing.expect(sameEnding("trap\nstopped by signal 9linea: index out of bounds at a.lin:3:5\n", "trap\nstopped by signal 9linea: index out of bounds at a.lin:9:1\n"));
     try testing.expectEqualStrings("", signalOf("trap\nlinea: not a number at a.lin:1:1\n"));
 }
 
