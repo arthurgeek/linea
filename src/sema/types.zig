@@ -4704,6 +4704,36 @@ pub const ImplIndex = struct {
     /// bound into the parameter's match, so `fn get(self: Box[T])` inside
     /// `impl[T] Box[T]` takes the box the head admitted and nothing else.
     pub fn bindKey(pool: anytype, actual: TypeId, written: TypeId, owner: u32, bindings: []TypeId) bool {
+        var matched: MatchedKeys = .{};
+        return bindKeyPast(pool, actual, written, owner, bindings, &matched);
+    }
+
+    /// The pairs of instantiations one `bindKey` has matched, so a pair
+    /// reached again along another path is not matched again. A type is one
+    /// entry however often it is named, and a binding keeps the type it was
+    /// given, so matching a pair a second time reads the same bindings and
+    /// changes none. A fixed table and no allocation: a pair that loses its
+    /// place to another is matched again, which costs time and nothing else.
+    const MatchedKeys = struct {
+        pairs: [256]Pair = @splat(.{}),
+
+        const Pair = struct { actual: TypeId = .poison, written: TypeId = .poison };
+
+        fn place(actual: TypeId, written: TypeId) usize {
+            return (@as(usize, @intFromEnum(actual)) *% 31 +% @intFromEnum(written)) % 256;
+        }
+
+        fn holds(self: *const MatchedKeys, actual: TypeId, written: TypeId) bool {
+            const pair = self.pairs[place(actual, written)];
+            return pair.actual == actual and pair.written == written;
+        }
+
+        fn note(self: *MatchedKeys, actual: TypeId, written: TypeId) void {
+            self.pairs[place(actual, written)] = .{ .actual = actual, .written = written };
+        }
+    };
+
+    fn bindKeyPast(pool: anytype, actual: TypeId, written: TypeId, owner: u32, bindings: []TypeId, matched: *MatchedKeys) bool {
         if (actual == .poison or written == .poison) return false;
         if (pool.standinOf(written) != null) return true;
         if (pool.get(written) == .parameter) {
@@ -4721,21 +4751,23 @@ pub const ImplIndex = struct {
             const want = want_instance orelse return false;
             const got = got_instance orelse return false;
             if (want.decl != got.decl) return false;
+            if (matched.holds(actual, written)) return true;
             const wanted = pool.argsOf(want);
             const given = pool.argsOf(got);
             if (wanted.len != given.len) return false;
             for (given, wanted) |got_arg, want_arg| {
-                if (!bindKey(pool, got_arg, want_arg, owner, bindings)) return false;
+                if (!bindKeyPast(pool, got_arg, want_arg, owner, bindings, matched)) return false;
             }
+            matched.note(actual, written);
             return true;
         }
         return switch (pool.get(written)) {
             .borrow => |want| switch (pool.get(actual)) {
-                .borrow => |got| bindKey(pool, got.referent, want.referent, owner, bindings),
+                .borrow => |got| bindKeyPast(pool, got.referent, want.referent, owner, bindings, matched),
                 else => false,
             },
             .array => |want| switch (pool.get(actual)) {
-                .array => |got| got.count == want.count and bindKey(pool, got.element, want.element, owner, bindings),
+                .array => |got| got.count == want.count and bindKeyPast(pool, got.element, want.element, owner, bindings, matched),
                 else => false,
             },
             .callable => |want| switch (pool.get(actual)) {
@@ -4749,9 +4781,9 @@ pub const ImplIndex = struct {
                         // parameter taken `inout` is another signature from
                         // one read, whatever its type.
                         if (!got_parameter.samePosition(want_parameter)) break :blk false;
-                        if (!bindKey(pool, got_parameter.ty, want_parameter.ty, owner, bindings)) break :blk false;
+                        if (!bindKeyPast(pool, got_parameter.ty, want_parameter.ty, owner, bindings, matched)) break :blk false;
                     }
-                    break :blk bindKey(pool, got.result, want.result, owner, bindings);
+                    break :blk bindKeyPast(pool, got.result, want.result, owner, bindings, matched);
                 },
                 else => false,
             },
@@ -4788,6 +4820,39 @@ pub const ImplIndex = struct {
         try testing.expect(!bindKey(&b, box_bool, box_u8, impl_decl.index(), &none));
         try testing.expect(bindKey(&b, .u8, .u8, impl_decl.index(), &none));
         try testing.expect(!bindKey(&b, .bool_, .u8, impl_decl.index(), &none));
+    }
+
+    test "bindKey: a type that names its parts many times over is matched part by part once" {
+        const gpa = testing.allocator;
+        var b = try Typing.Builder.init(gpa);
+        defer b.deinit();
+
+        const pair_decl: DeclId = @enumFromInt(1);
+        const template = try b.addStruct("P", .copyable, &.{});
+        try b.noteTemplate(pair_decl, 0, template);
+        const impl_decl: DeclId = @enumFromInt(2);
+        const t = try b.addParameter("T", impl_decl.index(), 0, .unrestricted, &.{});
+
+        // `P[x, x]` over itself forty levels deep: forty types, and a
+        // trillion paths through them.
+        const levels = 40;
+        var over_u8: TypeId = .u8;
+        var over_bool: TypeId = .bool_;
+        var over_t: TypeId = t;
+        for (0..levels) |_| {
+            over_u8 = try b.instantiate(template, pair_decl, &.{ over_u8, over_u8 });
+            over_bool = try b.instantiate(template, pair_decl, &.{ over_bool, over_bool });
+            over_t = try b.instantiate(template, pair_decl, &.{ over_t, over_t });
+        }
+
+        var none: [0]TypeId = .{};
+        try testing.expect(bindKey(&b, over_u8, over_u8, impl_decl.index(), &none));
+        try testing.expect(!bindKey(&b, over_bool, over_u8, impl_decl.index(), &none));
+        // A parameter at the leaves is bound once and holds along every path.
+        var bindings = [_]TypeId{.poison};
+        try testing.expect(bindKey(&b, over_bool, over_t, impl_decl.index(), &bindings));
+        try testing.expectEqual(TypeId.bool_, bindings[0]);
+        try testing.expect(!bindKey(&b, over_u8, over_t, impl_decl.index(), &bindings));
     }
 
     fn answersFor(
