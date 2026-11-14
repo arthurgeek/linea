@@ -349,7 +349,9 @@ pub fn emit(
         const id = FunctionId.at(@intCast(i));
         if (module.isExternal(id)) continue;
         const name = module.exportedNameOf(id) orelse continue;
-        try emitForeignEntry(w, module, f, id, .{ .exported = name }, options.sanitize);
+        const body = try checkedForeignBody(gpa, module, f, id, .{ .exported = name }, sink) orelse return false;
+        defer body.deinit(gpa);
+        try emitForeignEntry(w, module, f, id, .{ .exported = name }, options.sanitize, body);
     }
 
     // One C-callable entry per function passed to C as a callback, found in
@@ -371,7 +373,9 @@ pub fn emit(
         const id = FunctionId.at(@intCast(i));
         for ([_]struct { bit: u2, entry: ForeignEntry }{ .{ .bit = 1, .entry = .called_back }, .{ .bit = 2, .entry = .runtime_called_back } }) |one| {
             if (wanted & one.bit == 0) continue;
-            try emitForeignEntry(w, module, f, id, one.entry, options.sanitize);
+            const body = try checkedForeignBody(gpa, module, f, id, one.entry, sink) orelse return false;
+            defer body.deinit(gpa);
+            try emitForeignEntry(w, module, f, id, one.entry, options.sanitize, body);
         }
     }
 
@@ -701,6 +705,213 @@ const ForeignPlan = struct {
     }
 };
 
+/// One step of a C-callable entry's body, in the order it runs.
+const ForeignStep = union(enum) {
+    /// Enters, or leaves, foreign execution.
+    enter,
+    leave,
+    /// Widens parameter `n` from its declared width to the body's.
+    widen: u32,
+    /// Makes the float in parameter `n` canonical, in the value handed over
+    /// or at the address handed over.
+    canonical_value: u32,
+    canonical_at: u32,
+    /// Calls the body.
+    call,
+    /// Narrows the body's answer to the declared width.
+    narrow,
+    /// Ends the entry: after a body that never returns, with nothing, with
+    /// the answer as the body gave it, or with the narrowed answer.
+    unreachable_,
+    return_nothing,
+    return_answer,
+    return_narrowed,
+
+    fn ends(self: ForeignStep) bool {
+        return switch (self) {
+            .unreachable_, .return_nothing, .return_answer, .return_narrowed => true,
+            else => false,
+        };
+    }
+};
+
+/// Which value of a parameter the entry hands the body.
+const ForeignArgument = enum { as_given, widened, canonical };
+
+/// The body of a C-callable entry as the steps it runs and the arguments it
+/// passes, built from the plan and held to what the boundary requires before
+/// any of it is written. An entry is generated code no pass over the
+/// module's functions sees, so it is checked here, as what will be printed
+/// and not as the answers it was made from.
+const ForeignBody = struct {
+    steps: []const ForeignStep,
+    arguments: []const ForeignArgument,
+
+    fn of(gpa: std.mem.Allocator, module: *const Module, mir: *const Mir, entry: ForeignEntry) std.mem.Allocator.Error!ForeignBody {
+        const plan = ForeignPlan.of(module, mir, entry);
+        var steps: std.ArrayList(ForeignStep) = .empty;
+        errdefer steps.deinit(gpa);
+        const arguments = try gpa.alloc(ForeignArgument, mir.param_count);
+        errdefer gpa.free(arguments);
+
+        if (plan.enters) try steps.append(gpa, .enter);
+        for (0..mir.param_count) |i| {
+            if (ForeignParameter.of(module, mir, i).widened) try steps.append(gpa, .{ .widen = @intCast(i) });
+        }
+        for (arguments, 0..) |*argument, i| {
+            const parameter = ForeignParameter.of(module, mir, i);
+            switch (parameter.canonical) {
+                .none => {},
+                .value => try steps.append(gpa, .{ .canonical_value = @intCast(i) }),
+                .at_address => try steps.append(gpa, .{ .canonical_at = @intCast(i) }),
+            }
+            argument.* = if (parameter.widened) .widened else if (parameter.canonical == .value) .canonical else .as_given;
+        }
+        try steps.append(gpa, .call);
+        if (plan.never) {
+            try steps.append(gpa, .unreachable_);
+        } else {
+            if (plan.leaves) try steps.append(gpa, .leave);
+            if (!plan.answers) {
+                try steps.append(gpa, .return_nothing);
+            } else if (plan.narrows) {
+                try steps.append(gpa, .narrow);
+                try steps.append(gpa, .return_narrowed);
+            } else {
+                try steps.append(gpa, .return_answer);
+            }
+        }
+        return .{ .steps = try steps.toOwnedSlice(gpa), .arguments = arguments };
+    }
+
+    fn deinit(self: ForeignBody, gpa: std.mem.Allocator) void {
+        gpa.free(self.steps);
+        gpa.free(self.arguments);
+    }
+
+    /// The obligation of the boundary these steps break, or null. Read from
+    /// the steps and from the body's signature, never from the plan.
+    ///
+    /// **Bound:** the steps once, and each parameter's steps once more, so
+    /// the steps times the parameters at most; an entry has a few steps per
+    /// parameter.
+    fn broken(self: ForeignBody, module: *const Module, mir: *const Mir, entry: ForeignEntry) ?[]const u8 {
+        if (self.arguments.len != mir.param_count) return "an entry passes its body another number of arguments than it takes";
+
+        var call: ?usize = null;
+        var enter: ?usize = null;
+        var leave: ?usize = null;
+        var narrow: ?usize = null;
+        for (self.steps, 0..) |step, at| {
+            if (step.ends() and at + 1 != self.steps.len) return "an entry runs on after it has ended";
+            switch (step) {
+                .call => {
+                    if (call != null) return "an entry calls its body twice";
+                    call = at;
+                },
+                .enter => {
+                    if (enter != null) return "an entry enters foreign execution twice";
+                    enter = at;
+                },
+                .leave => {
+                    if (leave != null) return "an entry leaves foreign execution twice";
+                    leave = at;
+                },
+                .narrow => {
+                    if (narrow != null) return "an entry narrows its answer twice";
+                    narrow = at;
+                },
+                else => {},
+            }
+        }
+        const called = call orelse return "an entry never calls its body";
+        if (self.steps.len == 0 or !self.steps[self.steps.len - 1].ends()) return "an entry does not end";
+        const end = self.steps[self.steps.len - 1];
+
+        // C reaching Linea code enters foreign execution before anything
+        // else. The runtime's own callbacks start a task with no C frame
+        // above them and enter nothing.
+        if (entry == .runtime_called_back) {
+            if (enter != null or leave != null) return "an entry only the runtime calls enters or leaves foreign execution";
+        } else {
+            if (enter == null or enter.? != 0) return "an entry C calls does not enter foreign execution first";
+        }
+
+        // What is entered is left once, after the body and before the return
+        // to C. A body that never returns has no such path.
+        const never = mir.return_type == .never;
+        if (never != (end == .unreachable_)) return "an entry disagrees with its body about whether the body returns";
+        if (never) {
+            if (leave != null) return "an entry leaves foreign execution after a body that never returns";
+        } else if (enter != null) {
+            if (leave == null) return "an entry returns to C without leaving foreign execution";
+            if (leave.? < called) return "an entry leaves foreign execution before its body runs";
+        } else if (leave != null) return "an entry leaves foreign execution it did not enter";
+
+        // The answer C is given has the declared type's width.
+        if (!never) {
+            const answers = mir.return_type != .unit;
+            const narrows = answers and adaptsAtBoundary(module, mir.return_type);
+            const wanted: ForeignStep = if (!answers) .return_nothing else if (narrows) .return_narrowed else .return_answer;
+            if (std.meta.activeTag(end) != std.meta.activeTag(wanted)) return "an entry answers C something other than its body's declared result";
+            if (narrows != (narrow != null)) return "an entry narrows an answer of the declared width, or does not narrow a wider one";
+            if (narrow) |at| if (at < called) return "an entry narrows an answer its body has not given";
+        } else if (narrow != null) return "an entry narrows the answer of a body that never returns";
+
+        // Each parameter reaches the body in the body's convention.
+        for (self.arguments, 0..) |argument, index| {
+            const ty = mir.locals[index];
+            const by_address = module.arrivesByAddress(mir, index);
+            const narrow_in = !by_address and adaptsAtBoundary(module, ty);
+            const float = floatBitsOf(module.representationOf(ty).computation) != null;
+            var widened = false;
+            var canonical_value = false;
+            var canonical_at = false;
+            for (self.steps[0..called]) |step| switch (step) {
+                .widen => |n| if (n == index) {
+                    if (widened) return "a parameter is widened twice";
+                    widened = true;
+                },
+                .canonical_value => |n| if (n == index) {
+                    if (canonical_value) return "a float is made canonical twice";
+                    canonical_value = true;
+                },
+                .canonical_at => |n| if (n == index) {
+                    if (canonical_at) return "a float is made canonical twice";
+                    canonical_at = true;
+                },
+                else => {},
+            };
+            if (narrow_in != widened) return "a parameter narrower than the body's convention is not widened, or one of its width is";
+            if ((argument == .widened) != narrow_in) return "an entry passes its body a parameter's unwidened value, or a widened one it never made";
+            if (float and by_address != canonical_at) return "a float handed over by address reaches the body without being made canonical there";
+            if (float and !by_address and !canonical_value) return "a float handed over by value reaches the body without being made canonical";
+            if (!float and (canonical_value or canonical_at)) return "a value that is no float is made canonical";
+            if ((argument == .canonical) != (float and !by_address)) return "an entry passes its body a float's raw value, or a canonical one it never made";
+        }
+        for (self.steps[called..]) |step| switch (step) {
+            .widen, .canonical_value, .canonical_at => return "an entry prepares a parameter after its body has run",
+            else => {},
+        };
+        return null;
+    }
+};
+
+/// Builds the body of the entry about to be written for `mir` and holds it
+/// to what the boundary requires. Null, with the defect reported, where it
+/// breaks an obligation. The caller frees the body.
+fn checkedForeignBody(gpa: std.mem.Allocator, module: *const Module, mir: *const Mir, id: FunctionId, entry: ForeignEntry, sink: *Sink) std.mem.Allocator.Error!?ForeignBody {
+    const body = try ForeignBody.of(gpa, module, mir, entry);
+    const why = body.broken(module, mir, entry) orelse return body;
+    body.deinit(gpa);
+    try sink.add(.{
+        .severity = .err,
+        .message = try std.fmt.allocPrint(sink.arena, "compiler defect: the C-callable entry of `{s}` is malformed: {s}", .{ module.nameOf(id), why }),
+        .notes = &.{"the program was accepted; what the compiler generated for the boundary with C is wrong"},
+    });
+    return null;
+}
+
 /// The function type of a body's C-callable entry, as `func.constant` names it.
 fn writeForeignEntryType(w: *std.Io.Writer, module: *const Module, mir: *const Mir) std.Io.Writer.Error!void {
     try w.writeAll("(");
@@ -735,6 +946,7 @@ fn emitForeignEntry(
     id: FunctionId,
     entry: ForeignEntry,
     sanitize: ?Sanitizer,
+    body: ForeignBody,
 ) std.Io.Writer.Error!void {
     const plan = ForeignPlan.of(module, mir, entry);
     // What the thunk itself answers: the declared type, or nothing where that
@@ -786,89 +998,74 @@ fn emitForeignEntry(
         try w.writeAll("}");
     }
     try w.writeAll(" {\n");
-    if (plan.enters) try writeForeignGuard(w, true);
 
-    // A value narrower than the convention arrives narrow and is widened the
-    // way a load of one is: what the bits mean is the declared type's
-    // signedness, so an unsigned type widens with zeroes and a signed one with
-    // its sign.
-    for (0..mir.param_count) |i| {
-        if (!ForeignParameter.of(module, mir, i).widened) continue;
-        const ty = mir.locals[i];
-        try w.print("    %w{d} = arith.{s} %p{d} : {s} to {s}\n", .{
-            i, widening(module, ty), i, foreignTypeOf(module, ty), int_type,
-        });
-    }
-
-    // A float C hands over is canonicalised where it arrives, by value or at
-    // the address of an `inout` parameter.
-    for (0..mir.param_count) |i| {
-        var tag_buffer: [32]u8 = undefined;
-        const tag = std.fmt.bufPrint(&tag_buffer, "c{d}", .{i}) catch unreachable;
-        const canonical = ForeignParameter.of(module, mir, i).canonical;
-        if (canonical == .none) continue;
-        if (canonical == .at_address) {
+    // Written from the checked steps, one line or group of lines each.
+    for (body.steps) |step| switch (step) {
+        .enter => try writeForeignGuard(w, true),
+        .leave => try writeForeignGuard(w, false),
+        // A value narrower than the convention arrives narrow and is widened
+        // the way a load of one is: what the bits mean is the declared type's
+        // signedness, so an unsigned type widens with zeroes and a signed one
+        // with its sign.
+        .widen => |i| {
+            const ty = mir.locals[i];
+            try w.print("    %w{d} = arith.{s} %p{d} : {s} to {s}\n", .{
+                i, widening(module, ty), i, foreignTypeOf(module, ty), int_type,
+            });
+        },
+        // A float C hands over is canonicalised where it arrives, by value or
+        // at the address of an `inout` parameter.
+        .canonical_at => |i| {
+            var tag_buffer: [32]u8 = undefined;
+            const tag = std.fmt.bufPrint(&tag_buffer, "c{d}", .{i}) catch unreachable;
             var address_buffer: [32]u8 = undefined;
             const address = std.fmt.bufPrint(&address_buffer, "%p{d}", .{i}) catch unreachable;
             try writeCanonicalNanAt(w, module, mir.locals[i], address, tag, null);
-            continue;
-        }
-        const bits = floatBitsOf(module.representationOf(mir.locals[i]).computation).?;
-        var buffers: [4][32]u8 = undefined;
-        try writeCanonicalNan(w, .{
-            .result = std.fmt.bufPrint(&buffers[0], "{s}c", .{tag}) catch unreachable,
-            .raw = std.fmt.bufPrint(&buffers[1], "p{d}", .{i}) catch unreachable,
-            .unordered = std.fmt.bufPrint(&buffers[2], "{s}u", .{tag}) catch unreachable,
-            .quiet = std.fmt.bufPrint(&buffers[3], "{s}q", .{tag}) catch unreachable,
-        }, bits, null);
-    }
-
-    if (callee_answers != null) {
-        try w.writeAll("    %answer = func.call @");
-    } else {
-        try w.writeAll("    func.call @");
-    }
-    try writeSymbol(w, module, id);
-    try w.writeAll("(");
-    for (0..mir.param_count) |i| {
-        if (i > 0) try w.writeAll(", ");
-        const parameter = ForeignParameter.of(module, mir, i);
-        if (parameter.widened) {
-            try w.print("%w{d}", .{i});
-        } else if (parameter.canonical == .value) {
-            try w.print("%c{d}c", .{i});
-        } else {
-            try w.print("%p{d}", .{i});
-        }
-    }
-    try w.writeAll(") : (");
-    for (0..mir.param_count) |i| {
-        if (i > 0) try w.writeAll(", ");
-        try w.writeAll(paramTypeOf(module, id, mir, i));
-    }
-    try w.writeAll(") -> ");
-    if (callee_answers) |t| try w.print("{s}\n", .{t}) else try w.writeAll("()\n");
-
-    if (plan.never) {
-        try w.writeAll("    llvm.unreachable\n  }\n");
-        return;
-    }
-    if (plan.leaves) try writeForeignGuard(w, false);
-
-    // A body that answers a width the thunk does not is answering Unit: the
-    // value is bound and left, because nothing crosses.
-    if (!answers) {
-        try w.writeAll("    func.return\n  }\n");
-        return;
-    }
-
-    const foreign = foreignTypeOf(module, mir.return_type);
-    if (!plan.narrows) {
-        try w.print("    func.return %answer : {s}\n  }}\n", .{foreign});
-        return;
-    }
-    try w.print("    %narrow = arith.trunci %answer : {s} to {s}\n", .{ int_type, foreign });
-    try w.print("    func.return %narrow : {s}\n  }}\n", .{foreign});
+        },
+        .canonical_value => |i| {
+            var tag_buffer: [32]u8 = undefined;
+            const tag = std.fmt.bufPrint(&tag_buffer, "c{d}", .{i}) catch unreachable;
+            const bits = floatBitsOf(module.representationOf(mir.locals[i]).computation).?;
+            var buffers: [4][32]u8 = undefined;
+            try writeCanonicalNan(w, .{
+                .result = std.fmt.bufPrint(&buffers[0], "{s}c", .{tag}) catch unreachable,
+                .raw = std.fmt.bufPrint(&buffers[1], "p{d}", .{i}) catch unreachable,
+                .unordered = std.fmt.bufPrint(&buffers[2], "{s}u", .{tag}) catch unreachable,
+                .quiet = std.fmt.bufPrint(&buffers[3], "{s}q", .{tag}) catch unreachable,
+            }, bits, null);
+        },
+        .call => {
+            if (callee_answers != null) {
+                try w.writeAll("    %answer = func.call @");
+            } else {
+                try w.writeAll("    func.call @");
+            }
+            try writeSymbol(w, module, id);
+            try w.writeAll("(");
+            for (body.arguments, 0..) |argument, i| {
+                if (i > 0) try w.writeAll(", ");
+                switch (argument) {
+                    .widened => try w.print("%w{d}", .{i}),
+                    .canonical => try w.print("%c{d}c", .{i}),
+                    .as_given => try w.print("%p{d}", .{i}),
+                }
+            }
+            try w.writeAll(") : (");
+            for (0..mir.param_count) |i| {
+                if (i > 0) try w.writeAll(", ");
+                try w.writeAll(paramTypeOf(module, id, mir, i));
+            }
+            try w.writeAll(") -> ");
+            if (callee_answers) |t| try w.print("{s}\n", .{t}) else try w.writeAll("()\n");
+        },
+        .narrow => try w.print("    %narrow = arith.trunci %answer : {s} to {s}\n", .{ int_type, foreignTypeOf(module, mir.return_type) }),
+        .unreachable_ => try w.writeAll("    llvm.unreachable\n  }\n"),
+        // A body that answers a width the thunk does not is answering Unit:
+        // the value is bound and left, because nothing crosses.
+        .return_nothing => try w.writeAll("    func.return\n  }\n"),
+        .return_answer => try w.print("    func.return %answer : {s}\n  }}\n", .{foreignTypeOf(module, mir.return_type)}),
+        .return_narrowed => try w.print("    func.return %narrow : {s}\n  }}\n", .{foreignTypeOf(module, mir.return_type)}),
+    };
 }
 
 fn emitFunction(
@@ -3391,6 +3588,35 @@ test "a parameter of a C-callable entry is widened or made canonical as its type
     try testing.expect(!wide.widened and wide.canonical == .none);
     try testing.expect(!float.widened and float.canonical == .value);
     try testing.expect(!narrow.by_address and !wide.by_address and !float.by_address);
+
+    const body = try ForeignBody.of(gpa, &module, &mir, .called_back);
+    defer body.deinit(gpa);
+    try testing.expectEqual(@as(?[]const u8, null), body.broken(&module, &mir, .called_back));
+    try testing.expectEqualSlices(ForeignArgument, &.{ .widened, .as_given, .canonical }, body.arguments);
+    // Passing the body what C handed over, in place of what the entry made
+    // of it, is refused for the narrow integer and for the float.
+    for ([_]usize{ 0, 2 }) |index| {
+        const raw = try gpa.dupe(ForeignArgument, body.arguments);
+        defer gpa.free(raw);
+        raw[index] = .as_given;
+        const damaged: ForeignBody = .{ .steps = body.steps, .arguments = raw };
+        try testing.expect(damaged.broken(&module, &mir, .called_back) != null);
+    }
+    // So is preparing a parameter twice.
+    for (body.steps, 0..) |step, at| switch (step) {
+        .widen, .canonical_value => {
+            const twice = try std.mem.concat(gpa, ForeignStep, &.{ body.steps[0 .. at + 1], body.steps[at..] });
+            defer gpa.free(twice);
+            const doubled: ForeignBody = .{ .steps = twice, .arguments = body.arguments };
+            try testing.expect(doubled.broken(&module, &mir, .called_back) != null);
+        },
+        else => {},
+    };
+    // Widening the integer that already has the body's width is refused too.
+    const widened = try std.mem.concat(gpa, ForeignStep, &.{ &.{body.steps[0]}, &.{ForeignStep{ .widen = 1 }}, body.steps[1..] });
+    defer gpa.free(widened);
+    const over: ForeignBody = .{ .steps = widened, .arguments = body.arguments };
+    try testing.expect(over.broken(&module, &mir, .called_back) != null);
 }
 
 test "foreign frame guards balance calls and C entries while runtime callbacks stay switchable" {
@@ -3458,7 +3684,33 @@ test "foreign frame guards balance calls and C entries while runtime callbacks s
         for ([_]ForeignEntry{ .{ .exported = "published" }, .called_back, .runtime_called_back }) |entry| {
             var out: std.Io.Writer.Allocating = .init(gpa);
             defer out.deinit();
-            try emitForeignEntry(&out.writer, &module, &mir, .at(1), entry, null);
+            const body = try ForeignBody.of(gpa, &module, &mir, entry);
+            defer body.deinit(gpa);
+            try emitForeignEntry(&out.writer, &module, &mir, .at(1), entry, null, body);
+
+            // The steps about to be written meet what the boundary requires,
+            // and steps with one of them taken out, doubled or moved do not.
+            try testing.expectEqual(@as(?[]const u8, null), body.broken(&module, &mir, entry));
+            for (0..body.steps.len) |gone| {
+                const fewer = try std.mem.concat(gpa, ForeignStep, &.{ body.steps[0..gone], body.steps[gone + 1 ..] });
+                defer gpa.free(fewer);
+                const damaged: ForeignBody = .{ .steps = fewer, .arguments = body.arguments };
+                try testing.expect(damaged.broken(&module, &mir, entry) != null);
+
+                const twice = try std.mem.concat(gpa, ForeignStep, &.{ body.steps[0 .. gone + 1], body.steps[gone..] });
+                defer gpa.free(twice);
+                const doubled: ForeignBody = .{ .steps = twice, .arguments = body.arguments };
+                try testing.expect(doubled.broken(&module, &mir, entry) != null);
+            }
+            if (body.steps.len > 2) {
+                const moved = try gpa.dupe(ForeignStep, body.steps);
+                defer gpa.free(moved);
+                std.mem.swap(ForeignStep, &moved[0], &moved[moved.len - 2]);
+                const reordered: ForeignBody = .{ .steps = moved, .arguments = body.arguments };
+                if (std.meta.activeTag(moved[0]) != std.meta.activeTag(body.steps[0])) {
+                    try testing.expect(reordered.broken(&module, &mir, entry) != null);
+                }
+            }
             // What the plan answers for this entry and this body, and that
             // the entry written does exactly that.
             const plan = ForeignPlan.of(&module, &mir, entry);
