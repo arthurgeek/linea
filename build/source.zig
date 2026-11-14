@@ -12,6 +12,9 @@
 //! the moment something stops being named.
 
 const std = @import("std");
+// The compiler's own rule for a manifest's `source`, given to each program
+// that imports this file by the build.
+const manifest_source = @import("manifest_source");
 
 /// One file of a source tree, read once.
 pub const SourceFile = struct {
@@ -3146,29 +3149,18 @@ pub const Unreached = struct {
     problems: []const []const u8,
 };
 
-/// Whether a manifest's `source` names a directory inside the one holding the
-/// manifest: not absolute, and not climbing past it once `.` and `..` are
-/// resolved. The rule is `sourceStaysInside` in `src/driver/loader.zig`, which
-/// build/ cannot import; its test "a manifest's source stays inside the
-/// directory holding it" and the case "a source that leaves its root, and a
-/// manifest that is not JSON, are named" in `build/source_test.zig` use the
-/// same spellings.
-fn staysInside(gpa: std.mem.Allocator, named: []const u8) bool {
-    if (named.len > 0 and named[0] == '/') return false;
-    const resolved = std.fs.path.resolvePosix(gpa, &.{named}) catch @panic("out of memory");
-    return !(std.mem.eql(u8, resolved, "..") or std.mem.startsWith(u8, resolved, "../"));
-}
-
 /// The directory, relative to `examples/`, whose files `root` reaches: the
 /// root itself, or its manifest's `source` directory. A manifest that cannot
 /// be read, or whose `source` leaves the root, is a problem and has no reach.
 ///
-/// This is the rule `sourceRootOf` in `src/driver/loader.zig` applies to a
-/// manifest, spelled by joining and removing `.` segments. The compiler cannot
-/// be imported here, so the loader's test "a manifest's source key narrows the
-/// files a root reaches" and the case "a source no root reaches belongs to no
-/// example root" in `build/source_test.zig` use the same manifest text and fail
-/// when the two disagree.
+/// Which `source` a manifest names and whether it stays inside the manifest's
+/// directory are `manifest_source`'s answers, the ones the loader reads. The
+/// directory is then spelled by joining and removing `.` segments, where
+/// `sourceRootOf` in `src/driver/loader.zig` joins alone: the loader's test "a
+/// manifest's source key narrows the files a root reaches" and the case "a
+/// source no root reaches belongs to no example root" in
+/// `build/source_test.zig` use the same manifest text and fail when the two
+/// disagree.
 fn reachOf(gpa: std.mem.Allocator, root: []const u8, entries: []const ExampleEntry, problems: *std.ArrayList([]const u8)) ?[]const u8 {
     const manifest = for (entries) |entry| {
         if (entry.directory or !std.mem.eql(u8, std.fs.path.basenamePosix(entry.path), manifest_name)) continue;
@@ -3182,13 +3174,13 @@ fn reachOf(gpa: std.mem.Allocator, root: []const u8, entries: []const ExampleEnt
             problems.append(gpa, std.fmt.allocPrint(gpa, "{s} is not valid JSON", .{found.path}) catch @panic("out of memory")) catch @panic("out of memory");
             return null;
         };
-        if (parsed.source) |source| if (source.len > 0) {
-            if (!staysInside(gpa, source)) {
+        if (manifest_source.named(parsed.source)) |source| {
+            if (!(manifest_source.staysInside(gpa, source) catch @panic("out of memory"))) {
                 problems.append(gpa, std.fmt.allocPrint(gpa, "{s} names a source, \"{s}\", outside its directory", .{ found.path, source }) catch @panic("out of memory")) catch @panic("out of memory");
                 return null;
             }
             named = source;
-        };
+        }
     }
     const resolved = std.fs.path.resolvePosix(gpa, &.{ "/", root, named }) catch @panic("out of memory");
     return resolved[1..];
