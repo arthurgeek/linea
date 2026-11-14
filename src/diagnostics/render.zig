@@ -270,10 +270,13 @@ fn windowFor(map: *const SourceMap, l: Label, pos: LineCol) Window {
     var to: u32 = @min(len, from + max_snippet_columns);
 
     // Each cut falls between two characters: a sequence cut in half is bytes
-    // no reader can display. Both move towards the start, so the window never
-    // grows past its bound.
-    while (from > 0 and continues(text[from])) from -= 1;
-    while (to > from and to < len and continues(text[to])) to -= 1;
+    // no reader can display. Both cuts move inwards, so the window never grows
+    // past its bound, and by at most the three bytes that can continue a
+    // sequence, so a line that is not UTF-8 is cut where it was going to be.
+    var skipped: u32 = 0;
+    while (from > 0 and from < to and skipped < 3 and continues(text[from])) : (skipped += 1) from += 1;
+    skipped = 0;
+    while (to > from and to < len and skipped < 3 and continues(text[to])) : (skipped += 1) to -= 1;
 
     return .{
         .file = l.file,
@@ -486,6 +489,23 @@ test "a line of characters wider than a byte is cut between characters, and its 
     const caret = std.mem.indexOfScalar(u8, marker, '^').?;
     try testing.expectEqual(columnsOf(snippet[0..word]), columnsOf(marker[0..caret]));
     try testing.expect(std.mem.indexOf(u8, marker, "^^^^^^^ here") != null);
+}
+
+test "a line that is not UTF-8 is still cut to the bound" {
+    const text = "let s = \"" ++ "\x80" ** 3000 ++ "\"; missing\n";
+    const start: u32 = @intCast(std.mem.indexOf(u8, text, "missing").?);
+
+    const got = try renderToString(testing.allocator, text, .{
+        .severity = .err,
+        .message = "undefined",
+        .labels = &.{.{ .file = .from(0), .span = .{ .start = start, .end = start + 7 }, .message = "here" }},
+    });
+    defer testing.allocator.free(got);
+
+    const rows = try rowsOf(testing.allocator, got);
+    defer testing.allocator.free(rows);
+    try testing.expect(rows[3].len <= "1 | ".len + cut_before.len + max_snippet_columns + cut_after.len);
+    try testing.expect(std.mem.indexOf(u8, rows[3], "missing") != null);
 }
 
 test "two labels too far apart on one line each bring their own snippet" {
