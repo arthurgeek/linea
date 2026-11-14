@@ -2893,10 +2893,8 @@ const Lowerer = struct {
         const base = try self.baseFor(ty, span, dest);
         if (self.array_elisions) |elisions| if (elisions.contains(id)) return base;
 
-        const element = switch (self.types().get(ty)) {
-            .array => |a| a.element,
-            else => return base,
-        };
+        // The checker types an array literal as an array or as `Never`.
+        const element = self.types().get(ty).array.element;
         const stride = self.types().strideOf(element);
 
         for (c.args, 0..) |a, i| {

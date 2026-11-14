@@ -27219,110 +27219,116 @@ const Checker = struct {
     fn checkArrayLiteral(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
         const c = self.ast.call(id);
 
-        // With nothing expected, the elements say what this is. Unlike a
+        if (Expected.typeOf(expected)) |want| {
+            if (want == .poison) {
+                // Nothing known about the array says what an element must be, so
+                // each is checked on its own under the same unknown context:
+                // what is wrong inside one is still reported, and nothing is held
+                // against a type nobody knows.
+                for (c.args) |a| _ = try self.check(a, expected);
+                return self.record(id, .poison);
+            }
+            switch (self.builder.view().get(want)) {
+                .array => |arr| {
+                    self.builder.setConstruction(id, want);
+                    var diverges = false;
+                    for (c.args) |a| {
+                        // An element answers to whatever gave the array its type, so a
+                        // mismatch points where that was written.
+                        const found = try self.check(a, .{ .ty = arr.element, .reason = expected.?.reason, .at = expected.?.at, .inference = expected.?.inference });
+                        if (found == .never) diverges = true;
+                    }
+
+                    if (c.args.len != arr.count) return self.report(
+                        .t_array_length,
+                        id,
+                        "an array's length is part of its type, so a literal has as many elements as the type says",
+                        .{},
+                        try std.fmt.allocPrint(
+                            self.sink.arena,
+                            "this has {d}, and the type says {d}",
+                            .{ c.args.len, arr.count },
+                        ),
+                    );
+                    if (diverges) return self.expect(id, .never, expected);
+
+                    return self.record(id, want);
+                },
+                else => {},
+            }
+        }
+
+        // With no array expected, the elements say what this is. Unlike a
         // braced literal -- where many types have an `x: Int64` and only the
         // context can say which was meant -- an array's type is its element's
         // and its count, and both are written here. `let xs = [1, 2, 3]` reads
-        // like `let x = 1`, which is how most of a program is written.
-        const want = Expected.typeOf(expected) orelse {
-            if (c.args.len == 0) return self.report(
+        // like `let x = 1`, which is how most of a program is written. An
+        // expected type that is not an array chooses nothing about the
+        // literal: the array is built from its elements and then compared
+        // with what was expected, like any other value.
+        if (c.args.len == 0) {
+            // A settled type that is not an array already disagrees with the
+            // literal, whatever it would have held.
+            if (expected) |want| if (want.inference == null) {
+                const wanted = try self.typeName(want.ty);
+                return self.report(
+                    .t_mismatch,
+                    id,
+                    "expected `{s}`, found an empty array",
+                    .{wanted},
+                    "an array literal builds an array",
+                );
+            };
+            return self.report(
                 .t_infer,
                 id,
                 "an empty array has no element to say what it holds",
                 .{},
                 "give the binding a type, or name one",
             );
+        }
 
-            // From the first element that is not a bare literal. A literal
-            // takes the type its context asks for -- that is what makes
-            // `let x: UInt8 = 42` work -- and here its context is its
-            // siblings. Reading the type off whichever element came first
-            // made `[2, n]` and `[n, 2]` different verdicts about one array.
-            var settles: usize = 0;
+        // From the first element that is not a bare literal. A literal
+        // takes the type its context asks for -- that is what makes
+        // `let x: UInt8 = 42` work -- and here its context is its
+        // siblings. Reading the type off whichever element came first
+        // made `[2, n]` and `[n, 2]` different verdicts about one array.
+        var settles: usize = 0;
+        for (c.args, 0..) |a, i| {
+            if (self.ast.exprTag(a) != .int_literal) {
+                settles = i;
+                break;
+            }
+        }
+
+        const element = try self.check(c.args[settles], null);
+        if (element == .poison) {
             for (c.args, 0..) |a, i| {
-                if (self.ast.exprTag(a) != .int_literal) {
-                    settles = i;
-                    break;
-                }
+                if (i != settles) _ = try self.check(a, null);
             }
-
-            const element = try self.check(c.args[settles], null);
-            if (element == .poison) {
-                for (c.args, 0..) |a, i| {
-                    if (i != settles) _ = try self.check(a, null);
-                }
-                return self.record(id, .poison);
-            }
-            if (element == .never) {
-                for (c.args, 0..) |a, i| {
-                    if (i != settles) _ = try self.check(a, null);
-                }
-                return self.expect(id, .never, expected);
-            }
-
-            // Checked here and not below: the shared path takes an expected
-            // type, and running both reported every element's mismatch twice.
-            var diverges = false;
-            for (c.args, 0..) |a, i| {
-                if (i == settles) continue;
-                const found = try self.check(a, .{
-                    .ty = element,
-                    .reason = .element,
-                    .at = self.locOf(c.args[settles]),
-                });
-                if (found == .never) diverges = true;
-            }
-            const of = try self.builder.arrayOf(element, @intCast(c.args.len));
-            self.builder.setConstruction(id, of);
-            if (diverges) return self.expect(id, .never, expected);
-            return self.record(id, of);
-        };
-        if (want == .poison) {
-            // Nothing known about the array says what an element must be, so
-            // each is checked on its own under the same unknown context:
-            // what is wrong inside one is still reported, and nothing is held
-            // against a type nobody knows.
-            for (c.args) |a| _ = try self.check(a, expected);
             return self.record(id, .poison);
         }
-
-        const arr = switch (self.builder.view().get(want)) {
-            .array => |a| blk: {
-                self.builder.setConstruction(id, want);
-                break :blk a;
-            },
-            else => {
-                var diverges = false;
-                for (c.args) |a| {
-                    if (try self.check(a, null) == .never) diverges = true;
-                }
-                if (diverges) return self.expect(id, .never, expected);
-                return self.expect(id, want, expected);
-            },
-        };
-
-        var diverges = false;
-        for (c.args) |a| {
-            // An element answers to whatever gave the array its type, so a
-            // mismatch points where that was written.
-            const found = try self.check(a, .{ .ty = arr.element, .reason = expected.?.reason, .at = expected.?.at, .inference = expected.?.inference });
-            if (found == .never) diverges = true;
+        if (element == .never) {
+            for (c.args, 0..) |a, i| {
+                if (i != settles) _ = try self.check(a, null);
+            }
+            return self.expect(id, .never, expected);
         }
 
-        if (c.args.len != arr.count) return self.report(
-            .t_array_length,
-            id,
-            "an array's length is part of its type, so a literal has as many elements as the type says",
-            .{},
-            try std.fmt.allocPrint(
-                self.sink.arena,
-                "this has {d}, and the type says {d}",
-                .{ c.args.len, arr.count },
-            ),
-        );
+        var diverges = false;
+        for (c.args, 0..) |a, i| {
+            if (i == settles) continue;
+            const found = try self.check(a, .{
+                .ty = element,
+                .reason = .element,
+                .at = self.locOf(c.args[settles]),
+            });
+            if (found == .never) diverges = true;
+        }
+        const of = try self.builder.arrayOf(element, @intCast(c.args.len));
+        self.builder.setConstruction(id, of);
         if (diverges) return self.expect(id, .never, expected);
-
-        return self.record(id, want);
+        return self.expect(id, of, expected);
     }
 
     /// `(a, b)`: a construction of the prelude's tuple declaration of that
