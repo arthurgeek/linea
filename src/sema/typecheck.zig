@@ -32857,7 +32857,7 @@ const Checker = struct {
             const d = node.DeclId.at(@intCast(i));
             const own = self.ast.declBounds(d);
             if (own.len > 0) {
-                try self.reportCapabilityDemand(own, self.ast.declName(d));
+                try self.reportCapabilityDemand(own, self.ast.declName(d), .here);
                 for ([_]Containment{ .owned, .shareable, .isolated }) |which| {
                     if (containmentBound(self.ast, self.res, own, which)) |bound| try self.sink.addErrorFmt(
                         .t_bound,
@@ -32869,8 +32869,15 @@ const Checker = struct {
                     );
                 }
             }
-            for (self.ast.declTypeParams(d), 0..) |p, k| {
-                try self.reportCapabilityDemand(self.parameterBounds(d, k), p.name);
+            for (self.constraints.ofDeclaration(d)) |constraint| {
+                // `promiseWritten` records the `Owned`, `Shareable` and
+                // `Isolated` promises a written subject is given, across
+                // every clause naming it, and refuses a repeated one there.
+                try self.reportCapabilityDemand(
+                    self.constraints.requirementsOf(constraint),
+                    constraint.named,
+                    if (constraint.subject == .written) .where_promised else .here,
+                );
             }
         }
     }
@@ -32979,10 +32986,14 @@ const Checker = struct {
 
     /// Rejects repeated or redundant capability bounds, preserving the trait
     /// bounds that also provide operations.
+    ///
+    /// `containment` says where a repeated `Owned`, `Shareable` or `Isolated`
+    /// is refused: here, or where the subject's promises are recorded.
     fn reportCapabilityDemand(
         self: *Checker,
         bounds: []const node.TraitBound,
         named: TokenId,
+        containment: enum { here, where_promised },
     ) std.mem.Allocator.Error!void {
         const through = try self.traitsBounding(null, bounds);
         defer types_mod.freeBoundTraits(self.gpa, through);
@@ -32992,29 +33003,31 @@ const Checker = struct {
         // and a bound on that list is a token that is there.
         const at = if (named != .none) named else bounds[0].named.name;
 
-        for ([_]Containment{ .owned, .shareable, .isolated }) |which| {
-            const first = containmentBound(self.ast, self.res, bounds, which) orelse continue;
-            for (bounds) |bound| {
-                if (bound.kind != .named or bound.named.name == first) continue;
-                if (resolve_mod.boundNames(self.ast, bound.named.name, traitAt(self.ast, self.res, bound.named.name)) != containmentNamed(which)) continue;
-                return self.sink.addErrorFmt(
-                    .t_bound,
-                    self.ast.fileOf(at),
-                    self.ast.tokenSpan(at),
-                    "drop one of the two bounds",
-                    "`{s}` is bounded `{s}` twice",
-                    .{ self.ast.tokenText(at), which.spelled() },
-                );
-            }
-            if (integerDemandedBy(self.ast, self.res, bounds, through)) {
-                return self.sink.addErrorFmt(
-                    .t_bound,
-                    self.ast.fileOf(at),
-                    self.ast.tokenSpan(at),
-                    try std.fmt.allocPrint(self.sink.arena, "drop the redundant {s} bound", .{which.spelled()}),
-                    "Integer already includes {s}",
-                    .{which.spelled()},
-                );
+        if (containment == .here) {
+            for ([_]Containment{ .owned, .shareable, .isolated }) |which| {
+                const first = containmentBound(self.ast, self.res, bounds, which) orelse continue;
+                for (bounds) |bound| {
+                    if (bound.kind != .named or bound.named.name == first) continue;
+                    if (resolve_mod.boundNames(self.ast, bound.named.name, traitAt(self.ast, self.res, bound.named.name)) != containmentNamed(which)) continue;
+                    return self.sink.addErrorFmt(
+                        .t_bound,
+                        self.ast.fileOf(at),
+                        self.ast.tokenSpan(at),
+                        "drop one of the two bounds",
+                        "`{s}` is bounded `{s}` twice",
+                        .{ self.ast.tokenText(at), which.spelled() },
+                    );
+                }
+                if (integerDemandedBy(self.ast, self.res, bounds, through)) {
+                    return self.sink.addErrorFmt(
+                        .t_bound,
+                        self.ast.fileOf(at),
+                        self.ast.tokenSpan(at),
+                        try std.fmt.allocPrint(self.sink.arena, "drop the redundant {s} bound", .{which.spelled()}),
+                        "Integer already includes {s}",
+                        .{which.spelled()},
+                    );
+                }
             }
         }
 
@@ -33076,14 +33089,17 @@ const Checker = struct {
     /// resolver's, asked while `b.args` is still in hand, and a name nothing
     /// declares is refused as an unknown trait rather than as a count.
     ///
-    /// **Bound:** one visit per declaration and per type parameter it
-    /// declares, and one lookup per bound each carries.
+    /// Every subject a declaration bounds is asked: each type parameter, and
+    /// each written type its `where` clause bounds.
+    ///
+    /// **Bound:** one visit per declaration and per subject it bounds, and
+    /// one lookup per bound each carries.
     fn reportBoundArity(self: *Checker) std.mem.Allocator.Error!void {
         for (0..self.ast.declCount()) |i| {
             const d = node.DeclId.at(@intCast(i));
             try self.reportBoundArityOf(self.ast.declBounds(d));
-            for (self.ast.declTypeParams(d), 0..) |_, k| {
-                try self.reportBoundArityOf(self.parameterBounds(d, k));
+            for (self.constraints.ofDeclaration(d)) |constraint| {
+                try self.reportBoundArityOf(self.constraints.requirementsOf(constraint));
             }
         }
     }
