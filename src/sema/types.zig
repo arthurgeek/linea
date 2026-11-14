@@ -4198,10 +4198,10 @@ pub const ImplIndex = struct {
         var granted: RefusedDemands = .empty;
         defer granted.deinit(gpa);
         try granted.put(gpa, .{ .ty = ticket, .lacks = .{ .capability = .copyable } }, {});
-        try granted.put(gpa, .{ .ty = ticket, .lacks = .{ .trait = .{ .decl = DeclId.at(lookup), .args = &.{.u16} } } }, {});
+        try granted.put(gpa, .{ .ty = ticket, .lacks = .{ .trait = .{ .decl = lookup, .args = &.{.u16} } } }, {});
         // The trait is granted at `UInt16` only, and the requirement asks for `UInt8`.
         try testing.expect(!try index.appliesGranted(gpa, &implementations, &builder, 1, &.{}, ticket, .none, &granted));
-        try granted.put(gpa, .{ .ty = ticket, .lacks = .{ .trait = .{ .decl = DeclId.at(lookup), .args = &.{.u8} } } }, {});
+        try granted.put(gpa, .{ .ty = ticket, .lacks = .{ .trait = .{ .decl = lookup, .args = &.{.u8} } } }, {});
         try testing.expect(try index.appliesGranted(gpa, &implementations, &builder, 1, &.{}, ticket, .none, &granted));
         // Selection is unchanged by what a granted lookup accepted.
         try testing.expect(try index.find(gpa, &implementations, &builder, 1, &.{}, ticket, .none) == null);
