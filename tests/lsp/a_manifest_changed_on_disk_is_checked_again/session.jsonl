@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true}}}}}
+{"jsonrpc":"2.0","method":"initialized","params":{}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A manifest says which files a program holds and what it depends on, so a\n// change to it is a change to the program: the program is checked again and\n// its diagnostics published, though no source file changed.\nfn main() -> UInt8 {\n    missing\n}\n"}}}
+{"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{"changes":[{"uri":"linea.json","type":2}]}}
+{"jsonrpc":"2.0","id":2,"method":"shutdown"}
