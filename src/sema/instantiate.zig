@@ -1262,10 +1262,22 @@ const Discovery = struct {
     projection_floor: usize = 0,
     active_projections: std.ArrayList(struct { member: DeclId, receiver: TypeId }) = .empty,
 
+    /// One slot of a projection's path and the expression the site fills it
+    /// with, as lowering holds it, so the two read a path alike.
     const Splice = struct {
         binding: BindingId,
         wrote: ExprId,
+        /// The instance of the function that wrote the expression. The path
+        /// is read under the projection member's instance, and a generic call
+        /// in what the site wrote is built for the site's.
+        instance: types_mod.Instantiation,
         read: bool = false,
+        /// How many slots were open at the site, before this bracket opened
+        /// its own. What the site wrote reaches only those.
+        site: usize,
+        /// How many expressions written outside this slot's bracket are being
+        /// walked; the slot is out of their reach while any is.
+        hidden: u32 = 0,
     };
 
     fn through(self: *Discovery, ty: TypeId) !TypeId {
@@ -1475,7 +1487,8 @@ const Discovery = struct {
         var i = self.splices.items.len;
         while (i > 0) {
             i -= 1;
-            if (self.splices.items[i].binding == target) return i;
+            const slot = self.splices.items[i];
+            if (slot.hidden == 0 and slot.binding == target) return i;
         }
         return null;
     }
@@ -1484,7 +1497,21 @@ const Discovery = struct {
         if (self.splices.items[at].read) return;
         self.splices.items[at].read = true;
         const wrote = self.splices.items[at].wrote;
-        if (wrote != ExprId.none) try self.projectionOperand(wrote);
+        if (wrote == ExprId.none) return;
+        const saved = self.instance;
+        self.instance = self.splices.items[at].instance;
+        defer self.instance = saved;
+        // The expression was written where only the slots open before its
+        // bracket were in reach, so those opened since are hidden while it is
+        // walked; slots its own brackets open stay visible. Indices, not a
+        // slice: the walk may open slots and move the list.
+        const from = self.splices.items[at].site;
+        const until = self.splices.items.len;
+        for (self.splices.items[from..until]) |*slot| slot.hidden += 1;
+        defer for (self.splices.items[from..until]) |*slot| {
+            slot.hidden -= 1;
+        };
+        try self.projectionOperand(wrote);
     }
 
     /// Site operands are evaluated outside the projection path they fill.
@@ -1568,11 +1595,15 @@ const Discovery = struct {
         try self.splices.append(self.gpa, .{
             .binding = BindingId.at(found.receiver),
             .wrote = receiver,
+            .instance = self.instance,
+            .site = mark,
         });
         if (found.index != types_mod.Expansion.no_binding) {
             try self.splices.append(self.gpa, .{
                 .binding = BindingId.at(found.index),
                 .wrote = index,
+                .instance = self.instance,
+                .site = mark,
             });
         }
 
