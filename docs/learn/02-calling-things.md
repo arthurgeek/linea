@@ -1038,6 +1038,15 @@ receiver becomes an ordinary first parameter and keeps its convention, so
 argument, `strengthen(&mine)`. A local needs no annotation: `let strengthen =
 Coffee.add_shot` takes its type from the operation.
 
+Naming a generic function as a value builds it for the types it is named at,
+exactly as calling it does. A function may name itself at the types it was
+given, which is the copy already being built. One that names itself at a
+larger type on every round, such as `grow[Wrap[T]]` written inside `grow[T]`,
+would need a new copy for each round without end, so the compiler refuses it
+with `[T-PolyRec]` at the name, as it refuses the same call. A method of a
+generic type named inside its own `impl`, `Holder.peek` inside
+`impl[T] Holder[T]`, names the copy being built and is accepted.
+
 ### Labels are not part of a function's type
 
 The names in a function type are labels for reading and for named calls, not
