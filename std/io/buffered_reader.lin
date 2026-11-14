@@ -1732,7 +1732,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
             if self.eof {
                 return .Ok(.None)
             }
-            let count = refill_ahead(&self.reader, &self.ahead, self.allocator, self.position)?
+            let count = refill_ahead(&self.reader, &self.ahead, self.position)?
             self.cursor = 0
             self.available = count
             if count == 0 {
@@ -1929,18 +1929,15 @@ fn exact_error_from_peek[E](sink error: LineError[E]) -> ExactError[E] {
     }
 }
 
-// The input error can observe only its reader. Replacing the ahead storage
-// preserves its allocator dependencies without retaining any reader or record
-// observations in that buffer.
-fn refill_ahead[R: Reader, A: Allocator](inout reader: R, inout ahead: Vec[UInt8, A], allocator: A, position: UInt64) -> Result[UInt64, LineError[R.Error]] where carries(.Err.Input.reason: reader), retains(ahead: ahead, allocator) {
+// Read up to the read-ahead's fixed length into its bytes and return how many
+// arrived. `Reader.read_some` fills a `Buffer`, so the vector's backing buffer
+// is taken out for the call and put back at the same length. The input error
+// can observe only its reader.
+fn refill_ahead[R: Reader, A: Allocator](inout reader: R, inout ahead: Vec[UInt8, A], position: UInt64) -> Result[UInt64, LineError[R.Error]] where carries(.Err.Input.reason: reader), retains(ahead: ahead) {
     let capacity = ahead.length()
-    let empty: Vec[UInt8, A] = Vec.new_in(allocator)
-    let current = mem.exchange(&ahead, empty)
-    var buffer = mem.vector_into_buffer(current).unwrap()
+    var buffer = mem.vector_into_buffer(ahead).unwrap()
     let outcome = &reader.read_some(&buffer, offset: 0, count: capacity)
-    let restored = mem.vector_from_buffer(buffer, capacity)
-    let previous = mem.exchange(&ahead, restored)
-    previous.release()
+    ahead = mem.vector_from_buffer(buffer, capacity)
     let count = outcome else |error| {
         return .Err(.Input(.{ reason = error, stream_offset = position }))
     }
