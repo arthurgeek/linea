@@ -873,6 +873,9 @@ fn loadFromDiskWith(
     // A command line says which it means and is believed. Bounded by the
     // directory the compiler was run in, so a manifest further up names
     // somebody else's program and not this one.
+    // `rootOf` reads the manifest that marks the root, strictly: one that
+    // will not parse, or says what a root cannot be, stops the command here
+    // and is not read from disk again.
     const found = try rootOf(gpa, io, entry, .as_named, "");
     defer found.deinit(gpa);
     const given = found.entry;
@@ -880,14 +883,6 @@ fn loadFromDiskWith(
     if (std.mem.endsWith(u8, given, ".lin")) {
         const named = try std.Io.Dir.cwd().openFile(io, given, .{});
         named.close(io);
-    }
-
-    // Read strictly here, because the person who ran the command is there to
-    // be told: a manifest that will not parse, or says what a root cannot be,
-    // stops the command rather than loading the root as something else.
-    if (found.manifest) |path| {
-        const manifest = try readManifest(gpa, io, dirOf(path));
-        if (manifest) |m| freeManifest(gpa, m);
     }
 
     const paths = try pathsOfRoot(gpa, io, found);
