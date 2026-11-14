@@ -2227,7 +2227,7 @@ const Parser = struct {
 
             const ty = self.cursor.current();
             if (self.cursor.at(.identifier) or self.cursor.at(.l_bracket) or
-                self.cursor.at(.keyword_fn) or self.cursor.at(.keyword_borrow) or self.cursor.at(.l_paren))
+                self.startsCallableType() or self.cursor.at(.keyword_borrow) or self.cursor.at(.l_paren))
             {
                 // Positional, so no name -- what a variant carries is reached
                 // by matching rather than by naming.
@@ -2828,7 +2828,7 @@ const Parser = struct {
                 // point is not refused a second time by [S-Entry].
                 if (main) returns = .{ .at = arrow, .name = .none };
             } else if (self.cursor.at(.identifier) or self.cursor.at(.l_bracket) or
-                self.cursor.at(.l_paren) or self.cursor.at(.keyword_fn) or self.cursor.at(.keyword_borrow))
+                self.cursor.at(.l_paren) or self.startsCallableType() or self.cursor.at(.keyword_borrow))
             {
                 // Which type the name reaches is a question about names, so the
                 // parser records what was written and the checker answers it.
