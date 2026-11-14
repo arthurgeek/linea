@@ -19698,7 +19698,7 @@ fn outcomeOf(
                     // forever, and the trap it invents is indistinguishable
                     // from one the program means.
                     if (sig != std.posix.SIG.ABRT) return .{
-                        .text = try std.fmt.allocPrint(gpa, "{s}{s}{d}\n", .{ got.written(), signal_note, @intFromEnum(sig) }),
+                        .text = try withSignalNote(gpa, got.written(), @intFromEnum(sig)),
                         .output = printed,
                         .errors = said,
                         .tool_failed = false,
@@ -19845,6 +19845,29 @@ fn saidOf(answer: []const u8, errors: []const u8) []const u8 {
 /// number.
 const signal_note = "stopped by signal ";
 
+/// What a run that a signal stopped is recorded as: what it had answered and
+/// said, then the note on a line of its own. Standard error the program left
+/// unterminated would otherwise share the note's line and hide it from
+/// `signalOf`.
+fn withSignalNote(gpa: std.mem.Allocator, written: []const u8, signal: u32) ![]const u8 {
+    const ended = written.len == 0 or written[written.len - 1] == '\n';
+    return std.fmt.allocPrint(gpa, "{s}{s}{s}{d}\n", .{ written, if (ended) "" else "\n", signal_note, signal });
+}
+
+test "a signal's note is a line of its own after unterminated output, and such a run crashed" {
+    const whole = try withSignalNote(testing.allocator, "trap\nsaid first\n", 11);
+    defer testing.allocator.free(whole);
+    try testing.expectEqualStrings("trap\nsaid first\nstopped by signal 11\n", whole);
+
+    const cut = try withSignalNote(testing.allocator, "trap\nlinea: said and stopped", 11);
+    defer testing.allocator.free(cut);
+    try testing.expectEqualStrings("stopped by signal 11", signalOf(cut));
+    try testing.expect(!sameEnding(cut, "trap\nlinea: index out of bounds at a.lin:3:5\n"));
+    // The program had written the runtime's prefix, and a signal still
+    // stopped it.
+    try testing.expectEqualStrings("crashed", uncleanRun(.{ .text = cut, .errors = "linea: said and stopped", .tool_failed = false }).?);
+}
+
 /// The line naming the signal that stopped a program the runtime did not
 /// abort, or nothing where the program exited or the runtime aborted it.
 fn signalOf(text: []const u8) []const u8 {
@@ -19863,12 +19886,10 @@ fn sameEnding(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, answerOf(a), answerOf(b)) and std.mem.eql(u8, signalOf(a), signalOf(b));
 }
 
-/// A line of standard error without the source position a runtime trap
-/// report ends with: `linea: REASON at PATH:LINE:COLUMN` is `linea: REASON`.
-/// Any other line is itself, so text that only resembles a report is compared
-/// whole.
+/// A line without the source position a runtime trap report ends with:
+/// `REASON at PATH:LINE:COLUMN` is `REASON`. A line that ends with no
+/// position is itself.
 fn withoutTrapPosition(line: []const u8) []const u8 {
-    if (!std.mem.startsWith(u8, line, "linea: ")) return line;
     const at = std.mem.lastIndexOf(u8, line, " at ") orelse return line;
     var fields = std.mem.splitBackwardsScalar(u8, line[at + " at ".len ..], ':');
     const column = fields.next() orelse return line;
@@ -19883,20 +19904,28 @@ fn withoutTrapPosition(line: []const u8) []const u8 {
 
 /// Whether two runs said the same on standard error, as far as a rewrite of
 /// the source must keep it. Every byte counts, except that between two runs
-/// that trapped a trap report is compared without its source position, which
-/// the rewrite moves: the reason for the trap and everything the program
-/// said before it are still compared.
+/// that trapped the last line is compared without the source position it
+/// ends with, which the rewrite moves. The runtime writes its report last and
+/// ends it with the position, so that line is where the position is whatever
+/// the line begins with: a panic's message may hold a line break, and text
+/// the program left unterminated shares the report's line. The reason for
+/// the trap and everything said before that line are still compared.
 fn sameSaid(a_text: []const u8, a_errors: []const u8, b_text: []const u8, b_errors: []const u8) bool {
     const trapped = std.mem.startsWith(u8, a_text, trap_answer) and std.mem.startsWith(u8, b_text, trap_answer);
     if (!trapped) return std.mem.eql(u8, a_errors, b_errors);
-    var a_lines = std.mem.splitScalar(u8, a_errors, '\n');
-    var b_lines = std.mem.splitScalar(u8, b_errors, '\n');
-    while (true) {
-        const a = a_lines.next();
-        const b = b_lines.next();
-        if (a == null or b == null) return a == null and b == null;
-        if (!std.mem.eql(u8, withoutTrapPosition(a.?), withoutTrapPosition(b.?))) return false;
-    }
+    const a = lastLine(a_errors);
+    const b = lastLine(b_errors);
+    return std.mem.eql(u8, a.before, b.before) and
+        std.mem.eql(u8, a.after, b.after) and
+        std.mem.eql(u8, withoutTrapPosition(a.line), withoutTrapPosition(b.line));
+}
+
+/// `text` split around its last line: what precedes it, the line, and the
+/// line break that ends it where there is one.
+fn lastLine(text: []const u8) struct { before: []const u8, line: []const u8, after: []const u8 } {
+    const body = if (std.mem.endsWith(u8, text, "\n")) text[0 .. text.len - 1] else text;
+    const start = if (std.mem.lastIndexOfScalar(u8, body, '\n')) |nl| nl + 1 else 0;
+    return .{ .before = text[0..start], .line = body[start..], .after = text[body.len..] };
 }
 
 test "two runs end alike only with one status, one abort or one signal" {
@@ -19930,7 +19959,13 @@ test "a trap report is compared by its reason, and everything else said is compa
     try testing.expect(!sameSaid(trap, at_three, trap, ""));
     // Text that is no report, and a report in a run that did not trap.
     try testing.expect(!sameSaid(trap, "linea: a stack overflowed\n", trap, "linea: a stack overflowed twice\n"));
-    try testing.expect(!sameSaid(trap, "note at a.lin:3:5\n", trap, "note at a.lin:9:1\n"));
+    // A position on a line before the last is the program's own text.
+    try testing.expect(!sameSaid(trap, "note at a.lin:3:5\n" ++ at_three, trap, "note at a.lin:9:1\n" ++ at_three));
+    // A panic message of two lines puts the position on the second, and text
+    // the program left unterminated shares the report's line.
+    try testing.expect(sameSaid(trap, "linea: panic: first\nsecond at a.lin:3:5\n", trap, "linea: panic: first\nsecond at a.lin:9:1\n"));
+    try testing.expect(sameSaid(trap, "said" ++ at_three, trap, "said" ++ at_nine));
+    try testing.expect(!sameSaid(trap, "said" ++ at_three, trap, "told" ++ at_nine));
     try testing.expect(!sameSaid("exit 0\n", at_three, "exit 0\n", at_nine));
     try testing.expect(sameSaid("exit 0\n", "warned\n", "exit 0\n", "warned\n"));
 
