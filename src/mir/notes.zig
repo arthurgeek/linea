@@ -75,8 +75,13 @@ pub fn settle(
 ///
 /// A signature, a slot or an instruction naming a type is the program holding
 /// one, and what it holds is made of the types its parts are -- so the set
-/// closes over fields and payloads: a declaration written below writes its
-/// parts, and a part names a type that has to be declared beside it.
+/// closes over fields, payloads, array elements, what a newtype names, what a
+/// borrow observes and what a function type takes and answers: a declaration written
+/// below writes its parts, and a part names a type that has to be declared
+/// beside it.
+///
+/// **Bound:** each type reached is asked once, so the types reached and the
+/// parts they write.
 ///
 /// Read from the lowered code rather than from the pool. The pool is an intern
 /// table holding every type the compilation could reach -- the library's, and
@@ -93,25 +98,44 @@ pub fn typesHeld(gpa: std.mem.Allocator, module: *const mir.Module) ![]bool {
     // a different program.
     module.markNamedTypes(held);
 
-    // To a fixpoint, because a part is itself made of parts.
-    var moved = true;
-    while (moved) {
-        moved = false;
-        for (held, 0..) |in, i| {
-            if (!in) continue;
-            const t: types.TypeId = @enumFromInt(@as(u32, @intCast(i)));
-            for (0..module.types.fieldCount(t)) |k| {
-                moved = mark(held, module.types.fieldType(t, @intCast(k))) or moved;
+    // Each type reached is asked once for the types its declaration writes:
+    // its fields, its variants' payloads, and the types a written type is
+    // made of, which a field written `[Cell; 2]` or `fn(cell: Cell)` names
+    // though no instruction builds a `Cell`. A part is itself made of parts,
+    // so each newly reached type is asked in turn.
+    var pending: std.ArrayList(types.TypeId) = .empty;
+    defer pending.deinit(gpa);
+    for (held, 0..) |in, i| {
+        if (in) try pending.append(gpa, @enumFromInt(@as(u32, @intCast(i))));
+    }
+    while (pending.pop()) |t| {
+        for (0..module.types.fieldCount(t)) |k| {
+            try reach(gpa, held, &pending, module.types.fieldType(t, @intCast(k)));
+        }
+        for (0..module.types.variantCount(t)) |v| {
+            const at: u32 = @intCast(v);
+            for (0..module.types.variantFieldCount(t, at)) |k| {
+                try reach(gpa, held, &pending, module.types.variantFieldType(t, at, @intCast(k)));
             }
-            for (0..module.types.variantCount(t)) |v| {
-                const at: u32 = @intCast(v);
-                for (0..module.types.variantFieldCount(t, at)) |k| {
-                    moved = mark(held, module.types.variantFieldType(t, at, @intCast(k))) or moved;
-                }
-            }
+        }
+        switch (module.types.get(t)) {
+            .array => |array| try reach(gpa, held, &pending, array.element),
+            .newtype => |newtype| try reach(gpa, held, &pending, newtype.base),
+            .borrow => |borrow| try reach(gpa, held, &pending, borrow.referent),
+            .callable => |signature| {
+                for (module.types.callableParams(signature)) |param| try reach(gpa, held, &pending, param.ty);
+                try reach(gpa, held, &pending, signature.result);
+            },
+            else => {},
         }
     }
     return held;
+}
+
+/// Records that the program holds a type, and queues it to be asked what it
+/// holds where that was news.
+fn reach(gpa: std.mem.Allocator, held: []bool, pending: *std.ArrayList(types.TypeId), t: types.TypeId) !void {
+    if (mark(held, t)) try pending.append(gpa, t);
 }
 
 /// Records that the program holds a type, and says whether that was news.

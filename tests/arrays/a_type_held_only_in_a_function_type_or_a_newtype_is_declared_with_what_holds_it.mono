@@ -1,0 +1,28 @@
+@copyable
+struct Cell {
+    value: UInt8,
+}
+
+struct Handler {
+    run: fn(cell: Cell) -> UInt8,
+}
+
+@copyable
+struct Seal {
+    mark: UInt8,
+}
+
+struct Envelope {
+    seals: [Sealed; 0],
+}
+
+fn ;main() -> UInt8 {
+    ;weigh(Handler { run = |cell| cell.value }, Envelope { seals = [] })
+}
+
+fn lambda$40;main$230(read cell: Cell) -> UInt8 {
+    cell.value
+}
+fn ;weigh(_handler: Handler, _envelope: Envelope) -> UInt8 {
+    2
+}

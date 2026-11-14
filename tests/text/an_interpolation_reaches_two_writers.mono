@@ -85,6 +85,9 @@ pub enum Option[Int32] {
     Some(Int32),
 }
 
+@(opaque, copyable)
+type Address[UInt8] = UInt64
+
 @copyable
 pub enum Option[Str] {
     None,

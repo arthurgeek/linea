@@ -1,0 +1,17 @@
+@copyable
+struct Cell {
+    value: UInt8,
+}
+
+@copyable
+struct Row {
+    cells: [Cell; 2],
+}
+
+fn ;main() -> UInt8 {
+    ;width(filled)
+}
+
+fn ;width(_row: Row) -> UInt8 {
+    2
+}
