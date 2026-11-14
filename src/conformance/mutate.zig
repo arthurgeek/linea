@@ -386,7 +386,7 @@ pub const Mutation = enum {
             .copyable_holds_linear => copyableHoldsLinear(gpa, ast, text),
             .abrupt_after_a_transfer => abruptAfterATransfer(gpa, ast, res, types_of, calls, text),
             .dropped_phantom => droppedPhantom(gpa, ast, text),
-            .narrowed_range => narrowedRange(gpa, ast, text),
+            .narrowed_range => narrowedRange(gpa, ast, res, types_of, text),
             .narrowed_refinement => narrowedRefinement(gpa, ast, res, text),
             .summed_newtype => summedNewtype(gpa, ast, types_of, text),
         };
@@ -1175,21 +1175,38 @@ fn droppedPhantom(
 /// range between two; null for any other pattern.
 const Interval = struct { lo: i128, hi: i128 };
 
-fn integerAt(ast: *const Ast, text: []const u8, id: ExprId) ?i128 {
-    const at = ast.exprSpan(id);
-    return std.fmt.parseInt(i128, text[at.start..at.end], 10) catch null;
-}
+/// What a match's arms are read through: the text for a literal, and the
+/// checker's constant table for a bound that names a constant.
+const Arms = struct {
+    ast: *const Ast,
+    res: *const Resolution,
+    types_of: *const Typing,
+    text: []const u8,
 
-fn intervalOf(ast: *const Ast, text: []const u8, pattern: ExprId) ?Interval {
-    if (ast.exprTag(pattern) != .range) {
-        const value = integerAt(ast, text, pattern) orelse return null;
-        return .{ .lo = value, .hi = value };
+    /// The integer a bound is: written as one, or the value of the constant
+    /// its name reaches. Null for anything else.
+    fn integerAt(self: Arms, id: ExprId) ?i128 {
+        const at = self.ast.exprSpan(id);
+        if (std.fmt.parseInt(i128, self.text[at.start..at.end], 10)) |written| return written else |_| {}
+        const named = self.res.targetOf(self.ast.withoutGroups(id));
+        if (named == BindingId.none) return null;
+        return switch (self.types_of.constantValue(named) orelse return null) {
+            .integer => |value| value,
+            .truth, .string, .aggregate => null,
+        };
     }
-    const ends = ast.rangeEnds(pattern);
-    const lo = integerAt(ast, text, ends.lhs) orelse return null;
-    const hi = integerAt(ast, text, ends.rhs) orelse return null;
-    return .{ .lo = lo, .hi = if (ast.rangeInclusive(pattern)) hi else hi -| 1 };
-}
+
+    fn intervalOf(self: Arms, pattern: ExprId) ?Interval {
+        if (self.ast.exprTag(pattern) != .range) {
+            const value = self.integerAt(pattern) orelse return null;
+            return .{ .lo = value, .hi = value };
+        }
+        const ends = self.ast.rangeEnds(pattern);
+        const lo = self.integerAt(ends.lhs) orelse return null;
+        const hi = self.integerAt(ends.rhs) orelse return null;
+        return .{ .lo = lo, .hi = if (self.ast.rangeInclusive(pattern)) hi else hi -| 1 };
+    }
+};
 
 /// Respells to `..` the first `..=` in a covering match whose top value no
 /// other arm of the match takes.
@@ -1197,7 +1214,8 @@ fn intervalOf(ast: *const Ast, text: []const u8, pattern: ExprId) ?Interval {
 /// The accepted match covers its type, so a value one arm alone takes is a
 /// gap once that arm stops taking it. That the value is one arm's alone is
 /// read from the arms as written, not asked of the checker this mutation
-/// tests: every arm must be an integer literal or a range between two, and
+/// tests: every arm must be an integer, or a range between two, each written
+/// as a literal or as the name of a constant, and
 /// none but the narrowed arm may hold its top value, and the arms above it
 /// must leave it a value below that one. Two ranges may share
 /// values in an accepted match -- the later one is useful for the rest -- so
@@ -1208,7 +1226,8 @@ fn intervalOf(ast: *const Ast, text: []const u8, pattern: ExprId) ?Interval {
 /// values of the same type, and the checker refuses neither -- narrowing one
 /// would mutate an accepted program into another it is right to accept, which
 /// answers for no rule at all.
-fn narrowedRange(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?[]const u8 {
+fn narrowedRange(gpa: std.mem.Allocator, ast: *const Ast, res: *const Resolution, types_of: *const Typing, text: []const u8) !?[]const u8 {
+    const arms_of: Arms = .{ .ast = ast, .res = res, .types_of = types_of, .text = text };
     matches: for (0..ast.exprCount()) |i| {
         const id = ExprId.at(@intCast(i));
         if (!ast.exprTag(id).isMatch()) continue;
@@ -1216,7 +1235,7 @@ fn narrowedRange(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?[]
         const args = ast.call(id).args;
         var j: usize = 0;
         while (j < args.len) : (j += 2) {
-            if (intervalOf(ast, text, args[j]) == null) continue :matches;
+            if (arms_of.intervalOf(args[j]) == null) continue :matches;
         }
 
         j = 0;
@@ -1228,13 +1247,13 @@ fn narrowedRange(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?[]
             // An arm holding one value respells to an empty one, and an empty
             // arm is [T-Unreachable] before the match is uncovering -- a
             // rejection under a different rule than the one this claims.
-            const taken = intervalOf(ast, text, pattern).?;
+            const taken = arms_of.intervalOf(pattern).?;
             if (taken.lo >= taken.hi) continue;
 
             var k: usize = 0;
             while (k < args.len) : (k += 2) {
                 if (k == j) continue;
-                const other = intervalOf(ast, text, args[k]).?;
+                const other = arms_of.intervalOf(args[k]).?;
                 if (other.lo <= taken.hi and taken.hi <= other.hi) continue :arms;
             }
 
@@ -1247,7 +1266,7 @@ fn narrowedRange(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?[]
             search: while (free < taken.hi) {
                 k = 0;
                 while (k < j) : (k += 2) {
-                    const above = intervalOf(ast, text, args[k]).?;
+                    const above = arms_of.intervalOf(args[k]).?;
                     if (above.lo <= free and free <= above.hi) {
                         free = above.hi + 1;
                         continue :search;
@@ -2453,6 +2472,31 @@ test "an arm an earlier arm leaves only its top value is not the arm narrowed" {
 
     try testing.expect(std.mem.indexOf(u8, out, "0..=100") != null);
     try testing.expect(std.mem.indexOf(u8, out, "101..255") != null);
+    try testing.expect(asClaimed(try verdictOf(gpa, out, .program), .narrowed_range));
+}
+
+test "a range ended by a named constant is read through the constant it names" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // `Thing.top` is 9, which the first arm alone holds.
+    const out = (try mutated(gpa, .narrowed_range,
+        \\struct Thing {
+        \\    count: UInt8,
+        \\}
+        \\impl Thing {
+        \\    pub let top: UInt8 = 9
+        \\}
+        \\fn classify(b: UInt8) -> UInt8 {
+        \\    match read b { 0..=Thing.top => 1, 10..=255 => 2 }
+        \\}
+        \\fn main() -> UInt8 {
+        \\    classify(200)
+        \\}
+    )).?;
+
+    try testing.expect(std.mem.indexOf(u8, out, "0..Thing.top") != null);
     try testing.expect(asClaimed(try verdictOf(gpa, out, .program), .narrowed_range));
 }
 
