@@ -368,8 +368,11 @@ pub fn emit(
         }
     }
     for (module.functions, called_back, 0..) |*f, wanted, i| {
-        if (wanted & 1 != 0) try emitForeignEntry(w, module, f, FunctionId.at(@intCast(i)), .called_back, options.sanitize);
-        if (wanted & 2 != 0) try emitForeignEntry(w, module, f, FunctionId.at(@intCast(i)), .runtime_called_back, options.sanitize);
+        const id = FunctionId.at(@intCast(i));
+        for ([_]struct { bit: u2, entry: ForeignEntry }{ .{ .bit = 1, .entry = .called_back }, .{ .bit = 2, .entry = .runtime_called_back } }) |one| {
+            if (wanted & one.bit == 0) continue;
+            try emitForeignEntry(w, module, f, id, one.entry, options.sanitize);
+        }
     }
 
     try w.writeAll("}\n");
@@ -647,6 +650,57 @@ fn writeCalledBackName(w: *std.Io.Writer, module: *const Module, id: FunctionId,
     try writeSymbolName(w, module.nameOf(id), if (trusted) symbol_names.defined_prefix ++ "runtime_callback." else symbol_names.callback_prefix);
 }
 
+/// What a C-callable entry does to one parameter C hands over.
+const ForeignParameter = struct {
+    /// Whether the parameter arrives as an address, as an `inout` does.
+    by_address: bool,
+    /// Whether a by-value integer narrower than the computation width is
+    /// widened before the body takes it.
+    widened: bool,
+    /// Where a float is made canonical before the body reads it.
+    canonical: enum { none, value, at_address },
+
+    fn of(module: *const Module, mir: *const Mir, index: usize) ForeignParameter {
+        const ty = mir.locals[index];
+        const by_address = module.arrivesByAddress(mir, index);
+        const float = floatBitsOf(module.representationOf(ty).computation) != null;
+        return .{
+            .by_address = by_address,
+            .widened = !by_address and adaptsAtBoundary(module, ty),
+            .canonical = if (!float) .none else if (by_address) .at_address else .value,
+        };
+    }
+};
+
+/// What a C-callable entry does around the body it calls. `emitForeignEntry`
+/// writes from these answers and decides none of them at the line it writes,
+/// so what an entry does is read, and tested, in one place.
+const ForeignPlan = struct {
+    /// Whether the entry enters foreign execution before the body, and
+    /// whether it leaves it after.
+    enters: bool,
+    leaves: bool,
+    /// Whether the body never returns, so nothing follows the call.
+    never: bool,
+    /// Whether the entry answers a value to C, and whether that value is
+    /// narrowed from the body's convention to the declared width.
+    answers: bool,
+    narrows: bool,
+
+    fn of(module: *const Module, mir: *const Mir, entry: ForeignEntry) ForeignPlan {
+        const never = mir.return_type == .never;
+        const answers = mir.return_type != .unit and !never;
+        const enters = entry != .runtime_called_back;
+        return .{
+            .enters = enters,
+            .leaves = enters and !never,
+            .never = never,
+            .answers = answers,
+            .narrows = answers and adaptsAtBoundary(module, mir.return_type),
+        };
+    }
+};
+
 /// The function type of a body's C-callable entry, as `func.constant` names it.
 fn writeForeignEntryType(w: *std.Io.Writer, module: *const Module, mir: *const Mir) std.Io.Writer.Error!void {
     try w.writeAll("(");
@@ -682,9 +736,10 @@ fn emitForeignEntry(
     entry: ForeignEntry,
     sanitize: ?Sanitizer,
 ) std.Io.Writer.Error!void {
+    const plan = ForeignPlan.of(module, mir, entry);
     // What the thunk itself answers: the declared type, or nothing where that
     // is Unit, because a C function returning void sets no register.
-    const answers = mir.return_type != .unit and mir.return_type != .never;
+    const answers = plan.answers;
 
     // What the *body* answers, which is a separate question and asked of the
     // one routine every other site asks. A function answering Unit still
@@ -718,29 +773,28 @@ fn emitForeignEntry(
     }
     // A callback's entry is reached only through the address the program
     // hands C, so the object publishes no symbol for it, as for a body.
-    if (entry != .exported or sanitize != null or mir.return_type == .never) {
+    if (entry != .exported or sanitize != null or plan.never) {
         try w.writeAll(" attributes {");
         if (entry != .exported) try w.writeAll("llvm.linkage = #llvm.linkage<internal>");
-        if (sanitize != null or mir.return_type == .never) {
+        if (sanitize != null or plan.never) {
             if (entry != .exported) try w.writeAll(", ");
             try w.writeAll("passthrough = [");
-            if (mir.return_type == .never) try w.writeAll("\"noreturn\"");
-            try writeSanitizeEntry(w, sanitize, mir.return_type == .never);
+            if (plan.never) try w.writeAll("\"noreturn\"");
+            try writeSanitizeEntry(w, sanitize, plan.never);
             try w.writeAll("]");
         }
         try w.writeAll("}");
     }
     try w.writeAll(" {\n");
-    if (entry != .runtime_called_back) try writeForeignGuard(w, true);
+    if (plan.enters) try writeForeignGuard(w, true);
 
     // A value narrower than the convention arrives narrow and is widened the
     // way a load of one is: what the bits mean is the declared type's
     // signedness, so an unsigned type widens with zeroes and a signed one with
     // its sign.
     for (0..mir.param_count) |i| {
-        if (module.arrivesByAddress(mir, i)) continue;
+        if (!ForeignParameter.of(module, mir, i).widened) continue;
         const ty = mir.locals[i];
-        if (!adaptsAtBoundary(module, ty)) continue;
         try w.print("    %w{d} = arith.{s} %p{d} : {s} to {s}\n", .{
             i, widening(module, ty), i, foreignTypeOf(module, ty), int_type,
         });
@@ -751,13 +805,15 @@ fn emitForeignEntry(
     for (0..mir.param_count) |i| {
         var tag_buffer: [32]u8 = undefined;
         const tag = std.fmt.bufPrint(&tag_buffer, "c{d}", .{i}) catch unreachable;
-        if (module.arrivesByAddress(mir, i)) {
+        const canonical = ForeignParameter.of(module, mir, i).canonical;
+        if (canonical == .none) continue;
+        if (canonical == .at_address) {
             var address_buffer: [32]u8 = undefined;
             const address = std.fmt.bufPrint(&address_buffer, "%p{d}", .{i}) catch unreachable;
             try writeCanonicalNanAt(w, module, mir.locals[i], address, tag, null);
             continue;
         }
-        const bits = floatBitsOf(module.representationOf(mir.locals[i]).computation) orelse continue;
+        const bits = floatBitsOf(module.representationOf(mir.locals[i]).computation).?;
         var buffers: [4][32]u8 = undefined;
         try writeCanonicalNan(w, .{
             .result = std.fmt.bufPrint(&buffers[0], "{s}c", .{tag}) catch unreachable,
@@ -776,10 +832,10 @@ fn emitForeignEntry(
     try w.writeAll("(");
     for (0..mir.param_count) |i| {
         if (i > 0) try w.writeAll(", ");
-        const by_value = !module.arrivesByAddress(mir, i);
-        if (by_value and adaptsAtBoundary(module, mir.locals[i])) {
+        const parameter = ForeignParameter.of(module, mir, i);
+        if (parameter.widened) {
             try w.print("%w{d}", .{i});
-        } else if (by_value and floatBitsOf(module.representationOf(mir.locals[i]).computation) != null) {
+        } else if (parameter.canonical == .value) {
             try w.print("%c{d}c", .{i});
         } else {
             try w.print("%p{d}", .{i});
@@ -793,11 +849,11 @@ fn emitForeignEntry(
     try w.writeAll(") -> ");
     if (callee_answers) |t| try w.print("{s}\n", .{t}) else try w.writeAll("()\n");
 
-    if (mir.return_type == .never) {
+    if (plan.never) {
         try w.writeAll("    llvm.unreachable\n  }\n");
         return;
     }
-    if (entry != .runtime_called_back) try writeForeignGuard(w, false);
+    if (plan.leaves) try writeForeignGuard(w, false);
 
     // A body that answers a width the thunk does not is answering Unit: the
     // value is bound and left, because nothing crosses.
@@ -807,7 +863,7 @@ fn emitForeignEntry(
     }
 
     const foreign = foreignTypeOf(module, mir.return_type);
-    if (!adaptsAtBoundary(module, mir.return_type)) {
+    if (!plan.narrows) {
         try w.print("    func.return %answer : {s}\n  }}\n", .{foreign});
         return;
     }
@@ -3294,6 +3350,49 @@ test "allocator zero facts require the exact library producer" {
     }
 }
 
+test "a parameter of a C-callable entry is widened or made canonical as its type requires, and not otherwise" {
+    const gpa = testing.allocator;
+    var types = try types_mod.Typing.Builder.init(gpa);
+    defer types.deinit();
+    const layouts = try gpa.alloc(types_mod.Layout, types.pool.items.len);
+    defer gpa.free(layouts);
+    @memset(layouts, .{ .size = 8, .alignment = 8 });
+    var representations = try mir_mod.deriveRepresentations(gpa, &types.view(), layouts);
+    defer representations.deinit(gpa);
+
+    // A narrow integer, an integer of the body's own width and a float, each
+    // by value.
+    var builder = Mir.Builder.init(gpa);
+    defer builder.deinit();
+    for ([_]TypeId{ .u8, .u64, .f64 }) |ty| _ = try builder.addLocal(ty, .value);
+    builder.param_count = 3;
+    const block = try builder.addBlock();
+    _ = try builder.setTerminator(block, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = .none } });
+    var mir = try builder.finish(block, .from(0));
+    defer mir.deinit(gpa);
+    var functions = [_]Mir{mir};
+    var names = [_][]const u8{"target"};
+    const module: Module = .{
+        .functions = &functions,
+        .external = &.{false},
+        .bytes = &.{},
+        .names = &names,
+        .origins = &.{},
+        .types = types.view(),
+        .representations = representations,
+        .layouts = layouts,
+        .entry = .none,
+    };
+
+    const narrow = ForeignParameter.of(&module, &mir, 0);
+    const wide = ForeignParameter.of(&module, &mir, 1);
+    const float = ForeignParameter.of(&module, &mir, 2);
+    try testing.expect(narrow.widened and narrow.canonical == .none);
+    try testing.expect(!wide.widened and wide.canonical == .none);
+    try testing.expect(!float.widened and float.canonical == .value);
+    try testing.expect(!narrow.by_address and !wide.by_address and !float.by_address);
+}
+
 test "foreign frame guards balance calls and C entries while runtime callbacks stay switchable" {
     const gpa = testing.allocator;
     var types = try types_mod.Typing.Builder.init(gpa);
@@ -3360,8 +3459,17 @@ test "foreign frame guards balance calls and C entries while runtime callbacks s
             var out: std.Io.Writer.Allocating = .init(gpa);
             defer out.deinit();
             try emitForeignEntry(&out.writer, &module, &mir, .at(1), entry, null);
-            try testing.expectEqual(@as(usize, if (entry == .runtime_called_back) 0 else 1), std.mem.count(u8, out.written(), "func.call @linea_foreign_enter()"));
-            try testing.expectEqual(@as(usize, if (entry == .runtime_called_back or ty == .never) 0 else 1), std.mem.count(u8, out.written(), "func.call @linea_foreign_leave()"));
+            // What the plan answers for this entry and this body, and that
+            // the entry written does exactly that.
+            const plan = ForeignPlan.of(&module, &mir, entry);
+            try testing.expectEqual(entry != .runtime_called_back, plan.enters);
+            try testing.expectEqual(plan.enters and ty != .never, plan.leaves);
+            try testing.expectEqual(ty == .never, plan.never);
+            try testing.expectEqual(ty == .u8 or ty == .f64, plan.answers);
+            try testing.expectEqual(ty == .u8, plan.narrows);
+            try testing.expectEqual(@as(usize, @intFromBool(plan.enters)), std.mem.count(u8, out.written(), "func.call @linea_foreign_enter()"));
+            try testing.expectEqual(@as(usize, @intFromBool(plan.leaves)), std.mem.count(u8, out.written(), "func.call @linea_foreign_leave()"));
+            try testing.expectEqual(plan.narrows, std.mem.indexOf(u8, out.written(), "arith.trunci %answer") != null);
             if (ty == .never) {
                 try testing.expect(std.mem.indexOf(u8, out.written(), "passthrough = [\"noreturn\"]") != null);
                 try testing.expect(std.mem.indexOf(u8, out.written(), "llvm.unreachable") != null);
