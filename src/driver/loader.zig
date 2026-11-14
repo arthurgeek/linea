@@ -130,7 +130,9 @@ pub const MemoryOwnership = union(enum) {
     /// The texts supplied are borrowed, and a file supplied without one
     /// (`InMemoryFile.deferred`) is read from disk into `allocator` when the
     /// program reaches it. A file an `embed` names is looked for among the
-    /// files supplied, as under `borrow`.
+    /// files supplied, as under `borrow`. What is read is never freed one
+    /// text at a time, so `allocator` is one released whole, with the
+    /// sources.
     borrow_reading_disk: CopyReadingDisk,
 
     pub const CopyReadingDisk = struct {
@@ -1036,6 +1038,45 @@ test "a file left on disk is read only by a program that reaches it" {
             kept,
             gone,
         }, .program, false, reading));
+    }
+}
+
+test "an embedded file left on disk is read where the load can read, and is otherwise not there" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "page.txt", .data = "page" });
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    const files = [_]InMemoryFile{
+        .{ .path = try std.fs.path.join(gpa, &.{ root, manifest_name }), .text = "{}" },
+        .{ .path = try std.fs.path.join(gpa, &.{ root, "main.lin" }), .text = "let page = embed(\"page.txt\")\n\nfn main() -> UInt8 {\n    UInt8.try_from(page.len()).unwrap()\n}\n" },
+        .{ .path = try std.fs.path.join(gpa, &.{ root, "page.txt" }), .text = "", .deferred = true },
+    };
+
+    // The load reads from disk, so the file's bytes are the ones on disk.
+    {
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const reading: MemoryOwnership = .{ .borrow_reading_disk = .{ .allocator = gpa, .io = testing.io } };
+        const program = try loadFromMemory(gpa, &table, &sink, &interner, root, &files, .program, false, reading);
+        try testing.expect(!sink.hasErrors());
+        try testing.expectEqualStrings("page", program.embeds.bytesOf(program.embeds.sites[0].expr).?);
+    }
+
+    // The load has nothing to read with: the file is refused as missing, and
+    // is never the empty text it was listed with.
+    {
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const program = try loadFromMemory(gpa, &table, &sink, &interner, root, &files, .program, false, .borrow);
+        try testing.expectEqual(EmbedId.none, program.embeds.sites[0].embed);
+        try testing.expectEqual(@as(usize, 1), sink.items().len);
+        try testing.expectEqual(Code.m_embed, sink.items()[0].code.?);
     }
 }
 
@@ -2580,6 +2621,31 @@ const Loader = struct {
         self.prelude = try self.inLibrary(library.prelude_dir);
     }
 
+    /// What reading `full` gives where it is a file supplied with its text
+    /// left on disk, or null where it is not one. The text such a file is
+    /// listed with is empty and is never its content: a load given a reader
+    /// reads the file, and to any other load it is not there, as a source
+    /// left on disk is not.
+    fn leftOnDisk(self: *Loader, full: []const u8) std.mem.Allocator.Error!?embedded.Read {
+        const file = for (self.files) |f| {
+            if (std.mem.eql(u8, f.path, full)) break f;
+        } else return null;
+        if (!file.deferred) return null;
+        const reading = switch (self.input) {
+            .memory => |ownership| switch (ownership) {
+                .borrow_reading_disk, .copy_reading_disk => |reading| reading,
+                .borrow, .copy => return .{ .unread = .missing },
+            },
+            .disk => return null,
+        };
+        const text = MemoryOwnership.readDeferred(reading, full) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return .{ .unread = .missing },
+        };
+        if (text.len > embedded.max_bytes) return .{ .unread = .{ .too_large = text.len } };
+        return .{ .bytes = @constCast(text) };
+    }
+
     fn sourceFor(self: *Loader, file: InMemoryFile) !Source {
         if (self.in_library) return .{ .path = file.path, .text = file.text };
         const storage = switch (self.input) {
@@ -2842,6 +2908,8 @@ const Loader = struct {
         if (!library_bound) try self.embed_watched.append(self.gpa, try self.gpa.dupe(u8, full));
         const read: embedded.Read = if (disk_io) |io|
             try embedded.readFromDisk(storage orelse self.gpa, io, root, rel)
+        else if (try self.leftOnDisk(full)) |left|
+            left
         else
             embedded.readFromFiles(InMemoryFile, self.files, full);
         const bytes: []const u8 = switch (read) {
