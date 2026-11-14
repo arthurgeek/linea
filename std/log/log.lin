@@ -196,7 +196,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
         if !self.enabled(level) {
             return .Ok(())
         }
-        var line: Line[A] = .{ text = String.new_in(self.allocator), escaping = false }
+        var line: Line[A] = .{ text = String.new_in(self.allocator), rendered = .{ bytes = Vec.new_in(self.allocator) } }
         let built = write_line(&line, time.now(), level, message, fields)
         let written: Result[(), LogError[S.Error]] = match built {
             Ok(_) => match self.output.write_line(line.text.view()) {
