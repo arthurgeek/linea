@@ -247,7 +247,7 @@ pub const Region = struct {
 pub const Extents = struct {
     /// Nodes by where they begin, within a file.
     nodes: []Node,
-    /// The `on` markers, by token, in order.
+    /// The `on` markers, by where they end, within a file.
     closers: []TokenTag,
 
     const Node = struct {
@@ -258,7 +258,6 @@ pub const Extents = struct {
 
     const TokenTag = struct {
         file: FileId,
-        at: TokenId,
         /// Where the marker's comment ends, which is where its line does.
         span_end: u32,
     };
@@ -291,8 +290,12 @@ pub const Extents = struct {
             const at = TokenId.at(@intCast(i));
             const part = ast.partOf(at);
             if (tag != .comment or markerAt(part.source, span) != .on) continue;
-            try closers.append(gpa, .{ .file = part.file, .at = at, .span_end = span.end });
+            try closers.append(gpa, .{ .file = part.file, .span_end = span.end });
         }
+
+        // Sorted, since tokens are numbered in the order files were parsed
+        // and a file's number says nothing of that order.
+        std.mem.sortUnstable(TokenTag, closers.items, {}, closesBefore);
 
         return .{ .nodes = try nodes.toOwnedSlice(gpa), .closers = try closers.toOwnedSlice(gpa) };
     }
@@ -330,14 +333,28 @@ pub const Extents = struct {
         gpa.free(self.closers);
     }
 
+    fn closesBefore(_: void, a: TokenTag, b: TokenTag) bool {
+        const x = @intFromEnum(a.file);
+        const y = @intFromEnum(b.file);
+        return if (x == y) a.span_end < b.span_end else x < y;
+    }
+
     /// Where the first `on` marker after `from` in this file ends, or null.
+    ///
+    /// **Bound:** a binary search of the markers.
     fn closerAfter(self: *const Extents, file: FileId, from: u32) ?u32 {
-        for (self.closers) |c| {
-            if (c.file != file) continue;
-            if (c.span_end <= from) continue;
-            return c.span_end;
+        // The first marker that sits in a later file, or in this one past
+        // `from`.
+        var lo: usize = 0;
+        var hi: usize = self.closers.len;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            const c = self.closers[mid];
+            const before = if (c.file == file) c.span_end <= from else @intFromEnum(c.file) < @intFromEnum(file);
+            if (before) lo = mid + 1 else hi = mid;
         }
-        return null;
+        if (lo == self.closers.len or self.closers[lo].file != file) return null;
+        return self.closers[lo].span_end;
     }
 
     /// How far a region opened at `from` reaches, having started at `to`.
@@ -4889,6 +4906,30 @@ test "an off region is copied byte for byte" {
         \\}
         \\
     );
+}
+
+test "each of many off regions ends at its own on" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // Every region is copied as written and every line between two regions
+    // is formatted, so a region that ended at another region's marker would
+    // show as a line left unformatted or a line formatted inside a region.
+    var source: std.ArrayList(u8) = .empty;
+    var formatted: std.ArrayList(u8) = .empty;
+    try source.appendSlice(gpa, "fn main() -> UInt8 {\n");
+    try formatted.appendSlice(gpa, "fn main() -> UInt8 {\n");
+    for (0..300) |i| {
+        const kept = try std.fmt.allocPrint(gpa, "    // linea fmt: off\n    let   _a{d}   =   1;\n    // linea fmt: on\n", .{i});
+        try source.appendSlice(gpa, kept);
+        try formatted.appendSlice(gpa, kept);
+        try source.appendSlice(gpa, try std.fmt.allocPrint(gpa, "    let   _b{d}   =   2\n", .{i}));
+        try formatted.appendSlice(gpa, try std.fmt.allocPrint(gpa, "    let _b{d} = 2\n", .{i}));
+    }
+    try source.appendSlice(gpa, "    0\n}\n");
+    try formatted.appendSlice(gpa, "    0\n}\n");
+    try check(gpa, source.items, formatted.items);
 }
 
 test "an unclosed off region runs to end of file" {

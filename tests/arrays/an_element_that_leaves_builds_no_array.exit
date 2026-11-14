@@ -1,0 +1,2 @@
+trap
+linea: panic: stop at tests/arrays/an_element_that_leaves_builds_no_array.lin:4:21

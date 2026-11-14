@@ -15,4 +15,4 @@ error[O-Leak]: `_wrapped` (a linear `Wrapped`) is still owned when this path lea
 29 | }
    | - the block ends here
    |
-   = help: take it apart with `let Wrapped(_) = _wrapped`, or give it to something that takes it
+   = help: give it to something that takes it

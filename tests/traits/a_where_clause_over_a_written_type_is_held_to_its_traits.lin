@@ -1,0 +1,20 @@
+// [T-Bound]. A `where` clause may bound a written type as well as a
+// parameter, and its bounds are bounds like any other: each supplies as many
+// arguments as its trait declares, and none repeats a capability.
+trait Mark[phantom U] {}
+
+struct Box[phantom T] {}
+
+impl[T] Mark[UInt8] for Box[T] {}
+
+fn _too_few[T](_x: T) where Box[T]: Mark {}
+
+fn _too_many[T](_x: T) where Box[T]: Mark[UInt8, UInt8] {}
+
+fn _exact[T](_x: T) where Box[T]: Mark[UInt8] {}
+
+fn _repeated[T](_x: T) where Box[T]: Copyable + Copyable {}
+
+fn main() -> UInt8 {
+    0
+}

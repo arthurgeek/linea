@@ -54,6 +54,11 @@ the native object.
 
 These cases enter the normal conformance walk, including Linux x86-64
 optimized-corpus and address/thread sanitizer lanes. The fiber job also runs
-both test directories explicitly on Linux x86-64 and arm64. Wiring into a
-lane is not evidence that it has run. Local macOS sanitizer execution is excluded
-by the repository's toolchain policy.
+both test directories explicitly on Linux x86-64 and arm64.
+[CI run 43481888246](https://github.com/arthurgeek/linea/actions/runs/43481888246)
+passed all eight runtime cases and nine command transcripts on each Linux
+ABI, and both ASan/TSan corpus lanes passed. The sanitizer lanes leave
+non-running compile-refusal transcripts to the unsanitized jobs. See
+[ADR 0265 §9.5](../../../docs/adr/0265-waits-go-through-the-runtimes-poller-and-a-loop-runs-tasks-as-fibers.md#95-validation-evidence-and-acceptance)
+for provenance, counts and coverage limits. Local macOS sanitizer execution
+is excluded by the repository's toolchain policy.
