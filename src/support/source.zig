@@ -59,7 +59,7 @@ pub fn readFileAlloc(io: std.Io, gpa: std.mem.Allocator, path: []const u8) ![]u8
 /// create. The size is a hint and not the decision: what a stream reports and
 /// what it then delivers need not agree, so `readWithin` counts what arrives
 /// and refuses on that.
-fn readFileWithin(io: std.Io, gpa: std.mem.Allocator, path: []const u8, limit: u64) ![]u8 {
+pub fn readFileWithin(io: std.Io, gpa: std.mem.Allocator, path: []const u8, limit: u64) ![]u8 {
     const file = try std.Io.Dir.cwd().openFile(io, path, .{});
     defer file.close(io);
 

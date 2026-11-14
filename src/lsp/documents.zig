@@ -11,6 +11,9 @@ const source_mod = @import("../support/source.zig");
 pub const Documents = struct {
     gpa: std.mem.Allocator,
     open: std.StringHashMapUnmanaged([]const u8) = .empty,
+    /// The most bytes of a source file read from disk, which is the size no
+    /// source may pass. A field so a test can state a smaller one.
+    read_limit: u64 = source_mod.max_bytes,
 
     pub const Change = enum { inserted, changed, unchanged };
 
@@ -94,16 +97,30 @@ pub const Documents = struct {
             // path the loader's walk produced. The two are one string because
             // the entry the walk started from is spelled canonically, which is
             // what a manifest naming a source root can otherwise undo.
+            // A source file that cannot be read is carried without its text
+            // and with the reason. The program may not reach it, and then it
+            // is no part of what is checked, as it is none of what a load
+            // from disk reads. A manifest is read by every load of its root,
+            // so one that cannot be read still stops here.
+            const is_manifest = std.mem.eql(u8, std.fs.path.basename(path), loader.manifest_name);
+            var unread: ?loader.ReadFailure = null;
             const text = if (self.open.get(disk_path)) |buffer|
                 try gpa.dupe(u8, buffer)
             else
-                try source_mod.readFileAlloc(io, gpa, path);
+                source_mod.readFileWithin(io, gpa, path, self.read_limit) catch |err| switch (err) {
+                    error.OutOfMemory => return err,
+                    else => |failure| unreadable: {
+                        if (is_manifest) return failure;
+                        unread = failure;
+                        break :unreadable try gpa.dupe(u8, "");
+                    },
+                };
             errdefer gpa.free(text);
 
             // A manifest carries where its directory is, so the load from
             // these files tells one library spelled two ways apart from two
             // libraries exactly as the load from disk does.
-            const real: ?[:0]u8 = if (std.mem.eql(u8, std.fs.path.basename(path), loader.manifest_name))
+            const real: ?[:0]u8 = if (is_manifest)
                 std.Io.Dir.cwd().realPathFileAlloc(io, std.fs.path.dirname(path) orelse ".", gpa) catch null
             else
                 null;
@@ -111,7 +128,7 @@ pub const Documents = struct {
             const identity = try gpa.dupe(u8, if (real) |held| held else "");
             errdefer gpa.free(identity);
 
-            try files.append(gpa, .{ .path = path, .text = text, .identity = identity });
+            try files.append(gpa, .{ .path = path, .text = text, .identity = identity, .unread = unread });
         }
 
         return files.toOwnedSlice(gpa);
@@ -188,6 +205,39 @@ test "an open buffer is what filesFor returns, not the file it shadows" {
 
     try testing.expectEqual(@as(usize, 1), files.len);
     try testing.expectEqualStrings("fn main() -> UInt8 {\n    0\n}\n", files[0].text);
+}
+
+test "a file too large to read is carried unread beside the files that were read" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "linea.json", .data = "{}" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "main.lin", .data = "fn main() -> UInt8 {\n    0\n}\n" });
+    try tmp.dir.createDirPath(testing.io, "huge");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "huge/huge.lin", .data = "pub fn size() -> UInt8 {\n    1\n}\n// " ++ "x" ** 64 ++ "\n" });
+    const root = try std.fmt.allocPrint(testing.allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer testing.allocator.free(root);
+
+    // The limit stands in for the size no source may pass, so the case costs
+    // a hundred bytes rather than two gigabytes.
+    var docs: Documents = .{ .gpa = testing.allocator, .read_limit = 64 };
+    defer docs.deinit();
+    const found = try loader.rootOf(testing.allocator, testing.io, root, .its_program, root);
+    defer found.deinit(testing.allocator);
+    const files = try docs.filesFor(testing.allocator, testing.io, found);
+    defer Documents.freeFiles(testing.allocator, files);
+
+    var read: usize = 0;
+    var unread: usize = 0;
+    for (files) |file| {
+        if (file.unread) |failure| {
+            try testing.expectEqual(@as(loader.ReadFailure, error.SourceTooLarge), failure);
+            try testing.expect(std.mem.endsWith(u8, file.path, "huge/huge.lin"));
+            try testing.expectEqualStrings("", file.text);
+            unread += 1;
+        } else read += 1;
+    }
+    try testing.expectEqual(@as(usize, 1), unread);
+    try testing.expectEqual(@as(usize, 2), read);
 }
 
 test "a root's files carry the manifest that identified it" {

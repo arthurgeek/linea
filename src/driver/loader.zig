@@ -60,7 +60,15 @@ pub const InMemoryFile = struct {
     /// filesystem resolves it, so a load from these files tells libraries
     /// apart as a load from disk does. Empty where nothing resolved it.
     identity: []const u8 = "",
+    /// Why the file's bytes could not be read, where whoever gathered the
+    /// files tried and failed; `text` is then empty. A program that does not
+    /// reach the file loads without it, and one that does is refused for the
+    /// same reason a load from disk refuses it.
+    unread: ?ReadFailure = null,
 };
+
+/// What reading a source file can fail with.
+pub const ReadFailure = @typeInfo(@typeInfo(@TypeOf(source_mod.readFileAlloc)).@"fn".return_type.?).error_union.error_set;
 
 fn lessByPath(_: void, a: InMemoryFile, b: InMemoryFile) bool {
     return std.mem.lessThan(u8, a.path, b.path);
@@ -934,6 +942,39 @@ test "an embed reads a file supplied beside the source, once however often it is
     try testing.expectEqual(EmbedId.none, program.embeds.sites[2].embed);
     try testing.expectEqual(@as(usize, 1), sink.items().len);
     try testing.expectEqual(Code.m_embed, sink.items()[0].code.?);
+}
+
+test "a supplied file that could not be read stops only a program that reaches it" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const unread: InMemoryFile = .{ .path = "app/huge/huge.lin", .text = "", .unread = error.SourceTooLarge };
+
+    // No import names the module the unread file is in.
+    {
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const program = try loadFromMemory(gpa, &table, &sink, &interner, "app", &.{
+            .{ .path = "app/linea.json", .text = "{}" },
+            .{ .path = "app/main.lin", .text = "fn main() -> UInt8 {\n    0\n}\n" },
+            unread,
+        }, .program, false, .borrow);
+        try testing.expect(!sink.hasErrors());
+        try testing.expectEqual(@as(usize, 1), program.modules.len);
+    }
+
+    // The program imports it.
+    {
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        try testing.expectError(error.SourceTooLarge, loadFromMemory(gpa, &table, &sink, &interner, "app", &.{
+            .{ .path = "app/linea.json", .text = "{}" },
+            .{ .path = "app/main.lin", .text = "import huge\n\nfn main() -> UInt8 {\n    huge.size()\n}\n" },
+            unread,
+        }, .program, false, .borrow));
+    }
 }
 
 test "a path naming no file is refused as that path" {
@@ -2414,6 +2455,7 @@ const Loader = struct {
     }
 
     fn sourceFor(self: *Loader, file: InMemoryFile) !Source {
+        if (file.unread) |failure| return failure;
         if (self.in_library) return .{ .path = file.path, .text = file.text };
         const storage = switch (self.input) {
             .memory => |ownership| switch (ownership) {

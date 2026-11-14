@@ -1798,3 +1798,19 @@ test "watched dependency changes and missing imports invalidate analysis" {
     const repaired = try ws.handler.check(a, main);
     try std.testing.expect(!repaired.sink.hasErrors());
 }
+
+test "a file too large to read stops no check of a program that never reaches it" {
+    const filler = "// " ++ "x" ** 200 ++ "\n";
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "main.lin", .text = "fn main() -> UInt8 {\n    0\n}\n" },
+        .{ .at = "notes/notes.lin", .text = filler ++ "pub fn kept() -> UInt8 {\n    1\n}\n" },
+    });
+    defer ws.deinit();
+    const a = ws.arena.allocator();
+
+    // The directory beside the root holds a file past the limit, and no
+    // import names it: the program is checked and nothing is reported.
+    ws.handler.documents.read_limit = 64;
+    const checked = try ws.handler.check(a, try ws.main());
+    try std.testing.expectEqual(@as(usize, 0), checked.sink.items().len);
+}
