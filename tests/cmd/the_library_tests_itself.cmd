@@ -872,6 +872,7 @@ The library tests itself.
   ok    iter.peekable_yields_every_item_once_in_order
   ok    iter.position_counts_from_zero
   ok    iter.position_hands_linear_items_to_its_predicate
+  ok    iter.position_lends_a_predicate_the_caller_uses_again
   ok    iter.reduce_combines_from_the_first_item
   ok    iter.releasing_a_copied_releases_its_iterator_once
   ok    iter.releasing_a_filter_map_releases_its_iterator_once
@@ -1636,4 +1637,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1633 passed, 0 failed
+  1634 passed, 0 failed
