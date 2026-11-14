@@ -1,0 +1,42 @@
+// A closure written inside a deferred expression has a body of its own. A
+// `defer` in that body is scheduled for the end of the closure's call, and a
+// `return` there leaves the closure, so neither leaves or schedules in the
+// scope that is ending.
+import std.io
+
+fn first() {
+    io.println("closure body").unwrap()
+}
+
+fn last() {
+    io.println("closure's defer").unwrap()
+}
+
+fn run(f: fn()) {
+    f()
+}
+
+fn report(f: fn(flag: Bool) -> UInt8) {
+    let early = f(true)
+    let late = f(false)
+    io.println("{early} {late}").unwrap()
+}
+
+fn main() -> UInt8 {
+    defer run(
+        || {
+            defer last()
+            first()
+        },
+    )
+    defer report(
+        |flag| {
+            if flag {
+                return 1
+            }
+            2
+        },
+    )
+    io.println("main body").unwrap()
+    0
+}
