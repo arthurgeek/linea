@@ -16354,6 +16354,55 @@ test "shared type DAG substitution bounds allocation work per query" {
     try testing.expectEqual(first, try reopened.substitute(shared, owner, &.{.u8}));
 }
 
+test "a type too long to spell is a digest in a symbol, and one leaf apart is another" {
+    const gpa = testing.allocator;
+    var builder = try Typing.Builder.init(gpa);
+    defer builder.deinit();
+    const declaration = DeclId.at(1);
+    const template = try builder.addStruct("P", .copyable, &.{});
+    try builder.noteTemplate(declaration, 0, template);
+
+    // `P[x, x]` over itself: each level names the one below twice, so the
+    // pool holds one type per level and the spelling doubles.
+    const doubled = struct {
+        fn of(b: *Typing.Builder, t: TypeId, d: DeclId, leaf: TypeId, levels: usize) !TypeId {
+            var at = leaf;
+            for (0..levels) |_| at = try b.instantiate(t, d, &.{ at, at });
+            return at;
+        }
+    }.of;
+    const levels = 24;
+    const over_u8 = try doubled(&builder, template, declaration, .u8, levels);
+    const over_u16 = try doubled(&builder, template, declaration, .u16, levels);
+    const small = try doubled(&builder, template, declaration, .u8, 3);
+    const view = builder.view();
+
+    var shared: SharedSpelling = .{};
+    defer shared.deinit(gpa);
+    const first = try view.mangledNameWith(gpa, over_u8, &shared);
+    defer gpa.free(first);
+    const second = try view.mangledNameWith(gpa, over_u16, &shared);
+    defer gpa.free(second);
+
+    // Sixteen million names each, written in a few kilobytes, and the two
+    // differ though they differ in one leaf only.
+    try testing.expect(first.len <= 4 * SharedSpelling.longest);
+    try testing.expect(std.mem.indexOf(u8, first, SharedSpelling.marker) != null);
+    try testing.expect(!std.mem.eql(u8, first, second));
+    // Asked again, the same type is the same name.
+    const again = try view.mangledNameWith(gpa, over_u8, &shared);
+    defer gpa.free(again);
+    try testing.expectEqualStrings(first, again);
+
+    // A spelling under the bound is written as it always was.
+    const plain = try view.mangledName(gpa, small);
+    defer gpa.free(plain);
+    const bounded = try view.mangledNameWith(gpa, small, &shared);
+    defer gpa.free(bounded);
+    try testing.expectEqualStrings(plain, bounded);
+    try testing.expect(std.mem.indexOf(u8, bounded, SharedSpelling.marker) == null);
+}
+
 test "deep nominal mangling allocates in proportion to its exact spelling" {
     const gpa = testing.allocator;
     var builder = try Typing.Builder.init(gpa);
