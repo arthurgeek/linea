@@ -1,0 +1,3 @@
+import link69
+
+pub use link69.value

@@ -1,0 +1,8 @@
+// A `pub use` passes on what another module declares, and that module may
+// pass it on from a third. The name reaches the declaration at the end of
+// the chain however many modules stand between, here seventy.
+import link00
+
+fn main() -> UInt8 {
+    link00.value()
+}

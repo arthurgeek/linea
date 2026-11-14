@@ -1,0 +1,3 @@
+import link18
+
+pub use link18.value

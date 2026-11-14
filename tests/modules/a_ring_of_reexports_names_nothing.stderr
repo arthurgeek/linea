@@ -1,0 +1,5 @@
+error[M-Import]: `value` is passed on in a ring of `use` declarations, and none of them declares it
+ --> tests/modules/a_ring_of_reexports_names_nothing/south/south.lin:3:15
+  |
+3 | pub use north.value
+  |               ^^^^^ one of them names the declaration itself, in the module that declares it

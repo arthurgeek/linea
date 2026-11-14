@@ -1,0 +1,3 @@
+import link23
+
+pub use link23.value

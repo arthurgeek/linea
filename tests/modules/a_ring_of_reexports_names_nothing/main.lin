@@ -1,0 +1,7 @@
+// [M-Import]. A `pub use` passes on a declaration. Two that pass on each
+// other's name reach no declaration, so the name they share names nothing.
+import north
+
+fn main() -> UInt8 {
+    north.value()
+}

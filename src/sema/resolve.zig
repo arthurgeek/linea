@@ -7075,7 +7075,7 @@ const Resolver = struct {
     /// already bound to a real declaration, so following it once is following
     /// it all the way.
     fn reexport(self: *Resolver, d: DeclId) std.mem.Allocator.Error!void {
-        return self.reexportFollowing(d, 0);
+        return self.reexportFollowing(d, null);
     }
 
     /// The module and the name a re-export's path spells, or null where it
@@ -7091,6 +7091,9 @@ const Resolver = struct {
         return if (count == 2) elements else null;
     }
 
+    /// A re-export being resolved, and the one whose resolution led to it.
+    const ReexportOnPath = struct { decl: DeclId, outer: ?*const ReexportOnPath };
+
     /// Resolves a re-export, resolving what it names first where that is
     /// itself one.
     ///
@@ -7100,14 +7103,18 @@ const Resolver = struct {
     /// no parameters and no type, so every call through the chain was an
     /// arity error. Following the chain here needs no ordering to be true.
     ///
-    /// The depth bound is what a cycle of re-exports runs into; each is
-    /// reported where it is written by the ordinary path below.
+    /// `following` is the re-exports being resolved on the way here, so one
+    /// that names another already among them is a ring: it reaches no
+    /// declaration, and is reported once, where the ring closes.
+    ///
+    /// **Bound:** each re-export is resolved once, since a resolved one is
+    /// bound to a declaration and followed no further; a chain of n compares
+    /// each against those before it.
     fn reexportFollowing(
         self: *Resolver,
         d: DeclId,
-        depth: u32,
+        following: ?*const ReexportOnPath,
     ) std.mem.Allocator.Error!void {
-        if (depth > 64) return;
         var here: ?*Binding = null;
         for (self.scopeOf(self.current)) |b| {
             if (self.bindings.items[b.index()].decl == d) here = &self.bindings.items[b.index()];
@@ -7184,10 +7191,39 @@ const Resolver = struct {
             // resolved yet, and binding it now would bind the alias rather
             // than what it aliases.
             if (self.ast.declTag(held.decl) == .use_) {
+                // One already found to reach nothing was reported where it
+                // is written, and what names it reaches nothing either.
+                if (held.unresolved) {
+                    held.used = true;
+                    if (here) |h| h.unresolved = true;
+                    return;
+                }
+                var on_path: ?*const ReexportOnPath = following;
+                const closes_a_ring = held.decl == d or while (on_path) |earlier| : (on_path = earlier.outer) {
+                    if (earlier.decl == held.decl) break true;
+                } else false;
+                if (closes_a_ring) {
+                    held.used = true;
+                    if (here) |h| h.unresolved = true;
+                    return self.sink.addErrorFmt(
+                        .m_import,
+                        self.ast.fileOf(elements[1]),
+                        self.ast.tokenSpan(elements[1]),
+                        "one of them names the declaration itself, in the module that declares it",
+                        "`{s}` is passed on in a ring of `use` declarations, and none of them declares it",
+                        .{self.ast.tokenText(elements[1])},
+                    );
+                }
+                const next: ReexportOnPath = .{ .decl = d, .outer = following };
                 const was = self.current;
                 self.current = holding;
-                try self.reexportFollowing(held.decl, depth + 1);
+                try self.reexportFollowing(held.decl, &next);
                 self.current = was;
+                // What it names reached nothing, which was reported there.
+                if (self.bindings.items[b.index()].unresolved) {
+                    if (here) |h| h.unresolved = true;
+                    return;
+                }
             }
 
             const settled = &self.bindings.items[b.index()];
