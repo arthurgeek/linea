@@ -89,9 +89,50 @@ static void a_close_after_a_refused_half_close_ends_the_peers_input(void) {
     linea_sim_close(sim);
 }
 
+/* A close that cannot allocate the end of input it sends resets its peer at
+ * once: the peer's read answers and does not wait for an end that was never
+ * sent. */
+static void a_close_refused_for_memory_resets_the_peer(void) {
+    const unsigned long sim = linea_sim_open(7, ms, 0, 0, 65536, 0, 0);
+    assert(sim != 0);
+    (void)linea_io_switch(sim);
+    struct pair p = connected_pair();
+    refusals = 1;
+    assert(linea_net_close((int)p.client) == 0);
+    char got[2];
+    assert(linea_net_read((int)p.server, ADDRESS(got), 2, virtual_now() + 10 * ms) == -(long)ECONNRESET);
+    assert(linea_net_close((int)p.server) == 0);
+    assert(linea_net_close((int)p.listener) == 0);
+    (void)linea_io_switch(0);
+    linea_sim_close(sim);
+}
+
+/* A write to a peer that has closed sends the writer a reset. A write that
+ * cannot allocate it has sent none: the next write sends it, and the writer
+ * then reads the reset. */
+static void a_write_to_a_closed_peer_refused_for_memory_is_asked_again(void) {
+    const unsigned long sim = linea_sim_open(7, ms, 0, 0, 65536, 0, 0);
+    assert(sim != 0);
+    (void)linea_io_switch(sim);
+    struct pair p = connected_pair();
+    assert(linea_net_close((int)p.server) == 0);
+    const char sent[2] = { 'o', 'k' };
+    refusals = 1;
+    assert(linea_net_write((int)p.client, ADDRESS(sent), 2, virtual_now() + 10 * ms) == -(long)ENOMEM);
+    assert(linea_net_write((int)p.client, ADDRESS(sent), 2, virtual_now() + 10 * ms) == 2);
+    char got[2];
+    assert(linea_net_read((int)p.client, ADDRESS(got), 2, virtual_now() + 10 * ms) == -(long)ECONNRESET);
+    assert(linea_net_close((int)p.client) == 0);
+    assert(linea_net_close((int)p.listener) == 0);
+    (void)linea_io_switch(0);
+    linea_sim_close(sim);
+}
+
 int main(void) {
     a_half_close_refused_for_memory_is_asked_again();
     a_close_after_a_refused_half_close_ends_the_peers_input();
-    puts("native sim: a half-close refused for memory shuts nothing, and a retry or a close ends the peer's input");
+    a_close_refused_for_memory_resets_the_peer();
+    a_write_to_a_closed_peer_refused_for_memory_is_asked_again();
+    puts("native sim: an end or a reset refused for memory is sent when asked again, and a close resets its peer at once");
     return 0;
 }

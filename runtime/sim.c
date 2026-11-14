@@ -399,10 +399,19 @@ static void close_end(struct sim *s, long index, int reset) {
     struct entry *peer = at(e->peer);
     if (peer != NULL) {
         const int unread = e->received_len > 0 || e->inflight_bytes > 0;
+        long sent = 0;
         if (reset || unread) {
-            (void)schedule(s, peer, chunk_reset, NULL, 0);
+            sent = schedule(s, peer, chunk_reset, NULL, 0);
         } else if (!e->write_shut) {
-            (void)schedule(s, peer, chunk_end, NULL, 0);
+            sent = schedule(s, peer, chunk_end, NULL, 0);
+        }
+        /* A close cannot be refused, so an end or a reset that could not be
+         * allocated resets the peer at once: it would otherwise wait for
+         * something that was never sent. */
+        if (sent != 0) {
+            peer->reset = 1;
+            peer->received_len = 0;
+            note(s, event_reset, peer->number, 0);
         }
         peer->peer = -1;
         if (e->established > s->now && peer->listener >= 0) {
@@ -518,9 +527,11 @@ static long attempt_write(struct sim *s, struct entry *e, struct linea_op *op) {
     if (e->write_shut) return -(long)EPIPE;
     struct entry *peer = at(e->peer);
     if (peer == NULL) {
+        /* Marked once the reset is sent: one that could not be allocated was
+         * not, and the next write sends it. */
         if (!e->reset_scheduled) {
-            e->reset_scheduled = 1;
             if (schedule(s, e, chunk_reset, NULL, 0) != 0) return -(long)ENOMEM;
+            e->reset_scheduled = 1;
         }
         return (long)op->len;
     }
