@@ -158,8 +158,10 @@ fn render(
     var window: Window = .none;
     var order_buf: [max_ordered]usize = undefined;
     var shown: FileId = primary.file;
-    for (labelOrder(table, d, primary.file, &order_buf)) |i| {
-        const l = d.labels[i];
+    const ordered = labelOrder(table, d, primary.file, &order_buf);
+    for (0..d.labels.len) |at| {
+        // The ordered labels first, then the rest as they were built.
+        const l = d.labels[if (at < ordered.len) ordered[at] else at];
         const l_map = table.mapOf(l.file);
         const pos = l_map.lineCol(l.span.start);
 
