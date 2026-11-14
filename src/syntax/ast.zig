@@ -1183,9 +1183,21 @@ pub const Ast = struct {
     }
 
     /// `writtenSpan`, reaching past a named type's arguments to the bracket
-    /// that closes them. Bound: the written type's own tokens.
+    /// that closes them, wherever the name sits: written bare, behind a
+    /// `borrow`, or as a callable type's result. Bound: the written type's
+    /// own tokens.
     pub fn writtenWholeSpan(self: *const Ast, ref: node.TypeRef) Span {
         const span = self.writtenSpan(ref);
+        if (ref.kind == .borrow) {
+            const referent = self.typeArgs(ref.args);
+            if (referent.len == 0 or !referent[0].wasWritten()) return span;
+            return .{ .start = span.start, .end = self.writtenWholeSpan(referent[0]).end };
+        }
+        if (ref.kind == .callable) {
+            const result = self.callableType(ref).result;
+            if (!result.wasWritten()) return span;
+            return .{ .start = span.start, .end = self.writtenWholeSpan(result).end };
+        }
         if (ref.kind != .named and ref.kind != .selection) return span;
         const args = self.typeArgs(ref.args);
         if (args.len == 0) return span;

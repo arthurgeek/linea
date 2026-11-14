@@ -2830,21 +2830,16 @@ pub const Settlers = struct {
     /// value of `t`, in the order `Reach.each` yields them: the type's own
     /// first, then the traits'. How many were found, up to `out.len`.
     ///
-    /// Costs `Reach.each` over one type -- its own operations and the traits
-    /// the module can see -- and a comparison of names among those.
+    /// **Bound:** `Reach.each` over one type -- its own operations and the
+    /// traits the module can see -- and one table of the names among those.
     pub fn operations(self: Settlers, gpa: std.mem.Allocator, t: TypeId, out: []node.DeclId) std.mem.Allocator.Error!usize {
         var applicable: std.ArrayList(Applicable) = .empty;
         defer applicable.deinit(gpa);
         try self.reach.each(gpa, t, &applicable);
+        try keepReached(gpa, self.ast, &applicable);
         var found: usize = 0;
         for (applicable.items) |a| {
             if (found == out.len) break;
-            const name = self.ast.tokenName(self.ast.declName(a.sig));
-            var runs: NameReach = .{};
-            for (applicable.items) |other| {
-                if (self.ast.tokenName(self.ast.declName(other.sig)) == name) runs.note(other);
-            }
-            if (!runs.reaches(a)) continue;
             if (!self.settles(t, a.sig)) continue;
             out[found] = a.sig;
             found += 1;
