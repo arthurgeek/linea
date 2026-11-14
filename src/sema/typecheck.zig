@@ -5709,7 +5709,8 @@ fn memberNotAValue(kind: resolve_mod.Kind) ?NotAValue {
     };
 }
 
-/// An expression that leaves, and where it is written.
+/// An expression a `defer` may not hold, and where it is written: one that
+/// leaves, or what a `defer` written inside it schedules.
 const Leave = struct {
     /// The index of its first token, which is what orders these and what a
     /// containing extent is compared against.
@@ -5718,6 +5719,8 @@ const Leave = struct {
     /// How it is named in the message, so the search answers with the word as
     /// well as the place.
     what: []const u8,
+    /// Whether this is a `defer` rather than an expression that leaves.
+    schedules: bool = false,
 };
 
 /// A traversal and the implementation that declares it.
@@ -16318,12 +16321,19 @@ const Checker = struct {
         const found = self.leaves.items[lo];
         if (found.at >= extent.end.index()) return false;
 
-        _ = self.report(
+        const label = try std.fmt.allocPrint(self.sink.arena, "{s} inside a `defer`", .{found.what});
+        _ = if (found.schedules) self.report(
+            .s_defer,
+            found.id,
+            "a `defer` runs while its scope is ending, so what it schedules may not schedule as well",
+            .{},
+            label,
+        ) else self.report(
             .s_defer,
             found.id,
             "a `defer` runs where control leaves, so what it schedules may not leave as well",
             .{},
-            try std.fmt.allocPrint(self.sink.arena, "{s} inside a `defer`", .{found.what}),
+            label,
         );
         return true;
     }
@@ -16351,6 +16361,26 @@ const Checker = struct {
                 .at = self.ast.exprTokens(id).start.index(),
                 .id = id,
                 .what = what,
+            });
+        }
+
+        // A `defer` inside a deferred expression would be placed while the
+        // outer schedule is being placed, which the ownership builder,
+        // instance discovery and lowering each decline to do.
+        for (0..self.ast.stmtCount()) |i| {
+            const s = StmtId.at(@intCast(i));
+            const what: []const u8 = switch (self.ast.stmtTag(s)) {
+                .defer_stmt => "`defer`",
+                .defer_release => "`defer let`",
+                else => continue,
+            };
+            const scheduled = self.ast.stmtData(s).init;
+            if (scheduled == ExprId.none) continue;
+            try self.leaves.append(self.gpa, .{
+                .at = self.ast.stmtTokens(s).start.index(),
+                .id = scheduled,
+                .what = what,
+                .schedules = true,
             });
         }
 
