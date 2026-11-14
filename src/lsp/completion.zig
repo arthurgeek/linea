@@ -2491,12 +2491,11 @@ test "what the reader wrote stays as written when a stop is added beside it" {
     );
     try testing.expectEqual(lsp.types.InsertTextFormat.Snippet, item.insertTextFormat.?);
 
-    // With no stop to write the text is plain, and nothing is escaped.
+    // A client that takes no snippets is sent no edit of the receiver here,
+    // so there is nothing of the reader's to escape.
     const plain = try offeredReading(gpa, &checked, checked.fileNamed("main.lin").?, at, .unsupported);
     defer free(gpa, plain);
-    if ((try requireItem(plain, "plus")).textEdit) |edit| {
-        try testing.expect(std.mem.indexOf(u8, edit.text_edit.newText, "\\$") == null);
-    }
+    try testing.expect((try requireItem(plain, "plus")).textEdit == null);
 }
 
 const counter_program =
