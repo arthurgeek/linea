@@ -3745,6 +3745,11 @@ constructors is still part of a recursive family when it can return to the
 original declaration. If no complete implementation substitution is known, both
 the receiver and trait arguments participate in discovering growth.
 
+Naming a declared function as a value is held to the rule as a call of it is:
+the value's body is built for the type arguments it is named at whether or not
+the value is ever called, so `let next = spin[Wrap[T]]` inside `spin[T]` is a
+recurring instantiation that grows.
+
 Let H be the maximum structural height of the original caller's type arguments.
 Every reentry argument must be bounded by `max(H, C)` for some finite closed
 constant C. A positive root-dependent increase, an unbounded contribution or a

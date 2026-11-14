@@ -1,0 +1,22 @@
+// Naming a function as a value builds its body for the type arguments it is
+// named at, so a function that names itself at a larger type each time has no
+// last instance, whether or not the value is called.
+struct Wrap[phantom T] {}
+
+fn spin[T](_seed: T) -> UInt8 {
+    let _next = spin[Wrap[T]]
+    0
+}
+
+fn turn[T](_seed: T, again: Bool) -> UInt8 {
+    let next = turn[Wrap[T]]
+    if again {
+        next(Wrap[T] {}, false)
+    } else {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    spin(1) + turn(2, true)
+}

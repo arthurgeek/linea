@@ -1,0 +1,10 @@
+error[T-PolyRec]: this names `spin` with more than it was given
+ --> tests/generics/a_function_value_that_grows_is_refused.lin:7:17
+  |
+7 |     let _next = spin[Wrap[T]]
+  |                 ^^^^^^^^^^^^^ type-argument height must remain bounded where a function names itself as a value
+error[T-PolyRec]: this names `turn` with more than it was given
+  --> tests/generics/a_function_value_that_grows_is_refused.lin:12:16
+   |
+12 |     let next = turn[Wrap[T]]
+   |                ^^^^^^^^^^^^^ type-argument height must remain bounded where a function names itself as a value
