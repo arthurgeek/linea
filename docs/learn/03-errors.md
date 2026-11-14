@@ -340,6 +340,9 @@ entry is a request. Converting every variant that holds one field would give
 `TimeError` a `From[Str]` the moment it gained a `Key(Str)` variant, and then a
 `?` on any `Str` error anywhere would convert into it without a word.
 
+A source that is an array is matched by what its length counts, not by how it
+is written: `From[[UInt8; 2]]` wraps into a variant holding `[UInt8; 1 + 1]`.
+
 The derive refuses a source it cannot place. A source that two variants hold
 has no single variant to wrap it in. Reading the hours and the minutes both
 fail with a `text.ParseError`, so `From[text.ParseError]` cannot tell `Hours`
