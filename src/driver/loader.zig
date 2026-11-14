@@ -60,6 +60,12 @@ pub const InMemoryFile = struct {
     /// filesystem resolves it, so a load from these files tells libraries
     /// apart as a load from disk does. Empty where nothing resolved it.
     identity: []const u8 = "",
+    /// Whether the file's text was left on disk: `text` is then empty, and
+    /// the load reads the file when the program reaches it. A program that
+    /// does not reach it never reads it, as a load from disk does not. Such a
+    /// file is loaded only where the load was given a way to read
+    /// (`copy_reading_disk` or `borrow_reading_disk`).
+    deferred: bool = false,
 };
 
 fn lessByPath(_: void, a: InMemoryFile, b: InMemoryFile) bool {
@@ -121,6 +127,10 @@ pub const MemoryOwnership = union(enum) {
     /// disk rather than looked for among them: an editor holds the program's
     /// own buffers, and never a template or an image the program embeds.
     copy_reading_disk: CopyReadingDisk,
+    /// The texts supplied are borrowed, and a file supplied without one
+    /// (`InMemoryFile.deferred`) is read from disk into `allocator` when the
+    /// program reaches it. Files an `embed` names are read from disk too.
+    borrow_reading_disk: CopyReadingDisk,
 
     pub const CopyReadingDisk = struct { allocator: std.mem.Allocator, io: std.Io };
 };
@@ -341,13 +351,19 @@ pub const CheckedLibrary = struct {
         // load owns what it reads, so its candidate is the answer when it can
         // resume.
         const candidate_input: Input = switch (input) {
-            .memory => .{ .memory = .borrow },
+            .memory => |ownership| switch (ownership) {
+                // A load that may read deferred files keeps its reader while
+                // it decides, since the files the program reaches are what
+                // decide it.
+                .copy_reading_disk, .borrow_reading_disk => |reading| .{ .memory = .{ .borrow_reading_disk = reading } },
+                .borrow, .copy => .{ .memory = .borrow },
+            },
             .disk => input,
         };
         var candidate = try loader_mod.loadInputs(gpa, candidate_input, table, sink, interner, entry, module, files, purpose, true, &self.sources);
         const compatible = try self.resolved.canResume(gpa, &candidate, interner);
         const kept = switch (input) {
-            .memory => |ownership| ownership == .borrow,
+            .memory => |ownership| ownership == .borrow or ownership == .borrow_reading_disk,
             .disk => true,
         };
         if (compatible and kept) return candidate;
@@ -934,6 +950,52 @@ test "an embed reads a file supplied beside the source, once however often it is
     try testing.expectEqual(EmbedId.none, program.embeds.sites[2].embed);
     try testing.expectEqual(@as(usize, 1), sink.items().len);
     try testing.expectEqual(Code.m_embed, sink.items()[0].code.?);
+}
+
+test "a file left on disk is read only by a program that reaches it" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(testing.io, "kept");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "kept/kept.lin", .data = "pub fn size() -> UInt8 {\n    4\n}\n" });
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    const kept: InMemoryFile = .{ .path = try std.fs.path.join(gpa, &.{ root, "kept/kept.lin" }), .text = "", .deferred = true };
+    // Listed and never written: a load that read it would fail.
+    const gone: InMemoryFile = .{ .path = try std.fs.path.join(gpa, &.{ root, "gone/gone.lin" }), .text = "", .deferred = true };
+    const manifest: InMemoryFile = .{ .path = try std.fs.path.join(gpa, &.{ root, manifest_name }), .text = "{}" };
+    const main_path = try std.fs.path.join(gpa, &.{ root, "main.lin" });
+    const reading: MemoryOwnership = .{ .borrow_reading_disk = .{ .allocator = gpa, .io = testing.io } };
+
+    // The program imports one of the two, and that one is read from disk.
+    {
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const program = try loadFromMemory(gpa, &table, &sink, &interner, root, &.{
+            manifest,
+            .{ .path = main_path, .text = "import kept\n\nfn main() -> UInt8 {\n    kept.size()\n}\n" },
+            kept,
+            gone,
+        }, .program, false, reading);
+        try testing.expect(!sink.hasErrors());
+        try testing.expectEqual(@as(usize, 2), program.modules.len);
+    }
+
+    // The program imports the other, which is not there to read.
+    {
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        try testing.expectError(error.FileNotFound, loadFromMemory(gpa, &table, &sink, &interner, root, &.{
+            manifest,
+            .{ .path = main_path, .text = "import gone\n\nfn main() -> UInt8 {\n    gone.size()\n}\n" },
+            kept,
+            gone,
+        }, .program, false, reading));
+    }
 }
 
 test "a path naming no file is refused as that path" {
@@ -2417,7 +2479,16 @@ const Loader = struct {
         if (self.in_library) return .{ .path = file.path, .text = file.text };
         const storage = switch (self.input) {
             .memory => |ownership| switch (ownership) {
-                .borrow => return .{ .path = file.path, .text = file.text },
+                .borrow => {
+                    // Nothing to read with: whoever deferred a file's text
+                    // gives the load a reader.
+                    if (file.deferred) return error.FileNotFound;
+                    return .{ .path = file.path, .text = file.text };
+                },
+                .borrow_reading_disk => |reading| {
+                    if (!file.deferred) return .{ .path = file.path, .text = file.text };
+                    return .{ .path = file.path, .text = try source_mod.readFileAlloc(reading.io, reading.allocator, file.path) };
+                },
                 .copy => |allocator| allocator,
                 .copy_reading_disk => |reading| reading.allocator,
             },
@@ -2426,7 +2497,12 @@ const Loader = struct {
         const path = try storage.dupe(u8, file.path);
         errdefer storage.free(path);
         const text = switch (self.input) {
-            .memory => try storage.dupe(u8, file.text),
+            .memory => |ownership| if (!file.deferred)
+                try storage.dupe(u8, file.text)
+            else switch (ownership) {
+                .copy_reading_disk => |reading| try source_mod.readFileAlloc(reading.io, storage, path),
+                .copy, .borrow, .borrow_reading_disk => return error.FileNotFound,
+            },
             .disk => |io| try source_mod.readFileAlloc(io, storage, path),
         };
         return .{ .path = path, .text = text };
@@ -2650,7 +2726,7 @@ const Loader = struct {
             .memory => |ownership| switch (ownership) {
                 .borrow => .{ null, null },
                 .copy => |allocator| .{ null, allocator },
-                .copy_reading_disk => |reading| .{ reading.io, reading.allocator },
+                .copy_reading_disk, .borrow_reading_disk => |reading| .{ reading.io, reading.allocator },
             },
         };
         // A file the program names is one a change to which changes the
@@ -3495,7 +3571,7 @@ const Loader = struct {
         const file = self.manifest_files.get(manifest_path) orelse blk: {
             const storage = switch (self.input) {
                 .memory => |ownership| switch (ownership) {
-                    .borrow => null,
+                    .borrow, .borrow_reading_disk => null,
                     .copy => |allocator| allocator,
                     .copy_reading_disk => |reading| reading.allocator,
                 },

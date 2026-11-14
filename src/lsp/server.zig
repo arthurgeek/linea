@@ -769,7 +769,7 @@ pub const Handler = struct {
             if (std.mem.eql(u8, held.entry, entry)) return &held.of;
         }
 
-        const files = try handler.documents.filesFor(arena, handler.io, root);
+        const files = try handler.documents.filesFor(arena, handler.io, root, .open_and_manifests);
 
         // The analysis copies what it was given, so the buffers above are the
         // caller's business from here and the message's arena may reclaim
@@ -1797,4 +1797,22 @@ test "watched dependency changes and missing imports invalidate analysis" {
     try std.testing.expect(ws.handler.cached == null);
     const repaired = try ws.handler.check(a, main);
     try std.testing.expect(!repaired.sink.hasErrors());
+}
+
+test "a file the program never reaches is not read, and one it reaches is read from disk" {
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "main.lin", .text = "import kept\n\nfn main() -> UInt8 {\n    kept.size()\n}\n" },
+        .{ .at = "kept/kept.lin", .text = "pub fn size() -> UInt8 {\n    4\n}\n" },
+        .{ .at = "notes/notes.lin", .text = "this is no program at all\n" },
+    });
+    defer ws.deinit();
+    const a = ws.arena.allocator();
+
+    // `notes` holds text that would not parse. No import names it, so it is
+    // never read and nothing is reported; `kept` is read when `main` imports
+    // it, though the editor never opened it.
+    const checked = try ws.handler.check(a, try ws.main());
+    try std.testing.expectEqual(@as(usize, 0), checked.sink.items().len);
+    try std.testing.expect(checked.fileNamed(try loader.canonical(a, try ws.pathAt("kept/kept.lin"))) != null);
+    try std.testing.expect(checked.fileNamed(try loader.canonical(a, try ws.pathAt("notes/notes.lin"))) == null);
 }
