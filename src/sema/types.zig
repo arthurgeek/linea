@@ -4176,7 +4176,7 @@ pub const ImplIndex = struct {
         var builder = try Typing.Builder.init(gpa);
         defer builder.deinit();
         const ticket = try builder.addStruct("Ticket", .linear, &.{});
-        const lookup: u32 = 2;
+        const lookup = DeclId.at(2);
         // `Ticket` is linear and implements no `Lookup`, so the implementation
         // fails its capability requirement and its trait requirement at `UInt8`.
         const implementations = [_]Implementation{.{
@@ -10674,7 +10674,7 @@ pub const Typing = struct {
             var builder = try Builder.init(gpa);
             defer builder.deinit();
             const pair_decl = DeclId.at(1);
-            const trait: u32 = 9;
+            const trait = DeclId.at(9);
             const second = try builder.addParameter("U", @intCast(pair_decl.index()), 1, .unrestricted, &.{});
             const first = try builder.addParameter("T", @intCast(pair_decl.index()), 0, .unrestricted, &.{});
             try builder.setBoundTraits(first, try gpa.dupe(BoundTrait, &.{.{ .trait = trait, .args = try gpa.dupe(TypeId, &.{second}) }}));
