@@ -1,0 +1,3 @@
+import link02
+
+pub use link02.value

@@ -1,0 +1,3 @@
+import link42
+
+pub use link42.value

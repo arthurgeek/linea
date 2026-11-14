@@ -1,0 +1,5 @@
+error[M-Import]: `value` is not declared in `east`
+ --> tests/modules/a_reexport_of_a_name_nothing_declares_is_reported_once/south/south.lin:3:14
+  |
+3 | pub use east.value
+  |              ^^^^^ no declaration of that name is in that module

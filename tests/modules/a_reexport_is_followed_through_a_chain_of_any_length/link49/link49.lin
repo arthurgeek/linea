@@ -1,0 +1,3 @@
+import link50
+
+pub use link50.value
