@@ -18904,7 +18904,12 @@ const Checker = struct {
         const walked = try self.check(f.callee, null);
         if (walked == .never) {
             try self.bindWalked(f.args[0], .never, null);
+            // The body is a loop's body whether or not the walk starts, so a
+            // `break` or `continue` in it answers to this loop. What it would
+            // carry out is dropped with the frame: the head never completes.
+            try self.loops.append(self.gpa, .{ .settled = null, .broke = false });
             _ = try self.check(f.args[1], null);
+            _ = self.loops.pop();
             return self.expect(id, .never, expected);
         }
 
