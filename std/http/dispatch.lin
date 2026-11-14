@@ -65,18 +65,192 @@ alias DispatchBusy[E, F] = session.Chan[session.Recv[DispatchResult, DispatchAcc
 
 enum DispatchWake[L, E, F] {
     Listener(L),
-    Reader(UInt64, Reading),
-    Expired(UInt64),
+    Reader(DispatchTicket, Reading),
+    Expired(DispatchTicket),
     Worker(DispatchBusy[E, F]),
     Stop(io.SignalShare),
     Resume,
+}
+
+// Where an idle connection waits and which admission put it there. A slot is
+// reused, so a wake names the admission as well: one that arrives after its
+// connection left the slot matches nothing.
+@copyable
+struct DispatchTicket {
+    slot: UInt64,
+    number: UInt64,
 }
 
 @copyable
 struct DispatchIdle {
     number: UInt64,
     reader: task.Registered[Reading],
-    timer: Option[task.Registered[UInt64]],
+    timer: Option[task.Registered[DispatchTicket]],
+}
+
+// The index that names no slot, at either end of a chain of slots.
+let dispatch_no_slot: UInt64 = UInt64.max
+
+// One place in the idle table. A slot holding a connection names the slots
+// admitted before and after it; an empty slot names the next empty one in
+// `after`.
+@copyable
+struct DispatchIdleSlot {
+    entry: Option[DispatchIdle],
+    before: UInt64,
+    after: UInt64,
+}
+
+// The idle connections, each in a slot its wake names, so one is found
+// without a search and removed without moving the others. The slots in use
+// are linked from `oldest` to `newest` in the order they were admitted, the
+// order eviction and shutdown walk; the empty ones are chained from `free`.
+struct DispatchIdleTable {
+    slots: mem.Vec[DispatchIdleSlot],
+    oldest: UInt64,
+    newest: UInt64,
+    free: UInt64,
+    count: UInt64,
+}
+
+fn dispatch_idle_table() -> DispatchIdleTable {
+    .{ slots = mem.Vec.new(), oldest = dispatch_no_slot, newest = dispatch_no_slot, free = dispatch_no_slot, count = 0 }
+}
+
+impl DispatchIdleTable {
+    // Make `capacity` empty slots.
+    fn reserve(inout self: Self, capacity: UInt64) -> Result[(), mem.Oom] {
+        &self.slots.reserve(capacity)?
+        for index in 0..capacity {
+            let after = if index + 1 < capacity {
+                index + 1
+            } else {
+                dispatch_no_slot
+            }
+            &self.slots.push(.{ entry = .None, before = dispatch_no_slot, after }).unwrap()
+        }
+        if capacity > 0 {
+            self.free = 0
+        }
+        .Ok(())
+    }
+
+    // The slot the next admitted connection takes.
+    fn next_slot(self: Self) -> UInt64 {
+        if self.free == dispatch_no_slot {
+            panic("more idle connections than the dispatcher has slots")
+        }
+        self.free
+    }
+
+    // Put `entry` in the slot `next_slot` named, as the newest connection.
+    fn admit(inout self: Self, entry: DispatchIdle) {
+        let slot = self.next_slot()
+        self.free = self.slots[slot].after
+        self.slots[slot] = .{ entry = .Some(copy(entry)), before = self.newest, after = dispatch_no_slot }
+        if self.newest == dispatch_no_slot {
+            self.oldest = slot
+        } else {
+            self.slots[self.newest].after = slot
+        }
+        self.newest = slot
+        self.count += 1
+    }
+
+    // The slot at `slot`, or an empty one where `slot` names none.
+    fn at(self: Self, slot: UInt64) -> DispatchIdleSlot {
+        if slot >= self.slots.length() {
+            return .{ entry = .None, before = dispatch_no_slot, after = dispatch_no_slot }
+        }
+        copy(self.slots[slot])
+    }
+
+    // Take the connection `ticket` names out of its slot, if it is still
+    // there, and leave the connections around it in their order.
+    fn remove(inout self: Self, ticket: DispatchTicket) -> Option[DispatchIdle] {
+        let held = self.at(ticket.slot)
+        let entry = match copy(held.entry) {
+            Some(entry) => entry,
+            None => return .None,
+        }
+        if entry.number != ticket.number {
+            return .None
+        }
+        if held.before == dispatch_no_slot {
+            self.oldest = held.after
+        } else {
+            self.slots[held.before].after = held.after
+        }
+        if held.after == dispatch_no_slot {
+            self.newest = held.before
+        } else {
+            self.slots[held.after].before = held.before
+        }
+        self.slots[ticket.slot] = .{ entry = .None, before = dispatch_no_slot, after = self.free }
+        self.free = ticket.slot
+        self.count -= 1
+        .Some(entry)
+    }
+
+    // Forget the timer of the connection at `slot` and return it.
+    fn take_timer(inout self: Self, slot: UInt64) -> Option[task.Registered[DispatchTicket]] {
+        let held = self.at(slot)
+        match copy(held.entry) {
+            Some(entry) => {
+                self.slots[slot] = .{ entry = .Some(.{ number = entry.number, reader = copy(entry.reader), timer = .None }), before = held.before, after = held.after }
+                copy(entry.timer)
+            },
+            None => .None,
+        }
+    }
+}
+
+// The connections with a request to read, first in first out. The slots are
+// a ring: `count` connections start at `head` and continue from slot zero
+// where they pass the last one, so taking the first moves no other.
+struct DispatchReadyQueue {
+    slots: mem.Vec[Option[Reading]],
+    head: UInt64,
+    count: UInt64,
+}
+
+fn dispatch_ready_queue() -> DispatchReadyQueue {
+    .{ slots = mem.Vec.new(), head = 0, count = 0 }
+}
+
+impl DispatchReadyQueue {
+    // Make room for `capacity` connections.
+    fn reserve(inout self: Self, capacity: UInt64) -> Result[(), mem.Oom] {
+        &self.slots.reserve(capacity)?
+        for _index in 0..capacity {
+            &self.slots.push(.None).unwrap()
+        }
+        .Ok(())
+    }
+
+    // Add `reading` after every connection already waiting.
+    fn push(inout self: Self, sink reading: Reading) where retains(self: reading) {
+        if self.count == self.slots.length() {
+            panic("more ready connections than the dispatcher has slots")
+        }
+        let index = (self.head + self.count) % self.slots.length()
+        match mem.exchange(&self.slots[index], .Some(reading)) {
+            Some(displaced) => dispatch_close_reader(displaced),
+            None => {},
+        }
+        self.count += 1
+    }
+
+    // Take the connection that has waited longest.
+    fn pop(inout self: Self) -> Option[Reading] {
+        if self.count == 0 {
+            return .None
+        }
+        let reading = mem.exchange(&self.slots[self.head], .None)
+        self.head = (self.head + 1) % self.slots.length()
+        self.count -= 1
+        reading
+    }
 }
 
 // The dispatcher owns every idle connection; ready work waits without a task.
@@ -84,8 +258,8 @@ struct Dispatch[L, E, F] {
     waiting: task.WaitSet[DispatchWake[L, E, F]],
     listener: Option[L],
     listening: Option[task.Registered[L]],
-    idle: mem.Vec[DispatchIdle],
-    ready: mem.Vec[Reading],
+    idle: DispatchIdleTable,
+    ready: DispatchReadyQueue,
     free: mem.Vec[DispatchFree[E, F]],
     busy: UInt64,
     open: UInt64,
@@ -223,7 +397,7 @@ impl[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F] Dispatch[L
         if self.stopped || self.failed.is_some() || net.reached(limits.connections, self.accepted) || self.listening.is_some() || self.retry.is_some() || self.backoff.is_some() {
             return
         }
-        if self.open >= limits.open_connections && self.idle.length() == 0 {
+        if self.open >= limits.open_connections && self.idle.count == 0 {
             return
         }
         let listener = mem.exchange(&self.listener, .None) else {
@@ -243,20 +417,15 @@ impl[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F] Dispatch[L
         }
     }
 
-    fn forget_idle(inout self: Self, number: UInt64) -> Option[DispatchIdle] {
-        for i in 0..self.idle.length() {
-            if self.idle[i].number == number {
-                let entry = &self.idle.remove(i).unwrap()
-                match read entry.timer {
-                    Some(timer) => {
-                        let _withdrawn = &self.waiting.take(timer)
-                    },
-                    None => {},
-                }
-                return .Some(entry)
-            }
+    fn forget_idle(inout self: Self, ticket: DispatchTicket) -> Option[DispatchIdle] {
+        let entry = &self.idle.remove(ticket)?
+        match read entry.timer {
+            Some(timer) => {
+                let _withdrawn = &self.waiting.take(timer)
+            },
+            None => {},
         }
-        .None
+        .Some(entry)
     }
 
     fn keep_idle(inout self: Self, sink reading: Reading, limits: Limits, first: Bool = false) where retains(self: self, reading) {
@@ -267,10 +436,11 @@ impl[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F] Dispatch[L
         }
         self.serial += 1
         let number = self.serial
+        let slot = self.idle.next_slot()
         match &self.waiting.readable(
             reading,
-            [sink number] |sink ready| -> DispatchWake[L, E, F] {
-                .Reader(number, ready)
+            [sink slot, sink number] |sink ready| -> DispatchWake[L, E, F] {
+                .Reader(.{ slot, number }, ready)
             },
         ) {
             Ok(reader) => {
@@ -279,20 +449,20 @@ impl[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F] Dispatch[L
                 } else {
                     limits.idle_timeout_ms
                 }
-                let timer: Option[task.Registered[UInt64]] = if timeout == 0 {
+                let timer: Option[task.Registered[DispatchTicket]] = if timeout == 0 {
                     .None
                 } else {
                     .Some(
                         &self.waiting.after(
                             time.Duration.from_milliseconds(timeout),
-                            number,
-                            |sink number| -> DispatchWake[L, E, F] {
-                                .Expired(number)
+                            DispatchTicket { slot, number },
+                            |sink ticket| -> DispatchWake[L, E, F] {
+                                .Expired(ticket)
                             },
                         ),
                     )
                 }
-                &self.idle.push(.{ number, reader, timer }).unwrap()
+                &self.idle.admit(.{ number, reader, timer })
             },
             Err(Unregistered { value, reason }) => {
                 dispatch_close_reader(value)
@@ -304,17 +474,20 @@ impl[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F] Dispatch[L
 
     // Only a still-registered reader is evictable, never one already signalled.
     fn evict_oldest(inout self: Self) -> Bool {
-        for i in 0..self.idle.length() {
-            let entry = copy(self.idle[i])
+        var slot = self.idle.oldest
+        while slot != dispatch_no_slot {
+            let held = self.idle.at(slot)
+            let entry = copy(held.entry).unwrap()
             match &self.waiting.take_if_registered(entry.reader) {
                 Some(reader) => {
-                    let _entry = &self.forget_idle(entry.number)
+                    let _entry = &self.forget_idle(.{ slot, number = entry.number })
                     dispatch_close_reader(reader)
                     self.open -= 1
                     return true
                 },
                 None => {},
             }
+            slot = held.after
         }
         false
     }
@@ -331,25 +504,27 @@ impl[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F] Dispatch[L
             Some(key) => match &self.waiting.take(key) { Some(share) => share.settle(), None => {} },
             None => {},
         }
-        var i: UInt64 = 0
-        while i < self.idle.length() {
-            let entry = copy(self.idle[i])
+        var slot = self.idle.oldest
+        while slot != dispatch_no_slot {
+            // Read before the slot is emptied, which chains it to the free ones.
+            let held = self.idle.at(slot)
+            let entry = copy(held.entry).unwrap()
             match &self.waiting.take_if_registered(entry.reader) {
                 Some(reader) => {
-                    let _entry = &self.forget_idle(entry.number)
+                    let _entry = &self.forget_idle(.{ slot, number = entry.number })
                     dispatch_close_reader(reader)
                     self.open -= 1
                 },
                 None => {
-                    match mem.exchange(&self.idle[i].timer, .None) {
+                    match &self.idle.take_timer(slot) {
                         Some(key) => {
-                            let _number = &self.waiting.take(key)
+                            let _ticket = &self.waiting.take(key)
                         },
                         None => {},
                     }
-                    i += 1
                 },
             }
+            slot = held.after
         }
     }
 
@@ -398,8 +573,8 @@ fn dispatch_run[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F,
             &state.begin_stop()
         }
         // Ready requests have priority over another accept, keeping the queue bounded.
-        while state.ready.length() > 0 && (sequential || state.free.length() > 0) {
-            let reading = &state.ready.remove(0).unwrap()
+        while state.ready.count > 0 && (sequential || state.free.length() > 0) {
+            let reading = &state.ready.pop().unwrap()
             let work: DispatchWork = .Read(reading, state.stopped)
             if sequential {
                 match &local(work) {
@@ -481,8 +656,8 @@ fn dispatch_run[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F,
                     Failed(reason) => &state.fail(.Accept(reason)),
                 }
             },
-            Reader(number, reader) => {
-                let _entry = &state.forget_idle(number)
+            Reader(ticket, reader) => {
+                let _entry = &state.forget_idle(ticket)
                 var reading = reader
                 let started = time.Instant.now()
                 let configure = [limits, started] |inout connection: net.Connection| {
@@ -490,10 +665,10 @@ fn dispatch_run[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F,
                     &connection.set_deadline(started, limits.read_timeout_ms)
                 }
                 &reading.update_reader(configure)
-                &state.ready.push(reading).unwrap()
+                &state.ready.push(reading)
             },
-            Expired(number) => {
-                match &state.forget_idle(number) {
+            Expired(ticket) => {
+                match &state.forget_idle(ticket) {
                     Some(entry) => match &state.waiting.take(entry.reader) {
                         Some(reader) => {
                             dispatch_close_reader(reader)
@@ -569,9 +744,13 @@ fn dispatch_finish[L: io.Close, E: Owned + Release, F](sink state { waiting, lis
         }
     }
     withdrawn.finish().unwrap()
-    var readers = ready.drain()
-    for reading in &readers {
-        dispatch_close_reader(reading)
+    let DispatchReadyQueue { slots: ready_slots, head: _, count: _ } = ready
+    var readers = ready_slots.drain()
+    for waiting_reader in &readers {
+        match waiting_reader {
+            Some(reading) => dispatch_close_reader(reading),
+            None => {},
+        }
     }
     readers.finish().unwrap()
     var workers = free.drain()
@@ -579,7 +758,8 @@ fn dispatch_finish[L: io.Close, E: Owned + Release, F](sink state { waiting, lis
         dispatch_remember_failure(&failure, dispatch_finish_worker(worker))
     }
     workers.finish().unwrap()
-    var entries = idle.drain()
+    let DispatchIdleTable { slots: idle_slots, oldest: _, newest: _, free: _, count: _ } = idle
+    var entries = idle_slots.drain()
     for _entry in &entries {}
     entries.finish().unwrap()
     match listener {
@@ -603,8 +783,8 @@ fn dispatch_open[L, E, F](sink listener: L) -> Dispatch[L, E, F] where carries(l
         waiting = task.WaitSet.open(),
         listener = .Some(listener),
         listening = .None,
-        idle = mem.Vec.new(),
-        ready = mem.Vec.new(),
+        idle = dispatch_idle_table(),
+        ready = dispatch_ready_queue(),
         free = mem.Vec.new(),
         busy = 0,
         open = 0,
@@ -835,6 +1015,36 @@ test fn more_idle_connections_than_workers_can_all_make_another_request() {
     testing.assert_eq(a.view(), health_answer, "the first idle client could not request again")?
     testing.assert_eq(b.view(), health_answer, "the second idle client could not request again")?
     testing.assert_eq(c.view(), health_answer, "the third idle client could not request again")?
+    .Ok(())
+}
+
+test fn a_newcomer_at_capacity_closes_the_connection_idle_longest_and_keeps_the_rest() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let address = listener.local_address().unwrap()
+    let limits = Limits { open_connections = 2, ..serving(3) }
+    let body = sink [sink listener, limits] |sink me: session.Chan[session.Send[Result[(), ServeError], session.End]]| {
+        me.send(serve(listener, health_router, limits, policy: .Threads(1), shutdown: .Manual)).close()
+    }
+    let server = task.prepare(body).unwrap().start()
+    var oldest = send(address, dispatch_keepalive_request)
+    &oldest.set_timeouts(1000, 1000)
+    let oldest_answered = dispatch_read_known(&oldest, dispatch_keepalive_answer)
+    var kept = send(address, dispatch_keepalive_request)
+    &kept.set_timeouts(1000, 1000)
+    let kept_answered = dispatch_read_known(&kept, dispatch_keepalive_answer)
+    // Both slots hold an idle connection, so the third takes the oldest one's place.
+    let newcomer = send(address, health_request)
+    defer let third = read_to_end(newcomer)
+    defer let closed = read_to_end(oldest)
+    let _again = io.write_all(&kept, health_request.as_bytes()).unwrap()
+    defer let second = read_to_end(kept)
+    let (served, done) = server.recv()
+    done.close()
+    testing.assert_ok_eq(served, (), "serving past the open-connection bound failed")?
+    testing.assert(oldest_answered && kept_answered, "an idle connection was not answered first")?
+    testing.assert_eq(third.view(), health_answer, "the newcomer at capacity was not answered")?
+    testing.assert_eq(closed.view(), "", "the connection idle longest was not the one closed")?
+    testing.assert_eq(second.view(), health_answer, "the newer idle connection could not request again")?
     .Ok(())
 }
 
