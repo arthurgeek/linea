@@ -487,6 +487,24 @@ static void an_ignored_signal_is_refused(void) {
     signal(SIGUSR2, SIG_DFL);
 }
 
+/* A signal ignored by an action that also sets SA_SIGINFO is ignored all
+ * the same: the flag says how a handler would be called, and there is none.
+ * It is refused, its action is left as it was, and raising it does nothing. */
+static void a_signal_ignored_with_siginfo_set_is_refused(void) {
+    struct sigaction ignoring;
+    memset(&ignoring, 0, sizeof ignoring);
+    ignoring.sa_handler = SIG_IGN;
+    ignoring.sa_flags = SA_SIGINFO;
+    sigemptyset(&ignoring.sa_mask);
+    assert(sigaction(SIGUSR2, &ignoring, 0) == 0);
+    assert(linea_signal_acquire(4) == 1);
+    struct sigaction now;
+    assert(sigaction(SIGUSR2, 0, &now) == 0);
+    assert(now.sa_handler == SIG_IGN);
+    assert(raise(SIGUSR2) == 0);
+    signal(SIGUSR2, SIG_DFL);
+}
+
 /* While a share of `SIGTERM` lives the process survives it, and once the
  * last share is released a second `SIGTERM` ends the process. */
 static void a_second_terminate_after_the_last_share_ends_the_process(void) {
@@ -859,6 +877,7 @@ int main(void) {
     a_timer_past_any_lifetime_waits_in_the_kernel_queue();
     an_idle_descriptor_does_not_fire_when_a_timer_expires();
     an_ignored_signal_is_refused();
+    a_signal_ignored_with_siginfo_set_is_refused();
     a_delivered_share_keeps_the_handler_until_it_is_released();
     a_second_terminate_after_the_last_share_ends_the_process();
     puts("native wait sets: every interleaving of a source and the owner at each linearization point delivers or takes each registration once and loses no wake; descriptors, timers and signals wake a set");

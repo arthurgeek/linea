@@ -1,8 +1,8 @@
 # 265. Waits go through the runtime's poller, and a loop runs tasks as fibers
 
-Status: Phases 1 to 4 accepted and built; phase 5 architectural direction
-accepted, local lifecycle validation demonstrated and implementation
-acceptance still pending; phases 6 and 7 proposed — 2026-11-13. It builds on
+Status: Phases 1 to 5 accepted and built; phase 5 correctness, platform
+validation and measurement closeout recorded in §§9.5–9.6; phases 6 and 7
+proposed — 2026-11-13. It builds on
 [0261](0261-an-owning-task-holds-nothing-that-waits.md). Phases 1 to 7 of §13
 state what is built when. Phase 1 is built: nonblocking sockets with
 deadlines, `io.Io`, `io.system()`, `io.current()`, the loop table of §8 and
@@ -26,18 +26,20 @@ HTTP `on:` arguments. `io.inherited` resolves the default execution choice
 when a task is prepared; `io.current()` captures it when called. Simulation
 tasks are fibers on the calling thread, scheduled from the seed. Foreign calls
 still run on the carrier, and a live foreign frame prevents a fiber switch.
-Phases 5 to 7 are not built. Phase 5's architectural direction is accepted;
-its wrapper has local validation evidence (§9.5), while implementation
-acceptance remains pending. The proposed manifest
-booleans, automatic offload, persistent fiber leases and borrowed callback
-mode are withdrawn. Section 9 uses explicit system-thread tasks and resource
-ownership. Agreement on that direction is not implementation acceptance or
-approval of a new API. A validation-only spike using existing APIs is
-authorized; compiler, runtime and public standard-library changes are not.
+Phase 5 correctness and platform validation are complete for the existing-API
+library pattern: explicit system-thread
+execution, thread-bound resource ownership, and permanent positive, negative
+and stress coverage, validated on macOS arm64 and both Linux ABIs, with Linux
+ASan and TSan results recorded in §9.5. Section 9.6 completes the measurement
+closeout with fresh execution-choice observations and an explicit historical
+carry-forward disposition for unchanged network/session implementation. It adds no compiler, runtime or public
+standard-library mechanism. The proposed manifest booleans, automatic offload,
+persistent fiber leases and borrowed callback mode are withdrawn. Phases 6
+and 7 remain proposed; phase 6 is deferred pending its migration-safety design.
 The implemented clauses partially supersede 0154's whole-body, handler and
 one-request-per-connection contracts and 0253 §5's listener-owning task.
-These are the affected sentences of existing records; references to migration,
-explicit blocking execution and io_uring remain proposed until their phases land:
+These are the affected sentences of existing records; references to migration
+and io_uring remain proposed until their phases land:
 
 - [0154](0154-sockets-and-http-follow-go.md),
   that the request is read into the arena before the handler runs, which §6
@@ -1282,8 +1284,8 @@ Two shapes of `loop.close()` were weighed for these phases:
 
 ### 9. Blocking foreign work uses explicit execution boundaries
 
-**Phase 5 architectural direction accepted; local validation recorded in
-§9.5, implementation acceptance pending.** A foreign call executes on
+**Phase 5 accepted and validated through existing APIs; permanent regression
+and platform results are recorded in §9.5.** A foreign call executes on
 the OS thread that makes it. On a fiber that is its carrier, so a blocking
 foreign call can delay every fiber on that carrier. Linea does not infer
 whether arbitrary C code blocks or relies on thread-local state, and does
@@ -1333,8 +1335,8 @@ execution is not a way to submit a body after its borrows end or to bypass
 Synchronous file operations and standard-stream operations remain direct
 when called directly from a fiber. A wrapper that promises to avoid carrier
 stalls must explicitly perform its blocking work on the system substrate.
-This draft does not claim that all filesystem or database calls become
-nonblocking merely because the application selected a loop.
+Selecting a loop does not make synchronous filesystem or database calls
+nonblocking.
 
 #### 9.2 Thread identity follows a resource's owner
 
@@ -1342,10 +1344,10 @@ A foreign resource requiring one OS thread must be created, used, have its
 thread-local errors retrieved, and be destroyed on that thread. Starting an
 owner with an already-created affine resource is insufficient: moving it to
 a dedicated thread cannot repair the resource's original thread identity.
-This is already the wrapper obligation described in ADR 0260; phase 5 must
+This is already the wrapper obligation described in ADR 0260; the pattern must
 show how to fulfill it with the existing execution choices.
 
-The initial mechanism to evaluate is the existing
+The demonstrated mechanism uses the existing
 `task.own(state, on: io.system())`, with a wrapper that:
 
 1. Starts the owner with empty state, such as `Option[Resource].None`.
@@ -1372,7 +1374,7 @@ they do not prevent a later job from accessing already-settled state. The
 wrapper must establish the shutdown order above. If this lifecycle cannot
 be expressed safely and clearly with existing jobs, a minimal initialization
 or settlement API needs its own concrete counterexample and review before
-implementation. This draft adds no such API.
+implementation. The demonstrated lifecycle needs no such API.
 
 ADR 0255 already makes `Client[S]` shareable for every state an owner can
 hold: containment follows stored values, not phantom generic arguments. A
@@ -1419,8 +1421,8 @@ calls. The order is: stop admission through the application's protocol, join
 client-using tasks, consume the active wrapper, settle on the owner thread,
 and close the empty owner. A design that instead asks
 shutdown itself to quiesce outstanding clients must show who owns those task
-handles and how their borrows permit that operation; this draft does not
-assume the existing API can do it.
+handles and how their borrows permit that operation; the validated pattern
+establishes quiescence before consuming active authority.
 
 If destruction reports failure while retaining a live native object, the
 error must return linear closing authority with the resource still confined
@@ -1456,32 +1458,20 @@ actual `Owner`, can survive failed destruction without invoking its ordinary
 never call `Owner.close()` while live native state remains. Validate this
 before building the hundred-client demonstration.
 
-The original lifecycle proposal was unverified. The local spike in §9.5 now
-demonstrates a compiling wrapper, limited to that compiler, platform and
-mock-resource contract. Implementation acceptance still requires review of
-the evidence and permanent regression coverage. The validation artifact must
-use the actual Linea compiler and existing APIs to show a mock affine native resource and
-the complete public wrapper: creation and initialization failure, operation
-and operation failure, a failed destructor retaining the resource, combined
+The lifecycle is demonstrated by the local spike and permanent regressions
+in §9.5, within their tested platforms and mock-resource contracts. Together
+they cover creation and initialization failure, operation and operation
+failure, a failed destructor retaining the resource, combined
 initialization/cleanup failure, successful retry, quiescence, settlement and
-joining. It must show how an
-`Option[Resource]` containing a linear value is replaced without dropping,
-copying or transferring a live resource. Negative cases must refuse shutdown
-while borrowed clients remain usable, use of consumed active authority, and
-normal operations through closing authority. The shared hundred-fiber case
-must use the public restricted client, including its borrow dependency on
-the active wrapper, rather than the raw `Client`. Separate external-module
-compile-failure cases must attempt to extract the resource, access the raw
-client and submit an arbitrary owner job through the public API. No new owner API is justified
-unless that demonstration exposes an exact missing invariant.
-
-These are validation requirements, with the local evidence and its limits
-recorded separately in §9.5. The authorized validation-only spike may create
-examples and fixtures using existing APIs; it may not change
-the compiler, runtime or public standard library. Passing validation can
-justify documentation and regression coverage; failure identifies a missing
-invariant for further design review, not rejection of the accepted explicit
-execution architecture or permission to introduce an API.
+joining. Whole-value replacement settles the previous linear
+`Option[Resource]` without dropping, copying or transferring a live resource.
+The hundred-fiber case uses the public restricted client and its borrow of
+active authority. External-module negative cases refuse resource extraction,
+raw-client access, arbitrary owner jobs, shutdown with usable borrowed
+clients, reuse of consumed authority and ordinary operations through closing
+authority. No missing owner API emerged. A later extension still requires a
+concrete counterexample and an exact missing invariant; these results do not
+establish arbitrary native-resource transfer safety.
 
 #### 9.3 Resource limits, failure and progress
 
@@ -1498,10 +1488,9 @@ how many tasks or owners to prepare and how it admits further work. A single
 owner bounds its executing foreign jobs to one; that does not provide a
 bounded client queue or a recoverable `Client.call` admission failure.
 
-**A bounded baseline example is required.** Before phase 5 implementation is accepted,
-the demonstration must include an existing-API task/session pattern with an
-explicit positive limit `N`: prepare at most `N` system-task slots, start
-only those successfully prepared, join the batch before preparing another,
+**The bounded baseline is demonstrated by `bounded_admission`.** It uses an
+existing-API task/session pattern with an explicit positive limit `N`:
+prepare at most `N` system-task slots, start only those successfully prepared, join the batch before preparing another,
 and keep remaining work at the producer rather than in an unbounded request
 queue. A preparation refusal must return the error and any unstarted body,
 and the example must join previously started tasks and settle prepared slots
@@ -1514,9 +1503,8 @@ slow task delays admission even when the other slots have finished. A later
 capacity-refilling design could use existing `WaitSet.returned` notifications,
 but needs its own admission, resource and progress contract.
 
-The standard-library example must demonstrate this pattern rather than
-invent an executor API. Existing bounded task combinators can inform it, but
-their behavior must be checked: `task.Policy` does not itself select the
+The regression demonstrates this pattern without adding an executor API.
+Existing bounded task combinators can inform it, but their behavior must be checked: `task.Policy` does not itself select the
 system substrate, and a combinator that unwraps preparation failure does not
 establish recoverable admission. The proof must exercise its bound and its
 error cleanup with the actual compiler and APIs (§13).
@@ -1568,7 +1556,7 @@ Any extension of callback reentrancy must separately specify nested calls,
 task-local state, access to lent storage, waits, scheduler interactions and
 progress before it is implemented.
 
-#### 9.5 Local validation evidence and remaining acceptance
+#### 9.5 Validation evidence and acceptance
 
 A validation-only spike dated 2026-11-13 uses the preserved phase 4 compiler
 at `a1d6d7ce407cabfec9072a733c440f8e67ef4f3b` and its checked runtime archive.
@@ -1582,9 +1570,9 @@ artifact, not an installed example or a new public standard-library API.
 All 44 recorded checks pass on macOS arm64: 18 O0/O2 checked-storage builds,
 14 ordinary executions, two expected externally terminated nonreturning-call
 cases, two expected terminal-policy aborts, seven compile refusals, and one
-strict C99 native-source check. This satisfies local feasibility, not
-permanent-regression or cross-platform acceptance. Expected timeouts and aborts are not normal
-successful exits or evidence of cancellation and cleanup.
+strict C99 native-source check. This spike established local feasibility;
+permanent regression and platform results follow below. Expected timeouts and
+aborts are not normal successful exits or evidence of cancellation and cleanup.
 
 The first scenario retains the real owner through failed destruction and
 retries on its original thread. The complete examples also cover combined
@@ -1607,27 +1595,126 @@ discarded the rejected body instead of returning it, and an early cheap-call
 example did not show a mixed library. Both were corrected and re-reviewed;
 the corrected cases pass. No missing owner API emerged from this spike.
 
-This establishes local feasibility of the demonstrated library pattern. It
-does not establish general foreign thread-transfer safety, performance,
-production admission/shutdown policy, Linux or sanitizer coverage, every
-allocation-failure path, or implementation acceptance. Native failure paths
-are deterministic mocks; thread preparation refusal uses an impossible stack.
-The positive wrapper and negative public-API cases need permanent regression
-coverage together. Their local integration is in
+Permanent coverage landed in [PR #78](https://github.com/arthurgeek/linea/pull/78)
+at `e1db44f9a6247016ad4aaa2a3624a03f1db93b75`. The self-contained fixtures are
 [`tests/ffi/thread_bound_owner`](../../tests/ffi/thread_bound_owner/README.md)
-and [`tests/cmd/foreign_owner`](../../tests/cmd/foreign_owner/). It adds the
-private wrapper, eight runtime cases including 24 lifecycle stress cycles,
-seven compile-refusal transcripts and two bounded subprocess transcripts.
-These enter the normal Linux x86-64 sanitizer corpus lanes, and the fiber
-job explicitly runs both test directories on Linux x86-64 and arm64. No new
-runtime path is involved; lane inclusion is not a claim that those lanes
-have run. The one hundred-client execution is one observed schedule,
-not an exhaustive shutdown-interleaving proof; retain the static refusals and
-retain the repeated create/use/settle case with varied client completion orders.
-The impossible-stack test covers the public refusal path, not all native
-allocation, thread creation or owner-start failure points. Later targeted
-fault injection can extend that coverage without changing the API. Phase 5 remains unbuilt and no new API,
-executor, metadata or callback mode is authorized by these results.
+and [`tests/cmd/foreign_owner`](../../tests/cmd/foreign_owner/): eight runtime
+cases including 24 lifecycle stress cycles, seven compile-refusal transcripts
+and two bounded subprocess transcripts. They use the repository's configured
+compiler and runtime, without depending on the spike's preserved archive.
+
+[CI run 43481888246](https://github.com/arthurgeek/linea/actions/runs/43481888246)
+validated PR head `bac52376a8f485f4921e9830635200a885654a85`, tested against the
+phase 4 base `a1d6d7ce407cabfec9072a733c440f8e67ef4f3b`. The merged regression
+tree is identical to that tested head. The recorded results are:
+
+| Configuration | Recorded result |
+| --- | --- |
+| macOS arm64, clean phase 4 baseline plus regressions | 432 build steps and 2,689 unit tests passed; 4,602 corpus cases and 136 transcripts passed, with guide, examples and property checks |
+| Linux x86-64 | all eight owner runtime cases and nine command transcripts passed |
+| Linux arm64 | all eight owner runtime cases and nine command transcripts passed |
+| Linux x86-64 ASan | native runtime checks, 4,602 corpus cases, 69 running transcripts and 56 examples passed |
+| Linux x86-64 TSan | native runtime checks, 4,602 corpus cases, 69 running transcripts and 56 examples passed |
+
+The ABI jobs recorded fresh native executions, not inherited outcomes. The
+sanitizer lanes leave 67 non-running transcripts and the existing
+stack-overflow-report case to unsanitized runs by their normal policy. The
+seven compile refusals remain covered by the unsanitized ABI jobs. Local
+macOS sanitizer execution is excluded by the toolchain policy. Independent
+mutation probes also confirmed that the nonreturning watchdog rejects an
+escaped join and unexpected sanitizer output.
+
+This satisfies Phase 5's correctness/platform acceptance gate, separately
+from the §13 measurement requirement recorded in §9.6. It establishes the
+reviewed wrapper's lifecycle and explicit admission behavior, not general
+foreign thread-transfer safety, performance, production admission/shutdown
+policy, or every allocation-failure path. The hundred-client execution is one
+observed schedule, supplemented by varied-order lifecycle stress and static
+refusals; it is not an exhaustive shutdown-interleaving proof. Native failure
+paths are deterministic mocks, and the impossible-stack refusal covers the
+public preparation-error path rather than all allocation, thread creation or
+owner-start failures. Targeted fault injection remains follow-up work; the
+demonstrated pattern needs no new API, executor, manifest key or callback mode.
+
+#### 9.6 Execution-choice costs and measurement closeout
+
+The accepted design adds no execution mechanism beyond phase 4. Its fresh
+measurement question is the cost of selecting direct execution, a short-lived
+system task, or a persistent system-thread owner for the same tiny native
+operation. The retained acquisition is
+`linea-design/spikes/2026-11-13-explicit-ffi-measurements/`: `README.md` is the
+report, `trials.csv` and `results.json` retain every trial and summary, and
+`runs/final-02/` holds raw output, resource/host samples and immutable build
+provenance. There are 26 attempts: **24 included matched trials and two
+retained contention exclusions**, three repetitions per toolchain/mode.
+
+Both tools built the same 8-byte increment workload at O2 against regular
+unsanitized archives: the preserved phase 4 compiler at `a1d6d7ce` and the
+current tools from `b6c4bb65`. Production `src`, `runtime` and `std` tree IDs
+are identical to measured phase 4 head `59cc456c`, and the regular archive
+hash matches. The compiler hashes also match; benchmark executable hashes
+differ and are retained. These are matched execution-choice observations,
+not evidence of a new implementation speedup.
+
+The measured windows are two seconds after 100 untimed operations. Every
+operation's result, count and checksum is checked. A preallocated 30,000-entry
+pseudorandom reservoir retains latency observations across each window. Its
+sampling call is outside the latency interval; throughput includes validation
+and sampling overhead. One carrier, one outstanding System task per call, or
+one persistent System owner bounds these experiments; task stack requests
+are 2 MiB. This does not establish recoverable owner-queue admission.
+
+| Execution | Tools | Operations/s range | p50 µs | p95 µs | p99 µs |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Direct System | phase4 | 11,413,548–11,476,002 | <1 (resolution) | <1 (resolution) | 1–1 |
+| Direct System | phase5 | 11,337,372–11,519,123 | <1 (resolution) | <1 (resolution) | 1–1 |
+| Direct one-carrier fiber | phase4 | 9,459,252–9,568,636 | <1 (resolution) | <1 (resolution) | 1–1 |
+| Direct one-carrier fiber | phase5 | 9,431,868–9,538,652 | <1 (resolution) | <1 (resolution) | 1–1 |
+| New System task per call | phase4 | 14,034–14,548 | 64–65 | 95–105 | 132–149 |
+| New System task per call | phase5 | 13,441–14,630 | 64–66 | 92–119 | 134–165 |
+| Persistent System owner | phase4 | 58,172–60,075 | 15–15 | 22–26 | 42–49 |
+| Persistent System owner | phase5 | 59,106–60,338 | 15–15 | 21–22 | 41–44 |
+
+The host's `CLOCK_MONOTONIC` advertises and exhibits 1 µs resolution. Zero
+raw direct-call quantiles mean below that resolution, not zero-cost calls.
+Owner latency includes its private handle/thread checks and request/reply;
+System-task latency includes preparation, start, result receipt and join.
+Owner creation and retained-authority cleanup/retry are recorded separately.
+Three repetitions support observed ranges, not statistical significance,
+maximum capacity or a causal claim about the toolchains.
+
+The full CSV records lifetime CPU and voluntary/involuntary context switches,
+sampled resident/virtual memory and OS-thread peaks, lifecycle times,
+supervised process wall and package-idle/interrupt wakeups. CPU/context-switch
+counts include warmup, printing and cleanup; sampled memory/thread peaks can
+miss short transients, and mapped VM is not physical memory. Total scheduler
+wakeups are unsupported on this profiling path and remain null. Available
+wakeup-class deltas have their own sampled interval and are not substitutes.
+
+Acquisition waited for a clean host and rejected known build processes at
+any CPU and other competing processes at the established 50%-CPU threshold.
+Both exclusions were candidate-owner attempts: Chrome activity and Spotlight
+activity. They remain in raw data/CSV and were retried after clearance. The
+initial wait-only `final-01` run admitted no trials; its disposition records
+the pre-data gate adjustment. Shared-host sampling cannot prove isolation or
+exclude brief unsampled activity.
+
+The broader §13 network/session matrix is carried forward as **historical
+unchanged-implementation evidence**, not a fresh full HTTP acquisition. The
+phase 4 report retains 65 raw trials, 64 included and one excluded, covering
+10,000 idle/staggered-periodic connections, mixed CPU/I/O, deadlines, churn,
+listener contention and session/owner characterization. All 210 referenced
+raw/provenance files and its CSV hash were verified. Its capped pthread
+transport reference held 2,048 connections, not 10,000, and is not equivalent
+parser/ownership/deadline work. Its material HTTP/session/four-carrier-owner
+regressions remain visible and unexplained. Historical and fresh populations,
+workloads and counter intervals are not pooled. No new compiler clock sweep
+or repaired historical scaling failure is claimed.
+
+This closes the applicable measurement work for the existing-API pattern,
+within those explicit carry-forward, timer and counter limits. Real-library
+ergonomics, broader fault injection, an executor's resource/admission policy,
+migration safety and io_uring remain separate questions and phases.
 
 ### 10. Timeouts without cancellation
 
@@ -1865,27 +1952,26 @@ in. Phase 1 does not wait for the questions later phases raise.
    fiber annotations; a fiber polling a peer on its own carrier with
    `recv_until(time.Duration.from_milliseconds(0))` lets the peer run, and a hot buffered read does not switch.
    Foreign calls from fibers run on the carrier in this phase.
-5. **Explicit blocking foreign execution** (§9): architectural direction
-   accepted; local feasibility demonstrated in §9.5, implementation acceptance pending.
-   This is a library-pattern proposal using existing tasks and owners, not a
-   compiler-wide thread-affinity guarantee. The local evidence in §9.5
-   demonstrates its mock lifecycle; architectural agreement and that spike
-   do not approve a new API or mark implementation accepted.
+5. **Explicit blocking foreign execution** (§9): accepted and validated
+   through the existing task and owner implementation, with permanent
+   regressions and platform results in §9.5. This is a demonstrated library
+   pattern, not a compiler-wide thread-affinity guarantee or a new runtime
+   subsystem.
 
-   **Three separate milestones:**
+   **Validation and measurement milestones:**
 
    | Milestone | Status |
    | --- | --- |
    | Architecture approved | complete: explicit system-thread execution and resource ownership; no new compiler/runtime mechanism |
    | Existing-API local feasibility | complete for the tested macOS arm64 configuration in §9.5, with source, logs and provenance retained |
-   | Permanent regression and cross-platform validation | pending overall: permanent fixtures are integrated locally; existing Linux/sanitizer execution remains to be recorded |
+   | Permanent regression and cross-platform validation | complete for the configurations in §9.5: merged fixtures, Linux x86-64/arm64 and Linux ASan/TSan results |
+   | Measurement closeout | complete within §9.6: 24 fresh matched trials, two retained exclusions, and explicitly historical unchanged-implementation network/session evidence |
 
-   The original compiling-demonstration gate is satisfied for that tested
-   configuration. The remaining work does not reopen the architecture. It
-   makes the evidence permanent, adds varied-schedule lifecycle stress, and
-   exercises the existing Linux ABI and sanitizer lanes. A failed new case
-   must identify its exact missing invariant before any API extension is
-   proposed. The observation requirements remain:
+   The original compiling-demonstration and permanent-regression gates are
+   satisfied within the tested configurations and limits in §9.5. Broader
+   fault injection and real-library ergonomics remain separate follow-up
+   work; measurement results and their limits are recorded in §9.6. A failed new case must identify its exact missing invariant
+   before any API extension is proposed. The observation requirements remain:
 
    | Case | Required observation |
    | --- | --- |
@@ -2053,8 +2139,8 @@ set.
 `error.Canceled`, the linear-types note's proposal). Rejected by decision #14:
 the canceller is a token every blocking call must honour.
 
-**Module-wide `"blocking"` and `"thread_affine"` flags.** Rejected in this
-proposed phase 5 revision. A module can mix cheap calls and blocking operations.
+**Module-wide `"blocking"` and `"thread_affine"` flags.** Rejected in
+phase 5. A module can mix cheap calls and blocking operations.
 Offloading every call adds scheduling cost and can change native thread-local
 semantics. A fiber-local affinity bit cannot preserve an object's creation
 thread after the object moves, and a persistent pool lease cannot repair
