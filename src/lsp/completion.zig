@@ -64,9 +64,11 @@ const Call = struct {
 /// `inside` is how many of those sit inside the brackets, which is what decides
 /// whether the first stop needs a separator before it.
 ///
-/// Nothing is escaped, because there is nothing that could need it: a
+/// A stop's name is not escaped, because nothing in it could need it: a
 /// parameter's name is an identifier, and `$`, `}` and `\` are the three bytes
-/// snippet syntax reserves and the three an identifier cannot hold.
+/// snippet syntax reserves and the three an identifier cannot hold. Text the
+/// reader wrote beside the stops is another matter, and `escapeLiteral` is
+/// where it is escaped.
 ///
 /// Nothing is written where the name reaches no function to read parameters
 /// from -- a primitive the resolver put in scope, a name the index holds and
@@ -1655,18 +1657,61 @@ fn writtenOut(
         inside += args.len;
     }
 
+    // Everything so far is text the reader wrote or a name; what follows is
+    // written here in snippet syntax.
+    const literal = written.items.len;
     const stops = if (snippets == .supported)
         try appendStops(gpa, ast, &written, signature, 1 + args.len, inside)
     else
         0;
 
     try written.append(gpa, ')');
-    if (stops > 0) try written.appendSlice(gpa, "$0");
+    if (stops > 0) {
+        try written.appendSlice(gpa, "$0");
+        try escapeLiteral(gpa, &written, literal);
+    }
 
     return .{
         .edit = .{ .range = range, .newText = try written.toOwnedSlice(gpa) },
         .stops = stops,
     };
+}
+
+/// Rewrites the first `literal` bytes of `written` so a snippet reads them as
+/// the text they are: `$`, `}` and `\` each take a `\` before them. Those
+/// bytes are the reader's own source, which may hold any of the three, in a
+/// string for one. What follows them, the stops written in snippet syntax, is
+/// left as it is.
+///
+/// Called only for text that is sent as a snippet. Plain text is inserted as
+/// it stands, and a `\` added to it would be a byte in the reader's source.
+///
+/// **Bound:** one pass over the text of one item.
+fn escapeLiteral(gpa: std.mem.Allocator, written: *std.ArrayList(u8), literal: usize) !void {
+    var reserved: usize = 0;
+    for (written.items[0..literal]) |byte| {
+        if (byte == '$' or byte == '}' or byte == '\\') reserved += 1;
+    }
+    if (reserved == 0) return;
+
+    // Each reserved byte grows the text by one, so the bytes are moved from
+    // the end, where nothing unread is written over.
+    const before = written.items.len;
+    try written.resize(gpa, before + reserved);
+    const bytes = written.items;
+    std.mem.copyBackwards(u8, bytes[literal + reserved ..], bytes[literal..before]);
+    var to = literal + reserved;
+    var from = literal;
+    while (from > 0) {
+        from -= 1;
+        const byte = bytes[from];
+        to -= 1;
+        bytes[to] = byte;
+        if (byte == '$' or byte == '}' or byte == '\\') {
+            to -= 1;
+            bytes[to] = '\\';
+        }
+    }
 }
 
 /// What this program holds that nothing here has imported, each item carrying
@@ -2407,6 +2452,50 @@ test "an operation after a dot is written over the call the reader started" {
         item.textEdit.?.text_edit.newText,
     );
     try testing.expectEqual(lsp.types.InsertTextFormat.Snippet, item.insertTextFormat.?);
+}
+
+test "what the reader wrote stays as written when a stop is added beside it" {
+    const gpa = testing.allocator;
+
+    const text =
+        \\trait Priced {
+        \\    fn plus(self: Self, amount: UInt8) -> UInt8
+        \\}
+        \\
+        \\impl Priced for Str {
+        \\    fn plus(_self: Self, amount: UInt8) -> UInt8 {
+        \\        amount
+        \\    }
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    r"a$1}b\c".plus()
+        \\}
+        \\
+    ;
+
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+
+    const at = std.mem.indexOf(u8, text, ".plus()").? + 1;
+    const items = try offeredReading(gpa, &checked, checked.fileNamed("main.lin").?, at, .supported);
+    defer free(gpa, items);
+
+    // A snippet reads `$1` as a stop, `}` as the end of one and `\` as an
+    // escape, so each the reader wrote takes a `\` before it and comes out
+    // of the client as the byte it was. The stop written here keeps its own.
+    const item = try requireItem(items, "plus");
+    try testing.expectEqualStrings(
+        "r\"a\\$1\\}b\\\\c\".plus(${1:amount})$0",
+        item.textEdit.?.text_edit.newText,
+    );
+    try testing.expectEqual(lsp.types.InsertTextFormat.Snippet, item.insertTextFormat.?);
+
+    // A client that takes no snippets is sent no edit of the receiver here,
+    // so there is nothing of the reader's to escape.
+    const plain = try offeredReading(gpa, &checked, checked.fileNamed("main.lin").?, at, .unsupported);
+    defer free(gpa, plain);
+    try testing.expect((try requireItem(plain, "plus")).textEdit == null);
 }
 
 const counter_program =
