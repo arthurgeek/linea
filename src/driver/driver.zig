@@ -651,69 +651,97 @@ pub fn run(process: std.process.Init) !u8 {
     var program = loaded catch |e| {
         // A manifest that was read and says what its root cannot be is not a
         // read failure, so it is said on its own.
-        if (e == error.ManifestNamesTheLibrary) {
-            try stderr_w.print(
-                "error: a program may not be named `std`\n" ++
-                    "  the {s} for '{s}' names it `std`, the library every program depends on: give it another name, or make it a library\n",
+        const named_std = e == error.ManifestNamesTheLibrary;
+        const message = if (named_std)
+            try gpa.dupe(u8, "a program may not be named `std`")
+        else
+            try std.fmt.allocPrint(gpa, "cannot read '{s}'", .{file_path});
+        // The reason, for a missing path and for each thing a manifest may
+        // not say. The entry path may name a directory, so these do not
+        // claim to identify the individual source or manifest that failed.
+        const reason: ?[]const u8 = switch (e) {
+            error.ManifestNamesTheLibrary => try std.fmt.allocPrint(
+                gpa,
+                "the {s} for '{s}' names it `std`, the library every program depends on: give it another name, or make it a library",
                 .{ loader.manifest_name, file_path },
-            );
-            return exit_usage;
-        }
-        try stderr_w.print("error: cannot read '{s}'\n", .{file_path});
-        // Add specific explanations for a missing path and loader validation
-        // failures. The entry path may name a directory, so these errors do
-        // not claim to identify the individual source or manifest that failed.
-        switch (e) {
-            error.FileNotFound => try stderr_w.writeAll(
-                "  no file or directory of that name\n",
             ),
-            error.SourceTooLarge => try stderr_w.print(
-                "  a source is larger than the {d} bytes a position can address\n",
+            error.FileNotFound => "no file or directory of that name",
+            error.SourceTooLarge => try std.fmt.allocPrint(
+                gpa,
+                "a source is larger than the {d} bytes a position can address",
                 .{source_mod.max_bytes},
             ),
-            error.ManifestNotJson => try stderr_w.print(
-                "  the {s} marking its program is not JSON\n",
+            error.ManifestNotJson => try std.fmt.allocPrint(
+                gpa,
+                "the {s} marking its program is not JSON",
                 .{loader.manifest_name},
             ),
-            error.ManifestKindUnknown => try stderr_w.print(
-                "  the {s} names a kind that is not `program` or `library`\n",
+            error.ManifestKindUnknown => try std.fmt.allocPrint(
+                gpa,
+                "the {s} names a kind that is not `program` or `library`",
                 .{loader.manifest_name},
             ),
-            error.ManifestSourceLeavesRoot => try stderr_w.print(
-                "  the `source` in its {s} leaves the directory holding it; name a directory inside that one\n",
+            error.ManifestSourceLeavesRoot => try std.fmt.allocPrint(
+                gpa,
+                "the `source` in its {s} leaves the directory holding it; name a directory inside that one",
                 .{loader.manifest_name},
             ),
-            error.ManifestExternNotModules => try stderr_w.print(
-                "  the {s} grants `extern` to something other than a list of modules, such as [\"store\"] or [\".\"] for the root module\n",
+            error.ManifestExternNotModules => try std.fmt.allocPrint(
+                gpa,
+                "the {s} grants `extern` to something other than a list of modules, such as [\"store\"] or [\".\"] for the root module",
                 .{loader.manifest_name},
             ),
-            error.ManifestNativeNotSource => try stderr_w.print(
-                "  the {s} names under `native` something other than a C source below it, such as \"store/bind.c\"\n",
+            error.ManifestNativeNotSource => try std.fmt.allocPrint(
+                gpa,
+                "the {s} names under `native` something other than a C source below it, such as \"store/bind.c\"",
                 .{loader.manifest_name},
             ),
-            error.ManifestNativeMissing => try stderr_w.print(
-                "  the {s} names under `native` a C source that does not exist\n",
+            error.ManifestNativeMissing => try std.fmt.allocPrint(
+                gpa,
+                "the {s} names under `native` a C source that does not exist",
                 .{loader.manifest_name},
             ),
-            error.ManifestLinkNotLibrary => try stderr_w.print(
-                "  the {s} names under `link` something other than a library name, such as \"sqlite3\" for -lsqlite3\n",
+            error.ManifestLinkNotLibrary => try std.fmt.allocPrint(
+                gpa,
+                "the {s} names under `link` something other than a library name, such as \"sqlite3\" for -lsqlite3",
                 .{loader.manifest_name},
             ),
-            error.ManifestHeaderNotHeader => try stderr_w.print(
-                "  the {s} names under `headers` something other than a C header as an include names it, such as \"sqlite3.h\" or \"store/shim.h\"\n",
+            error.ManifestHeaderNotHeader => try std.fmt.allocPrint(
+                gpa,
+                "the {s} names under `headers` something other than a C header as an include names it, such as \"sqlite3.h\" or \"store/shim.h\"",
                 .{loader.manifest_name},
             ),
-            error.ManifestLinksWithoutExtern => try stderr_w.print(
-                "  the {s} names C to build or link but grants no module `extern`, so nothing could call it\n",
+            error.ManifestLinksWithoutExtern => try std.fmt.allocPrint(
+                gpa,
+                "the {s} names C to build or link but grants no module `extern`, so nothing could call it",
                 .{loader.manifest_name},
             ),
-            error.ManifestGrantsNoModule => try stderr_w.print(
-                "  the {s} grants `extern` to a module the root does not hold: each entry names a directory of source, as an import inside the root names it\n",
+            error.ManifestGrantsNoModule => try std.fmt.allocPrint(
+                gpa,
+                "the {s} grants `extern` to a module the root does not hold: each entry names a directory of source, as an import inside the root names it",
                 .{loader.manifest_name},
             ),
-            else => {},
+            else => null,
+        };
+        switch (error_format) {
+            .human => {
+                try stderr_w.print("error: {s}\n", .{message});
+                if (reason) |why| try stderr_w.print("  {s}\n", .{why});
+            },
+            // The format a consumer asked for carries this as it carries
+            // every other problem: an object with no file, since no source
+            // was loaded to point into.
+            .json => {
+                var unread = Sink.init(gpa);
+                try unread.add(.{
+                    .severity = .err,
+                    .message = message,
+                    .remarks = if (reason) |why| try gpa.dupe([]const u8, &.{why}) else &.{},
+                });
+                try report.emit(&table, &unread);
+            },
         }
-        return exit_io;
+        return if (named_std) exit_usage else exit_io;
     };
     const ast = program.ast;
 
