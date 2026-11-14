@@ -1198,7 +1198,8 @@ fn intervalOf(ast: *const Ast, text: []const u8, pattern: ExprId) ?Interval {
 /// gap once that arm stops taking it. That the value is one arm's alone is
 /// read from the arms as written, not asked of the checker this mutation
 /// tests: every arm must be an integer literal or a range between two, and
-/// none but the narrowed arm may hold its top value. Two ranges may share
+/// none but the narrowed arm may hold its top value, and the arms above it
+/// must leave it a value below that one. Two ranges may share
 /// values in an accepted match -- the later one is useful for the rest -- so
 /// an arm whose top value another takes is passed over, and a match holding
 /// a `_`, a binding or any pattern this cannot read is left alone.
@@ -1236,6 +1237,25 @@ fn narrowedRange(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?[]
                 const other = intervalOf(ast, text, args[k]).?;
                 if (other.lo <= taken.hi and taken.hi <= other.hi) continue :arms;
             }
+
+            // The arms above may between them take every value below the
+            // top, leaving the narrowed arm one no value reaches:
+            // [T-Unreachable], a rule this does not claim. `free` is the
+            // lowest value none of them takes, moved past each arm that
+            // holds it until none does.
+            var free = taken.lo;
+            search: while (free < taken.hi) {
+                k = 0;
+                while (k < j) : (k += 2) {
+                    const above = intervalOf(ast, text, args[k]).?;
+                    if (above.lo <= free and free <= above.hi) {
+                        free = above.hi + 1;
+                        continue :search;
+                    }
+                }
+                break;
+            }
+            if (free >= taken.hi) continue;
 
             const at = ast.tokenSpan(ast.exprMain(pattern));
             std.debug.assert(std.mem.eql(u8, text[at.start..at.end], "..="));
@@ -2404,6 +2424,27 @@ test "an arm whose top value an earlier literal takes is not the arm narrowed" {
     const out = (try mutated(gpa, .narrowed_range,
         \\fn classify(b: UInt8) -> UInt8 {
         \\    match read b { 100 => 0, 0..=100 => 1, 101..=255 => 2 }
+        \\}
+        \\fn main() -> UInt8 {
+        \\    classify(200)
+        \\}
+    )).?;
+
+    try testing.expect(std.mem.indexOf(u8, out, "0..=100") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "101..255") != null);
+    try testing.expect(asClaimed(try verdictOf(gpa, out, .program), .narrowed_range));
+}
+
+test "an arm an earlier arm leaves only its top value is not the arm narrowed" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // `0..=99` takes everything `0..=100` holds but 100, so `0..100` would
+    // be an arm no value reaches: [T-Unreachable] beside the uncovering.
+    const out = (try mutated(gpa, .narrowed_range,
+        \\fn classify(b: UInt8) -> UInt8 {
+        \\    match read b { 0..=99 => 1, 0..=100 => 2, 101..=255 => 3 }
         \\}
         \\fn main() -> UInt8 {
         \\    classify(200)
