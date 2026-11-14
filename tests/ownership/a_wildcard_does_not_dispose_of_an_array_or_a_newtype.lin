@@ -1,0 +1,42 @@
+// [O-Leak]. A consuming `_` takes the value and names nothing in it, so what
+// the value holds must owe nothing. An array holds its elements and a newtype
+// holds its base, as a structure holds its fields: a linear `Key` inside any
+// of them is still a `Key` nobody settled.
+@linear
+struct Key {
+    id: UInt8,
+}
+
+type Spare = Key
+
+fn in_an_array() -> UInt8 {
+    let keys: [Key; 2] = [.{ id = 1 }, .{ id = 2 }]
+    match keys {
+        _ => 0,
+    }
+}
+
+fn in_a_nested_array() -> UInt8 {
+    let rows: [[Key; 1]; 1] = [[.{ id = 3 }]]
+    match rows {
+        _ => 0,
+    }
+}
+
+fn in_a_newtype() -> UInt8 {
+    let spare = Spare(.{ id = 4 })
+    match spare {
+        _ => 0,
+    }
+}
+
+fn in_an_array_of_any[T](sink values: [T; 1]) -> UInt8 {
+    match values {
+        _ => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let lone: [UInt8; 1] = [5]
+    in_an_array() + in_a_nested_array() + in_a_newtype() + in_an_array_of_any(lone)
+}
