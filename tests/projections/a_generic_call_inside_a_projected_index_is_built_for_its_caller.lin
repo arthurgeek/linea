@@ -1,0 +1,27 @@
+// An index expression belongs to the function that writes it, so a generic
+// call inside one is built for that function's type arguments wherever the
+// projection it is handed to reads it.
+struct Grid {
+    cells: [UInt8; 2],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn key[T](_value: T) -> UInt64 {
+    0
+}
+
+fn pick[T](value: T, grid: Grid) -> UInt8 {
+    grid[key(value)]
+}
+
+fn main() -> UInt8 {
+    let grid: Grid = .{ cells = [7, 9] }
+    pick(true, grid) + pick(3, grid)
+}

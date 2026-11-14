@@ -1,0 +1,21 @@
+error[N-Immutable]: a bracket reaches as far as the implementation's `self` declares, and this one declares `read`
+  --> tests/projections/a_lend_to_a_closure_needs_the_ceiling.lin:22:8
+   |
+12 |     proj at(self: Fixed, i: UInt64) -> UInt8 {
+   |             ---- declared `read` here
+22 |     f(&fixed[0])
+   |        ^^^^^^^^ this place cannot be lent
+error[N-Immutable]: a bracket reaches as far as the implementation's `self` declares, and this one declares `read`
+  --> tests/projections/a_lend_to_a_closure_needs_the_ceiling.lin:30:13
+   |
+12 |     proj at(self: Fixed, i: UInt64) -> UInt8 {
+   |             ---- declared `read` here
+30 |     change(&f[0])
+   |             ^^^^ this place cannot be lent
+error[N-Immutable]: a bracket reaches as far as the implementation's `self` declares, and this one declares `read`
+  --> tests/projections/a_lend_to_a_closure_needs_the_ceiling.lin:31:10
+   |
+12 |     proj at(self: Fixed, i: UInt64) -> UInt8 {
+   |             ---- declared `read` here
+31 |     set(&f[0])
+   |          ^^^^ this place cannot be lent
