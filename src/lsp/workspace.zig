@@ -229,6 +229,11 @@ pub const Index = struct {
     /// The same entries grouped by module, retaining their original order
     /// inside each module. Built with the module list by sorting compact IDs.
     entry_order: []EntryId = &.{},
+    /// Every entry, sorted by the file it was read from and then by its place
+    /// in `entries`, so one file's entries are a run found by a search rather
+    /// than by reading the index. Rebuilt whenever `entries` changes. Costs
+    /// one `u32` per entry.
+    by_file: []EntryId = &.{},
 
     /// What the programs under a workspace export.
     ///
@@ -303,13 +308,47 @@ pub const Index = struct {
         }
 
         std.mem.sort(Entry, self.entries.items, {}, before);
+        self.by_file = try gpa.alloc(EntryId, self.entries.items.len);
+        self.fileEntries();
         return self;
+    }
+
+    /// Fills `by_file`, already the length of `entries`, from them.
+    fn fileEntries(self: *Index) void {
+        for (self.by_file, 0..) |*id, i| id.* = .from(i);
+        const Order = struct {
+            fn less(entries: []const Entry, a: EntryId, b: EntryId) bool {
+                return switch (std.mem.order(u8, entries[a.index()].file, entries[b.index()].file)) {
+                    .lt => true,
+                    .gt => false,
+                    .eq => a.index() < b.index(),
+                };
+            }
+        };
+        std.mem.sort(EntryId, self.by_file, self.entries.items, Order.less);
+    }
+
+    /// The entries read from `file`, in the order `entries` holds them.
+    ///
+    /// Costs the logarithm of the index to find the run and then the run.
+    fn entriesOf(self: *const Index, file: []const u8) []const EntryId {
+        const items = self.entries.items;
+        var lo: usize = 0;
+        var hi: usize = self.by_file.len;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            if (std.mem.order(u8, items[self.by_file[mid].index()].file, file) == .lt) lo = mid + 1 else hi = mid;
+        }
+        var end = lo;
+        while (end < self.by_file.len and std.mem.eql(u8, items[self.by_file[end].index()].file, file)) end += 1;
+        return self.by_file[lo..end];
     }
 
     pub fn deinit(self: *Index) void {
         self.forgetModules();
         for (self.entries.items) |e| self.release(e);
         self.entries.deinit(self.gpa);
+        self.gpa.free(self.by_file);
         for (self.programs) |p| self.gpa.free(p);
         self.gpa.free(self.programs);
         self.gpa.free(self.root);
@@ -376,9 +415,10 @@ pub const Index = struct {
     /// indexed program leaves the index as it was.
     ///
     /// Costs one lex and parse of that file, one resolution of which program
-    /// holds it, and a pass over the index to compare the file's exports.
-    /// Changed exports require two further passes to splice the entries out
-    /// and merge their replacements. Unchanged exports retain the entries and
+    /// holds it, and a comparison of the file's own entries, found without
+    /// reading the rest of the index. Changed exports require passes over the
+    /// index to splice the entries out, merge their replacements and sort the
+    /// entries by file again. Unchanged exports retain the entries and
     /// their borrowed module list. Nothing else is parsed.
     pub fn reindex(self: *Index, io: std.Io, path: []const u8, text: []const u8) !void {
         var scratch = std.heap.ArenaAllocator.init(self.gpa);
@@ -406,24 +446,19 @@ pub const Index = struct {
         // A body edit can leave every exported fact identical. Compare the
         // file's sorted run including multiplicity before releasing anything
         // the prepared module list borrows.
-        var previous: usize = 0;
-        var unchanged = true;
-        for (self.entries.items) |e| {
-            if (!std.mem.eql(u8, e.file, named)) continue;
-            defer previous += 1;
-            if (previous >= fresh.items.len) {
-                unchanged = false;
-                continue;
-            }
-            const replacement = fresh.items[previous];
+        const held = self.entriesOf(named);
+        const previous = held.len;
+        var unchanged = previous == fresh.items.len;
+        if (unchanged) for (held, fresh.items) |id, replacement| {
+            const e = self.entries.items[id.index()];
             if (e.root != replacement.root or e.reach != replacement.reach or
                 e.kind != replacement.kind or
                 !std.mem.eql(u8, e.name, replacement.name) or
                 !std.mem.eql(u8, e.module, replacement.module) or
                 !std.mem.eql(u8, e.header, replacement.header) or
                 !std.mem.eql(u8, e.file, replacement.file)) unchanged = false;
-        }
-        if (unchanged and previous == fresh.items.len) {
+        };
+        if (unchanged) {
             for (fresh.items) |e| self.release(e);
             return;
         }
@@ -432,7 +467,9 @@ pub const Index = struct {
         // module list, so an allocation failure leaves the query intact.
         var merged: std.ArrayList(Entry) = .empty;
         errdefer merged.deinit(self.gpa);
-        try merged.ensureTotalCapacityPrecise(self.gpa, self.entries.items.len - previous + fresh.items.len);
+        const count = self.entries.items.len - previous + fresh.items.len;
+        try merged.ensureTotalCapacityPrecise(self.gpa, count);
+        const by_file = try self.gpa.alloc(EntryId, count);
         self.forgetModules();
 
         // What the file used to say, dropped in one pass over the index, which
@@ -467,6 +504,9 @@ pub const Index = struct {
         fresh.clearRetainingCapacity();
         self.entries.deinit(self.gpa);
         self.entries = merged;
+        self.gpa.free(self.by_file);
+        self.by_file = by_file;
+        self.fileEntries();
     }
 
     /// One compact ordering supplies both module discovery and the run of
@@ -1247,6 +1287,50 @@ test "body-only reindex retains prepared export and module storage" {
     try testing.expectEqual(@as(usize, 1), found.len);
     try testing.expectEqualStrings("pub fn needle() -> UInt8", found[0].header);
     try testing.expect(found[0].name.ptr == name);
+}
+
+test "a file's entries are found without reading another file's" {
+    var ws = try Scratch.init(&.{
+        .{ .at = "linea.json", .text = "{}" },
+        .{ .at = "main.lin", .text = "pub fn shared() -> UInt8 { 1 }\npub fn first() -> UInt8 { 2 }\n" },
+        .{ .at = "other/item.lin", .text = "pub fn shared() -> UInt8 { 3 }\n" },
+        .{ .at = "quiet/none.lin", .text = "fn hidden() -> UInt8 { 4 }\n" },
+    });
+    defer ws.deinit();
+    var index = try Index.build(testing.allocator, testing.io, ws.root);
+    defer index.deinit();
+    const main = try ws.at("main.lin");
+    defer testing.allocator.free(main);
+    const other = try ws.at("other/item.lin");
+    defer testing.allocator.free(other);
+    const quiet = try ws.at("quiet/none.lin");
+    defer testing.allocator.free(quiet);
+
+    const Held = struct {
+        fn of(held: *const Index, path: []const u8) ![]const EntryId {
+            const named = try loader.canonical(testing.allocator, loader.trimmedEntry(path));
+            defer testing.allocator.free(named);
+            const ids = held.entriesOf(named);
+            for (ids) |id| try testing.expectEqualStrings(named, held.entries.items[id.index()].file);
+            return ids;
+        }
+    };
+    try testing.expectEqual(@as(usize, 2), (try Held.of(&index, main)).len);
+    try testing.expectEqual(@as(usize, 1), (try Held.of(&index, other)).len);
+    try testing.expectEqual(@as(usize, 0), (try Held.of(&index, quiet)).len);
+    try testing.expectEqual(index.entries.items.len, index.by_file.len);
+
+    // A file that gains an export is found with it, and the others as before.
+    try index.reindex(testing.io, quiet, "pub fn heard() -> UInt8 { 4 }\n");
+    try testing.expectEqual(@as(usize, 1), (try Held.of(&index, quiet)).len);
+    try testing.expectEqual(@as(usize, 2), (try Held.of(&index, main)).len);
+    try testing.expectEqual(@as(usize, 1), (try Held.of(&index, other)).len);
+    try testing.expectEqual(index.entries.items.len, index.by_file.len);
+
+    try index.reindex(testing.io, main, "fn first() -> UInt8 { 2 }\n");
+    try testing.expectEqual(@as(usize, 0), (try Held.of(&index, main)).len);
+    try testing.expectEqual(@as(usize, 1), (try Held.of(&index, other)).len);
+    try testing.expectEqual(index.entries.items.len, index.by_file.len);
 }
 
 test "reindex observes export headers reach kinds and multiplicity" {
