@@ -4491,7 +4491,10 @@ the second consumes it first, and the first schedule never runs.
 expression during scope exit. A deferred expression may not hold a `defer`,
 `defer let` or `defer var` either: it runs while its scope is ending, and
 nothing written inside it schedules. A function it calls is a scope of its own
-and may schedule. An empty `defer` is also rejected.
+and may schedule, and so is the body of a closure written inside it, where a
+`return` or a `?` leaves the closure. A capture's initialiser is not part of
+that body: it is evaluated where the closure is written, so it may not leave.
+An empty `defer` is also rejected.
 
 Deferred expressions run at every enclosing scope exit, last scheduled first. The
 compiler selects their execution sites and verifies that the written schedule
