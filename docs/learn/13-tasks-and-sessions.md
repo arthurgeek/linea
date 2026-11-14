@@ -488,7 +488,7 @@ error[T-UnknownOperation]: `Chan[Send[UInt64, Recv[UInt64, End]], (<closure>, me
 20  |     let (square, done) = asking.recv()
     |                          ^^^^^^ this is `Chan[Send[UInt64, Recv[UInt64, End]], (<closure>, mem.SystemAllocator)]`, which `Chan[Recv[T, N], H]` does not match
    ::: std/session/chan.lin
-126 | impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
+120 | impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
     |                                ------------------- `recv` is declared for `Chan[Recv[T, N], H]`
 ```
 
