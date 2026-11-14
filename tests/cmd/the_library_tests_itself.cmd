@@ -1454,8 +1454,8 @@ The library tests itself.
   ok    task.join4_runs_sequentially_and_on_threads
   ok    task.join_runs_on_threads
   ok    task.join_runs_sequentially
+  ok    task.map_keeps_every_result_of_a_fallible_function
   ok    task.map_preserves_deterministic_order
-  ok    task.map_results_preserves_all_slots
   ok    task.releasing_a_client_leaves_its_owner_serving
   ok    task.releasing_an_owner_joins_its_task
   ok    testing.a_failure_displays_the_callers_message
