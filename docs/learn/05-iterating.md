@@ -1689,7 +1689,7 @@ error[S-Mutation]: this argument is mutated, so it is marked `&`
 31  |     let total = order.as_slice().map(|sink line| line.cents * line.quantity).fold(0, adding)
     |                                                                                      ^^^^^^ expected `&` here
    ::: std/iter/iter.lin
-820 |     ](sink self: Self, sink initial: A, inout combine: F) -> A where
+830 |     ](sink self: Self, sink initial: A, inout combine: F) -> A where
     |                                               ------- declared `inout`
 ```
 
