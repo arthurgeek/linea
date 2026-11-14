@@ -2929,7 +2929,7 @@ implementations of one trait at one shape and one argument list are
 [N-Duplicate], whatever types the signatures write, as two tuple heads of one
 arity are, which refuses
 `fn(x: UInt64)` beside `fn(x: UInt8)`; implementations at different shapes never
-meet, and a callable head names at most 60 parameters ([T-Impl]). A function
+meet, and a head of any number of parameters has a shape of its own. A function
 value implements the trait where its signature matches the written head exactly,
 contract included, binding the head's parameters: a function taking `read` where
 the head writes `inout` does not match. A closure never does, because its type
