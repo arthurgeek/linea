@@ -8617,36 +8617,18 @@ fn checkGeneratedProgram(
             break :generated;
         };
         outcome_zone.end();
-        if (ran.timed_out) {
-            try failures.append(scratch, .{
-                .path = display_path,
-                .what = "did not finish",
-                .expected = "a program that stops",
-                .actual = ran.text,
-            });
-            break :generated;
-        }
-        if (ran.tool_failed) {
-            if (!ran.tool_missing) {
+        switch (generatedRunOf(ran)) {
+            .answer => {},
+            .skipped => break :generated,
+            .refused => |why| {
                 try failures.append(scratch, .{
                     .path = display_path,
-                    .what = "the toolchain refused a generated program",
-                    .expected = "a module the toolchain takes",
+                    .what = why.what,
+                    .expected = why.expected,
                     .actual = ran.text,
                 });
-            }
-            break :generated;
-        }
-        // A signal the runtime did not raise came from the machine, so the
-        // run is no answer to hold the program's rewrites to.
-        if (ran.signal != null) {
-            try failures.append(scratch, .{
-                .path = display_path,
-                .what = "a generated program was stopped by a signal",
-                .expected = "a program that exits or traps by the runtime's own report",
-                .actual = ran.text,
-            });
-            break :generated;
+                break :generated;
+            },
         }
         result.generated = true;
 
@@ -19619,6 +19601,41 @@ const Standalone = struct {
         self.resolved.deinit(gpa);
     }
 };
+
+/// What the run of a generated program is to the walk: an answer to hold its
+/// rewrites to, nothing where a tool it needs is not installed, or a failure.
+const GeneratedRun = union(enum) {
+    answer,
+    skipped,
+    refused: struct { what: []const u8, expected: []const u8 },
+};
+
+/// A run that did not finish, a toolchain that refused the module, and a
+/// signal the runtime did not raise are failures; a missing tool says nothing
+/// about the program. A signal from the machine is no answer to hold the
+/// program's rewrites to, whatever the program had said by then.
+fn generatedRunOf(ran: Ran) GeneratedRun {
+    if (ran.timed_out) return .{ .refused = .{ .what = "did not finish", .expected = "a program that stops" } };
+    if (ran.tool_failed) {
+        if (ran.tool_missing) return .skipped;
+        return .{ .refused = .{ .what = "the toolchain refused a generated program", .expected = "a module the toolchain takes" } };
+    }
+    if (ran.signal != null) return .{ .refused = .{ .what = "a generated program was stopped by a signal", .expected = "a program that exits or traps by the runtime's own report" } };
+    return .answer;
+}
+
+test "a generated program's run is an answer only where it finished, built and was stopped by no signal" {
+    try testing.expectEqual(GeneratedRun.answer, generatedRunOf(.{ .text = "exit 0\n", .tool_failed = false }));
+    // The runtime's own abort is an answer: the program trapped.
+    try testing.expectEqual(GeneratedRun.answer, generatedRunOf(.{ .text = "trap\nlinea: integer overflow at a.lin:1:1\n", .tool_failed = false }));
+    try testing.expectEqual(GeneratedRun.skipped, generatedRunOf(.{ .text = "", .tool_failed = true, .tool_missing = true }));
+    try testing.expectEqualStrings("the toolchain refused a generated program", generatedRunOf(.{ .text = "", .tool_failed = true }).refused.what);
+    try testing.expectEqualStrings("did not finish", generatedRunOf(.{ .text = "", .tool_failed = false, .timed_out = true }).refused.what);
+    try testing.expectEqualStrings(
+        "a generated program was stopped by a signal",
+        generatedRunOf(.{ .text = "trap\nstopped by signal 11\n", .tool_failed = false, .signal = 11 }).refused.what,
+    );
+}
 
 /// What a case's program did, and whether the toolchain is what said so.
 ///
