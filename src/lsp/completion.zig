@@ -367,6 +367,9 @@ pub fn atOffset(
     for (visible.items) |b| {
         if (res.kindOf(b) == .module and !importedIn(ast, res, b, file)) continue;
         if (attribute == .traits and res.kindOf(b) != .trait and res.kindOf(b) != .module) continue;
+        // Asked before the spelling is taken, so a local declared further
+        // down does not stand in for the one a name here reaches.
+        if (!declaredBy(ast, res, b, file, offset)) continue;
         const name = nameOf(ast, res, b) orelse continue;
         if ((try already.getOrPut(gpa, name)).found_existing) continue;
         try offered.append(gpa, try itemFor(gpa, ast, res, typing, snippets, name, b));
@@ -453,6 +456,25 @@ fn namesShadowingImports(
         }
         try into.put(gpa, ast.tokenText(declared), {});
     }
+}
+
+/// Whether a name written at `offset` could reach `b`. A scope lists every
+/// local its block declares, but a local is in scope only from the end of
+/// the statement that declares it: not above it, and not inside the
+/// expression that initialises it. Every other binding a scope lists, a
+/// parameter, a pattern's binder, a declaration of the module, is in scope
+/// throughout.
+fn declaredBy(ast: *const Ast, res: *const Resolution, b: BindingId, file: FileId, offset: u32) bool {
+    if (res.kindOf(b) != .local) return true;
+    const declared = res.declaringToken(b);
+    if (declared == .none or ast.fileOf(declared) != file) return true;
+    if (ast.tokenSpan(declared).start >= offset) return false;
+    const statement = res.stmtOf(b);
+    if (statement == .none) return true;
+    const init = ast.stmtData(statement).init;
+    if (init == .none) return true;
+    const extent = ast.exprSpan(init);
+    return !(extent.start <= offset and offset <= extent.end);
 }
 
 /// Where a cursor sits inside a declaration attribute. A derive entry takes no
@@ -2407,6 +2429,45 @@ test "an operation after a dot is written over the call the reader started" {
         item.textEdit.?.text_edit.newText,
     );
     try testing.expectEqual(lsp.types.InsertTextFormat.Snippet, item.insertTextFormat.?);
+}
+
+test "a local is offered from the statement after the one that declares it" {
+    const gpa = testing.allocator;
+
+    const text =
+        \\fn main() -> UInt8 {
+        \\    let x: UInt8 = 1
+        \\    let _before = x
+        \\    let x: Bool = true
+        \\    let late: UInt8 = 2
+        \\    if x { _before } else { late }
+        \\}
+        \\
+    ;
+
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const file = checked.fileNamed("main.lin").?;
+
+    // Between the two `x`, the name is the first one, and what is declared
+    // further down is not there to name.
+    const early = std.mem.indexOf(u8, text, "_before = x").? + "_before = ".len;
+    const before = try offeredReading(gpa, &checked, file, early, .unsupported);
+    defer free(gpa, before);
+    try testing.expectEqualStrings("UInt8", (try requireItem(before, "x")).detail.?);
+    try testing.expectError(error.TestExpectedCompletion, requireItem(before, "late"));
+    // A binding is not in scope inside the expression that initialises it.
+    try testing.expectError(error.TestExpectedCompletion, requireItem(before, "_before"));
+
+    // Past both, the name is the second, and the later local is offered.
+    const last = std.mem.indexOf(u8, text, "if x").? + "if ".len;
+    const after = try offeredReading(gpa, &checked, file, last, .unsupported);
+    defer free(gpa, after);
+    try testing.expectEqualStrings("Bool", (try requireItem(after, "x")).detail.?);
+    _ = try requireItem(after, "late");
+    _ = try requireItem(after, "_before");
+    // A function is in scope wherever it is named in its module.
+    _ = try requireItem(before, "main");
 }
 
 const counter_program =
