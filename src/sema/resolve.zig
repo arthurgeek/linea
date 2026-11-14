@@ -11562,9 +11562,11 @@ const Resolver = struct {
                     .family = target,
                     .applied = ast.typeArgs(ast.declHead(derive).args),
                 };
-                // Lengths are folded before any is compared. A source or a
-                // head holding one that counts nothing matches no payload.
-                const source_settled = try self.writtenLengthsSettled(&.{
+                // Lengths are folded before any is compared. One that counts
+                // nothing is left as it is spelled and reported where it is
+                // written, so it matches a payload spelled the same and the
+                // derive adds no report of its own.
+                _ = try self.writtenLengthsSettled(&.{
                     &.{wrapped},
                     template_reading.applied,
                     target_reading.applied,
@@ -11574,8 +11576,7 @@ const Resolver = struct {
                 for (variants, 0..) |variant, index| {
                     const fields = ast.variantFields(variant);
                     if (fields.len != 1) continue;
-                    if (!source_settled) break;
-                    if (!try self.writtenLengthsSettled(&.{&.{fields[0].written}})) continue;
+                    _ = try self.writtenLengthsSettled(&.{&.{fields[0].written}});
                     if (!try sameWrittenType(ast, identity, wrapped, template_reading, fields[0].written, target_reading)) continue;
                     if (selected == null) selected = index else {
                         second = index;

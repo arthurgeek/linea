@@ -1,0 +1,13 @@
+// [T-ArraySize]. A length that is not a number counts nothing, and is
+// reported as that wherever it is written: in the payload and in the derive's
+// argument. The derive has nothing further to say about it.
+@derive(From[[UInt8; true]])
+enum Frame {
+    Pair([UInt8; true]),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    let _frame = Frame.Unknown
+    0
+}
