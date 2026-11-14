@@ -167,6 +167,18 @@ pub fn lower(
     var touched: std.ArrayList(u32) = .empty;
     defer touched.deinit(gpa);
 
+    // Which array literals of a body need not be written before the loop
+    // that fills them, by the body's expression. The answer reads the
+    // written body and its checked types and nothing of an instantiation, so
+    // every instance of one body shares it, and a body found to have none is
+    // remembered as that.
+    var array_proofs: std.AutoHashMapUnmanaged(ExprId, array_initialization.Elisions) = .empty;
+    defer {
+        var proofs = array_proofs.valueIterator();
+        while (proofs.next()) |proof| proof.deinit(gpa);
+        array_proofs.deinit(gpa);
+    }
+
     // The entry is a lookup into the finished set, not the root of a second
     // reachability walk. `.none` names a library or a fragment with no runtime
     // entry, while a test binary receives its generated dispatcher below.
@@ -268,6 +280,7 @@ pub fn lower(
             calls,
             local_of_binding,
             &touched,
+            &array_proofs,
             origin,
             &mono,
             library,
@@ -1034,6 +1047,9 @@ fn lowerFunction(
     /// being cleared, which cost the program's bindings per function lowered.
     local_of_binding: []LocalId,
     touched: *std.ArrayList(u32),
+    /// The array literals each body lowered so far need not write, which
+    /// this fills in for a body it has not met.
+    array_proofs: *std.AutoHashMapUnmanaged(ExprId, array_initialization.Elisions),
     /// The declaration to lower and what this instantiation makes of every
     /// parameter its types hold.
     instance: mir_mod.Origin,
@@ -1169,8 +1185,17 @@ fn lowerFunction(
     else
         try instance.through(&mono.pool, source.returns);
 
-    var array_elisions: array_initialization.Elisions = if (source.body == .none) .empty else try array_initialization.find(gpa, ast, resolution, typing, source.body);
-    defer array_elisions.deinit(gpa);
+    // Read once for a body, however many instances of it are lowered. The
+    // set is copied out of the table, which owns it: a copy names the same
+    // storage and stays good when the table grows.
+    const array_elisions: array_initialization.Elisions = if (source.body == .none) .empty else found: {
+        const entry = try array_proofs.getOrPut(gpa, source.body);
+        if (!entry.found_existing) {
+            entry.value_ptr.* = .empty;
+            entry.value_ptr.* = try array_initialization.find(gpa, ast, resolution, typing, source.body);
+        }
+        break :found entry.value_ptr.*;
+    };
 
     var l: Lowerer = .{
         .gpa = gpa,
