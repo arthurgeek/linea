@@ -687,12 +687,12 @@ test fn map_preserves_deterministic_order() {
     testing.assert(order_matches, "deterministic order violated")?
 }
 
-test fn map_results_preserves_all_slots() {
+test fn map_keeps_every_result_of_a_fallible_function() {
     var items: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
     for i in 1..=6 {
         &items.push(i).unwrap()
     }
-    var results = map_results(
+    var results = map(
         Policy.Threads(3),
         items,
         |sink x| {
@@ -724,92 +724,6 @@ test fn map_results_preserves_all_slots() {
         count += 1
     }
     pending.finish().unwrap()
-    testing.assert(len_matches, "map_results lost elements")?
+    testing.assert(len_matches, "a failing item dropped another item's result")?
     testing.assert(results_match, "results mismatch")?
-}
-
-// map_results transforms items with full error accounting: every element occupies an explicit slot.
-pub fn map_results[T: Owned, R: Owned, E: Owned, F: Owned + Copyable + Shareable + fn(sink item: T) -> Result[R, E]](sink policy: Policy, sink items: mem.Vec[T, mem.SystemAllocator], sink f: F) -> mem.Vec[Result[R, E], mem.SystemAllocator] {
-    match policy {
-        Sequential => {
-            var results: mem.Vec[Result[R, E], mem.SystemAllocator] = mem.Vec.new()
-            var pending = items.drain()
-            for item in &pending {
-                &results.push(f(item)).unwrap()
-            }
-            pending.finish().unwrap()
-            results
-        },
-        Threads(max) => {
-            if max == 0 {
-                panic("task.map: policy task limit cannot be 0")
-            }
-            if max == 1 {
-                var results: mem.Vec[Result[R, E], mem.SystemAllocator] = mem.Vec.new()
-                var pending = items.drain()
-                for item in &pending {
-                    &results.push(f(item)).unwrap()
-                }
-                pending.finish().unwrap()
-                return results
-            }
-            let total = items.length()
-            if total == 0 {
-                items.finish().unwrap()
-                return mem.Vec.new()
-            }
-            let workers = if max > total {
-                total
-            } else {
-                max
-            }
-            let base_chunk = total / workers
-            let remainder = total % workers
-
-            var handles: mem.Vec[Chan[Recv[mem.Vec[Result[R, E], mem.SystemAllocator], End]], mem.SystemAllocator] = mem.Vec.new()
-            var drained = items.drain()
-            for worker_idx in 0..workers {
-                let chunk_len = base_chunk + (if worker_idx < remainder {
-                    UInt64(1)
-                } else {
-                    UInt64(0)
-                })
-                var chunk: mem.Vec[T, mem.SystemAllocator] = mem.Vec.new()
-                for _ in 0..chunk_len {
-                    match &drained.next() {
-                        Some(item) => {
-                            &chunk.push(item).unwrap()
-                        },
-                        None => break,
-                    }
-                }
-                let body = sink [sink chunk, sink f = copy(f)] |sink me: Chan[Send[mem.Vec[Result[R, E], mem.SystemAllocator], End]]| {
-                    var chunk_res: mem.Vec[Result[R, E], mem.SystemAllocator] = mem.Vec.new()
-                    var pending_chunk = chunk.drain()
-                    for item in &pending_chunk {
-                        &chunk_res.push(f(item)).unwrap()
-                    }
-                    pending_chunk.finish().unwrap()
-                    me.send(chunk_res).close()
-                }
-                let handle = prepare(body).unwrap().start()
-                &handles.push(session.detach(handle)).unwrap()
-            }
-            drained.finish().unwrap()
-
-            var results: mem.Vec[Result[R, E], mem.SystemAllocator] = mem.Vec.new()
-            var pending_handles = handles.drain()
-            for handle in &pending_handles {
-                let (chunk_res, done) = handle.recv()
-                done.close()
-                var pending_chunk_res = chunk_res.drain()
-                for res in &pending_chunk_res {
-                    &results.push(res).unwrap()
-                }
-                pending_chunk_res.finish().unwrap()
-            }
-            pending_handles.finish().unwrap()
-            results
-        },
-    }
 }

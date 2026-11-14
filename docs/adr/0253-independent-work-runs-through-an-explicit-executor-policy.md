@@ -9,6 +9,8 @@ The listener-owning task in §5 is superseded by the implemented phase 3 of
 [0265](0265-waits-go-through-the-runtimes-poller-and-a-loop-runs-tasks-as-fibers.md) §6:
 a dispatcher owns idle connection readers and passes ready requests to bounded
 serving tasks. The default policy remains `.Threads(128)`.
+The separate name `task.map_results` in §2 is superseded by
+[0270](0270-a-fallible-map-is-task-map.md).
 
 ## Context
 
