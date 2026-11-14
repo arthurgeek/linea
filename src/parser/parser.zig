@@ -67,6 +67,8 @@ pub fn parse(
         defer gpa.free(delimiter_ends);
         @memset(delimiter_ends, delimiter_unknown);
 
+        var lengths: Parser.Lengths = .{};
+        defer lengths.deinit(gpa);
         var p: Parser = .{
             .gpa = gpa,
             .cursor = Cursor.init(tokens.slice(), source.text, 0, @intCast(tokens.len)),
@@ -75,6 +77,7 @@ pub fn parse(
             .file = file,
             .delimiter_base = 0,
             .delimiter_ends = delimiter_ends,
+            .lengths = &lengths,
         };
         try p.parseProgram();
     }
@@ -216,6 +219,8 @@ pub const Modules = struct {
             const delimiter_ends = try self.gpa.alloc(u32, part.token_end - part.token_start);
             defer self.gpa.free(delimiter_ends);
             @memset(delimiter_ends, delimiter_unknown);
+            var lengths: Parser.Lengths = .{};
+            defer lengths.deinit(self.gpa);
             var p: Parser = .{
                 .gpa = self.gpa,
                 .cursor = Cursor.init(self.tokens.slice(), f.source.text, part.token_start, part.token_end),
@@ -224,6 +229,7 @@ pub const Modules = struct {
                 .file = part.file,
                 .delimiter_base = part.token_start,
                 .delimiter_ends = delimiter_ends,
+                .lengths = &lengths,
             };
             try p.parseProgram();
 
@@ -372,6 +378,10 @@ const Parser = struct {
     /// arguments visits each token once rather than once per possible head.
     delimiter_base: u32,
     delimiter_ends: []u32,
+    /// The array lengths read so far in this file that another reading of
+    /// the same tokens may take as they are. Outside the parser's own value,
+    /// which an attempt copies and restores, so the list is one list.
+    lengths: *Lengths,
     /// The entry point's declared return type, or `.none` for a bare program.
     /// How many levels are open above what is being read. Recursive descent
     /// uses one stack frame per level, and the stack is a resource the
@@ -433,6 +443,151 @@ const Parser = struct {
     line_end: ?LineEnd = null,
 
     const LineEnd = struct { from: usize, end: usize };
+
+    /// What an array length was read under, as far as it decides how the
+    /// length reads. The nesting depth is left out: a length is kept only
+    /// where its tokens are too few to reach the nesting limit from either
+    /// place it is read at.
+    const LengthContext = struct {
+        in_lambda_default: bool,
+        result_may_split: bool,
+        reported_nesting: bool,
+        control_header: bool,
+        clause: ?Clause,
+        pending_contract_comma: TokenId,
+        pending_contract_index: usize,
+        statement: StatementLine,
+    };
+
+    /// One array length that read without a diagnostic and left the parser as
+    /// it found it.
+    ///
+    /// A bracket after a path is read as type arguments and as an index, and
+    /// an array type inside it is reached by both readings and by the
+    /// readings of every bracket around it. Each would read the length again
+    /// and keep its own copy, so a few nested brackets kept the innermost
+    /// length once per combination of readings. The length is one expression
+    /// with one meaning in every one of them, so they hold the one copy.
+    const Length = struct {
+        /// The token the length begins at and the token after it.
+        start: u32,
+        end: u32,
+        expr: ExprId,
+        /// How many levels the expression stands above where it was read.
+        height: u32,
+        context: LengthContext,
+        /// Whether it was read inside an index bracket, where `^` begins an
+        /// expression, and whether it holds a `^` for that to matter to.
+        indexed: bool,
+        caret: bool,
+        /// The builder's rows once the length was read. A rollback to fewer
+        /// took some of the length's rows with it.
+        rows: Ast.Builder.Checkpoint,
+    };
+
+    const Lengths = struct {
+        /// In the order they were read, so the ones a rollback takes are at
+        /// the end.
+        read: std.ArrayList(Length) = .empty,
+        /// The newest length beginning at each token.
+        by_start: std.AutoHashMapUnmanaged(u32, u32) = .empty,
+
+        fn deinit(self: *Lengths, gpa: std.mem.Allocator) void {
+            self.read.deinit(gpa);
+            self.by_start.deinit(gpa);
+        }
+
+        fn at(self: *const Lengths, start: u32) ?Length {
+            const index = self.by_start.get(start) orelse return null;
+            return self.read.items[index];
+        }
+
+        fn keep(self: *Lengths, gpa: std.mem.Allocator, length: Length) std.mem.Allocator.Error!void {
+            try self.by_start.ensureUnusedCapacity(gpa, 1);
+            try self.read.append(gpa, length);
+            self.by_start.putAssumeCapacity(length.start, @intCast(self.read.items.len - 1));
+        }
+
+        /// Forgets every length holding a row the builder no longer has.
+        fn rollback(self: *Lengths, to: Ast.Builder.Checkpoint) void {
+            while (self.read.items.len > 0) {
+                const last = self.read.items[self.read.items.len - 1];
+                const gone = for (last.rows.lengths, to.lengths) |held, kept| {
+                    if (held > kept) break true;
+                } else false;
+                if (!gone) return;
+                const index: u32 = @intCast(self.read.items.len - 1);
+                if (self.by_start.get(last.start) == index) _ = self.by_start.remove(last.start);
+                _ = self.read.pop();
+            }
+        }
+    };
+
+    fn lengthContext(self: *const Parser) LengthContext {
+        return .{
+            .in_lambda_default = self.in_lambda_default,
+            .result_may_split = self.result_may_split,
+            .reported_nesting = self.reported_nesting,
+            .control_header = self.control_header,
+            .clause = self.clause,
+            .pending_contract_comma = self.pending_contract_comma,
+            .pending_contract_index = self.pending_contract_index,
+            .statement = self.statement,
+        };
+    }
+
+    /// An array type's length, the cursor on its first token. Taken from the
+    /// lengths already read where one began at this token under the same
+    /// context, and read and kept otherwise.
+    fn parseArrayLength(self: *Parser) std.mem.Allocator.Error!ExprId {
+        const start = self.cursor.index;
+        const context = self.lengthContext();
+        const indexed = self.indexes > 0;
+        if (self.lengths.at(start)) |known| {
+            if (std.meta.eql(known.context, context) and
+                (known.indexed == indexed or !known.caret) and
+                self.depth + (known.end - known.start) <= max_nesting)
+            {
+                self.cursor.seek(known.end);
+                self.deepest = @max(self.deepest, self.depth + known.height);
+                return known.expr;
+            }
+        }
+
+        const said = self.sink.list.items.len;
+        // Measured from this level, as an operand is, so the height can be
+        // given to another place the same length is read at.
+        const outer = self.deepest;
+        self.deepest = self.depth;
+        const expr = try self.parseFull();
+        const height = self.deepest - self.depth;
+        self.deepest = @max(outer, self.deepest);
+
+        const end = self.cursor.index;
+        if (end > start and
+            self.sink.list.items.len == said and
+            std.meta.eql(context, self.lengthContext()) and
+            self.depth + (end - start) <= max_nesting)
+        {
+            var caret = false;
+            var scan = self.cursor;
+            scan.seek(start);
+            while (scan.index < end) : (_ = scan.advance()) {
+                if (scan.at(.caret)) caret = true;
+            }
+            try self.lengths.keep(self.gpa, .{
+                .start = start,
+                .end = end,
+                .expr = expr,
+                .height = height,
+                .context = context,
+                .indexed = indexed,
+                .caret = caret,
+                .rows = self.builder.checkpoint(),
+            });
+        }
+        return expr;
+    }
 
     /// Where a statement sits, for measuring the closers a skip meets.
     ///
@@ -3463,7 +3618,7 @@ const Parser = struct {
             self.cursor.advance()
         else
             .none;
-        const length = if (inferred_length == .none) try self.parseFull() else ExprId.none;
+        const length = if (inferred_length == .none) try self.parseArrayLength() else ExprId.none;
 
         if (self.cursor.eat(.r_bracket) == null) {
             try self.reportAt(
@@ -6099,7 +6254,10 @@ const Parser = struct {
                 return true;
             }
             parser.* = self.saved;
-            if (!fits) parser.builder.rollback(self.checkpoint);
+            if (!fits) {
+                parser.builder.rollback(self.checkpoint);
+                parser.lengths.rollback(self.checkpoint);
+            }
             return fits;
         }
     };
@@ -7481,6 +7639,37 @@ test "brackets before calls past the nesting limit are reported once" {
     const text = try std.fmt.allocPrint(gpa, "fn main() -> UInt8 {{\n    {s}\n}}\n", .{inner.items});
     const codes = try codesOf(gpa, text);
     try testing.expectEqualSlices(?Code, &.{.s_nesting}, codes);
+}
+
+test "a bracket read as types and as an index keeps one copy of an array length inside it" {
+    // `a[B[[UInt8; E]]]` reads its bracket as type arguments and as an index,
+    // and the index reads `B[...]` both ways again. Each reading that holds
+    // the array type holds the same length expression, read once, so the
+    // tree grows with the nesting and not with the readings multiplied.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var counts: [2]usize = undefined;
+    for ([_]usize{ 6, 12 }, &counts) |levels, *count| {
+        var inner: std.ArrayList(u8) = .empty;
+        try inner.appendSlice(gpa, "0");
+        for (0..levels) |_| {
+            const wrapped = try std.fmt.allocPrint(gpa, "a[B[[UInt8; {s}]]]", .{inner.items});
+            inner.clearRetainingCapacity();
+            try inner.appendSlice(gpa, wrapped);
+        }
+        const text = try std.fmt.allocPrint(gpa, "fn main() -> UInt8 {{\n    {s}\n}}\n", .{inner.items});
+        const source: Source = .{ .path = "t.lin", .text = text };
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        const ast = try parse(gpa, &source, .from(0), tokens, &sink);
+        try testing.expectEqual(@as(u32, 0), sink.error_count);
+        count.* = ast.exprCount();
+    }
+    // Twice the nesting is at most a few times the expressions.
+    try testing.expect(counts[1] <= counts[0] * 4);
 }
 
 test "a chain of operators is bounded the same way" {

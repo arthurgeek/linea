@@ -1,0 +1,26 @@
+// [T-ArraySize]. A length is counted before the program runs, so a closure
+// called in one counts nothing. The bracket after `shelf.empty` reads as type
+// arguments and as an index until the call settles which, and the length
+// written inside it is one expression under both.
+enum Slot[T] {
+    Full(T),
+    Empty,
+}
+
+struct Shelf {
+    rows: UInt8,
+}
+
+impl Shelf {
+    fn empty[T](self: Shelf) -> Slot[T] {
+        let _rows = self.rows
+        .Empty
+    }
+}
+
+fn main() -> UInt8 {
+    let shelf = Shelf { rows = 1 }
+    let n: UInt8 = 2
+    let _b = shelf.empty[Slot[[UInt8; (|q| q)(n)]]]()
+    0
+}
