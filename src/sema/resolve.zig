@@ -9023,32 +9023,31 @@ const Resolver = struct {
     /// compares anything, or it decides for itself what two lengths with no
     /// count mean -- and neither answer to that is sound.
     fn lengthsAreSettled(self: *Resolver, it: Implementation) !bool {
+        // What the compiler provides has no header, so there is no written head
+        // to read a length out of. Its head is a primitive or the array
+        // constructor, and neither holds a written argument to carry a length:
+        // nothing to settle is settled, and the row is keyed like any other.
+        const head: []const node.TypeRef = if (it.decl == DeclId.none) &.{} else self.ast.typeArgs(self.ast.declHead(it.decl).args);
+        return self.writtenLengthsSettled(&.{ self.ast.typeArgs(it.args), head });
+    }
+
+    /// Whether every length written in `runs`, and under every alias they
+    /// reach, counts something, folding each into the memo a comparison of
+    /// written types reads. The preparation every such comparison makes first.
+    fn writtenLengthsSettled(self: *Resolver, runs: []const []const node.TypeRef) !bool {
         var walking: std.AutoHashMapUnmanaged(DeclId, void) = .empty;
         defer walking.deinit(self.gpa);
         var finished: std.ArrayList(DeclId) = .empty;
         defer finished.deinit(self.gpa);
-        const settled = try self.implementationLengthsWithin(it, &walking, &finished);
+        const settled = for (runs) |run| {
+            if (!try self.lengthsWithin(run, &walking, &finished)) break false;
+        } else true;
         // An alias finished inside a walk that failed was read under an
         // answer the failure may have decided, so none of them is kept.
         if (!settled) {
             for (finished.items) |alias| _ = self.settled_aliases.remove(alias);
         }
         return settled;
-    }
-
-    fn implementationLengthsWithin(
-        self: *Resolver,
-        it: Implementation,
-        walking: *std.AutoHashMapUnmanaged(DeclId, void),
-        finished: *std.ArrayList(DeclId),
-    ) !bool {
-        if (!try self.lengthsWithin(self.ast.typeArgs(it.args), walking, finished)) return false;
-        // What the compiler provides has no header, so there is no written head
-        // to read a length out of. Its head is a primitive or the array
-        // constructor, and neither holds a written argument to carry a length:
-        // nothing to settle is settled, and the row is keyed like any other.
-        if (it.decl == DeclId.none) return true;
-        return self.lengthsWithin(self.ast.typeArgs(self.ast.declHead(it.decl).args), walking, finished);
     }
 
     /// The same question of a run of written types and everything under them.
@@ -11479,9 +11478,9 @@ const Resolver = struct {
     }
 
     /// How `selectWrappedVariants` reads written names: coherence's reading,
-    /// with array lengths compared as a bound's constants are. A payload's
-    /// length has not been folded the way an implementation's arguments are,
-    /// so two lengths match when they are spelled alike.
+    /// with array lengths compared as a bound's constants are. The selector
+    /// folds every length it compares first, so two lengths match when they
+    /// count the same.
     const WrapIdentity = struct {
         res: *const Resolver,
 
@@ -11563,11 +11562,20 @@ const Resolver = struct {
                     .family = target,
                     .applied = ast.typeArgs(ast.declHead(derive).args),
                 };
+                // Lengths are folded before any is compared. A source or a
+                // head holding one that counts nothing matches no payload.
+                const source_settled = try self.writtenLengthsSettled(&.{
+                    &.{wrapped},
+                    template_reading.applied,
+                    target_reading.applied,
+                });
                 var selected: ?usize = null;
                 var second: ?usize = null;
                 for (variants, 0..) |variant, index| {
                     const fields = ast.variantFields(variant);
                     if (fields.len != 1) continue;
+                    if (!source_settled) break;
+                    if (!try self.writtenLengthsSettled(&.{&.{fields[0].written}})) continue;
                     if (!try sameWrittenType(ast, identity, wrapped, template_reading, fields[0].written, target_reading)) continue;
                     if (selected == null) selected = index else {
                         second = index;
@@ -11638,8 +11646,7 @@ const Resolver = struct {
                     .message = try std.fmt.allocPrint(self.sink.arena, "no variant of `{s}` wraps exactly `{s}`", .{ target_name, source_text }),
                     .labels = labels,
                     .notes = try self.sink.arena.dupe([]const u8, &.{
-                        try std.fmt.allocPrint(self.sink.arena, "a variant wraps a source when its only field has the source's type{s}; `{s}` has {s}", .{
-                            if (std.mem.indexOfScalar(u8, source_text, ';') != null) " (array lengths match only when spelled alike)" else "",
+                        try std.fmt.allocPrint(self.sink.arena, "a variant wraps a source when its only field has the source's type; `{s}` has {s}", .{
                             target_name,
                             shapes.items,
                         }),

@@ -1,0 +1,7 @@
+error[T-Derive]: no variant of `Frame` wraps exactly `[UInt8; 1 + 2]`
+ --> tests/derive_from/a_from_derive_needs_a_payload_of_the_source_length.lin:1:9
+  |
+1 | @derive(From[[UInt8; 1 + 2]])
+  |         ^^^^^^^^^^^^^^^^^^^^ no variant wraps this source
+  |
+  = help: a variant wraps a source when its only field has the source's type; `Frame` has `Pair([UInt8; 2])`, `Unknown`
