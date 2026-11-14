@@ -467,10 +467,14 @@ impl[E: Display] Display for ReadTextError[E] {
 // Read `reader` through EOF as UTF-8 text, under the limits of `read_all`. A
 // read that fails, or bytes that are not UTF-8, release what was read and
 // leave only the reason.
-pub fn read_text_in[R: Reader, A: Allocator](allocator: A, inout reader: R, max_bytes: UInt64) -> Result[String[A], ReadTextError[R.Error]] where carries(.Ok: allocator), carries(.Err: allocator, reader), R.Error: Release {
+pub fn read_text_in[R: Reader, A: Allocator](allocator: A, inout reader: R, max_bytes: UInt64) -> Result[String[A], ReadTextError[R.Error]] where carries(.Ok: allocator), carries(.Err: allocator, reader) {
     let bytes = match read_all_in(allocator, &reader, max_bytes) {
         Ok(bytes) => bytes,
-        Err(failure) => return .Err(.Read(failure.settle())),
+        Err(failure) => {
+            let ReadAllFailure { partial, reason } = failure
+            partial.release()
+            return .Err(.Read(reason))
+        },
     }
     let decoded = String.from_bytes(bytes).settled()?
     .Ok(decoded)
@@ -478,7 +482,7 @@ pub fn read_text_in[R: Reader, A: Allocator](allocator: A, inout reader: R, max_
 
 // Read `reader` through EOF as UTF-8 text from the system allocator. See
 // `read_text_in`.
-pub fn read_text[R: Reader](inout reader: R, max_bytes: UInt64) -> Result[String[mem.SystemAllocator], ReadTextError[R.Error]] where carries(.Err: reader), R.Error: Release {
+pub fn read_text[R: Reader](inout reader: R, max_bytes: UInt64) -> Result[String[mem.SystemAllocator], ReadTextError[R.Error]] where carries(.Err: reader) {
     read_text_in(mem.system(), &reader, max_bytes)
 }
 

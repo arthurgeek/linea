@@ -174,7 +174,7 @@ pub struct CollectFailure[I: Iterator, A: Allocator, T] {
 }
 
 // Display renders the refused insertion and borrows the collected prefix.
-impl[I: Iterator, A: Allocator, T: Display] Display for CollectFailure[I, A, T] {
+impl[I: Iterator, A: Allocator, T] Display for CollectFailure[I, A, T] {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
         self.failure.fmt(&w)
     }
