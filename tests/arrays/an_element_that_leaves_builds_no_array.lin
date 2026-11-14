@@ -1,0 +1,6 @@
+// An element that never yields a value leaves before the array is built, so
+// the literal is `Never` and fits whatever its position expects.
+fn main() -> UInt8 {
+    let n: UInt8 = [panic("stop")]
+    n
+}

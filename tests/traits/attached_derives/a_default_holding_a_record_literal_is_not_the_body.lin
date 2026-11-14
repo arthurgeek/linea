@@ -1,0 +1,20 @@
+// An attached derive implements the trait for the declaration below it, whose
+// body is the first brace outside its parameter list. A parameter's default
+// may hold a record literal, here the default of a callable type's own
+// parameter; its braces belong to the default.
+trait Marker {}
+
+template impl Marker {}
+
+@copyable
+struct Point {
+    x: UInt8,
+}
+
+@derive(Marker)
+struct Box[phantom F = fn(point: Point = Point { x = 0 }) -> UInt8] {}
+
+fn main() -> UInt8 {
+    let _box: Box = .{}
+    0
+}
