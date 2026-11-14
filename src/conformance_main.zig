@@ -14042,8 +14042,12 @@ fn writeSourceType(
         .callable => {
             const callable = ast.callableType(x);
             try out.print(gpa, "callable({d}", .{@intFromEnum(callable.invocation)});
-            for (ast.params[callable.params.start..callable.params.end]) |param| {
-                try out.print(gpa, ",{d}:{d}:", .{ @intFromEnum(param.convention), @intFromEnum(ast.tokenName(param.name)) });
+            // A parameter is its convention and its type. Its name labels a
+            // call of whatever declares the callable and is no part of the
+            // type, so it is left out of the text two types are compared by.
+            const params = ast.params[callable.params.start..callable.params.end];
+            for (params) |param| {
+                try out.print(gpa, ",{d}:", .{@intFromEnum(param.convention)});
                 try writeSourceType(gpa, ast, res, memo, out, param.written, reading, depth + 1);
                 if (param.default != ExprId.none) {
                     try out.appendSlice(gpa, "=");
@@ -14057,7 +14061,15 @@ fn writeSourceType(
                 try out.print(gpa, "+contract{d}{}", .{ @intFromEnum(contract.kind), contract.borrows_source });
                 for ([_]node_mod.ContractPath{ contract.source, contract.destination, contract.target }) |path| {
                     try out.appendSlice(gpa, "/");
-                    if (path.root != TokenId.none) try out.print(gpa, "{d}", .{@intFromEnum(ast.tokenName(path.root))});
+                    // A contract names a parameter, which stands for the
+                    // position it is written at.
+                    if (path.root != TokenId.none) {
+                        const root = ast.tokenName(path.root);
+                        const position = for (params, 0..) |param, at| {
+                            if (ast.tokenName(param.name) == root) break at;
+                        } else null;
+                        if (position) |at| try out.print(gpa, "p{d}", .{at}) else try out.print(gpa, "n{d}", .{@intFromEnum(root)});
+                    }
                     for (ast.contractSteps(path)) |step| switch (step) {
                         .field => |name| try out.print(gpa, ".{d}", .{@intFromEnum(ast.tokenName(name))}),
                         .dereference => try out.appendSlice(gpa, ".*"),
