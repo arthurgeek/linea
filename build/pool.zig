@@ -83,7 +83,11 @@ test "every index is worked once, however many threads the host starts" {
     const Tally = struct {
         worked: *[jobs]std.atomic.Value(u32),
 
+        // Counted only after a delay, so a call that returned before joining
+        // a thread it started would return with that thread's index uncounted.
         fn work(self: @This(), _: std.mem.Allocator, index: usize) void {
+            var spins: u32 = 0;
+            while (spins < 200_000) : (spins += 1) std.atomic.spinLoopHint();
             _ = self.worked[index].fetchAdd(1, .monotonic);
         }
     };
