@@ -281,6 +281,63 @@ static void chunks_make_short_reads_and_a_half_close_ends_input(void) {
     linea_sim_close(sim);
 }
 
+/* The byte after `byte` in a sequence that returns to zero after 255. */
+static unsigned char following(unsigned char byte) { return (unsigned char)((byte + 1u) & 0xffu); }
+
+/* Writes `count` bytes continuing the sequence at `*next` and lets them
+ * arrive. */
+static void send_sequence(unsigned long sim, long fd, unsigned char *next, size_t count) {
+    unsigned char bytes[512];
+    assert(count <= sizeof bytes);
+    for (size_t i = 0; i < count; i++) {
+        bytes[i] = *next;
+        *next = following(*next);
+    }
+    assert(linea_net_write((int)fd, ADDRESS(bytes), count, 0) == (long)count);
+    linea_sim_advance(sim, 2 * ms);
+}
+
+/* Reads `count` bytes and checks they continue the sequence at `*next`. */
+static void expect_sequence(long fd, unsigned char *next, size_t count) {
+    unsigned char got[512];
+    assert(count <= sizeof got);
+    assert(linea_net_read((int)fd, ADDRESS(got), count, 0) == (long)count);
+    for (size_t i = 0; i < count; i++) {
+        assert(got[i] == *next);
+        *next = following(*next);
+    }
+}
+
+/* Bytes delivered while earlier ones are unread are kept past the end of
+ * the receive storage and around to its start, and through its growth, and
+ * are read in the order they were written. The storage starts at 64 bytes. */
+static void bytes_read_in_pieces_between_deliveries_keep_their_order(void) {
+    const unsigned long sim = plain(ms);
+    (void)linea_io_switch(sim);
+    struct pair p = connected_pair();
+    unsigned char sent = 0, read_to = 0;
+    send_sequence(sim, p.client, &sent, 48);
+    expect_sequence(p.server, &read_to, 40);
+    /* 8 unread at 40; 48 more pass the end of 64 and continue at the start. */
+    send_sequence(sim, p.client, &sent, 48);
+    expect_sequence(p.server, &read_to, 20);
+    /* A read that itself passes the end. */
+    expect_sequence(p.server, &read_to, 10);
+    send_sequence(sim, p.client, &sent, 30);
+    expect_sequence(p.server, &read_to, 50);
+    /* 6 unread; 50 more wrap again, and 200 more grow the storage while the
+     * unread bytes are wrapped. */
+    send_sequence(sim, p.client, &sent, 50);
+    send_sequence(sim, p.client, &sent, 200);
+    for (int i = 0; i < 256; i++) expect_sequence(p.server, &read_to, 1);
+    assert(read_to == sent);
+    unsigned char none;
+    assert(linea_net_read((int)p.server, ADDRESS(&none), 1, virtual_now()) == -(long)ETIMEDOUT);
+    close_pair(p);
+    (void)linea_io_switch(0);
+    linea_sim_close(sim);
+}
+
 /* Short writes accept a prefix; a reset chosen for every chunk reaches the
  * reader as a reset. */
 static void short_writes_and_chosen_resets_reach_the_program(void) {
@@ -487,6 +544,32 @@ static void a_listener_closed_between_runs_frees_its_port(void) {
     linea_sim_close(sim);
 }
 
+/* Every descriptor released between runs is closed at the next run's first
+ * operation, however many there are and in whatever order they were
+ * released: the port listens again, and nothing is left for a later
+ * operation to close. */
+static void every_descriptor_released_between_runs_is_closed_at_the_next_operation(void) {
+    const unsigned long sim = plain(ms);
+    (void)linea_io_switch(sim);
+    struct pair p = connected_pair();
+    const long other = linea_net_listen(loopback(81), 4);
+    assert(other >= LINEA_SIM_FIRST_DESCRIPTOR);
+    (void)linea_io_switch(0);
+    assert(linea_net_close((int)p.server) == 0);
+    assert(linea_net_close((int)other) == 0);
+    assert(linea_net_close((int)p.listener) == 0);
+    assert(linea_net_close((int)p.client) == 0);
+    (void)linea_io_switch(sim);
+    const long first = linea_net_listen(loopback(80), 4);
+    assert(first >= LINEA_SIM_FIRST_DESCRIPTOR);
+    const long second = linea_net_listen(loopback(81), 4);
+    assert(second >= LINEA_SIM_FIRST_DESCRIPTOR);
+    assert(linea_net_close((int)first) == 0);
+    assert(linea_net_close((int)second) == 0);
+    (void)linea_io_switch(0);
+    linea_sim_close(sim);
+}
+
 static long held_elsewhere;
 
 static void *release_held(void *unused) {
@@ -553,6 +636,7 @@ int main(void) {
     a_write_to_a_peer_that_reads_nothing_times_out();
     a_deadline_already_past_consumes_nothing();
     chunks_make_short_reads_and_a_half_close_ends_input();
+    bytes_read_in_pieces_between_deliveries_keep_their_order();
     short_writes_and_chosen_resets_reach_the_program();
     refusals_and_resets_follow_the_kernels();
     one_seed_gives_one_trace();
@@ -561,6 +645,7 @@ int main(void) {
     different_bytes_of_one_length_give_different_fingerprints();
     a_connection_closed_between_runs_ends_its_peers_input();
     a_listener_closed_between_runs_frees_its_port();
+    every_descriptor_released_between_runs_is_closed_at_the_next_operation();
     a_session_wait_and_a_foreign_world_trap_inside();
     puts("native sim: loop identities, virtual clocks, tie rules, deadlines, chunks, resets, seeds, closes between runs and traps passed");
     return 0;

@@ -3844,6 +3844,13 @@ expected type supplies the required count, as it supplies a braced literal's
 type: for `let xs: [UInt8; 3] = [1, 2]`, both the two-element literal and
 `[1, 2, 3, 4]` are ill-formed.
 
+An array literal always has an array type. An expected type that is not an
+array supplies nothing to the literal: its type is its elements' type and their
+count, and that type must satisfy the expected one ([T-Mismatch]), so
+`let n: UInt8 = [1, 2]` is ill-formed. An empty literal where a type that is
+not an array is expected is [T-Mismatch] too. A literal with an element of type
+`Never` has type `Never` and builds no array.
+
 An array place `values: [T; N]` provides the explicit call
 `values.as_slice() -> mem.Slice[T]`. It observes all N initialized elements in
 index order without copying, consuming or allocating. The call accepts no
@@ -4481,7 +4488,10 @@ the second consumes it first, and the first schedule never runs.
 
 **[S-Defer]** A `defer` must contain an expression that does not leave the scope.
 `return`, `break`, `continue` and `?` cannot transfer control out of a deferred
-expression during scope exit. An empty `defer` is also rejected.
+expression during scope exit. A deferred expression may not hold a `defer`,
+`defer let` or `defer var` either: it runs while its scope is ending, and
+nothing written inside it schedules. A function it calls is a scope of its own
+and may schedule. An empty `defer` is also rejected.
 
 Deferred expressions run at every enclosing scope exit, last scheduled first. The
 compiler selects their execution sites and verifies that the written schedule

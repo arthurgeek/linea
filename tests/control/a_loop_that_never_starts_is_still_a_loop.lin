@@ -1,0 +1,28 @@
+// A `for` whose head never yields a value walks nothing, and its body is
+// still the body of a loop: a `break` or a `continue` written in it leaves
+// that loop and no other. The outer loop here yields what its own `break`
+// carries.
+fn main() -> UInt8 {
+    if false {
+        for _ in panic("stop") {
+            break
+        }
+        for _ in panic("stop") {
+            continue
+        }
+    }
+    let found = for n in 1..=3 {
+        if false {
+            for _ in panic("stop") {
+                break
+            }
+        }
+        if n == 2 {
+            break n
+        }
+    }
+    match found {
+        Some(n) => n,
+        None => 0,
+    }
+}

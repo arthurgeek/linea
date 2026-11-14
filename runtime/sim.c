@@ -58,8 +58,12 @@ struct entry {
     struct chunk *inflight, *inflight_tail;
     unsigned long inflight_bytes;
     unsigned long last_arrival; /* the latest arrival scheduled to this end, which keeps chunks in order */
+    /* Bytes delivered and not yet read, as a ring: `received_len` bytes
+     * starting at `received_head` and continuing from the start of the
+     * allocation where they pass its end. A read moves the head, so it copies
+     * only the bytes it hands over. */
     unsigned char *received;
-    size_t received_len, received_capacity;
+    size_t received_head, received_len, received_capacity;
     int ended, reset, write_shut, reset_scheduled;
     /* Released outside a run of its simulation, which is still open: no one
      * holds its number, and the simulation closes it at its next operation. */
@@ -80,6 +84,9 @@ struct sim {
      * the order deliveries are made in. */
     long *members;
     size_t member_count, member_capacity;
+    /* How many of its members were released outside a run and are closed at
+     * its next operation. */
+    size_t forgotten_count;
 };
 
 static pthread_mutex_t sim_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -252,7 +259,7 @@ static void free_contents(struct entry *e) {
     e->inflight_bytes = 0;
     free(e->received);
     e->received = NULL;
-    e->received_len = e->received_capacity = 0;
+    e->received_head = e->received_len = e->received_capacity = 0;
     free(e->pending);
     e->pending = NULL;
     e->pending_count = e->pending_capacity = 0;
@@ -261,7 +268,10 @@ static void free_contents(struct entry *e) {
 /* Free the entry `index` and its number. Called locked. */
 static void drop_entry(long index) {
     struct entry *e = entries[index];
-    if (e->sim != NULL) remove_index(e->sim->members, &e->sim->member_count, index);
+    if (e->sim != NULL) {
+        if (e->forgotten) e->sim->forgotten_count -= 1;
+        remove_index(e->sim->members, &e->sim->member_count, index);
+    }
     free_contents(e);
     free(e);
     entries[index] = NULL;
@@ -293,15 +303,26 @@ static long schedule(struct sim *s, struct entry *to, enum chunk_kind kind, cons
 }
 
 static long append_received(struct entry *e, const unsigned char *bytes, size_t len) {
+    if (len == 0) return 0;
     if (e->received_len + len > e->received_capacity) {
         size_t next = e->received_capacity == 0 ? 64 : e->received_capacity;
         while (next < e->received_len + len) next *= 2;
         unsigned char *grown = realloc(e->received, next);
         if (grown == NULL) return -ENOMEM;
+        /* Bytes that had wrapped to the start continue past the old end. The
+         * capacity at least doubled and they are fewer than the old capacity,
+         * so they fit there. */
+        if (e->received_head + e->received_len > e->received_capacity) {
+            const size_t wrapped = e->received_head + e->received_len - e->received_capacity;
+            memcpy(grown + e->received_capacity, grown, wrapped);
+        }
         e->received = grown;
         e->received_capacity = next;
     }
-    memcpy(e->received + e->received_len, bytes, len);
+    const size_t tail = (e->received_head + e->received_len) % e->received_capacity;
+    const size_t first = len < e->received_capacity - tail ? len : e->received_capacity - tail;
+    memcpy(e->received + tail, bytes, first);
+    memcpy(e->received, bytes + first, len - first);
     e->received_len += len;
     return 0;
 }
@@ -321,7 +342,7 @@ static void deliver(struct sim *s, unsigned long t) {
             e->inflight_bytes -= c->len;
             if (c->kind == chunk_reset) {
                 e->reset = 1;
-                e->received_len = 0;
+                e->received_head = e->received_len = 0;
                 note(s, event_reset, e->number, 0);
             } else if (c->kind == chunk_end) {
                 e->ended = 1;
@@ -331,7 +352,7 @@ static void deliver(struct sim *s, unsigned long t) {
                  * reset, since the stream can no longer be trusted. */
                 if (append_received(e, c->bytes, c->len) != 0) {
                     e->reset = 1;
-                    e->received_len = 0;
+                    e->received_head = e->received_len = 0;
                 }
                 note(s, event_data, e->number, c->len);
                 note_bytes(s, c->bytes, c->len);
@@ -433,6 +454,9 @@ static void close_listener(struct sim *s, long index) {
  * made, leaves the run as repeatable as a close made inside it. Called
  * locked, at the start of every operation. */
 static void settle(struct sim *s) {
+    /* Nearly every operation finds nothing released: the count says so
+     * without a walk over every descriptor the simulation holds. */
+    if (s->forgotten_count == 0) return;
     size_t m = 0;
     while (m < s->member_count) {
         const long index = s->members[m];
@@ -499,9 +523,12 @@ static long attempt_read(struct entry *e, struct linea_op *op) {
     if (e->listening) return -(long)ENOTCONN;
     if (e->received_len > 0) {
         const size_t count = e->received_len < op->len ? e->received_len : (size_t)op->len;
-        memcpy((void *)(uintptr_t)op->at, e->received, count);
-        memmove(e->received, e->received + count, e->received_len - count);
+        unsigned char *to = (unsigned char *)(uintptr_t)op->at;
+        const size_t first = count < e->received_capacity - e->received_head ? count : e->received_capacity - e->received_head;
+        memcpy(to, e->received + e->received_head, first);
+        memcpy(to + first, e->received, count - first);
         e->received_len -= count;
+        e->received_head = e->received_len == 0 ? 0 : (e->received_head + count) % e->received_capacity;
         return (long)count;
     }
     if (e->reset) return -(long)ECONNRESET;
@@ -824,7 +851,12 @@ long linea_sim_release(int fd) {
         /* Outside its simulation the entry is forgotten: a simulation that
          * has ended has already cut its links, and one still open closes it
          * at its next operation (`settle`). */
-        if (e->sim == NULL) drop_entry(index); else e->forgotten = 1;
+        if (e->sim == NULL) {
+            drop_entry(index);
+        } else if (!e->forgotten) {
+            e->forgotten = 1;
+            e->sim->forgotten_count += 1;
+        }
     }
     unlock();
     return 0;
