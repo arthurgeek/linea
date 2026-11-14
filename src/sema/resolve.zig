@@ -4041,6 +4041,7 @@ fn resolveInternal(
     defer r.builtin_namespaces.deinit(gpa);
     defer r.folded.deinit(gpa);
     defer r.settled_aliases.deinit(gpa);
+    defer r.length_reports.deinit(gpa);
     defer r.used_type_params.deinit(gpa);
     defer r.type_param_slots.deinit(gpa);
     defer r.type_parameter_bindings.deinit(gpa);
@@ -6352,6 +6353,11 @@ const Resolver = struct {
     unlent_marks: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// See `Resolution.bracket_readings`.
     bracket_readings: std.AutoHashMapUnmanaged(ExprId, Resolution.BracketReading) = .empty,
+    /// What resolving each written length reported, keyed by the length. Two
+    /// readings of one bracket hold the same length expression, so the second
+    /// to reach it is given these instead of resolving it again: a closure or
+    /// a binding declared in a length is declared once.
+    length_reports: std.AutoHashMapUnmanaged(ExprId, []const Diagnostic) = .empty,
     /// See `Resolution.name_kinds`.
     name_kinds: std.AutoHashMapUnmanaged(TokenId, name_case.Kind) = .empty,
     /// The bracket a call is about to resolve as its callee, while it is
@@ -12341,7 +12347,16 @@ const Resolver = struct {
         // any other: it is read against the scope standing here, the binding
         // it reaches is used by being written, and reaching nothing is
         // [N-Undefined] rather than something to say about the form.
-        if (ref.length != ExprId.none) try self.useTypeExpression(ref.length);
+        if (ref.length != ExprId.none) {
+            if (self.length_reports.get(ref.length)) |reports| {
+                for (reports) |report| try self.sink.add(report);
+            } else {
+                const reported = self.sink.list.items.len;
+                try self.useTypeExpression(ref.length);
+                const reports = try self.sink.arena.dupe(Diagnostic, self.sink.list.items[reported..]);
+                try self.length_reports.put(self.gpa, ref.length, reports);
+            }
+        }
         for (self.ast.typeArgs(ref.args)) |a| try self.useRefIn(a, context.ofArguments());
     }
 
