@@ -20504,7 +20504,7 @@ fn checkLibrary(
 fn filesOfProgram(gpa: std.mem.Allocator, io: std.Io, docs: *const Documents, program: []const u8) ![]const loader.InMemoryFile {
     const root = try loader.rootOf(gpa, io, program, .its_program, "");
     defer root.deinit(gpa);
-    return docs.filesFor(gpa, io, root);
+    return docs.filesFor(gpa, io, root, .every_file);
 }
 
 fn readIfExists(io: std.Io, gpa: std.mem.Allocator, path: []const u8) !?[]u8 {
