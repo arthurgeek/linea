@@ -25463,6 +25463,29 @@ const Checker = struct {
         return at;
     }
 
+    /// The mutation of `other` made while the place `place` is evaluated: in
+    /// an index along its path, or in the value its path starts from. A name
+    /// or a field step computes nothing, so a path over a binding is asked
+    /// only about its indexes, and `o.z` is not held against `o.inner`.
+    ///
+    /// **Bound:** the steps of the path, each index walked once.
+    fn placeEvaluationMutation(
+        self: *const Checker,
+        place: ExprId,
+        other: ExprId,
+        any: bool,
+        except: BindingId,
+    ) ExprId {
+        var steps = self.ast.placeSteps(place);
+        while (steps.next()) |step| {
+            if (self.ast.exprTag(step) != .index) continue;
+            const found = self.sharedMutation(self.ast.binary(step).rhs, other, any, except);
+            if (found != ExprId.none) return found;
+        }
+        if (self.ast.refersToBinding(steps.at)) return ExprId.none;
+        return self.sharedMutation(steps.at, other, any, except);
+    }
+
     fn sharedMutation(
         self: *const Checker,
         within: ExprId,
@@ -25473,10 +25496,12 @@ const Checker = struct {
         if (within == ExprId.none) return ExprId.none;
         const tag = self.ast.exprTag(within);
 
-        // A mark's operand is a place, and a place holds no further mutation.
+        // A mark's operand is a place: lending it writes it, and evaluating
+        // it runs whatever its path computes.
         if (tag == .marked) {
             const place = self.ast.unaryOperand(within);
-            return if (self.namesPlace(other, place, any, except)) within else ExprId.none;
+            if (self.namesPlace(other, place, any, except)) return within;
+            return self.placeEvaluationMutation(place, other, any, except);
         }
 
         if (tag == .call) {
@@ -25495,12 +25520,15 @@ const Checker = struct {
             };
         }
 
-        // An assignment's left side is the place it writes, and holds no
-        // mutation of its own; its right side is an ordinary expression and
-        // may hold one.
-        if (tag == .assign) {
+        // An assignment's left side is the place it writes, whether it is
+        // written `=` or with an operator; evaluating that place runs
+        // whatever its path computes, and its right side is an ordinary
+        // expression.
+        if (tag == .assign or tag.compounds() != null) {
             const p = self.ast.binary(within);
             if (self.namesPlace(other, p.lhs, any, except)) return within;
+            const evaluated = self.placeEvaluationMutation(p.lhs, other, any, except);
+            if (evaluated != ExprId.none) return evaluated;
             return self.sharedMutation(p.rhs, other, any, except);
         }
 
