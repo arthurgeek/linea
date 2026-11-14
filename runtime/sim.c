@@ -426,16 +426,19 @@ static void close_end(struct sim *s, long index, int reset) {
         } else if (!e->write_shut) {
             sent = schedule(s, peer, chunk_end, NULL, 0);
         }
+        /* A peer still queued at its listener was never handed to anyone: it
+         * is dropped below, and nothing waits on it. */
+        const int queued = e->established > s->now && peer->listener >= 0;
         /* A close cannot be refused, so an end or a reset that could not be
          * allocated resets the peer at once: it would otherwise wait for
          * something that was never sent. */
-        if (sent != 0) {
+        if (sent != 0 && !queued) {
             peer->reset = 1;
             peer->received_len = 0;
             note(s, event_reset, peer->number, 0);
         }
         peer->peer = -1;
-        if (e->established > s->now && peer->listener >= 0) {
+        if (queued) {
             remove_index(at(peer->listener)->pending, &at(peer->listener)->pending_count, e->peer);
             drop_entry(e->peer);
         }
