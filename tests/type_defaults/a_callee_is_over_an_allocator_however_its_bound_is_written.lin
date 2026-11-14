@@ -1,0 +1,54 @@
+// [T-DefaultedAllocator]. A call inside a declaration generic over an
+// allocator writes the allocator it would otherwise leave to a default. The
+// callee's parameter is an allocator's whether its bound is written beside it
+// or in a `where` clause, and the caller's is one however many traits stand
+// between its bound and `Allocator`.
+import std.mem
+
+use mem.Allocator
+
+trait Level0: Allocator {}
+
+trait Level1: Level0 {}
+
+trait Level2: Level1 {}
+
+trait Level3: Level2 {}
+
+trait Level4: Level3 {}
+
+trait Level5: Level4 {}
+
+trait Level6: Level5 {}
+
+trait Level7: Level6 {}
+
+trait Level8: Level7 {}
+
+trait Level9: Level8 {}
+
+fn beside[A: Allocator = mem.SystemAllocator](size: UInt64, allocator: A = .System) -> UInt64 where carries(allocator) {
+    let items: Vec[UInt8, A] = Vec.new_in(allocator)
+    let held = items.length() + size
+    items.release()
+    held
+}
+
+fn after[A = mem.SystemAllocator](size: UInt64, allocator: A = .System) -> UInt64 where A: Allocator, carries(allocator) {
+    let items: Vec[UInt8, A] = Vec.new_in(allocator)
+    let held = items.length() + size
+    items.release()
+    held
+}
+
+fn _a_where_bound_callee[B: Allocator](_allocator: B) -> UInt64 {
+    after(8)
+}
+
+fn _a_distant_caller[B: Level9](_allocator: B) -> UInt64 {
+    beside(8)
+}
+
+fn main() -> UInt8 {
+    UInt8(beside(4) + after(4))
+}

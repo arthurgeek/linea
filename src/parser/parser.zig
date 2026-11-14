@@ -1,6 +1,7 @@
 const std = @import("std");
 const cloneColumns = @import("../support/columns.zig").cloneExact;
 const tracy = @import("../support/tracy.zig");
+const name_case = @import("../support/name_case.zig");
 const testing = std.testing;
 
 const Span = @import("../support/span.zig").Span;
@@ -2227,7 +2228,7 @@ const Parser = struct {
 
             const ty = self.cursor.current();
             if (self.cursor.at(.identifier) or self.cursor.at(.l_bracket) or
-                self.cursor.at(.keyword_fn) or self.cursor.at(.keyword_borrow) or self.cursor.at(.l_paren))
+                self.startsCallableType() or self.cursor.at(.keyword_borrow) or self.cursor.at(.l_paren))
             {
                 // Positional, so no name -- what a variant carries is reached
                 // by matching rather than by naming.
@@ -2828,7 +2829,7 @@ const Parser = struct {
                 // point is not refused a second time by [S-Entry].
                 if (main) returns = .{ .at = arrow, .name = .none };
             } else if (self.cursor.at(.identifier) or self.cursor.at(.l_bracket) or
-                self.cursor.at(.l_paren) or self.cursor.at(.keyword_fn) or self.cursor.at(.keyword_borrow))
+                self.cursor.at(.l_paren) or self.startsCallableType() or self.cursor.at(.keyword_borrow))
             {
                 // Which type the name reaches is a question about names, so the
                 // parser records what was written and the checker answers it.
@@ -4008,7 +4009,7 @@ const Parser = struct {
         if (!self.cursor.at(.identifier) or self.cursor.peekAt(1) != .l_paren) return false;
         const name = self.cursor.current();
         const text = self.cursor.textOf(name);
-        if (text.len == 0 or !std.ascii.isUpper(text[0])) return false;
+        if (name_case.of(text) != .capital) return false;
         const bracket = self.cursor.ahead(1) orelse return false;
         return self.cursor.spanAt(bracket).start > self.cursor.spanAt(name).end;
     }
@@ -4019,7 +4020,7 @@ const Parser = struct {
         if (self.cursor.at(.l_paren) or self.cursor.at(.l_brace)) return true;
         if (!self.cursor.at(.identifier)) return false;
         const text = self.cursor.textOf(self.cursor.current());
-        if (text.len == 0 or !std.ascii.isUpper(text[0])) return false;
+        if (name_case.of(text) != .capital) return false;
         return switch (self.cursor.peekAt(1)) {
             .l_paren, .l_brace => true,
             else => false,

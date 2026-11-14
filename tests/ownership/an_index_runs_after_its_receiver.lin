@@ -1,0 +1,20 @@
+// A bracket's receiver is evaluated before its index, so a receiver and an
+// index that both write `order` leave the receiver's digit first.
+import std.io
+
+fn row(inout order: UInt64) -> [UInt8; 1] {
+    order = order * 10 + 1
+    [7]
+}
+
+fn first(inout order: UInt64) -> UInt64 {
+    order = order * 10 + 2
+    0
+}
+
+fn main() -> UInt8 {
+    var order: UInt64 = 0
+    let value = row(&order)[first(&order)]
+    io.println("order={order} value={value}").unwrap()
+    0
+}

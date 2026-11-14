@@ -514,6 +514,32 @@ static void a_listener_is_refused_once_every_dynamic_port_is_held(void) {
     linea_sim_close(sim);
 }
 
+/* Every descriptor released between runs is closed at the next run's first
+ * operation, however many there are and in whatever order they were
+ * released: the port listens again, and nothing is left for a later
+ * operation to close. */
+static void every_descriptor_released_between_runs_is_closed_at_the_next_operation(void) {
+    const unsigned long sim = plain(ms);
+    (void)linea_io_switch(sim);
+    struct pair p = connected_pair();
+    const long other = linea_net_listen(loopback(81), 4);
+    assert(other >= LINEA_SIM_FIRST_DESCRIPTOR);
+    (void)linea_io_switch(0);
+    assert(linea_net_close((int)p.server) == 0);
+    assert(linea_net_close((int)other) == 0);
+    assert(linea_net_close((int)p.listener) == 0);
+    assert(linea_net_close((int)p.client) == 0);
+    (void)linea_io_switch(sim);
+    const long first = linea_net_listen(loopback(80), 4);
+    assert(first >= LINEA_SIM_FIRST_DESCRIPTOR);
+    const long second = linea_net_listen(loopback(81), 4);
+    assert(second >= LINEA_SIM_FIRST_DESCRIPTOR);
+    assert(linea_net_close((int)first) == 0);
+    assert(linea_net_close((int)second) == 0);
+    (void)linea_io_switch(0);
+    linea_sim_close(sim);
+}
+
 static long held_elsewhere;
 
 static void *release_held(void *unused) {
@@ -589,6 +615,7 @@ int main(void) {
     a_connection_closed_between_runs_ends_its_peers_input();
     a_listener_closed_between_runs_frees_its_port();
     a_listener_is_refused_once_every_dynamic_port_is_held();
+    every_descriptor_released_between_runs_is_closed_at_the_next_operation();
     a_session_wait_and_a_foreign_world_trap_inside();
     puts("native sim: loop identities, virtual clocks, tie rules, deadlines, chunks, resets, seeds, closes between runs and traps passed");
     return 0;

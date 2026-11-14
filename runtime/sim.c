@@ -80,6 +80,9 @@ struct sim {
      * the order deliveries are made in. */
     long *members;
     size_t member_count, member_capacity;
+    /* How many of its members were released outside a run and are closed at
+     * its next operation. */
+    size_t forgotten_count;
 };
 
 static pthread_mutex_t sim_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -262,7 +265,10 @@ static void free_contents(struct entry *e) {
 /* Free the entry `index` and its number. Called locked. */
 static void drop_entry(long index) {
     struct entry *e = entries[index];
-    if (e->sim != NULL) remove_index(e->sim->members, &e->sim->member_count, index);
+    if (e->sim != NULL) {
+        if (e->forgotten) e->sim->forgotten_count -= 1;
+        remove_index(e->sim->members, &e->sim->member_count, index);
+    }
     free_contents(e);
     free(e);
     entries[index] = NULL;
@@ -438,6 +444,9 @@ static void close_listener(struct sim *s, long index) {
  * made, leaves the run as repeatable as a close made inside it. Called
  * locked, at the start of every operation. */
 static void settle(struct sim *s) {
+    /* Nearly every operation finds nothing released: the count says so
+     * without a walk over every descriptor the simulation holds. */
+    if (s->forgotten_count == 0) return;
     size_t m = 0;
     while (m < s->member_count) {
         const long index = s->members[m];
@@ -830,7 +839,12 @@ long linea_sim_release(int fd) {
         /* Outside its simulation the entry is forgotten: a simulation that
          * has ended has already cut its links, and one still open closes it
          * at its next operation (`settle`). */
-        if (e->sim == NULL) drop_entry(index); else e->forgotten = 1;
+        if (e->sim == NULL) {
+            drop_entry(index);
+        } else if (!e->forgotten) {
+            e->forgotten = 1;
+            e->sim->forgotten_count += 1;
+        }
     }
     unlock();
     return 0;
