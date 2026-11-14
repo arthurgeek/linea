@@ -3158,6 +3158,11 @@ pub const Reading = struct {
     family: DeclId = DeclId.none,
     applied: []const node.TypeRef = &.{},
     outer: ?*const Reading = null,
+    /// How many readings are around this one.
+    depth: u32 = 0,
+
+    /// How many readings `expands` looks back through one by one.
+    const frames_read = 64;
 
     /// The reading a text substituted for one of this one's parameters has.
     fn after(self: Reading) Reading {
@@ -3166,12 +3171,22 @@ pub const Reading = struct {
 
     /// Whether `alias` is being expanded by this reading or one around it,
     /// which is how an alias that names itself is told from one used twice.
-    fn expands(self: *const Reading, alias: DeclId) bool {
+    ///
+    /// **Bound:** `frames_read` readings. A ring of that many aliases or
+    /// fewer is found among them. A longer one is found by depth: aliases
+    /// that name no ring are expanded at most once each on the way down, so
+    /// a reading deeper than `declared`, the declarations the program holds,
+    /// is inside one. Reading back the whole chain at every level made a
+    /// chain of n aliases cost n squared.
+    fn expands(self: *const Reading, alias: DeclId, declared: usize) bool {
         var at: ?*const Reading = self;
+        var read: usize = 0;
         while (at) |reading| : (at = reading.outer) {
             if (reading.family == alias) return true;
+            read += 1;
+            if (read == frames_read) break;
         }
-        return false;
+        return self.depth > declared;
     }
 };
 
@@ -3213,14 +3228,14 @@ fn aliasUsed(ast: *const Ast, ctx: anytype, read: *const Reading, x: node.TypeRe
         .alias => |d| d,
         .nothing, .type_ => return null,
     };
-    if (ast.declTag(alias) != .alias or read.expands(alias)) return null;
+    if (ast.declTag(alias) != .alias or read.expands(alias, ast.declCount())) return null;
     return alias;
 }
 
 /// What an alias's use reads as: the type it names, with its parameters
 /// standing for the arguments written at the use.
 fn throughAlias(ast: *const Ast, alias: DeclId, use: node.TypeRef, outer: *const Reading) Reading {
-    return .{ .family = alias, .applied = ast.typeArgs(use.args), .outer = outer };
+    return .{ .family = alias, .applied = ast.typeArgs(use.args), .outer = outer, .depth = outer.depth + 1 };
 }
 
 /// Whether two written type-argument lists name the same types.
@@ -6438,9 +6453,9 @@ const Resolver = struct {
     /// walk reads each alias's text once however many uses and implementations
     /// reach it, and its size is the aliases the program declares.
     settled_aliases: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
-    /// The aliases `writtenSettled` found to name a type whose every name
-    /// settled.
-    aliases_settle: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// The aliases `writtenSettled` has found to name a type whose every name
+    /// settled, and those it is in the middle of walking.
+    aliases_settle: std.AutoHashMapUnmanaged(DeclId, enum { walking, settled }) = .empty,
     /// Every binding the program declares, in declaration order. Append-only:
     /// a `BindingId` indexes it, and every later pass keys side tables by one.
     bindings: std.ArrayList(Binding) = .empty,
@@ -11549,10 +11564,6 @@ const Resolver = struct {
         }
     };
 
-    /// An alias whose named type is being asked about, and the alias that
-    /// led to it, so a chain that returns to one of its own aliases is seen.
-    const AliasOnPath = struct { decl: node.DeclId, outer: ?*const AliasOnPath };
-
     /// Whether every name a written type reaches settled: a name nothing
     /// declares, an alias whose own type fails, and an alias that reaches itself
     /// have each been reported where they are written. A chain of aliases of
@@ -11560,10 +11571,10 @@ const Resolver = struct {
     ///
     /// **Bound:** the written type's own nodes, and each alias's named type
     /// once: an alias found to settle is kept in `aliases_settle`, so one
-    /// named twice by each of those above it is still walked once. An alias
-    /// is compared against the aliases on the path to it, so a chain of n
-    /// costs n squared at most.
-    fn writtenSettled(self: *Resolver, ref: node.TypeRef, path: ?*const AliasOnPath) std.mem.Allocator.Error!bool {
+    /// named twice by each of those above it is still walked once, and an
+    /// alias being walked is marked there too, so one that reaches itself is
+    /// found by a lookup and not by reading back the chain that led to it.
+    fn writtenSettled(self: *Resolver, ref: node.TypeRef) std.mem.Allocator.Error!bool {
         const ast = &self.program.ast;
         const x = ast.withoutTypeGroups(ref);
         switch (x.kind) {
@@ -11571,21 +11582,27 @@ const Resolver = struct {
                 const binding = self.writtenBinding(x.name);
                 if (binding == BindingId.none) return false;
                 const held = self.bindings.items[binding.index()];
-                if (held.kind == .type_alias and !self.aliases_settle.contains(held.decl)) {
-                    var on_path = path;
-                    while (on_path) |alias| : (on_path = alias.outer) {
-                        if (alias.decl == held.decl) return false;
+                if (held.kind == .type_alias) {
+                    const walk = try self.aliases_settle.getOrPut(self.gpa, held.decl);
+                    if (walk.found_existing) {
+                        // Still being walked: the alias reaches itself.
+                        if (walk.value_ptr.* == .walking) return false;
+                    } else {
+                        walk.value_ptr.* = .walking;
+                        const settles = try self.writtenSettled(ast.declReturnRef(held.decl));
+                        if (!settles) {
+                            _ = self.aliases_settle.remove(held.decl);
+                            return false;
+                        }
+                        self.aliases_settle.getPtr(held.decl).?.* = .settled;
                     }
-                    const next: AliasOnPath = .{ .decl = held.decl, .outer = path };
-                    if (!try self.writtenSettled(ast.declReturnRef(held.decl), &next)) return false;
-                    try self.aliases_settle.put(self.gpa, held.decl, {});
                 }
             },
-            .selection => if (!try self.writtenSettled(ast.selectionBase(x), path)) return false,
+            .selection => if (!try self.writtenSettled(ast.selectionBase(x))) return false,
             .callable, .array, .tuple, .borrow, .grouped => {},
         }
         for (ast.typeArgs(x.args)) |argument| {
-            if (!try self.writtenSettled(argument, path)) return false;
+            if (!try self.writtenSettled(argument)) return false;
         }
         return true;
     }
@@ -11645,10 +11662,10 @@ const Resolver = struct {
                 // A source or a payload that failed to resolve has its own
                 // report; a missing variant would say the same mistake twice.
                 var settled = true;
-                for (written_arguments) |argument| settled = settled and try self.writtenSettled(argument, null);
+                for (written_arguments) |argument| settled = settled and try self.writtenSettled(argument);
                 for (variants) |variant| {
                     const fields = ast.variantFields(variant);
-                    if (fields.len == 1) settled = settled and try self.writtenSettled(fields[0].written, null);
+                    if (fields.len == 1) settled = settled and try self.writtenSettled(fields[0].written);
                 }
                 if (!settled) return false;
                 const source_text = ast.writtenText(if (written_arguments.len == 1) written_arguments[0] else wrapped);
