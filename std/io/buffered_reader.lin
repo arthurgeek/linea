@@ -197,140 +197,6 @@ impl[R: Reader] BufferedReader[R, mem.SystemAllocator] {
         let _source = reader.abandon()
         testing.assert_eq(length, UInt64(4), "a line read through a system buffer changed length")
     }
-
-    // Read exactly count bytes into storage from the system allocator, under
-    // the limits of `read_exact_in`.
-    pub fn read_exact(inout self: Self, count: UInt64, max_bytes: UInt64) -> Result[Vec[UInt8, mem.SystemAllocator], ExactError[R.Error]] where carries(.Err.Input.reason: self.reader), retains(self.ahead: self.ahead, self.allocator) {
-        &self.read_exact_in(mem.system(), count, max_bytes)
-    }
-
-    test fn read_exact_allocates_from_the_system_allocator() {
-        let source = FragmentReader { bytes = "abc".as_bytes(), position = 0, step = 3, fail_at = UInt64.max }
-        var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
-            return testing.assert(false, "reader allocation failed")
-        }
-        let length = match &reader.read_exact(count: 2, max_bytes: 4) {
-            Ok(bytes) => {
-                let length = bytes.length()
-                bytes.release()
-                length
-            },
-            Err(_) => 0,
-        }
-        let _source = reader.abandon()
-        testing.assert_eq(length, UInt64(2), "an exact read into the system allocator lost bytes")
-    }
-
-    test fn read_exact_collects_a_body_split_across_reads() {
-        let input = "hello world"
-        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
-        var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
-            return testing.assert(false, "reader allocation failed")
-        }
-        let body = match &reader.read_exact(count: 5, max_bytes: 10) {
-            Ok(bytes) => {
-                let intact = bytes.length() == 5 && bytes[0] == 104 && bytes[4] == 111
-                bytes.release()
-                intact
-            },
-            Err(_) => false,
-        }
-        let rest = match &reader.read_raw_line_borrowed(max_bytes: 6) {
-            Ok(Some(value)) => value.length() == 6 && value[0] == 32 && value[5] == 100,
-            Ok(None) => false,
-            Err(_) => false,
-        }
-        let _source = reader.abandon()
-        testing.assert(body && rest, "an exact read lost bytes or disturbed the following read")?
-        .Ok(())
-    }
-
-    test fn read_exact_refuses_past_its_limit_before_reading() {
-        let input = "hello world"
-        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
-        var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
-            return testing.assert(false, "reader allocation failed")
-        }
-        let refused = match &reader.read_exact(count: 11, max_bytes: 10) {
-            Err(Limit) => true,
-            Err(_) => false,
-            Ok(bytes) => {
-                bytes.release()
-                false
-            },
-        }
-        let intact = match &reader.read_raw_line_borrowed(max_bytes: 11) {
-            Ok(Some(value)) => value.length() == 11 && value[0] == 104 && value[10] == 100,
-            Ok(None) => false,
-            Err(_) => false,
-        }
-        let _source = reader.abandon()
-        testing.assert(refused && intact, "an oversized exact read consumed input before refusing")?
-        .Ok(())
-    }
-
-    test fn read_exact_reports_how_much_arrived_before_the_end() {
-        let input = "abc"
-        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = UInt64.max }
-        var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
-            return testing.assert(false, "reader allocation failed")
-        }
-        let ended = match &reader.read_exact(count: 5, max_bytes: 10) {
-            Err(Ended(n)) => n == 3,
-            Err(_) => false,
-            Ok(bytes) => {
-                bytes.release()
-                false
-            },
-        }
-        let _source = reader.abandon()
-        testing.assert(ended, "an exact read reported the wrong count at end of stream")?
-        .Ok(())
-    }
-
-    test fn read_exact_refuses_while_a_line_read_needs_recovery() {
-        let input = "abcd\nnext\n"
-        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
-        var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
-            return testing.assert(false, "reader allocation failed")
-        }
-        let limited = match &reader.read_line_borrowed(max_bytes: 3) {
-            Err(Limit) => true,
-            _ => false,
-        }
-        let blocked = match &reader.read_exact(count: 1, max_bytes: 4) {
-            Err(RecoveryRequired) => true,
-            Err(_) => false,
-            Ok(bytes) => {
-                bytes.release()
-                false
-            },
-        }
-        let _source = reader.abandon()
-        testing.assert(limited && blocked, "an exact read ignored a reader still needing line recovery")?
-        .Ok(())
-    }
-
-    // ExcessReadFixture (defined in read_all.lin, this module's other whole-input
-    // reader) misreports its own progress, overrunning the destination it was
-    // given. read_exact treats this as unusable rather than trusting the count.
-    test fn read_exact_reports_a_reader_that_overruns_its_destination() {
-        let source = ExcessReadFixture {}
-        var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
-            return testing.assert(false, "reader allocation failed")
-        }
-        let invalid = match &reader.read_exact(count: 2, max_bytes: 4) {
-            Err(InvalidProgress) => true,
-            Err(_) => false,
-            Ok(bytes) => {
-                bytes.release()
-                false
-            },
-        }
-        let _source = reader.abandon()
-        testing.assert(invalid, "an exact read accepted a reader that overran its destination")?
-        .Ok(())
-    }
 }
 
 // A buffered reader is ready to read at once while it holds bytes it has not
@@ -934,15 +800,17 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // the underlying reader, and every byte consumed this way advances the
     // stream position. A stream that ends first reports how many bytes it
     // held. Unlike a line, an exact read touches no pending record, so it
-    // never itself blocks recovery. The bytes are allocated from `allocator`.
-    pub fn read_exact_in(inout self: Self, allocator: A, count: UInt64, max_bytes: UInt64) -> Result[Vec[UInt8, A], ExactError[R.Error]] where carries(.Ok: allocator), carries(.Err.Input.reason: self.reader), retains(self.ahead: self.ahead, self.allocator) {
+    // never itself blocks recovery. The bytes are allocated from `allocator`,
+    // which need not be the reader's: they are copied out of the read-ahead
+    // buffer, so they outlive the reader and whatever its allocator borrows.
+    pub fn read_exact_in[B: Allocator](inout self: Self, allocator: B, count: UInt64, max_bytes: UInt64) -> Result[Vec[UInt8, B], ExactError[R.Error]] where carries(.Ok: allocator), carries(.Err.Input.reason: self.reader), retains(self.ahead: self.ahead, self.allocator) {
         if count > max_bytes {
             return .Err(.Limit)
         }
         if self.blocked {
             return .Err(.RecoveryRequired)
         }
-        var bytes: Vec[UInt8, A] = Vec.new_in(allocator)
+        var bytes: Vec[UInt8, B] = Vec.new_in(allocator)
         match &bytes.reserve(count) {
             Err(reason) => {
                 bytes.release()
@@ -1032,6 +900,163 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         ample.release()
         testing.assert(refused, "the body was not allocated from the allocator passed in")?
         testing.assert_eq(body, .Some("hello"), "a refused allocation consumed the body")?
+        .Ok(())
+    }
+
+    test fn read_exact_keeps_its_bytes_apart_from_the_reader_allocator() {
+        // The reader's read-ahead comes from the arena; the bytes read come
+        // from the system allocator and are still there once the arena is gone.
+        let arena = mem.Arena.open(mem.system(), size: 64)
+        let source = FragmentReader { bytes = "abc".as_bytes(), position = 0, step = 3, fail_at = UInt64.max }
+        var reader = BufferedReader.open_in(arena.handle(), capacity: 8, reader: source) else |_| {
+            arena.release()
+            return testing.assert(false, "an arena reader was refused")
+        }
+        let outcome = &reader.read_exact_in(mem.system(), count: 3, max_bytes: 4)
+        let _source = reader.abandon()
+        arena.release()
+        let kept = match outcome {
+            Ok(bytes) => {
+                let same = bytes.length() == 3 && bytes[0] == 97 && bytes[2] == 99
+                bytes.release()
+                same
+            },
+            Err(_) => false,
+        }
+        testing.assert(kept, "bytes read into another allocator did not outlive the reader's arena")
+    }
+
+    // Read exactly count bytes into storage from the system allocator, under
+    // the limits of `read_exact_in`.
+    pub fn read_exact(inout self: Self, count: UInt64, max_bytes: UInt64) -> Result[Vec[UInt8, mem.SystemAllocator], ExactError[R.Error]] where carries(.Err.Input.reason: self.reader), retains(self.ahead: self.ahead, self.allocator) {
+        &self.read_exact_in(mem.system(), count, max_bytes)
+    }
+
+    test fn read_exact_allocates_from_the_system_allocator() {
+        let source = FragmentReader { bytes = "abc".as_bytes(), position = 0, step = 3, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let length = match &reader.read_exact(count: 2, max_bytes: 4) {
+            Ok(bytes) => {
+                let length = bytes.length()
+                bytes.release()
+                length
+            },
+            Err(_) => 0,
+        }
+        let _source = reader.abandon()
+        testing.assert_eq(length, UInt64(2), "an exact read into the system allocator lost bytes")
+    }
+
+    test fn read_exact_collects_a_body_split_across_reads() {
+        let input = "hello world"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let body = match &reader.read_exact(count: 5, max_bytes: 10) {
+            Ok(bytes) => {
+                let intact = bytes.length() == 5 && bytes[0] == 104 && bytes[4] == 111
+                bytes.release()
+                intact
+            },
+            Err(_) => false,
+        }
+        let rest = match &reader.read_raw_line_borrowed(max_bytes: 6) {
+            Ok(Some(value)) => value.length() == 6 && value[0] == 32 && value[5] == 100,
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(body && rest, "an exact read lost bytes or disturbed the following read")?
+        .Ok(())
+    }
+
+    test fn read_exact_refuses_past_its_limit_before_reading() {
+        let input = "hello world"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let refused = match &reader.read_exact(count: 11, max_bytes: 10) {
+            Err(Limit) => true,
+            Err(_) => false,
+            Ok(bytes) => {
+                bytes.release()
+                false
+            },
+        }
+        let intact = match &reader.read_raw_line_borrowed(max_bytes: 11) {
+            Ok(Some(value)) => value.length() == 11 && value[0] == 104 && value[10] == 100,
+            Ok(None) => false,
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert(refused && intact, "an oversized exact read consumed input before refusing")?
+        .Ok(())
+    }
+
+    test fn read_exact_reports_how_much_arrived_before_the_end() {
+        let input = "abc"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let ended = match &reader.read_exact(count: 5, max_bytes: 10) {
+            Err(Ended(n)) => n == 3,
+            Err(_) => false,
+            Ok(bytes) => {
+                bytes.release()
+                false
+            },
+        }
+        let _source = reader.abandon()
+        testing.assert(ended, "an exact read reported the wrong count at end of stream")?
+        .Ok(())
+    }
+
+    test fn read_exact_refuses_while_a_line_read_needs_recovery() {
+        let input = "abcd\nnext\n"
+        let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
+        var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let limited = match &reader.read_line_borrowed(max_bytes: 3) {
+            Err(Limit) => true,
+            _ => false,
+        }
+        let blocked = match &reader.read_exact(count: 1, max_bytes: 4) {
+            Err(RecoveryRequired) => true,
+            Err(_) => false,
+            Ok(bytes) => {
+                bytes.release()
+                false
+            },
+        }
+        let _source = reader.abandon()
+        testing.assert(limited && blocked, "an exact read ignored a reader still needing line recovery")?
+        .Ok(())
+    }
+
+    // ExcessReadFixture (defined in read_all.lin, this module's other whole-input
+    // reader) misreports its own progress, overrunning the destination it was
+    // given. read_exact treats this as unusable rather than trusting the count.
+    test fn read_exact_reports_a_reader_that_overruns_its_destination() {
+        let source = ExcessReadFixture {}
+        var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
+            return testing.assert(false, "reader allocation failed")
+        }
+        let invalid = match &reader.read_exact(count: 2, max_bytes: 4) {
+            Err(InvalidProgress) => true,
+            Err(_) => false,
+            Ok(bytes) => {
+                bytes.release()
+                false
+            },
+        }
+        let _source = reader.abandon()
+        testing.assert(invalid, "an exact read accepted a reader that overran its destination")?
         .Ok(())
     }
 
