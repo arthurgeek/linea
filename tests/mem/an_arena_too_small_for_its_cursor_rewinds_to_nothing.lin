@@ -1,0 +1,21 @@
+// An arena keeps an eight-byte cursor at the start of its bytes. One opened
+// over fewer than eight bytes has no cursor and hands out nothing, so
+// rewinding it has nothing to undo, and the arena is released as usual.
+import std.mem
+
+use mem.Allocator
+use mem.Lender
+
+fn main() -> UInt8 {
+    var refused: UInt8 = 0
+    for size in 0..8 {
+        var arena = mem.Arena.open(mem.system(), size: size)
+        &arena.rewind()
+        if arena.handle().acquire(1).is_err() {
+            refused += 1
+        }
+        &arena.rewind()
+        arena.release()
+    }
+    refused
+}
