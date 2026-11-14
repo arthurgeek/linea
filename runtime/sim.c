@@ -787,9 +787,12 @@ long linea_sim_shutdown_write(int fd) {
     if (e->listening || e->reset) {
         answer = -(long)ENOTCONN;
     } else if (!e->write_shut) {
-        e->write_shut = 1;
+        /* The end is sent before the side is marked shut: an end that could
+         * not be allocated leaves it open, so asking again or closing still
+         * ends the peer's input. */
         struct entry *peer = at(e->peer);
         if (peer != NULL && schedule(s, peer, chunk_end, NULL, 0) != 0) answer = -(long)ENOMEM;
+        else e->write_shut = 1;
     }
     unlock();
     return answer;
