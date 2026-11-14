@@ -477,9 +477,8 @@ fn serve_connections[L: Acceptor + Owned + Shareable + Isolated, H: Owned + Shar
 
 // What a listener's owning task holds while tasks serve it: the listener, how
 // many connections it has handed out, the most it hands out, the pause after
-// a transient accept failure and when that failure was seen, the failure
-// that ended accepting, and how many serving tasks are still getting ready to
-// serve, which it waits for before accepting anything.
+// a transient accept failure and when that failure was seen, and the failure
+// that ended accepting.
 internal struct Accepting[L] {
     listener: L,
     served: UInt64,
@@ -487,12 +486,7 @@ internal struct Accepting[L] {
     pause_ms: UInt64,
     retried_at: Option[time.Instant],
     stopped: Option[NetError],
-    preparing: UInt64,
 }
-
-// How long a serving task waits before asking again while other tasks are
-// still getting ready to serve.
-let preparing_pause_ms: UInt64 = 1
 
 // What a serving task is handed when it asks for its next connection.
 // `Retried` goes to the one task whose accept failed, which reports it and
@@ -531,18 +525,14 @@ impl[L: Acceptor] Accepting[L] {
     // Keep `listener`, to hand out at most `limit` connections, or any number
     // when that is `.None`.
     internal fn open(sink listener: L, limit: Option[UInt64]) -> Accepting[L] where carries(listener) {
-        .{ listener, served = 0, limit = copy(limit), pause_ms = 0, retried_at = .None, stopped = .None, preparing = 0 }
+        .{ listener, served = 0, limit = copy(limit), pause_ms = 0, retried_at = .None, stopped = .None }
     }
 
     // Accept the next connection, unless accepting has stopped, handed out
-    // the most it may, is waiting for serving tasks to get ready, or is
-    // waiting out the pause after a failed accept.
+    // the most it may, or is waiting out the pause after a failed accept.
     internal fn next(inout self: Self) -> Next {
         if self.stopped.is_some() || reached(self.limit, self.served) {
             return .Stop
-        }
-        if self.preparing > 0 {
-            return .Wait(time.Duration.from_milliseconds(preparing_pause_ms))
         }
         match read self.retried_at {
             Some(at) => {
@@ -592,57 +582,10 @@ impl[L: Acceptor] Accepting[L] {
         testing.assert_eq(later, Told.Connected, "the connection was not accepted after the pause")?
     }
 
-    // Accept nothing until `count` serving tasks have each called `ready`, or
-    // been given up by `unstarted`, so no task waits in `accept` while
-    // another is still building what it serves with.
-    internal fn expect(inout self: Self, count: UInt64) {
-        self.preparing = count
-    }
-
-    // One serving task is ready to serve, or, when `failed`, could not get
-    // ready. A failed task stops accepting: every later `next` answers
-    // `Stop`, so serving ends without accepting anything more.
-    internal fn ready(inout self: Self, failed: Bool) {
-        if self.preparing > 0 {
-            self.preparing -= 1
-        }
-        if failed {
-            self.limit = .Some(self.served)
-        }
-    }
-
-    // `count` serving tasks that were expected will never run, because the
-    // tasks to run them could not be made.
-    internal fn unstarted(inout self: Self, count: UInt64) {
-        self.preparing = if count < self.preparing {
-            self.preparing - count
-        } else {
-            0
-        }
-    }
-
-    test fn an_acceptor_waits_for_every_expected_task_and_stops_when_one_fails() {
-        let listener = listen(loopback(0)).unwrap()
-        let client = connect(listener.local_address().unwrap()).unwrap()
-        var accepting = Accepting.open(listener, limit: .None)
-        &accepting.expect(3)
-        &accepting.ready(failed: false)
-        let one_preparing = told(&accepting.next())
-        &accepting.unstarted(1)
-        let still_preparing = told(&accepting.next())
-        &accepting.ready(failed: true)
-        let after_a_failure = told(&accepting.next())
-        accepting.finish().unwrap()
-        client.close().unwrap()
-        testing.assert_eq(one_preparing, Told.Waited, "a connection was handed out before every task was ready")?
-        testing.assert_eq(still_preparing, Told.Waited, "a connection was handed out before the last task was ready")?
-        testing.assert_eq(after_a_failure, Told.Stopped, "a connection was handed out after a task failed to get ready")?
-    }
-
     // The listener, for a thread that serves it alone because its owning
     // task could not be made.
     internal fn close_alone(sink self: Self) -> L where carries(self.listener) {
-        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped: _, preparing: _ } = self
+        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped: _ } = self
         listener
     }
 }
@@ -651,7 +594,7 @@ impl[L: Acceptor + io.Close] Accepting[L] {
     // Close the listener and report the accept failure that ended serving,
     // or the failure to close it.
     internal fn finish(sink self: Self) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
-        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped, preparing: _ } = self
+        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped } = self
         finish(listener, stopped)
     }
 }
@@ -663,7 +606,7 @@ impl[L: Acceptor + io.Close] Accepting[L] {
 // of `count`. Every task started is joined before this returns. When a task
 // cannot be made, the share it would have run is not run and this thread
 // runs its own share alone, so fewer than `count` tasks run, but at least
-// one does, and the acceptor is told that the share's tasks will not run.
+// one does.
 // Each task is given a stack of `stack` bytes; a test asks for one no
 // system can give, so that no task can be made.
 internal fn on_tasks[L: Acceptor + Owned + Shareable + Isolated, C: Shareable + Copyable, R: Owned, W: Shareable + Copyable + fn(context: C, acceptor: task.Client[Accepting[L]]) -> R, J: Shareable + Copyable + fn(sink first: R, sink second: R) -> R](count: UInt64, acceptor: task.Client[Accepting[L]], context: C, work: W, combine: J, stack: UInt64 = task.default_stack_bytes) -> R {
@@ -684,7 +627,6 @@ internal fn on_tasks[L: Acceptor + Owned + Shareable + Isolated, C: Shareable + 
         },
         Err(unstarted) => {
             let Unstarted { body: _, reason: _ } = unstarted
-            acceptor.call([sink half] |inout accepting: Accepting[L]| &accepting.unstarted(half))
             on_tasks[L, C, R, W, J](count - half, acceptor, context, work, combine, stack)
         },
     }
@@ -720,11 +662,9 @@ test fn on_tasks_answers_what_every_task_answered() {
     testing.assert_eq(total, UInt64(10), "a task's answer was dropped")?
 }
 
-// One serving task the acceptor expects: report that it is ready, then ask
-// for a connection until it is handed one, told to stop, or has asked 2000
-// times, and answer whether it was handed one.
-fn ready_then_served[L: Acceptor + Owned + Shareable + Isolated](_context: (), acceptor: task.Client[Accepting[L]]) -> Bool {
-    acceptor.call(|inout accepting: Accepting[L]| &accepting.ready(failed: false))
+// One serving task: ask for a connection until it is handed one, told to
+// stop, or has asked 2000 times, and answer whether it was handed one.
+fn asked_until_served[L: Acceptor + Owned + Shareable + Isolated](_context: (), acceptor: task.Client[Accepting[L]]) -> Bool {
     var asked: UInt64 = 0
     while asked < 2000 {
         match acceptor.call(|inout accepting: Accepting[L]| told(&accepting.next())) {
@@ -742,10 +682,8 @@ fn either_served(sink first: Bool, sink second: Bool) -> Bool {
     first || second
 }
 
-// No task can be made with a stack of 2^62 bytes, so of the four tasks the
-// acceptor expects only the calling thread's runs. The three that never run
-// are reported as unstarted, so the one that does is handed the waiting
-// client rather than waiting forever for the others to get ready.
+// No task can be made with a stack of 2^62 bytes, so of the four tasks asked
+// for only the calling thread's runs, and it is handed the waiting client.
 test fn tasks_that_cannot_be_made_do_not_hold_up_the_one_that_runs() {
     let listener = listen(loopback(0)).unwrap()
     let client = connect(listener.local_address().unwrap()).unwrap()
@@ -757,12 +695,11 @@ test fn tasks_that_cannot_be_made_do_not_hold_up_the_one_that_runs() {
         },
     }
     let acceptor = owner.client()
-    acceptor.call(|inout accepting: Accepting[Listener]| &accepting.expect(4))
     let impossible_stack: UInt64 = 4611686018427387904
-    let served = on_tasks(4, acceptor, (), ready_then_served[Listener], either_served, stack: impossible_stack)
+    let served = on_tasks(4, acceptor, (), asked_until_served[Listener], either_served, stack: impossible_stack)
     owner.close().finish().unwrap()
     client.close().unwrap()
-    testing.assert(served, "the task that ran waited for tasks that were never made")?
+    testing.assert(served, "the task that ran was not handed the waiting client")?
 }
 
 // `answer_a_line` waits for its client's line, then answers `ok`. A client
