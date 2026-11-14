@@ -19965,8 +19965,8 @@ fn withoutTrapPosition(line: []const u8) []const u8 {
 
 /// Whether two runs said the same on standard error, as far as a rewrite of
 /// the source must keep it. Every byte counts, except that between two runs
-/// that trapped the last line is compared without the source position it
-/// ends with, which the rewrite moves. The runtime writes its report last and
+/// the runtime aborted the last line is compared without the source position
+/// it ends with, which the rewrite moves. The runtime writes its report last and
 /// ends it with the position, so that line is where the position is whatever
 /// the line begins with: a panic's message may hold a line break, and text
 /// the program left unterminated shares the report's line. The reason for
@@ -19974,6 +19974,9 @@ fn withoutTrapPosition(line: []const u8) []const u8 {
 fn sameSaid(a_text: []const u8, a_errors: []const u8, b_text: []const u8, b_errors: []const u8) bool {
     const trapped = std.mem.startsWith(u8, a_text, trap_answer) and std.mem.startsWith(u8, b_text, trap_answer);
     if (!trapped) return std.mem.eql(u8, a_errors, b_errors);
+    // A run a signal stopped ends with no report of the runtime's, so its
+    // last line is the program's own and holds no position to set aside.
+    if (signalOf(a_text).len != 0 or signalOf(b_text).len != 0) return std.mem.eql(u8, a_errors, b_errors);
     const a = lastLine(a_errors);
     const b = lastLine(b_errors);
     return std.mem.eql(u8, a.before, b.before) and
@@ -20033,6 +20036,12 @@ test "a trap report is compared by its reason, and everything else said is compa
     try testing.expect(!sameSaid(trap, "said" ++ at_three, trap, "told" ++ at_nine));
     try testing.expect(!sameSaid("exit 0\n", at_three, "exit 0\n", at_nine));
     try testing.expect(sameSaid("exit 0\n", "warned\n", "exit 0\n", "warned\n"));
+    // A signal stopped both, so the last line is the program's own text and
+    // a position in it is compared.
+    const own_three = "moved at a.lin:3:5\n";
+    const own_nine = "moved at a.lin:9:1\n";
+    try testing.expect(!sameSaid("trap\n" ++ own_three ++ "stopped by signal 11\n", own_three, "trap\n" ++ own_nine ++ "stopped by signal 11\n", own_nine));
+    try testing.expect(sameSaid("trap\n" ++ own_three ++ "stopped by signal 11\n", own_three, "trap\n" ++ own_three ++ "stopped by signal 11\n", own_three));
 
     try testing.expectEqualStrings("linea: panic: stopped at once", withoutTrapPosition("linea: panic: stopped at once at a.lin:2:9"));
     try testing.expectEqualStrings("linea: stopped at once", withoutTrapPosition("linea: stopped at once"));
