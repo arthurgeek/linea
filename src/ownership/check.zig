@@ -700,16 +700,9 @@ const Checker = struct {
         const t = self.typing.partsSource(held);
         if (self.typing.get(t) == .parameter) return false;
 
-        var i: u32 = 0;
-        while (i < self.typing.fieldCount(t)) : (i += 1) {
-            if (self.owes(self.typing.fieldType(t, i))) return false;
-        }
-        var v: u32 = 0;
-        while (v < self.typing.variantCount(t)) : (v += 1) {
-            var f: u32 = 0;
-            while (f < self.typing.variantFieldCount(t, v)) : (f += 1) {
-                if (self.owes(self.typing.variantFieldType(t, v, f))) return false;
-            }
+        var parts = self.typing.ownedParts(t);
+        while (parts.next()) |part| {
+            if (self.owes(part)) return false;
         }
         return true;
     }
@@ -1623,7 +1616,13 @@ const Checker = struct {
             .style = .secondary,
         };
         const notes = try arena.alloc([]const u8, 1);
-        notes[0] = if (nested) "name what it holds in the pattern, so something can settle it" else "name what it holds in the arm, so something can settle it";
+        // No pattern names an array's elements, so the arm cannot hold them.
+        notes[0] = if (self.typing.get(self.typing.partsSource(ty)) == .array)
+            "walk it with `for`, so each element can be settled"
+        else if (nested)
+            "name what it holds in the pattern, so something can settle it"
+        else
+            "name what it holds in the arm, so something can settle it";
         try self.emit(.{
             .severity = .err,
             .code = .o_leak,

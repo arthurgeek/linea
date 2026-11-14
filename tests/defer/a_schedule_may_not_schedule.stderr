@@ -1,0 +1,24 @@
+error[S-Defer]: a `defer` runs while its scope is ending, so what it schedules may not schedule as well
+  --> tests/defer/a_schedule_may_not_schedule.lin:14:15
+   |
+14 |         defer finish()
+   |               ^^^^^^^^ `defer` inside a `defer`
+error[S-Defer]: a `defer` runs while its scope is ending, so what it schedules may not schedule as well
+  --> tests/defer/a_schedule_may_not_schedule.lin:20:15
+   |
+20 |         defer finish()
+   |               ^^^^^^^^ `defer` inside a `defer`
+error[S-Defer]: a `defer` runs while its scope is ending, so what it schedules may not schedule as well
+  --> tests/defer/a_schedule_may_not_schedule.lin:38:9
+   |
+38 |         defer let _lamp = Lamp { id = 1 }
+   |         ^^^^^^^^^^^^^^^ `defer let` inside a `defer`
+error[O-Leak]: `_lamp` (a linear `Lamp`) is still owned when this path leaves
+  --> tests/defer/a_schedule_may_not_schedule.lin:38:19
+   |
+38 |         defer let _lamp = Lamp { id = 1 }
+   |                   ^^^^^ never settled on the path that reaches the end of this block
+39 |     }
+   |     - the block ends here
+   |
+   = help: settle it first with `_lamp.release()`, or take it apart with `let Lamp { id: _ } = _lamp`
