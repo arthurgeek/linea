@@ -358,17 +358,23 @@ pub const Handler = struct {
         params: lsp.types.workspace.did_change_watched_files.Params,
     ) !void {
         // A file the held program embeds, and a manifest, are nothing a
-        // document event follows the change of: the program is checked again
-        // and published from here, once however many of its files the
-        // notification names, or what the editor shows about it stays as it
-        // was.
+        // document event follows the change of: what the editor shows is
+        // checked again and published from here, or it stays as it was. An
+        // embedded file belongs to the held program, which is published once
+        // however many of its files the notification names. A manifest may
+        // decide what any program holds, whichever is held when the
+        // notification arrives and wherever in it the manifest is named, so
+        // the program of every open document is published.
         var republish: ?[]const u8 = null;
+        var manifest_changed = false;
         for (params.changes) |change| {
             const path = try uri_mod.pathOf(arena, change.uri);
-            if (republish == null) republish = try handler.embeddedBy(arena, path) orelse try handler.heldUnder(arena, path);
+            if (republish == null) republish = try handler.embeddedBy(arena, path);
+            if (std.mem.eql(u8, std.fs.path.basename(path), loader.manifest_name)) manifest_changed = true;
             try handler.invalidate(arena, path);
             try handler.freshen(arena, path);
         }
+        if (manifest_changed) return handler.reportOpen(arena);
         if (republish) |entry| try handler.report(arena, entry);
     }
 
@@ -999,13 +1005,28 @@ pub const Handler = struct {
         return null;
     }
 
-    /// The entry of the held analysis where `path` is a manifest, which may
-    /// decide what that program holds, or null.
-    fn heldUnder(handler: *Handler, arena: std.mem.Allocator, path: []const u8) !?[]const u8 {
-        const held = handler.cached orelse return null;
-        const named = try loader.canonical(arena, loader.trimmedEntry(path));
-        if (!std.mem.eql(u8, std.fs.path.basename(named), loader.manifest_name)) return null;
-        return try arena.dupe(u8, held.entry);
+    /// Checks and publishes the program of every document the editor has
+    /// open, each program once, in the order of the documents' paths so a
+    /// session reads the same whatever order they were opened in.
+    ///
+    /// **Bound:** the open documents, sorted, and one check per program
+    /// among them.
+    fn reportOpen(handler: *Handler, arena: std.mem.Allocator) !void {
+        var paths: std.ArrayList([]const u8) = .empty;
+        var open = handler.documents.open.keyIterator();
+        while (open.next()) |path| try paths.append(arena, path.*);
+        std.mem.sort([]const u8, paths.items, {}, struct {
+            fn before(_: void, a: []const u8, b: []const u8) bool {
+                return std.mem.lessThan(u8, a, b);
+            }
+        }.before);
+
+        var published: std.StringHashMapUnmanaged(void) = .empty;
+        for (paths.items) |path| {
+            const entry = (try handler.rootFor(arena, path)).entry;
+            if ((try published.getOrPut(arena, entry)).found_existing) continue;
+            try handler.report(arena, path);
+        }
     }
 
     /// Drops an analysis when a loaded file or a loaded module's sibling changes.
@@ -1625,7 +1646,6 @@ test "a manifest changed on disk changes which files the program holds" {
     // The manifest now says the program's files sit under `src`. No source
     // file changed. The held program is the one to publish again.
     try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "linea.json", .data = "{ \"source\": \"src\" }" });
-    try std.testing.expect((try ws.handler.heldUnder(a, try ws.pathAt("linea.json"))) != null);
     try ws.handler.invalidate(a, try ws.pathAt("linea.json"));
 
     // What was checked under the old manifest is not kept, and the file
