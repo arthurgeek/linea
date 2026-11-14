@@ -1724,6 +1724,7 @@ can write, so a pattern comes after one.
 | `inout [ … ] \|a\| …`, called as `&f(a)` | `FnMut`, called through `&mut f` |
 | `inout [inout x] \|a\| …` | an `FnMut` closure that borrows `x` mutably |
 | `F: fn(a: A) -> B` | `F: Fn(A) -> B` |
+| `-> inout fn() -> UInt8`, a result written with how it is called | `-> impl FnMut() -> u8` |
 | `mem.Closure[fn(a: A) -> B, Alloc]` | `Box<dyn Fn(A) -> B>`, with the allocator named |
 | `fn show(entry (position, name): (UInt64, Str))` | `fn show((position, name): (u64, &str))`, with a label for callers |
 
