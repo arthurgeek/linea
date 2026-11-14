@@ -2884,6 +2884,9 @@ pub const FixedFunction = struct { signature: TypeId, in_library: bool };
 /// is shortened to a digest anyway once it passes the length an assembler
 /// takes, so a type whose own spelling passes `longest` is digested where it
 /// stands, once, and every type holding it spells that digest.
+///
+/// A type's spelling never changes once the type is interned, so what is
+/// decided for it holds for every symbol spelled from the same pool.
 pub const SharedSpelling = struct {
     /// The digest of each type decided so far, null for one spelled out.
     known: std.AutoHashMapUnmanaged(TypeId, ?u64) = .empty,
@@ -7109,32 +7112,29 @@ pub const Typing = struct {
         t: TypeId,
         shared: ?*SharedSpelling,
     ) std.mem.Allocator.Error!void {
-        if (shared) |held| if (try self.sharedDigest(gpa, held, t)) |digest| {
-            try out.appendSlice(gpa, SharedSpelling.marker);
-            try out.print(gpa, "{x:0>16}", .{digest});
-            return;
-        };
-        return self.appendMangledInner(gpa, out, t, shared);
+        const held = shared orelse return self.appendMangledInner(gpa, out, t, null);
+        if (held.known.get(t)) |decided| {
+            const digest = decided orelse return self.appendMangledInner(gpa, out, t, shared);
+            return appendDigest(gpa, out, digest);
+        }
+        // Decided once per type, from the spelling written here: `t` is
+        // spelled with each type it holds already decided, so one that is
+        // itself long is its digest there, and the text digested is no
+        // longer than what `t` holds directly, each part at most `longest`.
+        // A spelling short enough to keep is the one just written.
+        const start = out.items.len;
+        try self.appendMangledInner(gpa, out, t, shared);
+        const spelled = out.items[start..];
+        if (spelled.len <= SharedSpelling.longest) return held.known.put(gpa, t, null);
+        const digest = std.hash.Wyhash.hash(0, spelled);
+        out.shrinkRetainingCapacity(start);
+        try held.known.put(gpa, t, digest);
+        return appendDigest(gpa, out, digest);
     }
 
-    /// The digest that stands for `t` in a spelling, or null where `t` is
-    /// spelled out. Decided once per type: `t` is spelled with each type it
-    /// holds already decided, so one that is itself long is its digest there,
-    /// and the text digested is no longer than what `t` holds directly, each
-    /// part at most `longest`.
-    fn sharedDigest(
-        self: *const Typing,
-        gpa: std.mem.Allocator,
-        shared: *SharedSpelling,
-        t: TypeId,
-    ) std.mem.Allocator.Error!?u64 {
-        if (shared.known.get(t)) |decided| return decided;
-        var text: std.ArrayList(u8) = .empty;
-        defer text.deinit(gpa);
-        try self.appendMangledInner(gpa, &text, t, shared);
-        const digest: ?u64 = if (text.items.len > SharedSpelling.longest) std.hash.Wyhash.hash(0, text.items) else null;
-        try shared.known.put(gpa, t, digest);
-        return digest;
+    fn appendDigest(gpa: std.mem.Allocator, out: *std.ArrayList(u8), digest: u64) std.mem.Allocator.Error!void {
+        try out.appendSlice(gpa, SharedSpelling.marker);
+        try out.print(gpa, "{x:0>16}", .{digest});
     }
 
     fn appendMangledInner(
@@ -8849,6 +8849,11 @@ pub const Typing = struct {
 
         gpa: std.mem.Allocator,
         constant_pool: *const constants.Pool = &.{},
+        /// Which of the pool's types a symbol writes as a digest, decided
+        /// as symbols are spelled and kept for the symbols after them.
+        ///
+        /// **Bound:** the types symbols have spelled, each once.
+        symbol_spelling: SharedSpelling = .{},
         /// Whether the pool is finished. Sealed, every growth path below is a
         /// named defect: the pass that completes the set seals it, so a later
         /// pass reaching for a type the set does not hold fails at the reach
@@ -11559,6 +11564,7 @@ pub const Typing = struct {
         }
 
         pub fn deinit(self: *Builder) void {
+            self.symbol_spelling.deinit(self.gpa);
             self.open_mentions.deinit(self.gpa);
             self.ground_memo.deinit(self.gpa);
             self.unsettled_memo.deinit(self.gpa);
