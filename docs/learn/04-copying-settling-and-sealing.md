@@ -1383,7 +1383,9 @@ Lights off.
 ```
 
 A function the deferred expression calls is a block of its own and may use
-`defer` freely.
+`defer` freely. So is a closure written inside it: `defer run(|| { defer finish() })`
+schedules `finish` for the end of the closure's call, and a `return` there leaves
+the closure.
 
 ### A `defer` and a move
 
