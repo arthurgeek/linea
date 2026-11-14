@@ -13073,29 +13073,35 @@ const Resolver = struct {
     /// program's own is. Each alias is followed once: a chain is walked to
     /// its end and every alias on it answered from there.
     ///
+    /// An alias no name heads, such as one of an array or a callable, is
+    /// recorded as headed by nothing, so a chain that ends at one is answered
+    /// once as well and a later alias naming it stops there.
+    ///
     /// **Bound:** one step per alias on each chain, with every alias answered
     /// once, so linear in the aliases.
     fn recordAliasHeads(self: *Resolver) std.mem.Allocator.Error!void {
         var chain: std.ArrayList(DeclId) = .empty;
         defer chain.deinit(self.gpa);
+        var on_chain: std.AutoHashMapUnmanaged(DeclId, void) = .empty;
+        defer on_chain.deinit(self.gpa);
         for (self.program.modules, 0..) |_, i| {
             for (self.expanded.?.declsOf(.from(i))) |root| {
                 if (self.ast.declTag(root) != .alias or self.alias_heads.contains(root)) continue;
                 chain.clearRetainingCapacity();
+                on_chain.clearRetainingCapacity();
                 var at = root;
                 const head: BindingId = while (true) {
                     try chain.append(self.gpa, at);
+                    try on_chain.put(self.gpa, at, {});
                     const b = self.writtenHead(at);
                     if (b == BindingId.none or self.bindings.items[b.index()].kind != .type_alias) break b;
                     const next = self.bindings.items[b.index()].decl;
                     if (self.alias_heads.get(next)) |known| break known;
                     // A cycle was refused where it was found, and heads nothing.
-                    if (std.mem.indexOfScalar(DeclId, chain.items, next) != null) break .none;
+                    if (on_chain.contains(next)) break .none;
                     at = next;
                 };
-                for (chain.items) |alias| {
-                    if (head != BindingId.none) try self.alias_heads.put(self.gpa, alias, head);
-                }
+                for (chain.items) |alias| try self.alias_heads.put(self.gpa, alias, head);
             }
         }
     }
