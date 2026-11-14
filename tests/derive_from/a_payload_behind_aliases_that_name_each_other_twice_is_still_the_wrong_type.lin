@@ -1,0 +1,58 @@
+// [T-Derive]. A derived `From[UInt8]` wraps its argument in the one variant
+// whose payload is a `UInt8`. Each alias here names the one before it twice,
+// so the payload's type is written with forty names and stands for a type no
+// one could write out. It is still not a `UInt8`.
+struct Pair[phantom A, phantom B] {}
+
+alias Step0 = UInt64
+alias Step1 = Pair[Step0, Step0]
+alias Step2 = Pair[Step1, Step1]
+alias Step3 = Pair[Step2, Step2]
+alias Step4 = Pair[Step3, Step3]
+alias Step5 = Pair[Step4, Step4]
+alias Step6 = Pair[Step5, Step5]
+alias Step7 = Pair[Step6, Step6]
+alias Step8 = Pair[Step7, Step7]
+alias Step9 = Pair[Step8, Step8]
+alias Step10 = Pair[Step9, Step9]
+alias Step11 = Pair[Step10, Step10]
+alias Step12 = Pair[Step11, Step11]
+alias Step13 = Pair[Step12, Step12]
+alias Step14 = Pair[Step13, Step13]
+alias Step15 = Pair[Step14, Step14]
+alias Step16 = Pair[Step15, Step15]
+alias Step17 = Pair[Step16, Step16]
+alias Step18 = Pair[Step17, Step17]
+alias Step19 = Pair[Step18, Step18]
+alias Step20 = Pair[Step19, Step19]
+alias Step21 = Pair[Step20, Step20]
+alias Step22 = Pair[Step21, Step21]
+alias Step23 = Pair[Step22, Step22]
+alias Step24 = Pair[Step23, Step23]
+alias Step25 = Pair[Step24, Step24]
+alias Step26 = Pair[Step25, Step25]
+alias Step27 = Pair[Step26, Step26]
+alias Step28 = Pair[Step27, Step27]
+alias Step29 = Pair[Step28, Step28]
+alias Step30 = Pair[Step29, Step29]
+alias Step31 = Pair[Step30, Step30]
+alias Step32 = Pair[Step31, Step31]
+alias Step33 = Pair[Step32, Step32]
+alias Step34 = Pair[Step33, Step33]
+alias Step35 = Pair[Step34, Step34]
+alias Step36 = Pair[Step35, Step35]
+alias Step37 = Pair[Step36, Step36]
+alias Step38 = Pair[Step37, Step37]
+alias Step39 = Pair[Step38, Step38]
+alias Step40 = Pair[Step39, Step39]
+
+@derive(From[UInt8])
+enum Wide {
+    Wrong(Step40),
+}
+
+fn _hold(_wide: Wide) {}
+
+fn main() -> UInt8 {
+    0
+}
