@@ -3844,6 +3844,13 @@ expected type supplies the required count, as it supplies a braced literal's
 type: for `let xs: [UInt8; 3] = [1, 2]`, both the two-element literal and
 `[1, 2, 3, 4]` are ill-formed.
 
+An array literal always has an array type. An expected type that is not an
+array supplies nothing to the literal: its type is its elements' type and their
+count, and that type must satisfy the expected one ([T-Mismatch]), so
+`let n: UInt8 = [1, 2]` is ill-formed. An empty literal where a type that is
+not an array is expected is [T-Mismatch] too. A literal with an element of type
+`Never` has type `Never` and builds no array.
+
 An array place `values: [T; N]` provides the explicit call
 `values.as_slice() -> mem.Slice[T]`. It observes all N initialized elements in
 index order without copying, consuming or allocating. The call accepts no
