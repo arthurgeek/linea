@@ -32,9 +32,10 @@ exact at every length.**
   count no packed shape has, so a numbered shape equals no packed one.
 - **Each pass numbers its own.** The resolver numbers a long shape by its
   spelling, one byte for the invocation and one for each convention, in a
-  table it keeps beside its implementations; the table goes into a library's
-  seed and is numbered again first and in the same order when a program
-  resumes from that library. The checker numbers a long shape by the callable
+  table it keeps beside its implementations. A number is compared only
+  between two implementations of one trait, and a callable head is written in
+  its trait's module, so a library's numbers and a program's never meet and
+  nothing is carried into a resume. The checker numbers a long shape by the callable
   type that stands for it in the type pool: the same invocation and
   conventions over `Unit`, answering `Unit`. Every callable type of more than
   sixty parameters records that type when it is interned, so looking a type's
