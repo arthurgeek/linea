@@ -339,11 +339,13 @@ pub const Handler = struct {
     /// A file under the workspace changed outside the editor.
     ///
     /// What the named files contribute to the index is replaced, and nothing
-    /// else is: a change on disk is never a walk. An analysis affected by a
-    /// changed file is dropped so the next request checks it again;
+    /// else is: a changed source file is never a walk. An analysis affected by
+    /// a changed file is dropped so the next request checks it again;
     /// publishing from here instead would check one module
     /// per notification, and a checkout delivers one notification per file it
-    /// touched.
+    /// touched. A changed manifest is the exception on both counts: the
+    /// index is dropped whole and walked again by the request that next reads
+    /// it, and the held program is checked and published once.
     ///
     /// **Bound: the files the notification names.** Per file, invalidation
     /// checks the loaded files and module directories. A prepared export index
@@ -355,15 +357,15 @@ pub const Handler = struct {
         arena: std.mem.Allocator,
         params: lsp.types.workspace.did_change_watched_files.Params,
     ) !void {
-        // A file the held program embeds is nothing an editor shows, so no
-        // document event follows its change: the program is checked again and
-        // published from here, once however many of its files the
+        // A file the held program embeds, and a manifest, are nothing a
+        // document event follows the change of: the program is checked again
+        // and published from here, once however many of its files the
         // notification names, or what the editor shows about it stays as it
         // was.
         var republish: ?[]const u8 = null;
         for (params.changes) |change| {
             const path = try uri_mod.pathOf(arena, change.uri);
-            if (republish == null) republish = try handler.embeddedBy(arena, path);
+            if (republish == null) republish = try handler.embeddedBy(arena, path) orelse try handler.heldUnder(arena, path);
             try handler.invalidate(arena, path);
             try handler.freshen(arena, path);
         }
@@ -849,8 +851,8 @@ pub const Handler = struct {
         try index.reindex(handler.io, path, text);
     }
 
-    /// Asks the client to say when a `.lin` file under the workspace changes
-    /// outside the editor.
+    /// Asks the client to say when a `.lin` file or a manifest under the
+    /// workspace changes outside the editor.
     ///
     /// The protocol has no static way for a server to ask for file events, so
     /// registering for them is the only way to be told -- which is why a
@@ -871,10 +873,14 @@ pub const Handler = struct {
 
         // The options a registration carries are whatever the method being
         // registered defines, so the protocol types them as any JSON value.
-        var watcher: std.json.ObjectMap = .empty;
-        try watcher.put(arena, "globPattern", .{ .string = "**/*.lin" });
+        // Source files, and the manifests that say which files a program
+        // holds, what it depends on and what it may declare.
         var watchers: std.json.Array = .init(arena);
-        try watchers.append(.{ .object = watcher });
+        for ([_][]const u8{ "**/*.lin", "**/" ++ loader.manifest_name }) |pattern| {
+            var watcher: std.json.ObjectMap = .empty;
+            try watcher.put(arena, "globPattern", .{ .string = pattern });
+            try watchers.append(.{ .object = watcher });
+        }
         var options: std.json.ObjectMap = .empty;
         try options.put(arena, "watchers", .{ .array = watchers });
 
@@ -993,6 +999,15 @@ pub const Handler = struct {
         return null;
     }
 
+    /// The entry of the held analysis where `path` is a manifest, which may
+    /// decide what that program holds, or null.
+    fn heldUnder(handler: *Handler, arena: std.mem.Allocator, path: []const u8) !?[]const u8 {
+        const held = handler.cached orelse return null;
+        const named = try loader.canonical(arena, loader.trimmedEntry(path));
+        if (!std.mem.eql(u8, std.fs.path.basename(named), loader.manifest_name)) return null;
+        return try arena.dupe(u8, held.entry);
+    }
+
     /// Drops an analysis when a loaded file or a loaded module's sibling changes.
     ///
     /// The loader's module directories include namespace dependencies on files
@@ -1003,10 +1018,23 @@ pub const Handler = struct {
     ///
     /// Bound: one program-file scan and one module-directory scan, plus
     /// resolution of the changed path's program when errors were reported.
-    /// No dependency index is rebuilt.
+    /// No dependency index is rebuilt; a changed manifest drops it.
     fn invalidate(handler: *Handler, arena: std.mem.Allocator, path: []const u8) !void {
-        const held = handler.cached orelse return;
         const named = try loader.canonical(arena, loader.trimmedEntry(path));
+        // A manifest decides where a program's files sit, which libraries it
+        // depends on and which modules may declare `extern`, for its own
+        // program and for every program that depends on it. Which of the
+        // held analysis and the index it reaches is not worked out: both are
+        // dropped, and each is built again by the next request that reads it.
+        if (std.mem.eql(u8, std.fs.path.basename(named), loader.manifest_name)) {
+            handler.drop();
+            if (handler.index) |*index| {
+                index.deinit();
+                handler.index = null;
+            }
+            return;
+        }
+        const held = handler.cached orelse return;
         if (held.of.fileNamed(named) != null) {
             handler.drop();
             return;
@@ -1578,6 +1606,35 @@ test "a file changed on disk changes what the index offers" {
     const then = try ws.offered();
     try std.testing.expectEqual(@as(usize, 1), then.len);
     try std.testing.expectEqualStrings("after", then[0]);
+}
+
+test "a manifest changed on disk changes which files the program holds" {
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "main.lin", .text = "pub fn here() -> UInt8 { 1 }\n" },
+        .{ .at = "src/main.lin", .text = "pub fn there() -> UInt8 { 2 }\n" },
+    });
+    defer ws.deinit();
+    const a = ws.arena.allocator();
+
+    // The root's own file and the module `src` beside it are both the
+    // program's.
+    try std.testing.expectEqual(@as(usize, 2), (try ws.offered()).len);
+    _ = try ws.handler.check(a, try ws.main());
+    try std.testing.expect(ws.handler.cached != null);
+
+    // The manifest now says the program's files sit under `src`. No source
+    // file changed. The held program is the one to publish again.
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "linea.json", .data = "{ \"source\": \"src\" }" });
+    try std.testing.expect((try ws.handler.heldUnder(a, try ws.pathAt("linea.json"))) != null);
+    try ws.handler.invalidate(a, try ws.pathAt("linea.json"));
+
+    // What was checked under the old manifest is not kept, and the file
+    // above `src` is no longer one of the program's.
+    try std.testing.expect(ws.handler.cached == null);
+    const program = try ws.handler.entryFor(a, try ws.pathAt("src/main.lin"));
+    const then = (try ws.handler.indexOf()).offers(program, "");
+    try std.testing.expectEqual(@as(usize, 1), then.len);
+    try std.testing.expectEqualStrings("there", then[0].name);
 }
 
 test "a file deleted on disk is offered no longer" {

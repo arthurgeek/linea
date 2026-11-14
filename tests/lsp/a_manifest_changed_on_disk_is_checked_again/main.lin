@@ -1,0 +1,6 @@
+// A manifest says which files a program holds and what it depends on, so a
+// change to it is a change to the program: the program is checked again and
+// its diagnostics published, though no source file changed.
+fn main() -> UInt8 {
+    missing
+}
