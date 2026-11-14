@@ -2588,7 +2588,15 @@ const Analysis = struct {
             .held = held,
         };
         try self.pending_escapes.append(self.gpa, pending);
-        try self.sink.add(try self.escapeReport(pending));
+        // The report holds its place among the function's others. Its help
+        // names the clause every escape of the function needs, which is known
+        // once the function is walked, so it is written then.
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .o_escapes,
+            .message = message,
+            .labels = try arena.dupe(diagnostics.Label, &.{primary}),
+        });
     }
 
     /// One [O-Escapes] report waiting for its function's walk to end.
@@ -2606,9 +2614,16 @@ const Analysis = struct {
     /// clause, so a report naming only its own sources would be undone by
     /// the next report's.
     ///
-    /// **Bound:** the function's escape reports, each built once more.
+    /// **Bound:** the function's escape reports, each built once. The clause
+    /// is one answer for the function and is worked out once for all of them,
+    /// and the typing is reopened at most once, by the first report that asks
+    /// whether a local owner lends allocations.
     fn reviseEscapes(self: *Analysis) !void {
-        for (self.pending_escapes.items) |pending| try self.sink.revise(pending.index, try self.escapeReport(pending));
+        if (self.pending_escapes.items.len == 0) return;
+        const clause = try self.functionClause();
+        var pool: ?Typing.Builder = null;
+        defer if (pool) |*opened| opened.deinit();
+        for (self.pending_escapes.items) |pending| try self.sink.revise(pending.index, try self.escapeReport(pending, clause, &pool));
     }
 
     /// What an escape's origins say a clause could name: the parameters it
@@ -2736,7 +2751,7 @@ const Analysis = struct {
     /// with the function. Where the result's type declares `to_owned`, the
     /// owned copy that observes nothing. A carrier that supplied the
     /// contract by default is named first.
-    fn escapeReport(self: *const Analysis, pending: PendingEscape) !diagnostics.Diagnostic {
+    fn escapeReport(self: *const Analysis, pending: PendingEscape, clause: []const u8, pool: *?Typing.Builder) !diagnostics.Diagnostic {
         const arena = self.sink.arena;
         const leaving = pending.leaving;
         const held = pending.held;
@@ -2770,7 +2785,6 @@ const Analysis = struct {
             const joiner = if (i == 0) "" else if (i + 1 == sources.len) " and " else ", ";
             try named.print(arena, "{s}`{s}`", .{ joiner, source.spelling });
         }
-        const clause = try self.functionClause();
         // Whether the clause also names what another report of this function
         // needs, which the help says, so a reader does not take the extra
         // sources for this exit's.
@@ -2820,10 +2834,10 @@ const Analysis = struct {
             const lender = self.program.libraryDeclIn("mem", "Lender") orelse break :lends false;
             const allocator = self.program.libraryDeclIn("mem", "Allocator") orelse break :lends false;
             const leaving_type = held orelse break :lends false;
-            var pool = try Typing.Builder.reopen(self.gpa, self.typing);
-            defer pool.deinit();
-            if (!try implementsAnyOf(self.gpa, &pool.impl_index, pool.implementations, &pool, lender, self.typing.bindingType(owner))) break :lends false;
-            break :lends !try implementsAnyOf(self.gpa, &pool.impl_index, pool.implementations, &pool, allocator, leaving_type);
+            if (pool.* == null) pool.* = try Typing.Builder.reopen(self.gpa, self.typing);
+            const opened = &pool.*.?;
+            if (!try implementsAnyOf(self.gpa, &opened.impl_index, opened.implementations, opened, lender, self.typing.bindingType(owner))) break :lends false;
+            break :lends !try implementsAnyOf(self.gpa, &opened.impl_index, opened.implementations, opened, allocator, leaving_type);
         };
         if (local) |owner| {
             const function = try self.functionName();
