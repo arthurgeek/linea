@@ -27,7 +27,13 @@ fn ReturnOf(comptime function: anytype) type {
 /// The call never runs on the caller's stack: a tree within the parser's
 /// height bound can need more than the caller has.
 pub fn run(comptime function: anytype, args: anytype) std.Thread.SpawnError!ReturnOf(function) {
-    return runWithin(compiler_stack_bytes, function, args);
+    return runOn(std.Thread.spawn, function, args);
+}
+
+/// `run`, starting the thread with `spawn`. What `run` does when the thread
+/// cannot start is decided here, so a test that refuses the thread sees it.
+fn runOn(comptime spawn: anytype, comptime function: anytype, args: anytype) std.Thread.SpawnError!ReturnOf(function) {
+    return runThrough(spawn, compiler_stack_bytes, function, args);
 }
 
 /// Calls `function(args)` on a thread with `stack_bytes` of stack and returns
@@ -63,7 +69,7 @@ fn recordCall(called: *bool) void {
 
 test "a call whose thread cannot start is not made, and answers with the error" {
     var called = false;
-    try testing.expectError(error.SystemResources, runThrough(spawnRefused, compiler_stack_bytes, recordCall, .{&called}));
+    try testing.expectError(error.SystemResources, runOn(spawnRefused, recordCall, .{&called}));
     try testing.expect(!called);
 }
 
