@@ -800,6 +800,11 @@ pub const SourceMap = struct {
     }
 
     /// The text of a 1-based line, excluding its terminator.
+    /// The offset of the first byte of a line.
+    pub fn lineStart(self: *const SourceMap, line: u32) u32 {
+        return self.line_starts[line - 1];
+    }
+
     pub fn lineText(self: *const SourceMap, line: u32) []const u8 {
         const start = self.line_starts[line - 1];
         const end = if (line < self.lineCount())

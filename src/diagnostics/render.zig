@@ -238,25 +238,42 @@ const Window = struct {
     }
 };
 
+/// Whether a byte continues a UTF-8 sequence another byte began.
+fn continues(byte: u8) bool {
+    return byte & 0b1100_0000 == 0b1000_0000;
+}
+
+/// How many columns a run of bytes takes: one for each byte that begins a
+/// sequence, which is how a column is counted wherever one is reported.
+fn columnsOf(bytes: []const u8) u32 {
+    var columns: u32 = 0;
+    for (bytes) |byte| {
+        if (!continues(byte)) columns += 1;
+    }
+    return columns;
+}
+
 fn windowFor(map: *const SourceMap, l: Label, pos: LineCol) Window {
     const text = map.lineText(pos.line);
     const len: u32 = @intCast(text.len);
+    const line_begin = map.lineStart(pos.line);
 
-    // Where the line ends, as the label's start plus what of the line follows
-    // it. `max_bytes` is halved so that this sum holds in a span's own field.
-    const line_end = l.span.start + len - (pos.column - 1);
-    const line_begin = line_end - len;
-
-    // A label inside the first `max_snippet_columns` columns is shown with the
+    // A label inside the first `max_snippet_columns` bytes is shown with the
     // line's own beginning, which is the context a reader wants. One past them
     // is centred instead, so a cut line still shows what led up to the label.
     //
     // A span may sit past the text of the line it belongs to -- at end of
     // input, or on a line whose terminator the snippet drops -- so where it
     // sits is clamped to what the snippet can be cut out of.
-    const at = @min(pos.column - 1, len);
-    const from: u32 = if (at < max_snippet_columns) 0 else at - max_snippet_columns / 2;
-    const to: u32 = @min(len, from + max_snippet_columns);
+    const at = @min(l.span.start - line_begin, len);
+    var from: u32 = if (at < max_snippet_columns) 0 else at - max_snippet_columns / 2;
+    var to: u32 = @min(len, from + max_snippet_columns);
+
+    // Each cut falls between two characters: a sequence cut in half is bytes
+    // no reader can display. Both move towards the start, so the window never
+    // grows past its bound.
+    while (from > 0 and continues(text[from])) from -= 1;
+    while (to > from and to < len and continues(text[to])) to -= 1;
 
     return .{
         .file = l.file,
@@ -294,15 +311,19 @@ fn writeMarker(
     try w.splatByteAll(' ', gutter);
     try w.writeAll(" | ");
     if (window.left_cut) try w.splatByteAll(' ', cut_before.len);
-    try w.splatByteAll(' ', l.span.start - window.begin);
+    // The marker is placed by columns, as the snippet above it is read: a
+    // character of several bytes takes one.
+    const shown: u32 = @intCast(window.text.len);
+    const start = @min(l.span.start - window.begin, shown);
+    try w.splatByteAll(' ', columnsOf(window.text[0..start]));
 
     const marker: u8 = if (l.style == .primary) '^' else '-';
     // Clamp to what the snippet shows, so that a span crossing a newline or
     // running past the cut does not carry a marker off the end of it. A
     // zero-width span at end of input sits past the last character of the line
     // it belongs to, so the lower bound matters as much as the upper one.
-    const end = @max(l.span.start, @min(l.span.end, window.end));
-    const width = @max(@as(u32, 1), end - l.span.start);
+    const end = @min(@max(l.span.start, @min(l.span.end, window.end)) - window.begin, shown);
+    const width = @max(@as(u32, 1), columnsOf(window.text[start..@max(start, end)]));
 
     try paint(w, opts, severityColor(if (l.style == .primary) .err else .note));
     try w.splatByteAll(marker, width);
@@ -435,6 +456,33 @@ test "a label past the bound brings the part of the line around it" {
         std.mem.indexOfScalar(u8, rows[3], 'z'),
         std.mem.indexOfScalar(u8, rows[4], '^'),
     );
+}
+
+test "a line of characters wider than a byte is cut between characters, and its marker sits under the label" {
+    const accents = "\xc3\xa9" ** 100;
+    const text = "let s = \"" ++ accents ++ "\"; missing\n";
+    const start: u32 = @intCast(std.mem.indexOf(u8, text, "missing").?);
+
+    const got = try renderToString(testing.allocator, text, .{
+        .severity = .err,
+        .message = "undefined",
+        .labels = &.{.{ .file = .from(0), .span = .{ .start = start, .end = start + 7 }, .message = "here" }},
+    });
+    defer testing.allocator.free(got);
+
+    try testing.expect(std.unicode.utf8ValidateSlice(got));
+
+    const rows = try rowsOf(testing.allocator, got);
+    defer testing.allocator.free(rows);
+
+    // The label is past the bound, so the line is cut on its left, and the
+    // word the label names is in what is shown.
+    const snippet = rows[3];
+    const marker = rows[4];
+    const word = std.mem.indexOf(u8, snippet, "missing").?;
+    const caret = std.mem.indexOfScalar(u8, marker, '^').?;
+    try testing.expectEqual(columnsOf(snippet[0..word]), columnsOf(marker[0..caret]));
+    try testing.expect(std.mem.indexOf(u8, marker, "^^^^^^^ here") != null);
 }
 
 test "two labels too far apart on one line each bring their own snippet" {
