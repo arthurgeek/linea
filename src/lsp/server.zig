@@ -839,8 +839,9 @@ pub const Handler = struct {
 
     /// What the workspace exports, built if this is the first ask.
     ///
-    /// Costs one walk of the workspace the first time and nothing after it.
-    /// Borrowed from the handler, and valid until the root is replaced.
+    /// Costs one walk of the workspace and one lex and parse of each open
+    /// document the first time, and nothing after it. Borrowed from the
+    /// handler, and valid until the root is replaced.
     ///
     /// A workspace nobody has named holds no programs, so this reached before
     /// `initialize` says which directory the client opened is an index of
@@ -848,6 +849,13 @@ pub const Handler = struct {
     fn indexOf(handler: *Handler) !*workspace.Index {
         if (handler.index == null) {
             handler.index = try workspace.Index.build(handler.gpa, handler.io, handler.root);
+            // The walk reads files, and an open document is what its buffer
+            // says: each is indexed again from the buffer, as an edit after
+            // the build would be.
+            var open = handler.documents.open.iterator();
+            while (open.next()) |document| {
+                try handler.index.?.reindex(handler.io, document.key_ptr.*, document.value_ptr.*);
+            }
         }
         return &handler.index.?;
     }
@@ -1786,6 +1794,30 @@ test "an edit to an open buffer changes what the index offers before the file is
     const then = try ws.offered();
     try std.testing.expectEqual(@as(usize, 1), then.len);
     try std.testing.expectEqualStrings("after", then[0]);
+}
+
+test "an index built while a buffer is open holds what the buffer says" {
+    var ws = try Rooted.init(std.testing.allocator, "pub fn before() -> UInt8 { 1 }\n");
+    defer ws.deinit();
+
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    ws.handler.transport = &recorder.transport;
+
+    // The edit arrives before anything asked for the index, and a changed
+    // manifest drops an index that was built: either way the next ask walks
+    // the files on disk, which still say `before`.
+    const a = ws.arena.allocator();
+    try ws.handler.@"textDocument/didChange"(a, .{
+        .textDocument = .{ .uri = try ws.main(), .version = 2 },
+        .contentChanges = &.{.{ .text_document_content_change_whole_document = .{
+            .text = "pub fn after() -> UInt8 { 1 }\n",
+        } }},
+    });
+
+    const offered = try ws.offered();
+    try std.testing.expectEqual(@as(usize, 1), offered.len);
+    try std.testing.expectEqualStrings("after", offered[0]);
 }
 
 test "byte-identical open and change retain the checked module" {
