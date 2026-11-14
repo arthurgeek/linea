@@ -8639,7 +8639,7 @@ fn checkGeneratedProgram(
         }
         // A signal the runtime did not raise came from the machine, so the
         // run is no answer to hold the program's rewrites to.
-        if (signalOf(ran.text).len != 0) {
+        if (ran.signal != null) {
             try failures.append(scratch, .{
                 .path = display_path,
                 .what = "a generated program was stopped by a signal",
@@ -8921,7 +8921,7 @@ fn uncleanRun(ran: Ran) ?[]const u8 {
     if (sanitizerReported(ran.errors)) return "a sanitizer reported a fault";
     // A signal the runtime did not raise is a crash whatever the program had
     // said by then, a line beginning `linea: ` included.
-    if (signalOf(ran.text).len != 0) return "crashed";
+    if (ran.signal != null) return "crashed";
     if (std.mem.startsWith(u8, ran.text, trap_answer) and std.mem.indexOf(u8, ran.errors, "linea: ") == null) return "crashed";
     return null;
 }
@@ -19642,6 +19642,11 @@ const Ran = struct {
     /// case about a debugging aid is asserting.
     errors: []const u8 = "",
     tool_failed: bool,
+    /// The signal that stopped the program, where one other than the
+    /// runtime's own abort did. Read by what asks whether this run crashed;
+    /// `text` carries a note of it too, for an answer compared after the run
+    /// is gone.
+    signal: ?u32 = null,
     /// Whether the tool that failed could not be started at all. A missing
     /// tool says nothing about the program, so a caller may skip it; a tool
     /// that ran and refused is judging the emitted module, and skipping that
@@ -19699,6 +19704,7 @@ fn outcomeOf(
                     // from one the program means.
                     if (sig != std.posix.SIG.ABRT) return .{
                         .text = try withSignalNote(gpa, got.written(), @intFromEnum(sig)),
+                        .signal = @intFromEnum(sig),
                         .output = printed,
                         .errors = said,
                         .tool_failed = false,
@@ -19865,7 +19871,9 @@ test "a signal's note is a line of its own after unterminated output, and such a
     try testing.expect(!sameEnding(cut, "trap\nlinea: index out of bounds at a.lin:3:5\n"));
     // The program had written the runtime's prefix, and a signal still
     // stopped it.
-    try testing.expectEqualStrings("crashed", uncleanRun(.{ .text = cut, .errors = "linea: said and stopped", .tool_failed = false }).?);
+    try testing.expectEqualStrings("crashed", uncleanRun(.{ .text = cut, .errors = "linea: said and stopped", .tool_failed = false, .signal = 11 }).?);
+    // The same text from a run no signal stopped is the runtime's abort.
+    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(.{ .text = "trap\nlinea: said and stopped\n", .errors = "linea: said and stopped\n", .tool_failed = false }));
 }
 
 /// The line naming the signal that stopped a program the runtime did not
