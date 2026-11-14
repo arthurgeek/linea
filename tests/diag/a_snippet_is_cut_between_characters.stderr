@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `missing`
+ --> tests/diag/a_snippet_is_cut_between_characters.lin:5:123
+  |
+5 | ... éééééééééééééééééééééééééééé" == missing
+  |                                      ^^^^^^^ no binding with this name is in scope
