@@ -4365,7 +4365,7 @@ const Parser = struct {
     /// otherwise written across lines ends each line with the operator that
     /// carries it on.
     fn finishedAtALineBreak(self: *const Parser) bool {
-        return self.cursor.precededByNewline() and endsAStatement(self.cursor.previousTag()) and !self.atLeadingSelection();
+        return self.cursor.precededByNewline() and self.cursor.previousTag().endsAStatement() and !self.atLeadingSelection();
     }
 
     /// Whether a line break ends the path of a declaration or a written type
@@ -4374,7 +4374,7 @@ const Parser = struct {
     /// whatever case the name after the dot has, and a re-export does not
     /// reach down a line for the name it exports.
     fn pathEndsAtALineBreak(self: *const Parser) bool {
-        return self.cursor.precededByNewline() and endsAStatement(self.cursor.previousTag());
+        return self.cursor.precededByNewline() and self.cursor.previousTag().endsAStatement();
     }
 
     /// Whether the current token opens a line that continues the one above,
@@ -4383,40 +4383,6 @@ const Parser = struct {
     fn atLeadingSelection(self: *const Parser) bool {
         const next = self.cursor.ahead(1) orelse return false;
         return self.cursor.peek().continuesTheLine(self.cursor.tags[next.index()], self.cursor.textOf(next));
-    }
-
-    /// The tokens an expression can end with, and so the tokens a newline can
-    /// follow to end a statement.
-    ///
-    /// Stated as what *can* end rather than what cannot, which keeps the list
-    /// short and makes a token added later default to continuing the line --
-    /// the safe direction, since a wrapped expression keeps working and the
-    /// mistake is a parse error rather than a silent second statement.
-    ///
-    /// Every token an expression can end with is here: a name, `reflect`, a
-    /// literal of each kind (an interpolated string ends at its closing
-    /// quote), a closing `)`, `}` or `]`, a postfix `?`, and a bare jump.
-    fn endsAStatement(tag: Tag) bool {
-        return switch (tag) {
-            .identifier,
-            .keyword_reflect,
-            .int_literal,
-            .float_literal,
-            .string_literal,
-            .string_line,
-            .str_close,
-            .keyword_true,
-            .keyword_false,
-            .r_paren,
-            .r_brace,
-            .r_bracket,
-            .question,
-            .keyword_break,
-            .keyword_continue,
-            .keyword_return,
-            => true,
-            else => false,
-        };
     }
 
     /// Tokens that may legitimately terminate an expression. An `err` node

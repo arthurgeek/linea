@@ -367,6 +367,9 @@ pub fn atOffset(
     for (visible.items) |b| {
         if (res.kindOf(b) == .module and !importedIn(ast, res, b, file)) continue;
         if (attribute == .traits and res.kindOf(b) != .trait and res.kindOf(b) != .module) continue;
+        // Asked before the spelling is taken, so a local declared further
+        // down does not stand in for the one a name here reaches.
+        if (!declaredBy(ast, res, b, file, offset)) continue;
         const name = nameOf(ast, res, b) orelse continue;
         if ((try already.getOrPut(gpa, name)).found_existing) continue;
         try offered.append(gpa, try itemFor(gpa, ast, res, typing, snippets, name, b));
@@ -444,15 +447,46 @@ fn namesShadowingImports(
         if (declared == .none or ast.fileOf(declared) != file) continue;
         if (ast.tokenSpan(declared).start >= offset) continue;
         const statement = res.stmtOf(b);
-        if (statement != .none) {
-            const init = ast.stmtData(statement).init;
-            if (init != .none) {
-                const extent = ast.exprSpan(init);
-                if (extent.start <= offset and offset <= extent.end) continue;
-            }
-        }
+        if (statement != .none and !endedBefore(ast, statement, file, offset)) continue;
         try into.put(gpa, ast.tokenText(declared), {});
     }
+}
+
+/// Whether a name written at `offset` could reach `b`. A scope lists every
+/// local its block declares, but a local is in scope only from the end of
+/// the statement that declares it: not above it, and not inside the
+/// expression that initialises it. Every other binding a scope lists, a
+/// parameter, a pattern's binder, a declaration of the module, is in scope
+/// throughout.
+fn declaredBy(ast: *const Ast, res: *const Resolution, b: BindingId, file: FileId, offset: u32) bool {
+    if (res.kindOf(b) != .local) return true;
+    const declared = res.declaringToken(b);
+    if (declared == .none or ast.fileOf(declared) != file) return true;
+    if (ast.tokenSpan(declared).start >= offset) return false;
+    const statement = res.stmtOf(b);
+    if (statement == .none) return true;
+    return endedBefore(ast, statement, file, offset);
+}
+
+/// Whether statement `statement` has ended before `offset`, so that what is
+/// written there begins another. Asked of the statement and not of its
+/// initialiser, because an initialiser not yet written, or one the parser
+/// recovered from, has no extent that holds the cursor.
+fn endedBefore(ast: *const Ast, statement: node.StmtId, file: FileId, offset: u32) bool {
+    const extent = ast.stmtSpan(statement);
+    if (offset <= extent.end) return false;
+
+    // The statement's last token says whether it can have ended, by the rule
+    // the parser reads: a `;` ends it where it stands, and a line break ends
+    // it only after a token an expression can end with. One left at `=`, an
+    // operator, a comma or an open bracket goes on to the next line.
+    const last = positions.tokenBefore(ast, file, extent.end);
+    if (last == .none) return false;
+    const tag = ast.tokenTag(last);
+    if (tag == .semicolon) return true;
+    if (!tag.endsAStatement()) return false;
+    const source = ast.partOfFile(file).?.source;
+    return std.mem.indexOfScalar(u8, source[extent.end..offset], '\n') != null;
 }
 
 /// Where a cursor sits inside a declaration attribute. A derive entry takes no
@@ -2407,6 +2441,90 @@ test "an operation after a dot is written over the call the reader started" {
         item.textEdit.?.text_edit.newText,
     );
     try testing.expectEqual(lsp.types.InsertTextFormat.Snippet, item.insertTextFormat.?);
+}
+
+test "a local is offered from the statement after the one that declares it" {
+    const gpa = testing.allocator;
+
+    const text =
+        \\fn main() -> UInt8 {
+        \\    let x: UInt8 = 1
+        \\    let _before = x
+        \\    let x: Bool = true
+        \\    let late: UInt8 = 2
+        \\    if x { _before } else { late }
+        \\}
+        \\
+    ;
+
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const file = checked.fileNamed("main.lin").?;
+
+    // Between the two `x`, the name is the first one, and what is declared
+    // further down is not there to name.
+    const early = std.mem.indexOf(u8, text, "_before = x").? + "_before = ".len;
+    const before = try offeredReading(gpa, &checked, file, early, .unsupported);
+    defer free(gpa, before);
+    try testing.expectEqualStrings("UInt8", (try requireItem(before, "x")).detail.?);
+    try testing.expectError(error.TestExpectedCompletion, requireItem(before, "late"));
+    // A binding is not in scope inside the expression that initialises it.
+    try testing.expectError(error.TestExpectedCompletion, requireItem(before, "_before"));
+
+    // An initialiser not yet written, or left unfinished, is still the
+    // statement's: its own name is not offered, and an earlier binding of the
+    // same name is the one described.
+    inline for (.{
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = |\n    2\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = |\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool =| x\n    2\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: UInt8 = x + |\n}\n",
+        // Left at an operator, an open call or a comment after one, the
+        // statement goes on to the next line.
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = 1 ==\n        |\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: UInt8 = 1 +\n        |\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = !\n        |\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = main(1,\n        |\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = 1 == // why\n        |\n}\n",
+    }) |marked| {
+        const at = comptime std.mem.indexOfScalar(u8, marked, '|').?;
+        const unfinished = marked[0..at] ++ marked[at + 1 ..];
+        var partial = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = unfinished }}, "main.lin");
+        defer partial.deinit();
+        const offered = try offeredReading(gpa, &partial, partial.fileNamed("main.lin").?, at, .unsupported);
+        defer free(gpa, offered);
+        try testing.expectEqualStrings("UInt8", (try requireItem(offered, "x")).detail.?);
+    }
+
+    // A `;` ends the statement where it stands, on its own line or not.
+    inline for (.{
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = true;\n    |\n    2\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = true; |\n    2\n}\n",
+    }) |marked| {
+        const at = comptime std.mem.indexOfScalar(u8, marked, '|').?;
+        const ended = marked[0..at] ++ marked[at + 1 ..];
+        var whole = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = ended }}, "main.lin");
+        defer whole.deinit();
+        const offered = try offeredReading(gpa, &whole, whole.fileNamed("main.lin").?, at, .unsupported);
+        defer free(gpa, offered);
+        try testing.expectEqualStrings("Bool", (try requireItem(offered, "x")).detail.?);
+    }
+
+    // On the line after a whole statement, its local is offered.
+    const next_line = std.mem.indexOf(u8, text, "    let late").?;
+    const below = try offeredReading(gpa, &checked, file, next_line, .unsupported);
+    defer free(gpa, below);
+    try testing.expectEqualStrings("Bool", (try requireItem(below, "x")).detail.?);
+
+    // Past both, the name is the second, and the later local is offered.
+    const last = std.mem.indexOf(u8, text, "if x").? + "if ".len;
+    const after = try offeredReading(gpa, &checked, file, last, .unsupported);
+    defer free(gpa, after);
+    try testing.expectEqualStrings("Bool", (try requireItem(after, "x")).detail.?);
+    _ = try requireItem(after, "late");
+    _ = try requireItem(after, "_before");
+    // A function is in scope wherever it is named in its module.
+    _ = try requireItem(before, "main");
 }
 
 const counter_program =
