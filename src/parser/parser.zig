@@ -2720,15 +2720,21 @@ const Parser = struct {
     /// `-> Result[(), E]` are results that hold a unit, not unit itself.
     fn refuseWrittenUnit(self: *Parser, arrow: TokenId, label: []const u8, help: []const u8, before_where: ?[]const u8) !bool {
         // `()` inside any number of grouping parentheses, `(())` included:
-        // every `(` before the first `)`, then as many `)`.
+        // every `(` before the first `)`, then as many `)`. Read once
+        // through a copy of the cursor, which becomes the cursor only when
+        // the whole shape is there.
+        var probe = self.cursor;
         var opens: u32 = 0;
-        while (self.cursor.peekAt(opens) == .l_paren) opens += 1;
+        while (probe.at(.l_paren)) : (opens += 1) _ = probe.advance();
         if (opens == 0) return false;
-        for (0..opens) |i| if (self.cursor.peekAt(opens + @as(u32, @intCast(i))) != .r_paren) return false;
+        var close = probe.current();
+        for (0..opens) |_| {
+            if (!probe.at(.r_paren)) return false;
+            close = probe.advance();
+        }
         // A lambda writing contracts keeps its arrow before `where`.
-        const said = if (before_where != null and self.cursor.peekAt(2 * opens) == .keyword_where) before_where.? else help;
-        for (0..2 * opens - 1) |_| _ = self.cursor.advance();
-        const close = self.cursor.advance();
+        const said = if (before_where != null and probe.at(.keyword_where)) before_where.? else help;
+        self.cursor = probe;
         const labels = try self.sink.arena.alloc(Label, 1);
         labels[0] = .{
             .file = self.file,
@@ -2791,6 +2797,31 @@ const Parser = struct {
             try testing.expectEqual(@as(usize, 1), sink.items().len);
             try testing.expectEqualStrings("remove `()`; the `->` stays before `where`", sink.items()[0].notes[0]);
         }
+    }
+
+    test "a unit result grouped many times over is refused once" {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+
+        const depth = 20_000;
+        var text: std.ArrayList(u8) = .empty;
+        try text.appendSlice(gpa, "fn f() -> ");
+        try text.appendNTimes(gpa, '(', depth);
+        try text.appendNTimes(gpa, ')', depth);
+        try text.appendSlice(gpa, " {}\n");
+        try testing.expectEqualSlices(?Code, &.{.s_unit_result}, try codesOf(gpa, text.items));
+
+        // One `)` too few is no unit, and the parentheses are read as the
+        // type they open.
+        text.clearRetainingCapacity();
+        try text.appendSlice(gpa, "fn f() -> ");
+        try text.appendNTimes(gpa, '(', 3);
+        try text.appendNTimes(gpa, ')', 2);
+        try text.appendSlice(gpa, " {}\n");
+        const codes = try codesOf(gpa, text.items);
+        try testing.expect(codes.len != 0);
+        try testing.expect(codes[0] != .s_unit_result);
     }
 
     test "a projection still writes the type of the place it names" {

@@ -699,6 +699,12 @@ pub const SourceMap = struct {
     /// byte offset. Rendering one diagnostic asks three times, and a file whose
     /// diagnostics sit on one long line asked for the whole prefix each time.
     ascii_only: []bool,
+    /// How many continuation bytes precede each 256-byte boundary, or empty
+    /// where every line is ASCII. A column on a line holding a multi-byte
+    /// scalar is the bytes before it less the continuation bytes among them,
+    /// and with this a query counts at most 255 bytes at each end instead of
+    /// the line's whole prefix. Costs one u32 per 256 bytes.
+    continuation_buckets: []u32,
 
     pub fn init(gpa: std.mem.Allocator, source: *const Source) !SourceMap {
         var starts: std.ArrayList(u32) = .empty;
@@ -718,6 +724,11 @@ pub const SourceMap = struct {
             }
             if (ch >= 0x80) plain = false;
         }
+        var any_wide = false;
+        for (ascii.items) |line_plain| {
+            if (!line_plain) any_wide = true;
+        }
+        if (!plain) any_wide = true;
         // The last line ends at the end of the text rather than at a newline,
         // so it is closed here. Without this a file not ending in one has a
         // line with no bit, and asking about it reads past the end.
@@ -742,19 +753,43 @@ pub const SourceMap = struct {
             bucket.* = @intCast(line);
         }
 
+        const continuation_buckets = try gpa.alloc(u32, if (any_wide) source.text.len / 256 + 1 else 0);
+        errdefer gpa.free(continuation_buckets);
+        var continuations: u32 = 0;
+        for (continuation_buckets, 0..) |*bucket, i| {
+            bucket.* = continuations;
+            const end = @min((i + 1) * 256, source.text.len);
+            for (source.text[i * 256 .. end]) |ch| {
+                if (ch & 0xC0 == 0x80) continuations += 1;
+            }
+        }
+
         return .{
             .gpa = gpa,
             .text = source.text,
             .line_starts = line_starts,
             .line_buckets = line_buckets,
             .ascii_only = try ascii.toOwnedSlice(gpa),
+            .continuation_buckets = continuation_buckets,
         };
+    }
+
+    /// How many continuation bytes precede `offset`, which is at most the
+    /// text's length, in a file holding a multi-byte scalar.
+    fn continuationsBefore(self: *const SourceMap, offset: u32) u32 {
+        const bucket = offset / 256;
+        var count = self.continuation_buckets[bucket];
+        for (self.text[bucket * 256 .. offset]) |ch| {
+            if (ch & 0xC0 == 0x80) count += 1;
+        }
+        return count;
     }
 
     pub fn deinit(self: *SourceMap) void {
         self.gpa.free(self.line_starts);
         self.gpa.free(self.line_buckets);
         self.gpa.free(self.ascii_only);
+        self.gpa.free(self.continuation_buckets);
         self.* = undefined;
     }
 
@@ -788,13 +823,10 @@ pub const SourceMap = struct {
             return .{ .line = line, .column = at - start + 1 };
         }
 
-        // Continuation bytes are 0b10xxxxxx, so counting everything else counts
-        // scalar values rather than bytes.
-        var scalars: u32 = 0;
-        var i = start;
-        while (i < offset and i < self.text.len) : (i += 1) {
-            if (self.text[i] & 0xC0 != 0x80) scalars += 1;
-        }
+        // Continuation bytes are 0b10xxxxxx, so the bytes that are not one are
+        // the scalar values.
+        const at = @min(offset, @as(u32, @intCast(self.text.len)));
+        const scalars = (at - start) - (self.continuationsBefore(at) - self.continuationsBefore(start));
 
         return .{ .line = line, .column = scalars + 1 };
     }
@@ -892,6 +924,39 @@ test "offset at end of input is valid" {
     defer map.deinit();
 
     try testing.expectEqual(LineCol{ .line = 1, .column = 3 }, map.lineCol(2));
+}
+
+test "a column far along a line of multi-byte scalars is the count a walk from its start reaches" {
+    // Lines several 256-byte buckets long, so a column is read from the
+    // counts kept at bucket boundaries on both sides of it.
+    const alphabet = [_][]const u8{ "a", "\u{e9}", "\u{4e2d}", "\u{1f600}", "b" };
+
+    var prng = std.Random.DefaultPrng.init(0xc01);
+    const rand = prng.random();
+
+    var text: std.ArrayList(u8) = .empty;
+    defer text.deinit(testing.allocator);
+    for (0..3000) |i| {
+        if (i == 700 or i == 701 or i == 2200) {
+            try text.append(testing.allocator, '\n');
+            continue;
+        }
+        try text.appendSlice(testing.allocator, alphabet[rand.uintLessThan(usize, alphabet.len)]);
+    }
+
+    const src: Source = .{ .path = "t.lin", .text = text.items };
+    var map = try SourceMap.init(testing.allocator, &src);
+    defer map.deinit();
+
+    for (0..text.items.len + 1) |offset| {
+        const at: u32 = @intCast(offset);
+        const start = map.line_starts[map.lineOf(at) - 1];
+        var scalars: u32 = 0;
+        for (text.items[start..offset]) |ch| {
+            if (ch & 0xC0 != 0x80) scalars += 1;
+        }
+        try testing.expectEqual(scalars + 1, map.lineCol(at).column);
+    }
 }
 
 test "a line of single-byte scalars is counted as the walk would count it" {
