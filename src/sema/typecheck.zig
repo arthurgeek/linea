@@ -5947,6 +5947,10 @@ const Checker = struct {
     /// matches of it are open. Empty between settlements.
     settled_pairs: std.AutoHashMapUnmanaged(SettledPair, void) = .empty,
     settling_pairs: u32 = 0,
+    /// How many parts a settlement has left for later because an open
+    /// context had not yet said what they are. A pair matched with this
+    /// unchanged left nothing, and is one `settled_pairs` may keep.
+    settle_left_open: u32 = 0,
     /// The function values named without a written type in the bodies being
     /// checked, innermost last. Each leaves when its body closes, so the list
     /// holds what the open bodies named rather than what the program does.
@@ -35042,7 +35046,10 @@ const Checker = struct {
     ) std.mem.Allocator.Error!bool {
         switch (self.builder.get(declared)) {
             .parameter => |p| {
-                if (open_context) |slots| if (try self.hasOpenParameter(actual, slots)) return true;
+                if (open_context) |slots| if (try self.hasOpenParameter(actual, slots)) {
+                    self.settle_left_open += 1;
+                    return true;
+                };
                 if (p.owner != d.index() or p.index >= found.len or actual == .never) return true;
                 if (found[p.index] == .poison) {
                     found[p.index] = actual;
@@ -35111,11 +35118,12 @@ const Checker = struct {
         // meet their innermost pair once per path. A pair matched once holds
         // however it is reached again, since a slot keeps the type it was
         // given: matching it again would read the same slots and change none.
-        // Kept only where nothing can differ on a second visit: no open
-        // context, whose slots a later step may fill, and no open type on
-        // either side, which a later meeting may settle.
-        const repeatable = open_context == null and
-            !try self.builder.mentionsOpen(declared) and !try self.builder.mentionsOpen(actual);
+        // Kept only where nothing can differ on a second visit: no open type
+        // on either side, which a later meeting may settle, and no part left
+        // for later under an open context, whose slots a later step may fill.
+        // A match that left nothing is complete, open context or not.
+        const repeatable = !try self.builder.mentionsOpen(declared) and !try self.builder.mentionsOpen(actual);
+        const left_open = self.settle_left_open;
         const pair: SettledPair = .{ .declared = declared, .actual = actual, .owner = d, .slots = @intFromPtr(found.ptr), .settlement = settlement };
         if (repeatable and self.settled_pairs.contains(pair)) return true;
 
@@ -35134,7 +35142,7 @@ const Checker = struct {
         for (wanted, given) |w, g| {
             if (!try self.settlePartInContext(w, g, d, found, clash, settlement, open_context)) return false;
         }
-        if (repeatable) try self.settled_pairs.put(self.gpa, pair, {});
+        if (repeatable and left_open == self.settle_left_open) try self.settled_pairs.put(self.gpa, pair, {});
         return true;
     }
 
@@ -35155,7 +35163,10 @@ const Checker = struct {
     ) std.mem.Allocator.Error!bool {
         if (actual == .never) switch (self.builder.get(declared)) {
             .parameter => |p| {
-                if (open_context) |slots| if (try self.hasOpenParameter(actual, slots)) return true;
+                if (open_context) |slots| if (try self.hasOpenParameter(actual, slots)) {
+                    self.settle_left_open += 1;
+                    return true;
+                };
                 if (p.owner != d.index() or p.index >= found.len) return true;
                 if (found[p.index] == .poison or found[p.index] == .never) {
                     found[p.index] = .never;

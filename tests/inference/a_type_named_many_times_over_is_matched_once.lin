@@ -1,7 +1,8 @@
 // Each alias names the one before it twice, so the last names `P` a billion
 // times over while the program holds one type per alias. Inferring `T` from a
 // value of the last, before or after another argument settles it, inside
-// another type and through a callback, asks each of those types once.
+// another type, through a callback's parameter and through a callback's result,
+// asks each of those types once.
 struct P[phantom A, phantom B] {}
 
 alias A0[T] = P[T, T]
@@ -58,9 +59,18 @@ fn apply[T](sink _value: A30[T], f: fn(v: A30[T]) -> UInt8) -> UInt8 {
     f(held)
 }
 
+fn produce[T](f: fn() -> A30[T]) -> UInt8 {
+    let _held = f()
+    1
+}
+
+fn give() -> A30[UInt8] {
+    .{}
+}
+
 fn main() -> UInt8 {
     let value: A30[UInt8] = .{}
     let other: A30[UInt8] = .{}
     let one: UInt8 = 1
-    width(value) + after(one, .{}) + within(.None, one) + apply(other, |_v| 1)
+    width(value) + after(one, .{}) + within(.None, one) + apply(other, |_v| 1) + produce(give) + produce(|| give())
 }
