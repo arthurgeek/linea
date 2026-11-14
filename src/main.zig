@@ -98,5 +98,10 @@ comptime {
 }
 
 pub fn main(init: std.process.Init) !u8 {
-    return compiler_stack.run(driver.run, .{init});
+    return compiler_stack.run(driver.run, .{init}) catch |err| {
+        // The passes recurse further than the caller's stack is sure to hold,
+        // so a compiler that cannot have its own stack stops here.
+        std.debug.print("linea: cannot start the compiler's thread with {d} MiB of stack: {t}\n", .{ compiler_stack.compiler_stack_bytes >> 20, err });
+        return driver.exit_io;
+    };
 }

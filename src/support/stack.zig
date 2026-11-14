@@ -23,15 +23,21 @@ fn ReturnOf(comptime function: anytype) type {
 }
 
 /// Calls `function(args)` on a thread with `compiler_stack_bytes` of stack and
-/// returns what it returns. Where the thread cannot be started the call runs
-/// on the caller's stack, which is the stack the caller already had.
-pub fn run(comptime function: anytype, args: anytype) ReturnOf(function) {
-    return runWithin(compiler_stack_bytes, function, args) catch @call(.auto, function, args);
+/// returns what it returns, or the error that kept the thread from starting.
+/// The call never runs on the caller's stack: a tree within the parser's
+/// height bound can need more than the caller has.
+pub fn run(comptime function: anytype, args: anytype) std.Thread.SpawnError!ReturnOf(function) {
+    return runWithin(compiler_stack_bytes, function, args);
 }
 
 /// Calls `function(args)` on a thread with `stack_bytes` of stack and returns
 /// what it returns, or the error that kept the thread from starting.
 pub fn runWithin(stack_bytes: usize, comptime function: anytype, args: anytype) std.Thread.SpawnError!ReturnOf(function) {
+    return runThrough(std.Thread.spawn, stack_bytes, function, args);
+}
+
+/// `runWithin`, starting the thread with `spawn`.
+fn runThrough(comptime spawn: anytype, stack_bytes: usize, comptime function: anytype, args: anytype) std.Thread.SpawnError!ReturnOf(function) {
     const Args = @TypeOf(args);
     const Job = struct {
         args: Args,
@@ -42,9 +48,23 @@ pub fn runWithin(stack_bytes: usize, comptime function: anytype, args: anytype) 
         }
     };
     var job: Job = .{ .args = args };
-    const thread = try std.Thread.spawn(.{ .stack_size = stack_bytes }, Job.go, .{&job});
+    const thread = try spawn(.{ .stack_size = stack_bytes }, Job.go, .{&job});
     thread.join();
     return job.result;
+}
+
+fn spawnRefused(_: std.Thread.SpawnConfig, comptime _: anytype, _: anytype) std.Thread.SpawnError!std.Thread {
+    return error.SystemResources;
+}
+
+fn recordCall(called: *bool) void {
+    called.* = true;
+}
+
+test "a call whose thread cannot start is not made, and answers with the error" {
+    var called = false;
+    try testing.expectError(error.SystemResources, runThrough(spawnRefused, compiler_stack_bytes, recordCall, .{&called}));
+    try testing.expect(!called);
 }
 
 /// Recurses `levels` deep through frames of 64 KiB and answers how deep it got.
@@ -58,5 +78,5 @@ fn descend(levels: usize) usize {
 
 test "a call through run recurses far past the main thread's stack" {
     // 2000 frames of 64 KiB are 125 MiB, where the main stack holds 8 MiB.
-    try testing.expectEqual(@as(usize, 2000), run(descend, .{2000}));
+    try testing.expectEqual(@as(usize, 2000), try run(descend, .{2000}));
 }
