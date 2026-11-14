@@ -312,10 +312,13 @@ fn writeMarker(
     try w.writeAll(" | ");
     if (window.left_cut) try w.splatByteAll(' ', cut_before.len);
     // The marker is placed by columns, as the snippet above it is read: a
-    // character of several bytes takes one.
+    // character of several bytes takes one. A span past the text of its
+    // line, at end of input or after a dropped terminator, sits as far past
+    // the last character as it is past the last byte.
     const shown: u32 = @intCast(window.text.len);
-    const start = @min(l.span.start - window.begin, shown);
-    try w.splatByteAll(' ', columnsOf(window.text[0..start]));
+    const offset = l.span.start - window.begin;
+    const start = @min(offset, shown);
+    try w.splatByteAll(' ', columnsOf(window.text[0..start]) + (offset - start));
 
     const marker: u8 = if (l.style == .primary) '^' else '-';
     // Clamp to what the snippet shows, so that a span crossing a newline or
