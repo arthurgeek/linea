@@ -20,7 +20,13 @@ fn questions(present: Bool) -> Option[UInt8] {
 }
 
 fn returns(present: Bool) -> UInt8 {
-    defer run([sink y = if present { return 1 } else { 5 }] || y + 0)
+    defer run(
+        [sink y = if present {
+            return 1
+        } else {
+            5
+        }] || y + 0,
+    )
     2
 }
 
