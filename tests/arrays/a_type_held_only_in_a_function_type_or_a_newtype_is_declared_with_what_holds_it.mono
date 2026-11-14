@@ -4,7 +4,16 @@ struct Cell {
 }
 
 struct Handler {
-    run: fn(cell: Cell) -> UInt8,
+    run: std.option.Option[fn(read:Cell:none)->UInt8],
+}
+
+@copyable
+struct Shelf {
+    rows: UInt8,
+}
+
+struct Lent {
+    shelves: [borrow Shelf; 0],
 }
 
 @copyable
@@ -12,17 +21,33 @@ struct Seal {
     mark: UInt8,
 }
 
+type Sealed = Seal
+
 struct Envelope {
     seals: [Sealed; 0],
 }
 
-fn ;main() -> UInt8 {
-    ;weigh(Handler { run = |cell| cell.value }, Envelope { seals = [] })
+@copyable
+struct Tag {
+    mark: UInt8,
 }
 
-fn lambda$40;main$230(read cell: Cell) -> UInt8 {
-    cell.value
+struct Holder {
+    marker: Marker[Tag],
 }
-fn ;weigh(_handler: Handler, _envelope: Envelope) -> UInt8 {
+
+@copyable
+pub enum Option[fn(read:Cell:none)->UInt8] {
+    None,
+    Some(fn(read:Cell:none)->UInt8),
+}
+
+struct Marker[Tag] {}
+
+fn ;main() -> UInt8 {
+    ;weigh(Handler { run = .None }, Lent { shelves = [] }, Envelope { seals = [] }, Holder { marker = .{} })
+}
+
+fn ;weigh(_handler: Handler, _lent: Lent, _envelope: Envelope, _holder: Holder) -> UInt8 {
     2
 }

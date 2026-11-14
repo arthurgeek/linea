@@ -75,8 +75,9 @@ pub fn settle(
 ///
 /// A signature, a slot or an instruction naming a type is the program holding
 /// one, and what it holds is made of the types its parts are -- so the set
-/// closes over fields, payloads, array elements, what a newtype names, what a
-/// borrow observes and what a function type takes and answers: a declaration written
+/// closes over fields, payloads, array elements, what an instantiation was
+/// applied to, what a newtype names, what a borrow observes and what a
+/// function type takes and answers: a declaration written
 /// below writes its parts, and a part names a type that has to be declared
 /// beside it.
 ///
@@ -117,6 +118,12 @@ pub fn typesHeld(gpa: std.mem.Allocator, module: *const mir.Module) ![]bool {
             for (0..module.types.variantFieldCount(t, at)) |k| {
                 try reach(gpa, held, &pending, module.types.variantFieldType(t, at, @intCast(k)));
             }
+        }
+        // What an instantiation was applied to, which its declaration names
+        // in its head: `Marker[Tag]` is written with `Tag` whether or not a
+        // field of it holds one.
+        if (module.types.instanceOf(t)) |instance| {
+            for (module.types.argsOf(instance)) |argument| try reach(gpa, held, &pending, argument);
         }
         switch (module.types.get(t)) {
             .array => |array| try reach(gpa, held, &pending, array.element),
