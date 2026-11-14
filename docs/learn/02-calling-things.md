@@ -1038,6 +1038,76 @@ receiver becomes an ordinary first parameter and keeps its convention, so
 argument, `strengthen(&mine)`. A local needs no annotation: `let strengthen =
 Coffee.add_shot` takes its type from the operation.
 
+### A generic function named as a value
+
+A generic function is one function for every type, and the compiler builds a
+copy of it for each type it is used at. Naming it as a value picks one of those
+copies, so the type goes in brackets after the name:
+
+```linea
+import std.io
+
+// A box that holds nothing: only its type argument tells two of them apart.
+struct Wrap[phantom T] {}
+
+// One function for every type. Each type it is used at gets a copy of its own.
+fn layers[T](_value: T) -> UInt8 {
+    1
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    // `layers[UInt8]` names the copy for `UInt8` without calling it.
+    let plain = layers[UInt8]
+    let wrapped = layers[Wrap[UInt8]]
+    io.println("Plain: {plain(7)}. Wrapped: {wrapped(Wrap[UInt8] {})}.")?
+    .Ok(0)
+}
+```
+
+```
+Plain: 1. Wrapped: 1.
+```
+
+`layers[UInt8]` and `layers[Wrap[UInt8]]` are two values, one for each copy.
+Naming a copy builds it, exactly as calling it does, whether or not the value
+is ever called.
+
+That matters when a generic function names itself. Naming itself at the type
+it was given is the copy already being built. Naming itself at a larger type
+each time asks for another copy, which asks for another, without end:
+
+<!-- guide: unchecked a function that names itself at a larger type on every round -->
+```linea
+struct Wrap[phantom T] {}
+
+fn grow[T](value: T, again: Bool) -> UInt8 {
+    let next = grow[Wrap[T]]
+    if again {
+        next(Wrap[T] {}, false)
+    } else {
+        layers(value)
+    }
+}
+
+fn layers[T](_value: T) -> UInt8 {
+    1
+}
+```
+
+```
+error[T-PolyRec]: this names `grow` with more than it was given
+ --> grows.lin:4:16
+  |
+4 |     let next = grow[Wrap[T]]
+  |                ^^^^^^^^^^^^^ type-argument height must remain bounded where a function names itself as a value
+```
+
+`grow[T]` would need `grow[Wrap[T]]`, which would need
+`grow[Wrap[Wrap[T]]]`, and so on. The same call, `grow(Wrap[T] {}, false)`,
+is refused for the same reason. Rust finds this only when the copies run out
+("reached the recursion limit while instantiating"); Linea refuses it where it
+is written.
+
 ### Labels are not part of a function's type
 
 The names in a function type are labels for reading and for named calls, not

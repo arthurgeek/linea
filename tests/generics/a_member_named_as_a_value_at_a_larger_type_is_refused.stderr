@@ -1,0 +1,5 @@
+error[T-PolyRec]: this names `peek` with more than it was given
+  --> tests/generics/a_member_named_as_a_value_at_a_larger_type_is_refused.lin:14:20
+   |
+14 |         let next = Holder.peek
+   |                    ^^^^^^^^^^^ type-argument height must remain bounded where a function names itself as a value
