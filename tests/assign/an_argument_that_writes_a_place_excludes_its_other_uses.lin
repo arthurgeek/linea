@@ -1,0 +1,66 @@
+// [N-Aliased]. One argument may not write a place another argument names,
+// since which is evaluated first would decide what the call receives. Every
+// form that writes counts: each compound assignment as much as `=`, and a
+// call lent the place while an index is being evaluated, whether that index
+// belongs to a lent place or to an assignment's target.
+fn pair(first: UInt8, second: UInt8) -> UInt8 {
+    first + second
+}
+
+fn bump(inout step: UInt8) -> UInt64 {
+    step += 1
+    0
+}
+
+fn set(inout cell: UInt8, to: UInt8) {
+    cell = to
+}
+
+fn main() -> UInt8 {
+    var value: UInt8 = 5
+    var cells: [UInt8; 1] = [0]
+    let added = pair(
+        {
+            value += 1
+            0
+        },
+        value,
+    )
+    let taken = pair(
+        {
+            value -= 1
+            0
+        },
+        value,
+    )
+    let scaled = pair(
+        {
+            value *= 2
+            0
+        },
+        value,
+    )
+    let halved = pair(
+        {
+            value /= 2
+            0
+        },
+        value,
+    )
+    let left = pair(
+        {
+            value %= 3
+            0
+        },
+        value,
+    )
+    set(&cells[bump(&value)], value)
+    let stored = pair(
+        {
+            cells[bump(&value)] = 1
+            0
+        },
+        value,
+    )
+    added + taken + scaled + halved + left + stored + cells[0]
+}

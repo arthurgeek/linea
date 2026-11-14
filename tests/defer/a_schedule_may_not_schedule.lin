@@ -1,0 +1,56 @@
+// [S-Defer]. A `defer` schedules an expression for the end of the scope it is
+// written in. A deferred expression runs while that scope is ending, and a
+// `defer` written inside it, in a block or behind a `defer let`, is refused.
+// A function the deferred expression calls is a scope of its own and may
+// `defer`.
+import std.io
+
+fn finish() {
+    io.println("finished").unwrap()
+}
+
+fn nested() {
+    defer {
+        defer finish()
+    }
+}
+
+fn nested_in_a_branch(flag: Bool) {
+    defer if flag {
+        defer finish()
+    }
+}
+
+@linear
+struct Lamp {
+    id: UInt8,
+}
+
+impl Release for Lamp {
+    fn release(sink self: Self) {
+        let Lamp { id } = self
+        io.println("{id}").unwrap()
+    }
+}
+
+fn nested_binding() {
+    defer {
+        defer let _lamp = Lamp { id = 1 }
+    }
+}
+
+fn helper() {
+    defer finish()
+}
+
+fn through_a_call() {
+    defer helper()
+}
+
+fn main() -> UInt8 {
+    nested()
+    nested_in_a_branch(true)
+    nested_binding()
+    through_a_call()
+    0
+}

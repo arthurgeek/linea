@@ -4762,7 +4762,7 @@ fn answerChainModule(gpa: std.mem.Allocator, shape: AnswerChain, links: u32, ord
 /// Checks `text` on the stack the compiler's passes run on, and returns the
 /// codes of the errors it was refused with.
 fn refusalCodes(gpa: std.mem.Allocator, text: []const u8) ![]const diagnostic.Code {
-    return compiler_stack.run(refusalCodesHere, .{ gpa, text });
+    return try compiler_stack.run(refusalCodesHere, .{ gpa, text });
 }
 
 fn refusalCodesHere(gpa: std.mem.Allocator, text: []const u8) ![]const diagnostic.Code {
@@ -14042,8 +14042,12 @@ fn writeSourceType(
         .callable => {
             const callable = ast.callableType(x);
             try out.print(gpa, "callable({d}", .{@intFromEnum(callable.invocation)});
-            for (ast.params[callable.params.start..callable.params.end]) |param| {
-                try out.print(gpa, ",{d}:{d}:", .{ @intFromEnum(param.convention), @intFromEnum(ast.tokenName(param.name)) });
+            // A parameter is its convention and its type. Its name labels a
+            // call of whatever declares the callable and is no part of the
+            // type, so it is left out of the text two types are compared by.
+            const params = ast.params[callable.params.start..callable.params.end];
+            for (params) |param| {
+                try out.print(gpa, ",{d}:", .{@intFromEnum(param.convention)});
                 try writeSourceType(gpa, ast, res, memo, out, param.written, reading, depth + 1);
                 if (param.default != ExprId.none) {
                     try out.appendSlice(gpa, "=");
@@ -14057,7 +14061,15 @@ fn writeSourceType(
                 try out.print(gpa, "+contract{d}{}", .{ @intFromEnum(contract.kind), contract.borrows_source });
                 for ([_]node_mod.ContractPath{ contract.source, contract.destination, contract.target }) |path| {
                     try out.appendSlice(gpa, "/");
-                    if (path.root != TokenId.none) try out.print(gpa, "{d}", .{@intFromEnum(ast.tokenName(path.root))});
+                    // A contract names a parameter, which stands for the
+                    // position it is written at.
+                    if (path.root != TokenId.none) {
+                        const root = ast.tokenName(path.root);
+                        const position = for (params, 0..) |param, at| {
+                            if (ast.tokenName(param.name) == root) break at;
+                        } else null;
+                        if (position) |at| try out.print(gpa, "p{d}", .{at}) else try out.print(gpa, "n{d}", .{@intFromEnum(root)});
+                    }
                     for (ast.contractSteps(path)) |step| switch (step) {
                         .field => |name| try out.print(gpa, ".{d}", .{@intFromEnum(ast.tokenName(name))}),
                         .dereference => try out.appendSlice(gpa, ".*"),
@@ -16416,7 +16428,7 @@ test "slow: a walk that selects nothing, or cannot run its transcripts, fails" {
 }
 
 pub fn main(init: std.process.Init) !u8 {
-    return compiler_stack.run(runInit, .{init});
+    return try compiler_stack.run(runInit, .{init});
 }
 
 fn runInit(init: std.process.Init) !u8 {
@@ -17939,9 +17951,9 @@ const OutcomeCache = struct {
     /// asserted without a toolchain to sabotage.
     /// Mixed into every key. Changing it retires every recorded outcome, for
     /// when entries a runner already wrote can no longer be trusted: entries
-    /// from runners that built concurrent cases under one shared path may
-    /// hold another program's result.
-    const generation = "outcomes-2";
+    /// filed under a key that did not mark where each of its texts ends may
+    /// hold the result of another build.
+    const generation = "outcomes-3";
 
     fn saltOf(in: Inputs) u64 {
         var salt: u64 = std.hash.Wyhash.hash(4, generation);
@@ -17951,8 +17963,9 @@ const OutcomeCache = struct {
 
         for (in.tools) |t| {
             var h: std.hash.Wyhash = .init(3);
-            h.update(t.name);
-            h.update(t.path orelse "not on PATH");
+            hashText(&h, t.name);
+            hashCount(&h, @intFromBool(t.path != null));
+            if (t.path) |path| hashText(&h, path);
             h.update(std.mem.asBytes(&t.size));
             // Widened first. A modification time is 96 bits in a 128-bit slot,
             // so its own bytes carry four the value does not reach, and a key
@@ -18054,6 +18067,16 @@ const OutcomeCache = struct {
         return .{ .name = name, .path = null, .size = 0, .mtime = 0 };
     }
 
+    fn hashCount(h: *std.hash.Wyhash, count: usize) void {
+        const wide: u64 = count;
+        h.update(std.mem.asBytes(&wide));
+    }
+
+    fn hashText(h: *std.hash.Wyhash, text: []const u8) void {
+        hashCount(h, text.len);
+        h.update(text);
+    }
+
     /// Where one case's outcome is filed.
     ///
     /// The driver joins the emitted IR rather than the salt. The salt is what
@@ -18069,16 +18092,23 @@ const OutcomeCache = struct {
         gpa: std.mem.Allocator,
         key: OutcomeKey,
     ) ![]u8 {
+        // Every text is hashed after its length, every list after its count
+        // and an optional text after whether it is there, so two keys are the
+        // same bytes only where they are the same key.
         var h: std.hash.Wyhash = .init(self.salt);
-        h.update(key.ir);
-        if (key.foreign.driver) |bytes| h.update(bytes);
+        hashText(&h, key.ir);
+        hashCount(&h, @intFromBool(key.foreign.driver != null));
+        if (key.foreign.driver) |bytes| hashText(&h, bytes);
+        hashCount(&h, key.foreign.native.files.len);
         for (key.foreign.native.files) |file| {
-            h.update(file.path);
-            h.update(file.text);
+            hashText(&h, file.path);
+            hashText(&h, file.text);
         }
-        for (key.foreign.native.compile) |path| h.update(path);
-        for (key.foreign.native.link) |name| h.update(name);
-        h.update(key.opt);
+        hashCount(&h, key.foreign.native.compile.len);
+        for (key.foreign.native.compile) |path| hashText(&h, path);
+        hashCount(&h, key.foreign.native.link.len);
+        for (key.foreign.native.link) |name| hashText(&h, name);
+        hashText(&h, key.opt);
         const filed = h.final();
         const name = try std.fmt.allocPrint(gpa, "{x}", .{filed});
         defer gpa.free(name);
@@ -19914,6 +19944,58 @@ test "one module built at two levels is filed as two outcomes" {
     const at_zero = try cache.pathFor(testing.allocator, .{ .ir = "module", .opt = "0" });
     defer testing.allocator.free(at_zero);
     try testing.expect(!std.mem.eql(u8, at_default, at_zero));
+}
+
+test "two builds that differ only in where one name ends are filed as two outcomes" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const cache: OutcomeCache = .{ .dir = "outcomes", .salt = 7 };
+    const files = [_]InMemoryFile{
+        .{ .path = "app/a.c", .text = "one" },
+        .{ .path = "app/b.c", .text = "" },
+        .{ .path = "app/a.capp/b.c", .text = "two" },
+    };
+    const pairs = [_][2]OutcomeKey{
+        // Two files compiled, and one file whose path is theirs joined.
+        .{
+            .{ .ir = "module", .foreign = .{ .native = .{ .files = &files, .compile = &.{ "app/a.c", "app/b.c" } } } },
+            .{ .ir = "module", .foreign = .{ .native = .{ .files = &files, .compile = &.{"app/a.capp/b.c"} } } },
+        },
+        // The same letters split into two library names at different places.
+        .{
+            .{ .ir = "module", .foreign = .{ .native = .{ .link = &.{ "ab", "c" } } } },
+            .{ .ir = "module", .foreign = .{ .native = .{ .link = &.{ "a", "bc" } } } },
+        },
+        // One name compiled, and the same name linked.
+        .{
+            .{ .ir = "module", .foreign = .{ .native = .{ .compile = &.{"m"} } } },
+            .{ .ir = "module", .foreign = .{ .native = .{ .link = &.{"m"} } } },
+        },
+        // A file's path and text divided at different places.
+        .{
+            .{ .ir = "module", .foreign = .{ .native = .{ .files = &.{.{ .path = "a.c", .text = "int x;" }} } } },
+            .{ .ir = "module", .foreign = .{ .native = .{ .files = &.{.{ .path = "a.cint", .text = " x;" }} } } },
+        },
+        // A driver, and the same bytes at the end of the module.
+        .{
+            .{ .ir = "module", .foreign = .{ .driver = "driver" } },
+            .{ .ir = "moduledriver" },
+        },
+        // An empty driver, and no driver.
+        .{
+            .{ .ir = "module", .foreign = .{ .driver = "" } },
+            .{ .ir = "module" },
+        },
+        // The level's text taken from the end of the module.
+        .{
+            .{ .ir = "module", .opt = "0" },
+            .{ .ir = "modul", .opt = "e0" },
+        },
+    };
+    for (pairs) |pair| {
+        try testing.expect(!std.mem.eql(u8, try cache.pathFor(a, pair[0]), try cache.pathFor(a, pair[1])));
+    }
 }
 
 /// Every file one build of a case writes.

@@ -261,6 +261,44 @@ pub const Tag = enum(u8) {
         }
     }
 
+    /// The tokens an expression can end with, and so the tokens a newline can
+    /// follow to end a statement.
+    ///
+    /// Stated as what *can* end rather than what cannot, which keeps the list
+    /// short and makes a token added later default to continuing the line --
+    /// the safe direction, since a wrapped expression keeps working and the
+    /// mistake is a parse error rather than a silent second statement.
+    ///
+    /// Every token an expression can end with is here: a name, `reflect`, a
+    /// literal of each kind (an interpolated string ends at its closing
+    /// quote), a closing `)`, `}` or `]`, a postfix `?`, and a bare jump.
+    ///
+    /// The parser reads this to decide where a statement ends, and the
+    /// language server to say whether the statement before a cursor has
+    /// ended; the two must agree, so the rule is here.
+    pub fn endsAStatement(self: Tag) bool {
+        return switch (self) {
+            .identifier,
+            .keyword_reflect,
+            .int_literal,
+            .float_literal,
+            .string_literal,
+            .string_line,
+            .str_close,
+            .keyword_true,
+            .keyword_false,
+            .r_paren,
+            .r_brace,
+            .r_bracket,
+            .question,
+            .keyword_break,
+            .keyword_continue,
+            .keyword_return,
+            => true,
+            else => false,
+        };
+    }
+
     /// Whether a line opening with this token, followed by `next` spelled
     /// `next_text`, continues the expression on the line above rather than
     /// beginning a statement: a `.` before a lowercase name, which selects an

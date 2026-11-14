@@ -1,0 +1,15 @@
+error[T-Bound]: `Box` is bounded `Copyable` twice
+  --> tests/traits/a_where_clause_over_a_written_type_is_held_to_its_traits.lin:16:30
+   |
+16 | fn _repeated[T](_x: T) where Box[T]: Copyable + Copyable {}
+   |                              ^^^ drop one of the two bounds
+error[T-Bound]: `Mark` takes 1 type argument(s), and this bound supplies 0
+  --> tests/traits/a_where_clause_over_a_written_type_is_held_to_its_traits.lin:10:37
+   |
+10 | fn _too_few[T](_x: T) where Box[T]: Mark {}
+   |                                     ^^^^ supply the arguments it declares
+error[T-Bound]: `Mark` takes 1 type argument(s), and this bound supplies 2
+  --> tests/traits/a_where_clause_over_a_written_type_is_held_to_its_traits.lin:12:38
+   |
+12 | fn _too_many[T](_x: T) where Box[T]: Mark[UInt8, UInt8] {}
+   |                                      ^^^^ supply the arguments it declares

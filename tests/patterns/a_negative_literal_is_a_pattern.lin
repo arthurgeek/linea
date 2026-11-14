@@ -1,0 +1,19 @@
+// A negative integer is a pattern on its own and as a component of a tuple.
+fn classify(value: Int8) -> UInt8 {
+    match value {
+        -1 => 1,
+        _ => 0,
+    }
+}
+
+fn below(pair: (Int8, Int8)) -> UInt8 {
+    match read pair {
+        (-1, _) => 2,
+        (_, -3) => 3,
+        _ => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    classify(-1) + below((-1, 0)) + below((0, -3))
+}

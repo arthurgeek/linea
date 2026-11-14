@@ -1,0 +1,50 @@
+// A bracket's receiver is evaluated before its index. Where the receiver is a
+// value no place names, such as a call's result, what it took is gone by the
+// time the index runs, so an index that reads it is refused: after a call,
+// after a field of a call's result, and at each bracket of a nested one.
+@linear
+struct Token {
+    n: UInt64,
+}
+
+struct Holder {
+    values: [UInt8; 1],
+}
+
+fn at(token: Token) -> UInt64 {
+    token.n
+}
+
+fn row(sink token: Token) -> [UInt8; 1] {
+    let Token { n: _ } = token
+    [7]
+}
+
+fn holder(sink token: Token) -> Holder {
+    let Token { n: _ } = token
+    Holder { values = [7] }
+}
+
+fn grid(sink token: Token) -> [[UInt8; 1]; 1] {
+    let Token { n: _ } = token
+    [[7]]
+}
+
+fn after_a_call() -> UInt8 {
+    let token = Token { n = 0 }
+    row(token)[at(token)]
+}
+
+fn after_a_field() -> UInt8 {
+    let token = Token { n = 0 }
+    holder(token).values[at(token)]
+}
+
+fn at_each_bracket() -> UInt8 {
+    let token = Token { n = 0 }
+    grid(token)[at(token)][at(token)]
+}
+
+fn main() -> UInt8 {
+    after_a_call() + after_a_field() + at_each_bracket()
+}
