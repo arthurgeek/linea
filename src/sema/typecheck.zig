@@ -29659,7 +29659,7 @@ const Checker = struct {
 
         /// How many settled references and aliases a chain of declared
         /// answers may pass through.
-        const max_depth: u32 = 1000;
+        const max_depth: u32 = types_mod.max_answer_links;
 
         fn isLink(reading: Read) bool {
             return reading == .reference or reading == .alias;

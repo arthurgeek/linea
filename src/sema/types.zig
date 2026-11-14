@@ -82,6 +82,10 @@ pub const IntegerProperty = struct {
     endpoint: IntegerEndpoint,
 };
 
+/// How many settled references and aliases a chain of declared answers may
+/// pass through before it is refused ([T-AnswerDepth]).
+pub const max_answer_links: u32 = 1000;
+
 /// A handle into the type pool.
 ///
 /// Builtin types occupy reserved indices, so the checker names a type instead
