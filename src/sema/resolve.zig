@@ -9076,9 +9076,10 @@ const Resolver = struct {
         defer walking.deinit(self.gpa);
         var finished: std.ArrayList(DeclId) = .empty;
         defer finished.deinit(self.gpa);
-        const settled = for (runs) |run| {
-            if (!try self.lengthsWithin(run, &walking, &finished)) break false;
-        } else true;
+        var settled = true;
+        for (runs) |run| {
+            if (!try self.lengthsWithin(run, &walking, &finished)) settled = false;
+        }
         // An alias finished inside a walk that failed was read under an
         // answer the failure may have decided, so none of them is kept.
         if (!settled) {
@@ -9107,20 +9108,28 @@ const Resolver = struct {
         walking: *std.AutoHashMapUnmanaged(DeclId, void),
         finished: *std.ArrayList(DeclId),
     ) !bool {
+        // Every length is folded, whatever an earlier one came to: the
+        // comparison that follows reads each of them, and one that counts
+        // nothing says nothing about the rest.
+        var settled = true;
         for (refs) |r| {
             switch (r.kind) {
                 .named, .borrow, .grouped, .tuple => {},
-                .selection => if (!try self.lengthsWithin(&.{self.ast.selectionBase(r)}, walking, finished)) return false,
+                .selection => if (!try self.lengthsWithin(&.{self.ast.selectionBase(r)}, walking, finished)) {
+                    settled = false;
+                },
                 // A count, and not merely a constant expression: a truth value
                 // is one and says nothing about how many elements a type holds,
                 // so an implementation written with one is left unkeyed exactly
                 // as one whose length has no value at all is. The type is
                 // refused where it is written, which is what reports it.
-                .array => if ((try self.foldedLength(r)).number() == null) return false,
+                .array => if ((try self.foldedLength(r)).number() == null) {
+                    settled = false;
+                },
                 .callable => {
                     const callable = self.ast.callableType(r);
                     for (self.ast.params[callable.params.start..callable.params.end]) |param| {
-                        if (!try self.lengthsWithin(&.{param.written}, walking, finished)) return false;
+                        if (!try self.lengthsWithin(&.{param.written}, walking, finished)) settled = false;
                         if (param.default != ExprId.none and
                             (try constfold.foldConstant(
                                 self.gpa,
@@ -9130,26 +9139,27 @@ const Resolver = struct {
                                 param.default,
                             )).checked() == null)
                         {
-                            return false;
+                            settled = false;
                         }
                     }
-                    if (!try self.lengthsWithin(&.{callable.result}, walking, finished)) return false;
+                    if (!try self.lengthsWithin(&.{callable.result}, walking, finished)) settled = false;
                 },
             }
-            if (!try self.lengthsWithin(self.ast.typeArgs(r.args), walking, finished)) return false;
+            if (!try self.lengthsWithin(self.ast.typeArgs(r.args), walking, finished)) settled = false;
             if ((r.kind == .named or r.kind == .selection) and r.name != TokenId.none) {
                 if (self.aliasReached(r.name)) |alias| {
                     if (!self.settled_aliases.contains(alias) and !walking.contains(alias)) {
                         try walking.put(self.gpa, alias, {});
                         defer _ = walking.remove(alias);
-                        if (!try self.lengthsWithin(&.{self.ast.declReturnRef(alias)}, walking, finished)) return false;
-                        try self.settled_aliases.put(self.gpa, alias, {});
-                        try finished.append(self.gpa, alias);
+                        if (try self.lengthsWithin(&.{self.ast.declReturnRef(alias)}, walking, finished)) {
+                            try self.settled_aliases.put(self.gpa, alias, {});
+                            try finished.append(self.gpa, alias);
+                        } else settled = false;
                     }
                 }
             }
         }
-        return true;
+        return settled;
     }
 
     /// What a fold reads about the names written in a constant expression, from
