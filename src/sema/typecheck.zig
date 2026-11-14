@@ -2152,7 +2152,7 @@ fn capabilityDemand(
     // Each trait's own bounds and no deeper: what those reach is in `through`
     // already, so one step over every entry is the whole closure.
     for (through) |t| {
-        const trait = node.DeclId.at(t.trait);
+        const trait = t.trait;
         for (ast.declBounds(trait)) |b| {
             if (b.kind == .callable) continue;
             const source: *Demanded = switch (resolve_mod.boundNames(ast, b.named.name, traitAt(ast, res, b.named.name))) {
@@ -2182,7 +2182,7 @@ fn integerDemandedBy(ast: *const Ast, res: *const Resolution, bounds: []const no
         if (bound.kind == .named and resolve_mod.boundNames(ast, bound.named.name, traitAt(ast, res, bound.named.name)) == .integer) return true;
     }
     for (through) |required| {
-        for (ast.declBounds(node.DeclId.at(required.trait))) |bound| {
+        for (ast.declBounds(required.trait)) |bound| {
             if (bound.kind == .named and resolve_mod.boundNames(ast, bound.named.name, traitAt(ast, res, bound.named.name)) == .integer) return true;
         }
     }
@@ -3232,7 +3232,7 @@ pub const Reach = struct {
         defer bounds.deinit(gpa);
         try self.typing.appendBoundsWithin(gpa, self.scope, held, &bounds);
         for (bounds.items) |bound| {
-            const trait = node.DeclId.at(bound.trait);
+            const trait = bound.trait;
             if (self.res.seesTrait(self.from, trait)) continue;
             if (std.mem.indexOfScalar(node.DeclId, out.items, trait) != null) continue;
             try out.append(gpa, trait);
@@ -3272,7 +3272,7 @@ pub const Reach = struct {
         try self.typing.appendBoundsWithin(gpa, self.scope, held, &bounds);
         const first = out.items.len;
         for (bounds.items) |bound| {
-            const trait = DeclId.at(bound.trait);
+            const trait = bound.trait;
             var members = self.res.signatures.typesOf(self.ast, trait);
             while (members.next()) |sig| {
                 if (!settlesAType(self.ast, sig)) continue;
@@ -6585,7 +6585,7 @@ const Checker = struct {
             for (@field(saved, field)) |row| try @field(self, field).append(gpa, try copyRetained(gpa, row));
         }
         for (prefix.seed.call_impls) |call| try self.call_impls.append(gpa, try copyRetained(gpa, call));
-        for (self.projected.items) |projection| try self.projected_at.put(gpa, ExprId.at(projection.at), projection.expansion);
+        for (self.projected.items) |projection| try self.projected_at.put(gpa, projection.at, projection.expansion);
         for (self.expansions.items, 0..) |expansion, i| {
             if (expansion.delegation) |forward| if (forward.field == null) continue;
             const implementation = if (expansion.delegation != null) expansion.member else self.res.implEnclosing(expansion.member);
@@ -8708,7 +8708,7 @@ const Checker = struct {
             admitted.deinit(self.gpa);
         }
         const arguments = try self.gpa.dupe(TypeId, self.param_types[trait.index()]);
-        admitted.append(self.gpa, .{ .trait = trait.index(), .args = arguments }) catch |err| {
+        admitted.append(self.gpa, .{ .trait = trait, .args = arguments }) catch |err| {
             self.gpa.free(arguments);
             return err;
         };
@@ -9888,7 +9888,7 @@ const Checker = struct {
     fn admittedAt(bounds: []const types_mod.BoundTrait, trait: node.DeclId) Admitted {
         var first: ?[]const TypeId = null;
         for (bounds) |b| {
-            if (b.trait != trait.index()) continue;
+            if (b.trait != trait) continue;
             if (first) |seen| {
                 if (!std.mem.eql(TypeId, seen, b.args)) return .several;
             } else first = b.args;
@@ -12947,7 +12947,7 @@ const Checker = struct {
         const named: u32 = @intCast(trait.index());
         var only: ?[]const TypeId = null;
         for (self.builder.boundsOn(receiver)) |bound| {
-            if (bound.trait != named) continue;
+            if (bound.trait.index() != named) continue;
             if (only != null) return;
             only = bound.args;
         }
@@ -18719,7 +18719,7 @@ const Checker = struct {
             const impl_args = try self.gpa.dupe(TypeId, arguments);
             errdefer self.gpa.free(impl_args);
             try self.traversals.append(self.gpa, .{
-                .at = @intCast(id.index()),
+                .at = id,
                 .decl = traversal,
                 .impl_args = impl_args,
                 .positions = positions_plan,
@@ -23416,7 +23416,7 @@ const Checker = struct {
         args[0] = self.ast.withoutGroups(receiver);
         @memcpy(args[1..], given);
         try self.postfix.append(self.gpa, .{
-            .call = @intCast(id.index()),
+            .call = id,
             .args = args,
         });
         return .{ .settled = .{ .sig = sig, .args = args } };
@@ -27779,7 +27779,7 @@ const Checker = struct {
         // that offset rather than folding the bounds again, which is the same
         // reason a routed bracket carries its expansion.
         try self.range_places.append(self.gpa, .{
-            .at = @intCast(id.index()),
+            .at = id,
             .first = @intCast(lo),
         });
 
@@ -28106,12 +28106,12 @@ const Checker = struct {
         var arguments: std.AutoHashMapUnmanaged(ExprId, []const TypeId) = .empty;
         defer arguments.deinit(self.gpa);
         try arguments.ensureTotalCapacity(self.gpa, @intCast(self.projected.items.len));
-        for (self.projected.items) |site| arguments.putAssumeCapacity(ExprId.at(site.at), site.impl_args);
+        for (self.projected.items) |site| arguments.putAssumeCapacity(site.at, site.impl_args);
         for (self.projected.items) |site| {
-            if (self.ast.exprTag(ExprId.at(site.at)) != .index) continue;
+            if (self.ast.exprTag(site.at) != .index) continue;
             const found = self.expansions.items[site.expansion];
             if (found.delegation == null and found.index == types_mod.Expansion.no_binding) continue;
-            const wrote = self.ast.binary(ExprId.at(site.at)).rhs;
+            const wrote = self.ast.binary(site.at).rhs;
             const counts_back = self.foldedFromEnd(wrote);
             const value = counts_back orelse self.folds.get(wrote).valueOf() orelse continue;
             var visited: RangeVisits = .empty;
@@ -28121,8 +28121,8 @@ const Checker = struct {
                 visited.deinit(self.gpa);
             }
             if (try self.settleThrough(site.expansion, site.impl_args, &visited, &arguments, wrote, value, counts_back != null)) {
-                _ = self.selected_places.remove(ExprId.at(site.at));
-                _ = self.record(ExprId.at(site.at), .poison);
+                _ = self.selected_places.remove(site.at);
+                _ = self.record(site.at, .poison);
             }
         }
     }
@@ -28516,7 +28516,7 @@ const Checker = struct {
             {
                 const impl_args = try self.gpa.dupe(TypeId, self.param_types[owner.index()]);
                 errdefer self.gpa.free(impl_args);
-                try self.projected.append(self.gpa, .{ .at = @intCast(at.index()), .expansion = row, .impl_args = impl_args });
+                try self.projected.append(self.gpa, .{ .at = at, .expansion = row, .impl_args = impl_args });
             }
             try self.projected_at.put(self.gpa, at, row);
             return .{ .place = settled };
@@ -28532,7 +28532,7 @@ const Checker = struct {
         {
             const impl_args = try self.gpa.dupe(TypeId, choice.impl_args);
             errdefer self.gpa.free(impl_args);
-            try self.projected.append(self.gpa, .{ .at = @intCast(at.index()), .expansion = row, .impl_args = impl_args });
+            try self.projected.append(self.gpa, .{ .at = at, .expansion = row, .impl_args = impl_args });
         }
         try self.projected_at.put(self.gpa, at, row);
 
@@ -28807,7 +28807,7 @@ const Checker = struct {
         var rows: std.AutoHashMapUnmanaged(ExprId, usize) = .empty;
         defer rows.deinit(self.gpa);
         try rows.ensureTotalCapacity(self.gpa, @intCast(self.projected.items.len));
-        for (self.projected.items, 0..) |site, i| rows.putAssumeCapacity(ExprId.at(site.at), i);
+        for (self.projected.items, 0..) |site, i| rows.putAssumeCapacity(site.at, i);
         var found: std.ArrayList(ExprId) = .empty;
         defer found.deinit(self.gpa);
 
@@ -31437,13 +31437,13 @@ const Checker = struct {
             if (predicate.subject != subject) continue;
             var kept: usize = 0;
             for (predicate.demand.traits) |required| {
-                if (required.trait != release.index()) kept += 1;
+                if (required.trait != release) kept += 1;
             }
             if (kept == predicate.demand.traits.len) continue;
             const traits = try self.gpa.alloc(types_mod.BoundTrait, kept);
             var at: usize = 0;
             for (predicate.demand.traits) |required| {
-                if (required.trait == release.index()) continue;
+                if (required.trait == release) continue;
                 traits[at] = required;
                 at += 1;
             }
@@ -32302,7 +32302,7 @@ const Checker = struct {
     ) bool {
         const receiver = self.builder.headOf(other.ty);
         for (self.builder.boundsOn(head.ty)) |bound| {
-            var rows = self.impl_index.candidates(implementations, bound.trait, receiver, true);
+            var rows = self.impl_index.candidates(implementations, bound.trait.index(), receiver, true);
             if (rows.next() == null) return true;
         }
         return false;
@@ -32635,7 +32635,7 @@ const Checker = struct {
         // supplied.
         var at: usize = 0;
         while (at < out.items.len) : (at += 1) {
-            const required = node.DeclId.at(out.items[at].trait);
+            const required = out.items[at].trait;
             const supplied = out.items[at].args;
             const through: ?BoundInterning = if (interning == null) null else .{
                 .module = self.program.moduleOf(required),
@@ -32705,7 +32705,7 @@ const Checker = struct {
         }
 
         for (traits) |carried| {
-            const required = node.DeclId.at(carried.trait);
+            const required = carried.trait;
             for (self.ast.declBounds(required)) |bound| {
                 if (!self.isCallableBound(bound)) continue;
                 const raw = try self.boundSignature(self.program.moduleOf(required), required, bound);
@@ -32788,7 +32788,7 @@ const Checker = struct {
             if (args.len > 0) self.gpa.free(args);
             return err;
         };
-        out.append(self.gpa, .{ .trait = named, .args = args, .written = written }) catch |err| {
+        out.append(self.gpa, .{ .trait = trait, .args = args, .written = written }) catch |err| {
             _ = seen.removeContext(key, context);
             if (args.len > 0) self.gpa.free(args);
             return err;
@@ -32822,9 +32822,8 @@ const Checker = struct {
         trait: node.DeclId,
         written: node.TraitBound,
     ) []const TypeId {
-        const named: u32 = @intCast(trait.index());
         for (self.builder.boundsOn(t)) |seen| {
-            if (seen.trait != named) continue;
+            if (seen.trait != trait) continue;
             if (!self.sameBoundArgs(seen.written.named.args, written.named.args)) continue;
             return seen.args;
         }
@@ -41061,7 +41060,7 @@ test "postfix checking and finalization release allocations on failure" {
     defer typing.deinit(gpa);
     try testing.expectEqual(@as(u32, 0), sink.error_count);
     try testing.expectEqual(@as(usize, 1), typing.postfix.len);
-    try testing.expect(typing.call_index.callOf(&typing, ExprId.at(typing.postfix[0].call)) != null);
+    try testing.expect(typing.call_index.callOf(&typing, typing.postfix[0].call) != null);
     try testing.checkAllAllocationFailures(gpa, typecheckOnly, .{.{ .resolved = &res }});
 }
 

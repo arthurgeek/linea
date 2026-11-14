@@ -672,8 +672,8 @@ fn postfixWrittenOut(gpa: std.mem.Allocator, semantics: Semantics, text: []const
     for (typing.postfix) |p| {
         // Only source expressions can be rewritten; generated calls share
         // the checked index but have no syntax in this tree.
-        if (p.call >= semantics.program.ast.exprCount()) continue;
-        const call = ExprId.at(p.call);
+        if (p.call.index() >= semantics.program.ast.exprCount()) continue;
+        const call = p.call;
         const normal = calls.callOf(typing, call) orelse continue;
         const signature = switch (normal.target) {
             .declared => |decl| decl,

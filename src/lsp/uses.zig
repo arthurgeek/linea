@@ -1042,9 +1042,9 @@ test "a call recorded twice is grouped under the record every pass reads" {
     // be written, and this one is about the checker.
     const settled = checked.semantics.typing.postfix;
     const of_decl: u32 = @intCast(res.declIfDeclared(of).index());
-    var mine: ?u32 = null;
+    var mine: ?ExprId = null;
     for (settled) |row| {
-        const normal = checked.semantics.typing.call_index.callOf(&checked.semantics.typing, ExprId.at(row.call)) orelse continue;
+        const normal = checked.semantics.typing.call_index.callOf(&checked.semantics.typing, row.call) orelse continue;
         const reaches_of = switch (normal.target) {
             .declared => |decl| decl == node.DeclId.at(of_decl),
             .closure_recovery, .array_view, .array_length, .closure, .indirect, .generic_callable, .erased => false,
@@ -1056,7 +1056,7 @@ test "a call recorded twice is grouped under the record every pass reads" {
     try testing.expect(mine != null);
 
     var forged = checked.semantics.typing;
-    const original = checked.semantics.typing.call_index.callOf(&checked.semantics.typing, ExprId.at(mine.?)).?;
+    const original = checked.semantics.typing.call_index.callOf(&checked.semantics.typing, mine.?).?;
     var redirected = original;
     redirected.target = .{ .declared = res.declIfDeclared(mass) };
     forged.calls = &.{ original, redirected };
@@ -1071,7 +1071,7 @@ test "a call recorded twice is grouped under the record every pass reads" {
     const calls = &forged.call_index;
     const twice = try Uses.build(a, ast, res, &forged, calls);
 
-    try testing.expectEqual(types_mod.CallTarget{ .declared = res.declIfDeclared(of) }, calls.callOf(&forged, ExprId.at(mine.?)).?.target);
+    try testing.expectEqual(types_mod.CallTarget{ .declared = res.declIfDeclared(of) }, calls.callOf(&forged, mine.?).?.target);
     try testing.expectEqual(@as(usize, 1), twice.of(of).len);
     try testing.expectEqual(@as(usize, 0), twice.of(mass).len);
 }

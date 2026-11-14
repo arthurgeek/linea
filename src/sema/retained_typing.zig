@@ -141,16 +141,6 @@ pub fn mapValue(gpa: Allocator, r: Relocation, value: anytype) Allocator.Error!@
         }
         return result;
     }
-    if (T == types.BoundTrait) {
-        var result = r.value(value);
-        result.trait = rawDecl(r, value.trait);
-        return result;
-    }
-    if (T == types.RangePlace) {
-        var result = value;
-        result.at = rawExpr(r, value.at);
-        return result;
-    }
     if (comptime !hasPointers(T)) return r.value(value);
     var result: T = switch (@typeInfo(T)) {
         .pointer => |info| blk: {
@@ -172,8 +162,7 @@ pub fn mapValue(gpa: Allocator, r: Relocation, value: anytype) Allocator.Error!@
         else => r.value(value),
     };
     if (T == types.Implementation or T == types.Standin or T == types.CallImpl) result.trait = rawDecl(r, value.trait);
-    if (T == types.Postfix or T == types.CallImpl) result.call = rawExpr(r, value.call);
-    if (T == types.Projected or T == types.Traversal) result.at = rawExpr(r, value.at);
+    if (T == types.CallImpl) result.call = rawExpr(r, value.call);
     return result;
 }
 
@@ -231,16 +220,16 @@ test "retained typing relocates generated semantic records without changing type
     const gpa = arena.allocator();
     var returns = [_]types.TypeId{ .u8, .u8, .u8 };
     var saved: types.Typing = .{
-        .pool = &.{.{ .parameter = .{ .name = "T", .owner = 2, .index = 0, .traits = &.{.{ .trait = 2 }} } }},
+        .pool = &.{.{ .parameter = .{ .name = "T", .owner = 2, .index = 0, .traits = &.{.{ .trait = .at(2) }} } }},
         .variants = .empty,
         .fields = .empty,
         .expr_types = &.{ .u8, .u8, .u8, .u8 },
         .binding_types = .empty,
         .decl_returns = .{ .entries = &returns },
         .calls = &.{.{ .at = .at(3), .target = .{ .declared = .at(2) }, .signature = .u8, .args = &.{.at(2)} }},
-        .postfix = &.{.{ .call = 3, .args = &.{.at(2)} }},
-        .projected = &.{.{ .at = 2, .expansion = 0 }},
-        .range_places = &.{.{ .at = 2, .first = 9 }},
+        .postfix = &.{.{ .call = .at(3), .args = &.{.at(2)} }},
+        .projected = &.{.{ .at = .at(2), .expansion = 0 }},
+        .range_places = &.{.{ .at = .at(2), .first = 9 }},
         .expansions = &.{
             .{
                 .member = .at(2),
@@ -267,8 +256,8 @@ test "retained typing relocates generated semantic records without changing type
             },
         },
         .traversals = &.{
-            .{ .at = 2, .decl = .at(2), .impl_args = &.{.u16}, .positions = .{ .array = .{ .key = .u64, .count = 4, .iterator = .u32 } } },
-            .{ .at = 3, .decl = .at(1), .positions = .{ .expression = .at(3) } },
+            .{ .at = .at(2), .decl = .at(2), .impl_args = &.{.u16}, .positions = .{ .array = .{ .key = .u64, .count = 4, .iterator = .u32 } } },
+            .{ .at = .at(3), .decl = .at(1), .positions = .{ .expression = .at(3) } },
         },
         .standins = &.{.{ .trait = 2, .member = .at(2), .held = .u8, .ty = .u8, .named = "Item" }},
     };
@@ -290,7 +279,7 @@ test "retained typing relocates generated semantic records without changing type
     try testing.expectEqual(node.DeclId.at(5), attached.float_math.declarations[sqrt_index]);
     try testing.expectEqual(node.DeclId.at(2), saved.float_math.declarations[sqrt_index]);
     try testing.expectEqual(@as(u32, 5), attached.pool[0].parameter.owner);
-    try testing.expectEqual(@as(u32, 5), attached.pool[0].parameter.traits[0].trait);
+    try testing.expectEqual(node.DeclId.at(5), attached.pool[0].parameter.traits[0].trait);
     try testing.expectEqual(@as(usize, 6), attached.expr_types.len);
     try testing.expectEqual(types.TypeId.poison, attached.expr_types[2]);
     try testing.expectEqual(types.TypeId.u8, attached.expr_types[4]);
@@ -298,9 +287,9 @@ test "retained typing relocates generated semantic records without changing type
     try testing.expectEqual(node.DeclId.at(5), call.target.declared);
     try testing.expectEqual(node.ExprId.at(4), call.args[0]);
     try testing.expectEqual(types.TypeId.u8, call.signature);
-    try testing.expectEqual(@as(u32, 5), attached.postfix[0].call);
-    try testing.expectEqual(@as(u32, 4), attached.projected[0].at);
-    try testing.expectEqual(@as(u32, 4), attached.range_places[0].at);
+    try testing.expectEqual(node.ExprId.at(5), attached.postfix[0].call);
+    try testing.expectEqual(node.ExprId.at(4), attached.projected[0].at);
+    try testing.expectEqual(node.ExprId.at(4), attached.range_places[0].at);
     try testing.expectEqual(@as(u32, 9), attached.range_places[0].first);
     try testing.expectEqual(@as(u32, 5), attached.standins[0].trait);
     const delegated = attached.expansions[0];
@@ -327,7 +316,7 @@ test "retained typing relocates generated semantic records without changing type
     try testing.expect(attached.expansions[3].delegation.?.field == null);
     try testing.expect(attached.expansions[3].delegation.?.field_name == null);
     try testing.expectEqual(node.DeclId.at(5), attached.traversals[0].decl);
-    try testing.expectEqual(@as(u32, 4), attached.traversals[0].at);
+    try testing.expectEqual(node.ExprId.at(4), attached.traversals[0].at);
     try testing.expectEqualSlices(types.TypeId, &.{.u16}, attached.traversals[0].impl_args);
     try testing.expectEqualDeep(saved.traversals[0].positions.array, attached.traversals[0].positions.array);
     try testing.expectEqual(node.ExprId.at(5), attached.traversals[1].positions.expression);

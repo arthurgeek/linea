@@ -2212,8 +2212,8 @@ test "a postfix call is paired with the receiver its callee declares" {
     const args = argumentsInOrder(
         &types_of,
         calls,
-        ExprId.at(written.call),
-        ast.declParams(switch (calls.callOf(&types_of, ExprId.at(written.call)).?.target) {
+        written.call,
+        ast.declParams(switch (calls.callOf(&types_of, written.call).?.target) {
             .declared => |decl| decl,
             .closure_recovery, .array_view, .array_length, .closure, .indirect, .generic_callable, .erased => unreachable,
         }),
