@@ -874,8 +874,8 @@ fn loadFromDiskWith(
     // directory the compiler was run in, so a manifest further up names
     // somebody else's program and not this one.
     // `rootOf` reads the manifest that marks the root, strictly: one that
-    // will not parse, or says what a root cannot be, stops the command here
-    // and is not read from disk again.
+    // will not parse, or says what a root cannot be, stops the command here,
+    // and is not checked a second time before the load.
     const found = try rootOf(gpa, io, entry, .as_named, "");
     defer found.deinit(gpa);
     const given = found.entry;
